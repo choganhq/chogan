@@ -1,0 +1,896 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>نقطه‌بازی — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .dt-wrap { width: 100%; display: flex; flex-direction: column; gap: var(--s-3); align-items: center; }
+  .dt-top { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+  .dt-players { display: flex; gap: var(--s-2); width: 100%; max-width: 520px; }
+  .dt-player {
+    flex: 1; display: flex; align-items: center; gap: var(--s-2);
+    background: var(--c-surface); border-radius: var(--r-md); padding: 8px 12px;
+    box-shadow: var(--sh-1); border: 2px solid transparent;
+    transition: border-color var(--t-mid) var(--ease), transform var(--t-mid) var(--ease);
+    min-width: 0;
+  }
+  .dt-player--on { border-color: var(--pc); transform: translateY(-2px); box-shadow: var(--sh-2); }
+  .dt-player__dot { width: 14px; height: 14px; border-radius: 50%; background: var(--pc); flex: 0 0 14px; }
+  .dt-player__name { flex: 1; min-width: 0; font-weight: 700; font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dt-player__score { font-weight: 800; font-size: var(--fs-lg); font-variant-numeric: tabular-nums; color: var(--pc); }
+  .dt-boardbox { width: 100%; max-width: min(94vw, 58vh, 520px); }
+  .dt-svg { width: 100%; height: auto; display: block; touch-action: manipulation; }
+  .dt-hit { stroke: transparent; cursor: pointer; }
+  @media (hover: hover) { .dt-hit:hover { stroke: color-mix(in srgb, var(--game) 28%, transparent); } }
+  .dt-line { stroke-linecap: round; }
+  .dt-line--new { animation: dt-draw 260ms var(--ease) backwards; }
+  @keyframes dt-draw { from { stroke-dasharray: 0 200; } }
+  .dt-box { animation: dt-fill 300ms var(--ease-back) backwards; }
+  @keyframes dt-fill { from { opacity: 0; transform: scale(.4); } }
+  .dt-boxlabel { font-weight: 800; font-family: inherit; }
+  .dt-thinking { animation: dt-blink 900ms infinite; }
+  @keyframes dt-blink { 50% { opacity: .45; } }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function DotsEngineFactory() {
+  'use strict';
+
+  // مدل: تخته‌ی R در C مربع.
+  // یال‌های افقی: (R+1)*C  ·  یال‌های عمودی: R*(C+1)
+  function makeBoard(R, C) {
+    var HC = (R + 1) * C;
+    var VC = R * (C + 1);
+    var E = HC + VC;
+    var boxEdges = [];
+    var edgeBoxes = [];
+    for (var i = 0; i < E; i++) edgeBoxes.push([]);
+    for (var r = 0; r < R; r++) {
+      for (var c = 0; c < C; c++) {
+        var b = r * C + c;
+        var e = [
+          r * C + c,                     // بالا
+          (r + 1) * C + c,               // پایین
+          HC + r * (C + 1) + c,          // چپ
+          HC + r * (C + 1) + c + 1       // راست
+        ];
+        boxEdges.push(e);
+        for (var k = 0; k < 4; k++) edgeBoxes[e[k]].push(b);
+      }
+    }
+    return { R: R, C: C, HC: HC, E: E, boxes: R * C, boxEdges: boxEdges, edgeBoxes: edgeBoxes };
+  }
+
+  function sides(bd, edges, b) {
+    var e = bd.boxEdges[b], n = 0;
+    for (var i = 0; i < 4; i++) if (edges[e[i]]) n++;
+    return n;
+  }
+
+  function legalMoves(bd, edges) {
+    var out = [];
+    for (var i = 0; i < bd.E; i++) if (!edges[i]) out.push(i);
+    return out;
+  }
+
+  // گذاشتن یک یال. خروجی: تعداد مربع‌های بسته‌شده
+  function play(bd, edges, owner, e, player) {
+    edges[e] = 1;
+    var closed = 0;
+    var bs = bd.edgeBoxes[e];
+    for (var i = 0; i < bs.length; i++) {
+      if (sides(bd, edges, bs[i]) === 4 && !owner[bs[i]]) { owner[bs[i]] = player; closed++; }
+    }
+    return closed;
+  }
+
+  function freeBoxes(bd, edges, owner) {
+    var out = [];
+    for (var b = 0; b < bd.boxes; b++) if (!owner[b] && sides(bd, edges, b) === 3) out.push(b);
+    return out;
+  }
+  function freeEdgeOf(bd, edges, b) {
+    var e = bd.boxEdges[b];
+    for (var i = 0; i < 4; i++) if (!edges[e[i]]) return e[i];
+    return -1;
+  }
+
+  // یالی که به حریف مربع هدیه نمی‌دهد
+  function safeMoves(bd, edges, owner) {
+    var out = [];
+    var all = legalMoves(bd, edges);
+    for (var i = 0; i < all.length; i++) {
+      var e = all[i];
+      var bs = bd.edgeBoxes[e];
+      var bad = false;
+      for (var j = 0; j < bs.length; j++) {
+        if (sides(bd, edges, bs[j]) === 2) { bad = true; break; }   // بعد از این حرکت سه‌ضلعی می‌شود
+      }
+      if (!bad) out.push(e);
+    }
+    return out;
+  }
+
+  /* تجزیه‌ی وضعیت به زنجیره‌ها: هر گروه از مربع‌های به‌هم‌چسبیده که
+     با یک حرکت به حریف، پشت سر هم باز می‌شوند. برای تصمیم قربانی دادن. */
+
+  /* بازی دقیق در انتهای کار: وقتی یال‌های باقی‌مانده کم شدند،
+     با کمینه‌بیشینه و حافظه دقیقاً بهترین حرکت را می‌دهد. */
+  function endgame(bd, edges, owner, maxEdges) {
+    var rem = legalMoves(bd, edges);
+    if (rem.length > maxEdges) return null;
+    var index = {};
+    for (var i = 0; i < rem.length; i++) index[rem[i]] = i;
+    var memo = {};
+
+    function key(mask) { return mask; }
+
+    function best(mask, e0, o0) {
+      // mask: بیت‌های یال‌های هنوز باز
+      if (mask === 0) return { diff: 0, move: -1 };
+      var m = memo[key(mask)];
+      if (m) return m;
+      var bestDiff = -Infinity, bestMove = -1;
+      for (var i = 0; i < rem.length; i++) {
+        if (!(mask & (1 << i))) continue;
+        var e = rem[i];
+        var edges2 = e0.slice(), owner2 = o0.slice();
+        var got = play(bd, edges2, owner2, e, 1);
+        var nm = mask & ~(1 << i);
+        var val;
+        if (got > 0) {
+          var sub = best(nm, edges2, owner2);
+          val = got + sub.diff;              // نوبت دوباره‌ی خودم
+        } else {
+          var sub2 = best(nm, edges2, owner2);
+          val = -sub2.diff;                  // نوبت حریف
+        }
+        if (val > bestDiff) { bestDiff = val; bestMove = e; }
+      }
+      var res = { diff: bestDiff, move: bestMove };
+      memo[key(mask)] = res;
+      return res;
+    }
+
+    var full = rem.length >= 31 ? 0 : ((1 << rem.length) - 1);
+    if (!full) return null;
+    return best(full, edges, owner);
+  }
+
+  /* ---------------------------------------------------------------------
+     تجزیه‌ی وضعیت به گروه‌های بازنشده: مربع‌هایی که هنوز سه‌ضلعی نشده‌اند
+     و از راه یال‌های کشیده‌نشده به هم وصل‌اند. هر گروه یک زنجیره یا حلقه است.
+     --------------------------------------------------------------------- */
+  function openGroups(bd, edges, owner) {
+    var seen = {}, out = [];
+    for (var b = 0; b < bd.boxes; b++) {
+      if (owner[b] || seen[b] || sides(bd, edges, b) >= 3) continue;
+      var stack = [b], group = [];
+      seen[b] = 1;
+      while (stack.length) {
+        var x = stack.pop();
+        group.push(x);
+        var e = bd.boxEdges[x];
+        for (var i = 0; i < 4; i++) {
+          if (edges[e[i]]) continue;
+          var nbs = bd.edgeBoxes[e[i]];
+          for (var j = 0; j < nbs.length; j++) {
+            var y = nbs[j];
+            if (y === x || seen[y] || owner[y] || sides(bd, edges, y) >= 3) continue;
+            seen[y] = 1; stack.push(y);
+          }
+        }
+      }
+      out.push(group);
+    }
+    return out;
+  }
+
+  // حلقه: گروهی که هیچ یال کشیده‌نشده‌ای به بیرون گروه ندارد
+  function isLoop(bd, edges, owner, group) {
+    var inGroup = {};
+    for (var i = 0; i < group.length; i++) inGroup[group[i]] = 1;
+    for (var k = 0; k < group.length; k++) {
+      var e = bd.boxEdges[group[k]];
+      for (var j = 0; j < 4; j++) {
+        if (edges[e[j]]) continue;
+        var nb = bd.edgeBoxes[e[j]];
+        if (nb.length === 1) return false;                       // یال لبه‌ی تخته
+        var other = nb[0] === group[k] ? nb[1] : nb[0];
+        if (!inGroup[other]) return false;
+      }
+    }
+    return group.length >= 4;
+  }
+
+  // مربع‌هایی که با گرفتن پشت سر هم از این نقطه به دست می‌آیند
+  function captureCascade(bd, edges, owner) {
+    var e2 = edges.slice(), o2 = owner.slice(), got = [], guard = 0;
+    for (;;) {
+      var fb = freeBoxes(bd, e2, o2);
+      if (!fb.length || guard++ > 400) break;
+      var fe = freeEdgeOf(bd, e2, fb[0]);
+      var before = o2.slice();
+      play(bd, e2, o2, fe, 1);
+      for (var b = 0; b < bd.boxes; b++) if (!before[b] && o2[b]) got.push(b);
+    }
+    return got;
+  }
+
+  // حرکت «دو تا آخر»: یالی داخل همین گروه که هیچ مربعی را نمی‌بندد.
+  // نتیجه‌اش این است که مربع‌های باقی‌مانده به حریف می‌رسند ولی نوبت هم
+  // به او می‌افتد و مجبور می‌شود زنجیره‌ی بعدی را باز کند.
+  function doubleCross(bd, edges, owner, group) {
+    for (var i = 0; i < group.length; i++) {
+      var e = bd.boxEdges[group[i]];
+      for (var k = 0; k < 4; k++) {
+        var ed = e[k];
+        if (edges[ed]) continue;
+        var closes = 0;
+        var bs = bd.edgeBoxes[ed];
+        for (var j = 0; j < bs.length; j++) if (sides(bd, edges, bs[j]) === 3) closes++;
+        if (closes === 0) return ed;
+      }
+    }
+    return -1;
+  }
+
+  // کم‌ضررترین باز کردن: کوتاه‌ترین زنجیره را باز کن، حلقه‌ها را برای آخر بگذار
+  function openShortest(bd, edges, owner, all) {
+    var groups = openGroups(bd, edges, owner);
+    var best = all[0], bestCost = Infinity;
+    for (var i = 0; i < all.length; i++) {
+      var e2 = edges.slice(), o2 = owner.slice();
+      e2[all[i]] = 1;
+      var got = captureCascade(bd, e2, o2).length;
+      // حلقه گران‌تر است، آخر باز شود
+      var touchesLoop = 0;
+      for (var g = 0; g < groups.length; g++) {
+        if (groups[g].some(function (b) { return bd.boxEdges[b].indexOf(all[i]) >= 0; })) {
+          if (isLoop(bd, edges, owner, groups[g])) touchesLoop = 2;
+        }
+      }
+      var cost = got + touchesLoop;
+      if (cost < bestCost) { bestCost = cost; best = all[i]; }
+    }
+    return best;
+  }
+
+  /* انتخاب حرکت هوش مصنوعی.
+     آسان: تصادفی، ولی مربع آماده را اغلب می‌گیرد.
+     متوسط: مربع می‌گیرد، بعد حرکت امن، وگرنه کم‌ضررترین قربانی.
+     سخت: زنجیره و حلقه را می‌شناسد، «دو تا آخر» را قربانی می‌دهد تا کنترل
+           را نگه دارد، پاریتی حرکت‌های امن را حساب می‌کند و در انتهای بازی
+           با کمینه‌بیشینه دقیق بازی می‌کند. */
+  function aiMove(bd, edges, owner, level, rnd) {
+    rnd = rnd || Math.random;
+    var all = legalMoves(bd, edges);
+    if (!all.length) return -1;
+    var free = freeBoxes(bd, edges, owner);
+
+    if (level === 'easy') {
+      if (free.length && rnd() < 0.85) return freeEdgeOf(bd, edges, free[0]);
+      return all[Math.floor(rnd() * all.length)];
+    }
+
+    if (level === 'medium') {
+      if (free.length) return freeEdgeOf(bd, edges, free[0]);
+      var sf = safeMoves(bd, edges, owner);
+      if (sf.length) return sf[Math.floor(rnd() * sf.length)];
+      return openShortest(bd, edges, owner, all);
+    }
+
+    // ---------------------------------------------------------------- سخت
+    var exact = endgame(bd, edges, owner, 16);
+    if (exact && exact.move >= 0) return exact.move;
+
+    if (free.length) {
+      var cascade = captureCascade(bd, edges, owner);
+      var others = openGroups(bd, edges, owner);
+      var group = [];
+      var seenG = {};
+      for (var i = 0; i < cascade.length; i++) { group.push(cascade[i]); seenG[cascade[i]] = 1; }
+      var loop = isLoop(bd, edges, owner, group);
+      var keepBack = loop ? 4 : 2;
+      // اگر این آخرین گروه است، همه را بگیر. وگرنه دو تای آخر را قربانی بده.
+      if (others.length >= 1 && cascade.length <= keepBack && cascade.length >= 2) {
+        var dc = doubleCross(bd, edges, owner, group);
+        if (dc >= 0) return dc;
+      }
+      return freeEdgeOf(bd, edges, free[0]);
+    }
+
+    var safe = safeMoves(bd, edges, owner);
+    if (safe.length) {
+      // پاریتی: می‌خواهم بعد از حرکت من تعداد حرکت‌های امن زوج بماند تا
+      // در نهایت حریف مجبور به باز کردن اولین زنجیره شود.
+      var bestE = safe[0], bestScore = -Infinity;
+      for (var s = 0; s < safe.length; s++) {
+        var e2 = edges.slice(), o2 = owner.slice();
+        e2[safe[s]] = 1;
+        var left = safeMoves(bd, e2, o2).length;
+        var gs = openGroups(bd, e2, o2);
+        var longs = 0, loops = 0;
+        for (var g = 0; g < gs.length; g++) {
+          if (isLoop(bd, e2, o2, gs[g])) loops++;
+          else if (gs[g].length >= 3) longs++;
+        }
+        var score = (left % 2 === 0 ? 3 : 0)          // پاریتی به نفع من
+          + (longs % 2 === 1 ? 1.5 : 0)               // تعداد فرد زنجیره‌ی بلند
+          - loops * 0.3
+          + rnd() * 0.05;
+        if (score > bestScore) { bestScore = score; bestE = safe[s]; }
+      }
+      return bestE;
+    }
+
+    return openShortest(bd, edges, owner, all);
+  }
+
+  var api = {
+    makeBoard: makeBoard, sides: sides, legalMoves: legalMoves, play: play,
+    freeBoxes: freeBoxes, freeEdgeOf: freeEdgeOf, safeMoves: safeMoves,
+    openGroups: openGroups, isLoop: isLoop, captureCascade: captureCascade,
+    aiMove: aiMove, endgame: endgame
+  };
+  if (typeof self !== 'undefined') self.DotsEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = DotsEngineFactory();
+  var NS = 'http://www.w3.org/2000/svg';
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'dots',
+    name: { fa: 'نقطه‌بازی', en: 'Dots and Boxes' },
+    accent: '#7BAE7F',
+    mood: 'dots',
+    strings: {
+      fa: {
+        twoPlayers: 'دو نفره', vsAi: 'با حریف', size: 'اندازه',
+        you: 'تو', rival: 'حریف', player2: 'بازیکن دو', renameP2: 'نام بازیکن دو',
+        thinking: 'فکر می‌کند…', yourTurn: 'نوبت توست', draw: 'مساوی', playerWon: '{n} برد',
+        rotate: 'چرخاندن خط',
+        boxes: 'مربع', newMatch: 'دست تازه', undoMove: 'برگرداندن حرکت',
+        undoOnlyAi: 'برگرداندن فقط در بازی با حریف کامپیوتری است',
+        dailyDots: 'نقطه‌بازی روزانه', vsHard: 'مقابل حریف سخت',
+        tutTitle1: 'خط بکش', tutText1: 'هر نوبت یک خط بین دو نقطه‌ی کنار هم می‌کشی.',
+        tutTitle2: 'مربع ببند', tutText2: 'هر کس چهارمین ضلع یک مربع را بکشد، آن مربع مال او می‌شود و دوباره نوبت خودش است.',
+        tutTitle3: 'زنجیره', tutText3: 'گاهی بهتر است دو مربع آخر را به حریف بدهی تا او مجبور شود زنجیره‌ی بعدی را باز کند.'
+      },
+      en: {
+        twoPlayers: 'Two players', vsAi: 'Versus AI', size: 'Size',
+        you: 'You', rival: 'Rival', player2: 'Player 2', renameP2: 'Player 2 name',
+        thinking: 'Thinking…', yourTurn: 'Your turn', draw: 'Draw', playerWon: '{n} wins',
+        rotate: 'Rotate line',
+        boxes: 'Boxes', newMatch: 'New match', undoMove: 'Undo move',
+        undoOnlyAi: 'Undo is only available against the AI',
+        dailyDots: 'Daily dots and boxes', vsHard: 'against the hard AI',
+        tutTitle1: 'Draw a line', tutText1: 'On your turn you draw one line between two neighbouring dots.',
+        tutTitle2: 'Close a box', tutText2: 'Draw the fourth side of a box and it is yours, and you move again.',
+        tutTitle3: 'Chains', tutText3: 'Sometimes it pays to leave the last two boxes so your rival has to open the next chain.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', { size: 5, mode: 'ai', level: 'medium', p2name: '' });
+
+  var P = [null, { c: '#5C9A6B', key: 'you' }, { c: '#E07A5F', key: 'rival' }];
+  var S = null, bd = null, aiTimer = null;
+
+  var svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('class', 'dt-svg');
+  var boardBox = el('div', { class: 'dt-boardbox' }, [svg]);
+  var top = el('div', { class: 'dt-top' });
+  var playersRow = el('div', { class: 'dt-players' });
+  var wrap = el('div', { class: 'dt-wrap' }, [top, playersRow, boardBox]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ ساخت */
+
+  function newGame(size, mode, level, daily, seedRng) {
+    stopAi();
+    bd = E.makeBoard(size, size);
+    S = {
+      size: size, mode: mode, level: level, daily: daily || null,
+      edges: new Array(bd.E).fill(0),
+      owner: new Array(bd.boxes).fill(0),
+      turn: 1, scores: [0, 0, 0], history: [], turnBoxes: 0,
+      done: false, startedAt: Date.now(), elapsed: 0,
+      lastEdge: -1, newBoxes: []
+    };
+    if (seedRng) S.turn = seedRng() < 0.5 ? 1 : 2;
+    drawAll();
+    render();
+    save();
+    maybeAi();
+  }
+
+  /* ------------------------------------------------------------ رسم */
+
+  var GAP = 100, PAD = 34;
+
+  function drawAll() {
+    var n = S.size;
+    var W = PAD * 2 + GAP * n;
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + W);
+    svg.innerHTML = '';
+
+    var gBoxes = document.createElementNS(NS, 'g');
+    var gLines = document.createElementNS(NS, 'g');
+    var gHits = document.createElementNS(NS, 'g');
+    var gDots = document.createElementNS(NS, 'g');
+    svg.appendChild(gBoxes); svg.appendChild(gLines); svg.appendChild(gHits); svg.appendChild(gDots);
+    S.g = { boxes: gBoxes, lines: gLines, hits: gHits };
+
+    // زمینه‌ی خطوط کشیده‌نشده
+    for (var e = 0; e < bd.E; e++) {
+      var p = edgePos(e);
+      var base = document.createElementNS(NS, 'line');
+      base.setAttribute('x1', p.x1); base.setAttribute('y1', p.y1);
+      base.setAttribute('x2', p.x2); base.setAttribute('y2', p.y2);
+      base.setAttribute('stroke', 'var(--c-surface-3)');
+      base.setAttribute('stroke-width', '7');
+      base.setAttribute('stroke-linecap', 'round');
+      gLines.appendChild(base);
+    }
+    // ناحیه‌ی لمس، پهن‌تر از خط تا هدف لمسی درشت باشد
+    for (var e2 = 0; e2 < bd.E; e2++) {
+      (function (idx) {
+        var p2 = edgePos(idx);
+        var hit = document.createElementNS(NS, 'line');
+        hit.setAttribute('x1', p2.x1); hit.setAttribute('y1', p2.y1);
+        hit.setAttribute('x2', p2.x2); hit.setAttribute('y2', p2.y2);
+        hit.setAttribute('stroke-width', '46');
+        hit.setAttribute('stroke-linecap', 'round');
+        hit.setAttribute('class', 'dt-hit');
+        hit.addEventListener('click', function () { human(idx); });
+        gHits.appendChild(hit);
+      })(e2);
+    }
+    for (var r = 0; r <= n; r++) {
+      for (var c = 0; c <= n; c++) {
+        var d = document.createElementNS(NS, 'circle');
+        d.setAttribute('cx', PAD + c * GAP);
+        d.setAttribute('cy', PAD + r * GAP);
+        d.setAttribute('r', '9');
+        d.setAttribute('fill', 'var(--c-text-dim)');
+        gDots.appendChild(d);
+      }
+    }
+    repaint(true);
+  }
+
+  function edgePos(e) {
+    var n = S.size;
+    if (e < bd.HC) {
+      var r = (e / n) | 0, c = e % n;
+      return { x1: PAD + c * GAP, y1: PAD + r * GAP, x2: PAD + (c + 1) * GAP, y2: PAD + r * GAP };
+    }
+    var k = e - bd.HC;
+    var r2 = (k / (n + 1)) | 0, c2 = k % (n + 1);
+    return { x1: PAD + c2 * GAP, y1: PAD + r2 * GAP, x2: PAD + c2 * GAP, y2: PAD + (r2 + 1) * GAP };
+  }
+
+  function repaint(full) {
+    var n = S.size;
+    S.g.boxes.innerHTML = '';
+    for (var b = 0; b < bd.boxes; b++) {
+      if (!S.owner[b]) continue;
+      var r = (b / n) | 0, c = b % n;
+      var rect = document.createElementNS(NS, 'rect');
+      rect.setAttribute('x', PAD + c * GAP + 6);
+      rect.setAttribute('y', PAD + r * GAP + 6);
+      rect.setAttribute('width', GAP - 12);
+      rect.setAttribute('height', GAP - 12);
+      rect.setAttribute('rx', '10');
+      rect.setAttribute('fill', P[S.owner[b]].c);
+      rect.setAttribute('opacity', '.24');
+      if (!full && S.newBoxes.indexOf(b) >= 0) rect.setAttribute('class', 'dt-box');
+      S.g.boxes.appendChild(rect);
+      var t = document.createElementNS(NS, 'text');
+      t.setAttribute('x', PAD + c * GAP + GAP / 2);
+      t.setAttribute('y', PAD + r * GAP + GAP / 2 + 13);
+      t.setAttribute('text-anchor', 'middle');
+      t.setAttribute('font-size', '38');
+      t.setAttribute('fill', P[S.owner[b]].c);
+      t.setAttribute('class', 'dt-boxlabel');
+      t.textContent = C.num(S.owner[b]);
+      S.g.boxes.appendChild(t);
+    }
+    // خطوط کشیده‌شده
+    var drawn = S.g.lines.querySelectorAll('.dt-line');
+    for (var d = 0; d < drawn.length; d++) drawn[d].remove();
+    for (var e = 0; e < bd.E; e++) {
+      if (!S.edges[e]) continue;
+      var p = edgePos(e);
+      var ln = document.createElementNS(NS, 'line');
+      ln.setAttribute('x1', p.x1); ln.setAttribute('y1', p.y1);
+      ln.setAttribute('x2', p.x2); ln.setAttribute('y2', p.y2);
+      ln.setAttribute('stroke', P[S.edgeOwner ? (S.edgeOwner[e] || 1) : 1].c);
+      ln.setAttribute('stroke-width', '11');
+      ln.setAttribute('class', 'dt-line' + (!full && e === S.lastEdge ? ' dt-line--new' : ''));
+      S.g.lines.appendChild(ln);
+    }
+    var hits = S.g.hits.childNodes;
+    for (var h = 0; h < hits.length; h++) {
+      hits[h].style.pointerEvents = (S.edges[h] || S.done || busy()) ? 'none' : 'auto';
+    }
+  }
+
+  function busy() { return S.mode === 'ai' && S.turn === 2 && !S.done; }
+
+  function render() {
+    top.innerHTML = '';
+    if (S.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' },
+        [C.icon('calendar', 14), el('span', { text: C.t('dailyDots') + ' — ' + C.num(S.daily) })]));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('vsHard') }));
+    } else {
+      top.appendChild(C.ui.segmented([
+        { value: 'ai', label: C.t('vsAi') }, { value: '2p', label: C.t('twoPlayers') }
+      ], S.mode, function (v) {
+        prefs.mode = v; ctx.store.set('prefs', prefs);
+        newGame(S.size, v, S.level);
+      }));
+      top.appendChild(C.ui.segmented([3, 4, 5, 6, 8].map(function (n) {
+        return { value: n, label: C.num(n) };
+      }), S.size, function (v) {
+        prefs.size = v; ctx.store.set('prefs', prefs);
+        newGame(v, S.mode, S.level);
+      }));
+      if (S.mode === 'ai') {
+        top.appendChild(C.ui.segmented([
+          { value: 'easy', label: C.t('easy') }, { value: 'medium', label: C.t('medium') }, { value: 'hard', label: C.t('hard') }
+        ], S.level, function (v) {
+          prefs.level = v; ctx.store.set('prefs', prefs);
+          newGame(S.size, S.mode, v);
+        }));
+      }
+    }
+    drawPlayers();
+    repaint(true);
+  }
+
+  function pname(i) {
+    if (i === 1) return C.state.profile.name || C.t('you');
+    if (S.mode === 'ai') return C.t('rival') + ' · ' + C.t(S.level);
+    return prefs.p2name || C.t('player2');
+  }
+
+  function drawPlayers() {
+    playersRow.innerHTML = '';
+    for (var i = 1; i <= 2; i++) {
+      (function (p) {
+        var box = el('div', {
+          class: 'dt-player' + (S.turn === p && !S.done ? ' dt-player--on' : ''),
+          style: { '--pc': P[p].c }
+        }, [
+          el('div', { class: 'dt-player__dot' }),
+          el('div', { class: 'dt-player__name', text: pname(p) }),
+          el('div', { class: 'dt-player__score', text: C.num(S.scores[p]) })
+        ]);
+        if (p === 2 && S.mode === '2p' && !S.daily) {
+          box.classList.add('ch-tap');
+          box.addEventListener('click', renameP2);
+        }
+        if (S.turn === p && busy() && p === 2) box.classList.add('dt-thinking');
+        playersRow.appendChild(box);
+      })(i);
+    }
+  }
+
+  /* ----------------------------------------------------------- حرکت */
+
+  function human(e) {
+    if (!S || S.done || S.edges[e] || busy()) return;
+    doMove(e, true);
+  }
+
+  function doMove(e, byHuman) {
+    if (!S.edgeOwner) S.edgeOwner = {};
+    S.history.push({ e: e, turn: S.turn, scores: S.scores.slice(), turnBoxes: S.turnBoxes });
+    S.edgeOwner[e] = S.turn;
+    var before = S.owner.slice();
+    var got = E.play(bd, S.edges, S.owner, e, S.turn);
+    S.lastEdge = e;
+    S.newBoxes = [];
+    for (var b = 0; b < bd.boxes; b++) if (!before[b] && S.owner[b]) S.newBoxes.push(b);
+    if (got > 0) {
+      S.scores[S.turn] += got;
+      S.turnBoxes += got;
+      C.audio.sfx(S.turnBoxes >= 3 ? 'chain' : 'pop');
+      C.haptic('success');
+      if (S.turnBoxes >= 5 && S.turn === 1) C.achievements.unlock('dt-chain');
+    } else {
+      S.turnBoxes = 0;
+      S.turn = S.turn === 1 ? 2 : 1;
+      C.audio.sfx('place');
+      if (byHuman) C.haptic('tap');
+    }
+    repaint(false);
+    drawPlayers();
+    save();
+    if (E.legalMoves(bd, S.edges).length === 0) { finish(); return; }
+    maybeAi();
+  }
+
+  function maybeAi() {
+    stopAi();
+    if (S.done || S.mode !== 'ai' || S.turn !== 2) return;
+    repaint(false);
+    drawPlayers();
+    aiTimer = setTimeout(function () {
+      if (!S || S.done || S.turn !== 2) return;
+      var rnd = S.daily ? C.daily('dots', S.daily + '|' + S.history.length).rng : Math.random;
+      var m = E.aiMove(bd, S.edges, S.owner, S.level, rnd);
+      if (m < 0) { finish(); return; }
+      doMove(m, false);
+    }, 380);
+  }
+  function stopAi() { if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; } }
+
+  function undo() {
+    if (!S || S.done) return;
+    if (S.mode !== 'ai') { C.ui.toast({ icon: 'info', title: C.t('undoOnlyAi') }); return; }
+    if (!S.history.length) { C.feedback('bad'); return; }
+    stopAi();
+    // تا جایی برگرد که دوباره نوبت بازیکن باشد
+    var guard = 0;
+    do {
+      var h = S.history.pop();
+      if (!h) break;
+      S.edges[h.e] = 0;
+      delete S.edgeOwner[h.e];
+      S.scores = h.scores;
+      S.turn = h.turn;
+      S.turnBoxes = h.turnBoxes;
+      // مالکیت مربع‌هایی که با این یال بسته شده بودند برداشته شود
+      var bs = bd.edgeBoxes[h.e];
+      for (var i = 0; i < bs.length; i++) if (E.sides(bd, S.edges, bs[i]) < 4) S.owner[bs[i]] = 0;
+    } while (S.turn !== 1 && guard++ < 200);
+    S.lastEdge = -1;
+    C.feedback('tap');
+    repaint(true);
+    drawPlayers();
+    save();
+  }
+
+  function finish() {
+    S.done = true;
+    S.elapsed = Date.now() - S.startedAt;
+    stopAi();
+    repaint(true);
+    drawPlayers();
+    var s1 = S.scores[1], s2 = S.scores[2];
+    var won = s1 > s2;
+    var tie = s1 === s2;
+    var margin = s1 - s2;
+
+    var base = { easy: 5, medium: 10, hard: 18 }[S.level] || 8;
+    var sizeK = S.size / 5;
+    var coins = Math.max(2, Math.round((won ? base : base * 0.35) * sizeK)) + (S.daily ? 8 : 0);
+    var points = Math.max(3, Math.round((won ? base * 4 : base * 1.2) * sizeK)) + (S.daily ? 25 : 0);
+
+    if (S.mode === 'ai' && won) {
+      C.achievements.unlock('dt-win');
+      if (S.level === 'hard') C.achievements.unlock('dt-hard');
+      if (s2 === 0) C.achievements.unlock('dt-shutout');
+    }
+    if (won) C.stats.best('dots', 'margin', margin, false);
+    if (S.daily) {
+      C.stats.daily('dots', S.daily, {
+        label: C.num(s1) + ' - ' + C.num(s2), win: won, diff: margin
+      });
+    }
+    ctx.clearSave();
+
+    ctx.finish({
+      won: won,
+      title: tie ? C.t('draw')
+        : (S.mode === '2p' ? C.t('playerWon', { n: pname(s1 > s2 ? 1 : 2) })
+          : (won ? C.t('won') : C.t('lost'))),
+      timeMs: S.elapsed, coins: coins, points: points,
+      lines: [
+        { label: pname(1), value: C.num(s1) },
+        { label: pname(2), value: C.num(s2) },
+        { label: C.t('size'), value: C.num(S.size) + '×' + C.num(S.size) }
+      ],
+      shareText: 'چوگان · نقطه‌بازی ' + C.num(S.size) + '×' + C.num(S.size) +
+        (S.daily ? ('\nروزانه ' + S.daily) : '') +
+        '\n' + C.num(s1) + ' - ' + C.num(s2),
+      onAgain: S.daily ? null : function () { newGame(S.size, S.mode, S.level); }
+    });
+  }
+
+  /* --------------------------------------------------------- ذخیره */
+
+  ctx.autosave(function () {
+    if (!S || S.done || !S.history.length) return { inProgress: false };
+    return {
+      s: {
+        size: S.size, mode: S.mode, level: S.level, daily: S.daily,
+        edges: S.edges, owner: S.owner, edgeOwner: S.edgeOwner || {},
+        turn: S.turn, scores: S.scores, history: S.history,
+        turnBoxes: S.turnBoxes, startedAt: S.startedAt
+      },
+      prefs: prefs
+    };
+  });
+  function save() { ctx.save(); }
+
+  function askNew() {
+    if (!S || S.done || !S.history.length) { newGame(S ? S.size : prefs.size, S ? S.mode : prefs.mode, S ? S.level : prefs.level); return; }
+    C.ui.confirm({ title: C.t('newMatch'), body: C.t('resetWarn'), onOk: function () { newGame(S.size, S.mode, S.level); } });
+  }
+
+  function renameP2() {
+    var input = el('input', {
+      type: 'text', value: prefs.p2name, maxlength: '16', placeholder: C.t('player2'),
+      style: { font: 'inherit', width: '100%', padding: '10px 14px', 'border-radius': 'var(--r-md)',
+        border: '1px solid var(--c-line)', background: 'var(--c-surface-2)', color: 'var(--c-text)' }
+    });
+    C.ui.modal({
+      title: C.t('renameP2'), body: [input],
+      actions: [{ label: C.t('cancel') }, { label: C.t('done'), kind: 'primary', onClick: function () {
+        prefs.p2name = input.value.trim().slice(0, 16);
+        ctx.store.set('prefs', prefs);
+        drawPlayers();
+      } }]
+    });
+  }
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('tutText2') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          kb('← ↑ → ↓', C.t('back')),
+          kb('Space / Enter', C.t('play')),
+          kb('U', C.t('undoMove')),
+          kb('R / Tab', C.t('rotate'))
+        ])
+      ],
+      actions: [
+        { label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('done'), kind: 'primary' }
+      ]
+    });
+  }
+  function kb(k, what) {
+    return el('div', { class: 'ch-item' }, [
+      el('div', { class: 'ch-item__label', text: what }),
+      el('span', { class: 'ch-badge', text: k })
+    ]);
+  }
+
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'),
+      art: '<svg viewBox="0 0 200 110" width="100%"><g fill="var(--c-text-dim)">' +
+        '<circle cx="70" cy="30" r="7"/><circle cx="130" cy="30" r="7"/><circle cx="70" cy="80" r="7"/><circle cx="130" cy="80" r="7"/></g>' +
+        '<path d="M70 30h60" stroke="var(--game)" stroke-width="8" stroke-linecap="round"/></svg>' },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'),
+      art: '<svg viewBox="0 0 200 110" width="100%"><rect x="72" y="32" width="56" height="46" rx="6" fill="var(--game)" opacity=".25"/>' +
+        '<path d="M70 30h60M70 80h60M70 30v50M130 30v50" stroke="var(--game)" stroke-width="8" stroke-linecap="round"/>' +
+        '<g fill="var(--c-text-dim)"><circle cx="70" cy="30" r="7"/><circle cx="130" cy="30" r="7"/><circle cx="70" cy="80" r="7"/><circle cx="130" cy="80" r="7"/></g></svg>' },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' +
+        '<rect x="40" y="35" width="40" height="40" rx="5" fill="#E07A5F" opacity=".3"/>' +
+        '<rect x="82" y="35" width="40" height="40" rx="5" fill="#E07A5F" opacity=".3"/>' +
+        '<rect x="124" y="35" width="40" height="40" rx="5" fill="var(--game)" opacity=".3"/>' +
+        '<path d="M40 35h124M40 75h124M40 35v40M82 35v40M124 35v40M164 35v40" stroke="var(--c-text-dim)" stroke-width="5" stroke-linecap="round"/></svg>' }
+  ];
+
+  /* -------------------------------------------------------- کیبورد */
+
+  // نشانگر کیبورد به‌صورت هندسی نگه داشته می‌شود: افقی یا عمودی بودن خط
+  // به‌علاوه‌ی سطر و ستون. پیمایش روی شماره‌ی خام یال، جهت‌نماها را بی‌معنا
+  // می‌کرد چون شماره‌ها اول همه‌ی خط‌های افقی‌اند بعد همه‌ی عمودی‌ها.
+  var cur = { v: 0, r: 0, c: 0 };   // v=0 افقی، v=1 عمودی
+  function curEdge() {
+    var n = S.size;
+    return cur.v ? (bd.HC + cur.r * (n + 1) + cur.c) : (cur.r * n + cur.c);
+  }
+  function moveCur(dr, dc) {
+    var n = S.size;
+    var maxR = cur.v ? n - 1 : n;
+    var maxC = cur.v ? n : n - 1;
+    cur.r = C.clamp(cur.r + dr, 0, maxR);
+    cur.c = C.clamp(cur.c + dc, 0, maxC);
+  }
+  function flipCur() {
+    var n = S.size;
+    cur.v = cur.v ? 0 : 1;
+    cur.r = C.clamp(cur.r, 0, cur.v ? n - 1 : n);
+    cur.c = C.clamp(cur.c, 0, cur.v ? n : n - 1);
+  }
+  window.addEventListener('keydown', function (e) {
+    if (!S || S.done || busy()) return;
+    var k = e.key;
+    if (k === 'u' || k === 'U') { undo(); e.preventDefault(); return; }
+    if (k === 'r' || k === 'R' || k === 'Tab') { flipCur(); highlight(); e.preventDefault(); return; }
+    var rtl = document.documentElement.dir === 'rtl';
+    if (k === 'ArrowUp') { moveCur(-1, 0); highlight(); e.preventDefault(); return; }
+    if (k === 'ArrowDown') { moveCur(1, 0); highlight(); e.preventDefault(); return; }
+    if (k === 'ArrowLeft') { moveCur(0, rtl ? 1 : -1); highlight(); e.preventDefault(); return; }
+    if (k === 'ArrowRight') { moveCur(0, rtl ? -1 : 1); highlight(); e.preventDefault(); return; }
+    if (k === ' ' || k === 'Enter') {
+      var ed = curEdge();
+      if (!S.edges[ed]) human(ed);
+      e.preventDefault();
+    }
+  });
+  function highlight() {
+    var old = svg.querySelector('.dt-cursor');
+    if (old) old.remove();
+    var p = edgePos(curEdge());
+    var ln = document.createElementNS(NS, 'line');
+    ln.setAttribute('x1', p.x1); ln.setAttribute('y1', p.y1);
+    ln.setAttribute('x2', p.x2); ln.setAttribute('y2', p.y2);
+    ln.setAttribute('stroke', 'var(--game)');
+    ln.setAttribute('stroke-width', '13');
+    ln.setAttribute('stroke-linecap', 'round');
+    ln.setAttribute('opacity', '.45');
+    ln.setAttribute('class', 'dt-cursor');
+    S.g.lines.appendChild(ln);
+  }
+
+  C.onPause(function () { stopAi(); });
+  C.onResume(function () { if (S && !S.done) maybeAi(); });
+
+  /* ---------------------------------------------------------- شروع */
+
+  var saved = ctx.loadSave();
+  if (dailyDate) {
+    var d = C.daily('dots', dailyDate);
+    newGame(5, 'ai', 'hard', dailyDate, d.rng);
+    if (C.stats.dailyDone('dots', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).dots;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec.label });
+    }
+    ctx.tutorialIfNew(TUT);
+  } else if (saved && saved.s && saved.s.history && saved.s.history.length) {
+    if (saved.prefs) prefs = saved.prefs;
+    var v = saved.s;
+    bd = E.makeBoard(v.size, v.size);
+    S = {
+      size: v.size, mode: v.mode, level: v.level, daily: v.daily,
+      edges: v.edges, owner: v.owner, edgeOwner: v.edgeOwner,
+      turn: v.turn, scores: v.scores, history: v.history, turnBoxes: v.turnBoxes,
+      done: false, startedAt: Date.now() - 0, elapsed: 0, lastEdge: -1, newBoxes: []
+    };
+    drawAll();
+    render();
+    maybeAi();
+  } else {
+    newGame(prefs.size || 5, prefs.mode || 'ai', prefs.level || 'medium');
+    ctx.tutorialIfNew(TUT);
+  }
+})();
+</script>
+</body>
+</html>
