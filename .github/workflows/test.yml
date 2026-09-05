@@ -29,3 +29,58 @@ jobs:
 
       - name: باز کردن همه‌ی صفحه‌ها در مرورگر بدون سر
         run: ./tools/browser-check.sh
+
+  android:
+    name: بیلد دیباگ اندروید
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: دریافت سورس
+        uses: actions/checkout@v4
+
+      - name: نصب جاوا
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: نصب گریدل
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
+
+      # بیلد دیباگ کلید امضا نمی‌خواهد، پس روی هر PR اجرا می‌شود و ثابت
+      # می‌کند پروژه‌ی اندروید واقعاً بیلد می‌شود، نه فقط روی کاغذ درست است.
+      - name: بیلد
+        working-directory: android
+        run: gradle --no-daemon assembleDebug
+
+      - name: بررسی محتوای APK
+        run: |
+          set -euo pipefail
+          APK=$(ls android/app/build/outputs/apk/debug/*.apk | head -n 1)
+          echo "خروجی: $APK ($(du -h "$APK" | cut -f1))"
+          # دارایی‌های وب و فهرست افزونه‌ها باید واقعاً داخل بسته باشند
+          unzip -l "$APK" > /tmp/apk.txt
+          for f in assets/public/index.html assets/public/games.json \
+                   assets/public/lib/chogan.js assets/public/fonts/vazirmatn-variable.woff2 \
+                   assets/capacitor.config.json assets/capacitor.plugins.json; do
+            grep -q "$f" /tmp/apk.txt || { echo "در APK نیست: $f"; exit 1; }
+          done
+          for g in tower-defence sudoku minesweeper dots; do
+            grep -q "assets/public/games/$g/index.html" /tmp/apk.txt || { echo "بازی در APK نیست: $g"; exit 1; }
+          done
+          echo "همه‌ی دارایی‌های لازم داخل APK هستند"
+
+      - name: بررسی مجوزهای منیفست
+        run: |
+          set -euo pipefail
+          AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -n 1)
+          APK=$(ls android/app/build/outputs/apk/debug/*.apk | head -n 1)
+          PERMS=$("$AAPT" dump permissions "$APK" | grep '^permission:' || true)
+          echo "مجوزها: ${PERMS:-هیچ}"
+          if [ "$PERMS" != "permission: android.permission.VIBRATE" ]; then
+            echo "مجموعه‌ی مجوزها آن چیزی نیست که باید باشد"
+            exit 1
+          fi
+          echo "فقط مجوز لرزش، همان‌طور که باید"
