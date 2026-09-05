@@ -1,0 +1,794 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<meta name="description" content="مجموعه‌بازی چوگان: رایگان، متن‌باز، بدون تبلیغ، بدون ردیاب، کاملاً آفلاین.">
+<title>چوگان</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="lib/chogan.css">
+</head>
+<body>
+<div id="app"></div>
+<nav class="ch-nav" id="nav" aria-label="ناوبری اصلی"><div class="ch-nav__in" id="navIn"></div></nav>
+
+<script src="version.js"></script>
+<script src="lib/chogan.js"></script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan;
+  var el = C.el;
+
+  C.strings({
+    fa: {
+      slogan: 'بازی‌های کوچک، تمام‌شدنی، بدون مزاحمت',
+      allGames: 'بازی‌ها', pickDay: 'یک روز را انتخاب کن',
+      seasonTable: 'جدول فصل', myTier: 'رده‌ی تو',
+      toNext: 'تا صعود', keepAbove: 'کف ماندن در رده',
+      unlockAsk: 'با {n} سکه باز شود؟', mascot: 'شخصیت', palette: 'پالت منو',
+      statsTitle: 'آمار تو', perGame: 'به تفکیک بازی',
+      dangerZone: 'پاک کردن داده', wipeAll: 'پاک کردن همه‌چیز',
+      wipeAllAsk: 'همه‌ی داده‌های اپ پاک شود؟ سکه‌ها، دستاوردها، لیگ و پیشرفت همه‌ی بازی‌ها.',
+      installed: 'نصب‌شده روی دستگاه', playedTimes: '{n} بار بازی کردی',
+      noneYet: 'هنوز چیزی نیست', dailyOf: 'چالش‌های {d}',
+      noGames: 'هنوز بازی‌ای اضافه نشده', noGamesSub: 'به‌زودی', loadFailed: 'فهرست بازی‌ها بار نشد',
+      wave: 'موج', wins: 'برد', solved: 'حل‌شده', cleared: 'پاک‌شده',
+      defaultPalette: 'پیش‌فرض', sea: 'دریا', sunset: 'غروب', forest: 'جنگل',
+      fox: 'روباه', owl: 'جغد', cat: 'گربه', bear: 'خرس',
+      seasonResult: 'نتیجه‌ی فصل گذشته'
+    },
+    en: {
+      slogan: 'Small games you can actually finish',
+      allGames: 'Games', pickDay: 'Pick a day',
+      seasonTable: 'Season table', myTier: 'Your tier',
+      toNext: 'to promotion', keepAbove: 'stay above',
+      unlockAsk: 'Unlock for {n} coins?', mascot: 'Character', palette: 'Menu palette',
+      statsTitle: 'Your stats', perGame: 'Per game',
+      dangerZone: 'Erase data', wipeAll: 'Erase everything',
+      wipeAllAsk: 'Erase all app data? Coins, awards, league and every game.',
+      installed: 'Installed on device', playedTimes: 'played {n} times',
+      noneYet: 'Nothing yet', dailyOf: 'Challenges of {d}',
+      noGames: 'No games yet', noGamesSub: 'Coming soon', loadFailed: 'Could not load the game list',
+      wave: 'Wave', wins: 'Wins', solved: 'Solved', cleared: 'Cleared',
+      defaultPalette: 'Default', sea: 'Sea', sunset: 'Sunset', forest: 'Forest',
+      fox: 'Fox', owl: 'Owl', cat: 'Cat', bear: 'Bear',
+      seasonResult: 'Last season'
+    }
+  });
+
+  var PALETTES = {
+    default: { key: 'defaultPalette', c: '#E07A5F', s: '#FBE7DF', cost: 0 },
+    sea:     { key: 'sea',            c: '#4E93A8', s: '#DEEEF2', cost: 150 },
+    sunset:  { key: 'sunset',         c: '#C96A9B', s: '#F8E4EF', cost: 250 },
+    forest:  { key: 'forest',         c: '#6E9E63', s: '#E5F0E1', cost: 200 }
+  };
+  var MASCOTS = {
+    fox:  { key: 'fox',  cost: 0 },
+    owl:  { key: 'owl',  cost: 120 },
+    cat:  { key: 'cat',  cost: 200 },
+    bear: { key: 'bear', cost: 320 }
+  };
+
+  var app = document.getElementById('app');
+  var navIn = document.getElementById('navIn');
+  var GAMES = [];
+  var tab = 'home';
+
+  /* ------------------------------------------------------------ کمکی */
+
+  function lang() { return C.state.settings.lang; }
+  function gname(g) { return g.name[lang()] || g.name.fa; }
+  function gsum(g) { return g.summary[lang()] || g.summary.fa; }
+
+  // روشن کردن رنگ بدون color-mix، برای وب‌ویوهای قدیمی
+  function lighten(hex, k) {
+    var h = String(hex).replace('#', '');
+    var n = parseInt(h, 16);
+    var r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    r = Math.round(r + (255 - r) * k);
+    g = Math.round(g + (255 - g) * k);
+    b = Math.round(b + (255 - b) * k);
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+  }
+
+  function applyPalette() {
+    var p = PALETTES[C.state.settings.palette || 'default'] || PALETTES.default;
+    document.documentElement.style.setProperty('--c-accent', p.c);
+    document.documentElement.style.setProperty('--c-accent-soft', p.s);
+  }
+
+  function isNew(g) {
+    if (C.stats.get().byGame[g.id]) return false;
+    var age = (Date.now() - C.keyToDate(g.added).getTime()) / 86400000;
+    return age <= 21;
+  }
+
+  // یک خط خلاصه‌ی وضعیت هر بازی برای کارت منو
+  function bestLine(g) {
+    var s = C.stats.get().byGame[g.id];
+    if (!s || !s.plays) return null;
+    if (g.id === 'tower-defence') {
+      var w = s.best && s.best.wave;
+      return w ? C.t('best') + ' ' + C.t('wave') + ' ' + C.num(w) : null;
+    }
+    if (g.id === 'sudoku') {
+      var t = s.best && s.best['time-medium'];
+      return t ? C.t('best') + ' ' + C.time(t) : C.t('solved') + ' ' + C.num(s.wins);
+    }
+    if (g.id === 'minesweeper') {
+      var t2 = s.best && s.best['time-medium'];
+      return t2 ? C.t('best') + ' ' + C.time(t2) : C.t('cleared') + ' ' + C.num(s.wins);
+    }
+    if (g.id === 'dots') return C.t('wins') + ' ' + C.num(s.wins);
+    return null;
+  }
+
+  function goGame(g, daily) {
+    C.markNav();
+    C.feedback('tap');
+    var url = g.path + (daily ? ('?daily=' + daily) : '');
+    setTimeout(function () { location.href = url; }, 90);
+  }
+
+  function coinPill() {
+    return el('div', { class: 'ch-coin' }, [
+      C.icon('coin', 18),
+      el('b', { 'data-coin-view': '1', text: C.num(C.coins.get()) })
+    ]);
+  }
+
+  function sectionHead(title, extra) {
+    return el('div', { class: 'ch-section__head' }, [el('h2', { text: title }), extra || null]);
+  }
+
+  /* ------------------------------------------------------------ خانه */
+
+  function viewHome() {
+    var page = el('div', { class: 'ch-page' });
+
+    var m = C.state.settings.mascot || 'fox';
+    var head = el('div', { class: 'ch-head' }, [
+      el('div', { class: 'ch-head__title' }, [
+        el('h1', { text: C.t('appName') }),
+        el('p', { text: C.t('slogan') })
+      ]),
+      coinPill()
+    ]);
+    page.appendChild(head);
+
+    var st = C.stats.get();
+    if (st.streak.count > 0) {
+      var streak = el('div', { class: 'ch-row', style: { 'margin-bottom': 'var(--s-4)' } }, [
+        el('span', { class: 'ch-badge ch-badge--warn' }, [C.icon('flame', 15), el('span', { text: C.num(st.streak.count) + ' ' + C.t('dayStreak') })])
+      ]);
+      page.appendChild(streak);
+    }
+
+    // بدون بازی، صفحه‌ی خانه چیزی برای نشان دادن ندارد.
+    // این حالت واقعاً پیش می‌آید: تا وقتی هیچ بازی‌ای در games.json نیست.
+    if (!GAMES.length) {
+      page.appendChild(el('div', { class: 'ch-empty' }, [
+        el('div', { html: C.mascot(C.state.settings.mascot || 'fox', 92) }),
+        el('h3', { text: C.t('noGames') }),
+        el('p', { class: 'ch-sm', text: C.t('noGamesSub') })
+      ]));
+      return page;
+    }
+
+    // کارت بزرگ چالش روزانه‌ی امروز
+    var today = C.dateKey();
+    var idx = Math.abs(C.hash32(today)) % GAMES.length;
+    var feat = GAMES[idx];
+    var done = C.stats.dailyDone(feat.id, today);
+    var hero = el('div', {
+      class: 'ch-card ch-tap ch-enter',
+      style: { background: feat.color, 'background-image': 'linear-gradient(135deg, ' + C.alpha(feat.color, 1) + ' 0%, ' + lighten(feat.color, .38) + ' 100%)', color: '#fff', 'margin-bottom': 'var(--s-5)' },
+      onclick: function () { goGame(feat, today); }
+    }, [
+      el('div', { class: 'ch-row' }, [
+        el('div', { class: 'ch-grow' }, [
+          el('div', { class: 'ch-row', style: { gap: '6px' } }, [
+            C.icon('calendar', 18),
+            el('span', { class: 'ch-bold ch-sm', text: C.t('todayChallenge') })
+          ]),
+          el('h2', { style: { 'margin-top': '2px' }, text: gname(feat) }),
+          el('p', { class: 'ch-sm', style: { opacity: '.88' }, text: done ? C.t('dailyDone') : C.t('todayChallengeSub') })
+        ]),
+        el('div', { style: { width: '58px', height: '58px', 'border-radius': 'var(--r-md)', background: 'rgba(255,255,255,.22)', display: 'grid', 'place-items': 'center' } },
+          [done ? C.icon('check', 30) : C.icon('play', 28)])
+      ])
+    ]);
+    page.appendChild(hero);
+
+    var sec = el('div', { class: 'ch-section' }, [sectionHead(C.t('allGames'))]);
+    var grid = el('div', { class: 'ch-games' });
+    GAMES.forEach(function (g, i) {
+      var badges = el('div', { class: 'ch-game__meta' });
+      if (C.hasResume(g.id)) badges.appendChild(el('span', { class: 'ch-badge ch-badge--good', text: C.t('continueBadge') }));
+      if (isNew(g)) badges.appendChild(el('span', { class: 'ch-badge ch-badge--accent', text: C.t('newBadge') }));
+      var bl = bestLine(g);
+      if (bl) badges.appendChild(el('span', { class: 'ch-badge', text: bl }));
+
+      var card = el('div', {
+        class: 'ch-card ch-game ch-tap ch-enter',
+        style: { '--game': g.color, '--game-soft': g.soft, 'animation-delay': (60 + i * 55) + 'ms' },
+        onclick: function () { goGame(g); }
+      }, [
+        el('div', { class: 'ch-game__icon' }, [el('img', { src: g.icon, alt: '', width: 62, height: 62 })]),
+        el('div', { class: 'ch-game__body' }, [
+          el('div', { class: 'ch-game__name', text: gname(g) }),
+          el('div', { class: 'ch-game__sum', text: gsum(g) }),
+          badges
+        ])
+      ]);
+      grid.appendChild(card);
+    });
+    sec.appendChild(grid);
+    page.appendChild(sec);
+
+    page.appendChild(el('div', { class: 'ch-center', style: { opacity: '.5', 'margin-top': 'var(--s-6)' } },
+      [el('div', { html: C.mascot(m, 74) })]));
+    return page;
+  }
+
+  /* --------------------------------------------------------- روزانه */
+
+  function viewDaily() {
+    var page = el('div', { class: 'ch-page' });
+    page.appendChild(el('div', { class: 'ch-head' }, [
+      el('div', { class: 'ch-head__title' }, [
+        el('h1', { text: C.t('daily') }),
+        el('p', { text: C.t('todayChallengeSub') })
+      ]),
+      coinPill()
+    ]));
+
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var cur = new Date(today.getFullYear(), today.getMonth(), 1);
+
+    var monthLabel = el('h2');
+    var calWrap = el('div', { class: 'ch-card' });
+
+    function monthName(d) {
+      try {
+        return d.toLocaleDateString(lang() === 'fa' ? 'fa-IR' : 'en-US', { month: 'long', year: 'numeric' });
+      } catch (e) { return (d.getMonth() + 1) + '/' + d.getFullYear(); }
+    }
+
+    function drawCal() {
+      monthLabel.textContent = monthName(cur);
+      calWrap.innerHTML = '';
+      var grid = el('div', { class: 'ch-cal' });
+      var dows = ['sat', 'sun', 'mon', 'tue', 'wed', 'thu', 'fri'];
+      dows.forEach(function (d) { grid.appendChild(el('div', { class: 'ch-cal__dow', text: C.t(d) })); });
+
+      var first = new Date(cur.getFullYear(), cur.getMonth(), 1);
+      var lead = (first.getDay() + 1) % 7;       // شنبه ستون اول
+      for (var i = 0; i < lead; i++) grid.appendChild(el('div', { class: 'ch-day ch-day--empty' }));
+
+      var dim = new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getDate();
+      for (var d = 1; d <= dim; d++) {
+        (function (day) {
+          var date = new Date(cur.getFullYear(), cur.getMonth(), day);
+          var key = C.dateKey(date);
+          var future = date.getTime() > today.getTime();
+          var rec = C.stats.dailyOf(key);
+          var n = Object.keys(rec).length;
+          var cls = 'ch-day';
+          if (future) cls += ' ch-day--future';
+          if (key === C.dateKey(today)) cls += ' ch-day--today';
+          if (n >= GAMES.length) cls += ' ch-day--done';
+          var dots = el('div', { class: 'ch-day__dots' });
+          GAMES.forEach(function (g) {
+            dots.appendChild(el('div', { class: 'ch-day__dot' + (rec[g.id] ? ' ch-day__dot--on' : '') }));
+          });
+          var b = el('button', { class: cls, type: 'button', disabled: future }, [
+            el('span', { text: C.num(day) }), dots
+          ]);
+          if (!future) b.addEventListener('click', function () { C.feedback('select'); dayModal(key); });
+          grid.appendChild(b);
+        })(d);
+      }
+      calWrap.appendChild(grid);
+    }
+
+    var nav = el('div', { class: 'ch-row', style: { 'margin-bottom': 'var(--s-3)' } }, [
+      el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': 'قبلی', onclick: function () {
+        cur = new Date(cur.getFullYear(), cur.getMonth() - 1, 1); C.feedback('select'); drawCal();
+      } }, [C.icon(lang() === 'fa' ? 'forward' : 'back', 20)]),
+      el('div', { class: 'ch-grow ch-center' }, [monthLabel]),
+      el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': 'بعدی', onclick: function () {
+        var next = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+        if (next.getTime() > today.getTime()) return;
+        cur = next; C.feedback('select'); drawCal();
+      } }, [C.icon(lang() === 'fa' ? 'back' : 'forward', 20)])
+    ]);
+    page.appendChild(nav);
+    page.appendChild(calWrap);
+    drawCal();
+
+    var st = C.stats.get();
+    page.appendChild(el('div', { class: 'ch-stats', style: { 'margin-top': 'var(--s-5)' } }, [
+      el('div', { class: 'ch-stat' }, [el('b', { text: C.num(C.counter('dailyDone')) }), el('span', { text: C.t('daily') })]),
+      el('div', { class: 'ch-stat' }, [el('b', { text: C.num(st.streak.count) }), el('span', { text: C.t('streak') })]),
+      el('div', { class: 'ch-stat' }, [el('b', { text: C.num(st.streak.best || 0) }), el('span', { text: C.t('best') })])
+    ]));
+    return page;
+  }
+
+  function dayModal(key) {
+    var rec = C.stats.dailyOf(key);
+    var list = el('div', { class: 'ch-list' });
+    GAMES.forEach(function (g) {
+      var r = rec[g.id];
+      list.appendChild(el('div', { class: 'ch-item' }, [
+        el('div', { style: { width: '34px', height: '34px', 'border-radius': '10px', overflow: 'hidden', flex: '0 0 34px' } },
+          [el('img', { src: g.icon, alt: '', width: 34, height: 34 })]),
+        el('div', { class: 'ch-item__label' }, [
+          el('div', { text: gname(g) }),
+          el('div', { class: 'ch-item__hint', text: r ? (r.label || C.t('dailyDone')) : C.t('dailyOpen') })
+        ]),
+        r ? C.icon('check', 22) : el('button', {
+          class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', text: C.t('play'),
+          style: { '--game': g.color, '--game-soft': g.soft },
+          onclick: function () { goGame(g, key); }
+        })
+      ]));
+    });
+    var d = C.keyToDate(key);
+    var label;
+    try { label = d.toLocaleDateString(lang() === 'fa' ? 'fa-IR' : 'en-US', { day: 'numeric', month: 'long' }); }
+    catch (e) { label = key; }
+    C.ui.modal({
+      title: C.t('dailyOf', { d: label }),
+      body: [list],
+      actions: [{ label: C.t('close'), kind: 'primary' }]
+    });
+  }
+
+  /* ------------------------------------------------------------ لیگ */
+
+  function tierMedal(tier, size) {
+    var t = C.league.tiers[tier - 1];
+    return '<svg viewBox="0 0 100 100" width="' + size + '" height="' + size + '" aria-hidden="true">' +
+      '<circle cx="50" cy="50" r="34" fill="rgba(255,255,255,.25)"/>' +
+      '<circle cx="50" cy="50" r="27" fill="' + t.color + '"/>' +
+      '<path d="M50 33l4.8 9.8 10.8 1.6-7.8 7.6 1.8 10.7L50 57.6l-9.6 5.1 1.8-10.7-7.8-7.6 10.8-1.6z" fill="#fff" opacity=".92"/>' +
+      '</svg>';
+  }
+
+  function viewLeague() {
+    var page = el('div', { class: 'ch-page' });
+    var lg = C.league.state();
+    var t = C.league.tier();
+
+    page.appendChild(el('div', { class: 'ch-head' }, [
+      el('div', { class: 'ch-head__title' }, [el('h1', { text: C.t('league') })]),
+      coinPill()
+    ]));
+
+    if (lg.lastResult) {
+      var lr = lg.lastResult;
+      C.ui.toast({
+        icon: lr.result === 'promoted' ? 'trophy' : (lr.result === 'demoted' ? 'info' : 'medal'),
+        title: C.t('seasonResult'),
+        sub: C.t(lr.result)
+      });
+      C.league.clearLastResult();
+    }
+
+    var ms = C.league.endsIn();
+    var dleft = Math.floor(ms / 86400000);
+    var hleft = Math.floor((ms % 86400000) / 3600000);
+
+    page.appendChild(el('div', { class: 'ch-tier ch-enter', style: { '--tier-c': t.color, 'margin-bottom': 'var(--s-4)' } }, [
+      el('div', { class: 'ch-tier__medal', html: tierMedal(lg.tier, 66) }),
+      el('div', { class: 'ch-grow' }, [
+        el('div', { class: 'ch-sm', style: { opacity: '.85' }, text: C.t('myTier') }),
+        el('h2', { text: C.t(t.key) }),
+        el('div', { class: 'ch-sm', style: { opacity: '.85' },
+          text: C.t('seasonEnds') + ' ' + C.num(dleft) + C.t('days') + ' ' + C.num(hleft) + C.t('hours') })
+      ]),
+      el('div', { class: 'ch-center' }, [
+        el('div', { class: 'ch-bold', style: { 'font-size': 'var(--fs-2xl)' }, text: C.num(lg.points) }),
+        el('div', { class: 'ch-xs', style: { opacity: '.85' }, text: C.t('points') })
+      ])
+    ]));
+
+    var goal = t.up > 0 ? t.up : Math.max(t.down * 2, lg.points);
+    var pct = Math.min(100, Math.round(lg.points / goal * 100));
+    page.appendChild(el('div', { class: 'ch-card', style: { 'margin-bottom': 'var(--s-5)' } }, [
+      el('div', { class: 'ch-row', style: { 'justify-content': 'space-between', 'margin-bottom': 'var(--s-2)' } }, [
+        el('span', { class: 'ch-sm ch-dim', text: t.up > 0 ? (C.num(Math.max(0, t.up - lg.points)) + ' ' + C.t('toNext')) : C.t('keepAbove') + ' ' + C.num(t.down) }),
+        el('span', { class: 'ch-sm ch-bold', text: C.num(pct) + '٪' })
+      ]),
+      el('div', { class: 'ch-bar' }, [el('div', { class: 'ch-bar__fill', style: { width: pct + '%' } })])
+    ]));
+
+    var rows = C.league.table();
+    var list = el('div', { class: 'ch-card' });
+    list.appendChild(el('div', { class: 'ch-section__head' }, [
+      el('h2', { style: { 'font-size': 'var(--fs-md)' }, text: C.t('seasonTable') })
+    ]));
+    rows.forEach(function (r) {
+      list.appendChild(el('div', { class: 'ch-rank' + (r.me ? ' ch-rank--me' : '') }, [
+        el('div', { class: 'ch-rank__n', text: C.num(r.rank) }),
+        el('div', { class: 'ch-rank__name', text: (r.country ? C.flag(r.country) + ' ' : '') + r.name }),
+        el('div', { class: 'ch-rank__pts', text: C.num(r.points) })
+      ]));
+    });
+    list.appendChild(el('p', { class: 'ch-xs ch-faint ch-center', style: { 'margin-top': 'var(--s-3)' }, text: C.t('offlineRivals') }));
+    page.appendChild(list);
+    return page;
+  }
+
+  /* ------------------------------------------------------ دستاوردها */
+
+  function achBadge(icon, unlocked, size) {
+    var wrap = el('div', { style: { color: unlocked ? 'var(--c-gold)' : 'var(--c-text-faint)' } }, [C.icon(icon, size || 48)]);
+    return wrap;
+  }
+
+  function viewAchievements() {
+    var page = el('div', { class: 'ch-page' });
+    var got = C.achievements.count();
+    var all = C.achievements.all.length;
+    page.appendChild(el('div', { class: 'ch-head' }, [
+      el('div', { class: 'ch-head__title' }, [
+        el('h1', { text: C.t('achievements') }),
+        el('p', { text: C.num(got) + ' / ' + C.num(all) })
+      ]),
+      coinPill()
+    ]));
+
+    var pct = Math.round(got / all * 100);
+    page.appendChild(el('div', { class: 'ch-bar', style: { 'margin-bottom': 'var(--s-5)' } },
+      [el('div', { class: 'ch-bar__fill', style: { width: pct + '%' } })]));
+
+    var grid = el('div', { class: 'ch-achs' });
+    C.achievements.all.forEach(function (a) {
+      var un = C.achievements.has(a.id);
+      grid.appendChild(el('div', {
+        class: 'ch-ach' + (un ? '' : ' ch-ach--locked'), tabindex: '0', role: 'button',
+        onclick: function () {
+          C.feedback('select');
+          C.ui.modal({
+            title: lang() === 'fa' ? a.fa : a.en,
+            body: [
+              el('div', { class: 'ch-center', style: { margin: 'var(--s-3) 0' } }, [achBadge(a.icon, un, 72)]),
+              el('p', { class: 'ch-dim ch-center', text: lang() === 'fa' ? a.dfa : a.den }),
+              un ? el('p', { class: 'ch-xs ch-faint ch-center', style: { 'margin-top': 'var(--s-2)' },
+                text: C.t('unlockedAt') + ' ' + new Date(C.state.achievements[a.id]).toLocaleDateString(lang() === 'fa' ? 'fa-IR' : 'en-US') })
+                : el('p', { class: 'ch-xs ch-faint ch-center', style: { 'margin-top': 'var(--s-2)' }, text: C.t('locked') })
+            ],
+            actions: [{ label: C.t('close'), kind: 'primary' }]
+          });
+        }
+      }, [
+        achBadge(a.icon, un),
+        el('div', { class: 'ch-ach__n', text: lang() === 'fa' ? a.fa : a.en })
+      ]));
+    });
+    page.appendChild(grid);
+    return page;
+  }
+
+  /* ------------------------------------------------- پروفایل و تنظیمات */
+
+  function viewProfile() {
+    var page = el('div', { class: 'ch-page' });
+    var st = C.stats.get();
+
+    page.appendChild(el('div', { class: 'ch-head' }, [
+      el('div', { class: 'ch-head__title' }, [el('h1', { text: C.t('profile') })]),
+      coinPill()
+    ]));
+
+    // شناسنامه
+    var nameInput = el('input', {
+      type: 'text', value: C.state.profile.name, maxlength: '24',
+      placeholder: C.t('name') + ' (' + C.t('optional') + ')',
+      style: { flex: '1', 'min-width': '0', font: 'inherit', padding: '10px 14px', 'border-radius': 'var(--r-md)',
+        border: '1px solid var(--c-line)', background: 'var(--c-surface-2)', color: 'var(--c-text)' }
+    });
+    var countryInput = el('input', {
+      type: 'text', value: C.state.profile.country, maxlength: '2',
+      placeholder: C.t('country') + ' (IR)',
+      style: { width: '86px', font: 'inherit', 'text-align': 'center', padding: '10px', 'border-radius': 'var(--r-md)',
+        border: '1px solid var(--c-line)', background: 'var(--c-surface-2)', color: 'var(--c-text)', 'text-transform': 'uppercase' }
+    });
+    function saveProfile() {
+      C.state.profile.name = nameInput.value.trim().slice(0, 24);
+      C.state.profile.country = countryInput.value.trim().toUpperCase().slice(0, 2);
+      C.store.set('profile', C.state.profile);
+    }
+    nameInput.addEventListener('change', saveProfile);
+    countryInput.addEventListener('change', saveProfile);
+
+    page.appendChild(el('div', { class: 'ch-card', style: { 'margin-bottom': 'var(--s-4)' } }, [
+      el('div', { class: 'ch-row', style: { 'margin-bottom': 'var(--s-3)' } }, [
+        el('div', { style: { width: '56px', height: '56px', flex: '0 0 56px' }, html: C.mascot(C.state.settings.mascot || 'fox', 56) }),
+        el('div', { class: 'ch-grow' }, [
+          el('div', { class: 'ch-bold', text: C.state.profile.name || C.t('you') }),
+          el('div', { class: 'ch-xs ch-faint', text: C.state.profile.uid })
+        ])
+      ]),
+      el('div', { class: 'ch-row' }, [nameInput, countryInput])
+    ]));
+
+    // آمار
+    page.appendChild(el('div', { class: 'ch-section' }, [
+      sectionHead(C.t('statsTitle')),
+      el('div', { class: 'ch-stats' }, [
+        el('div', { class: 'ch-stat' }, [el('b', { text: C.num(st.plays) }), el('span', { text: C.t('totalPlays') })]),
+        el('div', { class: 'ch-stat' }, [el('b', { text: C.duration(st.timeMs) }), el('span', { text: C.t('playTime') })]),
+        el('div', { class: 'ch-stat' }, [el('b', { text: C.num(st.streak.count) }), el('span', { text: C.t('streak') })]),
+        el('div', { class: 'ch-stat' }, [el('b', { text: C.num(C.achievements.count()) }), el('span', { text: C.t('achievements') })])
+      ])
+    ]));
+
+    var per = el('div', { class: 'ch-card' });
+    GAMES.forEach(function (g) {
+      var s = st.byGame[g.id];
+      per.appendChild(el('div', { class: 'ch-item' }, [
+        el('div', { style: { width: '30px', height: '30px', 'border-radius': '9px', overflow: 'hidden', flex: '0 0 30px' } },
+          [el('img', { src: g.icon, alt: '', width: 30, height: 30 })]),
+        el('div', { class: 'ch-item__label' }, [
+          el('div', { text: gname(g) }),
+          el('div', { class: 'ch-item__hint', text: s ? C.t('playedTimes', { n: C.num(s.plays) }) : C.t('noneYet') })
+        ]),
+        el('span', { class: 'ch-badge', text: bestLine(g) || '—' })
+      ]));
+    });
+    page.appendChild(el('div', { class: 'ch-section' }, [sectionHead(C.t('perGame')), per]));
+
+    // فروشگاه تزئینی
+    page.appendChild(el('div', { class: 'ch-section' }, [sectionHead(C.t('unlocks')), unlockShop()]));
+
+    // تنظیمات
+    page.appendChild(el('div', { class: 'ch-section' }, [sectionHead(C.t('settings')), settingsCard()]));
+
+    // پاک کردن داده
+    var danger = el('div', { class: 'ch-card' });
+    GAMES.forEach(function (g) {
+      danger.appendChild(el('div', { class: 'ch-item' }, [
+        el('div', { class: 'ch-item__label', text: gname(g) }),
+        el('button', {
+          class: 'ch-btn ch-btn--danger ch-btn--sm', type: 'button', text: C.t('resetGame'),
+          onclick: function () {
+            C.ui.confirm({
+              title: C.t('resetAsk'), body: gname(g) + ' — ' + C.t('resetWarn'), danger: true,
+              onOk: function () {
+                C.storage(g.id).wipe();
+                var s2 = C.stats.get();
+                delete s2.byGame[g.id];
+                C.store.set('stats', s2);
+                C.ui.toast({ icon: 'check', title: C.t('resetDone') });
+                render();
+              }
+            });
+          }
+        })
+      ]));
+    });
+    danger.appendChild(el('div', { class: 'ch-item' }, [
+      el('div', { class: 'ch-item__label', text: C.t('wipeAll') }),
+      el('button', {
+        class: 'ch-btn ch-btn--danger ch-btn--sm', type: 'button', text: C.t('wipeAll'),
+        onclick: function () {
+          C.ui.confirm({
+            title: C.t('wipeAllAsk'), body: C.t('resetWarn'), danger: true,
+            onOk: function () {
+              GAMES.forEach(function (g) { C.storage(g.id).wipe(); });
+              C.store.wipe();
+              location.reload();
+            }
+          });
+        }
+      })
+    ]));
+    page.appendChild(el('div', { class: 'ch-section' }, [sectionHead(C.t('dangerZone')), danger]));
+
+    // درباره
+    page.appendChild(el('div', { class: 'ch-card ch-card--tint' }, [
+      el('div', { class: 'ch-row', style: { 'margin-bottom': 'var(--s-2)' } }, [
+        C.icon('info', 20), el('b', { text: C.t('about') })
+      ]),
+      el('p', { class: 'ch-sm ch-dim', text: C.t('aboutText') }),
+      el('div', { class: 'ch-item' }, [
+        el('div', { class: 'ch-item__label', text: C.t('version') }),
+        el('span', { class: 'ch-badge', text: C.num(C.version) })
+      ]),
+      el('div', { class: 'ch-item' }, [
+        el('div', { class: 'ch-item__label', text: C.t('source') }),
+        el('a', { href: 'https://github.com/choganhq/chogan', target: '_blank', rel: 'noopener', text: 'choganhq/chogan' })
+      ]),
+      el('div', { class: 'ch-item' }, [
+        el('div', { class: 'ch-item__label', text: C.t('license') }),
+        el('span', { class: 'ch-badge', text: 'MIT' })
+      ])
+    ]));
+    return page;
+  }
+
+  function unlockShop() {
+    var card = el('div', { class: 'ch-card' });
+    var row = el('div', { class: 'ch-row ch-wrap', style: { 'margin-bottom': 'var(--s-4)' } });
+    Object.keys(MASCOTS).forEach(function (k) {
+      var m = MASCOTS[k];
+      var owned = m.cost === 0 || C.state.unlocks.indexOf('mascot.' + k) >= 0;
+      var active = (C.state.settings.mascot || 'fox') === k;
+      var b = el('button', {
+        class: 'ch-card ch-card--tint ch-tap', type: 'button',
+        style: { padding: 'var(--s-2)', 'text-align': 'center', width: '84px',
+          'border-color': active ? 'var(--c-accent)' : 'var(--c-line)', 'border-width': '2px' }
+      }, [
+        el('div', { html: C.mascot(k, 52), style: { filter: owned ? 'none' : 'grayscale(1)', opacity: owned ? '1' : '.45' } }),
+        el('div', { class: 'ch-xs ch-bold', text: C.t(m.key) }),
+        owned ? el('div', { class: 'ch-xs ch-faint', text: active ? C.t('apply') : C.t('owned') })
+          : el('div', { class: 'ch-xs', style: { color: 'var(--c-gold)' }, text: C.num(m.cost) })
+      ]);
+      b.addEventListener('click', function () { pickUnlock('mascot', k, m, owned); });
+      row.appendChild(b);
+    });
+    card.appendChild(el('div', { class: 'ch-xs ch-faint', text: C.t('mascot') }));
+    card.appendChild(row);
+
+    var row2 = el('div', { class: 'ch-row ch-wrap' });
+    Object.keys(PALETTES).forEach(function (k) {
+      var p = PALETTES[k];
+      var owned = p.cost === 0 || C.state.unlocks.indexOf('palette.' + k) >= 0;
+      var active = (C.state.settings.palette || 'default') === k;
+      var b = el('button', {
+        class: 'ch-card ch-card--tint ch-tap', type: 'button',
+        style: { padding: 'var(--s-2) var(--s-3)', 'text-align': 'center', width: '84px',
+          'border-color': active ? 'var(--c-accent)' : 'var(--c-line)', 'border-width': '2px' }
+      }, [
+        el('div', { style: { width: '34px', height: '34px', 'border-radius': '50%', margin: '0 auto 4px',
+          background: p.c, opacity: owned ? '1' : '.35' } }),
+        el('div', { class: 'ch-xs ch-bold', text: C.t(p.key) }),
+        owned ? el('div', { class: 'ch-xs ch-faint', text: active ? C.t('apply') : C.t('owned') })
+          : el('div', { class: 'ch-xs', style: { color: 'var(--c-gold)' }, text: C.num(p.cost) })
+      ]);
+      b.addEventListener('click', function () { pickUnlock('palette', k, p, owned); });
+      row2.appendChild(b);
+    });
+    card.appendChild(el('div', { class: 'ch-xs ch-faint', text: C.t('palette') }));
+    card.appendChild(row2);
+    return card;
+  }
+
+  function pickUnlock(kind, key, def, owned) {
+    if (owned) {
+      C.state.settings[kind === 'mascot' ? 'mascot' : 'palette'] = key;
+      C.store.set('settings', C.state.settings);
+      applyPalette();
+      C.feedback('select');
+      render();
+      return;
+    }
+    if (!C.coins.can(def.cost)) {
+      C.ui.toast({ icon: 'coin', title: C.t('notEnoughCoins'), sub: C.t('playToEarn') });
+      C.feedback('bad');
+      return;
+    }
+    C.ui.confirm({
+      title: C.t('unlockAsk', { n: C.num(def.cost) }),
+      okLabel: C.t('unlockCost'),
+      onOk: function () {
+        if (!C.coins.spend(def.cost)) return;
+        C.state.unlocks.push(kind + '.' + key);
+        C.store.set('unlocks', C.state.unlocks);
+        C.state.settings[kind === 'mascot' ? 'mascot' : 'palette'] = key;
+        C.store.set('settings', C.state.settings);
+        applyPalette();
+        C.feedback('coin');
+        render();
+      }
+    });
+  }
+
+  function settingsCard() {
+    var card = el('div', { class: 'ch-card' });
+    var s = C.state.settings;
+
+    card.appendChild(el('div', { class: 'ch-item' }, [
+      C.icon('globe', 20),
+      el('div', { class: 'ch-item__label', text: C.t('language') }),
+      C.ui.segmented([{ value: 'fa', label: 'فارسی' }, { value: 'en', label: 'English' }], s.lang, function (v) {
+        C.setLang(v); render();
+      })
+    ]));
+
+    card.appendChild(el('div', { class: 'ch-item' }, [
+      C.icon(s.theme === 'dark' ? 'moon' : 'sun', 20),
+      el('div', { class: 'ch-item__label', text: C.t('theme') }),
+      C.ui.segmented([
+        { value: 'auto', label: C.t('themeAuto') },
+        { value: 'light', label: C.t('themeLight') },
+        { value: 'dark', label: C.t('themeDark') }
+      ], s.theme, function (v) { C.setTheme(v); render(); })
+    ]));
+
+    [
+      { icon: 'sound', label: C.t('sfx'), get: function () { return s.sfx; }, set: function (v) { C.audio.setSfx(v); } },
+      { icon: 'music', label: C.t('music'), get: function () { return s.music; }, set: function (v) { C.audio.setMusic(v); } },
+      { icon: 'vibrate', label: C.t('haptics'), get: function () { return s.haptics; }, set: function (v) { s.haptics = v; C.store.set('settings', s); C.haptic('tap'); } }
+    ].forEach(function (o) {
+      card.appendChild(el('div', { class: 'ch-item' }, [
+        C.icon(o.icon, 20),
+        el('div', { class: 'ch-item__label', text: o.label }),
+        C.ui.switch(o.get(), o.set)
+      ]));
+    });
+    return card;
+  }
+
+  /* ------------------------------------------------------------ ناوبری */
+
+  var TABS = [
+    { id: 'home', icon: 'home', label: 'home', view: viewHome },
+    { id: 'daily', icon: 'calendar', label: 'daily', view: viewDaily },
+    { id: 'league', icon: 'trophy', label: 'league', view: viewLeague },
+    { id: 'ach', icon: 'medal', label: 'achievements', view: viewAchievements },
+    { id: 'profile', icon: 'user', label: 'profile', view: viewProfile }
+  ];
+
+  function drawNav() {
+    navIn.innerHTML = '';
+    TABS.forEach(function (t) {
+      var b = el('button', {
+        class: 'ch-nav__item', type: 'button', role: 'tab',
+        'aria-selected': tab === t.id ? 'true' : 'false'
+      }, [C.icon(t.icon, 24), el('span', { text: C.t(t.label) })]);
+      b.addEventListener('click', function () {
+        if (tab === t.id) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+        tab = t.id;
+        C.feedback('select');
+        render();
+      });
+      navIn.appendChild(b);
+    });
+  }
+
+  function render() {
+    var t = TABS.filter(function (x) { return x.id === tab; })[0] || TABS[0];
+    app.innerHTML = '';
+    app.appendChild(t.view());
+    drawNav();
+    C.ui.refreshCoins();
+    window.scrollTo(0, 0);
+  }
+
+  /* --------------------------------------------------------- شروع */
+
+  C.boot({ sw: true });
+  applyPalette();
+  C.onLangChange = function () { applyPalette(); };
+
+  fetch('games.json', { cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      GAMES = d.games || [];
+      render();
+      C.afterUnlock(function () { C.audio.music('menu'); });
+    })
+    .catch(function (err) {
+      // اگر واقعاً فایل نیامد، این را بگو. خطای رندر را قورت نده.
+      if (window.console && console.error) console.error(err);
+      app.innerHTML = '';
+      app.appendChild(el('div', { class: 'ch-page' }, [
+        el('div', { class: 'ch-empty' }, [
+          el('div', { html: C.mascot('fox', 92) }),
+          el('p', { text: C.t('loadFailed') })
+        ])
+      ]));
+    });
+})();
+</script>
+</body>
+</html>
