@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>بازی نمونه — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* استایل مخصوص همین بازی. رنگ و اندازه را از توکن‌های سیستم طراحی بگیر،
+     نه از عدد و رنگ خام. --game رنگ تأکید همین بازی است. */
+  .sample-board {
+    position: relative; width: 100%; max-width: min(94vw, 60vh, 480px);
+    aspect-ratio: 1; background: var(--c-surface); border-radius: var(--r-lg);
+    box-shadow: var(--sh-2); overflow: hidden; touch-action: manipulation;
+  }
+  .sample-dot {
+    position: absolute; width: 64px; height: 64px; border-radius: 50%;
+    background: var(--game); border: 0; cursor: pointer; padding: 0;
+    transition: transform var(--t-fast) var(--ease);
+  }
+  .sample-dot:active { transform: scale(.88); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+
+<script>
+/* ==== ENGINE START ====
+   هر چیزی که منطق خالص بازی است اینجا بیاید: تولید مرحله، حل‌کننده، هوش
+   مصنوعی، امتیازدهی. بدون DOM و بدون تصادف غیرقطعی.
+   tools/test.js همین بخش را از دل فایل بیرون می‌کشد و در نود تست می‌کند،
+   پس هیچ‌وقت نسخه‌ی دومی از این کد لازم نیست.                              */
+function SampleEngineFactory() {
+  'use strict';
+
+  // مرحله را همیشه از یک تابع تصادف قطعی بساز تا چالش روزانه ممکن باشد
+  function makeRound(rnd, level) {
+    var n = 5 + level * 3;
+    var spots = [];
+    for (var i = 0; i < n; i++) {
+      spots.push({ x: 0.08 + rnd() * 0.84, y: 0.08 + rnd() * 0.84, ms: 1400 - level * 120 });
+    }
+    return { spots: spots, level: level };
+  }
+
+  function score(hits, misses, level) {
+    return Math.max(0, hits * (10 + level * 4) - misses * 5);
+  }
+
+  var api = { makeRound: makeRound, score: score };
+  if (typeof self !== 'undefined') self.SampleEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = SampleEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = SampleEngineFactory();
+
+  // ۱. راه‌اندازی صفحه. برای بازی‌ها بدون سرویس‌ورکر.
+  C.boot({});
+
+  // ۲. پوسته‌ی بازی: سربرگ، دکمه‌ی بازگشت، ذخیره‌ی خودکار، موسیقی، رنگ تأکید.
+  //    شناسه باید دقیقاً با نام پوشه و با کلید id در games.json یکی باشد،
+  //    چون همین شناسه پیشوند ذخیره‌سازی هم هست.
+  var ctx = C.game({
+    id: 'sample',
+    name: { fa: 'بازی نمونه', en: 'Sample Game' },
+    accent: '#A57BD1',
+    mood: 'menu',
+    strings: {
+      fa: { hits: 'زده', misses: 'خطا', tapDot: 'روی دایره بزن',
+        tutTitle: 'قانون', tutText: 'تا وقتی دایره محو نشده رویش بزن. هر بار سریع‌تر می‌شود.' },
+      en: { hits: 'Hits', misses: 'Misses', tapDot: 'Tap the dot',
+        tutTitle: 'The rule', tutText: 'Tap the dot before it fades. It gets faster every time.' }
+    }
+  });
+
+  // ۳. حالت چالش روزانه: منو با ?daily=YYYY-MM-DD صدا می‌زند.
+  var dailyDate = new URLSearchParams(location.search).get('daily');
+  var rnd = dailyDate ? C.daily('sample', dailyDate).rng : Math.random;
+
+  var S = null, dotEl = null, timer = null;
+  var board = el('div', { class: 'sample-board' });
+  ctx.stat('hits', C.t('hits'));
+  ctx.stat('misses', C.t('misses'));
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: function () { ctx.showTutorial(TUT); } });
+  ctx.main.appendChild(board);
+  ctx.mount();
+
+  var TUT = [{ title: C.t('tutTitle'), text: C.t('tutText'),
+    art: '<svg viewBox="0 0 200 110" width="100%"><circle cx="100" cy="55" r="30" fill="var(--game)"/></svg>' }];
+
+  function start(saved) {
+    S = saved || { round: E.makeRound(rnd, 0), i: 0, hits: 0, misses: 0, startedAt: Date.now() };
+    ctx.setStat('hits', S.hits);
+    ctx.setStat('misses', S.misses);
+    next();
+  }
+
+  function next() {
+    if (timer) clearTimeout(timer);
+    if (dotEl) dotEl.remove();
+    if (S.i >= S.round.spots.length) { finish(); return; }
+    var sp = S.round.spots[S.i];
+    dotEl = el('button', { class: 'sample-dot', type: 'button', 'aria-label': C.t('tapDot'),
+      style: { left: (sp.x * 100) + '%', top: (sp.y * 100) + '%' } });
+    dotEl.addEventListener('click', function () {
+      S.hits++;
+      ctx.setStat('hits', S.hits, true);
+      C.feedback('good');          // ۴. بازخورد: صدا و لرزش با هم، طبق تنظیمات کاربر
+      S.i++;
+      ctx.save();                  // ۵. ذخیره بعد از هر حرکت معنادار
+      next();
+    });
+    board.appendChild(dotEl);
+    timer = setTimeout(function () {
+      S.misses++;
+      ctx.setStat('misses', S.misses);
+      C.feedback('bad');
+      S.i++;
+      ctx.save();
+      next();
+    }, sp.ms);
+  }
+
+  function finish() {
+    var pts = E.score(S.hits, S.misses, S.round.level);
+    if (dailyDate) C.stats.daily('sample', dailyDate, { label: C.num(pts) });
+    // ۶. پایان دور: آمار، سکه، امتیاز لیگ و پنجره‌ی نتیجه را هسته انجام می‌دهد
+    ctx.finish({
+      won: S.hits > S.misses,
+      timeMs: Date.now() - S.startedAt,
+      coins: Math.round(pts / 10),
+      points: pts,
+      lines: [
+        { label: C.t('hits'), value: C.num(S.hits) },
+        { label: C.t('misses'), value: C.num(S.misses) },
+        { label: C.t('score'), value: C.num(pts) }
+      ],
+      shareText: 'چوگان · بازی نمونه\nامتیاز ' + C.num(pts),
+      onAgain: dailyDate ? null : function () { start(null); }
+    });
+  }
+
+  // ۷. ذخیره‌ی خودکار. هسته این را روی مکث و بسته شدن صفحه هم صدا می‌زند.
+  //    اگر بازی تمام شده، inProgress: false برگردان تا نشان «ادامه» پاک شود.
+  ctx.autosave(function () {
+    if (!S || S.i >= S.round.spots.length) return { inProgress: false };
+    return S;
+  });
+
+  C.onPause(function () { if (timer) clearTimeout(timer); });
+  // شرط تمام نشدن لازم است: بدون آن، برگشتن به اپ بعد از تمام شدن دور
+  // دوباره finish را صدا می‌زد و آمار و سکه دو بار ثبت می‌شد.
+  C.onResume(function () { if (S && S.i < S.round.spots.length) next(); });
+
+  // ۸. شروع: اگر بازی نیمه‌کاره‌ای هست همان را ادامه بده
+  var saved = ctx.loadSave();
+  start(saved && saved.round ? saved : null);
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
