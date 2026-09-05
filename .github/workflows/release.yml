@@ -1,0 +1,129 @@
+name: انتشار اندروید
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: تست پیش از انتشار
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: تست موتور بازی‌ها
+        run: node tools/test.js
+      - name: باز کردن همه‌ی صفحه‌ها در مرورگر بدون سر
+        run: ./tools/browser-check.sh
+
+  apk:
+    name: ساخت و انتشار APK امضاشده
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: دریافت سورس
+        uses: actions/checkout@v4
+
+      - name: خواندن نسخه و بررسی هم‌خوانی با تگ
+        run: |
+          set -euo pipefail
+          VERSION=$(sed -n "s/^self\.APP_VERSION *= *'\([^']*\)'.*/\1/p" www/version.js)
+          VERSION_CODE=$(sed -n "s/^self\.APP_VERSION_CODE *= *\([0-9]*\).*/\1/p" www/version.js)
+          APP_ID=$(python3 -c "import json;print(json.load(open('capacitor.config.json'))['appId'])")
+          if [ -z "$VERSION" ] || [ -z "$VERSION_CODE" ]; then
+            echo "نسخه از www/version.js خوانده نشد"; exit 1
+          fi
+          # تگ‌هایی که به -test ختم می‌شوند بیلد آزمایشی‌اند: از قید هم‌خوانی نسخه
+          # معافند و خروجی‌شان pre-release منتشر می‌شود تا با انتشار واقعی قاطی نشود.
+          case "$GITHUB_REF_NAME" in
+            *-test)
+              echo "بیلد آزمایشی با تگ ${GITHUB_REF_NAME}"
+              echo "IS_TEST=1" >> "$GITHUB_ENV"
+              ;;
+            *)
+              if [ "v$VERSION" != "${GITHUB_REF_NAME}" ]; then
+                echo "تگ ${GITHUB_REF_NAME} با نسخه‌ی www/version.js یعنی v$VERSION نمی‌خواند"
+                exit 1
+              fi
+              echo "IS_TEST=0" >> "$GITHUB_ENV"
+              ;;
+          esac
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+          echo "APP_ID=$APP_ID" >> "$GITHUB_ENV"
+
+      - name: نصب جاوا
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: نصب گریدل
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
+
+      - name: بازسازی کلید امضا از سکرت
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "سکرت ANDROID_KEYSTORE_BASE64 تعریف نشده"; exit 1
+          fi
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+      - name: بیلد نسخه‌ی ریلیز
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle --no-daemon assembleRelease
+
+      - name: بررسی امضا و نام‌گذاری فایل
+        run: |
+          set -euo pipefail
+          SRC=android/app/build/outputs/apk/release/app-release.apk
+          if [ "$IS_TEST" = "1" ]; then
+            APK="${APP_ID}-${VERSION}-test.apk"
+          else
+            APK="${APP_ID}-${VERSION}.apk"
+          fi
+          mv "$SRC" "$APK"
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
+          "$APKSIGNER" verify --print-certs "$APK"
+          sha256sum "$APK" | tee "$APK.sha256"
+          echo "APK=$APK" >> "$GITHUB_ENV"
+
+      - name: پاک کردن کلید
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
+
+      - name: انتشار در Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "$IS_TEST" = "1" ]; then
+            gh release create "$GITHUB_REF_NAME" --title "${GITHUB_REF_NAME}" --prerelease \
+              --notes "بیلد آزمایشی برای بررسی ورک‌فلو. بعد از تست با دستور زیر پاک شود:
+            gh release delete ${GITHUB_REF_NAME} --cleanup-tag --yes" || true
+          else
+            NOTES="fastlane/metadata/android/fa/changelogs/${VERSION_CODE}.txt"
+            if [ -f "$NOTES" ]; then
+              gh release create "$GITHUB_REF_NAME" --title "${GITHUB_REF_NAME}" --notes-file "$NOTES" \
+                || gh release edit "$GITHUB_REF_NAME" --notes-file "$NOTES"
+            else
+              gh release create "$GITHUB_REF_NAME" --title "${GITHUB_REF_NAME}" --generate-notes || true
+            fi
+          fi
+          gh release upload "$GITHUB_REF_NAME" "$APK" "$APK.sha256" --clobber
