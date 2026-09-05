@@ -35,6 +35,7 @@
       wipeAllAsk: 'همه‌ی داده‌های اپ پاک شود؟ سکه‌ها، دستاوردها، لیگ و پیشرفت همه‌ی بازی‌ها.',
       installed: 'نصب‌شده روی دستگاه', playedTimes: '{n} بار بازی کردی',
       noneYet: 'هنوز چیزی نیست', dailyOf: 'چالش‌های {d}',
+      noGames: 'هنوز بازی‌ای اضافه نشده', noGamesSub: 'به‌زودی', loadFailed: 'فهرست بازی‌ها بار نشد',
       wave: 'موج', wins: 'برد', solved: 'حل‌شده', cleared: 'پاک‌شده',
       defaultPalette: 'پیش‌فرض', sea: 'دریا', sunset: 'غروب', forest: 'جنگل',
       fox: 'روباه', owl: 'جغد', cat: 'گربه', bear: 'خرس',
@@ -51,6 +52,7 @@
       wipeAllAsk: 'Erase all app data? Coins, awards, league and every game.',
       installed: 'Installed on device', playedTimes: 'played {n} times',
       noneYet: 'Nothing yet', dailyOf: 'Challenges of {d}',
+      noGames: 'No games yet', noGamesSub: 'Coming soon', loadFailed: 'Could not load the game list',
       wave: 'Wave', wins: 'Wins', solved: 'Solved', cleared: 'Cleared',
       defaultPalette: 'Default', sea: 'Sea', sunset: 'Sunset', forest: 'Forest',
       fox: 'Fox', owl: 'Owl', cat: 'Cat', bear: 'Bear',
@@ -164,6 +166,17 @@
         el('span', { class: 'ch-badge ch-badge--warn' }, [C.icon('flame', 15), el('span', { text: C.num(st.streak.count) + ' ' + C.t('dayStreak') })])
       ]);
       page.appendChild(streak);
+    }
+
+    // بدون بازی، صفحه‌ی خانه چیزی برای نشان دادن ندارد.
+    // این حالت واقعاً پیش می‌آید: تا وقتی هیچ بازی‌ای در games.json نیست.
+    if (!GAMES.length) {
+      page.appendChild(el('div', { class: 'ch-empty' }, [
+        el('div', { html: C.mascot(C.state.settings.mascot || 'fox', 92) }),
+        el('h3', { text: C.t('noGames') }),
+        el('p', { class: 'ch-sm', text: C.t('noGamesSub') })
+      ]));
+      return page;
     }
 
     // کارت بزرگ چالش روزانه‌ی امروز
@@ -764,11 +777,14 @@
       render();
       C.afterUnlock(function () { C.audio.music('menu'); });
     })
-    .catch(function () {
+    .catch(function (err) {
+      // اگر واقعاً فایل نیامد، این را بگو. خطای رندر را قورت نده.
+      if (window.console && console.error) console.error(err);
+      app.innerHTML = '';
       app.appendChild(el('div', { class: 'ch-page' }, [
         el('div', { class: 'ch-empty' }, [
           el('div', { html: C.mascot('fox', 92) }),
-          el('p', { text: 'فهرست بازی‌ها بار نشد.' })
+          el('p', { text: C.t('loadFailed') })
         ])
       ]));
     });
