@@ -72,15 +72,20 @@ jobs:
           done
           echo "همه‌ی دارایی‌های لازم داخل APK هستند"
 
-      - name: بررسی مجوزهای منیفست
+      - name: بررسی مجوزهای بسته
         run: |
           set -euo pipefail
           AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -n 1)
           APK=$(ls android/app/build/outputs/apk/debug/*.apk | head -n 1)
-          PERMS=$("$AAPT" dump permissions "$APK" | grep '^permission:' || true)
-          echo "مجوزها: ${PERMS:-هیچ}"
-          if [ "$PERMS" != "permission: android.permission.VIBRATE" ]; then
-            echo "مجموعه‌ی مجوزها آن چیزی نیست که باید باشد"
+          DUMP=$("$AAPT" dump permissions "$APK")
+          echo "$DUMP"
+          # فقط مجوزهای سیستمی مهم‌اند. اندروایکس برای اپ‌هایی که هدفشان API 33
+          # به بالاست خودش یک مجوز با نام بسته‌ی خودمان تعریف می‌کند
+          # (DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION) که مجوز سیستمی نیست.
+          SYS=$(echo "$DUMP" | grep -oE "android\.permission\.[A-Z_]+" | sort -u | tr '\n' ' ' | sed 's/ $//')
+          echo "مجوزهای سیستمی: ${SYS:-هیچ}"
+          if [ "$SYS" != "android.permission.VIBRATE" ]; then
+            echo "مجموعه‌ی مجوزهای سیستمی آن چیزی نیست که باید باشد"
             exit 1
           fi
           echo "فقط مجوز لرزش، همان‌طور که باید"
