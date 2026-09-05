@@ -375,7 +375,7 @@ function TdEngineFactory() {
         var p = posAt(S.geo, en.t);
         var dx = p.x - tx, dy = p.y - ty;
         if (dx * dx + dy * dy > st.range * st.range) continue;
-        if (en.t > bestT) { bestT = en.t; target = en; en._p = p; }
+        if (en.t > bestT) { bestT = en.t; target = en; }
       }
       if (!target) continue;
       tw.cd = st.rate;
@@ -830,7 +830,14 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
     lastT = now;
     if (S && !S.over && S.waveActive) {
       var mult = prefs.speed;
-      for (var i = 0; i < mult; i++) E.step(S, dt, Math.random);
+      // هر گام افکت‌های خودش را پاک می‌کند، پس در سرعت دو برابر شلیک‌های
+      // گام اول قبل از رسم از بین می‌رفتند. اینجا جمعشان می‌کنیم.
+      var shots = [];
+      for (var i = 0; i < mult; i++) {
+        E.step(S, dt, Math.random);
+        if (mult > 1 && S.effects.length) shots = shots.concat(S.effects);
+      }
+      if (mult > 1) S.effects = shots;
       hudTick();
     }
     draw();
