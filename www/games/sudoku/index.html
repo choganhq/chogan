@@ -1,0 +1,807 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>سودوکو — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .sd-wrap { width: 100%; max-width: min(94vw, 62vh, 520px); display: flex; flex-direction: column; gap: var(--s-3); }
+  .sd-board {
+    display: grid; grid-template-columns: repeat(9, 1fr);
+    aspect-ratio: 1; width: 100%;
+    background: var(--c-line); gap: 1px; padding: 3px;
+    border-radius: var(--r-md); box-shadow: var(--sh-2);
+    border: 3px solid var(--c-line);
+    touch-action: manipulation;
+  }
+  .sd-cell {
+    background: var(--c-surface); border: 0; padding: 0; font: inherit; cursor: pointer;
+    display: grid; place-items: center; position: relative;
+    font-size: clamp(15px, 5vw, 26px); font-weight: 700; color: var(--c-text);
+    transition: background var(--t-fast) var(--ease);
+    font-variant-numeric: tabular-nums;
+  }
+  .sd-cell[data-bt="1"] { border-top: 2px solid var(--c-text-faint); }
+  .sd-cell[data-bl="1"] { border-inline-start: 2px solid var(--c-text-faint); }
+  .sd-cell--given { color: var(--c-text); background: var(--c-surface-2); }
+  .sd-cell--user { color: var(--game); }
+  .sd-cell--hinted { color: var(--c-good); }
+  .sd-cell--peer { background: var(--c-surface-3); }
+  .sd-cell--same { background: var(--game-soft); }
+  .sd-cell--sel { background: var(--game); color: #fff; }
+  .sd-cell--sel.sd-cell--user, .sd-cell--sel.sd-cell--hinted { color: #fff; }
+  .sd-cell--bad { background: var(--c-bad-soft); color: var(--c-bad); }
+  .sd-cell--sel.sd-cell--bad { background: var(--c-bad); color: #fff; }
+  .sd-notes { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; height: 100%; padding: 2px; }
+  .sd-notes span { font-size: clamp(7px, 2vw, 11px); font-weight: 600; color: var(--c-text-dim); display: grid; place-items: center; line-height: 1; }
+  .sd-pad { display: grid; grid-template-columns: repeat(9, 1fr); gap: 5px; }
+  .sd-num {
+    border: 0; background: var(--c-surface); border-radius: var(--r-sm); cursor: pointer;
+    font: inherit; font-weight: 800; font-size: clamp(17px, 5.4vw, 24px); color: var(--game);
+    aspect-ratio: 1 / 1.25; box-shadow: var(--sh-1); position: relative;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    transition: transform var(--t-fast) var(--ease);
+    touch-action: manipulation; min-height: 44px;
+  }
+  .sd-num:active { transform: scale(.9); }
+  .sd-num small { font-size: 9px; color: var(--c-text-faint); font-weight: 600; line-height: 1; }
+  .sd-num[disabled] { opacity: .3; }
+  .sd-tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .sd-tool {
+    border: 0; background: var(--c-surface); border-radius: var(--r-sm); box-shadow: var(--sh-1);
+    font: inherit; font-size: 11px; font-weight: 700; color: var(--c-text-dim); cursor: pointer;
+    padding: 7px 2px; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    min-height: 52px; transition: transform var(--t-fast) var(--ease);
+    touch-action: manipulation;
+  }
+  .sd-tool:active { transform: scale(.94); }
+  .sd-tool[aria-pressed="true"] { background: var(--game); color: #fff; }
+  .sd-tool svg { width: 20px; height: 20px; }
+  .sd-tool b { font-size: 9px; color: var(--c-gold); font-weight: 800; }
+  .sd-tool[aria-pressed="true"] b { color: #fff; }
+  .sd-top { display: flex; align-items: center; gap: var(--s-2); justify-content: space-between; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function SudokuEngineFactory() {
+  'use strict';
+
+  var ROWS = [], COLS = [], BOXES = [], PEERS = [];
+  (function build() {
+    for (var i = 0; i < 9; i++) { ROWS.push([]); COLS.push([]); BOXES.push([]); }
+    for (var c = 0; c < 81; c++) {
+      var r = (c / 9) | 0, k = c % 9, b = ((r / 3) | 0) * 3 + ((k / 3) | 0);
+      ROWS[r].push(c); COLS[k].push(c); BOXES[b].push(c);
+    }
+    for (var i2 = 0; i2 < 81; i2++) {
+      var r2 = (i2 / 9) | 0, k2 = i2 % 9, b2 = ((r2 / 3) | 0) * 3 + ((k2 / 3) | 0);
+      var set = {};
+      ROWS[r2].concat(COLS[k2], BOXES[b2]).forEach(function (x) { if (x !== i2) set[x] = 1; });
+      PEERS.push(Object.keys(set).map(Number));
+    }
+  })();
+
+  function candidates(grid, i) {
+    if (grid[i]) return 0;
+    var used = 0, p = PEERS[i];
+    for (var j = 0; j < p.length; j++) { var v = grid[p[j]]; if (v) used |= 1 << v; }
+    return (~used) & 0x3FE;
+  }
+  function bitCount(m) { var n = 0; while (m) { m &= m - 1; n++; } return n; }
+  function firstBit(m) { var v = 1; while (!(m & (1 << v))) v++; return v; }
+
+  // شمارش جواب‌ها تا سقف. برای بررسی یکتا بودن جواب.
+  function solveCount(grid, limit) {
+    var g = grid.slice();
+    var count = 0;
+    (function rec() {
+      if (count >= limit) return;
+      var best = -1, bestMask = 0, bestN = 10;
+      for (var i = 0; i < 81; i++) {
+        if (g[i]) continue;
+        var m = candidates(g, i);
+        var n = bitCount(m);
+        if (n === 0) return;
+        if (n < bestN) { bestN = n; best = i; bestMask = m; if (n === 1) break; }
+      }
+      if (best === -1) { count++; return; }
+      for (var v = 1; v <= 9; v++) {
+        if (!(bestMask & (1 << v))) continue;
+        g[best] = v; rec(); g[best] = 0;
+        if (count >= limit) return;
+      }
+    })();
+    return count;
+  }
+
+  function solve(grid) {
+    var g = grid.slice();
+    var ok = (function rec() {
+      var best = -1, bestMask = 0, bestN = 10;
+      for (var i = 0; i < 81; i++) {
+        if (g[i]) continue;
+        var m = candidates(g, i);
+        var n = bitCount(m);
+        if (n === 0) return false;
+        if (n < bestN) { bestN = n; best = i; bestMask = m; if (n === 1) break; }
+      }
+      if (best === -1) return true;
+      for (var v = 1; v <= 9; v++) {
+        if (!(bestMask & (1 << v))) continue;
+        g[best] = v;
+        if (rec()) return true;
+        g[best] = 0;
+      }
+      return false;
+    })();
+    return ok ? g : null;
+  }
+
+  function generateSolved(rnd) {
+    var g = new Array(81).fill(0);
+    (function rec() {
+      var best = -1, bestMask = 0, bestN = 10;
+      for (var i = 0; i < 81; i++) {
+        if (g[i]) continue;
+        var m = candidates(g, i);
+        var n = bitCount(m);
+        if (n === 0) return false;
+        if (n < bestN) { bestN = n; best = i; bestMask = m; }
+      }
+      if (best === -1) return true;
+      var vals = [];
+      for (var v = 1; v <= 9; v++) if (bestMask & (1 << v)) vals.push(v);
+      for (var k = vals.length - 1; k > 0; k--) {
+        var j2 = Math.floor(rnd() * (k + 1));
+        var t = vals[k]; vals[k] = vals[j2]; vals[j2] = t;
+      }
+      for (var q = 0; q < vals.length; q++) {
+        g[best] = vals[q];
+        if (rec()) return true;
+        g[best] = 0;
+      }
+      return false;
+    })();
+    return g;
+  }
+
+  /* درجه‌بندی بر پایه‌ی تکنیک لازم، نه فقط تعداد سرنخ:
+     ۰ تک‌مقدار آشکار · ۱ تک‌مقدار پنهان · ۲ نامزد قفل‌شده و جفت آشکار · ۳ نیازمند حدس */
+  function rate(puzzle) {
+    var g = puzzle.slice();
+    var level = 0;
+    for (;;) {
+      var empty = 0;
+      for (var i = 0; i < 81; i++) if (!g[i]) empty++;
+      if (empty === 0) return level;
+
+      var moved = false;
+      for (var a = 0; a < 81; a++) {
+        if (g[a]) continue;
+        var m = candidates(g, a);
+        if (m === 0) return 3;
+        if (bitCount(m) === 1) { g[a] = firstBit(m); moved = true; }
+      }
+      if (moved) continue;
+
+      var units = ROWS.concat(COLS, BOXES);
+      for (var u = 0; u < units.length && !moved; u++) {
+        for (var v = 1; v <= 9 && !moved; v++) {
+          var spot = -1, cnt = 0;
+          for (var s = 0; s < 9; s++) {
+            var cell = units[u][s];
+            if (g[cell] === v) { cnt = 0; break; }
+            if (!g[cell] && (candidates(g, cell) & (1 << v))) { cnt++; spot = cell; }
+          }
+          if (cnt === 1) { g[spot] = v; moved = true; level = Math.max(level, 1); }
+        }
+      }
+      if (moved) continue;
+
+      if (reduceLocked(g)) { level = Math.max(level, 2); continue; }
+      return 3;
+    }
+  }
+
+  function reduceLocked(g) {
+    var cand = new Array(81).fill(0);
+    for (var i = 0; i < 81; i++) if (!g[i]) cand[i] = candidates(g, i);
+    for (var b = 0; b < 9; b++) {
+      for (var v = 1; v <= 9; v++) {
+        var cells = BOXES[b].filter(function (c) { return !g[c] && (cand[c] & (1 << v)); });
+        if (cells.length < 2 || cells.length > 3) continue;
+        var rows = {}, cols = {};
+        cells.forEach(function (c) { rows[(c / 9) | 0] = 1; cols[c % 9] = 1; });
+        var rk = Object.keys(rows), ck = Object.keys(cols);
+        if (rk.length === 1) ROWS[+rk[0]].forEach(function (c) { if (BOXES[b].indexOf(c) < 0) cand[c] &= ~(1 << v); });
+        if (ck.length === 1) COLS[+ck[0]].forEach(function (c) { if (BOXES[b].indexOf(c) < 0) cand[c] &= ~(1 << v); });
+      }
+    }
+    var units = ROWS.concat(COLS, BOXES);
+    for (var u = 0; u < units.length; u++) {
+      for (var x = 0; x < 9; x++) {
+        var c1 = units[u][x];
+        if (g[c1] || bitCount(cand[c1]) !== 2) continue;
+        for (var y = x + 1; y < 9; y++) {
+          var c2 = units[u][y];
+          if (g[c2] || cand[c2] !== cand[c1]) continue;
+          for (var z = 0; z < 9; z++) {
+            var c3 = units[u][z];
+            if (c3 === c1 || c3 === c2 || g[c3]) continue;
+            cand[c3] &= ~cand[c1];
+          }
+        }
+      }
+    }
+    for (var q = 0; q < 81; q++) if (!g[q] && bitCount(cand[q]) === 1) { g[q] = firstBit(cand[q]); return true; }
+    return false;
+  }
+
+  var TARGET = {
+    easy:   { clues: [40, 46], level: 0 },
+    medium: { clues: [32, 38], level: 1 },
+    hard:   { clues: [27, 31], level: 2 },
+    expert: { clues: [23, 27], level: 3 }
+  };
+
+  function makePuzzle(rnd, difficulty) {
+    var spec = TARGET[difficulty] || TARGET.medium;
+    var best = null;
+    for (var attempt = 0; attempt < 14; attempt++) {
+      var solution = generateSolved(rnd);
+      var puzzle = solution.slice();
+      var order = [];
+      for (var i = 0; i < 81; i++) order.push(i);
+      for (var k = order.length - 1; k > 0; k--) {
+        var j = Math.floor(rnd() * (k + 1));
+        var t = order[k]; order[k] = order[j]; order[j] = t;
+      }
+      var clues = 81;
+      var minClues = spec.clues[0];
+      for (var o = 0; o < order.length && clues > minClues; o++) {
+        var c = order[o];
+        if (!puzzle[c]) continue;
+        var keep = puzzle[c];
+        puzzle[c] = 0;
+        if (solveCount(puzzle, 2) !== 1) { puzzle[c] = keep; continue; }
+        clues--;
+      }
+      var lvl = rate(puzzle);
+      var cand = { puzzle: puzzle, solution: solution, clues: clues, level: lvl };
+      if (lvl === spec.level && clues <= spec.clues[1]) return cand;
+      if (!best || Math.abs(lvl - spec.level) < Math.abs(best.level - spec.level)) best = cand;
+    }
+    return best;
+  }
+
+  var api = {
+    ROWS: ROWS, COLS: COLS, BOXES: BOXES, PEERS: PEERS,
+    candidates: candidates, bitCount: bitCount, firstBit: firstBit,
+    solve: solve, solveCount: solveCount, generateSolved: generateSolved,
+    rate: rate, makePuzzle: makePuzzle, TARGET: TARGET,
+    conflicts: function (grid) {
+      var bad = {};
+      var units = ROWS.concat(COLS, BOXES);
+      for (var u = 0; u < units.length; u++) {
+        var seen = {};
+        for (var s = 0; s < 9; s++) {
+          var c = units[u][s], v = grid[c];
+          if (!v) continue;
+          if (seen[v] !== undefined) { bad[c] = 1; bad[seen[v]] = 1; }
+          else seen[v] = c;
+        }
+      }
+      return bad;
+    }
+  };
+  if (typeof self !== 'undefined') self.SudokuEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = SudokuEngineFactory();
+  var HINT_COST = 10;
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'sudoku',
+    name: { fa: 'سودوکو', en: 'Sudoku' },
+    accent: '#6A8CBF',
+    mood: 'sudoku',
+    strings: {
+      fa: {
+        mistakes: 'خطا', hints: 'راهنمایی', notes: 'یادداشت', erase: 'پاک‌کن',
+        autoNotes: 'یادداشت خودکار', showErrors: 'نمایش خطا', newPuzzle: 'جدول تازه',
+        solvedIn: 'در {t} حل شد', noMoreEmpty: 'خانه‌ی خالی نمانده',
+        dailySudoku: 'سودوکوی روزانه', clues: 'سرنخ',
+        tutTitle1: 'قانون بازی', tutText1: 'هر سطر، هر ستون و هر بلوک سه‌درسه باید اعداد یک تا نه را دقیقاً یک بار داشته باشد.',
+        tutTitle2: 'یادداشت', tutText2: 'با دکمه‌ی یادداشت، عددها را به شکل کوچک داخل خانه می‌نویسی. برای وقتی که مطمئن نیستی.',
+        tutTitle3: 'راهنمایی', tutText3: 'راهنمایی یک خانه را درست پر می‌کند و ده سکه می‌گیرد. سکه از بازی کردن می‌آید.'
+      },
+      en: {
+        mistakes: 'Errors', hints: 'Hints', notes: 'Notes', erase: 'Erase',
+        autoNotes: 'Auto notes', showErrors: 'Show errors', newPuzzle: 'New puzzle',
+        solvedIn: 'Solved in {t}', noMoreEmpty: 'No empty cells left',
+        dailySudoku: 'Daily sudoku', clues: 'clues',
+        tutTitle1: 'The rule', tutText1: 'Every row, column and 3x3 block must contain each digit from one to nine exactly once.',
+        tutTitle2: 'Notes', tutText2: 'Notes mode writes small pencil marks inside a cell, for when you are not sure yet.',
+        tutTitle3: 'Hints', tutText3: 'A hint fills one cell correctly and costs ten coins. Coins come from playing.'
+      }
+    }
+  });
+
+  /* ------------------------------------------------------------ وضعیت */
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var DIFFS = ['easy', 'medium', 'hard', 'expert'];
+
+  var S = null;               // وضعیت جاری
+  var selected = -1;
+  var noteMode = false;
+  var timerId = null;
+  var cells = [];
+  var pads = [];
+
+  var prefs = ctx.store.get('prefs', { showErrors: true, difficulty: 'medium' });
+
+  /* ------------------------------------------------------------ ساخت */
+
+  function newGame(difficulty, seedRng, daily) {
+    var rnd = seedRng || function () { return Math.random(); };
+    var p = E.makePuzzle(rnd, difficulty);
+    S = {
+      difficulty: difficulty,
+      daily: daily || null,
+      puzzle: p.puzzle,
+      solution: p.solution,
+      grid: p.puzzle.slice(),
+      notes: [], hinted: {},
+      undo: [],
+      elapsed: 0, mistakes: 0, hints: 0,
+      started: Date.now(), done: false
+    };
+    for (var i = 0; i < 81; i++) S.notes.push([]);
+    selected = -1;
+    render();
+    save();
+  }
+
+  function restore(s) {
+    S = s;
+    selected = -1;
+    render();
+  }
+
+  /* ------------------------------------------------------------ رابط */
+
+  var board = el('div', { class: 'sd-board', role: 'grid', 'aria-label': 'جدول سودوکو' });
+  var pad = el('div', { class: 'sd-pad' });
+  var tools = el('div', { class: 'sd-tools' });
+  var topRow = el('div', { class: 'sd-top' });
+  var wrap = el('div', { class: 'sd-wrap' }, [topRow, board, tools, pad]);
+
+  for (var i = 0; i < 81; i++) {
+    (function (idx) {
+      var r = (idx / 9) | 0, c = idx % 9;
+      var b = el('button', {
+        class: 'sd-cell', type: 'button', role: 'gridcell',
+        'data-bt': (r % 3 === 0 && r > 0) ? '1' : '0',
+        'data-bl': (c % 3 === 0 && c > 0) ? '1' : '0'
+      });
+      b.addEventListener('click', function () { pick(idx); });
+      cells.push(b);
+      board.appendChild(b);
+    })(i);
+  }
+
+  for (var n = 1; n <= 9; n++) {
+    (function (v) {
+      var left = el('small');
+      var b = el('button', { class: 'sd-num', type: 'button' }, [el('span', { text: C.num(v) }), left]);
+      b.addEventListener('click', function () { enter(v); });
+      pads.push({ btn: b, left: left, v: v });
+      pad.appendChild(b);
+    })(n);
+  }
+
+  function tool(icon, labelKey, onClick, extra) {
+    var b = el('button', { class: 'sd-tool', type: 'button' }, [
+      C.icon(icon, 20), el('span', { text: C.t(labelKey) }), extra || null
+    ]);
+    b.addEventListener('click', function () { onClick(b); });
+    tools.appendChild(b);
+    return b;
+  }
+
+  var noteBtn = tool('pencil', 'notes', function (b) {
+    noteMode = !noteMode;
+    b.setAttribute('aria-pressed', noteMode ? 'true' : 'false');
+    C.feedback('select');
+    // دکمه‌های عدد در حالت یادداشت هیچ‌وقت غیرفعال نمی‌شوند، پس باید
+    // بلافاصله دوباره رسم شوند وگرنه عددهای تمام‌شده قفل می‌مانند.
+    if (S) paint();
+  });
+  noteBtn.setAttribute('aria-pressed', 'false');
+  tool('eraser', 'erase', function () { enter(0); });
+  tool('undo', 'back', function () { undo(); });
+  var hintBtn = tool('bulb', 'hint', function () { hint(); },
+    el('b', { text: C.num(HINT_COST) }));
+
+  ctx.stat('time', C.t('time'));
+  ctx.stat('mistakes', C.t('mistakes'));
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newPuzzle'), onClick: askNew });
+
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* --------------------------------------------------------- نمایش */
+
+  function render() {
+    if (!S) return;
+    topRow.innerHTML = '';
+    if (S.daily) {
+      topRow.appendChild(el('span', { class: 'ch-badge ch-badge--accent' },
+        [C.icon('calendar', 14), el('span', { text: C.t('dailySudoku') + ' — ' + C.num(S.daily) })]));
+      topRow.appendChild(el('span', { class: 'ch-badge', text: C.t(S.difficulty) }));
+    } else {
+      topRow.appendChild(C.ui.segmented(DIFFS.map(function (d) {
+        return { value: d, label: C.t(d) };
+      }), S.difficulty, function (v) {
+        prefs.difficulty = v; ctx.store.set('prefs', prefs);
+        newGame(v);
+      }));
+      topRow.appendChild(el('span', { class: 'ch-badge', text: C.num(S.puzzle.filter(function (x) { return x; }).length) + ' ' + C.t('clues') }));
+    }
+    paint();
+  }
+
+  function paint() {
+    var bad = prefs.showErrors ? E.conflicts(S.grid) : {};
+    var selVal = selected >= 0 ? S.grid[selected] : 0;
+    var counts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    for (var i = 0; i < 81; i++) if (S.grid[i]) counts[S.grid[i]]++;
+
+    for (var c = 0; c < 81; c++) {
+      var b = cells[c];
+      var v = S.grid[c];
+      var given = !!S.puzzle[c];
+      var cls = 'sd-cell';
+      if (given) cls += ' sd-cell--given';
+      else if (S.hinted[c]) cls += ' sd-cell--hinted';
+      else if (v) cls += ' sd-cell--user';
+      if (selected >= 0 && c !== selected && isPeer(c, selected)) cls += ' sd-cell--peer';
+      if (selVal && v === selVal && c !== selected) cls += ' sd-cell--same';
+      if (bad[c]) cls += ' sd-cell--bad';
+      if (c === selected) cls += ' sd-cell--sel';
+      b.className = cls;
+      b.innerHTML = '';
+      if (v) {
+        b.appendChild(document.createTextNode(C.num(v)));
+      } else if (S.notes[c] && S.notes[c].length) {
+        var g = el('div', { class: 'sd-notes' });
+        for (var n = 1; n <= 9; n++) {
+          g.appendChild(el('span', { text: S.notes[c].indexOf(n) >= 0 ? C.num(n) : '' }));
+        }
+        b.appendChild(g);
+      }
+    }
+    pads.forEach(function (p) {
+      var left = 9 - counts[p.v];
+      p.left.textContent = left > 0 ? C.num(left) : '';
+      p.btn.disabled = left <= 0 && !noteMode;
+    });
+    ctx.setStat('mistakes', S.mistakes);
+    hintBtn.disabled = false;
+  }
+
+  function isPeer(a, b) {
+    return ((a / 9) | 0) === ((b / 9) | 0) || (a % 9) === (b % 9) ||
+      (((((a / 9) | 0) / 3) | 0) === ((((b / 9) | 0) / 3) | 0) && (((a % 9) / 3) | 0) === (((b % 9) / 3) | 0));
+  }
+
+  /* ------------------------------------------------------------ حرکت */
+
+  function pick(i) {
+    if (S.done) return;
+    selected = i;
+    C.audio.sfx('select');
+    paint();
+  }
+
+  function pushUndo() {
+    S.undo.push({ grid: S.grid.slice(), notes: JSON.stringify(S.notes), hinted: JSON.stringify(S.hinted), mistakes: S.mistakes });
+    if (S.undo.length > 400) S.undo.shift();
+  }
+
+  function undo() {
+    if (!S.undo.length) { C.feedback('bad'); return; }
+    var u = S.undo.pop();
+    S.grid = u.grid;
+    S.notes = JSON.parse(u.notes);
+    S.hinted = JSON.parse(u.hinted);
+    S.mistakes = u.mistakes;
+    C.feedback('tap');
+    paint();
+    save();
+  }
+
+  function enter(v) {
+    if (!S || S.done || selected < 0) { C.feedback('bad'); return; }
+    if (S.puzzle[selected]) { C.feedback('bad'); C.ui.shake(cells[selected]); return; }
+    pushUndo();
+    if (v === 0) {
+      S.grid[selected] = 0;
+      S.notes[selected] = [];
+      delete S.hinted[selected];
+      C.feedback('tap');
+    } else if (noteMode) {
+      if (S.grid[selected]) S.grid[selected] = 0;
+      var arr = S.notes[selected];
+      var at = arr.indexOf(v);
+      if (at >= 0) arr.splice(at, 1); else arr.push(v);
+      C.audio.sfx('tap');
+    } else {
+      S.grid[selected] = v;
+      S.notes[selected] = [];
+      delete S.hinted[selected];
+      if (v !== S.solution[selected]) {
+        S.mistakes++;
+        C.feedback('bad');
+        C.ui.shake(cells[selected]);
+      } else {
+        C.feedback('place');
+        // یادداشت‌های همسایه‌ها که دیگر ممکن نیستند پاک شوند
+        E.PEERS[selected].forEach(function (p) {
+          var a = S.notes[p], k = a ? a.indexOf(v) : -1;
+          if (k >= 0) a.splice(k, 1);
+        });
+      }
+    }
+    paint();
+    save();
+    checkWin();
+  }
+
+  function hint() {
+    if (!S || S.done) return;
+    var empties = [];
+    for (var i = 0; i < 81; i++) if (!S.grid[i] || S.grid[i] !== S.solution[i]) empties.push(i);
+    if (!empties.length) { C.ui.toast({ icon: 'info', title: C.t('noMoreEmpty') }); return; }
+    if (!C.coins.can(HINT_COST)) {
+      C.feedback('bad');
+      C.ui.toast({ icon: 'coin', title: C.t('notEnoughCoins'), sub: C.t('playToEarn') });
+      return;
+    }
+    C.coins.spend(HINT_COST);
+    pushUndo();
+    var pickCell = empties[Math.floor(Math.random() * empties.length)];
+    if (pickCell === undefined) return;
+    S.grid[pickCell] = S.solution[pickCell];
+    S.notes[pickCell] = [];
+    S.hinted[pickCell] = 1;
+    S.hints++;
+    selected = pickCell;
+    C.feedback('coin');
+    C.ui.toast({ icon: 'bulb', title: C.t('hintUsed') });
+    paint();
+    save();
+    checkWin();
+  }
+
+  function checkWin() {
+    for (var i = 0; i < 81; i++) if (S.grid[i] !== S.solution[i]) return;
+    S.done = true;
+    stopTimer();
+    var secs = Math.round(S.elapsed / 1000);
+    var base = { easy: 6, medium: 12, hard: 20, expert: 30 }[S.difficulty] || 12;
+    var speed = C.clamp(1.6 - secs / 900, 0.6, 1.6);
+    var coins = Math.round(base * speed) + (S.daily ? 8 : 0);
+    var points = Math.round(base * 4 * speed) + (S.daily ? 25 : 0);
+
+    var isBest = C.stats.best('sudoku', 'time-' + S.difficulty, S.elapsed, true);
+    C.achievements.unlock('sd-win');
+    if (S.difficulty === 'expert') C.achievements.unlock('sd-expert');
+    if (S.hints === 0 && S.mistakes === 0) C.achievements.unlock('sd-clean');
+    if (S.difficulty === 'medium' && S.elapsed < 300000) C.achievements.unlock('sd-fast');
+
+    if (S.daily) {
+      C.stats.daily('sudoku', S.daily, { label: C.time(S.elapsed), ms: S.elapsed, difficulty: S.difficulty });
+    }
+    ctx.store.remove('session');
+
+    var share = 'چوگان · سودوکو ' + C.t(S.difficulty) + '\n' +
+      (S.daily ? ('روزانه ' + S.daily + '\n') : '') +
+      'زمان ' + C.time(S.elapsed) + ' · خطا ' + C.num(S.mistakes) + ' · راهنمایی ' + C.num(S.hints);
+
+    ctx.finish({
+      won: true,
+      title: C.t('won'),
+      timeMs: S.elapsed,
+      coins: coins,
+      points: points,
+      note: isBest ? C.t('best') + '!' : null,
+      lines: [
+        { label: C.t('time'), value: C.time(S.elapsed) },
+        { label: C.t('mistakes'), value: C.num(S.mistakes) },
+        { label: C.t('hints'), value: C.num(S.hints) },
+        { label: C.t('difficulty'), value: C.t(S.difficulty) }
+      ],
+      shareText: share,
+      onAgain: S.daily ? null : function () { newGame(S.difficulty); startTimer(); }
+    });
+  }
+
+  /* --------------------------------------------------------- زمان‌سنج */
+
+  function startTimer() {
+    stopTimer();
+    var last = Date.now();
+    timerId = setInterval(function () {
+      var n = Date.now();
+      if (!S.done) { S.elapsed += n - last; ctx.setStat('time', C.time(S.elapsed)); }
+      last = n;
+    }, 250);
+  }
+  function stopTimer() { if (timerId) { clearInterval(timerId); timerId = null; } }
+  C.onPause(function () { stopTimer(); });
+  C.onResume(function () { if (S && !S.done) startTimer(); });
+
+  /* --------------------------------------------------- ذخیره و شروع */
+
+  ctx.autosave(function () {
+    if (!S || S.done) return { inProgress: false };
+    return { s: S, prefs: prefs };
+  });
+  function save() { ctx.save(); }
+
+  function askNew() {
+    if (!S || S.done) { newGame(S ? S.difficulty : prefs.difficulty); startTimer(); return; }
+    C.ui.confirm({
+      title: C.t('newPuzzle'), body: C.t('resetWarn'),
+      onOk: function () { newGame(S.difficulty); startTimer(); }
+    });
+  }
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('tutText1') }),
+        el('div', { class: 'ch-list' }, [
+          settingRow('showErrors', 'showErrors'),
+          el('div', { class: 'ch-item' }, [
+            el('div', { class: 'ch-item__label', text: C.t('autoNotes') }),
+            el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', text: C.t('apply'),
+              onclick: function () { fillNotes(); } })
+          ])
+        ]),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          kbRow('۱ تا ۹ / 1-9', C.t('play')),
+          kbRow('← ↑ → ↓', C.t('back')),
+          kbRow('N', C.t('notes')),
+          kbRow('U', C.t('back')),
+          kbRow('H', C.t('hint')),
+          kbRow('Backspace', C.t('erase'))
+        ])
+      ],
+      actions: [
+        { label: C.t('tutorial'), keepOpen: false, onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('done'), kind: 'primary' }
+      ]
+    });
+  }
+  function kbRow(k, what) {
+    return el('div', { class: 'ch-item' }, [
+      el('div', { class: 'ch-item__label', text: what }),
+      el('span', { class: 'ch-badge', text: k })
+    ]);
+  }
+  function settingRow(key, labelKey) {
+    return el('div', { class: 'ch-item' }, [
+      el('div', { class: 'ch-item__label', text: C.t(labelKey) }),
+      C.ui.switch(prefs[key], function (v) { prefs[key] = v; ctx.store.set('prefs', prefs); paint(); })
+    ]);
+  }
+
+  function fillNotes() {
+    if (!S || S.done) return;
+    pushUndo();
+    for (var i = 0; i < 81; i++) {
+      if (S.grid[i]) { S.notes[i] = []; continue; }
+      var m = E.candidates(S.grid, i);
+      var arr = [];
+      for (var v = 1; v <= 9; v++) if (m & (1 << v)) arr.push(v);
+      S.notes[i] = arr;
+    }
+    C.feedback('select');
+    paint();
+    save();
+  }
+
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'),
+      art: '<svg viewBox="0 0 200 120" width="100%"><rect x="55" y="10" width="90" height="90" rx="8" fill="var(--c-surface-2)" stroke="var(--game)" stroke-width="3"/>' +
+        '<g stroke="var(--c-line)" stroke-width="2"><path d="M85 10v90M115 10v90M55 40h90M55 70h90"/></g>' +
+        '<g fill="var(--game)" font-size="17" font-weight="700" text-anchor="middle" font-family="sans-serif"><text x="70" y="33">5</text><text x="100" y="63">7</text><text x="130" y="93">2</text></g></svg>' },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'),
+      art: '<svg viewBox="0 0 200 120" width="100%"><rect x="70" y="20" width="60" height="60" rx="8" fill="var(--c-surface-2)" stroke="var(--game)" stroke-width="3"/>' +
+        '<g fill="var(--c-text-dim)" font-size="11" text-anchor="middle" font-family="sans-serif"><text x="85" y="40">1</text><text x="100" y="40">3</text><text x="115" y="60">6</text><text x="85" y="75">9</text></g>' +
+        '<circle cx="140" cy="92" r="14" fill="var(--game)"/><path d="M134 92l4 4 8-8" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round"/></svg>' },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'),
+      art: '<svg viewBox="0 0 200 120" width="100%"><circle cx="100" cy="55" r="26" fill="var(--c-warn-soft)"/>' +
+        '<path d="M92 70h16M95 78h10M100 26a16 16 0 0 0-9.6 28.8c1.7 1.4 2.9 3.5 3.2 5.2h12.8c.3-1.7 1.5-3.8 3.2-5.2A16 16 0 0 0 100 26z" fill="none" stroke="var(--c-gold)" stroke-width="3.5" stroke-linecap="round"/>' +
+        '<circle cx="152" cy="86" r="13" fill="var(--c-gold)"/><text x="152" y="92" font-size="15" font-weight="800" fill="#fff" text-anchor="middle" font-family="sans-serif">۱۰</text></svg>' }
+  ];
+
+  /* --------------------------------------------------------- کیبورد */
+
+  window.addEventListener('keydown', function (e) {
+    if (!S || S.done) return;
+    var k = e.key;
+    if (k >= '1' && k <= '9') { enter(+k); e.preventDefault(); return; }
+    if (k === '0' || k === 'Backspace' || k === 'Delete') { enter(0); e.preventDefault(); return; }
+    if (k === 'n' || k === 'N') { noteBtn.click(); e.preventDefault(); return; }
+    if (k === 'u' || k === 'U') { undo(); e.preventDefault(); return; }
+    if (k === 'h' || k === 'H') { hint(); e.preventDefault(); return; }
+    var d = { ArrowUp: -9, ArrowDown: 9, ArrowLeft: 1, ArrowRight: -1 }[k];
+    if (d !== undefined) {
+      if (document.documentElement.dir !== 'rtl' && (k === 'ArrowLeft' || k === 'ArrowRight')) d = -d;
+      var next = (selected < 0 ? 40 : selected + d);
+      if (next >= 0 && next < 81) { selected = next; paint(); }
+      e.preventDefault();
+    }
+  });
+
+  /* ----------------------------------------------------------- شروع */
+
+  var saved = ctx.loadSave();
+  if (dailyDate) {
+    if (C.stats.dailyDone('sudoku', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).sudoku;
+      C.ui.modal({
+        title: C.t('dailyDone'),
+        body: [el('p', { class: 'ch-dim', text: C.t('solvedIn', { t: rec.label }) })],
+        actions: [{ label: C.t('menu'), onClick: function () { C.back(); } },
+          { label: C.t('newGame'), kind: 'primary', onClick: function () { startFresh(); } }],
+        dismissable: false
+      });
+      var d = C.daily('sudoku', dailyDate);
+      newGame(['medium', 'hard', 'expert'][d.seed % 3], d.rng, dailyDate);
+      startTimer();
+    } else {
+      var d2 = C.daily('sudoku', dailyDate);
+      newGame(['medium', 'hard', 'expert'][d2.seed % 3], d2.rng, dailyDate);
+      startTimer();
+      ctx.tutorialIfNew(TUT);
+    }
+  } else if (saved && saved.s && !saved.s.done) {
+    if (saved.prefs) prefs = saved.prefs;
+    restore(saved.s);
+    startTimer();
+  } else {
+    startFresh();
+  }
+
+  function startFresh() {
+    newGame(prefs.difficulty || 'medium');
+    startTimer();
+    ctx.tutorialIfNew(TUT);
+  }
+})();
+</script>
+</body>
+</html>
