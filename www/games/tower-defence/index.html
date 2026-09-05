@@ -1,0 +1,1109 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>دفاع از برج — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* رنگ زمین و مسیر جدا از توکن‌های عمومی، چون باید در هر دو تم تضاد کافی داشته باشند */
+  :root { --td-grass: #F3EADC; --td-grass2: #EDE2D0; --td-path: #D8B87E; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --td-grass: #262019; --td-grass2: #2E271E; --td-path: #5C4726; }
+  }
+  :root[data-theme="dark"] { --td-grass: #262019; --td-grass2: #2E271E; --td-path: #5C4726; }
+  .td-wrap { width: 100%; height: 100%; display: flex; flex-direction: column; gap: var(--s-2); align-items: center; }
+  .td-top { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+  .td-canvasbox {
+    flex: 1; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center;
+  }
+  canvas { border-radius: var(--r-md); box-shadow: var(--sh-2); touch-action: manipulation; display: block; }
+  .td-bottom { width: 100%; max-width: 520px; display: flex; align-items: center; gap: var(--s-2); }
+  .td-preview {
+    flex: 1; display: flex; align-items: center; gap: 6px; background: var(--c-surface);
+    border-radius: var(--r-md); padding: 6px 10px; box-shadow: var(--sh-1); min-height: 48px;
+    overflow-x: auto;
+  }
+  .td-pv { display: flex; align-items: center; gap: 3px; font-size: var(--fs-xs); font-weight: 700; }
+  .td-pv i { width: 13px; height: 13px; border-radius: 50%; display: block; }
+  .td-shop { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .td-buy {
+    border: 0; background: var(--c-surface-2); border-radius: var(--r-md); cursor: pointer;
+    padding: 8px 4px; font: inherit; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    min-height: 76px; transition: transform var(--t-fast) var(--ease);
+  }
+  .td-buy:active { transform: scale(.94); }
+  .td-buy[disabled] { opacity: .42; }
+  .td-buy b { font-size: var(--fs-xs); }
+  .td-buy small { color: var(--c-gold); font-weight: 800; font-size: 11px; }
+  .td-mark { width: 30px; height: 30px; border-radius: 9px; }
+  .td-stars { display: flex; gap: 2px; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function TdEngineFactory() {
+  'use strict';
+
+  var GW = 10, GH = 15;   // ستون و سطر
+
+  /* تولید مسیر: از سطر صفر شروع می‌شود و همیشه رو به پایین می‌رود.
+     چون هیچ‌وقت به سطر بالاتر برنمی‌گردد، مسیر خودش را قطع نمی‌کند و
+     همیشه معتبر است. هر بذر یک نقشه‌ی متفاوت ولی همیشه قابل بازی می‌دهد. */
+  function genPath(rnd, opts) {
+    opts = opts || {};
+    var minTurns = opts.minTurns || 4;
+    var w = opts.w || GW, h = opts.h || GH;
+    for (var attempt = 0; attempt < 40; attempt++) {
+      var path = [];
+      var c = 1 + Math.floor(rnd() * (w - 2));
+      var r = 0;
+      var turns = 0;
+      var lastDir = 0;
+      path.push({ r: r, c: c });
+      var guard = 0;
+      while (r < h - 1 && guard++ < 500) {
+        // چند خانه پایین
+        var down = 1 + Math.floor(rnd() * 2);
+        for (var d = 0; d < down && r < h - 1; d++) {
+          r++;
+          path.push({ r: r, c: c });
+        }
+        if (r >= h - 1) break;
+        // یک حرکت افقی. جهت را عوض می‌کنیم تا مسیر مثل مار کل عرض تخته را
+        // بگیرد، نه اینکه یک طرف نقشه خالی بماند.
+        var span = 2 + Math.floor(rnd() * 4);
+        var dir = lastDir === 0 ? (rnd() < 0.5 ? -1 : 1) : -lastDir;
+        if (c + dir * span < 0 || c + dir * span > w - 1) {
+          if (c - dir * span >= 0 && c - dir * span <= w - 1) dir = -dir;
+        }
+        var moved = 0;
+        for (var s = 0; s < span; s++) {
+          var nc = c + dir;
+          if (nc < 0 || nc > w - 1) break;
+          c = nc;
+          path.push({ r: r, c: c });
+          moved++;
+        }
+        if (moved > 0) { turns++; lastDir = dir; }
+      }
+      while (r < h - 1) { r++; path.push({ r: r, c: c }); }
+      if (turns >= minTurns && path.length >= h + 6) return path;
+    }
+    // در بدترین حالت یک مسیر مستقیم که همیشه معتبر است
+    var straight = [];
+    var cc = Math.floor(w / 2);
+    for (var rr = 0; rr < h; rr++) straight.push({ r: rr, c: cc });
+    return straight;
+  }
+
+  function validatePath(path, w, h) {
+    w = w || GW; h = h || GH;
+    if (!path.length) return 'خالی';
+    if (path[0].r !== 0) return 'از بالا شروع نمی‌شود';
+    if (path[path.length - 1].r !== h - 1) return 'به پایین نمی‌رسد';
+    var seen = {};
+    for (var i = 0; i < path.length; i++) {
+      var p = path[i];
+      if (p.r < 0 || p.c < 0 || p.r >= h || p.c >= w) return 'بیرون از تخته در گام ' + i;
+      var k = p.r + ',' + p.c;
+      if (seen[k]) return 'خانه‌ی تکراری در گام ' + i;
+      seen[k] = 1;
+      if (i > 0) {
+        var q = path[i - 1];
+        var dist = Math.abs(p.r - q.r) + Math.abs(p.c - q.c);
+        if (dist !== 1) return 'پرش در گام ' + i;
+      }
+    }
+    return null;
+  }
+
+  /* ترکیب موج‌ها. موج بیست آخرین موج حالت داستانی است.
+     بعد از آن حالت بی‌پایان با فرمول رشد ادامه پیدا می‌کند. */
+  var TYPES = {
+    grunt:  { hp: 22,  speed: 1.00, armor: 0,    bounty: 6,  r: 0.30, color: '#7BAE7F' },
+    runner: { hp: 15,  speed: 1.85, armor: 0,    bounty: 7,  r: 0.25, color: '#6BB6C4' },
+    armor:  { hp: 55,  speed: 0.72, armor: 0.35, bounty: 12, r: 0.34, color: '#9AA3AB' },
+    swarm:  { hp: 9,   speed: 1.30, armor: 0,    bounty: 3,  r: 0.20, color: '#E4A853' },
+    boss:   { hp: 520, speed: 0.55, armor: 0.30, bounty: 90, r: 0.46, color: '#A57BD1' }
+  };
+
+  function waveComposition(wave, rnd) {
+    var out = [];
+    var k = wave;
+    function add(type, count, gap, delay) {
+      out.push({ type: type, count: count, gap: gap, delay: delay || 0 });
+    }
+    if (wave % 10 === 0) {
+      add('boss', 1 + Math.floor(wave / 20), 1.4, 0);
+      add('grunt', 6 + k, 0.5, 2.5);
+      return out;
+    }
+    add('grunt', 5 + Math.floor(k * 1.15), 0.62, 0);
+    if (wave >= 3) add('runner', 2 + Math.floor(k * 0.5), 0.42, 1.6);
+    if (wave >= 5) add('armor', 1 + Math.floor(k * 0.42), 0.9, 3.0);
+    if (wave >= 7 && (rnd ? rnd() : Math.random()) < 0.65) add('swarm', 8 + k * 2, 0.16, 5.0);
+    return out;
+  }
+
+  // ضریب سلامت و پاداش هر موج
+  function waveScale(wave) {
+    return {
+      hp: Math.pow(1.185, wave - 1),
+      // موج‌های بالاتر فقط پرجان‌تر نیستند؛ کمی تندتر و زره‌دارتر هم می‌شوند
+      // تا صرفاً زیاد کردن آسیب خام جواب ندهد و ترکیب برج‌ها مهم بماند.
+      speed: 1 + Math.min(0.4, (wave - 1) * 0.016),
+      armor: Math.min(0.34, Math.floor((wave - 1) / 5) * 0.085),
+      bounty: 1 + (wave - 1) * 0.03
+    };
+  }
+
+  function waveBudget(wave) {
+    var comp = waveComposition(wave, function () { return 0.5; });
+    var hp = 0, n = 0;
+    var sc = waveScale(wave);
+    for (var i = 0; i < comp.length; i++) {
+      var t = TYPES[comp[i].type];
+      hp += t.hp * sc.hp * comp[i].count;
+      n += comp[i].count;
+    }
+    return { hp: Math.round(hp), count: n };
+  }
+
+  var TOWERS = {
+    archer: { cost: 60,  range: 2.6, dps: 15, rate: 0.55, splash: 0,   slow: 0,   chain: 0, color: '#E07A5F' },
+    cannon: { cost: 115, range: 2.3, dps: 34, rate: 1.5,  splash: 1.0, slow: 0,   chain: 0, color: '#C8783C' },
+    frost:  { cost: 95,  range: 2.2, dps: 8,  rate: 0.9,  splash: 0.9, slow: 0.45, chain: 0, color: '#6BB6C4' },
+    tesla:  { cost: 155, range: 2.5, dps: 26, rate: 0.85, splash: 0,   slow: 0,   chain: 3, color: '#A57BD1' }
+  };
+
+  function towerStats(kind, level) {
+    var b = TOWERS[kind];
+    var m = [1, 1.65, 2.6][level] || 1;
+    var rm = [1, 1.12, 1.26][level] || 1;
+    return {
+      range: b.range * rm,
+      dps: b.dps * m,
+      rate: b.rate / (1 + level * 0.14),
+      splash: b.splash * (1 + level * 0.14),
+      slow: Math.min(0.68, b.slow * (1 + level * 0.2)),
+      chain: b.chain ? b.chain + level : 0,
+      color: b.color
+    };
+  }
+  function upgradeCost(kind, level) {
+    return Math.round(TOWERS[kind].cost * (level === 0 ? 0.9 : 1.7));
+  }
+
+
+  /* ---------------------------------------------------------------------
+     شبیه‌سازی خالص نبرد. هیچ ربطی به رسم و ورودی ندارد، پس هم بازی از آن
+     استفاده می‌کند هم تست خودکار تعادل. وضعیت داده‌ی ساده است تا ذخیره‌ی
+     خودکار وسط موج فقط یک JSON.stringify باشد.
+     --------------------------------------------------------------------- */
+
+  function pathGeometry(path) {
+    var pts = path.map(function (p) { return { x: p.c + 0.5, y: p.r + 0.5 }; });
+    var cum = [0];
+    for (var i = 1; i < pts.length; i++) {
+      var dx = pts[i].x - pts[i - 1].x, dy = pts[i].y - pts[i - 1].y;
+      cum.push(cum[i - 1] + Math.sqrt(dx * dx + dy * dy));
+    }
+    return { pts: pts, cum: cum, len: cum[cum.length - 1] };
+  }
+
+  function posAt(geo, t) {
+    if (t <= 0) return { x: geo.pts[0].x, y: geo.pts[0].y };
+    if (t >= geo.len) return { x: geo.pts[geo.pts.length - 1].x, y: geo.pts[geo.pts.length - 1].y };
+    var lo = 0, hi = geo.cum.length - 1;
+    while (lo < hi - 1) {
+      var mid = (lo + hi) >> 1;
+      if (geo.cum[mid] <= t) lo = mid; else hi = mid;
+    }
+    var seg = geo.cum[hi] - geo.cum[lo];
+    var k = seg > 0 ? (t - geo.cum[lo]) / seg : 0;
+    return {
+      x: geo.pts[lo].x + (geo.pts[hi].x - geo.pts[lo].x) * k,
+      y: geo.pts[lo].y + (geo.pts[hi].y - geo.pts[lo].y) * k
+    };
+  }
+
+  function createGame(opts) {
+    var path = opts.path;
+    var blocked = {};
+    for (var i = 0; i < path.length; i++) blocked[path[i].r + ',' + path[i].c] = 1;
+    return {
+      path: path, blocked: blocked,
+      geo: pathGeometry(path),
+      towers: [], enemies: [], effects: [],
+      money: opts.money || 200,
+      lives: opts.lives || 20,
+      maxLives: opts.lives || 20,
+      wave: 0, waveActive: false, queue: [],
+      time: 0, nextId: 1,
+      kills: 0, leaked: 0, spent: 0,
+      endless: false, over: false, won: false,
+      lastWave: opts.lastWave || 20
+    };
+  }
+
+  function canBuild(S, r, c) {
+    if (r < 0 || c < 0 || r >= GH || c >= GW) return false;
+    if (S.blocked[r + ',' + c]) return false;
+    for (var i = 0; i < S.towers.length; i++) if (S.towers[i].r === r && S.towers[i].c === c) return false;
+    return true;
+  }
+  function towerAt(S, r, c) {
+    for (var i = 0; i < S.towers.length; i++) if (S.towers[i].r === r && S.towers[i].c === c) return S.towers[i];
+    return null;
+  }
+  function build(S, r, c, kind) {
+    if (!canBuild(S, r, c)) return null;
+    var cost = TOWERS[kind].cost;
+    if (S.money < cost) return null;
+    S.money -= cost;
+    S.spent += cost;
+    var t = { id: S.nextId++, kind: kind, level: 0, r: r, c: c, cd: 0, kills: 0 };
+    S.towers.push(t);
+    return t;
+  }
+  function upgrade(S, t) {
+    if (t.level >= 2) return false;
+    var cost = upgradeCost(t.kind, t.level);
+    if (S.money < cost) return false;
+    S.money -= cost;
+    S.spent += cost;
+    t.level++;
+    return true;
+  }
+  function sellValue(S, t) {
+    var paid = TOWERS[t.kind].cost;
+    for (var l = 0; l < t.level; l++) paid += upgradeCost(t.kind, l);
+    return Math.round(paid * 0.6);
+  }
+  function sell(S, t) {
+    var v = sellValue(S, t);
+    S.money += v;
+    S.towers = S.towers.filter(function (x) { return x !== t; });
+    return v;
+  }
+
+  function startWave(S, rnd) {
+    if (S.waveActive || S.over) return false;
+    S.wave++;
+    S.waveActive = true;
+    var comp = waveComposition(S.wave, rnd);
+    var sc = waveScale(S.wave);
+    S.queue = [];
+    for (var i = 0; i < comp.length; i++) {
+      S.queue.push({
+        type: comp[i].type, left: comp[i].count,
+        gap: comp[i].gap, next: S.time + comp[i].delay, scale: sc
+      });
+    }
+    return true;
+  }
+
+  function spawn(S, type, sc) {
+    var t = TYPES[type];
+    S.enemies.push({
+      id: S.nextId++, type: type,
+      t: 0, hp: t.hp * sc.hp, max: t.hp * sc.hp,
+      sp: sc.speed || 1, ar: sc.armor || 0,
+      slow: 0, slowT: 0
+    });
+  }
+
+  function damage(S, e, amount, armorPierce) {
+    var t = TYPES[e.type];
+    var armor = armorPierce ? 0 : Math.min(0.75, t.armor + (e.ar || 0));
+    e.hp -= amount * (1 - armor);
+    if (e.hp <= 0) {
+      S.money += Math.round(t.bounty * (1 + (S.wave - 1) * 0.03));
+      S.kills++;
+      return true;
+    }
+    return false;
+  }
+
+  function step(S, dt, rnd) {
+    if (S.over) return;
+    rnd = rnd || Math.random;
+    S.time += dt;
+
+    // تولید دشمن
+    for (var q = 0; q < S.queue.length; q++) {
+      var Q = S.queue[q];
+      while (Q.left > 0 && S.time >= Q.next) {
+        spawn(S, Q.type, Q.scale);
+        Q.left--;
+        Q.next += Q.gap;
+      }
+    }
+    S.queue = S.queue.filter(function (x) { return x.left > 0; });
+
+    // حرکت
+    for (var i = S.enemies.length - 1; i >= 0; i--) {
+      var e = S.enemies[i];
+      var base = TYPES[e.type].speed;
+      if (e.slowT > 0) { e.slowT -= dt; } else { e.slow = 0; }
+      e.t += base * (e.sp || 1) * (1 - e.slow) * dt * 1.9;
+      if (e.t >= S.geo.len) {
+        S.enemies.splice(i, 1);
+        S.lives--;
+        S.leaked++;
+        if (S.lives <= 0) { S.lives = 0; S.over = true; S.won = false; return; }
+      }
+    }
+
+    // شلیک
+    S.effects.length = 0;
+    for (var k = 0; k < S.towers.length; k++) {
+      var tw = S.towers[k];
+      tw.cd -= dt;
+      if (tw.cd > 0) continue;
+      var st = towerStats(tw.kind, tw.level);
+      var tx = tw.c + 0.5, ty = tw.r + 0.5;
+      var target = null, bestT = -1;
+      for (var j = 0; j < S.enemies.length; j++) {
+        var en = S.enemies[j];
+        var p = posAt(S.geo, en.t);
+        var dx = p.x - tx, dy = p.y - ty;
+        if (dx * dx + dy * dy > st.range * st.range) continue;
+        if (en.t > bestT) { bestT = en.t; target = en; }
+      }
+      if (!target) continue;
+      tw.cd = st.rate;
+      var dmg = st.dps * st.rate;
+      var tp = posAt(S.geo, target.t);
+      S.effects.push({ kind: tw.kind, x1: tx, y1: ty, x2: tp.x, y2: tp.y, color: st.color });
+
+      if (st.splash > 0) {
+        for (var s = S.enemies.length - 1; s >= 0; s--) {
+          var e2 = S.enemies[s];
+          var p2 = posAt(S.geo, e2.t);
+          var ddx = p2.x - tp.x, ddy = p2.y - tp.y;
+          if (ddx * ddx + ddy * ddy > st.splash * st.splash) continue;
+          if (st.slow > 0) { e2.slow = Math.max(e2.slow, st.slow); e2.slowT = 1.6; }
+          if (damage(S, e2, e2 === target ? dmg : dmg * 0.6)) { S.enemies.splice(s, 1); tw.kills++; }
+        }
+      } else if (st.chain > 0) {
+        var hit = [target];
+        for (var h = 0; h < S.enemies.length && hit.length < st.chain; h++) {
+          var e3 = S.enemies[h];
+          if (e3 === target) continue;
+          var p3 = posAt(S.geo, e3.t);
+          var hx = p3.x - tp.x, hy = p3.y - tp.y;
+          if (hx * hx + hy * hy <= 2.6) hit.push(e3);
+        }
+        for (var m = 0; m < hit.length; m++) {
+          var hp = posAt(S.geo, hit[m].t);
+          if (m > 0) S.effects.push({ kind: 'tesla', x1: tp.x, y1: tp.y, x2: hp.x, y2: hp.y, color: st.color });
+          if (damage(S, hit[m], dmg * (m === 0 ? 1 : 0.72), true)) {
+            var ix = S.enemies.indexOf(hit[m]);
+            if (ix >= 0) S.enemies.splice(ix, 1);
+            tw.kills++;
+          }
+        }
+      } else {
+        if (damage(S, target, dmg)) {
+          var ix2 = S.enemies.indexOf(target);
+          if (ix2 >= 0) S.enemies.splice(ix2, 1);
+          tw.kills++;
+        }
+      }
+    }
+
+    // پایان موج
+    if (S.waveActive && !S.queue.length && !S.enemies.length) {
+      S.waveActive = false;
+      S.money += 20 + S.wave * 8;
+      if (S.wave >= S.lastWave && !S.endless) { S.over = true; S.won = true; }
+    }
+  }
+
+  function stars(S) {
+    if (!S.won) return 0;
+    var kept = S.lives / S.maxLives;
+    if (kept >= 0.9) return 3;
+    if (kept >= 0.5) return 2;
+    return 1;
+  }
+
+  var api = {
+    GW: GW, GH: GH, TYPES: TYPES, TOWERS: TOWERS,
+    genPath: genPath, validatePath: validatePath,
+    waveComposition: waveComposition, waveScale: waveScale, waveBudget: waveBudget,
+    towerStats: towerStats, upgradeCost: upgradeCost,
+    pathGeometry: pathGeometry, posAt: posAt, createGame: createGame,
+    canBuild: canBuild, towerAt: towerAt, build: build, upgrade: upgrade,
+    sell: sell, sellValue: sellValue, startWave: startWave, step: step, stars: stars
+  };
+  if (typeof self !== 'undefined') self.TdEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = TdEngineFactory();
+
+  var MAPS = [
+    { id: 'm1', seed: 101, fa: 'دره', en: 'Valley' },
+    { id: 'm2', seed: 202, fa: 'گذرگاه', en: 'Pass' },
+    { id: 'm3', seed: 303, fa: 'مرداب', en: 'Marsh' }
+  ];
+  var KINDS = ['archer', 'cannon', 'frost', 'tesla'];
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'tower-defence',
+    name: { fa: 'دفاع از برج', en: 'Tower Defence' },
+    accent: '#E07A5F',
+    mood: 'tower-defence',
+    strings: {
+      fa: {
+        wave: 'موج', lives: 'جان', money: 'سکه‌ی نقشه',
+        startWave: 'شروع موج', nextWave: 'موج بعدی', speed: 'سرعت',
+        archer: 'کمان', cannon: 'توپ', frost: 'یخ', tesla: 'برق',
+        archerD: 'شلیک تند به یک هدف', cannonD: 'انفجار ناحیه‌ای', frostD: 'کند کردن دشمن‌ها', teslaD: 'زنجیره‌ی برق به چند هدف',
+        upgrade: 'ارتقا', sell: 'فروش', level: 'سطح', range: 'برد', dps: 'آسیب',
+        endless: 'حالت بی‌پایان', endlessGo: 'ادامه بده', mapDone: 'نقشه تمام شد',
+        pickMap: 'نقشه', dailyMap: 'نقشه‌ی روزانه', leaked: 'رد شده', kills: 'کشته',
+        noMoney: 'پول کافی نداری', gameOver: 'قلعه سقوط کرد',
+        buildHere: 'اینجا برج بساز', cantBuild: 'روی مسیر نمی‌شود ساخت',
+        tutTitle1: 'مسیر را ببند', tutText1: 'دشمن‌ها از بالا می‌آیند و به پایین می‌روند. کنار مسیر برج بگذار تا بزنندشان.',
+        tutTitle2: 'چهار برج', tutText2: 'کمان تند می‌زند، توپ ناحیه‌ای، یخ کند می‌کند و برق زنجیره‌ای می‌زند. ترکیبشان مهم است.',
+        tutTitle3: 'بیست موج', tutText3: 'بیست موج را دوام بیاور. هرچه جان بیشتری بماند ستاره‌ی بیشتری می‌گیری.'
+      },
+      en: {
+        wave: 'Wave', lives: 'Lives', money: 'Gold',
+        startWave: 'Start wave', nextWave: 'Next wave', speed: 'Speed',
+        archer: 'Archer', cannon: 'Cannon', frost: 'Frost', tesla: 'Tesla',
+        archerD: 'Fast single target', cannonD: 'Splash damage', frostD: 'Slows enemies', teslaD: 'Chains between targets',
+        upgrade: 'Upgrade', sell: 'Sell', level: 'Level', range: 'Range', dps: 'Damage',
+        endless: 'Endless mode', endlessGo: 'Keep going', mapDone: 'Map complete',
+        pickMap: 'Map', dailyMap: 'Daily map', leaked: 'Leaked', kills: 'Kills',
+        noMoney: 'Not enough gold', gameOver: 'The keep has fallen',
+        buildHere: 'Build here', cantBuild: 'You cannot build on the path',
+        tutTitle1: 'Block the path', tutText1: 'Enemies walk from top to bottom. Place towers beside the path to stop them.',
+        tutTitle2: 'Four towers', tutText2: 'Archer is fast, cannon splashes, frost slows and tesla chains. Mixing them matters.',
+        tutTitle3: 'Twenty waves', tutText3: 'Survive twenty waves. The more lives you keep, the more stars you earn.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', { map: 'm1', speed: 1 });
+  var starsBook = ctx.store.get('stars', {});
+
+  var S = null, mapId = null, raf = null, lastT = 0, selected = null, buildCell = null;
+  var canvas = el('canvas');
+  var cbox = el('div', { class: 'td-canvasbox' }, [canvas]);
+  var top = el('div', { class: 'td-top' });
+  var preview = el('div', { class: 'td-preview' });
+  var startBtn = el('button', { class: 'ch-btn ch-btn--primary', type: 'button', text: C.t('startWave') });
+  var speedBtn = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', text: '×' + C.num(1) });
+  var bottom = el('div', { class: 'td-bottom' }, [preview, speedBtn, startBtn]);
+  var wrap = el('div', { class: 'td-wrap' }, [top, cbox, bottom]);
+
+  startBtn.addEventListener('click', function () {
+    if (!S || S.over) return;
+    if (S.waveActive) return;
+    C.feedback('select');
+    E.startWave(S, Math.random);
+    updateHud();
+    save();
+  });
+  speedBtn.addEventListener('click', function () {
+    prefs.speed = prefs.speed === 1 ? 2 : 1;
+    ctx.store.set('prefs', prefs);
+    speedBtn.textContent = '×' + C.num(prefs.speed);
+    C.feedback('select');
+  });
+
+  ctx.stat('wave', C.t('wave'));
+  ctx.stat('lives', C.t('lives'));
+  ctx.stat('money', C.t('money'));
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('restart'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.main.className = 'ch-gamemain';
+  ctx.mount();
+
+  /* --------------------------------------------------------- رنگ‌ها */
+
+  var CO = {};
+  function readColors() {
+    var cs = getComputedStyle(document.documentElement);
+    function v(n, f) { return (cs.getPropertyValue(n) || f).trim() || f; }
+    CO = {
+      grass: v('--td-grass', '#F3EADC'),
+      grass2: v('--td-grass2', '#EDE2D0'),
+      path: v('--td-path', '#D8B87E'),
+      pathEdge: v('--c-line', '#E7DACA'),
+      text: v('--c-text', '#2C2620'),
+      dim: v('--c-text-faint', '#A99C8C'),
+      surface: v('--c-surface', '#fff'),
+      bad: v('--c-bad', '#C8574B'),
+      good: v('--c-good', '#5C9A6B'),
+      gold: v('--c-gold', '#D9A441')
+    };
+  }
+  readColors();
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    if (mq.addEventListener) mq.addEventListener('change', function () { setTimeout(readColors, 60); });
+  }
+
+  /* ---------------------------------------------------------- ساخت */
+
+  function pathFor(id, date) {
+    if (id === 'daily') return E.genPath(C.daily('tower-defence', date).rng, { minTurns: 5 });
+    var m = MAPS.filter(function (x) { return x.id === id; })[0] || MAPS[0];
+    return E.genPath(seedRng(m.seed), { minTurns: 5 });
+  }
+  function seedRng(n) { return C.rng(n); }
+
+  function newGame(id, date) {
+    mapId = id;
+    var path = pathFor(id, date);
+    S = E.createGame({ path: path, money: 200, lives: 20, lastWave: 20 });
+    S.mapId = id;
+    S.date = date || null;
+    selected = null;
+    resize();
+    render();
+    save();
+  }
+
+  /* ---------------------------------------------------------- رابط */
+
+  function render() {
+    top.innerHTML = '';
+    if (S.date) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' },
+        [C.icon('calendar', 14), el('span', { text: C.t('dailyMap') + ' — ' + C.num(S.date) })]));
+    } else {
+      top.appendChild(C.ui.segmented(MAPS.map(function (m) {
+        return { value: m.id, label: (C.state.settings.lang === 'fa' ? m.fa : m.en) };
+      }), mapId, function (v) {
+        prefs.map = v; ctx.store.set('prefs', prefs);
+        askSwitch(v);
+      }));
+      var st = starsBook[mapId] || 0;
+      var sr = el('span', { class: 'ch-badge td-stars' });
+      for (var i = 1; i <= 3; i++) {
+        var ic = C.icon('star', 13);
+        ic.style.color = i <= st ? 'var(--c-gold)' : 'var(--c-text-faint)';
+        if (i > st) ic.style.opacity = '.4';
+        if (i <= st) ic.setAttribute('fill', 'currentColor');
+        sr.appendChild(ic);
+      }
+      top.appendChild(sr);
+    }
+    updateHud();
+  }
+
+  function askSwitch(v) {
+    if (S && S.wave > 0 && !S.over) {
+      C.ui.confirm({ title: C.t('restart'), body: C.t('resetWarn'), onOk: function () { newGame(v); } });
+    } else newGame(v);
+  }
+
+  function updateHud() {
+    ctx.setStat('wave', C.num(S.wave) + (S.endless ? '∞' : '/' + C.num(S.lastWave)));
+    ctx.setStat('lives', S.lives);
+    ctx.setStat('money', S.money);
+    startBtn.disabled = S.waveActive || S.over;
+    startBtn.textContent = S.waveActive ? C.t('wave') + ' ' + C.num(S.wave) : C.t('startWave');
+    speedBtn.textContent = '×' + C.num(prefs.speed);
+    drawPreview();
+  }
+
+  function drawPreview() {
+    preview.innerHTML = '';
+    var next = S.wave + 1;
+    if (S.over) { preview.appendChild(el('span', { class: 'ch-xs ch-dim', text: C.t('gameOver') })); return; }
+    preview.appendChild(el('span', { class: 'ch-xs ch-faint', text: C.t('nextWave') + ' ' + C.num(next) }));
+    var comp = E.waveComposition(next, function () { return 0.5; });
+    comp.forEach(function (c) {
+      preview.appendChild(el('span', { class: 'td-pv' }, [
+        el('i', { style: { background: E.TYPES[c.type].color } }),
+        el('span', { text: C.num(c.count) })
+      ]));
+    });
+  }
+
+  /* ---------------------------------------------------------- رسم */
+
+  var cs = 30, ox = 0, oy = 0, dpr = 1;
+  function resize() {
+    var boxW = cbox.clientWidth || window.innerWidth;
+    var boxH = cbox.clientHeight || (window.innerHeight - 220);
+    cs = Math.max(16, Math.floor(Math.min(boxW / E.GW, boxH / E.GH)));
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var w = cs * E.GW, h = cs * E.GH;
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ox = 0; oy = 0;
+  }
+  window.addEventListener('resize', function () { resize(); });
+
+  function draw() {
+    if (!S) return;
+    var g = canvas.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, cs * E.GW, cs * E.GH);
+
+    // زمین
+    for (var r = 0; r < E.GH; r++) {
+      for (var c = 0; c < E.GW; c++) {
+        g.fillStyle = ((r + c) % 2) ? CO.grass : CO.grass2;
+        g.fillRect(c * cs, r * cs, cs, cs);
+      }
+    }
+    // مسیر
+    g.strokeStyle = CO.path;
+    g.lineWidth = cs * 0.8;
+    g.lineJoin = 'round';
+    g.lineCap = 'round';
+    g.beginPath();
+    for (var i = 0; i < S.path.length; i++) {
+      var p = S.path[i];
+      var x = (p.c + 0.5) * cs, y = (p.r + 0.5) * cs;
+      if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+    }
+    g.stroke();
+
+    // قلعه‌ی پایین و دروازه‌ی بالا
+    var first = S.path[0], last = S.path[S.path.length - 1];
+    drawGate(g, (first.c + 0.5) * cs, (first.r + 0.5) * cs, CO.dim);
+    drawKeep(g, (last.c + 0.5) * cs, (last.r + 0.5) * cs);
+
+    // برج‌ها
+    for (var t = 0; t < S.towers.length; t++) drawTower(g, S.towers[t]);
+
+    // برد برج انتخاب‌شده
+    if (selected) {
+      var st = E.towerStats(selected.kind, selected.level);
+      g.beginPath();
+      g.arc((selected.c + 0.5) * cs, (selected.r + 0.5) * cs, st.range * cs, 0, Math.PI * 2);
+      g.fillStyle = 'rgba(224,122,95,.12)';
+      g.fill();
+      g.strokeStyle = 'rgba(224,122,95,.5)';
+      g.lineWidth = 2;
+      g.stroke();
+    }
+    if (buildCell) {
+      g.strokeStyle = CO.good;
+      g.lineWidth = 3;
+      g.strokeRect(buildCell.c * cs + 2, buildCell.r * cs + 2, cs - 4, cs - 4);
+    }
+
+    // شلیک‌ها
+    for (var e = 0; e < S.effects.length; e++) {
+      var f = S.effects[e];
+      g.strokeStyle = f.color;
+      g.globalAlpha = 0.85;
+      g.lineWidth = f.kind === 'cannon' ? 4 : (f.kind === 'tesla' ? 3 : 2);
+      g.beginPath();
+      g.moveTo(f.x1 * cs, f.y1 * cs);
+      if (f.kind === 'tesla') {
+        var mx = (f.x1 + f.x2) / 2 * cs + (Math.random() - 0.5) * cs * 0.5;
+        var my = (f.y1 + f.y2) / 2 * cs + (Math.random() - 0.5) * cs * 0.5;
+        g.lineTo(mx, my);
+      }
+      g.lineTo(f.x2 * cs, f.y2 * cs);
+      g.stroke();
+      g.globalAlpha = 1;
+    }
+
+    // دشمن‌ها
+    for (var n = 0; n < S.enemies.length; n++) drawEnemy(g, S.enemies[n]);
+  }
+
+  function drawGate(g, x, y, col) {
+    g.fillStyle = col;
+    g.globalAlpha = .5;
+    g.beginPath();
+    g.arc(x, y, cs * 0.28, 0, Math.PI * 2);
+    g.fill();
+    g.globalAlpha = 1;
+  }
+  function drawKeep(g, x, y) {
+    var s = cs * 0.42;
+    g.fillStyle = '#8A6A4F';
+    g.fillRect(x - s, y - s * 0.7, s * 2, s * 1.5);
+    g.fillStyle = '#A98263';
+    for (var i = -2; i <= 1; i++) g.fillRect(x - s + (i + 2) * s * 0.5, y - s * 1.05, s * 0.35, s * 0.4);
+    g.fillStyle = CO.bad;
+    g.beginPath();
+    g.moveTo(x, y - s * 1.6);
+    g.lineTo(x + s * 0.7, y - s * 1.35);
+    g.lineTo(x, y - s * 1.1);
+    g.closePath();
+    g.fill();
+    g.strokeStyle = '#6E5340';
+    g.lineWidth = 2;
+    g.beginPath(); g.moveTo(x, y - s * 1.6); g.lineTo(x, y - s * 0.7); g.stroke();
+  }
+
+  function drawTower(g, t) {
+    var x = (t.c + 0.5) * cs, y = (t.r + 0.5) * cs;
+    var st = E.towerStats(t.kind, t.level);
+    g.fillStyle = st.color;
+    var s = cs * 0.34;
+    g.beginPath();
+    if (t.kind === 'archer') {
+      g.moveTo(x, y - s); g.lineTo(x + s, y + s * 0.8); g.lineTo(x - s, y + s * 0.8);
+      g.closePath();
+    } else if (t.kind === 'cannon') {
+      g.arc(x, y, s, 0, Math.PI * 2);
+    } else if (t.kind === 'frost') {
+      for (var i = 0; i < 6; i++) {
+        var a = Math.PI / 3 * i - Math.PI / 2;
+        var px = x + Math.cos(a) * s, py = y + Math.sin(a) * s;
+        if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+      }
+      g.closePath();
+    } else {
+      g.rect(x - s * 0.85, y - s, s * 1.7, s * 2);
+    }
+    g.fill();
+    g.fillStyle = 'rgba(255,255,255,.55)';
+    g.beginPath();
+    g.arc(x, y - s * 0.15, s * 0.28, 0, Math.PI * 2);
+    g.fill();
+    // نشان سطح
+    for (var l = 0; l < t.level; l++) {
+      g.fillStyle = CO.gold;
+      g.beginPath();
+      g.arc(x - s * 0.5 + l * s * 0.5, y + s * 1.15, cs * 0.055, 0, Math.PI * 2);
+      g.fill();
+    }
+  }
+
+  function drawEnemy(g, e) {
+    var p = E.posAt(S.geo, e.t);
+    var t = E.TYPES[e.type];
+    var x = p.x * cs, y = p.y * cs, r = t.r * cs;
+    g.fillStyle = t.color;
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fill();
+    if (e.slow > 0) {
+      g.strokeStyle = '#6BB6C4';
+      g.lineWidth = 2;
+      g.stroke();
+    }
+    // چشم‌ها
+    g.fillStyle = '#2C2620';
+    g.beginPath(); g.arc(x - r * 0.32, y - r * 0.1, r * 0.16, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc(x + r * 0.32, y - r * 0.1, r * 0.16, 0, Math.PI * 2); g.fill();
+    // نوار سلامت
+    if (e.hp < e.max) {
+      var w = r * 2, h = Math.max(2, cs * 0.07);
+      g.fillStyle = 'rgba(0,0,0,.18)';
+      g.fillRect(x - w / 2, y - r - h * 2, w, h);
+      g.fillStyle = e.hp / e.max > 0.4 ? CO.good : CO.bad;
+      g.fillRect(x - w / 2, y - r - h * 2, w * (e.hp / e.max), h);
+    }
+  }
+
+  /* ---------------------------------------------------------- حلقه */
+
+  function loop(now) {
+    raf = requestAnimationFrame(loop);
+    var dt = Math.min((now - lastT) / 1000, 0.05);
+    lastT = now;
+    if (S && !S.over && S.waveActive) {
+      var mult = prefs.speed;
+      // هر گام افکت‌های خودش را پاک می‌کند، پس در سرعت دو برابر شلیک‌های
+      // گام اول قبل از رسم از بین می‌رفتند. اینجا جمعشان می‌کنیم.
+      var shots = [];
+      for (var i = 0; i < mult; i++) {
+        E.step(S, dt, Math.random);
+        if (mult > 1 && S.effects.length) shots = shots.concat(S.effects);
+      }
+      if (mult > 1) S.effects = shots;
+      hudTick();
+    }
+    draw();
+  }
+
+  var lastLives = -1, lastMoney = -1, lastWave = -1, lastActive = null;
+  function hudTick() {
+    if (S.lives !== lastLives) {
+      if (lastLives >= 0 && S.lives < lastLives) { C.audio.sfx('bad'); C.haptic('error'); C.ui.shake(canvas); }
+      lastLives = S.lives;
+      ctx.setStat('lives', S.lives);
+    }
+    if (S.money !== lastMoney) { lastMoney = S.money; ctx.setStat('money', S.money); }
+    if (S.wave !== lastWave) { lastWave = S.wave; updateHud(); }
+    if (S.waveActive !== lastActive) {
+      lastActive = S.waveActive;
+      updateHud();
+      if (!S.waveActive) save();
+    }
+    if (S.over) { finish(); }
+  }
+
+  /* ---------------------------------------------------------- ورودی */
+
+  canvas.addEventListener('click', function (ev) {
+    if (!S || S.over) return;
+    var rect = canvas.getBoundingClientRect();
+    var c = Math.floor((ev.clientX - rect.left) / cs);
+    var r = Math.floor((ev.clientY - rect.top) / cs);
+    if (r < 0 || c < 0 || r >= E.GH || c >= E.GW) return;
+    var t = E.towerAt(S, r, c);
+    if (t) { selected = t; buildCell = null; towerPanel(t); return; }
+    selected = null;
+    if (!E.canBuild(S, r, c)) { C.ui.toast({ icon: 'info', title: C.t('cantBuild') }); return; }
+    buildCell = { r: r, c: c };
+    C.audio.sfx('select');
+    shopPanel(r, c);
+  });
+
+  function shopPanel(r, c) {
+    var grid = el('div', { class: 'td-shop' });
+    KINDS.forEach(function (k) {
+      var def = E.TOWERS[k];
+      var b = el('button', { class: 'td-buy', type: 'button', disabled: S.money < def.cost }, [
+        el('div', { class: 'td-mark', style: { background: def.color } }),
+        el('b', { text: C.t(k) }),
+        el('small', { text: C.num(def.cost) })
+      ]);
+      b.addEventListener('click', function () {
+        if (E.build(S, r, c, k)) {
+          C.audio.sfx('build'); C.haptic('success');
+          buildCell = null;
+          updateHud();
+          save();
+          m.close();
+        } else { C.feedback('bad'); C.ui.toast({ icon: 'coin', title: C.t('noMoney') }); }
+      });
+      grid.appendChild(b);
+    });
+    var m = C.ui.modal({
+      title: C.t('buildHere'),
+      body: [grid, el('p', { class: 'ch-xs ch-faint', style: { 'margin-top': 'var(--s-3)' },
+        text: C.t('archer') + ': ' + C.t('archerD') + ' · ' + C.t('cannon') + ': ' + C.t('cannonD') + ' · ' +
+          C.t('frost') + ': ' + C.t('frostD') + ' · ' + C.t('tesla') + ': ' + C.t('teslaD') })],
+      actions: [{ label: C.t('close') }],
+      onClose: function () { buildCell = null; }
+    });
+  }
+
+  function towerPanel(t) {
+    var st = E.towerStats(t.kind, t.level);
+    var up = t.level < 2 ? E.upgradeCost(t.kind, t.level) : null;
+    var body = [
+      el('div', { class: 'ch-list' }, [
+        line(C.t('level'), C.num(t.level + 1)),
+        line(C.t('dps'), C.num(Math.round(st.dps))),
+        line(C.t('range'), C.num(st.range.toFixed(1))),
+        line(C.t('kills'), C.num(t.kills))
+      ])
+    ];
+    var actions = [{ label: C.t('close'), onClick: function () { selected = null; } }];
+    actions.push({
+      label: C.t('sell') + ' ' + C.num(E.sellValue(S, t)), onClick: function () {
+        E.sell(S, t); selected = null; C.audio.sfx('coin'); updateHud(); save();
+      }
+    });
+    if (up !== null) {
+      actions.push({
+        label: C.t('upgrade') + ' ' + C.num(up), kind: 'primary', onClick: function () {
+          if (E.upgrade(S, t)) { C.audio.sfx('build'); C.haptic('success'); updateHud(); save(); }
+          else { C.feedback('bad'); C.ui.toast({ icon: 'coin', title: C.t('noMoney') }); }
+        }
+      });
+    }
+    C.ui.modal({ title: C.t(t.kind), body: body, actions: actions, onClose: function () { selected = null; } });
+  }
+  function line(a, b) {
+    return el('div', { class: 'ch-item' }, [
+      el('div', { class: 'ch-item__label', text: a }), el('b', { class: 'ch-num', text: b })
+    ]);
+  }
+
+  /* --------------------------------------------------------- پایان */
+
+  var finished = false;
+  function finish() {
+    if (finished) return;
+    finished = true;
+    var won = S.won;
+    var st = E.stars(S);
+    if (won && !S.endless) {
+      if ((starsBook[mapId] || 0) < st) { starsBook[mapId] = st; ctx.store.set('stars', starsBook); }
+      C.achievements.unlock('td-win');
+      if (S.lives === S.maxLives) C.achievements.unlock('td-perfect');
+      if (st >= 3) C.achievements.unlock('td-stars');
+    }
+    if (S.wave >= 30) C.achievements.unlock('td-endless');
+    var coins = won ? (24 + st * 10 + S.wave) : Math.max(3, Math.round(S.wave * 1.6));
+    var points = won ? (90 + st * 25 + S.wave * 3) : Math.max(5, S.wave * 5);
+    if (S.date) {
+      C.stats.daily('tower-defence', S.date, {
+        label: C.t('wave') + ' ' + C.num(S.wave) + (won ? ' ★' + C.num(st) : ''), wave: S.wave, won: won
+      });
+    }
+    C.stats.best('tower-defence', 'wave', S.wave, false);
+    ctx.clearSave();
+
+    var actions = null;
+    ctx.finish({
+      won: won,
+      title: won ? C.t('mapDone') : C.t('gameOver'),
+      stars: won && !S.endless ? st : null,
+      timeMs: S.time * 1000,
+      coins: coins, points: points,
+      lines: [
+        { label: C.t('wave'), value: C.num(S.wave) },
+        { label: C.t('lives'), value: C.num(S.lives) },
+        { label: C.t('kills'), value: C.num(S.kills) },
+        { label: C.t('leaked'), value: C.num(S.leaked) }
+      ],
+      shareText: 'چوگان · دفاع از برج' + (S.date ? ('\nنقشه‌ی روزانه ' + S.date) : '') +
+        '\nموج ' + C.num(S.wave) + (won ? (' · ' + C.num(st) + ' ستاره') : '') + ' · جان ' + C.num(S.lives),
+      onAgain: function () { finished = false; newGame(mapId, S.date); }
+    });
+
+    // پیشنهاد حالت بی‌پایان بعد از برد
+    if (won && !S.endless) {
+      setTimeout(function () {
+        C.ui.confirm({
+          title: C.t('endless'), body: C.t('tutText3'),
+          okLabel: C.t('endlessGo'),
+          onOk: function () {
+            S.endless = true; S.over = false; S.won = false; finished = false;
+            document.querySelectorAll('.ch-scrim').forEach(function (n) { n.remove(); });
+            updateHud();
+          }
+        });
+      }, 400);
+    }
+  }
+
+  /* --------------------------------------------------------- ذخیره */
+
+  ctx.autosave(function () {
+    if (!S || S.over || S.wave === 0) return { inProgress: false };
+    return {
+      mapId: mapId, date: S.date, prefs: prefs,
+      s: {
+        path: S.path, towers: S.towers, enemies: S.enemies, queue: S.queue,
+        money: S.money, lives: S.lives, maxLives: S.maxLives, wave: S.wave,
+        waveActive: S.waveActive, time: S.time, nextId: S.nextId,
+        kills: S.kills, leaked: S.leaked, spent: S.spent, endless: S.endless,
+        lastWave: S.lastWave
+      }
+    };
+  });
+  function save() { ctx.save(); }
+
+  function askNew() {
+    if (!S || S.over || S.wave === 0) { newGame(mapId, S ? S.date : null); return; }
+    C.ui.confirm({ title: C.t('restart'), body: C.t('resetWarn'), onOk: function () { finished = false; newGame(mapId, S.date); } });
+  }
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('tutText1') }),
+        el('div', { class: 'ch-list' }, [
+          line(C.t('archer'), C.t('archerD')),
+          line(C.t('cannon'), C.t('cannonD')),
+          line(C.t('frost'), C.t('frostD')),
+          line(C.t('tesla'), C.t('teslaD'))
+        ]),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          line(C.t('startWave'), 'Space'),
+          line(C.t('speed'), 'S')
+        ])
+      ],
+      actions: [
+        { label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('done'), kind: 'primary' }
+      ]
+    });
+  }
+
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'),
+      art: '<svg viewBox="0 0 200 120" width="100%"><rect x="20" y="10" width="160" height="100" rx="10" fill="var(--c-surface-2)"/>' +
+        '<path d="M60 10v40h80v40H60v20" stroke="var(--c-warn-soft)" stroke-width="20" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' +
+        '<circle cx="60" cy="25" r="8" fill="#7BAE7F"/><polygon points="40,44 50,62 30,62" fill="#E07A5F"/>' +
+        '<polygon points="160,64 170,82 150,82" fill="#E07A5F"/></svg>' },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'),
+      art: '<svg viewBox="0 0 200 120" width="100%">' +
+        '<polygon points="45,35 62,70 28,70" fill="#E07A5F"/><circle cx="95" cy="55" r="18" fill="#C8783C"/>' +
+        '<polygon points="140,37 155,46 155,64 140,73 125,64 125,46" fill="#6BB6C4"/>' +
+        '<rect x="170" y="38" width="22" height="34" rx="5" fill="#A57BD1"/></svg>' },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'),
+      art: '<svg viewBox="0 0 200 120" width="100%"><g fill="var(--c-gold)">' +
+        '<path d="M60 30l7 15 16 2-12 11 3 16-14-8-14 8 3-16-12-11 16-2z"/>' +
+        '<path d="M100 22l8 17 18 2-13 13 3 18-16-9-16 9 3-18-13-13 18-2z"/>' +
+        '<path d="M140 30l7 15 16 2-12 11 3 16-14-8-14 8 3-16-12-11 16-2z"/></g></svg>' }
+  ];
+
+  window.addEventListener('keydown', function (e) {
+    if (!S || S.over) return;
+    if (e.key === ' ') { startBtn.click(); e.preventDefault(); }
+    else if (e.key === 's' || e.key === 'S') { speedBtn.click(); e.preventDefault(); }
+  });
+
+  C.onPause(function () { if (raf) { cancelAnimationFrame(raf); raf = null; } });
+  C.onResume(function () { if (!raf) { lastT = performance.now(); raf = requestAnimationFrame(loop); } });
+
+  /* ---------------------------------------------------------- شروع */
+
+  var saved = ctx.loadSave();
+  if (dailyDate) {
+    newGame('daily', dailyDate);
+    if (C.stats.dailyDone('tower-defence', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate)['tower-defence'];
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec.label });
+    }
+    ctx.tutorialIfNew(TUT);
+  } else if (saved && saved.s && saved.s.wave > 0) {
+    if (saved.prefs) prefs = saved.prefs;
+    mapId = saved.mapId;
+    var v = saved.s;
+    S = E.createGame({ path: v.path, money: v.money, lives: v.maxLives, lastWave: v.lastWave });
+    S.towers = v.towers; S.enemies = v.enemies; S.queue = v.queue;
+    S.money = v.money; S.lives = v.lives; S.wave = v.wave;
+    S.waveActive = v.waveActive; S.time = v.time; S.nextId = v.nextId;
+    S.kills = v.kills; S.leaked = v.leaked; S.spent = v.spent;
+    S.endless = v.endless; S.date = saved.date || null;
+    S.mapId = mapId;
+    resize();
+    render();
+  } else {
+    newGame(prefs.map || 'm1');
+    ctx.tutorialIfNew(TUT);
+  }
+
+  setTimeout(resize, 30);
+  lastT = performance.now();
+  raf = requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
