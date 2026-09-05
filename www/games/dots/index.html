@@ -364,7 +364,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
       fa: {
         twoPlayers: 'دو نفره', vsAi: 'با حریف', size: 'اندازه',
         you: 'تو', rival: 'حریف', player2: 'بازیکن دو', renameP2: 'نام بازیکن دو',
-        thinking: 'فکر می‌کند…', yourTurn: 'نوبت توست', draw: 'مساوی',
+        thinking: 'فکر می‌کند…', yourTurn: 'نوبت توست', draw: 'مساوی', playerWon: '{n} برد',
+        rotate: 'چرخاندن خط',
         boxes: 'مربع', newMatch: 'دست تازه', undoMove: 'برگرداندن حرکت',
         undoOnlyAi: 'برگرداندن فقط در بازی با حریف کامپیوتری است',
         dailyDots: 'نقطه‌بازی روزانه', vsHard: 'مقابل حریف سخت',
@@ -375,7 +376,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
       en: {
         twoPlayers: 'Two players', vsAi: 'Versus AI', size: 'Size',
         you: 'You', rival: 'Rival', player2: 'Player 2', renameP2: 'Player 2 name',
-        thinking: 'Thinking…', yourTurn: 'Your turn', draw: 'Draw',
+        thinking: 'Thinking…', yourTurn: 'Your turn', draw: 'Draw', playerWon: '{n} wins',
+        rotate: 'Rotate line',
         boxes: 'Boxes', newMatch: 'New match', undoMove: 'Undo move',
         undoOnlyAi: 'Undo is only available against the AI',
         dailyDots: 'Daily dots and boxes', vsHard: 'against the hard AI',
@@ -420,7 +422,6 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
       lastEdge: -1, newBoxes: []
     };
     if (seedRng) S.turn = seedRng() < 0.5 ? 1 : 2;
-    S.aiRng = null;
     drawAll();
     render();
     save();
@@ -708,7 +709,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
 
     ctx.finish({
       won: won,
-      title: tie ? C.t('draw') : (won ? C.t('won') : C.t('lost')),
+      title: tie ? C.t('draw')
+        : (S.mode === '2p' ? C.t('playerWon', { n: pname(s1 > s2 ? 1 : 2) })
+          : (won ? C.t('won') : C.t('lost'))),
       timeMs: S.elapsed, coins: coins, points: points,
       lines: [
         { label: pname(1), value: C.num(s1) },
@@ -768,7 +771,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
         el('div', { class: 'ch-list' }, [
           kb('← ↑ → ↓', C.t('back')),
           kb('Space / Enter', C.t('play')),
-          kb('U', C.t('undoMove'))
+          kb('U', C.t('undoMove')),
+          kb('R / Tab', C.t('rotate'))
         ])
       ],
       actions: [
@@ -803,34 +807,47 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
 
   /* -------------------------------------------------------- کیبورد */
 
-  var cursorEdge = 0;
+  // نشانگر کیبورد به‌صورت هندسی نگه داشته می‌شود: افقی یا عمودی بودن خط
+  // به‌علاوه‌ی سطر و ستون. پیمایش روی شماره‌ی خام یال، جهت‌نماها را بی‌معنا
+  // می‌کرد چون شماره‌ها اول همه‌ی خط‌های افقی‌اند بعد همه‌ی عمودی‌ها.
+  var cur = { v: 0, r: 0, c: 0 };   // v=0 افقی، v=1 عمودی
+  function curEdge() {
+    var n = S.size;
+    return cur.v ? (bd.HC + cur.r * (n + 1) + cur.c) : (cur.r * n + cur.c);
+  }
+  function moveCur(dr, dc) {
+    var n = S.size;
+    var maxR = cur.v ? n - 1 : n;
+    var maxC = cur.v ? n : n - 1;
+    cur.r = C.clamp(cur.r + dr, 0, maxR);
+    cur.c = C.clamp(cur.c + dc, 0, maxC);
+  }
+  function flipCur() {
+    var n = S.size;
+    cur.v = cur.v ? 0 : 1;
+    cur.r = C.clamp(cur.r, 0, cur.v ? n - 1 : n);
+    cur.c = C.clamp(cur.c, 0, cur.v ? n : n - 1);
+  }
   window.addEventListener('keydown', function (e) {
     if (!S || S.done || busy()) return;
     var k = e.key;
     if (k === 'u' || k === 'U') { undo(); e.preventDefault(); return; }
-    var step = 0;
-    if (k === 'ArrowRight') step = document.documentElement.dir === 'rtl' ? -1 : 1;
-    else if (k === 'ArrowLeft') step = document.documentElement.dir === 'rtl' ? 1 : -1;
-    else if (k === 'ArrowDown') step = S.size;
-    else if (k === 'ArrowUp') step = -S.size;
-    if (step) {
-      var guard = 0;
-      do {
-        cursorEdge = (cursorEdge + step + bd.E) % bd.E;
-      } while (S.edges[cursorEdge] && guard++ < bd.E);
-      highlight();
-      e.preventDefault();
-      return;
-    }
+    if (k === 'r' || k === 'R' || k === 'Tab') { flipCur(); highlight(); e.preventDefault(); return; }
+    var rtl = document.documentElement.dir === 'rtl';
+    if (k === 'ArrowUp') { moveCur(-1, 0); highlight(); e.preventDefault(); return; }
+    if (k === 'ArrowDown') { moveCur(1, 0); highlight(); e.preventDefault(); return; }
+    if (k === 'ArrowLeft') { moveCur(0, rtl ? 1 : -1); highlight(); e.preventDefault(); return; }
+    if (k === 'ArrowRight') { moveCur(0, rtl ? -1 : 1); highlight(); e.preventDefault(); return; }
     if (k === ' ' || k === 'Enter') {
-      if (!S.edges[cursorEdge]) human(cursorEdge);
+      var ed = curEdge();
+      if (!S.edges[ed]) human(ed);
       e.preventDefault();
     }
   });
   function highlight() {
     var old = svg.querySelector('.dt-cursor');
     if (old) old.remove();
-    var p = edgePos(cursorEdge);
+    var p = edgePos(curEdge());
     var ln = document.createElementNS(NS, 'line');
     ln.setAttribute('x1', p.x1); ln.setAttribute('y1', p.y1);
     ln.setAttribute('x2', p.x2); ln.setAttribute('y2', p.y2);
