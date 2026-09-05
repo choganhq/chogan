@@ -86,6 +86,8 @@ android {
 
 // www و capacitor.config.json را داخل assets می‌ریزد و فهرست خالی افزونه‌ها را می‌سازد.
 // جای npx cap sync را می‌گیرد، بدون نود و بدون npm.
+def pluginsJson = new File(capacitorAssetsDir, 'capacitor.plugins.json')
+
 def syncWebAssets = tasks.register('syncWebAssets', Sync) {
     description = 'کپی www و capacitor.config.json داخل assets'
     from(new File(repoRoot, 'www')) {
@@ -93,9 +95,14 @@ def syncWebAssets = tasks.register('syncWebAssets', Sync) {
     }
     from(new File(repoRoot, 'capacitor.config.json'))
     into capacitorAssetsDir
+    // این فایل در doLast ساخته می‌شود، پس باید صریح به گریدل معرفی شود.
+    // وگرنه اگر کسی فقط همین فایل را پاک کند، تسک به‌روز حساب می‌شود،
+    // دوباره ساخته نمی‌شود و APK بدون آن بیرون می‌آید — که یعنی کپسیتور
+    // موقع بالا آمدن با PluginLoadException می‌افتد.
+    outputs.file(pluginsJson)
     doLast {
-        // کپسیتور بدون این فایل بالا نمی‌آید. هیچ افزونه‌ای نداریم، پس آرایه‌ی خالی.
-        new File(capacitorAssetsDir, 'capacitor.plugins.json').setText('[]\n', 'UTF-8')
+        // هیچ افزونه‌ای نداریم، پس آرایه‌ی خالی.
+        pluginsJson.setText('[]\n', 'UTF-8')
     }
 }
 
