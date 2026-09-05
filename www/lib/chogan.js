@@ -1101,10 +1101,15 @@
       var list = Array.isArray(o.body) ? o.body : [o.body];
       list.forEach(function (b) { box.appendChild(typeof b === 'string' ? el('p', { class: 'ch-dim', text: b }) : b); });
     }
+    var closed = false;
     var close = function () {
+      if (closed) return;
+      closed = true;
       scrim.style.animation = 'ch-fade var(--t-fast) reverse';
       setTimeout(function () { if (scrim.parentNode) scrim.parentNode.removeChild(scrim); }, 110);
       document.removeEventListener('keydown', onKey);
+      // از هر مسیری که بسته شد — دکمه، Escape یا کلیک بیرون — یک بار صدا می‌خورد
+      if (o.onClose) o.onClose();
     };
     if (o.actions && o.actions.length) {
       var row = el('div', { class: 'ch-modal__actions' });
@@ -1122,12 +1127,12 @@
       box.appendChild(row);
     }
     function onKey(e) {
-      if (e.key === 'Escape' && o.dismissable !== false) { close(); if (o.onClose) o.onClose(); }
+      if (e.key === 'Escape' && o.dismissable !== false) close();
     }
     document.addEventListener('keydown', onKey);
     if (o.dismissable !== false) {
       scrim.addEventListener('click', function (e) {
-        if (e.target === scrim) { close(); if (o.onClose) o.onClose(); }
+        if (e.target === scrim) close();
       });
     }
     scrim.appendChild(box);
@@ -1288,7 +1293,7 @@
     var h = el('h2', { class: 'ch-center' });
     var p = el('p', { class: 'ch-dim ch-center' });
     var dots = el('div', { class: 'ch-tut__dots' });
-    var nextBtn = el('button', { class: 'ch-btn ch-btn--primary', type: 'button' });
+    var nextBtn = null;   // بعد از ساخته شدن پنجره از دکمه‌های خودش گرفته می‌شود
     function render() {
       var pg = pages[i];
       art.innerHTML = pg.art || '';
@@ -1298,7 +1303,7 @@
       for (var j = 0; j < pages.length; j++) {
         dots.appendChild(el('div', { class: 'ch-tut__dot' + (j === i ? ' ch-tut__dot--on' : '') }));
       }
-      nextBtn.textContent = (i === pages.length - 1) ? Chogan.t('gotIt') : Chogan.t('next');
+      if (nextBtn) nextBtn.textContent = (i === pages.length - 1) ? Chogan.t('gotIt') : Chogan.t('next');
     }
     var m = ui.modal({
       body: [el('div', { class: 'ch-tut' }, [art, h, p, dots])],
