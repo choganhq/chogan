@@ -1,0 +1,61 @@
+name: انتشار وب
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'www/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: انتشار پوشه‌ی www روی گیت‌هاب پیجز
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: دریافت سورس
+        uses: actions/checkout@v4
+
+      # روی ریپوی قالب پیجز عمداً فعال نیست. بدون این بررسی، ورک‌فلو
+      # با خطای قرمز می‌افتاد. اینجا فقط با پیام رد می‌شود.
+      - name: بررسی فعال بودن پیجز
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/pages" >/dev/null 2>&1; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "گیت‌هاب پیجز روی این ریپو فعال نیست. انتشار وب رد شد."
+            echo "برای فعال کردن: Settings ← Pages ← Source: GitHub Actions"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: آماده‌سازی پیجز
+        if: steps.pages.outputs.enabled == 'true'
+        uses: actions/configure-pages@v5
+
+      - name: بسته‌بندی www
+        if: steps.pages.outputs.enabled == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: www
+
+      - name: انتشار
+        id: deployment
+        if: steps.pages.outputs.enabled == 'true'
+        uses: actions/deploy-pages@v4
