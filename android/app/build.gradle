@@ -1,0 +1,114 @@
+plugins {
+    id 'com.android.application'
+}
+
+// ---------------------------------------------------------------------------
+// تنها منبع شناسه و نام بسته: capacitor.config.json در ریشه‌ی ریپو
+// تنها منبع نسخه: www/version.js در ریشه‌ی ریپو
+// هیچ‌کدام از این مقادیر نباید جای دیگری تکرار شود.
+// ---------------------------------------------------------------------------
+def repoRoot = rootProject.file('..')
+
+def capConfig = new groovy.json.JsonSlurper()
+        .parseText(new File(repoRoot, 'capacitor.config.json').getText('UTF-8'))
+
+def versionSource = new File(repoRoot, 'www/version.js').getText('UTF-8')
+def appVersionName = (versionSource =~ /APP_VERSION\s*=\s*['"]([^'"]+)['"]/)[0][1]
+def appVersionCode = ((versionSource =~ /APP_VERSION_CODE\s*=\s*(\d+)/)[0][1]).toInteger()
+
+// دارایی‌های وب اینجا ساخته می‌شوند تا درخت کاری تمیز بماند
+def capacitorAssetsDir = layout.buildDirectory.dir('generated/capacitorAssets').get().asFile
+
+android {
+    namespace capConfig.appId
+    compileSdk 36
+
+    defaultConfig {
+        applicationId capConfig.appId
+        minSdk 24
+        targetSdk 36
+        versionCode appVersionCode
+        versionName appVersionName
+
+        // نام برنامه هم از همان capacitor.config.json می‌آید، نه از strings.xml
+        resValue 'string', 'app_name', capConfig.appName
+
+        aaptOptions {
+            // اجازه‌ی نگه‌داشتن فایل‌های وبی که با نقطه شروع می‌شوند
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+
+    sourceSets {
+        main {
+            assets.srcDirs += capacitorAssetsDir
+        }
+    }
+
+    signingConfigs {
+        release {
+            // فقط وقتی متغیرهای محیطی وجود دارند فعال می‌شود.
+            // بیلد اف‌دروید بدون این متغیرها اجرا می‌شود و خروجی امضانشده می‌ماند
+            // تا اف‌دروید خودش امضا کند.
+            def keystorePath = System.getenv('ANDROID_KEYSTORE_FILE')
+            if (keystorePath) {
+                storeFile file(keystorePath)
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            shrinkResources false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (System.getenv('ANDROID_KEYSTORE_FILE')) {
+                signingConfig signingConfigs.release
+            }
+        }
+        debug {
+            applicationIdSuffix '.debug'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+
+    lint {
+        abortOnError false
+    }
+}
+
+// www و capacitor.config.json را داخل assets می‌ریزد و فهرست خالی افزونه‌ها را می‌سازد.
+// جای npx cap sync را می‌گیرد، بدون نود و بدون npm.
+def syncWebAssets = tasks.register('syncWebAssets', Sync) {
+    description = 'کپی www و capacitor.config.json داخل assets'
+    from(new File(repoRoot, 'www')) {
+        into 'public'
+    }
+    from(new File(repoRoot, 'capacitor.config.json'))
+    into capacitorAssetsDir
+    doLast {
+        // کپسیتور بدون این فایل بالا نمی‌آید. هیچ افزونه‌ای نداریم، پس آرایه‌ی خالی.
+        new File(capacitorAssetsDir, 'capacitor.plugins.json').setText('[]\n', 'UTF-8')
+    }
+}
+
+tasks.named('preBuild').configure {
+    dependsOn syncWebAssets
+}
+
+dependencies {
+    // هسته‌ی کپسیتور از Maven Central، نه از node_modules.
+    // نسخه باید با نسخه‌ی @capacitor/android یکی باشد اگر روزی CLI را برگرداندی.
+    implementation 'com.capacitorjs:core:8.5.1'
+    // برای رزولوشن استایل AppTheme.NoActionBar در منابع
+    implementation 'androidx.appcompat:appcompat:1.7.1'
+    // OnBackPressedCallback در MainActivity. از appcompat هم می‌آید ولی صریح پین می‌کنیم.
+    implementation 'androidx.activity:activity:1.11.0'
+}
