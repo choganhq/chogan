@@ -20,7 +20,7 @@ var p = new URLSearchParams(location.search);
   try { localStorage.setItem('chogan.'+g+'.tutSeen','true'); } catch(e){}
 });
 try {
-  localStorage.setItem('chogan.app.settings', JSON.stringify({lang:'fa',theme:p.get('theme')||'light',sfx:true,music:true,haptics:true}));
+  localStorage.setItem('chogan.app.settings', JSON.stringify({lang:p.get('lang')||'fa',theme:p.get('theme')||'light',sfx:true,music:true,haptics:true}));
   localStorage.setItem('chogan.app.coins','245');
   localStorage.setItem('chogan.app.league', JSON.stringify({season:'2026-08-29',tier:2,points:412,history:[],lastResult:null}));
   localStorage.setItem('chogan.app.counters', JSON.stringify({coinsEarned:640,dailyDone:12}));
@@ -40,20 +40,30 @@ sleep 1
 shot() {
   "$CHROME" --headless --disable-gpu --no-sandbox --hide-scrollbars \
     --virtual-time-budget=8000 --window-size=440,900 --force-device-scale-factor=2.4 \
-    --screenshot="$OUT/$1.png" "http://127.0.0.1:$PORT/_shot.html?theme=$3&to=$2" >/dev/null 2>&1
-  echo "  $1.png"
+    --screenshot="$OUT/$4/$1.png" \
+    "http://127.0.0.1:$PORT/_shot.html?theme=$3&lang=$4&to=$2" >/dev/null 2>&1
+  echo "  $4/$1.png"
 }
 
-shot 1 "index.html" light
-shot 2 "games%2Ftower-defence%2Findex.html" light
-shot 3 "games%2Fsudoku%2Findex.html" light
-shot 4 "games%2Fminesweeper%2Findex.html%3Fdaily%3D$(date +%Y-%m-%d)" light
-shot 5 "games%2Fdots%2Findex.html" light
-shot 6 "index.html" dark
-
-for loc in fa en-US; do
-  dir="fastlane/metadata/android/$loc/images/phoneScreenshots"
-  mkdir -p "$dir"
-  cp "$OUT"/*.png "$dir/"
+# هر زبان تصویر خودش را می‌گیرد. تصویر رابط فارسی داخل متادیتای انگلیسی
+# فقط کاربر را گیج می‌کند.
+TODAY=$(date +%Y-%m-%d)
+for lang in fa en; do
+  mkdir -p "$OUT/$lang"
+  shot 1 "index.html" light "$lang"
+  shot 2 "games%2Ftower-defence%2Findex.html" light "$lang"
+  shot 3 "games%2Fsudoku%2Findex.html" light "$lang"
+  shot 4 "games%2Fminesweeper%2Findex.html%3Fdaily%3D$TODAY" light "$lang"
+  shot 5 "games%2Fdots%2Findex.html" light "$lang"
+  shot 6 "index.html" dark "$lang"
 done
-echo "تصویرها در متادیتای هر دو زبان به‌روز شدند"
+
+copy_to() {
+  dir="fastlane/metadata/android/$1/images/phoneScreenshots"
+  mkdir -p "$dir"
+  rm -f "$dir"/*.png
+  cp "$OUT/$2"/*.png "$dir/"
+}
+copy_to fa fa
+copy_to en-US en
+echo "تصویرها برای هر زبان جدا ساخته و در متادیتا گذاشته شدند"
