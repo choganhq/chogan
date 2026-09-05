@@ -1,0 +1,788 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>مین‌روب — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .ms-wrap { width: 100%; display: flex; flex-direction: column; gap: var(--s-3); align-items: center; max-width: 100%; }
+  .ms-top { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+  .ms-scroll {
+    max-width: 100%; overflow: auto; overscroll-behavior: contain;
+    border-radius: var(--r-md); box-shadow: var(--sh-2); background: var(--c-line);
+    padding: 4px; touch-action: pan-x pan-y;
+  }
+  .ms-board { display: grid; grid-template-columns: repeat(var(--cols), var(--cs)); gap: 2px; }
+  .ms-cell {
+    width: var(--cs); height: var(--cs); border: 0; padding: 0; cursor: pointer;
+    background: var(--c-surface-3); border-radius: 4px;
+    font: inherit; font-weight: 800; font-size: calc(var(--cs) * .56);
+    display: grid; place-items: center; color: var(--c-text);
+    box-shadow: var(--sh-inset);
+    transition: background var(--t-fast) var(--ease);
+    -webkit-user-select: none; user-select: none; touch-action: manipulation;
+    font-variant-numeric: tabular-nums;
+  }
+  .ms-cell--open { background: var(--c-surface-2); box-shadow: none; }
+  .ms-cell--open.ms-pop { animation: ms-open var(--t-mid) var(--ease) backwards; }
+  @keyframes ms-open { from { transform: scale(.6); opacity: .2; } }
+  .ms-cell--flag { color: var(--c-bad); }
+  .ms-cell--mine { background: var(--c-bad); color: #fff; }
+  .ms-cell--wrong { background: var(--c-bad-soft); color: var(--c-bad); }
+  .ms-cell--hint { outline: 3px solid var(--c-good); outline-offset: -3px; }
+  .ms-cell--cursor { outline: 3px solid var(--game); outline-offset: -3px; }
+  .ms-cell svg { width: 68%; height: 68%; }
+  .ms-n1 { color: #4C7DBE; } .ms-n2 { color: #4A8A5C; } .ms-n3 { color: #C8574B; }
+  .ms-n4 { color: #6A4FA3; } .ms-n5 { color: #B06B2E; } .ms-n6 { color: #2D8C97; }
+  .ms-n7 { color: #6A6A6A; } .ms-n8 { color: #9A2F2F; }
+  .ms-tools { display: flex; gap: var(--s-2); align-items: center; justify-content: center; flex-wrap: wrap; }
+  .ms-flagbtn { min-width: 120px; }
+  .ms-custom { display: grid; grid-template-columns: 1fr auto; gap: var(--s-2); align-items: center; }
+  .ms-custom input {
+    font: inherit; width: 92px; text-align: center; padding: 9px; border-radius: var(--r-md);
+    border: 1px solid var(--c-line); background: var(--c-surface-2); color: var(--c-text);
+  }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function MinesEngineFactory() {
+  'use strict';
+
+  function makeNeighbors(rows, cols) {
+    var nb = new Array(rows * cols);
+    for (var r = 0; r < rows; r++) {
+      for (var c = 0; c < cols; c++) {
+        var list = [];
+        for (var dr = -1; dr <= 1; dr++) {
+          for (var dc = -1; dc <= 1; dc++) {
+            if (!dr && !dc) continue;
+            var rr = r + dr, cc = c + dc;
+            if (rr < 0 || cc < 0 || rr >= rows || cc >= cols) continue;
+            list.push(rr * cols + cc);
+          }
+        }
+        nb[r * cols + c] = list;
+      }
+    }
+    return nb;
+  }
+
+  function layMines(rows, cols, mines, safe, nb, rnd) {
+    var n = rows * cols;
+    var banned = {};
+    banned[safe] = 1;
+    nb[safe].forEach(function (i) { banned[i] = 1; });
+    var pool = [];
+    for (var i = 0; i < n; i++) if (!banned[i]) pool.push(i);
+    for (var k = pool.length - 1; k > 0; k--) {
+      var j = Math.floor(rnd() * (k + 1));
+      var t = pool[k]; pool[k] = pool[j]; pool[j] = t;
+    }
+    var mine = new Uint8Array(n);
+    for (var m = 0; m < mines && m < pool.length; m++) mine[pool[m]] = 1;
+    return mine;
+  }
+
+  function counts(mine, nb) {
+    var num = new Uint8Array(mine.length);
+    for (var i = 0; i < mine.length; i++) {
+      if (mine[i]) { num[i] = 9; continue; }
+      var c = 0;
+      var list = nb[i];
+      for (var j = 0; j < list.length; j++) if (mine[list[j]]) c++;
+      num[i] = c;
+    }
+    return num;
+  }
+
+  function floodOpen(idx, mine, num, nb, revealed) {
+    var stack = [idx];
+    while (stack.length) {
+      var i = stack.pop();
+      if (revealed[i] || mine[i]) continue;
+      revealed[i] = 1;
+      if (num[i] === 0) {
+        var list = nb[i];
+        for (var j = 0; j < list.length; j++) if (!revealed[list[j]]) stack.push(list[j]);
+      }
+    }
+  }
+
+  /* حل‌کننده‌ی قطعی: فقط استنتاج، بدون حدس.
+     قانون‌ها: شمارش ساده، زیرمجموعه‌ی محدودیت‌ها، و شمارش کل مین‌های باقی‌مانده. */
+  function solvable(mine, num, nb, rows, cols, first) {
+    var n = rows * cols;
+    var revealed = new Uint8Array(n);
+    var flagged = new Uint8Array(n);
+    floodOpen(first, mine, num, nb, revealed);
+    var totalMines = 0;
+    for (var i = 0; i < n; i++) if (mine[i]) totalMines++;
+
+    for (;;) {
+      var progress = false;
+
+      // محدودیت‌های فعال
+      var cons = [];
+      for (var c = 0; c < n; c++) {
+        if (!revealed[c] || num[c] === 0) continue;
+        var hidden = [], fl = 0;
+        var list = nb[c];
+        for (var j = 0; j < list.length; j++) {
+          var x = list[j];
+          if (flagged[x]) fl++;
+          else if (!revealed[x]) hidden.push(x);
+        }
+        if (!hidden.length) continue;
+        cons.push({ cells: hidden, mines: num[c] - fl });
+      }
+
+      // قانون یک: همه امن یا همه مین
+      for (var k = 0; k < cons.length; k++) {
+        var q = cons[k];
+        if (q.mines === 0) {
+          for (var a = 0; a < q.cells.length; a++) {
+            if (!revealed[q.cells[a]]) { floodOpen(q.cells[a], mine, num, nb, revealed); progress = true; }
+          }
+        } else if (q.mines === q.cells.length) {
+          for (var b = 0; b < q.cells.length; b++) {
+            if (!flagged[q.cells[b]]) { flagged[q.cells[b]] = 1; progress = true; }
+          }
+        }
+      }
+      if (progress) continue;
+
+      // قانون دو: زیرمجموعه
+      for (var x1 = 0; x1 < cons.length && !progress; x1++) {
+        for (var x2 = 0; x2 < cons.length && !progress; x2++) {
+          if (x1 === x2) continue;
+          var A = cons[x1], B = cons[x2];
+          if (A.cells.length >= B.cells.length) continue;
+          var setB = {};
+          for (var s = 0; s < B.cells.length; s++) setB[B.cells[s]] = 1;
+          var sub = true;
+          for (var s2 = 0; s2 < A.cells.length; s2++) if (!setB[A.cells[s2]]) { sub = false; break; }
+          if (!sub) continue;
+          var diff = B.cells.filter(function (v) { return A.cells.indexOf(v) < 0; });
+          var dm = B.mines - A.mines;
+          if (dm === 0) {
+            for (var d1 = 0; d1 < diff.length; d1++) if (!revealed[diff[d1]]) { floodOpen(diff[d1], mine, num, nb, revealed); progress = true; }
+          } else if (dm === diff.length) {
+            for (var d2 = 0; d2 < diff.length; d2++) if (!flagged[diff[d2]]) { flagged[diff[d2]] = 1; progress = true; }
+          }
+        }
+      }
+      if (progress) continue;
+
+      // قانون سه: شمارش کل
+      var hiddenAll = [], flags = 0;
+      for (var h = 0; h < n; h++) {
+        if (flagged[h]) flags++;
+        else if (!revealed[h]) hiddenAll.push(h);
+      }
+      var left = totalMines - flags;
+      if (hiddenAll.length && left === 0) {
+        for (var z = 0; z < hiddenAll.length; z++) { floodOpen(hiddenAll[z], mine, num, nb, revealed); }
+        progress = true;
+      } else if (hiddenAll.length && left === hiddenAll.length) {
+        for (var z2 = 0; z2 < hiddenAll.length; z2++) flagged[hiddenAll[z2]] = 1;
+        progress = true;
+      }
+      if (!progress) break;
+    }
+
+    for (var f = 0; f < n; f++) if (!mine[f] && !revealed[f]) return false;
+    return true;
+  }
+
+  // تولید تخته. اگر noGuess باشد تا سقف زمانی و تعداد تلاش می‌کند
+  // و اگر نشد تخته‌ی معمولی می‌دهد و در خروجی می‌گوید.
+  function generate(opts) {
+    var rows = opts.rows, cols = opts.cols, mines = opts.mines;
+    var rnd = opts.rnd, safe = opts.safe;
+    var nb = opts.nb || makeNeighbors(rows, cols);
+    var noGuess = opts.noGuess !== false;
+    var budget = opts.budgetMs || 1200;
+    var maxTries = opts.maxTries || 400;
+    var t0 = Date.now();
+    var fallback = null;
+    for (var tries = 1; tries <= (noGuess ? maxTries : 1); tries++) {
+      var mine = layMines(rows, cols, mines, safe, nb, rnd);
+      var num = counts(mine, nb);
+      if (!noGuess) return { mine: mine, num: num, nb: nb, noGuess: false, tries: tries };
+      if (!fallback) fallback = { mine: mine, num: num };
+      if (solvable(mine, num, nb, rows, cols, safe)) {
+        return { mine: mine, num: num, nb: nb, noGuess: true, tries: tries, ms: Date.now() - t0 };
+      }
+      if (Date.now() - t0 > budget) break;
+    }
+    return { mine: fallback.mine, num: fallback.num, nb: nb, noGuess: false, failed: noGuess, ms: Date.now() - t0 };
+  }
+
+  // یک خانه‌ی امن و بسته برای راهنمایی؛ ترجیحاً کنار یک عدد باز
+  function safeHint(mine, revealed, flagged, nb, rnd) {
+    var edge = [], any = [];
+    for (var i = 0; i < mine.length; i++) {
+      if (revealed[i] || flagged[i] || mine[i]) continue;
+      any.push(i);
+      var list = nb[i];
+      for (var j = 0; j < list.length; j++) if (revealed[list[j]]) { edge.push(i); break; }
+    }
+    var pool = edge.length ? edge : any;
+    if (!pool.length) return -1;
+    return pool[Math.floor((rnd ? rnd() : Math.random()) * pool.length)];
+  }
+
+  var api = {
+    makeNeighbors: makeNeighbors, layMines: layMines, counts: counts,
+    floodOpen: floodOpen, solvable: solvable, generate: generate, safeHint: safeHint
+  };
+  if (typeof self !== 'undefined') self.MinesEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = MinesEngineFactory();
+  var HINT_COST = 15;
+
+  var SIZES = {
+    small:  { rows: 9,  cols: 9,  mines: 10 },
+    medium: { rows: 16, cols: 16, mines: 40 },
+    large:  { rows: 16, cols: 30, mines: 99 }
+  };
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'minesweeper',
+    name: { fa: 'مین‌روب', en: 'Minesweeper' },
+    accent: '#E4A853',
+    mood: 'minesweeper',
+    strings: {
+      fa: {
+        small: 'کوچک', medium: 'متوسط', large: 'بزرگ', custom: 'سفارشی',
+        minesLeft: 'مین', flagMode: 'حالت پرچم', noGuess: 'بدون حدس',
+        guessy: 'این تخته ممکن است حدس بخواهد', boom: 'روی مین رفتی',
+        rows: 'سطر', cols: 'ستون', mineCount: 'تعداد مین', newBoard: 'تخته‌ی تازه',
+        chordHint: 'روی عدد باز بزن تا خانه‌های اطرافش باز شوند',
+        longPress: 'لمس طولانی برای پرچم', safeShown: 'یک خانه‌ی امن نشان داده شد',
+        dailyMines: 'مین‌روب روزانه',
+        tutTitle1: 'هدف', tutText1: 'همه‌ی خانه‌های بدون مین را باز کن. هر عدد می‌گوید چند مین دور تا دورش هست.',
+        tutTitle2: 'پرچم', tutText2: 'روی خانه‌ای که مطمئنی مین است پرچم بگذار: دکمه‌ی حالت پرچم یا لمس طولانی.',
+        tutTitle3: 'بدون حدس', tutText3: 'تخته‌ها طوری ساخته می‌شوند که همیشه با استدلال حل شوند. لازم نیست شانسی بزنی.'
+      },
+      en: {
+        small: 'Small', medium: 'Medium', large: 'Large', custom: 'Custom',
+        minesLeft: 'Mines', flagMode: 'Flag mode', noGuess: 'No guessing',
+        guessy: 'This board may require a guess', boom: 'You hit a mine',
+        rows: 'Rows', cols: 'Columns', mineCount: 'Mines', newBoard: 'New board',
+        chordHint: 'Tap an open number to clear around it',
+        longPress: 'Long press to flag', safeShown: 'A safe cell was revealed',
+        dailyMines: 'Daily minesweeper',
+        tutTitle1: 'The goal', tutText1: 'Open every cell without a mine. Each number tells you how many mines touch that cell.',
+        tutTitle2: 'Flags', tutText2: 'Mark a cell you are sure about: use flag mode or a long press.',
+        tutTitle3: 'No guessing', tutText3: 'Boards are generated so they are always solvable by reasoning alone.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', { size: 'small', custom: { rows: 12, cols: 12, mines: 24 } });
+
+  var S = null, cells = [], timerId = null, flagMode = false, cursor = 0, pressTimer = null, longFired = false;
+
+  var board = el('div', { class: 'ms-board', role: 'grid' });
+  var scroll = el('div', { class: 'ms-scroll' }, [board]);
+  var top = el('div', { class: 'ms-top' });
+  var tools = el('div', { class: 'ms-tools' });
+  var wrap = el('div', { class: 'ms-wrap' }, [top, scroll, tools]);
+
+  var flagBtn = el('button', { class: 'ch-btn ch-btn--soft ms-flagbtn', type: 'button' },
+    [C.icon('flag', 20), el('span', { text: C.t('flagMode') })]);
+  flagBtn.setAttribute('aria-pressed', 'false');
+  flagBtn.addEventListener('click', function () {
+    flagMode = !flagMode;
+    flagBtn.setAttribute('aria-pressed', flagMode ? 'true' : 'false');
+    flagBtn.className = 'ch-btn ms-flagbtn ' + (flagMode ? 'ch-btn--primary' : 'ch-btn--soft');
+    C.feedback('select');
+  });
+  var hintBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button' },
+    [C.icon('bulb', 20), el('span', { text: C.t('hint') }), el('span', { class: 'ch-badge ch-badge--gold', text: C.num(HINT_COST) })]);
+  hintBtn.addEventListener('click', function () { hint(); });
+  tools.appendChild(flagBtn);
+  tools.appendChild(hintBtn);
+
+  ctx.stat('mines', C.t('minesLeft'));
+  ctx.stat('time', C.t('time'));
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newBoard'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ ساخت */
+
+  function spec() {
+    if (S && S.spec) return S.spec;
+    if (prefs.size === 'custom') return prefs.custom;
+    return SIZES[prefs.size] || SIZES.small;
+  }
+
+  function newGame(sizeKey, seedRng, daily) {
+    var sp = sizeKey === 'custom' ? prefs.custom : (SIZES[sizeKey] || SIZES.small);
+    S = {
+      sizeKey: sizeKey, spec: { rows: sp.rows, cols: sp.cols, mines: sp.mines },
+      daily: daily || null,
+      seed: null,
+      started: false, done: false, won: false,
+      elapsed: 0, flags: 0, hints: 0, noGuess: null,
+      mine: null, num: null,
+      revealed: [], flagged: [],
+    };
+    S.nbRows = sp.rows; S.nbCols = sp.cols;
+    S.revealed = new Array(sp.rows * sp.cols).fill(0);
+    S.flagged = new Array(sp.rows * sp.cols).fill(0);
+    S.pendingRng = seedRng || null;
+    buildBoard();
+    render();
+    stopTimer();
+    ctx.setStat('time', C.time(0));
+    save();
+  }
+
+  function firstClick(idx) {
+    var sp = S.spec;
+    var nb = E.makeNeighbors(sp.rows, sp.cols);
+    var rnd = S.pendingRng || function () { return Math.random(); };
+    var g = E.generate({
+      rows: sp.rows, cols: sp.cols, mines: sp.mines, rnd: rnd, safe: idx, nb: nb,
+      noGuess: true, budgetMs: 1500, maxTries: 500
+    });
+    S.mine = Array.prototype.slice.call(g.mine);
+    S.num = Array.prototype.slice.call(g.num);
+    S.noGuess = !!g.noGuess;
+    S.started = true;
+    S.startedAt = Date.now();
+    if (!S.noGuess) C.ui.toast({ icon: 'info', title: C.t('guessy'), ms: 2600 });
+    startTimer();
+  }
+
+  function neighbors(i) {
+    var sp = S.spec, r = (i / sp.cols) | 0, c = i % sp.cols, out = [];
+    for (var dr = -1; dr <= 1; dr++) {
+      for (var dc = -1; dc <= 1; dc++) {
+        if (!dr && !dc) continue;
+        var rr = r + dr, cc = c + dc;
+        if (rr < 0 || cc < 0 || rr >= sp.rows || cc >= sp.cols) continue;
+        out.push(rr * sp.cols + cc);
+      }
+    }
+    return out;
+  }
+
+  /* ------------------------------------------------------------ رابط */
+
+  function buildBoard() {
+    var sp = S.spec;
+    board.innerHTML = '';
+    cells = [];
+    board.style.setProperty('--cols', sp.cols);
+    sizeCells();
+    for (var i = 0; i < sp.rows * sp.cols; i++) {
+      (function (idx) {
+        var b = el('button', { class: 'ms-cell', type: 'button', role: 'gridcell' });
+        b.addEventListener('pointerdown', function (e) {
+          longFired = false;
+          if (e.pointerType !== 'mouse') {
+            pressTimer = setTimeout(function () { longFired = true; toggleFlag(idx); }, 420);
+          }
+        });
+        b.addEventListener('pointerup', function () { clearTimeout(pressTimer); });
+        b.addEventListener('pointercancel', function () { clearTimeout(pressTimer); });
+        b.addEventListener('pointerleave', function () { clearTimeout(pressTimer); });
+        b.addEventListener('contextmenu', function (e) { e.preventDefault(); toggleFlag(idx); });
+        b.addEventListener('click', function () {
+          if (longFired) { longFired = false; return; }
+          cursor = idx;
+          if (flagMode && !S.revealed[idx]) toggleFlag(idx);
+          else tap(idx);
+        });
+        cells.push(b);
+        board.appendChild(b);
+      })(i);
+    }
+  }
+
+  function sizeCells() {
+    var sp = S.spec;
+    var avail = Math.min(window.innerWidth - 26, 640);
+    var cs = Math.floor((avail - sp.cols * 2) / sp.cols);
+    cs = C.clamp(cs, 26, 42);
+    board.style.setProperty('--cs', cs + 'px');
+  }
+  window.addEventListener('resize', function () { if (S) sizeCells(); });
+
+  function render() {
+    top.innerHTML = '';
+    if (S.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' },
+        [C.icon('calendar', 14), el('span', { text: C.t('dailyMines') + ' — ' + C.num(S.daily) })]));
+    } else {
+      top.appendChild(C.ui.segmented(
+        ['small', 'medium', 'large', 'custom'].map(function (k) { return { value: k, label: C.t(k) }; }),
+        S.sizeKey,
+        function (v) {
+          prefs.size = v; ctx.store.set('prefs', prefs);
+          if (v === 'custom') customModal(); else newGame(v);
+        }
+      ));
+    }
+    if (S.noGuess === true) top.appendChild(el('span', { class: 'ch-badge ch-badge--good', text: C.t('noGuess') }));
+    paint();
+  }
+
+  function paint() {
+    var sp = S.spec;
+    for (var i = 0; i < sp.rows * sp.cols; i++) {
+      var b = cells[i];
+      if (!b) continue;
+      var cls = 'ms-cell';
+      b.innerHTML = '';
+      if (S.revealed[i]) {
+        cls += ' ms-cell--open';
+        var v = S.num ? S.num[i] : 0;
+        if (v > 0 && v < 9) { cls += ' ms-n' + v; b.textContent = C.num(v); }
+        if (S.mine && S.mine[i]) { cls += ' ms-cell--mine'; b.appendChild(C.icon('mine', 18)); }
+      } else if (S.flagged[i]) {
+        cls += ' ms-cell--flag';
+        b.appendChild(C.icon('flag', 18));
+        if (S.done && S.mine && !S.mine[i]) cls += ' ms-cell--wrong';
+      }
+      if (i === cursor && document.documentElement.dataset.kb === '1') cls += ' ms-cell--cursor';
+      b.className = cls;
+    }
+    ctx.setStat('mines', Math.max(0, sp.mines - S.flags));
+  }
+
+  /* ----------------------------------------------------------- حرکت */
+
+  function tap(idx) {
+    if (S.done) return;
+    if (!S.started) { firstClick(idx); }
+    if (S.flagged[idx]) return;
+    if (S.revealed[idx]) { chord(idx); return; }
+    if (S.mine[idx]) { lose(idx); return; }
+    var order = openFrom(idx);
+    animate(order);
+    C.feedback('tap');
+    C.audio.sfx('dig');
+    checkWin();
+    save();
+  }
+
+  function openFrom(idx) {
+    var order = [], stack = [idx];
+    while (stack.length) {
+      var i = stack.shift();
+      if (S.revealed[i] || S.flagged[i] || S.mine[i]) continue;
+      S.revealed[i] = 1;
+      order.push(i);
+      if (S.num[i] === 0) neighbors(i).forEach(function (n) { if (!S.revealed[n]) stack.push(n); });
+    }
+    return order;
+  }
+
+  function animate(order) {
+    paint();
+    if (C.ui.reduceMotion() || order.length < 2) return;
+    for (var k = 0; k < order.length; k++) {
+      var b = cells[order[k]];
+      if (!b) continue;
+      b.classList.add('ms-pop');
+      b.style.animationDelay = Math.min(k * 9, 420) + 'ms';
+      (function (node) {
+        setTimeout(function () { node.classList.remove('ms-pop'); node.style.animationDelay = ''; }, 700);
+      })(b);
+    }
+  }
+
+  function chord(idx) {
+    if (!S.num || S.num[idx] <= 0 || S.num[idx] > 8) return;
+    var nb = neighbors(idx);
+    var flags = 0, hidden = [];
+    nb.forEach(function (n) { if (S.flagged[n]) flags++; else if (!S.revealed[n]) hidden.push(n); });
+    if (flags !== S.num[idx] || !hidden.length) { C.audio.sfx('tap'); return; }
+    var hitMine = -1;
+    var order = [];
+    hidden.forEach(function (n) {
+      if (S.mine[n]) { hitMine = n; return; }
+      order = order.concat(openFrom(n));
+    });
+    if (hitMine >= 0) { lose(hitMine); return; }
+    animate(order);
+    C.feedback('tap');
+    checkWin();
+    save();
+  }
+
+  function toggleFlag(idx) {
+    if (S.done || S.revealed[idx]) return;
+    S.flagged[idx] = S.flagged[idx] ? 0 : 1;
+    S.flags += S.flagged[idx] ? 1 : -1;
+    C.audio.sfx('flag');
+    C.haptic('select');
+    paint();
+    save();
+  }
+
+  function hint() {
+    if (!S || S.done) return;
+    if (!S.started) { C.ui.toast({ icon: 'info', title: C.t('chordHint') }); return; }
+    if (!C.coins.can(HINT_COST)) {
+      C.feedback('bad');
+      C.ui.toast({ icon: 'coin', title: C.t('notEnoughCoins'), sub: C.t('playToEarn') });
+      return;
+    }
+    var i = E.safeHint(S.mine, S.revealed, S.flagged, neighborsArray(), null);
+    if (i < 0) return;
+    C.coins.spend(HINT_COST);
+    S.hints++;
+    var order = openFrom(i);
+    animate(order);
+    if (cells[i]) {
+      cells[i].classList.add('ms-cell--hint');
+      setTimeout(function () { if (cells[i]) cells[i].classList.remove('ms-cell--hint'); }, 1400);
+    }
+    C.feedback('coin');
+    C.ui.toast({ icon: 'bulb', title: C.t('safeShown') });
+    checkWin();
+    save();
+  }
+  function neighborsArray() {
+    var sp = S.spec, out = [];
+    for (var i = 0; i < sp.rows * sp.cols; i++) out.push(neighbors(i));
+    return out;
+  }
+
+  function lose(idx) {
+    S.done = true; S.won = false;
+    stopTimer();
+    for (var i = 0; i < S.mine.length; i++) if (S.mine[i]) S.revealed[i] = 1;
+    paint();
+    C.ui.shake(scroll);
+    C.audio.sfx('boom');
+    C.haptic('error');
+    ctx.clearSave();
+    setTimeout(function () {
+      ctx.finish({
+        won: false, title: C.t('boom'), timeMs: S.elapsed,
+        coins: 2, points: 4,
+        lines: [
+          { label: C.t('time'), value: C.time(S.elapsed) },
+          { label: C.t('difficulty'), value: C.t(S.sizeKey) }
+        ],
+        onAgain: S.daily ? null : function () { newGame(S.sizeKey); }
+      });
+    }, 620);
+  }
+
+  function checkWin() {
+    var sp = S.spec, total = sp.rows * sp.cols;
+    for (var i = 0; i < total; i++) if (!S.mine[i] && !S.revealed[i]) return;
+    S.done = true; S.won = true;
+    stopTimer();
+    for (var j = 0; j < total; j++) if (S.mine[j] && !S.flagged[j]) { S.flagged[j] = 1; S.flags++; }
+    paint();
+
+    var secs = Math.round(S.elapsed / 1000);
+    var base = { small: 8, medium: 16, large: 28, custom: 12 }[S.sizeKey] || 10;
+    var speed = C.clamp(1.7 - secs / 420, 0.6, 1.7);
+    var coins = Math.round(base * speed) + (S.daily ? 8 : 0);
+    var points = Math.round(base * 4 * speed) + (S.daily ? 25 : 0);
+
+    var isBest = C.stats.best('minesweeper', 'time-' + S.sizeKey, S.elapsed, true);
+    C.achievements.unlock('ms-win');
+    if (S.sizeKey === 'large') C.achievements.unlock('ms-large');
+    if (S.sizeKey === 'small' && S.elapsed < 30000) C.achievements.unlock('ms-fast');
+    if (S.daily) C.stats.daily('minesweeper', S.daily, { label: C.time(S.elapsed), ms: S.elapsed, size: S.sizeKey });
+    ctx.clearSave();
+
+    ctx.finish({
+      won: true, timeMs: S.elapsed, coins: coins, points: points,
+      note: isBest ? C.t('best') + '!' : null,
+      lines: [
+        { label: C.t('time'), value: C.time(S.elapsed) },
+        { label: C.t('difficulty'), value: C.t(S.sizeKey) },
+        { label: C.t('hints'), value: C.num(S.hints) }
+      ],
+      shareText: 'چوگان · مین‌روب ' + C.t(S.sizeKey) + (S.daily ? ('\nروزانه ' + S.daily) : '') +
+        '\nزمان ' + C.time(S.elapsed) + ' · راهنمایی ' + C.num(S.hints),
+      onAgain: S.daily ? null : function () { newGame(S.sizeKey); }
+    });
+  }
+
+  /* --------------------------------------------------------- زمان‌سنج */
+
+  function startTimer() {
+    stopTimer();
+    var last = Date.now();
+    timerId = setInterval(function () {
+      var n = Date.now();
+      if (S && !S.done && S.started) { S.elapsed += n - last; ctx.setStat('time', C.time(S.elapsed)); }
+      last = n;
+    }, 250);
+  }
+  function stopTimer() { if (timerId) { clearInterval(timerId); timerId = null; } }
+  C.onPause(function () { stopTimer(); });
+  C.onResume(function () { if (S && !S.done && S.started) startTimer(); });
+
+  /* --------------------------------------------------------- ذخیره */
+
+  ctx.autosave(function () {
+    if (!S || S.done || !S.started) return { inProgress: false };
+    return { s: S, prefs: prefs };
+  });
+  function save() { ctx.save(); }
+
+  function askNew() {
+    if (!S || S.done || !S.started) { newGame(S ? S.sizeKey : prefs.size); return; }
+    C.ui.confirm({ title: C.t('newBoard'), body: C.t('resetWarn'), onOk: function () { newGame(S.sizeKey); } });
+  }
+
+  function customModal() {
+    var r = el('input', { type: 'number', min: '5', max: '24', value: prefs.custom.rows });
+    var c = el('input', { type: 'number', min: '5', max: '30', value: prefs.custom.cols });
+    var m = el('input', { type: 'number', min: '3', max: '400', value: prefs.custom.mines });
+    C.ui.modal({
+      title: C.t('custom'),
+      body: [
+        el('div', { class: 'ms-custom' }, [el('span', { text: C.t('rows') }), r]),
+        el('div', { class: 'ms-custom' }, [el('span', { text: C.t('cols') }), c]),
+        el('div', { class: 'ms-custom' }, [el('span', { text: C.t('mineCount') }), m])
+      ],
+      actions: [
+        { label: C.t('cancel') },
+        { label: C.t('start'), kind: 'primary', onClick: function () {
+          var rows = C.clamp(parseInt(r.value, 10) || 12, 5, 24);
+          var cols = C.clamp(parseInt(c.value, 10) || 12, 5, 30);
+          var maxM = rows * cols - 10;
+          var mines = C.clamp(parseInt(m.value, 10) || 20, 3, maxM);
+          prefs.custom = { rows: rows, cols: cols, mines: mines };
+          prefs.size = 'custom';
+          ctx.store.set('prefs', prefs);
+          newGame('custom');
+        } }
+      ]
+    });
+  }
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('tutText1') }),
+        el('div', { class: 'ch-list' }, [
+          row(C.t('longPress'), C.t('flagMode')),
+          row(C.t('chordHint'), '')
+        ]),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          row(C.t('play'), 'Space / Enter'),
+          row(C.t('flagMode'), 'F'),
+          row(C.t('hint'), 'H'),
+          row(C.t('back'), '← ↑ → ↓')
+        ])
+      ],
+      actions: [
+        { label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('done'), kind: 'primary' }
+      ]
+    });
+  }
+  function row(what, key) {
+    return el('div', { class: 'ch-item' }, [
+      el('div', { class: 'ch-item__label', text: what }),
+      key ? el('span', { class: 'ch-badge', text: key }) : null
+    ]);
+  }
+
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'),
+      art: '<svg viewBox="0 0 200 110" width="100%"><g>' +
+        '<rect x="40" y="20" width="34" height="34" rx="5" fill="var(--c-surface-2)"/>' +
+        '<rect x="78" y="20" width="34" height="34" rx="5" fill="var(--c-surface-3)"/>' +
+        '<rect x="116" y="20" width="34" height="34" rx="5" fill="var(--c-surface-3)"/>' +
+        '<rect x="40" y="58" width="34" height="34" rx="5" fill="var(--c-surface-2)"/>' +
+        '<rect x="78" y="58" width="34" height="34" rx="5" fill="var(--c-surface-2)"/>' +
+        '<rect x="116" y="58" width="34" height="34" rx="5" fill="var(--c-surface-3)"/>' +
+        '<text x="57" y="45" font-size="20" font-weight="800" fill="#4C7DBE" text-anchor="middle" font-family="sans-serif">۱</text>' +
+        '<text x="95" y="83" font-size="20" font-weight="800" fill="#4A8A5C" text-anchor="middle" font-family="sans-serif">۲</text>' +
+        '</g></svg>' },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' +
+        '<rect x="70" y="25" width="60" height="60" rx="8" fill="var(--c-surface-3)"/>' +
+        '<path d="M88 72V38M88 40h22l-7 6 7 6H88" fill="none" stroke="var(--c-bad)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' +
+        '<circle cx="100" cy="55" r="34" fill="var(--c-good-soft)"/>' +
+        '<path d="M84 56l11 11 22-24" fill="none" stroke="var(--c-good)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg>' }
+  ];
+
+  /* --------------------------------------------------------- کیبورد */
+
+  window.addEventListener('keydown', function (e) {
+    if (!S || S.done) return;
+    var sp = S.spec, k = e.key, moved = true;
+    document.documentElement.dataset.kb = '1';
+    if (k === 'ArrowUp') cursor = Math.max(0, cursor - sp.cols);
+    else if (k === 'ArrowDown') cursor = Math.min(sp.rows * sp.cols - 1, cursor + sp.cols);
+    else if (k === 'ArrowLeft') cursor = C.clamp(cursor + (document.documentElement.dir === 'rtl' ? 1 : -1), 0, sp.rows * sp.cols - 1);
+    else if (k === 'ArrowRight') cursor = C.clamp(cursor + (document.documentElement.dir === 'rtl' ? -1 : 1), 0, sp.rows * sp.cols - 1);
+    else moved = false;
+    if (moved) { paint(); e.preventDefault(); return; }
+    if (k === ' ' || k === 'Enter') { tap(cursor); e.preventDefault(); }
+    else if (k === 'f' || k === 'F') { toggleFlag(cursor); e.preventDefault(); }
+    else if (k === 'h' || k === 'H') { hint(); e.preventDefault(); }
+  });
+
+  /* ----------------------------------------------------------- شروع */
+
+  var saved = ctx.loadSave();
+  if (dailyDate) {
+    var d = C.daily('minesweeper', dailyDate);
+    newGame('medium', d.rng, dailyDate);
+    // در حالت روزانه خانه‌ی اولین کلیک هم از بذر می‌آید، وگرنه تخته‌ی هر بازیکن
+    // با تخته‌ی بقیه فرق می‌کرد و «یک پازل یکسان برای همه» معنا نداشت.
+    var startCell = d.rng.int(S.spec.rows * S.spec.cols);
+    firstClick(startCell);
+    animate(openFrom(startCell));
+    save();
+    if (C.stats.dailyDone('minesweeper', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).minesweeper;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec.label });
+    }
+    ctx.tutorialIfNew(TUT);
+  } else if (saved && saved.s && saved.s.started && !saved.s.done) {
+    if (saved.prefs) prefs = saved.prefs;
+    S = saved.s;
+    buildBoard();
+    render();
+    startTimer();
+  } else {
+    newGame(prefs.size || 'small');
+    ctx.tutorialIfNew(TUT);
+  }
+})();
+</script>
+</body>
+</html>
