@@ -57,8 +57,11 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
+  // ignoreSearch لازم است: منو بازی‌ها را با ?daily=YYYY-MM-DD صدا می‌زند و
+  // بدون این گزینه، درخواستِ چالش روزانه هیچ‌وقت با نسخه‌ی کش‌شده جور نمی‌شد
+  // و آفلاین کاربر را به منو برمی‌گرداند.
   event.respondWith(
-    caches.match(req).then((hit) => {
+    caches.match(req, { ignoreSearch: true }).then((hit) => {
       if (hit) return hit;
       return fetch(req).then((res) => {
         if (res && res.ok && res.type === 'basic') {
