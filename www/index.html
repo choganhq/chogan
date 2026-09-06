@@ -39,7 +39,12 @@
       wave: 'موج', wins: 'برد', solved: 'حل‌شده', cleared: 'پاک‌شده',
       defaultPalette: 'پیش‌فرض', sea: 'دریا', sunset: 'غروب', forest: 'جنگل',
       fox: 'روباه', owl: 'جغد', cat: 'گربه', bear: 'خرس',
-      seasonResult: 'نتیجه‌ی فصل گذشته'
+      seasonResult: 'نتیجه‌ی فصل گذشته',
+      welcomeTitle: 'به چوگان خوش آمدی', welcomeSub: 'چند بازی کوچک و تمام‌شدنی. بدون تبلیغ، بدون ردیاب، بدون اینترنت.',
+      youTitle: 'خودت را معرفی کن', youSub: 'اسم اختیاری است و از این دستگاه بیرون نمی‌رود.',
+      yourName: 'اسمت', pickChar: 'یک شخصیت انتخاب کن', charFree: 'بقیه را بعداً با سکه باز می‌کنی.',
+      prefsTitle: 'دلخواه خودت تنظیمش کن', prefsSub: 'هر کدام از این‌ها را بعداً هم می‌توانی از تنظیمات عوض کنی.',
+      showWelcome: 'دیدن دوباره‌ی خوشامدگویی'
     },
     en: {
       slogan: 'Small games you can actually finish',
@@ -56,15 +61,20 @@
       wave: 'Wave', wins: 'Wins', solved: 'Solved', cleared: 'Cleared',
       defaultPalette: 'Default', sea: 'Sea', sunset: 'Sunset', forest: 'Forest',
       fox: 'Fox', owl: 'Owl', cat: 'Cat', bear: 'Bear',
-      seasonResult: 'Last season'
+      seasonResult: 'Last season',
+      welcomeTitle: 'Welcome to Chogan', welcomeSub: 'A few small games you can actually finish. No ads, no trackers, no internet.',
+      youTitle: 'Tell us about you', youSub: 'The name is optional and never leaves this device.',
+      yourName: 'Your name', pickChar: 'Pick a character', charFree: 'You can unlock the rest later with coins.',
+      prefsTitle: 'Set it up how you like', prefsSub: 'You can change any of this later in Settings.',
+      showWelcome: 'Show the welcome again'
     }
   });
 
   var PALETTES = {
-    default: { key: 'defaultPalette', c: '#E07A5F', s: '#FBE7DF', cost: 0 },
-    sea:     { key: 'sea',            c: '#4E93A8', s: '#DEEEF2', cost: 150 },
-    sunset:  { key: 'sunset',         c: '#C96A9B', s: '#F8E4EF', cost: 250 },
-    forest:  { key: 'forest',         c: '#6E9E63', s: '#E5F0E1', cost: 200 }
+    default: { key: 'defaultPalette', c: '#E07A5F', cost: 0 },
+    sea:     { key: 'sea',            c: '#4E93A8', cost: 150 },
+    sunset:  { key: 'sunset',         c: '#C96A9B', cost: 250 },
+    forest:  { key: 'forest',         c: '#6E9E63', cost: 200 }
   };
   var MASCOTS = {
     fox:  { key: 'fox',  cost: 0 },
@@ -76,6 +86,7 @@
   var app = document.getElementById('app');
   var navIn = document.getElementById('navIn');
   var GAMES = [];
+  var gamesLoaded = false;
   var tab = 'home';
 
   /* ------------------------------------------------------------ کمکی */
@@ -98,7 +109,10 @@
   function applyPalette() {
     var p = PALETTES[C.state.settings.palette || 'default'] || PALETTES.default;
     document.documentElement.style.setProperty('--c-accent', p.c);
-    document.documentElement.style.setProperty('--c-accent-soft', p.s);
+    // رنگ نرم باید نیمه‌شفاف باشد نه یک رنگ روشن ثابت، وگرنه در تم تاریک
+    // روی زمینه‌ی تیره یک لکه‌ی کرم می‌نشیند. همان کاری که setAccent برای
+    // رنگ تأکید بازی‌ها می‌کند.
+    document.documentElement.style.setProperty('--c-accent-soft', C.alpha(p.c, 0.16));
   }
 
   function isNew(g) {
@@ -610,6 +624,13 @@
       el('div', { class: 'ch-item' }, [
         el('div', { class: 'ch-item__label', text: C.t('license') }),
         el('span', { class: 'ch-badge', text: 'MIT' })
+      ]),
+      el('div', { class: 'ch-item' }, [
+        el('div', { class: 'ch-item__label', text: C.t('showWelcome') }),
+        el('button', {
+          class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', text: C.t('play'),
+          onclick: function () { C.feedback('tap'); openWelcome(); }
+        })
       ])
     ]));
     return page;
@@ -728,6 +749,163 @@
     return card;
   }
 
+  /* ----------------------------------------------------- خوشامدگویی اول */
+  /* گام‌ها عمداً یک آرایه‌اند تا اضافه کردن صفحه‌ی تازه — مثلاً معرفی
+     چالش روزانه یا لیگ — فقط یک ورودی باشد، نه دست بردن در جریان کار. */
+
+  function stepHello() {
+    var box = el('div', { class: 'ch-welcome__in ch-enter' }, [
+      el('div', { class: 'ch-welcome__art', html: C.mascot(C.state.settings.mascot || 'fox', 148) }),
+      el('h1', { text: C.t('welcomeTitle') }),
+      el('p', { class: 'ch-welcome__sub', text: C.t('welcomeSub') })
+    ]);
+    // زبان همین اول، تا بقیه‌ی گام‌ها به زبان خودش باشد
+    box.appendChild(el('div', { class: 'ch-row', style: { 'justify-content': 'center' } }, [
+      C.ui.segmented([{ value: 'fa', label: 'فارسی' }, { value: 'en', label: 'English' }],
+        C.state.settings.lang, function (v) { C.setLang(v); applyPalette(); drawWelcome(); })
+    ]));
+    return box;
+  }
+
+  function stepYou() {
+    var input = el('input', {
+      class: 'ch-field', type: 'text', maxlength: '24',
+      value: C.state.profile.name, placeholder: C.t('yourName'),
+      'aria-label': C.t('yourName')
+    });
+    var save = function () {
+      C.state.profile.name = input.value.trim().slice(0, 24);
+      C.store.set('profile', C.state.profile);
+    };
+    input.addEventListener('input', save);
+    input.addEventListener('change', save);
+
+    var chars = el('div', { class: 'ch-chars' });
+    C.mascotNames.forEach(function (k) {
+      var b = el('button', {
+        class: 'ch-char', type: 'button',
+        'aria-pressed': (C.state.settings.mascot || 'fox') === k ? 'true' : 'false'
+      }, [
+        el('div', { html: C.mascot(k, 56) }),
+        el('span', { text: C.t(MASCOTS[k] ? MASCOTS[k].key : k) })
+      ]);
+      b.addEventListener('click', function () {
+        C.state.settings.mascot = k;
+        // شخصیتی که همان اول انتخاب می‌شود مال اوست و بعداً سکه نمی‌خواهد
+        if (C.state.unlocks.indexOf('mascot.' + k) < 0) {
+          C.state.unlocks.push('mascot.' + k);
+          C.store.set('unlocks', C.state.unlocks);
+        }
+        C.store.set('settings', C.state.settings);
+        C.feedback('select');
+        drawWelcome();
+      });
+      chars.appendChild(b);
+    });
+
+    return el('div', { class: 'ch-welcome__in ch-enter' }, [
+      el('h1', { text: C.t('youTitle') }),
+      el('p', { class: 'ch-welcome__sub', text: C.t('youSub') }),
+      input,
+      el('div', { class: 'ch-xs ch-faint', style: { 'margin-top': 'var(--s-2)' }, text: C.t('pickChar') }),
+      chars,
+      el('p', { class: 'ch-xs ch-faint ch-center', text: C.t('charFree') })
+    ]);
+  }
+
+  function stepPrefs() {
+    var s = C.state.settings;
+    var list = el('div', { class: 'ch-card' }, [
+      el('div', { class: 'ch-item' }, [
+        C.icon(s.theme === 'dark' ? 'moon' : 'sun', 20),
+        el('div', { class: 'ch-item__label', text: C.t('theme') }),
+        C.ui.segmented([
+          { value: 'auto', label: C.t('themeAuto') },
+          { value: 'light', label: C.t('themeLight') },
+          { value: 'dark', label: C.t('themeDark') }
+        ], s.theme, function (v) { C.setTheme(v); drawWelcome(); })
+      ])
+    ]);
+    [
+      { icon: 'sound', label: C.t('sfx'), get: function () { return s.sfx; }, set: function (v) { C.audio.setSfx(v); } },
+      { icon: 'music', label: C.t('music'), get: function () { return s.music; }, set: function (v) { C.audio.setMusic(v); } },
+      { icon: 'vibrate', label: C.t('haptics'), get: function () { return s.haptics; },
+        set: function (v) { s.haptics = v; C.store.set('settings', s); C.haptic('tap'); } }
+    ].forEach(function (o) {
+      list.appendChild(el('div', { class: 'ch-item' }, [
+        C.icon(o.icon, 20),
+        el('div', { class: 'ch-item__label', text: o.label }),
+        C.ui.switch(o.get(), o.set)
+      ]));
+    });
+
+    return el('div', { class: 'ch-welcome__in ch-enter' }, [
+      el('h1', { text: C.t('prefsTitle') }),
+      el('p', { class: 'ch-welcome__sub', text: C.t('prefsSub') }),
+      list
+    ]);
+  }
+
+  var WELCOME_STEPS = [stepHello, stepYou, stepPrefs];
+  var wStep = 0;
+  var wHost = null;
+
+  function drawWelcome() {
+    if (!wHost) return;
+    wHost.innerHTML = '';
+    wHost.appendChild(WELCOME_STEPS[wStep]());
+
+    var last = wStep === WELCOME_STEPS.length - 1;
+    var dots = el('div', { class: 'ch-tut__dots' });
+    for (var i = 0; i < WELCOME_STEPS.length; i++) {
+      dots.appendChild(el('div', { class: 'ch-tut__dot' + (i === wStep ? ' ch-tut__dot--on' : '') }));
+    }
+    var next = el('button', {
+      class: 'ch-btn ch-btn--primary', type: 'button',
+      text: last ? C.t('start') : C.t('next')
+    });
+    next.addEventListener('click', function () {
+      C.feedback('tap');
+      if (last) { closeWelcome(); return; }
+      wStep++;
+      drawWelcome();
+    });
+    var foot = el('div', { class: 'ch-welcome__foot' }, [
+      wStep > 0 ? el('button', {
+        class: 'ch-btn ch-btn--ghost', type: 'button', text: C.t('back'),
+        onclick: function () { C.feedback('tap'); wStep--; drawWelcome(); }
+      }) : null,
+      next
+    ]);
+    var inner = wHost.querySelector('.ch-welcome__in');
+    inner.appendChild(dots);
+    inner.appendChild(foot);
+  }
+
+  function openWelcome() {
+    if (wHost && wHost.parentNode) wHost.parentNode.removeChild(wHost);
+    wStep = 0;
+    wHost = el('div', { class: 'ch-welcome', role: 'dialog', 'aria-modal': 'true' });
+    document.body.appendChild(wHost);
+    // aria-modal تنها کافی نیست: بدون این، صفحه‌خوان و کلید Tab همچنان به
+    // منو و نوار ناوبری پشت صفحه می‌رسند.
+    app.setAttribute('aria-hidden', 'true');
+    document.getElementById('nav').setAttribute('aria-hidden', 'true');
+    drawWelcome();
+  }
+
+  function closeWelcome() {
+    C.store.set('welcomeSeen', true);
+    if (wHost && wHost.parentNode) wHost.parentNode.removeChild(wHost);
+    wHost = null;
+    app.removeAttribute('aria-hidden');
+    document.getElementById('nav').removeAttribute('aria-hidden');
+    // اگر فهرست بازی‌ها هنوز نیامده، رسم را به خود fetch بسپار وگرنه یک لحظه
+    // حالت «هنوز بازی‌ای نیست» می‌پرد و بعد جایش را به فهرست می‌دهد.
+    if (gamesLoaded) render();
+    C.afterUnlock(function () { C.audio.music('menu'); });
+  }
+
   /* ------------------------------------------------------------ ناوبری */
 
   var TABS = [
@@ -770,15 +948,19 @@
   applyPalette();
   C.onLangChange = function () { applyPalette(); };
 
+  if (!C.store.get('welcomeSeen', false)) openWelcome();
+
   fetch('games.json', { cache: 'no-store' })
     .then(function (r) { return r.json(); })
     .then(function (d) {
       GAMES = d.games || [];
+      gamesLoaded = true;
       render();
       C.afterUnlock(function () { C.audio.music('menu'); });
     })
     .catch(function (err) {
       // اگر واقعاً فایل نیامد، این را بگو. خطای رندر را قورت نده.
+      gamesLoaded = true;
       if (window.console && console.error) console.error(err);
       app.innerHTML = '';
       app.appendChild(el('div', { class: 'ch-page' }, [

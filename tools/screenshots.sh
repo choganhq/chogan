@@ -19,6 +19,8 @@ var p = new URLSearchParams(location.search);
 ['tower-defence','sudoku','minesweeper','dots'].forEach(function(g){
   try { localStorage.setItem('chogan.'+g+'.tutSeen','true'); } catch(e){}
 });
+// خوشامدگویی روی همه‌ی تصویرها می‌افتد مگر اینکه صریح بخواهیمش
+try { if (!p.get('welcome')) localStorage.setItem('chogan.app.welcomeSeen','true'); } catch(e){}
 try {
   localStorage.setItem('chogan.app.settings', JSON.stringify({lang:p.get('lang')||'fa',theme:p.get('theme')||'light',sfx:true,music:true,haptics:true}));
   localStorage.setItem('chogan.app.coins','245');
@@ -41,7 +43,7 @@ shot() {
   "$CHROME" --headless --disable-gpu --no-sandbox --hide-scrollbars \
     --virtual-time-budget=8000 --window-size=440,900 --force-device-scale-factor=2.4 \
     --screenshot="$OUT/$4/$1.png" \
-    "http://127.0.0.1:$PORT/_shot.html?theme=$3&lang=$4&to=$2" >/dev/null 2>&1
+    "http://127.0.0.1:$PORT/_shot.html?theme=$3&lang=$4${5:+&welcome=1}&to=$2" >/dev/null 2>&1
   echo "  $4/$1.png"
 }
 
@@ -56,6 +58,7 @@ for lang in fa en; do
   shot 4 "games%2Fminesweeper%2Findex.html%3Fdaily%3D$TODAY" light "$lang"
   shot 5 "games%2Fdots%2Findex.html" light "$lang"
   shot 6 "index.html" dark "$lang"
+  shot 7 "index.html" light "$lang" welcome
 done
 
 copy_to() {
