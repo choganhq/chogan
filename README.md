@@ -1,4 +1,64 @@
-# چوگان — Chogan
+# Chogan — چوگان
+
+## English
+
+Chogan is a small collection of finishable games in a single app. Free, open source, no ads, no in-app purchases, no analytics or trackers, and fully offline.
+
+**[Play on the web](https://choganhq.github.io/chogan/)** · Android builds on the [Releases page](https://github.com/choganhq/chogan/releases)
+
+### The games
+
+| Game | About |
+| --- | --- |
+| Tower Defence | Four towers, three fixed maps plus a daily map, twenty waves and an endless mode |
+| Sudoku | Four difficulties with a guaranteed unique solution, notes, hints and a daily challenge |
+| Minesweeper | No-guess generation, four sizes, chording and flags, daily challenge |
+| Dots and Boxes | Two players on one phone, or three levels of AI |
+
+Around the games: a daily challenge that is identical on every device with no server at all, a weekly offline league with five tiers, over thirty awards, a shared coin that is only ever spent on hints and cosmetics, stats and a profile, and a bilingual Persian and English interface with light and dark themes.
+
+### Why it needs no permissions
+
+The Android manifest declares `VIBRATE` and nothing else — not even internet access, because nothing in the app ever touches the network. Fonts, sounds and every asset ship inside the package; sound is generated procedurally with WebAudio, so there is not a single audio file in the build. Progress is stored on the device only, and Google auto-backup is turned off.
+
+### Building
+
+The web version needs no build step:
+
+```bash
+python3 -m http.server -d www 8000
+```
+
+The Android version needs Gradle only — no Node, no npm, no `node_modules`:
+
+```bash
+cd android && gradle assembleDebug
+```
+
+Capacitor's runtime is pulled from Maven Central as `com.capacitorjs:core`, and a Gradle task named `syncWebAssets` replaces `npx cap sync`.
+
+### Testing
+
+```bash
+node tools/test.js
+tools/browser-check.sh
+```
+
+The tests extract each game engine from the published HTML file itself, between the `ENGINE START` and `ENGINE END` markers, so no second copy of the code exists for testing.
+
+### Adding a game
+
+See [NEW_GAME.md](NEW_GAME.md). In short: one folder under `www/games/`, one entry in `games.json`, bump the version.
+
+### F-Droid and GitHub builds do not cross-update
+
+They are signed with different keys, so switching source means uninstalling first, which wipes local progress. Pick one source and stay on it.
+
+### License
+
+MIT, see [LICENSE](LICENSE). The Vazirmatn font is under the OFL; its licence text ships beside the font in `www/fonts/OFL.txt`.
+
+---
 
 <div dir="rtl">
 
@@ -91,63 +151,3 @@ APK اف‌دروید و APK بخش Releases این ریپو با کلیدهای
 MIT. متن کامل در [LICENSE](LICENSE). فونت وزیرمتن زیر مجوز OFL است، متنش کنار خود فونت در `www/fonts/OFL.txt`.
 
 </div>
-
----
-
-## English
-
-Chogan is a small collection of finishable games in a single app. Free, open source, no ads, no in-app purchases, no analytics or trackers, and fully offline.
-
-**[Play on the web](https://choganhq.github.io/chogan/)** · Android builds on the [Releases page](https://github.com/choganhq/chogan/releases)
-
-### The games
-
-| Game | About |
-| --- | --- |
-| Tower Defence | Four towers, three fixed maps plus a daily map, twenty waves and an endless mode |
-| Sudoku | Four difficulties with a guaranteed unique solution, notes, hints and a daily challenge |
-| Minesweeper | No-guess generation, four sizes, chording and flags, daily challenge |
-| Dots and Boxes | Two players on one phone, or three levels of AI |
-
-Around the games: a daily challenge that is identical on every device with no server at all, a weekly offline league with five tiers, over thirty awards, a shared coin that is only ever spent on hints and cosmetics, stats and a profile, and a bilingual Persian and English interface with light and dark themes.
-
-### Why it needs no permissions
-
-The Android manifest declares `VIBRATE` and nothing else — not even internet access, because nothing in the app ever touches the network. Fonts, sounds and every asset ship inside the package; sound is generated procedurally with WebAudio, so there is not a single audio file in the build. Progress is stored on the device only, and Google auto-backup is turned off.
-
-### Building
-
-The web version needs no build step:
-
-```bash
-python3 -m http.server -d www 8000
-```
-
-The Android version needs Gradle only — no Node, no npm, no `node_modules`:
-
-```bash
-cd android && gradle assembleDebug
-```
-
-Capacitor's runtime is pulled from Maven Central as `com.capacitorjs:core`, and a Gradle task named `syncWebAssets` replaces `npx cap sync`.
-
-### Testing
-
-```bash
-node tools/test.js
-tools/browser-check.sh
-```
-
-The tests extract each game engine from the published HTML file itself, between the `ENGINE START` and `ENGINE END` markers, so no second copy of the code exists for testing.
-
-### Adding a game
-
-See [NEW_GAME.md](NEW_GAME.md). In short: one folder under `www/games/`, one entry in `games.json`, bump the version.
-
-### F-Droid and GitHub builds do not cross-update
-
-They are signed with different keys, so switching source means uninstalling first, which wipes local progress. Pick one source and stay on it.
-
-### License
-
-MIT, see [LICENSE](LICENSE). The Vazirmatn font is under the OFL; its licence text ships beside the font in `www/fonts/OFL.txt`.
