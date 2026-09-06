@@ -86,6 +86,7 @@
   var app = document.getElementById('app');
   var navIn = document.getElementById('navIn');
   var GAMES = [];
+  var gamesLoaded = false;
   var tab = 'home';
 
   /* ------------------------------------------------------------ کمکی */
@@ -882,9 +883,14 @@
   }
 
   function openWelcome() {
+    if (wHost && wHost.parentNode) wHost.parentNode.removeChild(wHost);
     wStep = 0;
     wHost = el('div', { class: 'ch-welcome', role: 'dialog', 'aria-modal': 'true' });
     document.body.appendChild(wHost);
+    // aria-modal تنها کافی نیست: بدون این، صفحه‌خوان و کلید Tab همچنان به
+    // منو و نوار ناوبری پشت صفحه می‌رسند.
+    app.setAttribute('aria-hidden', 'true');
+    document.getElementById('nav').setAttribute('aria-hidden', 'true');
     drawWelcome();
   }
 
@@ -892,7 +898,11 @@
     C.store.set('welcomeSeen', true);
     if (wHost && wHost.parentNode) wHost.parentNode.removeChild(wHost);
     wHost = null;
-    render();
+    app.removeAttribute('aria-hidden');
+    document.getElementById('nav').removeAttribute('aria-hidden');
+    // اگر فهرست بازی‌ها هنوز نیامده، رسم را به خود fetch بسپار وگرنه یک لحظه
+    // حالت «هنوز بازی‌ای نیست» می‌پرد و بعد جایش را به فهرست می‌دهد.
+    if (gamesLoaded) render();
     C.afterUnlock(function () { C.audio.music('menu'); });
   }
 
@@ -944,11 +954,13 @@
     .then(function (r) { return r.json(); })
     .then(function (d) {
       GAMES = d.games || [];
+      gamesLoaded = true;
       render();
       C.afterUnlock(function () { C.audio.music('menu'); });
     })
     .catch(function (err) {
       // اگر واقعاً فایل نیامد، این را بگو. خطای رندر را قورت نده.
+      gamesLoaded = true;
       if (window.console && console.error) console.error(err);
       app.innerHTML = '';
       app.appendChild(el('div', { class: 'ch-page' }, [
