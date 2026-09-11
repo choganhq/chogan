@@ -351,6 +351,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
       revealed: [], flagged: [],
     };
     S.nbRows = sp.rows; S.nbCols = sp.cols;
+    cursor = 0;
     S.revealed = new Array(sp.rows * sp.cols).fill(0);
     S.flagged = new Array(sp.rows * sp.cols).fill(0);
     S.pendingRng = seedRng || null;
@@ -376,6 +377,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
     S.startedAt = Date.now();
     if (!S.noGuess) C.ui.toast({ icon: 'info', title: C.t('guessy'), ms: 2600 });
     startTimer();
+    render();   // نشان «بدون حدس» تا حالا فقط بعد از بارگذاری دوباره می‌آمد
   }
 
   function neighbors(i) {
@@ -498,8 +500,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
 
   function tap(idx) {
     if (S.done) return;
-    if (!S.started) { firstClick(idx); }
+    // خانه‌ی پرچم‌دار نباید اولین کلیک حساب شود: تخته ساخته و زمان‌سنج
+    // روشن می‌شد بدون اینکه چیزی باز شود.
     if (S.flagged[idx]) return;
+    if (!S.started) { firstClick(idx); }
     if (S.revealed[idx]) { chord(idx); return; }
     if (S.mine[idx]) { lose(idx); return; }
     var order = openFrom(idx);
@@ -597,6 +601,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
   function lose(idx) {
     S.done = true; S.won = false;
     stopTimer();
+    // عکس وضعیت همین دور، چون پنجره ۶۲۰ میلی‌ثانیه بعد باز می‌شود و تا آن
+    // موقع ممکن است تخته‌ی تازه‌ای ساخته شده باشد.
+    var snap = { elapsed: S.elapsed, sizeKey: S.sizeKey, daily: S.daily };
     for (var i = 0; i < S.mine.length; i++) if (S.mine[i]) S.revealed[i] = 1;
     paint();
     C.ui.shake(scroll);
@@ -605,13 +612,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
     ctx.clearSave();
     setTimeout(function () {
       ctx.finish({
-        won: false, title: C.t('boom'), timeMs: S.elapsed,
+        won: false, title: C.t('boom'), timeMs: snap.elapsed,
         coins: 2, points: 4,
         lines: [
-          { label: C.t('time'), value: C.time(S.elapsed) },
-          { label: C.t('difficulty'), value: C.t(S.sizeKey) }
+          { label: C.t('time'), value: C.time(snap.elapsed) },
+          { label: C.t('difficulty'), value: C.t(snap.sizeKey) }
         ],
-        onAgain: S.daily ? null : function () { newGame(S.sizeKey); }
+        onAgain: snap.daily ? null : function () { newGame(snap.sizeKey); }
       });
     }, 620);
   }
@@ -773,6 +780,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
     // دکمه‌های بیرون تخته باید Enter و Space خودشان را نگه دارند
     if (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
     var sp = S.spec, k = e.key, moved = true;
+    cursor = C.clamp(cursor, 0, sp.rows * sp.cols - 1);
     document.documentElement.dataset.kb = '1';
     if (k === 'ArrowUp') cursor = Math.max(0, cursor - sp.cols);
     else if (k === 'ArrowDown') cursor = Math.min(sp.rows * sp.cols - 1, cursor + sp.cols);

@@ -209,6 +209,32 @@
   if (!state.profile.uid) { state.profile.uid = randomId(); appStore.set('profile', state.profile); }
   Chogan.state = state;
 
+  // برگشت از bfcache جاوااسکریپت را دوباره اجرا نمی‌کند، پس وضعیت درون‌حافظه
+  // از چیزی که صفحه‌ی بازی در حافظه‌ی محلی نوشته عقب می‌ماند. شیء state سر
+  // جایش تازه می‌شود، نه جایگزین، چون همه‌جا به همین ارجاع چسبیده‌اند.
+  Chogan.reloadState = function () {
+    state.settings = Object.assign({}, DEFAULT_SETTINGS, appStore.get('settings', {}));
+    state.profile = Object.assign({ name: '', country: '', uid: state.profile.uid }, appStore.get('profile', {}));
+    state.coins = appStore.get('coins', 0);
+    state.unlocks = appStore.get('unlocks', []);
+    state.achievements = appStore.get('achievements', {});
+    state.stats = appStore.get('stats', state.stats);
+    state.league = appStore.get('league', state.league);
+    state.counters = appStore.get('counters', {});
+  };
+
+  // قبل از هر تغییر روی داده‌ی مشترک، دوباره از حافظه می‌خوانیم تا تب یا
+  // صفحه‌ی دیگری که هم‌زمان باز است نوشته‌اش پاک نشود.
+  function mutate(key, fn) {
+    var fresh = appStore.get(key, null);
+    if (fresh !== null && typeof fresh === typeof state[key]) state[key] = fresh;
+    var out = fn(state[key]);
+    if (out !== undefined) state[key] = out;
+    appStore.set(key, state[key]);
+    return state[key];
+  }
+  Chogan.mutate = mutate;
+
   function saveSettings() { appStore.set('settings', state.settings); }
   function saveStats() { appStore.set('stats', state.stats); }
 
@@ -242,7 +268,7 @@
       about: 'درباره', version: 'نسخه', source: 'کد منبع', license: 'مجوز',
       aboutText: 'رایگان، متن‌باز، بدون تبلیغ، بدون ردیاب، کاملاً آفلاین.',
       name: 'نام', country: 'کشور', optional: 'اختیاری',
-      hint: 'راهنمایی', notEnoughCoins: 'سکه کافی نداری', hintUsed: 'راهنمایی گرفتی',
+      hint: 'راهنمایی', hints: 'راهنمایی', notEnoughCoins: 'سکه کافی نداری', hintUsed: 'راهنمایی گرفتی',
       coinsEarned: 'سکه گرفتی', playToEarn: 'یک دور بازی کن تا سکه بگیری',
       keyboard: 'کیبورد', difficulty: 'سختی',
       easy: 'آسان', medium: 'متوسط', hard: 'سخت', expert: 'خبره',
@@ -279,7 +305,7 @@
       about: 'About', version: 'Version', source: 'Source code', license: 'License',
       aboutText: 'Free, open source, no ads, no trackers, fully offline.',
       name: 'Name', country: 'Country', optional: 'optional',
-      hint: 'Hint', notEnoughCoins: 'Not enough coins', hintUsed: 'Hint used',
+      hint: 'Hint', hints: 'Hints', notEnoughCoins: 'Not enough coins', hintUsed: 'Hint used',
       coinsEarned: 'coins earned', playToEarn: 'Play a round to earn coins',
       keyboard: 'Keyboard', difficulty: 'Difficulty',
       easy: 'Easy', medium: 'Medium', hard: 'Hard', expert: 'Expert',
@@ -640,14 +666,15 @@
     add: function (n, silent) {
       n = Math.max(0, Math.round(n));
       if (!n) return state.coins;
-      state.coins += n;
-      appStore.set('coins', state.coins);
+      mutate('coins', function (c) { return (typeof c === 'number' ? c : 0) + n; });
       bump('coinsEarned', n);
       Chogan.achievements.check();
       if (!silent) Chogan.ui.coinFly(n);
       return state.coins;
     },
     spend: function (n) {
+      var fresh = appStore.get('coins', state.coins);
+      if (typeof fresh === 'number') state.coins = fresh;
       if (state.coins < n) return false;
       state.coins -= n;
       appStore.set('coins', state.coins);
@@ -711,8 +738,7 @@
       if (state.achievements[id]) return false;
       var d = achApi.def(id);
       if (!d) return false;
-      state.achievements[id] = Date.now();
-      appStore.set('achievements', state.achievements);
+      mutate('achievements', function (a) { a[id] = Date.now(); return a; });
       Chogan.ui.toast({
         icon: d.icon,
         title: state.settings.lang === 'fa' ? d.fa : d.en,
@@ -1371,6 +1397,11 @@
     else { fireResume(); if (state.settings.music && audioReady) audioApi.music(music.moodName || 'menu'); }
   });
   global.addEventListener('pagehide', firePause);
+  global.addEventListener('pageshow', function (e) {
+    if (!e.persisted) return;
+    Chogan.reloadState();
+    if (Chogan.onRestore) Chogan.onRestore();
+  });
 
   /* ==================================================== پوسته‌ی بازی */
 
@@ -1558,9 +1589,16 @@
   /* ================================================ راه‌اندازی صفحه */
 
   var unlockHooks = [];
-  Chogan.afterUnlock = function (fn) { unlockHooks.push(fn); };
+  var unlockedOnce = false;
+  // بعد از اولین لمس، کالبک تازه باید فوری اجرا شود نه اینکه در آرایه‌ای
+  // که دیگر خوانده نمی‌شود گم شود.
+  Chogan.afterUnlock = function (fn) {
+    if (unlockedOnce) { try { fn(); } catch (e) { /* یکی خراب بود بقیه بمانند */ } return; }
+    unlockHooks.push(fn);
+  };
 
   function unlockAudioOnce() {
+    unlockedOnce = true;
     audioApi.unlock();
     for (var i = 0; i < unlockHooks.length; i++) { try { unlockHooks[i](); } catch (e) { /* بی‌خیال */ } }
     unlockHooks = [];

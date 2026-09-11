@@ -422,6 +422,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
       lastEdge: -1, newBoxes: []
     };
     if (seedRng) S.turn = seedRng() < 0.5 ? 1 : 2;
+    cur = { v: 0, r: 0, c: 0 };
     drawAll();
     render();
     save();
@@ -621,7 +622,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
   /* ----------------------------------------------------------- حرکت */
 
   function human(e) {
-    if (!S || S.done || S.edges[e] || busy()) return;
+    if (!S || S.done || !(e >= 0 && e < bd.E) || S.edges[e] || busy()) return;
     doMove(e, true);
   }
 
@@ -708,7 +709,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
     var tie = s1 === s2;
     var margin = s1 - s2;
 
-    var base = { easy: 5, medium: 10, hard: 18 }[S.level] || 8;
+    // در دونفره سطح حریف معنا ندارد و نباید پاداش را تعیین کند
+    var base = S.mode === 'ai' ? ({ easy: 5, medium: 10, hard: 18 }[S.level] || 10) : 8;
     var sizeK = S.size / 5;
     var coins = Math.max(2, Math.round((won ? base : base * 0.35) * sizeK)) + (S.daily ? 8 : 0);
     var points = Math.max(3, Math.round((won ? base * 4 : base * 1.2) * sizeK)) + (S.daily ? 25 : 0);
@@ -754,7 +756,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
         size: S.size, mode: S.mode, level: S.level, daily: S.daily,
         edges: S.edges, owner: S.owner, edgeOwner: S.edgeOwner || {},
         turn: S.turn, scores: S.scores, history: S.history,
-        turnBoxes: S.turnBoxes, startedAt: S.startedAt
+        turnBoxes: S.turnBoxes, elapsed: Date.now() - S.startedAt
       },
       prefs: prefs
     };
@@ -762,8 +764,14 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
   function save() { ctx.save(); }
 
   function askNew() {
-    if (!S || S.done || !S.history.length) { newGame(S ? S.size : prefs.size, S ? S.mode : prefs.mode, S ? S.level : prefs.level); return; }
-    C.ui.confirm({ title: C.t('newMatch'), body: C.t('resetWarn'), onOk: function () { newGame(S.size, S.mode, S.level); } });
+    var dd = S ? S.daily : null;
+    function go() {
+      // داخل روزانه باید همان دست روزانه دوباره ساخته شود، نه یک مسابقه‌ی عادی
+      if (dd) newGame(5, 'ai', 'hard', dd, C.daily('dots', dd).rng);
+      else newGame(S ? S.size : prefs.size, S ? S.mode : prefs.mode, S ? S.level : prefs.level);
+    }
+    if (!S || S.done || !S.history.length) { go(); return; }
+    C.ui.confirm({ title: C.t('newMatch'), body: C.t('resetWarn'), onOk: go });
   }
 
   function renameP2() {
@@ -857,11 +865,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
     var k = e.key;
     if (k === 'u' || k === 'U') { undo(); e.preventDefault(); return; }
     if (k === 'r' || k === 'R' || k === 'Tab') { flipCur(); highlight(); e.preventDefault(); return; }
-    var rtl = document.documentElement.dir === 'rtl';
+    // تخته یک SVG با مختصات ثابت است و در راست‌چین آینه نمی‌شود، پس
+    // جهت‌نماها هم نباید برعکس شوند.
     if (k === 'ArrowUp') { moveCur(-1, 0); highlight(); e.preventDefault(); return; }
     if (k === 'ArrowDown') { moveCur(1, 0); highlight(); e.preventDefault(); return; }
-    if (k === 'ArrowLeft') { moveCur(0, rtl ? 1 : -1); highlight(); e.preventDefault(); return; }
-    if (k === 'ArrowRight') { moveCur(0, rtl ? -1 : 1); highlight(); e.preventDefault(); return; }
+    if (k === 'ArrowLeft') { moveCur(0, -1); highlight(); e.preventDefault(); return; }
+    if (k === 'ArrowRight') { moveCur(0, 1); highlight(); e.preventDefault(); return; }
     if (k === ' ' || k === 'Enter') {
       var ed = curEdge();
       if (!S.edges[ed]) human(ed);
@@ -905,7 +914,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
       size: v.size, mode: v.mode, level: v.level, daily: v.daily,
       edges: v.edges, owner: v.owner, edgeOwner: v.edgeOwner,
       turn: v.turn, scores: v.scores, history: v.history, turnBoxes: v.turnBoxes,
-      done: false, startedAt: Date.now() - 0, elapsed: 0, lastEdge: -1, newBoxes: []
+      done: false, startedAt: Date.now() - (v.elapsed || 0), elapsed: 0, lastEdge: -1, newBoxes: []
     };
     drawAll();
     render();
