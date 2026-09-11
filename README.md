@@ -50,9 +50,11 @@ The tests extract each game engine from the published HTML file itself, between 
 
 See [NEW_GAME.md](NEW_GAME.md). In short: one folder under `www/games/`, one entry in `games.json`, bump the version.
 
-### F-Droid and GitHub builds do not cross-update
+### Both sources ship the same signed APK
 
-They are signed with different keys, so switching source means uninstalling first, which wipes local progress. Pick one source and stay on it.
+Chogan is published on F-Droid as a [reproducible build](https://f-droid.org/docs/Reproducible_Builds). F-Droid rebuilds it from source, compares the result to the APK attached to the GitHub release, and when they match it publishes **our** signed file rather than re-signing with its own key.
+
+So both sources carry the identical, identically-signed APK. You can install from either one and switch later without uninstalling, and your progress survives.
 
 ### License
 
@@ -142,9 +144,11 @@ git tag v0.2.0 && git push origin v0.2.0
 
 سکرت‌های امضا در سطح سازمان `choganhq` تعریف شده‌اند: `ANDROID_KEYSTORE_BASE64` و `ANDROID_KEYSTORE_PASSWORD` و `ANDROID_KEY_ALIAS` و `ANDROID_KEY_PASSWORD`.
 
-### هشدار درباره‌ی آپدیت اف‌دروید و گیت‌هاب
+### هر دو منبع یک فایل امضاشده می‌دهند
 
-APK اف‌دروید و APK بخش Releases این ریپو با کلیدهای متفاوتی امضا می‌شوند، پس روی هم آپدیت نمی‌شوند. برای عوض کردن منبع باید اول اپ را حذف کنی، که یعنی پیشرفت ذخیره‌شده هم پاک می‌شود. یکی از دو منبع را انتخاب کن و همان را نگه دار.
+چوگان روی اف‌دروید به شکل [بیلد تکرارپذیر](https://f-droid.org/docs/Reproducible_Builds) منتشر می‌شود. اف‌دروید از روی سورس دوباره بیلد می‌گیرد، نتیجه را با APK پیوست‌شده به انتشار گیت‌هاب مقایسه می‌کند، و چون یکی درمی‌آیند همان فایل امضاشده‌ی **ما** را منتشر می‌کند نه نسخه‌ای با کلید خودش.
+
+پس هر دو منبع دقیقاً یک فایل با یک امضا می‌دهند. از هرکدام خواستی نصب کن و هر وقت خواستی منبعت را عوض کن؛ لازم نیست اپ را حذف کنی و پیشرفتت هم می‌ماند.
 
 ### مجوز
 
