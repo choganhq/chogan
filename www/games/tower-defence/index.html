@@ -665,7 +665,6 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
       top.appendChild(C.ui.segmented(MAPS.map(function (m) {
         return { value: m.id, label: (C.state.settings.lang === 'fa' ? m.fa : m.en) };
       }), mapId, function (v) {
-        prefs.map = v; ctx.store.set('prefs', prefs);
         askSwitch(v);
       }));
       var st = starsBook[mapId] || 0;
@@ -684,8 +683,17 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
 
   function askSwitch(v) {
     if (S && S.wave > 0 && !S.over) {
-      C.ui.confirm({ title: C.t('restart'), body: C.t('resetWarn'), onOk: function () { newGame(v); } });
-    } else newGame(v);
+      // انصراف باید انتخابگر را به نقشه‌ای که واقعاً بازی می‌شود برگرداند
+      C.ui.confirm({
+        title: C.t('restart'), body: C.t('resetWarn'),
+        onOk: function () { prefs.map = v; ctx.store.set('prefs', prefs); newGame(v); },
+        onCancel: function () { render(); }
+      });
+      render();
+      return;
+    }
+    prefs.map = v; ctx.store.set('prefs', prefs);
+    newGame(v);
   }
 
   function updateHud() {
@@ -704,7 +712,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
     var next = S.wave + 1;
     if (S.over) { preview.appendChild(el('span', { class: 'ch-xs ch-dim', text: C.t('gameOver') })); return; }
     preview.appendChild(el('span', { class: 'ch-xs ch-faint', text: C.t('nextWave') + ' ' + C.num(next) }));
-    var comp = E.waveComposition(next, function () { return 0.5; });
+    // بذر همان چیزی که startWave استفاده می‌کند تا پیش‌نمایش دروغ نگوید
+    var comp = E.waveComposition(next, C.rng('td|' + (S.mapId || '') + '|' + (S.date || '') + '|' + next));
     comp.forEach(function (c) {
       preview.appendChild(el('span', { class: 'td-pv' }, [
         el('i', { style: { background: E.TYPES[c.type].color } }),
@@ -1062,7 +1071,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
 
     // پیشنهاد حالت بی‌پایان بعد از برد
     if (won && !S.endless) {
+      var forSession = S;
       setTimeout(function () {
+        // بازی ممکن است در این ۴۰۰ میلی‌ثانیه با «دوباره» عوض شده باشد
+        if (S !== forSession || S.over === false) return;
         C.ui.confirm({
           title: C.t('endless'), body: C.t('tutText3'),
           okLabel: C.t('endlessGo'),

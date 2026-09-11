@@ -272,7 +272,9 @@
 
     function monthName(d) {
       try {
-        return d.toLocaleDateString(lang() === 'fa' ? 'fa-IR' : 'en-US', { month: 'long', year: 'numeric' });
+        // شبکه‌ی تقویم میلادی است چون کلید چالش روزانه میلادی است؛ نام ماه
+        // هم باید میلادی باشد وگرنه «مهر» بالای شبکه‌ی سپتامبر می‌نشست.
+        return d.toLocaleDateString(lang() === 'fa' ? 'fa-IR-u-ca-gregory' : 'en-US', { month: 'long', year: 'numeric' });
       } catch (e) { return (d.getMonth() + 1) + '/' + d.getFullYear(); }
     }
 
@@ -298,7 +300,7 @@
           var cls = 'ch-day';
           if (future) cls += ' ch-day--future';
           if (key === C.dateKey(today)) cls += ' ch-day--today';
-          if (n >= GAMES.length) cls += ' ch-day--done';
+          if (GAMES.length && n >= GAMES.length) cls += ' ch-day--done';
           var dots = el('div', { class: 'ch-day__dots' });
           GAMES.forEach(function (g) {
             dots.appendChild(el('div', { class: 'ch-day__dot' + (rec[g.id] ? ' ch-day__dot--on' : '') }));
@@ -358,7 +360,7 @@
     });
     var d = C.keyToDate(key);
     var label;
-    try { label = d.toLocaleDateString(lang() === 'fa' ? 'fa-IR' : 'en-US', { day: 'numeric', month: 'long' }); }
+    try { label = d.toLocaleDateString(lang() === 'fa' ? 'fa-IR-u-ca-gregory' : 'en-US', { day: 'numeric', month: 'long' }); }
     catch (e) { label = key; }
     C.ui.modal({
       title: C.t('dailyOf', { d: label }),
@@ -906,6 +908,15 @@
     app.setAttribute('aria-hidden', 'true');
     document.getElementById('nav').setAttribute('aria-hidden', 'true');
     drawWelcome();
+    // بدون این، Tab به منوی پشت صفحه می‌رسید
+    wHost.addEventListener('keydown', function (e) {
+      if (e.key !== 'Tab' || !wHost) return;
+      var f = wHost.querySelectorAll('button, input, [tabindex]:not([tabindex="-1"])');
+      if (!f.length) return;
+      var first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { last.focus(); e.preventDefault(); }
+      else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
+    });
   }
 
   function closeWelcome() {
@@ -961,6 +972,8 @@
   C.boot({ sw: true });
   applyPalette();
   C.onLangChange = function () { applyPalette(); };
+  // برگشت از bfcache: سکه و رکوردی که داخل بازی عوض شده باید دیده شود
+  C.onRestore = function () { applyPalette(); if (gamesLoaded) render(); };
 
   if (!C.store.get('welcomeSeen', false)) openWelcome();
 
