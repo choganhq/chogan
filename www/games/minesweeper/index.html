@@ -413,9 +413,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
         b.addEventListener('pointerleave', function () { clearTimeout(pressTimer); });
         b.addEventListener('contextmenu', function (e) {
           e.preventDefault();
+          clearTimeout(pressTimer);
           // روی اندروید لمس طولانی هم تایمر ما را می‌زند هم contextmenu مرورگر را.
-          // بدون این محافظ، پرچم دو بار عوض می‌شد یعنی عملاً هیچ اتفاقی نمی‌افتاد.
-          if (longFired) { longFired = false; return; }
+          // محافظ را اینجا صفر نمی‌کنیم: click بعدی هم باید مسدود بماند، وگرنه
+          // برداشتن پرچم با لمس طولانی همان خانه را هم باز می‌کرد.
+          // longFired در هر pointerdown خودش صفر می‌شود.
+          if (longFired) return;
           toggleFlag(idx);
         });
         b.addEventListener('click', function () {
@@ -762,6 +765,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
 
   window.addEventListener('keydown', function (e) {
     if (!S || S.done) return;
+    // با دیالوگ باز، کلید مال دیالوگ است نه تخته‌ی پشتش. بدون این، H پشت
+    // پنجره‌ی راهنما سکه خرج می‌کرد و Space روی دکمه‌ها دو کار می‌کرد.
+    if (document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
+    // دکمه‌های بیرون تخته باید Enter و Space خودشان را نگه دارند
+    if (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
     var sp = S.spec, k = e.key, moved = true;
     document.documentElement.dataset.kb = '1';
     if (k === 'ArrowUp') cursor = Math.max(0, cursor - sp.cols);

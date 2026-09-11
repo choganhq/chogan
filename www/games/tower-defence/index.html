@@ -522,6 +522,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
   var starsBook = ctx.store.get('stars', {});
 
   var S = null, mapId = null, raf = null, lastT = 0, selected = null, buildCell = null;
+  var panel = null;
+  function closePanel() { if (panel) { var p = panel; panel = null; p.close(); } }
   var canvas = el('canvas');
   var cbox = el('div', { class: 'td-canvasbox' }, [canvas]);
   var top = el('div', { class: 'td-top' });
@@ -639,6 +641,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
   function seedRng(n) { return C.rng(n); }
 
   function newGame(id, date) {
+    closePanel();
     mapId = id;
     var path = pathFor(id, date);
     S = E.createGame({ path: path, money: 200, lives: 20, lastWave: 20 });
@@ -983,18 +986,25 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
     var actions = [{ label: C.t('close'), onClick: function () { selected = null; } }];
     actions.push({
       label: C.t('sell') + ' ' + C.num(E.sellValue(S, t)), onClick: function () {
+        if (!S || S.towers.indexOf(t) < 0) return;
         E.sell(S, t); selected = null; C.audio.sfx('coin'); updateHud(); save(); refreshDock();
       }
     });
     if (up !== null) {
       actions.push({
         label: C.t('upgrade') + ' ' + C.num(up), kind: 'primary', onClick: function () {
+          if (!S || S.towers.indexOf(t) < 0) return;
           if (E.upgrade(S, t)) { C.audio.sfx('build'); C.haptic('success'); updateHud(); save(); }
           else { C.feedback('bad'); C.ui.toast({ icon: 'coin', title: C.t('noMoney') }); }
         }
       });
     }
-    C.ui.modal({ title: C.t(t.kind), body: body, actions: actions, onClose: function () { selected = null; } });
+    closePanel();
+    var h = C.ui.modal({
+      title: C.t(t.kind), body: body, actions: actions,
+      onClose: function () { if (panel === h) { selected = null; panel = null; } }
+    });
+    panel = h;
   }
   function line(a, b) {
     return el('div', { class: 'ch-item' }, [
@@ -1008,6 +1018,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
   function finish() {
     if (finished) return;
     finished = true;
+    closePanel();
     var won = S.won;
     var st = E.stars(S);
     if (won && !S.endless) {
@@ -1031,8 +1042,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
     C.stats.best('tower-defence', 'wave', S.wave, false);
     ctx.clearSave();
 
-    var actions = null;
-    ctx.finish({
+    var resultModal = ctx.finish({
       won: won,
       continued: continued,
       title: won ? C.t('mapDone') : C.t('gameOver'),
@@ -1058,7 +1068,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
           okLabel: C.t('endlessGo'),
           onOk: function () {
             S.endless = true; S.over = false; S.won = false; finished = false;
-            document.querySelectorAll('.ch-scrim').forEach(function (n) { n.remove(); });
+            // بستن درست، نه کندن گره از DOM: وگرنه شنونده‌ی کیبورد پنجره
+            // هیچ‌وقت برداشته نمی‌شود و با هر ادامه یکی نشت می‌کند.
+            if (resultModal) resultModal.close();
             updateHud();
           }
         });
@@ -1132,6 +1144,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
 
   window.addEventListener('keydown', function (e) {
     if (!S || S.over) return;
+    if (document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
+    if (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
     if (e.key === ' ') { startBtn.click(); e.preventDefault(); }
     else if (e.key === 's' || e.key === 'S') { speedBtn.click(); e.preventDefault(); }
   });
