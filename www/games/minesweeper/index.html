@@ -449,8 +449,18 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
         ['small', 'medium', 'large', 'custom'].map(function (k) { return { value: k, label: C.t(k) }; }),
         S.sizeKey,
         function (v) {
-          prefs.size = v; ctx.store.set('prefs', prefs);
-          if (v === 'custom') customModal(); else newGame(v);
+          if (v === S.sizeKey && v !== 'custom') return;
+          var go = function () {
+            prefs.size = v; ctx.store.set('prefs', prefs);
+            if (v === 'custom') customModal(); else newGame(v);
+          };
+          // تخته‌ی شروع‌شده نباید بی‌هشدار برود
+          if (S.started && !S.done) {
+            C.ui.confirm({ title: C.t('newBoard'), body: C.t('resetWarn'), onOk: go, onCancel: function () { render(); } });
+            render();
+            return;
+          }
+          go();
         }
       ));
     }
@@ -621,7 +631,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
     C.achievements.unlock('ms-win');
     if (S.sizeKey === 'large') C.achievements.unlock('ms-large');
     if (S.sizeKey === 'small' && S.elapsed < 30000) C.achievements.unlock('ms-fast');
-    if (S.daily) C.stats.daily('minesweeper', S.daily, { label: C.time(S.elapsed), ms: S.elapsed, size: S.sizeKey });
+    if (S.daily) {
+      var firstDaily = C.stats.daily('minesweeper', S.daily, { label: C.time(S.elapsed), ms: S.elapsed, size: S.sizeKey });
+      if (!firstDaily) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
     ctx.clearSave();
 
     ctx.finish({

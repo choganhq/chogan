@@ -549,24 +549,40 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
         [C.icon('calendar', 14), el('span', { text: C.t('dailyDots') + ' — ' + C.num(S.daily) })]));
       top.appendChild(el('span', { class: 'ch-badge', text: C.t('vsHard') }));
     } else {
+      // هر سه انتخابگر بازی را از نو می‌سازند، پس اگر دستی در جریان است اول تأیید
+      var guard = function (same, go) {
+        if (same) return;
+        if (S.history && S.history.length && !S.done) {
+          C.ui.confirm({ title: C.t('newMatch'), body: C.t('resetWarn'), onOk: go, onCancel: function () { render(); } });
+          render();
+          return;
+        }
+        go();
+      };
       top.appendChild(C.ui.segmented([
         { value: 'ai', label: C.t('vsAi') }, { value: '2p', label: C.t('twoPlayers') }
       ], S.mode, function (v) {
-        prefs.mode = v; ctx.store.set('prefs', prefs);
-        newGame(S.size, v, S.level);
+        guard(v === S.mode, function () {
+          prefs.mode = v; ctx.store.set('prefs', prefs);
+          newGame(S.size, v, S.level);
+        });
       }));
       top.appendChild(C.ui.segmented([3, 4, 5, 6, 8].map(function (n) {
         return { value: n, label: C.num(n) };
       }), S.size, function (v) {
-        prefs.size = v; ctx.store.set('prefs', prefs);
-        newGame(v, S.mode, S.level);
+        guard(v === S.size, function () {
+          prefs.size = v; ctx.store.set('prefs', prefs);
+          newGame(v, S.mode, S.level);
+        });
       }));
       if (S.mode === 'ai') {
         top.appendChild(C.ui.segmented([
           { value: 'easy', label: C.t('easy') }, { value: 'medium', label: C.t('medium') }, { value: 'hard', label: C.t('hard') }
         ], S.level, function (v) {
-          prefs.level = v; ctx.store.set('prefs', prefs);
-          newGame(S.size, S.mode, v);
+          guard(v === S.level, function () {
+            prefs.level = v; ctx.store.set('prefs', prefs);
+            newGame(S.size, S.mode, v);
+          });
         }));
       }
     }
@@ -701,9 +717,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
     }
     if (won) C.stats.best('dots', 'margin', margin, false);
     if (S.daily) {
-      C.stats.daily('dots', S.daily, {
+      var firstDaily = C.stats.daily('dots', S.daily, {
         label: C.num(s1) + ' - ' + C.num(s2), win: won, diff: margin
       });
+      if (!firstDaily) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
     }
     ctx.clearSave();
 
