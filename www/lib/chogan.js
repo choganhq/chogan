@@ -878,10 +878,10 @@
     // ثبت پایان یک دور. تنها راه ورود امتیاز به لیگ و سکه به کیف.
     record: function (o) {
       var g = statsApi.game(o.gameId);
-      g.plays++;
+      // ادامه‌ی یک نشست (مثل حالت بی‌پایان بعد از برد) بازی تازه نیست
+      if (!o.continued) { g.plays++; state.stats.plays++; }
       if (o.won) g.wins++;
       g.timeMs += Math.max(0, o.timeMs || 0);
-      state.stats.plays++;
       state.stats.timeMs += Math.max(0, o.timeMs || 0);
       touchStreak();
       saveStats();
@@ -905,12 +905,17 @@
       return g && g.best ? g.best[key] : undefined;
     },
     // ثبت چالش روزانه
+    // فقط اولین نتیجه‌ی هر روز ثبت می‌شود. بازی دوباره‌ی همان روز نباید رکورد
+    // ثبت‌شده را عوض کند — وگرنه یک باخت، بردِ صبح را پاک می‌کرد.
+    // خروجی می‌گوید ثبت شد یا نه، تا بازی بداند پاداش روزانه بدهد یا ندهد.
     daily: function (gameId, date, payload) {
       if (!state.stats.daily[date]) state.stats.daily[date] = {};
-      if (!state.stats.daily[date][gameId]) bump('dailyDone');
+      if (state.stats.daily[date][gameId]) return false;
+      bump('dailyDone');
       state.stats.daily[date][gameId] = Object.assign({ at: Date.now() }, payload);
       saveStats();
       achApi.check();
+      return true;
     },
     dailyDone: function (gameId, date) {
       var d = state.stats.daily[date];
@@ -1105,6 +1110,9 @@
     var close = function () {
       if (closed) return;
       closed = true;
+      // پنجره ۱۱۰ میلی‌ثانیه محو می‌شود و تا وقتی در DOM است کلیک می‌گیرد.
+      // بدون این، دو ضربه‌ی پشت سر هم روی «تأیید» دو بار سکه خرج می‌کرد.
+      scrim.style.pointerEvents = 'none';
       scrim.style.animation = 'ch-fade var(--t-fast) reverse';
       setTimeout(function () { if (scrim.parentNode) scrim.parentNode.removeChild(scrim); }, 110);
       document.removeEventListener('keydown', onKey);
@@ -1118,6 +1126,8 @@
           class: 'ch-btn ' + (a.kind === 'primary' ? 'ch-btn--primary' : (a.kind === 'danger' ? 'ch-btn--danger' : '')),
           type: 'button',
           onclick: function () {
+            // اکشن‌های keepOpen عمداً چند بار اجرا می‌شوند؛ بقیه فقط یک بار
+            if (a.keepOpen !== true && closed) return;
             Chogan.feedback('tap');
             if (a.keepOpen !== true) close();
             if (a.onClick) a.onClick();
@@ -1143,13 +1153,17 @@
   };
 
   ui.confirm = function (o) {
+    var done = false;
     return ui.modal({
       title: o.title,
       body: o.body,
       actions: [
-        { label: o.cancelLabel || Chogan.t('cancel') },
-        { label: o.okLabel || Chogan.t('confirm'), kind: o.danger ? 'danger' : 'primary', onClick: o.onOk }
-      ]
+        { label: o.cancelLabel || Chogan.t('cancel'), onClick: function () { done = true; if (o.onCancel) o.onCancel(); } },
+        { label: o.okLabel || Chogan.t('confirm'), kind: o.danger ? 'danger' : 'primary',
+          onClick: function () { done = true; if (o.onOk) o.onOk(); } }
+      ],
+      // بستن با Escape یا کلیک بیرون هم یعنی انصراف
+      onClose: function () { if (!done && o.onCancel) o.onCancel(); }
     });
   };
 
@@ -1364,6 +1378,16 @@
     var store = Chogan.storage(cfg.id);
     if (cfg.strings) Chogan.strings(cfg.strings);
 
+    // چالش روزانه و بازی عادی دو نشست جدا هستند و نباید روی هم بنویسند.
+    // قبلاً هر دو کلید 'session' را می‌گرفتند، پس باز کردن روزانه بازی
+    // نیمه‌کاره را پاک می‌کرد و خود روزانه هم هیچ‌وقت ادامه نمی‌شد.
+    var slot = (function () {
+      try {
+        var d = new URLSearchParams(location.search).get('daily');
+        return d ? ('session.daily.' + d) : 'session';
+      } catch (e) { return 'session'; }
+    })();
+
     var title = el('div', { class: 'ch-gamebar__title ch-grow', text: cfg.name[state.settings.lang] || cfg.name.fa });
     var backBtn = el('button', { class: 'ch-iconbtn ch-iconbtn--plain', type: 'button', 'aria-label': Chogan.t('back') }, [Chogan.icon('back', 22)]);
     backBtn.addEventListener('click', function () { Chogan.feedback('tap'); ctx.save(); Chogan.back(); });
@@ -1431,11 +1455,11 @@
         if (!saveFn) return;
         var s = null;
         try { s = saveFn(); } catch (e) { s = null; }
-        if (s && s.inProgress !== false) store.set('session', Object.assign({ inProgress: true, at: Date.now() }, s));
-        else store.remove('session');
+        if (s && s.inProgress !== false) store.set(slot, Object.assign({ inProgress: true, at: Date.now() }, s));
+        else store.remove(slot);
       },
-      loadSave: function () { return store.get('session', null); },
-      clearSave: function () { store.remove('session'); },
+      loadSave: function () { return store.get(slot, null); },
+      clearSave: function () { store.remove(slot); },
 
       /* ---- آموزش و راهنما ---- */
       tutorialIfNew: function (pages) {
@@ -1452,6 +1476,7 @@
         var rec = statsApi.record({
           gameId: cfg.id,
           won: !!o.won,
+          continued: !!o.continued,
           timeMs: o.timeMs || 0,
           points: o.points || 0,
           coins: o.coins || 0

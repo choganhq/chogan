@@ -28,17 +28,30 @@
   }
   .td-pv { display: flex; align-items: center; gap: 3px; font-size: var(--fs-xs); font-weight: 700; }
   .td-pv i { width: 13px; height: 13px; border-radius: 50%; display: block; }
-  .td-shop { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  /* نوار دائمی برج‌ها. جای پنجره‌ی فروشگاه را گرفته: برج را انتخاب می‌کنی و
+     بعد روی خانه می‌زنی، بدون هیچ پنجره‌ای وسط راه. */
+  .td-dock {
+    width: 100%; max-width: 520px;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  }
   .td-buy {
-    border: 0; background: var(--c-surface-2); border-radius: var(--r-md); cursor: pointer;
-    padding: 8px 4px; font: inherit; display: flex; flex-direction: column; align-items: center; gap: 3px;
-    min-height: 76px; transition: transform var(--t-fast) var(--ease);
+    border: 2px solid transparent; background: var(--c-surface); border-radius: var(--r-md);
+    cursor: pointer; box-shadow: var(--sh-1);
+    padding: 7px 4px 6px; font: inherit;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    min-height: 68px; transition: transform var(--t-fast) var(--ease),
+      border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+    touch-action: manipulation;
   }
   .td-buy:active { transform: scale(.94); }
-  .td-buy[disabled] { opacity: .42; }
-  .td-buy b { font-size: var(--fs-xs); }
+  .td-buy[disabled] { opacity: .4; box-shadow: none; }
+  .td-buy[aria-pressed="true"] {
+    border-color: var(--tc); background: var(--c-surface-2); box-shadow: var(--sh-2);
+  }
+  .td-buy b { font-size: var(--fs-xs); color: var(--c-text); }
   .td-buy small { color: var(--c-gold); font-weight: 800; font-size: 11px; }
-  .td-mark { width: 30px; height: 30px; border-radius: 9px; }
+  .td-buy[disabled] small { color: var(--c-bad); }
+  .td-mark { width: 26px; height: 26px; border-radius: 8px; background: var(--tc); }
   .td-stars { display: flex; gap: 2px; }
 </style>
 </head>
@@ -480,6 +493,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
         pickMap: 'نقشه', dailyMap: 'نقشه‌ی روزانه', leaked: 'رد شده', kills: 'کشته',
         noMoney: 'پول کافی نداری', gameOver: 'قلعه سقوط کرد',
         buildHere: 'اینجا برج بساز', cantBuild: 'روی مسیر نمی‌شود ساخت',
+        pickTower: 'اول از نوار پایین یک برج انتخاب کن',
         tutTitle1: 'مسیر را ببند', tutText1: 'دشمن‌ها از بالا می‌آیند و به پایین می‌روند. کنار مسیر برج بگذار تا بزنندشان.',
         tutTitle2: 'چهار برج', tutText2: 'کمان تند می‌زند، توپ ناحیه‌ای، یخ کند می‌کند و برق زنجیره‌ای می‌زند. ترکیبشان مهم است.',
         tutTitle3: 'بیست موج', tutText3: 'بیست موج را دوام بیاور. هرچه جان بیشتری بماند ستاره‌ی بیشتری می‌گیری.'
@@ -494,6 +508,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
         pickMap: 'Map', dailyMap: 'Daily map', leaked: 'Leaked', kills: 'Kills',
         noMoney: 'Not enough gold', gameOver: 'The keep has fallen',
         buildHere: 'Build here', cantBuild: 'You cannot build on the path',
+        pickTower: 'Pick a tower from the bar below first',
         tutTitle1: 'Block the path', tutText1: 'Enemies walk from top to bottom. Place towers beside the path to stop them.',
         tutTitle2: 'Four towers', tutText2: 'Archer is fast, cannon splashes, frost slows and tesla chains. Mixing them matters.',
         tutTitle3: 'Twenty waves', tutText3: 'Survive twenty waves. The more lives you keep, the more stars you earn.'
@@ -514,7 +529,56 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
   var startBtn = el('button', { class: 'ch-btn ch-btn--primary', type: 'button', text: C.t('startWave') });
   var speedBtn = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', text: '×' + C.num(1) });
   var bottom = el('div', { class: 'td-bottom' }, [preview, speedBtn, startBtn]);
-  var wrap = el('div', { class: 'td-wrap' }, [top, cbox, bottom]);
+  var dock = el('div', { class: 'td-dock' });
+  var wrap = el('div', { class: 'td-wrap' }, [top, cbox, dock, bottom]);
+
+  /* ------------------------------ نوار برج‌ها ------------------------------ */
+  var armed = null;          // برجی که الان در دست است
+  var dockBtns = {};
+
+  KINDS.forEach(function (k) {
+    var def = E.TOWERS[k];
+    var cost = el('small', { text: C.num(def.cost) });
+    var b = el('button', {
+      class: 'td-buy', type: 'button', 'aria-pressed': 'false',
+      style: { '--tc': def.color },
+      title: C.t(k + 'D')
+    }, [
+      el('div', { class: 'td-mark' }),
+      el('b', { text: C.t(k) }),
+      cost
+    ]);
+    b.addEventListener('click', function () {
+      if (!S || S.over) return;
+      if (S.money < E.TOWERS[k].cost) {
+        C.feedback('bad');
+        C.ui.toast({ icon: 'coin', title: C.t('noMoney') });
+        return;
+      }
+      arm(armed === k ? null : k);
+      C.feedback('select');
+    });
+    dockBtns[k] = { btn: b, cost: cost };
+    dock.appendChild(b);
+  });
+
+  function arm(k) {
+    armed = k;
+    selected = null;
+    KINDS.forEach(function (x) {
+      dockBtns[x].btn.setAttribute('aria-pressed', armed === x ? 'true' : 'false');
+    });
+  }
+
+  function refreshDock() {
+    if (!S) return;
+    KINDS.forEach(function (k) {
+      var d = dockBtns[k];
+      var poor = S.money < E.TOWERS[k].cost || S.over;
+      d.btn.disabled = poor;
+      if (poor && armed === k) arm(null);
+    });
+  }
 
   startBtn.addEventListener('click', function () {
     if (!S || S.over) return;
@@ -581,6 +645,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
     S.mapId = id;
     S.date = date || null;
     selected = null;
+    if (typeof arm === 'function') arm(null);
     resize();
     render();
     save();
@@ -624,6 +689,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
     ctx.setStat('wave', C.num(S.wave) + (S.endless ? '∞' : '/' + C.num(S.lastWave)));
     ctx.setStat('lives', S.lives);
     ctx.setStat('money', S.money);
+    refreshDock();
     startBtn.disabled = S.waveActive || S.over;
     startBtn.textContent = S.waveActive ? C.t('wave') + ' ' + C.num(S.wave) : C.t('startWave');
     speedBtn.textContent = '×' + C.num(prefs.speed);
@@ -839,6 +905,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
       }
       if (mult > 1) S.effects = shots;
       hudTick();
+    } else if (S && S.effects.length) {
+      // افکت‌ها فقط داخل step پاک می‌شوند و step فقط وقتی موج فعال است اجرا
+      // می‌شود. بدون این، آخرین شلیک‌های موج تا ابد روی تخته می‌ماندند.
+      S.effects.length = 0;
     }
     draw();
   }
@@ -850,7 +920,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
       lastLives = S.lives;
       ctx.setStat('lives', S.lives);
     }
-    if (S.money !== lastMoney) { lastMoney = S.money; ctx.setStat('money', S.money); }
+    if (S.money !== lastMoney) { lastMoney = S.money; ctx.setStat('money', S.money); refreshDock(); }
     if (S.wave !== lastWave) { lastWave = S.wave; updateHud(); }
     if (S.waveActive !== lastActive) {
       lastActive = S.waveActive;
@@ -868,44 +938,36 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
     var c = Math.floor((ev.clientX - rect.left) / cs);
     var r = Math.floor((ev.clientY - rect.top) / cs);
     if (r < 0 || c < 0 || r >= E.GH || c >= E.GW) return;
+
     var t = E.towerAt(S, r, c);
-    if (t) { selected = t; buildCell = null; towerPanel(t); return; }
+    if (t) { arm(null); selected = t; buildCell = null; towerPanel(t); return; }
+
     selected = null;
     if (!E.canBuild(S, r, c)) { C.ui.toast({ icon: 'info', title: C.t('cantBuild') }); return; }
-    buildCell = { r: r, c: c };
-    C.audio.sfx('select');
-    shopPanel(r, c);
-  });
 
-  function shopPanel(r, c) {
-    var grid = el('div', { class: 'td-shop' });
-    KINDS.forEach(function (k) {
-      var def = E.TOWERS[k];
-      var b = el('button', { class: 'td-buy', type: 'button', disabled: S.money < def.cost }, [
-        el('div', { class: 'td-mark', style: { background: def.color } }),
-        el('b', { text: C.t(k) }),
-        el('small', { text: C.num(def.cost) })
-      ]);
-      b.addEventListener('click', function () {
-        if (E.build(S, r, c, k)) {
-          C.audio.sfx('build'); C.haptic('success');
-          buildCell = null;
-          updateHud();
-          save();
-          m.close();
-        } else { C.feedback('bad'); C.ui.toast({ icon: 'coin', title: C.t('noMoney') }); }
-      });
-      grid.appendChild(b);
-    });
-    var m = C.ui.modal({
-      title: C.t('buildHere'),
-      body: [grid, el('p', { class: 'ch-xs ch-faint', style: { 'margin-top': 'var(--s-3)' },
-        text: C.t('archer') + ': ' + C.t('archerD') + ' · ' + C.t('cannon') + ': ' + C.t('cannonD') + ' · ' +
-          C.t('frost') + ': ' + C.t('frostD') + ' · ' + C.t('tesla') + ': ' + C.t('teslaD') })],
-      actions: [{ label: C.t('close') }],
-      onClose: function () { buildCell = null; }
-    });
-  }
+    // برجی در دست نیست: به‌جای باز کردن پنجره، نوار پایین را نشان بده
+    if (!armed) {
+      C.audio.sfx('tap');
+      C.ui.toast({ icon: 'info', title: C.t('pickTower') });
+      dock.classList.remove('ch-pulse');
+      void dock.offsetWidth;
+      dock.classList.add('ch-pulse');
+      return;
+    }
+
+    if (E.build(S, r, c, armed)) {
+      C.audio.sfx('build');
+      C.haptic('success');
+      buildCell = null;
+      updateHud();
+      save();
+      // برج در دست می‌ماند تا بشود چندتا پشت سر هم گذاشت
+      refreshDock();
+    } else {
+      C.feedback('bad');
+      C.ui.toast({ icon: 'coin', title: C.t('noMoney') });
+    }
+  });
 
   function towerPanel(t) {
     var st = E.towerStats(t.kind, t.level);
@@ -921,7 +983,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
     var actions = [{ label: C.t('close'), onClick: function () { selected = null; } }];
     actions.push({
       label: C.t('sell') + ' ' + C.num(E.sellValue(S, t)), onClick: function () {
-        E.sell(S, t); selected = null; C.audio.sfx('coin'); updateHud(); save();
+        E.sell(S, t); selected = null; C.audio.sfx('coin'); updateHud(); save(); refreshDock();
       }
     });
     if (up !== null) {
@@ -957,17 +1019,22 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
     if (S.wave >= 30) C.achievements.unlock('td-endless');
     var coins = won ? (24 + st * 10 + S.wave) : Math.max(3, Math.round(S.wave * 1.6));
     var points = won ? (90 + st * 25 + S.wave * 3) : Math.max(5, S.wave * 5);
+    var continued = !!S.endless;
+    var firstDaily = false;
     if (S.date) {
-      C.stats.daily('tower-defence', S.date, {
+      firstDaily = C.stats.daily('tower-defence', S.date, {
         label: C.t('wave') + ' ' + C.num(S.wave) + (won ? ' ★' + C.num(st) : ''), wave: S.wave, won: won
       });
     }
+    // پاداش روزانه فقط بار اول. تکرار همان روز دوباره سکه نمی‌دهد.
+    if (S.date && !firstDaily) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
     C.stats.best('tower-defence', 'wave', S.wave, false);
     ctx.clearSave();
 
     var actions = null;
     ctx.finish({
       won: won,
+      continued: continued,
       title: won ? C.t('mapDone') : C.t('gameOver'),
       stars: won && !S.endless ? st : null,
       timeMs: S.time * 1000,

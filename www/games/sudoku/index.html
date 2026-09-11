@@ -481,8 +481,19 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngi
       topRow.appendChild(C.ui.segmented(DIFFS.map(function (d) {
         return { value: d, label: C.t(d) };
       }), S.difficulty, function (v) {
+        if (v === S.difficulty) return;
+        // جدول نیمه‌تمام نباید بی‌هشدار برود؛ همان تأییدی که «جدول تازه» می‌گیرد
+        if (started()) {
+          C.ui.confirm({
+            title: C.t('newPuzzle'), body: C.t('resetWarn'),
+            onOk: function () { prefs.difficulty = v; ctx.store.set('prefs', prefs); newGame(v); startTimer(); },
+            onCancel: function () { render(); }
+          });
+          render();
+          return;
+        }
         prefs.difficulty = v; ctx.store.set('prefs', prefs);
-        newGame(v);
+        newGame(v); startTimer();
       }));
       topRow.appendChild(el('span', { class: 'ch-badge', text: C.num(S.puzzle.filter(function (x) { return x; }).length) + ' ' + C.t('clues') }));
     }
@@ -534,6 +545,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngi
   }
 
   /* ------------------------------------------------------------ حرکت */
+
+  // بازی «شروع شده» یعنی کاربر چیزی نوشته یا زمان معناداری گذشته
+  function started() {
+    if (!S || S.done) return false;
+    if (S.undo && S.undo.length) return true;
+    return S.elapsed > 5000;
+  }
 
   function pick(i) {
     if (S.done) return;
@@ -638,8 +656,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngi
     if (S.hints === 0 && S.mistakes === 0) C.achievements.unlock('sd-clean');
     if (S.difficulty === 'medium' && S.elapsed < 300000) C.achievements.unlock('sd-fast');
 
+    var firstDaily = false;
     if (S.daily) {
-      C.stats.daily('sudoku', S.daily, { label: C.time(S.elapsed), ms: S.elapsed, difficulty: S.difficulty });
+      firstDaily = C.stats.daily('sudoku', S.daily, { label: C.time(S.elapsed), ms: S.elapsed, difficulty: S.difficulty });
+      if (!firstDaily) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
     }
     ctx.store.remove('session');
 
