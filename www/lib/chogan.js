@@ -375,6 +375,17 @@
     var l = state.settings.lang;
     document.documentElement.lang = l;
     document.documentElement.dir = (l === 'fa') ? 'rtl' : 'ltr';
+    // وب‌منیفست ترجمه‌ی بومی ندارد، پس دو فایل داریم و لینک را جابه‌جا می‌کنیم.
+    // بدون این، نام PWA نصب‌شده روی هر دستگاهی فارسی می‌ماند.
+    var link = document.querySelector('link[rel="manifest"]');
+    if (link) {
+      var href = (l === 'fa') ? 'manifest.webmanifest' : 'manifest-en.webmanifest';
+      if (link.getAttribute('href') !== href) link.setAttribute('href', href);
+    }
+    // عنوان صفحه هم اسم اپ را نشان می‌دهد و باید با زبان عوض شود
+    if (Chogan.pageTitle) {
+      try { document.title = Chogan.pageTitle(); } catch (e) { /* عنوان قبلی بماند */ }
+    }
   };
   Chogan.setLang = function (l) {
     state.settings.lang = (l === 'en') ? 'en' : 'fa';
@@ -1690,6 +1701,14 @@
     var store = Chogan.storage(cfg.id);
     if (cfg.strings) Chogan.strings(cfg.strings);
 
+    // عنوان تب هم اسم بازی و اسم اپ را نشان می‌دهد؛ در HTML فارسی نوشته شده
+    // و باید با زبان عوض شود. applyLang بعد از هر تغییر زبان صدایش می‌زند.
+    Chogan.pageTitle = function () {
+      var n = (cfg.name && (cfg.name[state.settings.lang] || cfg.name.fa)) || '';
+      return n ? (n + ' — ' + Chogan.t('appName')) : Chogan.t('appName');
+    };
+    Chogan.applyLang();
+
     // چالش روزانه و بازی عادی دو نشست جدا هستند و نباید روی هم بنویسند.
     // قبلاً هر دو کلید 'session' را می‌گرفتند، پس باز کردن روزانه بازی
     // نیمه‌کاره را پاک می‌کرد و خود روزانه هم هیچ‌وقت ادامه نمی‌شد.
@@ -1927,6 +1946,8 @@
 
   Chogan.boot = function (o) {
     o = o || {};
+    // صفحه‌ی منو. صفحه‌ی بازی خودش در Chogan.game عنوان دقیق‌ترش را می‌گذارد.
+    if (!Chogan.pageTitle) Chogan.pageTitle = function () { return Chogan.t('appName'); };
     Chogan.applyLang();
     Chogan.applyTheme();
     rollSeason();
