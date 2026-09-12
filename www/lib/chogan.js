@@ -246,6 +246,7 @@
       achievements: 'دستاوردها', profile: 'پروفایل', settings: 'تنظیمات',
       play: 'بازی', resume: 'ادامه', newGame: 'بازی تازه', again: 'دوباره',
       menu: 'منو', back: 'بازگشت', undo: 'برگرداندن', close: 'بستن', cancel: 'انصراف', result: 'نتیجه',
+      saveImage: 'ذخیره‌ی عکس', copyText: 'کپی متن',
       confirm: 'تأیید', done: 'باشه', next: 'بعدی', skip: 'رد کردن',
       start: 'شروع', pause: 'مکث', resumeGame: 'ادامه‌ی بازی', restart: 'شروع دوباره',
       quit: 'خروج به منو', help: 'راهنما', share: 'اشتراک‌گذاری', copied: 'در حافظه کپی شد',
@@ -283,6 +284,7 @@
       achievements: 'Awards', profile: 'Profile', settings: 'Settings',
       play: 'Play', resume: 'Resume', newGame: 'New game', again: 'Again',
       menu: 'Menu', back: 'Back', undo: 'Undo', close: 'Close', cancel: 'Cancel', result: 'Result',
+      saveImage: 'Save image', copyText: 'Copy text',
       confirm: 'Confirm', done: 'OK', next: 'Next', skip: 'Skip',
       start: 'Start', pause: 'Pause', resumeGame: 'Resume', restart: 'Restart',
       quit: 'Quit to menu', help: 'Help', share: 'Share', copied: 'Copied to clipboard',
@@ -960,6 +962,238 @@
     }
     copyText(text);
   };
+
+  /* ------------------------------------------------- کارت تصویری نتیجه */
+  // یک بوم ۱۰۸۰×۱۳۵۰ که برند، عنوان، تخته‌ی پایانی و ردیف‌های نتیجه را
+  // می‌کشد. تخته را خود بازی می‌کشد چون فقط او مدلش را می‌داند.
+  var CARD_W = 1080, CARD_H = 1500;
+
+  function cssVar(name, fallback) {
+    try {
+      var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      return v || fallback;
+    } catch (e) { return fallback; }
+  }
+
+  // roundRect در وب‌ویوهای قدیمی نیست
+  function rrect(g, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    g.beginPath();
+    g.moveTo(x + r, y);
+    g.arcTo(x + w, y, x + w, y + h, r);
+    g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r);
+    g.arcTo(x, y, x + w, y, r);
+    g.closePath();
+  }
+  Chogan.rrect = rrect;
+
+  function fontsReady() {
+    if (document.fonts && document.fonts.ready) {
+      // یک بار متن فارسی را بخواه تا فونت متغیر واقعاً بار شود
+      try { document.fonts.load('700 76px Vazirmatn', 'چوگان'); } catch (e) { /* مهم نیست */ }
+      return document.fonts.ready.catch(function () { });
+    }
+    return Promise.resolve();
+  }
+
+  // o: { game, title, note, stars, lines, footer, paint }
+  Chogan.card = function (o) {
+    return fontsReady().then(function () {
+      var cv = document.createElement('canvas');
+      cv.width = CARD_W; cv.height = CARD_H;
+      var g = cv.getContext('2d');
+      var rtl = document.documentElement.dir === 'rtl';
+      var fam = 'Vazirmatn, system-ui, sans-serif';
+      var col = {
+        bg: cssVar('--c-bg', '#FBF6EF'),
+        surface: cssVar('--c-surface', '#FFFFFF'),
+        surface2: cssVar('--c-surface-2', '#F3EADF'),
+        surface3: cssVar('--c-surface-3', '#EDE0D0'),
+        line: cssVar('--c-line', '#E6D9C8'),
+        text: cssVar('--c-text', '#2C2620'),
+        dim: cssVar('--c-text-dim', '#7A6A57'),
+        faint: cssVar('--c-text-faint', '#A99883'),
+        accent: cssVar('--c-accent', '#D9A441'),
+        gold: cssVar('--c-gold', '#D9A441'),
+        game: cssVar('--game', '') || cssVar('--c-accent', '#D9A441')
+      };
+      try { g.direction = rtl ? 'rtl' : 'ltr'; } catch (e) { /* پشتیبانی نشد */ }
+
+      var START = rtl ? 'right' : 'left', END = rtl ? 'left' : 'right';
+      var PAD = 84;
+      var xs = rtl ? CARD_W - PAD : PAD;      // لبه‌ی شروع خط
+      var xe = rtl ? PAD : CARD_W - PAD;      // لبه‌ی پایان خط
+
+      g.fillStyle = col.bg;
+      g.fillRect(0, 0, CARD_W, CARD_H);
+      g.fillStyle = col.surface;
+      rrect(g, 36, 36, CARD_W - 72, CARD_H - 72, 56);
+      g.fill();
+
+      // برند
+      g.textBaseline = 'alphabetic';
+      g.textAlign = START;
+      g.fillStyle = col.game;
+      g.font = '800 46px ' + fam;
+      g.fillText(rtl ? 'چوگان' : 'Chogan', xs, 150);
+      if (o.game) {
+        g.textAlign = END;
+        g.fillStyle = col.faint;
+        g.font = '600 36px ' + fam;
+        g.fillText(o.game, xe, 150);
+      }
+      g.strokeStyle = col.line; g.lineWidth = 3;
+      g.beginPath(); g.moveTo(PAD, 186); g.lineTo(CARD_W - PAD, 186); g.stroke();
+
+      // عنوان
+      var y = 268;
+      g.textAlign = 'center';
+      g.fillStyle = col.text;
+      g.font = '800 70px ' + fam;
+      g.fillText(o.title || '', CARD_W / 2, y);
+      y += 20;
+      if (o.note) {
+        y += 46;
+        g.fillStyle = col.dim;
+        g.font = '600 34px ' + fam;
+        g.fillText(o.note, CARD_W / 2, y);
+      }
+      if (o.stars !== undefined && o.stars !== null) {
+        y += 74;
+        drawStars(g, CARD_W / 2, y, o.stars, col);
+        y += 12;
+      }
+
+      // تخته
+      var lines = o.lines || [];
+      var rowH = 74;
+      var listH = lines.length * rowH;
+      var footTop = CARD_H - PAD - 40;
+      var boxTop = y + 44;
+      var boxBottom = footTop - listH - 44;
+      // بدون تخته، ردیف‌ها می‌آیند بالا تا کارت وسطش خالی نماند
+      var box = o.paint
+        ? { x: PAD, y: boxTop, w: CARD_W - PAD * 2, h: Math.max(160, boxBottom - boxTop) }
+        : { x: PAD, y: boxTop, w: CARD_W - PAD * 2, h: Math.max(0, (boxBottom - boxTop) / 3) };
+      if (o.paint) {
+        g.save();
+        try {
+          g.translate(box.x, box.y);
+          g.beginPath(); g.rect(0, 0, box.w, box.h); g.clip();
+          o.paint(g, box.w, box.h, col);
+        } catch (e) { /* تخته نکشیده شد، بقیه‌ی کارت سالم است */ }
+        g.restore();
+      }
+
+      // ردیف‌های نتیجه
+      var ly = box.y + box.h + 44;
+      lines.forEach(function (l, i) {
+        if (i) {
+          g.strokeStyle = col.line; g.lineWidth = 2;
+          g.beginPath(); g.moveTo(PAD, ly - rowH / 2 - 14); g.lineTo(CARD_W - PAD, ly - rowH / 2 - 14); g.stroke();
+        }
+        g.textAlign = START;
+        g.fillStyle = col.dim;
+        g.font = '600 36px ' + fam;
+        g.fillText(l.label, xs, ly);
+        g.textAlign = END;
+        g.fillStyle = l.gold ? col.gold : col.text;
+        g.font = '800 40px ' + fam;
+        g.fillText(l.value, xe, ly);
+        ly += rowH;
+      });
+
+      // پابرگ
+      g.textAlign = 'center';
+      g.fillStyle = col.faint;
+      g.font = '600 28px ' + fam;
+      g.fillText(o.footer || 'choganhq.github.io/chogan', CARD_W / 2, CARD_H - PAD + 6);
+      return cv;
+    });
+  };
+
+  function drawStars(g, cx, cy, n, col) {
+    var R = 30, gap = 84;
+    for (var i = 0; i < 3; i++) {
+      var x = cx + (i - 1) * gap;
+      g.beginPath();
+      for (var k = 0; k < 10; k++) {
+        var rad = k % 2 ? R * 0.45 : R;
+        var a = -Math.PI / 2 + k * Math.PI / 5;
+        var px = x + Math.cos(a) * rad, py = cy + Math.sin(a) * rad;
+        if (k) g.lineTo(px, py); else g.moveTo(px, py);
+      }
+      g.closePath();
+      if (i < n) { g.fillStyle = col.gold; g.fill(); }
+      else { g.strokeStyle = col.line; g.lineWidth = 4; g.stroke(); }
+    }
+  }
+
+  function canvasBlob(cv) {
+    return new Promise(function (res) {
+      if (cv.toBlob) cv.toBlob(function (b) { res(b); }, 'image/png');
+      else res(null);
+    });
+  }
+
+  // متن همیشه همراه عکس می‌رود تا جایی که عکس پشتیبانی نمی‌شود دست خالی نماند
+  Chogan.shareCard = function (o) {
+    var text = o.text || '';
+    Chogan.card(o).then(function (cv) {
+      return canvasBlob(cv).then(function (blob) { return { cv: cv, blob: blob }; });
+    }).then(function (r) {
+      var file = null;
+      if (r.blob && global.File) {
+        try { file = new File([r.blob], 'chogan.png', { type: 'image/png' }); } catch (e) { file = null; }
+      }
+      var nav = global.navigator;
+      var canFiles = false;
+      try { canFiles = !!(file && nav && nav.canShare && nav.canShare({ files: [file] })); } catch (e) { canFiles = false; }
+      cardSheet(r.cv, r.blob, text, canFiles ? file : null);
+    }, function () { Chogan.share(text); });
+  };
+
+  function cardSheet(cv, blob, text, file) {
+    var url = blob && global.URL && URL.createObjectURL ? URL.createObjectURL(blob) : cv.toDataURL('image/png');
+    var img = el('img', { class: 'ch-card__img', src: url, alt: '' });
+    var actions = [];
+    var nav = global.navigator;
+    if (file) {
+      actions.push({
+        label: Chogan.t('share'), kind: 'primary', keepOpen: true, onClick: function () {
+          nav.share({ files: [file], text: text }).catch(function () { /* لغو شد */ });
+        }
+      });
+    } else if (nav && nav.share) {
+      actions.push({
+        label: Chogan.t('share'), kind: 'primary', keepOpen: true, onClick: function () {
+          nav.share({ text: text }).catch(function () { copyText(text); });
+        }
+      });
+    }
+    actions.push({
+      label: Chogan.t('saveImage'), keepOpen: true, onClick: function () {
+        var a = el('a', { href: url, download: 'chogan.png' });
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function () { if (a.parentNode) a.parentNode.removeChild(a); }, 0);
+      }
+    });
+    if (text) actions.push({ label: Chogan.t('copyText'), keepOpen: true, onClick: function () { copyText(text); } });
+
+    Chogan.ui.modal({
+      title: Chogan.t('share'),
+      body: [img],
+      actions: actions,
+      closeButton: true,
+      onClose: function () {
+        // آدرس شیء را آزاد کن وگرنه تا بسته شدن صفحه در حافظه می‌ماند
+        if (blob && global.URL && URL.revokeObjectURL) setTimeout(function () { URL.revokeObjectURL(url); }, 400);
+      }
+    });
+  }
+
   function copyText(text) {
     var done = function () { Chogan.ui.toast({ icon: 'check', title: Chogan.t('copied') }); };
     if (global.navigator && global.navigator.clipboard && global.navigator.clipboard.writeText) {
@@ -1555,9 +1789,24 @@
         if (o.note) body.push(el('p', { class: 'ch-dim ch-center', text: o.note }));
         body.push(lines);
 
+        var cardLines = (o.lines || []).slice();
+        if (rec.coins) cardLines.push({ label: Chogan.t('coins'), value: '+' + Chogan.num(rec.coins), gold: true });
+
         var actions = [];
         if (o.shareText) {
-          actions.push({ label: Chogan.t('share'), keepOpen: true, onClick: function () { Chogan.share(o.shareText); } });
+          actions.push({
+            label: Chogan.t('share'), keepOpen: true, onClick: function () {
+              Chogan.shareCard({
+                game: (cfg.name && (cfg.name[state.settings.lang] || cfg.name.fa)) || '',
+                title: o.title || (o.won ? Chogan.t('won') : Chogan.t('finished')),
+                note: o.note || null,
+                stars: (o.stars === undefined ? null : o.stars),
+                lines: cardLines,
+                paint: o.paint || null,
+                text: o.shareText
+              });
+            }
+          });
         }
         actions.push({ label: Chogan.t('menu'), onClick: function () { Chogan.back(); } });
         if (o.onAgain) actions.push({ label: Chogan.t('again'), kind: 'primary', onClick: o.onAgain });
