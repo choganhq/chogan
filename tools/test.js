@@ -264,6 +264,23 @@ function testFiles() {
     ok(src.indexOf('localStorage.clear(') < 0, f + ': localStorage.clear صدا زده نمی‌شود');
     ok(!/history\.(pushState|replaceState)\s*\(/.test(src), f + ': تاریخچه دستکاری نمی‌شود');
   }
+  // وب‌منیفست ترجمه‌ی بومی ندارد، پس دو فایل داریم و صفحه لینک را جابه‌جا می‌کند
+  const mFa = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/manifest.webmanifest'), 'utf8'));
+  const mEn = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/manifest-en.webmanifest'), 'utf8'));
+  ok(mFa.name === 'چوگان' && mFa.lang === 'fa' && mFa.dir === 'rtl', 'منیفست فارسی درست است');
+  ok(mEn.name === 'Chogan' && mEn.lang === 'en' && mEn.dir === 'ltr', 'منیفست انگلیسی درست است');
+  // اگر id یا scope فرق کند مرورگر آن را یک اپ دوم می‌بیند و دو بار نصب می‌شود
+  for (const k of ['id', 'start_url', 'scope', 'display', 'orientation', 'background_color', 'theme_color']) {
+    ok(JSON.stringify(mFa[k]) === JSON.stringify(mEn[k]), 'دو منیفست روی ' + k + ' یکی هستند');
+  }
+  ok(JSON.stringify(mFa.icons) === JSON.stringify(mEn.icons), 'دو منیفست آیکون یکسان دارند');
+  ok(mFa.description !== mEn.description, 'توضیح هر منیفست به زبان خودش است');
+  ok(sw.indexOf('manifest-en.webmanifest') > 0, 'منیفست انگلیسی در فهرست کش سرویس‌ورکر هست');
+  const menuHtml = fs.readFileSync(path.join(ROOT, 'www/index.html'), 'utf8');
+  ok(/<link rel="manifest" href="manifest\.webmanifest">/.test(menuHtml), 'صفحه لینک منیفست دارد');
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  ok(/link\[rel="manifest"\]/.test(core), 'هسته لینک منیفست را با زبان عوض می‌کند');
+
   // نام لانچر باید با زبان گوشی عوض شود، وگرنه گوشی انگلیسی هم لیبل فارسی می‌گیرد
   const strDefault = fs.readFileSync(path.join(ROOT, 'android/app/src/main/res/values/strings.xml'), 'utf8');
   const strFa = fs.readFileSync(path.join(ROOT, 'android/app/src/main/res/values-fa/strings.xml'), 'utf8');
