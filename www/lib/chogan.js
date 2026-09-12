@@ -247,6 +247,7 @@
       play: 'بازی', resume: 'ادامه', newGame: 'بازی تازه', again: 'دوباره',
       menu: 'منو', back: 'بازگشت', undo: 'برگرداندن', close: 'بستن', cancel: 'انصراف', result: 'نتیجه',
       saveImage: 'ذخیره‌ی عکس', copyText: 'کپی متن',
+      updateReady: 'نسخه‌ی تازه آماده است', updateNow: 'آپدیت',
       confirm: 'تأیید', done: 'باشه', next: 'بعدی', skip: 'رد کردن',
       start: 'شروع', pause: 'مکث', resumeGame: 'ادامه‌ی بازی', restart: 'شروع دوباره',
       quit: 'خروج به منو', help: 'راهنما', share: 'اشتراک‌گذاری', copied: 'در حافظه کپی شد',
@@ -285,6 +286,7 @@
       play: 'Play', resume: 'Resume', newGame: 'New game', again: 'Again',
       menu: 'Menu', back: 'Back', undo: 'Undo', close: 'Close', cancel: 'Cancel', result: 'Result',
       saveImage: 'Save image', copyText: 'Copy text',
+      updateReady: 'A new version is ready', updateNow: 'Update',
       confirm: 'Confirm', done: 'OK', next: 'Next', skip: 'Skip',
       start: 'Start', pause: 'Pause', resumeGame: 'Resume', restart: 'Restart',
       quit: 'Quit to menu', help: 'Help', share: 'Share', copied: 'Copied to clipboard',
@@ -1341,6 +1343,29 @@
     return h;
   };
 
+  // نوار آپدیت. اعلان موقت به درد نمی‌خورد چون تا کاربر تصمیم نگیرد باید بماند.
+  ui.updateBar = function (onGo) {
+    var existing = document.querySelector('.ch-update');
+    if (existing) return existing;
+    var bar = el('div', { class: 'ch-update', role: 'status' });
+    var go = el('button', { class: 'ch-btn ch-btn--primary ch-btn--sm', type: 'button', text: Chogan.t('updateNow') });
+    var x = el('button', { class: 'ch-iconbtn ch-iconbtn--plain', type: 'button', 'aria-label': Chogan.t('close') },
+      [Chogan.icon('close', 18)]);
+    var close = function () { if (bar.parentNode) bar.parentNode.removeChild(bar); };
+    go.addEventListener('click', function () {
+      Chogan.feedback('tap');
+      go.disabled = true;
+      go.textContent = '…';
+      if (onGo) onGo();
+    });
+    x.addEventListener('click', function () { Chogan.feedback('tap'); close(); });
+    bar.appendChild(el('div', { class: 'ch-update__t', text: Chogan.t('updateReady') }));
+    bar.appendChild(go);
+    bar.appendChild(x);
+    document.body.appendChild(bar);
+    return bar;
+  };
+
   ui.toast = function (o) {
     var host = ui.toastHost();
     var node = el('div', { class: 'ch-toast' }, [
@@ -1909,19 +1934,48 @@
     if (o.sw && !global.Capacitor && 'serviceWorker' in global.navigator &&
         (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
       var sw = global.navigator.serviceWorker;
-      // اگر از قبل کنترل‌کننده‌ای هست، عوض شدنش یعنی نسخه‌ی تازه آمده.
-      // بدون این بارگذاری دوباره، صفحه‌ی باز تا بستن کامل مرورگر فایل‌های
-      // قدیمی را از کش می‌گرفت. نصب اول کنترل‌کننده ندارد و ریلود نمی‌شود.
-      var hadController = !!sw.controller, reloading = false;
-      sw.addEventListener('controllerchange', function () {
-        if (reloading || !hadController) return;
+      // نصب اول کنترل‌کننده ندارد؛ عوض شدنِ کنترل‌کننده‌ی موجود یعنی نسخه‌ی
+      // تازه جا افتاده و صفحه باید یک بار از نو بار شود.
+      var hadController = !!sw.controller, reloading = false, offered = false;
+      var reload = function () {
+        if (reloading) return;
         reloading = true;
         location.reload();
+      };
+      sw.addEventListener('controllerchange', function () {
+        if (!hadController) return;
+        reload();
       });
+      var offer = function (worker) {
+        if (offered || !worker) return;
+        offered = true;
+        ui.updateBar(function () {
+          worker.postMessage({ type: 'skipWaiting' });
+          // اگر به هر دلیل کنترل‌کننده عوض نشد، دست کاربر خالی نماند
+          setTimeout(reload, 2500);
+        });
+      };
       global.addEventListener('load', function () {
-        sw.register('sw.js', { scope: './', updateViaCache: 'none' })
-          .then(function (reg) { reg.update(); })
-          .catch(function () { /* بدون سرویس‌ورکر هم اپ کار می‌کند */ });
+        sw.register('sw.js', { scope: './', updateViaCache: 'none' }).then(function (reg) {
+          if (reg.waiting && sw.controller) offer(reg.waiting);
+          reg.addEventListener('updatefound', function () {
+            var w = reg.installing;
+            if (!w) return;
+            w.addEventListener('statechange', function () {
+              // نصب تمام شده و کنترل‌کننده‌ای هم هست: این یک آپدیت است، نه نصب اول
+              if (w.state === 'installed' && sw.controller) offer(w);
+            });
+          });
+          reg.update();
+          // یک تب می‌تواند روزها باز بماند. هر بار برگشتن به صفحه دوباره می‌پرسیم،
+          // ولی نه بیشتر از هر پنج دقیقه یک بار.
+          var last = Date.now();
+          document.addEventListener('visibilitychange', function () {
+            if (document.hidden || offered || Date.now() - last < 300000) return;
+            last = Date.now();
+            reg.update();
+          });
+        }).catch(function () { /* بدون سرویس‌ورکر هم اپ کار می‌کند */ });
       });
     }
     return Chogan;
