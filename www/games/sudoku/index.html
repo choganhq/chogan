@@ -682,8 +682,43 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngi
         { label: C.t('difficulty'), value: C.t(S.difficulty) }
       ],
       shareText: share,
+      paint: cardPaint(S.puzzle, S.grid),
       onAgain: S.daily ? null : function () { newGame(S.difficulty); startTimer(); }
     });
+  }
+
+
+  /* ------------------------------------------------- تخته روی کارت نتیجه */
+  function cardPaint(puzzle, grid) {
+    var giv = puzzle.slice(), val = grid.slice();
+    return function (g, W, H, col) {
+      var rtl = document.documentElement.dir === 'rtl';
+      var side = Math.min(W - 24, H - 24);
+      var cs = side / 9;
+      var ox = (W - side) / 2, oy = (H - side) / 2;
+      C.rrect(g, ox - 8, oy - 8, side + 16, side + 16, 18);
+      g.fillStyle = col.line; g.fill();
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      for (var i = 0; i < 81; i++) {
+        var r = (i / 9) | 0, c = i % 9;
+        var x = ox + (rtl ? (8 - c) : c) * cs, y = oy + r * cs;
+        var given = giv[i] > 0;
+        g.fillStyle = given ? col.surface2 : col.surface;
+        g.fillRect(x + 1, y + 1, cs - 2, cs - 2);
+        if (val[i]) {
+          g.fillStyle = given ? col.text : col.game;
+          g.font = (given ? '800 ' : '700 ') + Math.round(cs * 0.6) + 'px Vazirmatn, system-ui, sans-serif';
+          g.fillText(C.num(val[i]), x + cs / 2, y + cs / 2 + cs * 0.03);
+        }
+      }
+      // خط‌های ضخیم بلوک‌های سه‌تایی
+      g.strokeStyle = col.line;
+      for (var k = 0; k <= 9; k++) {
+        g.lineWidth = (k % 3 === 0) ? 5 : 2;
+        g.beginPath(); g.moveTo(ox + k * cs, oy); g.lineTo(ox + k * cs, oy + side); g.stroke();
+        g.beginPath(); g.moveTo(ox, oy + k * cs); g.lineTo(ox + side, oy + k * cs); g.stroke();
+      }
+    };
   }
 
   /* --------------------------------------------------------- زمان‌سنج */

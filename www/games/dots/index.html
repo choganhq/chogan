@@ -495,6 +495,59 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
     return { x1: PAD + c2 * GAP, y1: PAD + r2 * GAP, x2: PAD + c2 * GAP, y2: PAD + (r2 + 1) * GAP };
   }
 
+
+  /* ------------------------------------------------- تخته روی کارت نتیجه */
+  function cardPaint() {
+    var n = S.size, E_ = bd.E, HC = bd.HC;
+    var edges = S.edges.slice(), owner = S.owner.slice();
+    var eo = {};
+    for (var q in (S.edgeOwner || {})) eo[q] = S.edgeOwner[q];
+    var VB = PAD * 2 + GAP * n;
+    var pos = function (e) {
+      if (e < HC) {
+        var r = (e / n) | 0, c = e % n;
+        return { x1: PAD + c * GAP, y1: PAD + r * GAP, x2: PAD + (c + 1) * GAP, y2: PAD + r * GAP };
+      }
+      var k = e - HC, r2 = (k / (n + 1)) | 0, c2 = k % (n + 1);
+      return { x1: PAD + c2 * GAP, y1: PAD + r2 * GAP, x2: PAD + c2 * GAP, y2: PAD + (r2 + 1) * GAP };
+    };
+    return function (g, W, H, col) {
+      var side = Math.min(W, H);
+      var k = side / VB;
+      g.translate((W - side) / 2, (H - side) / 2);
+      g.scale(k, k);
+      // مربع‌های گرفته‌شده
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      for (var b = 0; b < n * n; b++) {
+        if (!owner[b]) continue;
+        var r = (b / n) | 0, c = b % n;
+        g.globalAlpha = 0.24;
+        g.fillStyle = P[owner[b]].c;
+        C.rrect(g, PAD + c * GAP + 6, PAD + r * GAP + 6, GAP - 12, GAP - 12, 10);
+        g.fill();
+        g.globalAlpha = 1;
+        g.fillStyle = P[owner[b]].c;
+        g.font = '800 38px Vazirmatn, system-ui, sans-serif';
+        g.fillText(C.num(owner[b]), PAD + c * GAP + GAP / 2, PAD + r * GAP + GAP / 2);
+      }
+      // یال‌های خالی، بعد یال‌های کشیده‌شده
+      g.lineCap = 'round';
+      for (var e = 0; e < E_; e++) {
+        var p = pos(e);
+        g.strokeStyle = edges[e] ? P[eo[e] || 1].c : col.surface2;
+        g.lineWidth = edges[e] ? 11 : 7;
+        g.beginPath(); g.moveTo(p.x1, p.y1); g.lineTo(p.x2, p.y2); g.stroke();
+      }
+      // نقطه‌ها
+      g.fillStyle = col.dim;
+      for (var rr = 0; rr <= n; rr++) {
+        for (var cc = 0; cc <= n; cc++) {
+          g.beginPath(); g.arc(PAD + cc * GAP, PAD + rr * GAP, 9, 0, Math.PI * 2); g.fill();
+        }
+      }
+    };
+  }
+
   function repaint(full) {
     var n = S.size;
     S.g.boxes.innerHTML = '';
@@ -743,6 +796,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
       shareText: 'چوگان · نقطه‌بازی ' + C.num(S.size) + '×' + C.num(S.size) +
         (S.daily ? ('\nروزانه ' + S.daily) : '') +
         '\n' + C.num(s1) + ' - ' + C.num(s2),
+      paint: cardPaint(),
       onAgain: S.daily ? null : function () { newGame(S.size, S.mode, S.level); }
     });
   }

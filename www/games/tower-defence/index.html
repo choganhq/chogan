@@ -525,6 +525,27 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
   var panel = null;
   function closePanel() { if (panel) { var p = panel; panel = null; p.close(); } }
   var canvas = el('canvas');
+
+  /* ------------------------------------------------- تخته روی کارت نتیجه */
+  // بوم بازی همین حالا درست همان چیزی است که باید روی کارت بنشیند، پس
+  // یک نسخه از آن برمی‌داریم؛ بازی ادامه می‌دهد و بوم اصلی عوض می‌شود.
+  function cardPaint() {
+    var snap = document.createElement('canvas');
+    snap.width = canvas.width; snap.height = canvas.height;
+    if (!snap.width || !snap.height) return null;
+    try { snap.getContext('2d').drawImage(canvas, 0, 0); } catch (e) { return null; }
+    return function (g, W, H) {
+      var k = Math.min(W / snap.width, H / snap.height);
+      var w = snap.width * k, h = snap.height * k;
+      var x = (W - w) / 2, y = (H - h) / 2;
+      g.save();
+      C.rrect(g, x, y, w, h, 18);
+      g.clip();
+      g.drawImage(snap, x, y, w, h);
+      g.restore();
+    };
+  }
+
   var cbox = el('div', { class: 'td-canvasbox' }, [canvas]);
   var top = el('div', { class: 'td-top' });
   var preview = el('div', { class: 'td-preview' });
@@ -1051,6 +1072,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
     C.stats.best('tower-defence', 'wave', S.wave, false);
     ctx.clearSave();
 
+    var cardPainter = cardPaint();
     var resultModal = ctx.finish({
       won: won,
       continued: continued,
@@ -1066,6 +1088,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
       ],
       shareText: 'چوگان · دفاع از برج' + (S.date ? ('\nنقشه‌ی روزانه ' + S.date) : '') +
         '\nموج ' + C.num(S.wave) + (won ? (' · ' + C.num(st) + ' ستاره') : '') + ' · جان ' + C.num(S.lives),
+      paint: cardPainter,
       onAgain: function () { finished = false; newGame(mapId, S.date); }
     });
 

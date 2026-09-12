@@ -62,6 +62,7 @@ tools/browser-check.sh      # همه‌ی صفحه‌ها در کروم بدون
 | سکه | `C.coins.can/spend`، درآمد از راه `ctx.finish` |
 | دستاورد | `C.achievements.unlock('id')` |
 | امتیاز لیگ و آمار | `ctx.finish({ points, coins, won, timeMs })` |
+| کارت تصویری اشتراک‌گذاری | `ctx.finish({ shareText, paint })` — `paint(g, w, h, col)` تخته را روی بوم می‌کشد |
 | چالش روزانه | `C.daily(id, date)` که بذر قطعی می‌دهد |
 | بهترین رکورد | `C.stats.best(id, key, value, lowerIsBetter)` |
 | آموزش اول بازی | `ctx.tutorialIfNew(pages)` |

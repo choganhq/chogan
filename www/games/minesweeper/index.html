@@ -632,6 +632,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
     var snap = { elapsed: S.elapsed, sizeKey: S.sizeKey, daily: S.daily };
     for (var i = 0; i < S.mine.length; i++) if (S.mine[i]) S.revealed[i] = 1;
     paint();
+    snap.board = boardSnap();
     C.ui.shake(frame);
     C.audio.sfx('boom');
     C.haptic('error');
@@ -644,6 +645,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
           { label: C.t('time'), value: C.time(snap.elapsed) },
           { label: C.t('difficulty'), value: C.t(snap.sizeKey) }
         ],
+        paint: cardPaint(snap.board),
+        shareText: 'چوگان · مین‌روب ' + C.t(snap.sizeKey) + (snap.daily ? ('\nروزانه ' + snap.daily) : '') +
+          '\nروی مین رفتم · زمان ' + C.time(snap.elapsed),
         onAgain: snap.daily ? null : function () { newGame(snap.sizeKey); }
       });
     }, 620);
@@ -683,8 +687,72 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
       ],
       shareText: 'چوگان · مین‌روب ' + C.t(S.sizeKey) + (S.daily ? ('\nروزانه ' + S.daily) : '') +
         '\nزمان ' + C.time(S.elapsed) + ' · راهنمایی ' + C.num(S.hints),
+      paint: cardPaint(boardSnap()),
       onAgain: S.daily ? null : function () { newGame(S.sizeKey); }
     });
+  }
+
+
+  /* ------------------------------------------------- تخته روی کارت نتیجه */
+  // مدل را همین‌جا کپی می‌کنیم: پنجره‌ی نتیجه می‌تواند بعد از ساخته شدن
+  // تخته‌ی تازه هنوز باز باشد و کارت باید همان دور را نشان بدهد.
+  var NUMC = ['', '#4C7DBE', '#4A8A5C', '#C8574B', '#6A4FA3', '#B06B2E', '#2D8C97', '#8A5A44', '#7A6A57'];
+
+  function boardSnap() {
+    var sp = S.spec;
+    return {
+      rows: sp.rows, cols: sp.cols,
+      mine: S.mine ? S.mine.slice() : [],
+      num: S.num ? S.num.slice() : [],
+      revealed: S.revealed.slice(),
+      flagged: S.flagged.slice()
+    };
+  }
+
+  function cardPaint(b) {
+    return function (g, W, H, col) {
+      var rtl = document.documentElement.dir === 'rtl';
+      var cs = Math.min((W - 24) / b.cols, (H - 24) / b.rows);
+      var bw = cs * b.cols, bh = cs * b.rows;
+      var ox = (W - bw) / 2, oy = (H - bh) / 2;
+      var pad = Math.max(0.5, cs * 0.05), rad = Math.max(1.5, cs * 0.16);
+      C.rrect(g, ox - 8, oy - 8, bw + 16, bh + 16, rad + 8);
+      g.fillStyle = col.line; g.fill();
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      for (var i = 0; i < b.rows * b.cols; i++) {
+        var r = (i / b.cols) | 0, c = i % b.cols;
+        var x = ox + (rtl ? (b.cols - 1 - c) : c) * cs, y = oy + r * cs;
+        var open = b.revealed[i], mine = b.mine[i];
+        g.fillStyle = open ? (mine ? '#C8574B' : col.surface2) : col.surface3;
+        C.rrect(g, x + pad, y + pad, cs - pad * 2, cs - pad * 2, rad);
+        g.fill();
+        var mx = x + cs / 2, my = y + cs / 2;
+        if (open && mine) {
+          g.fillStyle = '#fff';
+          g.beginPath(); g.arc(mx, my, cs * 0.2, 0, Math.PI * 2); g.fill();
+          g.strokeStyle = '#fff'; g.lineWidth = Math.max(1, cs * 0.06);
+          for (var k = 0; k < 4; k++) {
+            var a = k * Math.PI / 4;
+            g.beginPath();
+            g.moveTo(mx - Math.cos(a) * cs * 0.33, my - Math.sin(a) * cs * 0.33);
+            g.lineTo(mx + Math.cos(a) * cs * 0.33, my + Math.sin(a) * cs * 0.33);
+            g.stroke();
+          }
+        } else if (open && b.num[i] > 0 && b.num[i] < 9) {
+          g.fillStyle = NUMC[b.num[i]];
+          g.font = '800 ' + Math.round(cs * 0.56) + 'px Vazirmatn, system-ui, sans-serif';
+          g.fillText(C.num(b.num[i]), mx, my + cs * 0.03);
+        } else if (!open && b.flagged[i]) {
+          g.fillStyle = '#C8574B';
+          g.fillRect(mx - cs * 0.03, my - cs * 0.26, cs * 0.06, cs * 0.52);
+          g.beginPath();
+          g.moveTo(mx, my - cs * 0.26);
+          g.lineTo(mx + cs * 0.26, my - cs * 0.12);
+          g.lineTo(mx, my + 0.02 * cs);
+          g.closePath(); g.fill();
+        }
+      }
+    };
   }
 
   /* --------------------------------------------------------- زمان‌سنج */
