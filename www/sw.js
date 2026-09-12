@@ -45,8 +45,13 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     buildList()
       .then((list) => caches.open(CACHE).then((c) => c.addAll(list)))
-      .then(() => self.skipWaiting())
   );
+});
+
+// عمداً skipWaiting در نصب نیست: نسخه‌ی تازه منتظر می‌ماند تا صفحه به کاربر
+// خبر بدهد و او خودش بزند. جای‌گزینی بی‌خبر یعنی صفحه زیر دست کاربر ریلود شود.
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'skipWaiting') self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {

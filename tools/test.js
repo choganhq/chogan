@@ -270,11 +270,85 @@ function testFiles() {
   ok(manifest.indexOf('INTERNET') < 0, 'مجوز اینترنت در منیفست نیست');
 }
 
+
+// سرویس‌ورکر را واقعاً در یک محیط ساختگی اجرا می‌کنیم. چرخه‌ی آپدیت را
+// نمی‌شود در کروم بدون سر پایدار تست کرد، ولی منطق خود فایل را می‌شود.
+function swHarness(build) {
+  const src = fs.readFileSync(path.join(ROOT, 'www/sw.js'), 'utf8');
+  const verSrc = fs.readFileSync(path.join(ROOT, 'www/version.js'), 'utf8');
+  const listeners = {};
+  const opened = [];
+  const deleted = [];
+  const sandbox = {
+    console,
+    skipWaitingCalls: 0,
+    importScripts: function () {
+      vm.runInContext(verSrc, sandbox);
+      if (build) sandbox.self.APP_BUILD = build;
+    },
+    caches: {
+      keys: () => Promise.resolve([]),
+      open: (name) => { opened.push(name); return Promise.resolve({ addAll: () => Promise.resolve() }); },
+      delete: (name) => { deleted.push(name); return Promise.resolve(true); },
+      match: () => Promise.resolve(null)
+    },
+    // فهرست بازی‌ها را سرویس‌ورکر موقع نصب می‌خواند
+    fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ games: [{ path: 'games/x/index.html' }] }) })
+  };
+  sandbox.self = sandbox;
+  sandbox.clients = { claim: () => Promise.resolve() };
+  sandbox.addEventListener = function (name, fn) { (listeners[name] = listeners[name] || []).push(fn); };
+  sandbox.skipWaiting = function () { sandbox.skipWaitingCalls++; };
+  vm.createContext(sandbox);
+  vm.runInContext(src, sandbox, { filename: 'sw.js' });
+
+  const fire = function (name, event) {
+    let waited = null;
+    (listeners[name] || []).forEach((fn) => fn(Object.assign({ waitUntil: (p) => { waited = p; } }, event)));
+    return waited || Promise.resolve();
+  };
+  return { sandbox, listeners, opened, deleted, fire };
+}
+
+function testSw() {
+  head('سرویس‌ورکر');
+  const plain = swHarness(null);
+  const stamped = swHarness('abc123abc123');
+  const version = plain.sandbox.self.APP_VERSION;
+
+  return plain.fire('install').then(() => stamped.fire('install')).then(function () {
+    ok(plain.opened[0] === 'chogan-v' + version, 'بدون شناسه‌ی بیلد، اسم کش فقط نسخه است');
+    ok(stamped.opened[0] === 'chogan-v' + version + '-abc123abc123', 'شناسه‌ی بیلد وارد اسم کش می‌شود');
+    ok(plain.opened[0] !== stamped.opened[0], 'دو انتشار وب پشت سر هم دو کش جدا می‌گیرند');
+    // نصب دیگر بی‌خبر جای نسخه‌ی قبلی را نمی‌گیرد؛ صفحه باید اول از کاربر بپرسد
+    ok(stamped.sandbox.skipWaitingCalls === 0, 'نصب، خودش جای نسخه‌ی قبلی را نمی‌گیرد');
+
+    const msg = (stamped.listeners.message || [])[0];
+    ok(typeof msg === 'function', 'سرویس‌ورکر به پیام صفحه گوش می‌دهد');
+    msg({ data: { type: 'nope' } });
+    ok(stamped.sandbox.skipWaitingCalls === 0, 'پیام ناشناس جای‌گزینی را شروع نمی‌کند');
+    msg({});
+    ok(stamped.sandbox.skipWaitingCalls === 0, 'پیام بدون data خطا نمی‌دهد');
+    msg({ data: { type: 'skipWaiting' } });
+    ok(stamped.sandbox.skipWaitingCalls === 1, 'پیام skipWaiting صفحه، جای‌گزینی را شروع می‌کند');
+
+    // فعال‌سازی باید هر کشی جز کش فعلی را پاک کند، وگرنه بیلدهای قدیمی جمع می‌شوند
+    const current = stamped.opened[0];
+    stamped.sandbox.caches.keys = () => Promise.resolve(['chogan-v0.0.1-old', current]);
+    return stamped.fire('activate').then(function () {
+      ok(stamped.deleted.length === 1 && stamped.deleted[0] === 'chogan-v0.0.1-old',
+        'فعال‌سازی فقط کش‌های قدیمی را پاک می‌کند');
+    });
+  });
+}
+
 testFiles();
 testSudoku();
 testMines();
 testDots();
 testTd();
 
-console.log('\n' + (failures ? ('✗ ' + failures + ' خطا از ' + checks + ' بررسی') : ('همه‌ی ' + checks + ' بررسی سبز')));
-process.exit(failures ? 1 : 0);
+testSw().then(function () {
+  console.log('\n' + (failures ? ('✗ ' + failures + ' خطا از ' + checks + ' بررسی') : ('همه‌ی ' + checks + ' بررسی سبز')));
+  process.exit(failures ? 1 : 0);
+});
