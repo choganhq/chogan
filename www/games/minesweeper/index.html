@@ -10,10 +10,17 @@
 <style>
   .ms-wrap { width: 100%; display: flex; flex-direction: column; gap: var(--s-3); align-items: center; max-width: 100%; }
   .ms-top { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+  /* قاب ثابت می‌ماند و فقط داخلش اسکرول می‌شود، پس حاشیه هیچ‌وقت از دید خارج نمی‌شود */
+  .ms-frame {
+    max-width: 100%; background: var(--c-line);
+    border: 3px solid var(--c-line); border-radius: var(--r-md);
+    box-shadow: var(--sh-2); overflow: hidden;
+    --ms-inner-r: calc(var(--r-md) - 3px);
+  }
   .ms-scroll {
     max-width: 100%; overflow: auto; overscroll-behavior: contain;
-    border-radius: var(--r-md); box-shadow: var(--sh-2); background: var(--c-line);
-    padding: 4px; touch-action: pan-x pan-y;
+    background: var(--c-line); border-radius: var(--ms-inner-r);
+    touch-action: pan-x pan-y;
   }
   .ms-board { display: grid; grid-template-columns: repeat(var(--cols), var(--cs)); gap: 2px; }
   .ms-cell {
@@ -305,9 +312,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
 
   var board = el('div', { class: 'ms-board', role: 'grid' });
   var scroll = el('div', { class: 'ms-scroll' }, [board]);
+  var frame = el('div', { class: 'ms-frame' }, [scroll]);
   var top = el('div', { class: 'ms-top' });
   var tools = el('div', { class: 'ms-tools' });
-  var wrap = el('div', { class: 'ms-wrap' }, [top, scroll, tools]);
+  var wrap = el('div', { class: 'ms-wrap' }, [top, frame, tools]);
 
   var flagBtn = el('button', { class: 'ch-btn ch-btn--soft ms-flagbtn', type: 'button' },
     [C.icon('flag', 20), el('span', { text: C.t('flagMode') })]);
@@ -432,6 +440,24 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
         cells.push(b);
         board.appendChild(b);
       })(i);
+    }
+    roundCorners();
+  }
+
+  // شعاع گوشه‌های بیرونی روی چهار خانه‌ی گوشه، هم‌مرکز با قاب.
+  // ابعاد تخته متغیر است پس nth-child ثابت جواب نمی‌دهد.
+  // خاصیت‌های منطقی تا در راست‌به‌چپ گوشه‌ی درست گرد شود.
+  function roundCorners() {
+    var sp = S.spec, r = 'var(--ms-inner-r)';
+    var map = [
+      [0, 'border-start-start-radius'],
+      [sp.cols - 1, 'border-start-end-radius'],
+      [(sp.rows - 1) * sp.cols, 'border-end-start-radius'],
+      [sp.rows * sp.cols - 1, 'border-end-end-radius']
+    ];
+    for (var k = 0; k < map.length; k++) {
+      var c = cells[map[k][0]];
+      if (c) c.style.setProperty(map[k][1], r);
     }
   }
 
@@ -606,7 +632,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
     var snap = { elapsed: S.elapsed, sizeKey: S.sizeKey, daily: S.daily };
     for (var i = 0; i < S.mine.length; i++) if (S.mine[i]) S.revealed[i] = 1;
     paint();
-    C.ui.shake(scroll);
+    C.ui.shake(frame);
     C.audio.sfx('boom');
     C.haptic('error');
     ctx.clearSave();

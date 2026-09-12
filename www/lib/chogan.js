@@ -245,7 +245,7 @@
       appName: 'چوگان', home: 'خانه', daily: 'روزانه', league: 'لیگ',
       achievements: 'دستاوردها', profile: 'پروفایل', settings: 'تنظیمات',
       play: 'بازی', resume: 'ادامه', newGame: 'بازی تازه', again: 'دوباره',
-      menu: 'منو', back: 'بازگشت', undo: 'برگرداندن', close: 'بستن', cancel: 'انصراف',
+      menu: 'منو', back: 'بازگشت', undo: 'برگرداندن', close: 'بستن', cancel: 'انصراف', result: 'نتیجه',
       confirm: 'تأیید', done: 'باشه', next: 'بعدی', skip: 'رد کردن',
       start: 'شروع', pause: 'مکث', resumeGame: 'ادامه‌ی بازی', restart: 'شروع دوباره',
       quit: 'خروج به منو', help: 'راهنما', share: 'اشتراک‌گذاری', copied: 'در حافظه کپی شد',
@@ -282,7 +282,7 @@
       appName: 'Chogan', home: 'Home', daily: 'Daily', league: 'League',
       achievements: 'Awards', profile: 'Profile', settings: 'Settings',
       play: 'Play', resume: 'Resume', newGame: 'New game', again: 'Again',
-      menu: 'Menu', back: 'Back', undo: 'Undo', close: 'Close', cancel: 'Cancel',
+      menu: 'Menu', back: 'Back', undo: 'Undo', close: 'Close', cancel: 'Cancel', result: 'Result',
       confirm: 'Confirm', done: 'OK', next: 'Next', skip: 'Skip',
       start: 'Start', pause: 'Pause', resumeGame: 'Resume', restart: 'Restart',
       quit: 'Quit to menu', help: 'Help', share: 'Share', copied: 'Copied to clipboard',
@@ -1127,13 +1127,23 @@
   ui.modal = function (o) {
     var scrim = el('div', { class: 'ch-scrim', role: 'dialog', 'aria-modal': 'true' });
     var box = el('div', { class: 'ch-modal' });
-    if (o.title) box.appendChild(el('h2', { text: o.title }));
+    if (o.title || o.closeButton) {
+      var head = el('div', { class: 'ch-modal__head' });
+      head.appendChild(el('h2', { text: o.title || '' }));
+      if (o.closeButton) {
+        var xb = el('button', { class: 'ch-iconbtn ch-iconbtn--plain', type: 'button', 'aria-label': Chogan.t('close') },
+          [Chogan.icon('close', 20)]);
+        xb.addEventListener('click', function () { Chogan.feedback('tap'); close('x'); });
+        head.appendChild(xb);
+      }
+      box.appendChild(head);
+    }
     if (o.body) {
       var list = Array.isArray(o.body) ? o.body : [o.body];
       list.forEach(function (b) { box.appendChild(typeof b === 'string' ? el('p', { class: 'ch-dim', text: b }) : b); });
     }
     var closed = false;
-    var close = function () {
+    var close = function (via) {
       if (closed) return;
       closed = true;
       // پنجره ۱۱۰ میلی‌ثانیه محو می‌شود و تا وقتی در DOM است کلیک می‌گیرد.
@@ -1142,8 +1152,8 @@
       scrim.style.animation = 'ch-fade var(--t-fast) reverse';
       setTimeout(function () { if (scrim.parentNode) scrim.parentNode.removeChild(scrim); }, 110);
       document.removeEventListener('keydown', onKey);
-      // از هر مسیری که بسته شد — دکمه، Escape یا کلیک بیرون — یک بار صدا می‌خورد
-      if (o.onClose) o.onClose();
+      // از هر مسیری که بسته شد — دکمه، ضربدر، Escape یا کلیک بیرون — یک بار صدا می‌خورد
+      if (o.onClose) o.onClose(via || 'action');
     };
     if (o.actions && o.actions.length) {
       var row = el('div', { class: 'ch-modal__actions' });
@@ -1155,7 +1165,7 @@
             // اکشن‌های keepOpen عمداً چند بار اجرا می‌شوند؛ بقیه فقط یک بار
             if (a.keepOpen !== true && closed) return;
             Chogan.feedback('tap');
-            if (a.keepOpen !== true) close();
+            if (a.keepOpen !== true) close('action');
             if (a.onClick) a.onClick();
           }
         }, a.label));
@@ -1163,17 +1173,19 @@
       box.appendChild(row);
     }
     function onKey(e) {
-      if (e.key === 'Escape' && o.dismissable !== false) close();
+      // ضربدر که باشد، Escape هم باید کار کند حتی وقتی کلیک بیرون بسته است
+      if (e.key === 'Escape' && (o.dismissable !== false || o.closeButton)) close('escape');
     }
     document.addEventListener('keydown', onKey);
     if (o.dismissable !== false) {
       scrim.addEventListener('click', function (e) {
-        if (e.target === scrim) close();
+        if (e.target === scrim) close('backdrop');
       });
     }
     scrim.appendChild(box);
     document.body.appendChild(scrim);
-    var focusable = box.querySelector('button, [tabindex], input');
+    // ضربدر اولین دکمه‌ی جعبه است ولی تمرکز باید روی خود کنش‌ها بنشیند
+    var focusable = box.querySelector('.ch-modal__actions button') || box.querySelector('button, [tabindex], input');
     if (focusable) setTimeout(function () { focusable.focus(); }, 40);
     return { close: close, box: box };
   };
@@ -1429,7 +1441,7 @@
 
     var stats = {};
     var saveFn = null;
-    var lastFinish = null;
+    var lastFinish = null, resultBtn = null, reopenResult = null;
 
     var ctx = {
       id: cfg.id,
@@ -1486,8 +1498,10 @@
         if (!saveFn) return;
         var s = null;
         try { s = saveFn(); } catch (e) { s = null; }
-        if (s && s.inProgress !== false) store.set(slot, Object.assign({ inProgress: true, at: Date.now() }, s));
-        else store.remove(slot);
+        if (s && s.inProgress !== false) {
+          store.set(slot, Object.assign({ inProgress: true, at: Date.now() }, s));
+          hideResultBtn(); // دور تازه شروع شده، دکمه‌ی نتیجه‌ی قبلی دیگر معنی ندارد
+        } else store.remove(slot);
       },
       loadSave: function () { return store.get(slot, null); },
       clearSave: function () { store.remove(slot); },
@@ -1548,16 +1562,37 @@
         actions.push({ label: Chogan.t('menu'), onClick: function () { Chogan.back(); } });
         if (o.onAgain) actions.push({ label: Chogan.t('again'), kind: 'primary', onClick: o.onAgain });
 
-        return ui.modal({
-          title: o.title || (o.won ? Chogan.t('won') : Chogan.t('finished')),
-          body: body,
-          actions: actions,
-          dismissable: false
-        });
+        // بستن با ضربدر تخته را همان‌طور که تمام شد نشان می‌دهد؛ دکمه‌ی «نتیجه»
+        // در نوار بالا می‌ماند تا هر وقت خواست همین پنجره را برگرداند.
+        reopenResult = function () {
+          return ui.modal({
+            title: o.title || (o.won ? Chogan.t('won') : Chogan.t('finished')),
+            body: body,
+            actions: actions,
+            dismissable: false,
+            closeButton: true,
+            onClose: function (via) { if (via !== 'action') showResultBtn(); }
+          });
+        };
+        hideResultBtn();
+        return reopenResult();
       },
 
       lastResult: function () { return lastFinish; }
     };
+
+    function showResultBtn() {
+      if (!resultBtn) {
+        resultBtn = ctx.button({
+          icon: 'trophy',
+          label: Chogan.t('result'),
+          onClick: function () { if (reopenResult) reopenResult(); }
+        });
+        resultBtn.classList.add('ch-iconbtn--gold');
+      }
+      resultBtn.hidden = false;
+    }
+    function hideResultBtn() { if (resultBtn) resultBtn.hidden = true; }
 
     function starsRow(n) {
       var row = el('div', { class: 'ch-row ch-center', style: { 'justify-content': 'center', gap: '6px', margin: '4px 0 14px' } });
