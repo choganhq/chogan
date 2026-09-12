@@ -169,8 +169,18 @@
 
   /* ========================================================= وضعیت اپ */
 
+  // زبان پیش‌فرض از خود دستگاه. فارسی زبان اول پروژه است ولی روی گوشی
+  // انگلیسی، صفحه‌ی خوشامد فارسی باز می‌شد. کاربر در همان صفحه و بعد هم در
+  // تنظیمات می‌تواند عوضش کند. همان قاعده‌ای که لیبل لانچر با values-fa دارد.
+  function deviceLang() {
+    try {
+      var l = (global.navigator.languages && global.navigator.languages[0]) || global.navigator.language || '';
+      return /^fa\b|^fa-/i.test(l) ? 'fa' : 'en';
+    } catch (e) { return 'fa'; }
+  }
+
   var DEFAULT_SETTINGS = {
-    lang: 'fa',
+    lang: deviceLang(),
     theme: 'auto',   // auto | light | dark
     sfx: true,
     music: true,

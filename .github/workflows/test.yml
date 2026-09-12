@@ -72,6 +72,21 @@ jobs:
           done
           echo "همه‌ی دارایی‌های لازم داخل APK هستند"
 
+      # لیبل لانچر باید با زبان گوشی عوض شود. تست‌های فایلی فقط منابع را
+      # می‌بینند؛ اینجا از خود APK بیلدشده می‌پرسیم که واقعاً هر دو تا آمده‌اند.
+      - name: بررسی نام برنامه در هر دو زبان
+        run: |
+          set -euo pipefail
+          AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -n 1)
+          APK=$(ls android/app/build/outputs/apk/debug/*.apk | head -n 1)
+          BADGE=$("$AAPT" dump badging "$APK")
+          echo "$BADGE" | grep -E "^application(-label|-label-fa)" || true
+          DEF=$(echo "$BADGE" | sed -n "s/^application-label:'\(.*\)'$/\1/p")
+          FA=$(echo "$BADGE" | sed -n "s/^application-label-fa:'\(.*\)'$/\1/p")
+          [ "$DEF" = "Chogan" ] || { echo "نام پیش‌فرض «$DEF» است نه Chogan"; exit 1; }
+          [ "$FA" = "چوگان" ] || { echo "نام فارسی «$FA» است نه چوگان"; exit 1; }
+          echo "پیش‌فرض: $DEF · فارسی: $FA"
+
       - name: بررسی مجوزهای بسته
         run: |
           set -euo pipefail
