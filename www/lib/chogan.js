@@ -1908,8 +1908,18 @@
     // داخل اپ اندروید فایل‌ها از قبل محلی‌اند و لایه‌ی کش لازم نیست.
     if (o.sw && !global.Capacitor && 'serviceWorker' in global.navigator &&
         (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+      var sw = global.navigator.serviceWorker;
+      // اگر از قبل کنترل‌کننده‌ای هست، عوض شدنش یعنی نسخه‌ی تازه آمده.
+      // بدون این بارگذاری دوباره، صفحه‌ی باز تا بستن کامل مرورگر فایل‌های
+      // قدیمی را از کش می‌گرفت. نصب اول کنترل‌کننده ندارد و ریلود نمی‌شود.
+      var hadController = !!sw.controller, reloading = false;
+      sw.addEventListener('controllerchange', function () {
+        if (reloading || !hadController) return;
+        reloading = true;
+        location.reload();
+      });
       global.addEventListener('load', function () {
-        global.navigator.serviceWorker.register('sw.js', { scope: './', updateViaCache: 'none' })
+        sw.register('sw.js', { scope: './', updateViaCache: 'none' })
           .then(function (reg) { reg.update(); })
           .catch(function () { /* بدون سرویس‌ورکر هم اپ کار می‌کند */ });
       });
