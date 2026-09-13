@@ -44,10 +44,21 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      # نسخه‌ی گردل از همان فایلی خوانده می‌شود که اف‌دروید می‌خواند، وگرنه
+      # CI با یک نسخه سبز می‌شود و اف‌دروید با نسخه‌ی دیگری می‌سازد.
+      - name: خواندن نسخه‌ی گردل از فایل wrapper
+        id: gradleversion
+        run: |
+          set -euo pipefail
+          V=$(sed -n 's|.*/gradle-\([0-9][^-]*\)-bin\.zip.*|\1|p' android/gradle/wrapper/gradle-wrapper.properties)
+          [ -n "$V" ] || { echo "نسخه‌ی گردل از gradle-wrapper.properties خوانده نشد"; exit 1; }
+          echo "نسخه‌ی گردل: $V"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
       - name: نصب گریدل
         uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: '8.14.3'
+          gradle-version: ${{ steps.gradleversion.outputs.version }}
 
       # بیلد دیباگ کلید امضا نمی‌خواهد، پس روی هر PR اجرا می‌شود و ثابت
       # می‌کند پروژه‌ی اندروید واقعاً بیلد می‌شود، نه فقط روی کاغذ درست است.

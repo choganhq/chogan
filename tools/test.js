@@ -264,6 +264,21 @@ function testFiles() {
     ok(src.indexOf('localStorage.clear(') < 0, f + ': localStorage.clear صدا زده نمی‌شود');
     ok(!/history\.(pushState|replaceState)\s*\(/.test(src), f + ': تاریخچه دستکاری نمی‌شود');
   }
+  // اف‌دروید با نسخه‌ی داخل gradle-wrapper.properties می‌سازد. اگر ورک‌فلو
+  // نسخه‌ی دیگری را دستی پین کند، CI سبز می‌شود و اف‌دروید چیز دیگری می‌سازد.
+  const wrapper = fs.readFileSync(path.join(ROOT, 'android/gradle/wrapper/gradle-wrapper.properties'), 'utf8');
+  const gradleVer = (wrapper.match(/gradle-([0-9][^-]*)-bin\.zip/) || [])[1];
+  ok(!!gradleVer, 'نسخه‌ی گردل از gradle-wrapper.properties خوانده می‌شود');
+  ok(/distributionSha256Sum=[0-9a-f]{64}/.test(wrapper), 'توزیع گردل چک‌سام دارد');
+  for (const wf of ['test.yml', 'release.yml']) {
+    const y = fs.readFileSync(path.join(ROOT, '.github/workflows', wf), 'utf8');
+    if (y.indexOf('setup-gradle') < 0) continue;
+    const pinned = y.match(/gradle-version:\s*'([^']+)'/);
+    ok(!pinned, wf + ': نسخه‌ی گردل دستی پین نشده');
+    ok(/gradle-version:\s*\$\{\{\s*steps\.gradleversion\.outputs\.version/.test(y),
+      wf + ': نسخه‌ی گردل از فایل wrapper می‌آید');
+  }
+
   // اف‌دروید توضیح انتشار را در ۵۰۰ کاراکتر بی‌صدا می‌برد (char_limits.whatsNew)،
   // پس متن بلند وسط جمله قیچی می‌شود بدون اینکه جایی خطا بدهد.
   const CHANGELOG_LIMIT = 500;
