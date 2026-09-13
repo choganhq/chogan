@@ -264,6 +264,20 @@ function testFiles() {
     ok(src.indexOf('localStorage.clear(') < 0, f + ': localStorage.clear صدا زده نمی‌شود');
     ok(!/history\.(pushState|replaceState)\s*\(/.test(src), f + ': تاریخچه دستکاری نمی‌شود');
   }
+  // اف‌دروید توضیح انتشار را در ۵۰۰ کاراکتر بی‌صدا می‌برد (char_limits.whatsNew)،
+  // پس متن بلند وسط جمله قیچی می‌شود بدون اینکه جایی خطا بدهد.
+  const CHANGELOG_LIMIT = 500;
+  const verSrcTxt = fs.readFileSync(path.join(ROOT, 'www/version.js'), 'utf8');
+  const code = verSrcTxt.match(/APP_VERSION_CODE\s*=\s*(\d+)/)[1];
+  for (const loc of ['en-US', 'fa']) {
+    const dir = path.join(ROOT, 'fastlane/metadata/android', loc, 'changelogs');
+    for (const f of fs.readdirSync(dir)) {
+      const text = fs.readFileSync(path.join(dir, f), 'utf8');
+      ok(text.length <= CHANGELOG_LIMIT, loc + '/' + f + ' زیر ' + CHANGELOG_LIMIT + ' کاراکتر است (' + text.length + ')');
+    }
+    ok(fs.existsSync(path.join(dir, code + '.txt')), loc + ': توضیح انتشار برای کد نسخه‌ی ' + code + ' هست');
+  }
+
   // وب‌منیفست ترجمه‌ی بومی ندارد، پس دو فایل داریم و صفحه لینک را جابه‌جا می‌کند
   const mFa = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/manifest.webmanifest'), 'utf8'));
   const mEn = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/manifest-en.webmanifest'), 'utf8'));
