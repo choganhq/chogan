@@ -29,6 +29,8 @@ The web version needs no build step:
 python3 -m http.server -d www 8000
 ```
 
+For a clean browser with no progress or service worker cache left over from an earlier run, use `tools/dev.sh`. It serves the same files, opens Chrome with a throwaway profile that is deleted when you close it, and never writes into `www/`. `tools/dev.sh --seed` also skips the first-run welcome and adds invented demo state.
+
 The Android version needs Gradle only — no Node, no npm, no `node_modules`:
 
 ```bash
@@ -111,6 +113,8 @@ fastlane/metadata/         متادیتای اف‌دروید، دوزبانه
 ```bash
 python3 -m http.server -d www 8000
 ```
+
+برای مرورگری بدون پیشرفت یا کش سرویس‌ورکرِ مانده از اجرای قبل، `tools/dev.sh` را بزن. همان فایل‌ها را سرو می‌کند، کروم را با پروفایل موقتی باز می‌کند که با بستنش پاک می‌شود، و چیزی داخل `www/` نمی‌نویسد. `tools/dev.sh --seed` خوشامد اولین اجرا را هم رد می‌کند و داده‌ی نمایشی ساختگی می‌گذارد.
 
 نسخه‌ی اندروید فقط گریدل لازم دارد. نه نود، نه npm، نه `node_modules`:
 
