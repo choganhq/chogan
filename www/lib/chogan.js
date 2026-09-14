@@ -283,6 +283,7 @@
       hint: 'راهنمایی', hints: 'راهنمایی', notEnoughCoins: 'سکه کافی نداری', hintUsed: 'راهنمایی گرفتی',
       coinsEarned: 'سکه گرفتی', playToEarn: 'یک دور بازی کن تا سکه بگیری',
       keyboard: 'کیبورد', difficulty: 'سختی',
+      fullscreen: 'تمام‌صفحه', exitFullscreen: 'خروج از تمام‌صفحه',
       easy: 'آسان', medium: 'متوسط', hard: 'سخت', expert: 'خبره',
       today: 'امروز', dailyDone: 'امروز را زدی', dailyOpen: 'هنوز نزدی',
       noAchievements: 'هنوز دستاوردی نگرفتی', emptyDaily: 'برای این روز چیزی ثبت نشده',
@@ -322,6 +323,7 @@
       hint: 'Hint', hints: 'Hints', notEnoughCoins: 'Not enough coins', hintUsed: 'Hint used',
       coinsEarned: 'coins earned', playToEarn: 'Play a round to earn coins',
       keyboard: 'Keyboard', difficulty: 'Difficulty',
+      fullscreen: 'Fullscreen', exitFullscreen: 'Exit fullscreen',
       easy: 'Easy', medium: 'Medium', hard: 'Hard', expert: 'Expert',
       today: 'Today', dailyDone: 'Done today', dailyOpen: 'Not played yet',
       emptyDaily: 'Nothing recorded for this day', noAchievements: 'No awards yet',
@@ -1244,6 +1246,8 @@
     back: 'M15 5l-7 7 7 7',
     forward: 'M9 5l7 7-7 7',
     close: 'M6 6l12 12M18 6L6 18',
+    expand: 'M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5',
+    collapse: 'M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5',
     check: 'M5 12.5l4.5 4.5L19 7',
     gear: 'M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z M19.4 13.5a7.6 7.6 0 0 0 0-3l1.8-1.3-1.9-3.3-2.1.8a7.6 7.6 0 0 0-2.6-1.5L14.3 3h-4.6l-.3 2.2a7.6 7.6 0 0 0-2.6 1.5l-2.1-.8-1.9 3.3 1.8 1.3a7.6 7.6 0 0 0 0 3l-1.8 1.3 1.9 3.3 2.1-.8a7.6 7.6 0 0 0 2.6 1.5l.3 2.2h4.6l.3-2.2a7.6 7.6 0 0 0 2.6-1.5l2.1.8 1.9-3.3z',
     star: 'M12 3.5l2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 10l6.1-.9z',
@@ -1285,6 +1289,49 @@
     lock: 'M6.5 10.5h11V20h-11zM8.5 10.5V7.5a3.5 3.5 0 0 1 7 0v3',
     plus: 'M12 5v14M5 12h14',
     minus: 'M5 12h14'
+  };
+
+  /* ------------------------------------------------------ تمام‌صفحه */
+  // اپ چندصفحه‌ای است و هر بازی سند خودش را دارد، پس مرورگر با هر ناوبری از
+  // تمام‌صفحه بیرون می‌آید. دکمه هم در منو و هم در نوار بازی می‌نشیند تا
+  // برگرداندنش یک ضربه باشد. در حالت نصب‌شده اصلاً لازم نیست.
+  Chogan.fullscreen = {
+    available: function () {
+      try {
+        if (global.Capacitor) return false;
+        if (global.matchMedia && global.matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches) return false;
+        var e = document.documentElement;
+        return !!(document.fullscreenEnabled && e.requestFullscreen);
+      } catch (e) { return false; }
+    },
+    on: function () { return !!document.fullscreenElement; },
+    toggle: function () {
+      try {
+        if (document.fullscreenElement) return document.exitFullscreen();
+        return document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+      } catch (e) { return Promise.reject(e); }
+    },
+    // دکمه‌ای که خودش برچسب و آیکونش را با وضعیت به‌روز نگه می‌دارد
+    button: function (extraClass) {
+      if (!Chogan.fullscreen.available()) return null;
+      var btn = el('button', { class: 'ch-iconbtn' + (extraClass ? ' ' + extraClass : ''), type: 'button' });
+      var sync = function () {
+        var on = Chogan.fullscreen.on();
+        btn.innerHTML = '';
+        btn.appendChild(Chogan.icon(on ? 'collapse' : 'expand', 22));
+        btn.setAttribute('aria-label', Chogan.t(on ? 'exitFullscreen' : 'fullscreen'));
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      };
+      btn.addEventListener('click', function () {
+        Chogan.feedback('tap');
+        // درخواست باید روی همین ضربه باشد، وگرنه مرورگر ردش می‌کند
+        var p = Chogan.fullscreen.toggle();
+        if (p && p.catch) p.catch(function () { /* کاربر یا مرورگر نخواست */ });
+      });
+      document.addEventListener('fullscreenchange', sync);
+      sync();
+      return btn;
+    }
   };
 
   Chogan.icon = function (name, size, cls) {
@@ -1721,6 +1768,8 @@
     backBtn.addEventListener('click', function () { Chogan.feedback('tap'); ctx.save(); Chogan.back(); });
 
     var bar = el('header', { class: 'ch-gamebar' }, [backBtn, title]);
+    // در نوار بازی هم هست چون ناوبری بین منو و بازی تمام‌صفحه را می‌بندد
+    var fsBtn = Chogan.fullscreen.button('ch-iconbtn--plain');
     var main = el('main', { class: 'ch-gamemain' + (cfg.scroll ? ' ch-gamemain--scroll' : '') });
     var root = el('div', { class: 'ch-gameroot' }, [bar, main]);
 
@@ -1738,6 +1787,8 @@
       num: Chogan.num,
 
       mount: function () {
+        // آخر از همه اضافه می‌شود تا بعد از دکمه‌های خود بازی بنشیند
+        if (fsBtn) bar.appendChild(fsBtn);
         document.body.className = 'ch-noscroll';
         document.body.appendChild(root);
         Chogan.setAccent(cfg.accent, cfg.accentSoft);
