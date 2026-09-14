@@ -293,22 +293,24 @@ function testFiles() {
     ok(fs.existsSync(path.join(dir, code + '.txt')), loc + ': توضیح انتشار برای کد نسخه‌ی ' + code + ' هست');
   }
 
-  // وب‌منیفست ترجمه‌ی بومی ندارد، پس دو فایل داریم و صفحه لینک را جابه‌جا می‌کند
-  const mFa = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/manifest.webmanifest'), 'utf8'));
-  const mEn = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/manifest-en.webmanifest'), 'utf8'));
-  ok(mFa.name === 'چوگان' && mFa.lang === 'fa' && mFa.dir === 'rtl', 'منیفست فارسی درست است');
-  ok(mEn.name === 'Chogan' && mEn.lang === 'en' && mEn.dir === 'ltr', 'منیفست انگلیسی درست است');
-  // اگر id یا scope فرق کند مرورگر آن را یک اپ دوم می‌بیند و دو بار نصب می‌شود
-  for (const k of ['id', 'start_url', 'scope', 'display', 'orientation', 'background_color', 'theme_color']) {
-    ok(JSON.stringify(mFa[k]) === JSON.stringify(mEn[k]), 'دو منیفست روی ' + k + ' یکی هستند');
+  // یک منیفست با نام محلی‌شده. پیش‌فرض انگلیسی است تا کاربر آلمانی هم اسم
+  // خوانا بگیرد، و فارسی به شکل name_localized اضافه شده تا مرورگر خودش
+  // بر اساس زبان دستگاه انتخاب کند و اسم موقع نصب قفل نشود.
+  const man = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/manifest.webmanifest'), 'utf8'));
+  ok(man.name === 'Chogan' && man.lang === 'en' && man.dir === 'ltr', 'پیش‌فرض منیفست انگلیسی است');
+  ok(!fs.existsSync(path.join(ROOT, 'www/manifest-en.webmanifest')), 'منیفست دوم حذف شده');
+  for (const k of ['name_localized', 'short_name_localized', 'description_localized']) {
+    ok(man[k] && man[k].fa, 'منیفست ' + k + ' فارسی دارد');
   }
-  ok(JSON.stringify(mFa.icons) === JSON.stringify(mEn.icons), 'دو منیفست آیکون یکسان دارند');
-  ok(mFa.description !== mEn.description, 'توضیح هر منیفست به زبان خودش است');
-  ok(sw.indexOf('manifest-en.webmanifest') > 0, 'منیفست انگلیسی در فهرست کش سرویس‌ورکر هست');
+  ok(man.name_localized.fa.value === 'چوگان', 'نام فارسی در منیفست درست است');
+  ok(man.name_localized.fa.dir === 'rtl', 'نام فارسی جهت راست‌به‌چپ دارد');
+  ok(man.name_localized.fa.value !== man.name, 'نام فارسی با پیش‌فرض یکی نیست');
   const menuHtml = fs.readFileSync(path.join(ROOT, 'www/index.html'), 'utf8');
   ok(/<link rel="manifest" href="manifest\.webmanifest">/.test(menuHtml), 'صفحه لینک منیفست دارد');
-  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
-  ok(/link\[rel="manifest"\]/.test(core), 'هسته لینک منیفست را با زبان عوض می‌کند');
+  const coreSrc = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  // جابه‌جا کردن لینک منیفست اسم را موقع نصب قفل می‌کرد؛ نباید برگردد
+  ok(!/link\[rel="manifest"\]/.test(coreSrc), 'هسته لینک منیفست را جابه‌جا نمی‌کند');
+  ok(sw.indexOf('manifest-en.webmanifest') < 0, 'منیفست دوم از فهرست کش سرویس‌ورکر رفته');
 
   // نام لانچر باید با زبان گوشی عوض شود، وگرنه گوشی انگلیسی هم لیبل فارسی می‌گیرد
   const strDefault = fs.readFileSync(path.join(ROOT, 'android/app/src/main/res/values/strings.xml'), 'utf8');

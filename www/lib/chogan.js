@@ -375,13 +375,10 @@
     var l = state.settings.lang;
     document.documentElement.lang = l;
     document.documentElement.dir = (l === 'fa') ? 'rtl' : 'ltr';
-    // وب‌منیفست ترجمه‌ی بومی ندارد، پس دو فایل داریم و لینک را جابه‌جا می‌کنیم.
-    // بدون این، نام PWA نصب‌شده روی هر دستگاهی فارسی می‌ماند.
-    var link = document.querySelector('link[rel="manifest"]');
-    if (link) {
-      var href = (l === 'fa') ? 'manifest.webmanifest' : 'manifest-en.webmanifest';
-      if (link.getAttribute('href') !== href) link.setAttribute('href', href);
-    }
+    // منیفست عوض نمی‌شود. یک فایل داریم با name_localized و مرورگر خودش
+    // بر اساس زبان دستگاه انتخاب می‌کند. جابه‌جا کردن لینک، اسم را موقع نصب
+    // قفل می‌کرد: هر کس با دستگاه فارسی نصب می‌کرد، بعد از عوض کردن زبانِ
+    // دستگاه هم اسم فارسی می‌ماند.
     // عنوان صفحه هم اسم اپ را نشان می‌دهد و باید با زبان عوض شود
     if (Chogan.pageTitle) {
       try { document.title = Chogan.pageTitle(); } catch (e) { /* عنوان قبلی بماند */ }
