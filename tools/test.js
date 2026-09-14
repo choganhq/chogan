@@ -14,6 +14,11 @@ const { spawnSync } = require('child_process');
 const ROOT = path.join(__dirname, '..');
 let failures = 0;
 let checks = 0;
+// حداقل تعداد بررسی‌ای که یک اجرای کامل باید داشته باشد. قبلاً اگر یک گروه کامل
+// اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
+// مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
+// پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
+const MIN_CHECKS = 388;
 
 function ok(cond, msg) {
   checks++;
@@ -272,11 +277,19 @@ function testFiles() {
   const gradleVer = (wrapper.match(/gradle-([0-9][^-]*)-bin\.zip/) || [])[1];
   ok(!!gradleVer, 'نسخه‌ی گردل از gradle-wrapper.properties خوانده می‌شود');
   ok(/distributionSha256Sum=[0-9a-f]{64}/.test(wrapper), 'توزیع گردل چک‌سام دارد');
-  for (const wf of ['test.yml', 'release.yml']) {
-    const y = fs.readFileSync(path.join(ROOT, '.github/workflows', wf), 'utf8');
-    if (y.indexOf('setup-gradle') < 0) continue;
-    const pinned = y.match(/gradle-version:\s*'([^']+)'/);
-    ok(!pinned, wf + ': نسخه‌ی گردل دستی پین نشده');
+  // هر ورک‌فلویی که اندروید می‌سازد باید گردل را از فایل wrapper بگیرد. قبلاً حلقه
+  // ورک‌فلوی بدون setup-gradle را با continue رد می‌کرد، پس حذف setup-gradle چهار
+  // بررسی را بی‌صدا از بین می‌برد و تست سبز می‌ماند.
+  const wfDirGradle = path.join(ROOT, '.github/workflows');
+  const wfAll = fs.readdirSync(wfDirGradle).filter((f) => /\.ya?ml$/.test(f));
+  const builders = wfAll.filter((f) =>
+    /\bgradle\b[^\n]*\b(assemble|bundle)[A-Za-z]*/.test(fs.readFileSync(path.join(wfDirGradle, f), 'utf8')));
+  ok(builders.indexOf('test.yml') >= 0 && builders.indexOf('release.yml') >= 0,
+    'ورک‌فلوهای بیلد اندروید test.yml و release.yml پیدا شدند (' + builders.join(', ') + ')');
+  for (const wf of builders) {
+    const y = fs.readFileSync(path.join(wfDirGradle, wf), 'utf8');
+    ok(y.indexOf('gradle/actions/setup-gradle') >= 0, wf + ': اندروید می‌سازد پس setup-gradle دارد');
+    ok(!/gradle-version:\s*'([^']+)'/.test(y), wf + ': نسخه‌ی گردل دستی پین نشده');
     ok(/gradle-version:\s*\$\{\{\s*steps\.gradleversion\.outputs\.version/.test(y),
       wf + ': نسخه‌ی گردل از فایل wrapper می‌آید');
   }
@@ -623,6 +636,64 @@ function testWebChanged() {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+// بررسی مرورگر را در حالت‌هایی اجرا می‌کنیم که نمی‌تواند چیزی را بسنجد و خروج ۲ و
+// دلیلش را هر دو می‌خواهیم. فقط کد خروج کافی نیست: بدون کروم هر حالتی خروج ۲ می‌داد
+// و حالت games.json خراب به دلیل اشتباه سبز می‌شد.
+function testBrowserCheckExits() {
+  head('خروج بررسی مرورگر');
+  const script = path.join(ROOT, 'tools/browser-check.sh');
+  const exists = fs.existsSync(script);
+  ok(exists, 'اسکریپت بررسی مرورگر هست: tools/browser-check.sh');
+  if (!exists) return;
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'chogan-bc-'));
+  const port = String(20000 + (process.pid % 20000));
+  const which = (b) => (spawnSync('bash', ['-c', 'command -v ' + b], { encoding: 'utf8' }).stdout || '').trim();
+
+  // ۱. هیچ کرومی روی PATH نیست
+  const bin = path.join(tmp, 'bin');
+  fs.mkdirSync(bin);
+  for (const b of ['bash', 'dirname', 'python3']) {
+    const src = which(b);
+    ok(!!src, 'ابزار لازم برای تست پیدا شد: ' + b);
+    if (src) fs.symlinkSync(src, path.join(bin, b));
+  }
+  let r = spawnSync(path.join(bin, 'bash'), [script], {
+    encoding: 'utf8', env: { HOME: process.env.HOME || tmp, PATH: bin, PORT: port }
+  });
+  ok(r.status === 2 && /کروم/.test(r.stderr || ''),
+    'بدون کروم: خروج ۲ با دلیل کروم (آمد ' + r.status + '، «' + (r.stderr || '').trim().split('\n').pop() + '»)');
+
+  // ۲ و ۳. کروم «هست» ولی فهرست صفحه‌ها ساخته نمی‌شود. به‌جای کروم /bin/true می‌دهیم
+  // تا بررسی کروم رد شود و فقط دلیل games.json سنجیده شود.
+  const fakeChrome = which('true');
+  ok(!!fakeChrome, 'جایگزین کروم برای تست پیدا شد');
+  const mirror = path.join(tmp, 'mirror');
+  fs.mkdirSync(path.join(mirror, 'tools'), { recursive: true });
+  fs.mkdirSync(path.join(mirror, 'www'));
+  for (const e of fs.readdirSync(ROOT)) {
+    if (['tools', 'www', '.git'].indexOf(e) < 0) fs.symlinkSync(path.join(ROOT, e), path.join(mirror, e));
+  }
+  for (const e of fs.readdirSync(path.join(ROOT, 'tools'))) fs.symlinkSync(path.join(ROOT, 'tools', e), path.join(mirror, 'tools', e));
+  for (const e of fs.readdirSync(path.join(ROOT, 'www'))) {
+    if (e !== 'games.json') fs.symlinkSync(path.join(ROOT, 'www', e), path.join(mirror, 'www', e));
+  }
+  const cases = [
+    ['games.json خراب', '{"games": [ not json'],
+    ['games.json بدون بازی', '{"games": []}']
+  ];
+  ok(cases.length > 0, 'فهرست حالت‌های games.json خالی نیست');
+  for (const [label, content] of cases) {
+    fs.writeFileSync(path.join(mirror, 'www/games.json'), content);
+    r = spawnSync('bash', [path.join(mirror, 'tools/browser-check.sh'), fakeChrome], {
+      encoding: 'utf8', env: Object.assign({}, process.env, { PORT: port })
+    });
+    ok(r.status === 2 && /games\.json/.test(r.stderr || ''),
+      label + ': خروج ۲ با دلیل games.json (آمد ' + r.status + '، «' + (r.stderr || '').trim().split('\n').pop() + '»)');
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
 testFiles();
 testSudoku();
 testMines();
@@ -631,8 +702,15 @@ testTd();
 testVersionStamp();
 testDeployGate();
 testWebChanged();
+testBrowserCheckExits();
 
 testSw().then(testVerifyDeploy).then(function () {
+  head('کامل بودن اجرا');
+  ok(checks >= MIN_CHECKS, 'دست‌کم ' + MIN_CHECKS + ' بررسی اجرا شد (' + checks + ' اجرا شد)');
   console.log('\n' + (failures ? ('✗ ' + failures + ' خطا از ' + checks + ' بررسی') : ('همه‌ی ' + checks + ' بررسی سبز')));
   process.exit(failures ? 1 : 0);
+}).catch(function (e) {
+  // یک گروه ناهمگام که خطا بدهد نباید مثل اجرای تمام‌شده دیده شود
+  console.log('\n✗ اجرای تست‌ها نیمه‌کاره ماند: ' + ((e && e.stack) || e));
+  process.exit(1);
 });
