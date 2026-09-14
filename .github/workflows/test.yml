@@ -115,3 +115,93 @@ jobs:
             exit 1
           fi
           echo "فقط مجوز لرزش، همان‌طور که باید"
+
+  # انتشار وب فقط بعد از سبز شدن تست و بیلد اندروید روی همین کامیت. قبلاً
+  # pages.yml جدا و هم‌زمان با تست‌ها اجرا می‌شد، پس ادغامی که تستش روی main
+  # می‌افتاد باز هم به دست کاربرها می‌رسید. بعد از انتشار، فایل منتشرشده را
+  # برمی‌گردانیم و با همین کامیت و همین اجرا مقایسه می‌کنیم؛ سبز شدن
+  # deploy-pages فقط یعنی آپلود پذیرفته شد، نه اینکه سایت عوض شد.
+  pages:
+    name: انتشار وب روی گیت‌هاب پیجز
+    needs: [test, android]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      # deploy-pages از نسخه‌ی ۴ به بعد این را لازم دارد
+      actions: read
+    concurrency:
+      group: pages
+      cancel-in-progress: true
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: دریافت سورس
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # هر انتشار اسم کش سرویس‌ورکر را عوض می‌کند و همه‌ی کاربرها پوسته را از نو
+      # می‌گیرند، پس ادغامی که فقط مستند یا اندروید را عوض کرده منتشر نمی‌شود.
+      # تصمیم در tools/web-changed.sh است تا tools/test.js روی یک مخزن آزمایشی
+      # واقعی اجرایش کند؛ درون YAML هیچ تستی به آن نمی‌رسید.
+      - name: آیا چیزی از نسخه‌ی وب عوض شده؟
+        id: changed
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: bash tools/web-changed.sh >> "$GITHUB_OUTPUT"
+
+      # روی ریپوی قالب پیجز عمداً فعال نیست. بدون این بررسی، کار با خطای
+      # قرمز می‌افتاد. اینجا فقط با پیام رد می‌شود.
+      - name: بررسی فعال بودن پیجز
+        id: pages
+        if: steps.changed.outputs.deploy == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/pages" >/dev/null 2>&1; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "گیت‌هاب پیجز روی این ریپو فعال نیست. انتشار وب رد شد."
+            echo "برای فعال کردن: Settings ← Pages ← Source: GitHub Actions"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: آماده‌سازی پیجز
+        if: steps.changed.outputs.deploy == 'true' && steps.pages.outputs.enabled == 'true'
+        uses: actions/configure-pages@v6
+
+      # منطق مهر در tools/stamp-version.sh است تا tools/test.js همان چیزی را تست کند
+      # که اینجا اجرا می‌شود. GITHUB_SHA و GITHUB_RUN_ID و GITHUB_RUN_ATTEMPT را
+      # خود اکشنز می‌دهد؛ نام محیط را صریح می‌دهیم تا هیچ‌وقت حدس زده نشود.
+      - name: مهر هویت استقرار روی نسخه‌ی وب
+        if: steps.changed.outputs.deploy == 'true' && steps.pages.outputs.enabled == 'true'
+        env:
+          APP_ENV: production
+        run: bash tools/stamp-version.sh www/version.js
+
+      - name: بسته‌بندی www
+        if: steps.changed.outputs.deploy == 'true' && steps.pages.outputs.enabled == 'true'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: www
+
+      - name: انتشار
+        id: deployment
+        if: steps.changed.outputs.deploy == 'true' && steps.pages.outputs.enabled == 'true'
+        uses: actions/deploy-pages@v5
+
+      # مقایسه با مقدارهای مورد انتظار است، نه با چیزی که همین بیلد درباره‌ی خودش
+      # گفته. پیجز از چند ثانیه تا چند دقیقه طول می‌کشد تا نسخه‌ی تازه را سرو
+      # کند، پس اسکریپت با سقف مشخص دوباره تلاش می‌کند و بعد شکست می‌خورد.
+      - name: بررسی اینکه سایت همین کامیت و همین اجرا را سرو می‌کند
+        if: steps.changed.outputs.deploy == 'true' && steps.pages.outputs.enabled == 'true'
+        run: >-
+          bash tools/verify-deploy.sh
+          "${{ steps.deployment.outputs.page_url }}version.js"
+          "$GITHUB_SHA" production "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"

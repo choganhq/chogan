@@ -465,10 +465,162 @@ function testVersionStamp() {
   }
 
   // ورک‌فلو باید همین اسکریپت تست‌شده را اجرا کند، نه نسخه‌ی دیگری از منطق
-  const pagesYml = fs.readFileSync(path.join(ROOT, '.github/workflows/pages.yml'), 'utf8');
-  ok(/tools\/stamp-version\.sh\s+www\/version\.js/.test(pagesYml), 'پیجز همان tools/stamp-version.sh را اجرا می‌کند');
-  ok(/APP_ENV:\s*production/.test(pagesYml), 'پیجز نام محیط را production می‌دهد');
-  ok(pagesYml.indexOf('self.APP_BUILD') < 0, 'منطق مهر دیگر درون ورک‌فلو تکرار نشده');
+  // انتشار حالا کار pages داخل test.yml است (#52)، پس همان‌جا را می‌خوانیم.
+  const testYml = fs.readFileSync(path.join(ROOT, '.github/workflows/test.yml'), 'utf8');
+  const pagesJob = (testYml.match(/\n  pages:\n([\s\S]*?)(?=\n  [a-z][a-z0-9_-]*:\n|$)/) || [])[1] || '';
+  ok(pagesJob.length > 0, 'کار pages در test.yml برای بررسی مهر پیدا شد');
+  ok(/tools\/stamp-version\.sh\s+www\/version\.js/.test(pagesJob), 'انتشار همان tools/stamp-version.sh را اجرا می‌کند');
+  ok(/APP_ENV:\s*production/.test(pagesJob), 'انتشار نام محیط را production می‌دهد');
+  const wfDirStamp = path.join(ROOT, '.github/workflows');
+  const wfFiles = fs.readdirSync(wfDirStamp).filter((f) => /\.ya?ml$/.test(f));
+  ok(wfFiles.length > 0, 'فهرست ورک‌فلوها برای بررسی مهر خالی نیست');
+  const inline = wfFiles.filter((f) => fs.readFileSync(path.join(wfDirStamp, f), 'utf8').indexOf('self.APP_BUILD') >= 0);
+  ok(inline.length === 0, 'منطق مهر درون هیچ ورک‌فلویی تکرار نشده (' + inline.join(', ') + ')');
+}
+
+// انتشار وب باید پشت تست‌ها باشد و بعد از انتشار بررسی شود. این بررسی ساختار
+// ورک‌فلو را می‌خواند چون خود اجرای اکشنز اینجا در دسترس نیست.
+function testDeployGate() {
+  head('دروازه‌ی انتشار وب');
+  const wfDir = path.join(ROOT, '.github/workflows');
+  const workflows = fs.readdirSync(wfDir).filter((f) => /\.ya?ml$/.test(f));
+  ok(workflows.length > 0, 'فهرست ورک‌فلوها خالی نیست (' + wfDir + ')');
+  ok(!fs.existsSync(path.join(wfDir, 'pages.yml')), 'ورک‌فلو جدای pages.yml که هم‌زمان با تست‌ها منتشر می‌کرد حذف شده');
+
+  const deployers = workflows.filter((f) => fs.readFileSync(path.join(wfDir, f), 'utf8').indexOf('actions/deploy-pages') >= 0);
+  ok(deployers.length === 1 && deployers[0] === 'test.yml', 'فقط test.yml منتشر می‌کند (' + deployers.join(', ') + ')');
+
+  const y = fs.readFileSync(path.join(wfDir, 'test.yml'), 'utf8');
+  const m = y.match(/\n  pages:\n([\s\S]*?)(?=\n  [a-z][a-z0-9_-]*:\n|$)/);
+  ok(!!m, 'کار pages در test.yml هست');
+  if (!m) return;
+  const job = m[1];
+  const needs = (job.match(/^\s{4}needs:\s*\[([^\]]*)\]/m) || [])[1] || '';
+  const needed = needs.split(',').map((x) => x.trim()).filter(Boolean);
+  ok(needed.indexOf('test') >= 0 && needed.indexOf('android') >= 0, 'انتشار منتظر test و android می‌ماند (' + needed.join(', ') + ')');
+  ok(/if:\s*github\.ref == 'refs\/heads\/main'/.test(job), 'انتشار فقط از main');
+  ok(/tools\/web-changed\.sh/.test(job) && job.indexOf('git diff') < 0,
+    'تصمیم انتشار را همان tools/web-changed.sh تست‌شده می‌گیرد، نه منطق درون YAML');
+  const iDeploy = job.indexOf('actions/deploy-pages');
+  const iVerify = job.indexOf('tools/verify-deploy.sh');
+  ok(iDeploy >= 0 && iVerify > iDeploy, 'بعد از deploy-pages فایل منتشرشده بررسی می‌شود');
+  ok(/steps\.deployment\.outputs\.page_url/.test(job.slice(iVerify)), 'بررسی آدرس را از خروجی خود انتشار می‌گیرد');
+  ok(/\$GITHUB_SHA"?\s+production\s+"?\$GITHUB_RUN_ID-\$GITHUB_RUN_ATTEMPT/.test(job.slice(iVerify)),
+    'بررسی با همین کامیت، production و همین اجرا مقایسه می‌کند');
+}
+
+// اسکریپت بررسی را جلوی یک سرور محلی اجرا می‌کنیم. هر حالت خروجی را از مقدار
+// مورد انتظار می‌سنجیم؛ بررسی‌ای که با فایل قدیمی یا ۴۰۴ هم سبز شود بی‌فایده است.
+function testVerifyDeploy() {
+  head('بررسی استقرار');
+  const script = path.join(ROOT, 'tools/verify-deploy.sh');
+  const exists = fs.existsSync(script);
+  ok(exists, 'اسکریپت بررسی استقرار هست: tools/verify-deploy.sh');
+  if (!exists) return Promise.resolve();
+
+  const http = require('http');
+  const { execFile } = require('child_process');
+  const SHA = '0123456789abcdef0123456789abcdef01234567';
+  const OTHER = 'fedcba9876543210fedcba9876543210fedcba98';
+  let served = null;
+  const server = http.createServer((req, res) => {
+    if (served === null) { res.writeHead(404); res.end('not found'); return; }
+    res.writeHead(200, { 'content-type': 'application/javascript' });
+    res.end(served);
+  });
+  const stamped = (commit, env, deploy) =>
+    "self.APP_VERSION = '0.2.4';\nself.APP_VERSION_CODE = 6;\n" +
+    "self.APP_BUILD = '" + commit.slice(0, 12) + "';\nself.APP_COMMIT = '" + commit + "';\n" +
+    "self.APP_ENV = '" + env + "';\nself.APP_DEPLOY = '" + deploy + "';\n";
+  const run = (args) => new Promise((resolve) => {
+    execFile('bash', [script].concat(args),
+      { env: Object.assign({}, process.env, { VERIFY_TRIES: '2', VERIFY_INTERVAL: '0' }) },
+      (err, stdout, stderr) => resolve({ code: err ? (typeof err.code === 'number' ? err.code : -1) : 0, out: stdout + stderr }));
+  });
+
+  return new Promise((r) => server.listen(0, '127.0.0.1', r)).then(async () => {
+    const url = 'http://127.0.0.1:' + server.address().port + '/version.js';
+    const cases = [
+      ['مطابق', stamped(SHA, 'production', '111-1'), [url, SHA, 'production', '111-1'], 0],
+      ['کامیت دیگر', stamped(OTHER, 'production', '111-1'), [url, SHA, 'production', '111-1'], 1],
+      ['محیط دیگر', stamped(SHA, 'staging', '111-1'), [url, SHA, 'production', '111-1'], 1],
+      ['همان کامیت، استقرار قبلی', stamped(SHA, 'production', '110-1'), [url, SHA, 'production', '111-1'], 1],
+      ['فایل بدون فیلدهای هویت', "self.APP_VERSION = '0.2.4';\n", [url, SHA, 'production', '111-1'], 1],
+      ['۴۰۴', null, [url, SHA, 'production', '111-1'], 1],
+      ['بدون شناسه‌ی استقرار مورد انتظار', stamped(SHA, 'production', '111-1'), [url, SHA, 'production'], 2],
+      ['بدون آدرس', stamped(SHA, 'production', '111-1'), ['', SHA, 'production', '111-1'], 2],
+      ['کامیت مورد انتظار خراب', stamped(SHA, 'production', '111-1'), [url, 'not-a-sha', 'production', '111-1'], 2]
+    ];
+    ok(cases.length > 0, 'فهرست حالت‌های بررسی استقرار خالی نیست');
+    for (const [label, body, args, want] of cases) {
+      served = body;
+      const r = await run(args);
+      ok(r.code === want, label + ': خروج ' + want + ' (آمد ' + r.code + ')');
+    }
+  }).finally(() => server.close());
+}
+
+// تصمیم انتشار روی یک مخزن گیت آزمایشی واقعی اجرا می‌شود. هر حالت با خروجی
+// مورد انتظار مقایسه می‌شود؛ اشتباه در این تصمیم یعنی کاربرها یا نسخه‌ی تازه را
+// نمی‌گیرند یا بی‌دلیل کل پوسته را از نو دانلود می‌کنند.
+function testWebChanged() {
+  head('تشخیص تغییر نسخه‌ی وب');
+  const script = path.join(ROOT, 'tools/web-changed.sh');
+  const exists = fs.existsSync(script);
+  ok(exists, 'اسکریپت تشخیص تغییر هست: tools/web-changed.sh');
+  if (!exists) return;
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chogan-changed-'));
+  const gitEnv = Object.assign({}, process.env, {
+    GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 'test@example.invalid',
+    GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 'test@example.invalid'
+  });
+  const git = (args) => spawnSync('git', ['-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null'].concat(args),
+    { cwd: dir, encoding: 'utf8', env: gitEnv });
+  const commit = (file) => {
+    fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+    fs.writeFileSync(path.join(dir, file), file + ' ' + Math.random());
+    git(['add', '-A']);
+    git(['commit', '-q', '-m', file]);
+    return git(['rev-parse', 'HEAD']).stdout.trim();
+  };
+  git(['init', '-q']);
+  const c0 = commit('www/index.html');
+  const c1 = commit('README.md');
+  const c2 = commit('android/app/build.gradle');
+  const c3 = commit('www/lib/chogan.js');
+  const c4 = commit('tools/stamp-version.sh');
+  const c5 = commit('.github/workflows/test.yml');
+  ok([c0, c1, c2, c3, c4, c5].every((c) => /^[0-9a-f]{40}$/.test(c)), 'مخزن آزمایشی ساخته شد');
+
+  const run = (env) => {
+    const clean = Object.assign({}, process.env);
+    for (const k of ['GITHUB_EVENT_NAME', 'BEFORE', 'GITHUB_SHA']) delete clean[k];
+    const r = spawnSync('bash', [script], { cwd: dir, encoding: 'utf8', env: Object.assign(clean, env) });
+    return { code: r.status, out: (r.stdout || '').trim() };
+  };
+  const push = (before, after) => ({ GITHUB_EVENT_NAME: 'push', BEFORE: before, GITHUB_SHA: after });
+  const cases = [
+    ['فقط مستند', push(c0, c1), 0, 'deploy=false'],
+    ['فقط اندروید', push(c1, c2), 0, 'deploy=false'],
+    ['مستند و اندروید در یک push', push(c0, c2), 0, 'deploy=false'],
+    ['تغییر www', push(c2, c3), 0, 'deploy=true'],
+    ['چند کامیت که یکی‌شان www است', push(c1, c3), 0, 'deploy=true'],
+    ['اسکریپت مهر نسخه', push(c3, c4), 0, 'deploy=true'],
+    ['ورک‌فلو انتشار', push(c4, c5), 0, 'deploy=true'],
+    ['اجرای دستی بدون تغییر وب', { GITHUB_EVENT_NAME: 'workflow_dispatch', BEFORE: c0, GITHUB_SHA: c1 }, 0, 'deploy=true'],
+    ['کامیت قبلی تمام صفر', push('0'.repeat(40), c1), 0, 'deploy=true'],
+    ['کامیت قبلی ناموجود', push('f'.repeat(40), c1), 0, 'deploy=true'],
+    ['کامیت قبلی خالی', push('', c1), 0, 'deploy=true'],
+    ['کامیت انتشار خراب', push(c0, 'not-a-sha'), 2, '']
+  ];
+  ok(cases.length > 0, 'فهرست حالت‌های تشخیص تغییر خالی نیست');
+  for (const [label, env, wantCode, wantOut] of cases) {
+    const r = run(env);
+    ok(r.code === wantCode && r.out === wantOut,
+      label + ': خروج ' + wantCode + ' و «' + (wantOut || 'بدون خروجی') + '» (آمد ' + r.code + ' و «' + r.out + '»)');
+  }
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 testFiles();
@@ -477,8 +629,10 @@ testMines();
 testDots();
 testTd();
 testVersionStamp();
+testDeployGate();
+testWebChanged();
 
-testSw().then(function () {
+testSw().then(testVerifyDeploy).then(function () {
   console.log('\n' + (failures ? ('✗ ' + failures + ' خطا از ' + checks + ' بررسی') : ('همه‌ی ' + checks + ' بررسی سبز')));
   process.exit(failures ? 1 : 0);
 });
