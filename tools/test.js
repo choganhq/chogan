@@ -8,6 +8,8 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const os = require('os');
+const { spawnSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
 let failures = 0;
@@ -404,11 +406,77 @@ function testSw() {
   });
 }
 
+// مهر نسخه‌ی وب را همان اسکریپتی می‌زند که ورک‌فلو پیجز اجرا می‌کند. مقدارها با
+// ورودی‌های ثابت مقایسه می‌شوند نه با خروجی همان بیلد، وگرنه تست به هر دلیلی سبز می‌شد.
+function testVersionStamp() {
+  head('مهر نسخه‌ی وب');
+  const script = path.join(ROOT, 'tools/stamp-version.sh');
+  const exists = fs.existsSync(script);
+  ok(exists, 'اسکریپت مهر نسخه هست: tools/stamp-version.sh');
+  if (!exists) return;
+
+  const repoSrc = fs.readFileSync(path.join(ROOT, 'www/version.js'), 'utf8');
+  // اف‌دروید از سورس می‌سازد و version.js را از main می‌خواند؛ فیلدهای استقرار نباید در ریپو باشند
+  for (const k of ['APP_ENV', 'APP_COMMIT', 'APP_DEPLOY', 'APP_BUILD']) {
+    ok(repoSrc.indexOf(k) < 0, 'نسخه‌ی ریپو ' + k + ' ندارد');
+  }
+  const intendedVersion = (repoSrc.match(/APP_VERSION\s*=\s*'([^']+)'/) || [])[1];
+  const intendedCode = Number((repoSrc.match(/APP_VERSION_CODE\s*=\s*(\d+)/) || [])[1]);
+
+  const SHA = '0123456789abcdef0123456789abcdef01234567';
+  const good = { GITHUB_SHA: SHA, GITHUB_RUN_ID: '987654321', GITHUB_RUN_ATTEMPT: '2', APP_ENV: 'production' };
+
+  function stamp(env) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chogan-stamp-'));
+    const file = path.join(dir, 'version.js');
+    fs.writeFileSync(file, repoSrc);
+    const clean = Object.assign({}, process.env);
+    for (const k of ['GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'APP_ENV']) delete clean[k];
+    const r = spawnSync('bash', [script, file], { env: Object.assign(clean, env), encoding: 'utf8' });
+    const out = fs.readFileSync(file, 'utf8');
+    fs.rmSync(dir, { recursive: true, force: true });
+    return { status: r.status, out: out };
+  }
+
+  const r = stamp(good);
+  ok(r.status === 0, 'مهر با ورودی درست موفق است (خروج ' + r.status + ')');
+  const sb = { self: {} };
+  vm.createContext(sb);
+  try { vm.runInContext(r.out, sb); } catch (e) { ok(false, 'خروجی مهر جاوااسکریپت معتبر است: ' + e.message); }
+  const v = sb.self;
+  ok(v.APP_VERSION === intendedVersion, 'APP_VERSION دست نخورده (' + v.APP_VERSION + ')');
+  ok(v.APP_VERSION_CODE === intendedCode, 'APP_VERSION_CODE دست نخورده (' + v.APP_VERSION_CODE + ')');
+  ok(v.APP_BUILD === SHA.slice(0, 12), 'APP_BUILD دوازده نویسه‌ی اول کامیت است (' + v.APP_BUILD + ')');
+  ok(v.APP_COMMIT === SHA, 'APP_COMMIT کل کامیت است (' + v.APP_COMMIT + ')');
+  ok(v.APP_ENV === 'production', 'APP_ENV نام محیط است (' + v.APP_ENV + ')');
+  ok(v.APP_DEPLOY === '987654321-2', 'APP_DEPLOY شناسه‌ی اجرا و تلاش است (' + v.APP_DEPLOY + ')');
+
+  // ورودی خراب نباید چیز نامعتبری وارد جاوااسکریپت منتشرشده کند
+  const bad = [
+    ['کامیت غیرهگز', Object.assign({}, good, { GITHUB_SHA: 'not-a-sha' })],
+    ['بدون نام محیط', (function () { const e = Object.assign({}, good); delete e.APP_ENV; return e; })()],
+    ['نام محیط با کوتیشن', Object.assign({}, good, { APP_ENV: "prod'uction" })],
+    ['شناسه‌ی اجرای غیرعددی', Object.assign({}, good, { GITHUB_RUN_ID: '12x' })]
+  ];
+  for (const [label, env] of bad) {
+    const b = stamp(env);
+    ok(b.status !== 0, label + ': مهر رد می‌شود (خروج ' + b.status + ')');
+    ok(b.out === repoSrc, label + ': فایل دست نخورده می‌ماند');
+  }
+
+  // ورک‌فلو باید همین اسکریپت تست‌شده را اجرا کند، نه نسخه‌ی دیگری از منطق
+  const pagesYml = fs.readFileSync(path.join(ROOT, '.github/workflows/pages.yml'), 'utf8');
+  ok(/tools\/stamp-version\.sh\s+www\/version\.js/.test(pagesYml), 'پیجز همان tools/stamp-version.sh را اجرا می‌کند');
+  ok(/APP_ENV:\s*production/.test(pagesYml), 'پیجز نام محیط را production می‌دهد');
+  ok(pagesYml.indexOf('self.APP_BUILD') < 0, 'منطق مهر دیگر درون ورک‌فلو تکرار نشده');
+}
+
 testFiles();
 testSudoku();
 testMines();
 testDots();
 testTd();
+testVersionStamp();
 
 testSw().then(function () {
   console.log('\n' + (failures ? ('✗ ' + failures + ' خطا از ' + checks + ' بررسی') : ('همه‌ی ' + checks + ' بررسی سبز')));
