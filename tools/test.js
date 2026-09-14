@@ -18,7 +18,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 388;
+const MIN_CHECKS = 394;
 
 function ok(cond, msg) {
   checks++;
@@ -694,6 +694,24 @@ function testBrowserCheckExits() {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
+// راه‌انداز محیط توسعه باید هر اجرای مرورگر را با پروفایل تازه باز کند و فقط پردازه‌های
+// خودش را با شناسه ببندد. خودآزمایی رفتاری‌اش (tools/dev.sh --selftest) کروم لازم
+// دارد و در CI اجرا نمی‌شود؛ این بررسی‌های ارزان جلوی برگشتن این دو قاعده را می‌گیرند.
+function testDevScript() {
+  head('راه‌انداز محیط توسعه');
+  const file = path.join(ROOT, 'tools/dev.sh');
+  const exists = fs.existsSync(file);
+  ok(exists, 'tools/dev.sh هست');
+  if (!exists) return;
+  ok((fs.statSync(file).mode & 0o111) !== 0, 'tools/dev.sh اجراشدنی است');
+  const code = fs.readFileSync(file, 'utf8').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  ok(!/\b(pkill|killall|pgrep)\b/.test(code), 'tools/dev.sh پردازه را با نام نمی‌کشد');
+  ok(/new_profile\(\)\s*\{\s*mktemp -d\b/.test(code), 'پروفایل هر اجرا با mktemp -d تازه ساخته می‌شود');
+  ok(/PROFILE=\$\(new_profile\)/.test(code), 'اجرای تعاملی پروفایلش را از new_profile می‌گیرد');
+  const launches = code.match(/--user-data-dir=/g) || [];
+  ok(launches.length >= 2, 'هر دو مسیر اجرای کروم پروفایل صریح می‌دهند (' + launches.length + ')');
+}
+
 testFiles();
 testSudoku();
 testMines();
@@ -703,6 +721,7 @@ testVersionStamp();
 testDeployGate();
 testWebChanged();
 testBrowserCheckExits();
+testDevScript();
 
 testSw().then(testVerifyDeploy).then(function () {
   head('کامل بودن اجرا');
