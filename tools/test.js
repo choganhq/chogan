@@ -722,6 +722,7 @@ testDeployGate();
 testWebChanged();
 testBrowserCheckExits();
 testDevScript();
+ok(false, 'deliberate failure: branch protection probe for #56, never merged');
 
 testSw().then(testVerifyDeploy).then(function () {
   head('کامل بودن اجرا');
