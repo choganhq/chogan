@@ -174,8 +174,11 @@
   // تنظیمات می‌تواند عوضش کند. همان قاعده‌ای که لیبل لانچر با values-fa دارد.
   function deviceLang() {
     try {
-      var l = (global.navigator.languages && global.navigator.languages[0]) || global.navigator.language || '';
-      return /^fa\b|^fa-/i.test(l) ? 'fa' : 'en';
+      var l = ((global.navigator.languages && global.navigator.languages[0]) || global.navigator.language || '').toLowerCase();
+      if (/^fa\b|^fa-/.test(l)) return 'fa';
+      // فقط چینی ساده‌شده ترجمه داریم، پس zh-TW و zh-HK به انگلیسی می‌روند
+      if (l === 'zh' || /^zh-(cn|sg|hans)/.test(l)) return 'zh';
+      return 'en';
     } catch (e) { return 'fa'; }
   }
 
@@ -249,6 +252,22 @@
   function saveStats() { appStore.set('stats', state.stats); }
 
   /* ============================================== زبان و رقم و جهت */
+
+  // زبان‌های اپ. اضافه کردن زبان تازه یعنی یک ورودی اینجا و یک دیکشنری در هر
+  // فایل. کلید ترجمه‌نشده به انگلیسی برمی‌گردد، پس رشته‌ی تازه منتظر مترجم نمی‌ماند
+  // و زبان کم‌ترجمه‌شده هم قابل استفاده می‌ماند.
+  var LOCALES = [
+    { code: 'fa', label: 'فارسی',    dir: 'rtl', tag: 'fa',      date: 'fa-IR-u-ca-gregory' },
+    { code: 'en', label: 'English',  dir: 'ltr', tag: 'en',      date: 'en-US' },
+    { code: 'zh', label: '中文', dir: 'ltr', tag: 'zh-Hans', date: 'zh-CN' }
+  ];
+  function localeOf(code) {
+    for (var i = 0; i < LOCALES.length; i++) if (LOCALES[i].code === code) return LOCALES[i];
+    return LOCALES[0];
+  }
+  Chogan.locales = function () { return LOCALES.slice(); };
+  Chogan.isRtl = function () { return localeOf(state.settings.lang).dir === 'rtl'; };
+  Chogan.dateLocale = function () { return localeOf(state.settings.lang).date; };
 
   var STR = {
     fa: {
@@ -330,19 +349,65 @@
       sun: 'S', mon: 'M', tue: 'T', wed: 'W', thu: 'T', fri: 'F', sat: 'S',
       unlocks: 'Themes and characters', unlockCost: 'Unlock', owned: 'Unlocked', apply: 'Select',
       tutorial: 'How to play', gotIt: 'Got it', stars: 'stars'
+    },
+    zh: {
+      appName: 'Chogan', home: '主页', daily: '每日', league: '联赛',
+      achievements: '成就', profile: '个人', settings: '设置',
+      play: '开始', resume: '继续', newGame: '新游戏', again: '再来一局',
+      menu: '菜单', back: '返回', undo: '撤销', close: '关闭', cancel: '取消', result: '结果',
+      saveImage: '保存图片', copyText: '复制文字',
+      updateReady: '新版本已就绪', updateNow: '更新',
+      confirm: '确定', done: '好', next: '下一步', skip: '跳过',
+      start: '开始', pause: '暂停', resumeGame: '继续游戏', restart: '重新开始',
+      quit: '退出到菜单', help: '帮助', share: '分享', copied: '已复制到剪贴板',
+      best: '最佳', score: '分数', time: '时间', coins: '金币',
+      newBadge: '新', continueBadge: '继续', todayChallenge: '每日挑战',
+      todayChallengeSub: '每天一道新题，所有人都一样',
+      won: '你赢了', lost: '你输了', finished: '结束',
+      earned: '你获得了', weeklyPoints: '本周积分', tier: '段位',
+      promoted: '晋级', demoted: '降级', stayed: '保级',
+      bronze: '青铜', silver: '白银', gold: '黄金', diamond: '钻石', legend: '传奇',
+      seasonEnds: '赛季结束还有', days: '天', hours: '时', minutes: '分',
+      rank: '排名', points: '积分', you: '你',
+      offlineRivals: '离线对手，在本机生成',
+      streak: '连续', dayStreak: '天连续', locked: '未解锁',
+      unlockedAt: '解锁于', totalPlays: '局数', playTime: '游戏时长',
+      language: '语言', theme: '主题', themeAuto: '自动', themeLight: '浅色', themeDark: '深色',
+      sfx: '音效', music: '音乐', haptics: '振动',
+      resetGame: '重置游戏数据', resetAsk: '确定清除这个游戏的全部数据？',
+      resetWarn: '此操作无法撤销。', resetDone: '已清除',
+      about: '关于', version: '版本', source: '源代码', license: '许可协议',
+      aboutText: '免费、开源、无广告、无追踪，完全离线。',
+      name: '名字', country: '国家', optional: '可选',
+      hint: '提示', hints: '提示', notEnoughCoins: '金币不足', hintUsed: '已使用提示',
+      coinsEarned: '获得金币', playToEarn: '玩一局即可获得金币',
+      keyboard: '键盘', difficulty: '难度',
+      fullscreen: '全屏', exitFullscreen: '退出全屏',
+      easy: '简单', medium: '中等', hard: '困难', expert: '专家',
+      today: '今天', dailyDone: '今天已完成', dailyOpen: '还没玩',
+      noAchievements: '还没有成就', emptyDaily: '这一天没有记录',
+      sun: '日', mon: '一', tue: '二', wed: '三', thu: '四', fri: '五', sat: '六',
+      unlocks: '主题和角色', unlockCost: '解锁', owned: '已解锁', apply: '选择',
+      tutorial: '玩法', gotIt: '明白了', stars: '星'
     }
   };
-  var localStrings = { fa: {}, en: {} };
+  var localStrings = (function () { var o = {}; for (var i = 0; i < LOCALES.length; i++) o[LOCALES[i].code] = {}; return o; })();
 
   Chogan.strings = function (obj) {
-    if (obj.fa) Object.assign(localStrings.fa, obj.fa);
-    if (obj.en) Object.assign(localStrings.en, obj.en);
+    for (var i = 0; i < LOCALES.length; i++) {
+      var c = LOCALES[i].code;
+      if (obj[c]) Object.assign(localStrings[c], obj[c]);
+    }
   };
 
   Chogan.t = function (key, vars) {
     var l = state.settings.lang;
-    var s = localStrings[l][key];
-    if (s === undefined) s = STR[l][key];
+    var s = (localStrings[l] || {})[key];
+    if (s === undefined) s = (STR[l] || {})[key];
+    // انگلیسی پیش از فارسی: زبانی که هنوز کامل ترجمه نشده باید خوانا بماند،
+    // نه اینکه وسط متنش فارسی راست‌به‌چپ بیفتد.
+    if (s === undefined) s = localStrings.en[key];
+    if (s === undefined) s = STR.en[key];
     if (s === undefined) s = localStrings.fa[key];
     if (s === undefined) s = STR.fa[key];
     if (s === undefined) s = key;
@@ -374,9 +439,9 @@
   };
 
   Chogan.applyLang = function () {
-    var l = state.settings.lang;
-    document.documentElement.lang = l;
-    document.documentElement.dir = (l === 'fa') ? 'rtl' : 'ltr';
+    var loc = localeOf(state.settings.lang);
+    document.documentElement.lang = loc.tag;
+    document.documentElement.dir = loc.dir;
     // منیفست عوض نمی‌شود. یک فایل داریم با name_localized و مرورگر خودش
     // بر اساس زبان دستگاه انتخاب می‌کند. جابه‌جا کردن لینک، اسم را موقع نصب
     // قفل می‌کرد: هر کس با دستگاه فارسی نصب می‌کرد، بعد از عوض کردن زبانِ
@@ -387,7 +452,7 @@
     }
   };
   Chogan.setLang = function (l) {
-    state.settings.lang = (l === 'en') ? 'en' : 'fa';
+    state.settings.lang = localeOf(l).code;
     saveSettings();
     Chogan.applyLang();
     if (Chogan.onLangChange) Chogan.onLangChange();
@@ -718,39 +783,46 @@
 
   /* ======================================================= دستاوردها */
 
+  // متن دستاورد به زبان جاری، و اگر ترجمه نشده به انگلیسی. منو هم از همین
+  // استفاده می‌کند تا منطق زبان دو جا تکرار نشود.
+  Chogan.achText = function (d) {
+    var l = state.settings.lang;
+    return { title: d[l] || d.en, sub: d['d' + l] || d.den };
+  };
+
   var ACH = [
-    { id: 'first-play',  icon: 'star',    fa: 'اولین قدم',        en: 'First step',        dfa: 'اولین بازی‌ات را انجام دادی',        den: 'Play your first game' },
-    { id: 'play-10',     icon: 'star',    fa: 'ده تایی',          en: 'Ten rounds',        dfa: 'ده بازی انجام دادی',                den: 'Play 10 games' },
-    { id: 'play-50',     icon: 'medal',   fa: 'پنجاه تایی',       en: 'Fifty rounds',      dfa: 'پنجاه بازی انجام دادی',             den: 'Play 50 games' },
-    { id: 'play-200',    icon: 'trophy',  fa: 'دویست تایی',       en: 'Two hundred',       dfa: 'دویست بازی انجام دادی',             den: 'Play 200 games' },
-    { id: 'sampler',     icon: 'palette', fa: 'همه‌چیزخور',       en: 'Sampler',           dfa: 'هر چهار بازی را امتحان کردی',        den: 'Try all four games' },
-    { id: 'coins-100',   icon: 'coin',    fa: 'صد سکه',           en: 'Hundred coins',     dfa: 'در مجموع صد سکه گرفتی',             den: 'Earn 100 coins in total' },
-    { id: 'coins-1000',  icon: 'coin',    fa: 'هزار سکه',         en: 'Thousand coins',    dfa: 'در مجموع هزار سکه گرفتی',           den: 'Earn 1000 coins in total' },
-    { id: 'daily-1',     icon: 'calendar',fa: 'اولین روزانه',     en: 'First daily',       dfa: 'اولین چالش روزانه را زدی',           den: 'Finish your first daily' },
-    { id: 'daily-25',    icon: 'calendar',fa: 'بیست‌وپنج روزانه', en: 'Daily regular',     dfa: 'بیست‌وپنج چالش روزانه زدی',          den: 'Finish 25 daily challenges' },
-    { id: 'streak-3',    icon: 'flame',   fa: 'سه روز پشت هم',    en: 'Three in a row',    dfa: 'سه روز پیوسته بازی کردی',           den: 'Play three days in a row' },
-    { id: 'streak-7',    icon: 'flame',   fa: 'یک هفته',          en: 'A full week',       dfa: 'هفت روز پیوسته بازی کردی',          den: 'Play seven days in a row' },
-    { id: 'streak-30',   icon: 'flame',   fa: 'یک ماه',           en: 'A full month',      dfa: 'سی روز پیوسته بازی کردی',           den: 'Play thirty days in a row' },
-    { id: 'tier-silver', icon: 'medal',   fa: 'نقره‌ای',          en: 'Silver',            dfa: 'به رده‌ی نقره رسیدی',               den: 'Reach the Silver tier' },
-    { id: 'tier-gold',   icon: 'medal',   fa: 'طلایی',            en: 'Gold',              dfa: 'به رده‌ی طلا رسیدی',                den: 'Reach the Gold tier' },
-    { id: 'tier-diamond',icon: 'gem',     fa: 'الماسی',           en: 'Diamond',           dfa: 'به رده‌ی الماس رسیدی',              den: 'Reach the Diamond tier' },
-    { id: 'tier-legend', icon: 'crown',   fa: 'افسانه',           en: 'Legend',            dfa: 'به رده‌ی افسانه رسیدی',             den: 'Reach the Legend tier' },
-    { id: 'night-owl',   icon: 'moon',    fa: 'شب‌زنده‌دار',      en: 'Night owl',         dfa: 'بین دو تا پنج بامداد بازی کردی',     den: 'Play between 2 and 5 AM' },
-    { id: 'td-win',      icon: 'tower',   fa: 'برج‌بان',          en: 'Tower keeper',      dfa: 'یک نقشه‌ی دفاع از برج را بردی',      den: 'Win a tower defence map' },
-    { id: 'td-perfect',  icon: 'shield',  fa: 'بی‌خش',            en: 'Flawless',          dfa: 'یک نقشه را بدون از دست دادن جان بردی', den: 'Win a map without losing a life' },
-    { id: 'td-stars',    icon: 'star',    fa: 'سه ستاره',         en: 'Three stars',       dfa: 'در یک نقشه سه ستاره گرفتی',          den: 'Earn three stars on a map' },
-    { id: 'td-endless',  icon: 'infinity',fa: 'موج سی',           en: 'Wave thirty',       dfa: 'در حالت بی‌پایان به موج سی رسیدی',    den: 'Reach wave 30 in endless mode' },
-    { id: 'sd-win',      icon: 'grid',    fa: 'اولین سودوکو',     en: 'First sudoku',      dfa: 'یک سودوکو را کامل کردی',             den: 'Complete a sudoku' },
-    { id: 'sd-expert',   icon: 'brain',   fa: 'سودوکوی خبره',     en: 'Expert sudoku',     dfa: 'یک سودوکوی خبره را حل کردی',         den: 'Solve an expert sudoku' },
-    { id: 'sd-clean',    icon: 'sparkle', fa: 'بی‌راهنمایی',      en: 'No help',           dfa: 'سودوکو را بدون راهنمایی و بدون خطا تمام کردی', den: 'Finish a sudoku with no hints and no mistakes' },
-    { id: 'sd-fast',     icon: 'bolt',    fa: 'سریع',             en: 'Speedy',            dfa: 'سودوکوی متوسط را زیر پنج دقیقه حل کردی', den: 'Solve a medium sudoku under five minutes' },
-    { id: 'ms-win',      icon: 'mine',    fa: 'مین‌یاب',          en: 'Sweeper',           dfa: 'یک مین‌روب را بردی',                 den: 'Win a minesweeper game' },
-    { id: 'ms-large',    icon: 'mine',    fa: 'میدان بزرگ',       en: 'Big field',         dfa: 'مین‌روب بزرگ را بردی',               den: 'Win a large minesweeper board' },
-    { id: 'ms-fast',     icon: 'bolt',    fa: 'دست تند',          en: 'Quick hands',       dfa: 'مین‌روب کوچک را زیر سی ثانیه بردی',   den: 'Win a small board under 30 seconds' },
-    { id: 'dt-win',      icon: 'box',     fa: 'جعبه‌گیر',         en: 'Box taker',         dfa: 'یک دست نقطه‌بازی را بردی',           den: 'Win a dots and boxes match' },
-    { id: 'dt-hard',     icon: 'brain',   fa: 'مغلوب‌کننده',      en: 'Mind beater',       dfa: 'حریف سخت را شکست دادی',              den: 'Beat the hard AI' },
-    { id: 'dt-chain',    icon: 'link',    fa: 'زنجیره‌ساز',       en: 'Chain master',      dfa: 'در یک نوبت پنج مربع گرفتی',          den: 'Take five boxes in one turn' },
-    { id: 'dt-shutout',  icon: 'crown',   fa: 'قلعه‌ی بسته',      en: 'Shutout',           dfa: 'حریف را بدون هیچ مربعی نگه داشتی',    den: 'Win without conceding a box' }
+    { id: 'first-play',  icon: 'star',    fa: 'اولین قدم',        en: 'First step',        dfa: 'اولین بازی‌ات را انجام دادی',        den: 'Play your first game', zh: '第一步', dzh: '完成第一局游戏' },
+    { id: 'play-10',     icon: 'star',    fa: 'ده تایی',          en: 'Ten rounds',        dfa: 'ده بازی انجام دادی',                den: 'Play 10 games', zh: '十局', dzh: '玩满十局' },
+    { id: 'play-50',     icon: 'medal',   fa: 'پنجاه تایی',       en: 'Fifty rounds',      dfa: 'پنجاه بازی انجام دادی',             den: 'Play 50 games', zh: '五十局', dzh: '玩满五十局' },
+    { id: 'play-200',    icon: 'trophy',  fa: 'دویست تایی',       en: 'Two hundred',       dfa: 'دویست بازی انجام دادی',             den: 'Play 200 games', zh: '两百局', dzh: '玩满两百局' },
+    { id: 'sampler',     icon: 'palette', fa: 'همه‌چیزخور',       en: 'Sampler',           dfa: 'هر چهار بازی را امتحان کردی',        den: 'Try all four games', zh: '全都试过', dzh: '四个游戏都玩过' },
+    { id: 'coins-100',   icon: 'coin',    fa: 'صد سکه',           en: 'Hundred coins',     dfa: 'در مجموع صد سکه گرفتی',             den: 'Earn 100 coins in total', zh: '一百金币', dzh: '累计获得一百金币' },
+    { id: 'coins-1000',  icon: 'coin',    fa: 'هزار سکه',         en: 'Thousand coins',    dfa: 'در مجموع هزار سکه گرفتی',           den: 'Earn 1000 coins in total', zh: '一千金币', dzh: '累计获得一千金币' },
+    { id: 'daily-1',     icon: 'calendar',fa: 'اولین روزانه',     en: 'First daily',       dfa: 'اولین چالش روزانه را زدی',           den: 'Finish your first daily', zh: '首个每日', dzh: '完成第一个每日挑战' },
+    { id: 'daily-25',    icon: 'calendar',fa: 'بیست‌وپنج روزانه', en: 'Daily regular',     dfa: 'بیست‌وپنج چالش روزانه زدی',          den: 'Finish 25 daily challenges', zh: '每日常客', dzh: '完成二十五个每日挑战' },
+    { id: 'streak-3',    icon: 'flame',   fa: 'سه روز پشت هم',    en: 'Three in a row',    dfa: 'سه روز پیوسته بازی کردی',           den: 'Play three days in a row', zh: '连续三天', dzh: '连续三天玩游戏' },
+    { id: 'streak-7',    icon: 'flame',   fa: 'یک هفته',          en: 'A full week',       dfa: 'هفت روز پیوسته بازی کردی',          den: 'Play seven days in a row', zh: '整整一周', dzh: '连续七天玩游戏' },
+    { id: 'streak-30',   icon: 'flame',   fa: 'یک ماه',           en: 'A full month',      dfa: 'سی روز پیوسته بازی کردی',           den: 'Play thirty days in a row', zh: '整整一月', dzh: '连续三十天玩游戏' },
+    { id: 'tier-silver', icon: 'medal',   fa: 'نقره‌ای',          en: 'Silver',            dfa: 'به رده‌ی نقره رسیدی',               den: 'Reach the Silver tier', zh: '白银', dzh: '达到白银段位' },
+    { id: 'tier-gold',   icon: 'medal',   fa: 'طلایی',            en: 'Gold',              dfa: 'به رده‌ی طلا رسیدی',                den: 'Reach the Gold tier', zh: '黄金', dzh: '达到黄金段位' },
+    { id: 'tier-diamond',icon: 'gem',     fa: 'الماسی',           en: 'Diamond',           dfa: 'به رده‌ی الماس رسیدی',              den: 'Reach the Diamond tier', zh: '钻石', dzh: '达到钻石段位' },
+    { id: 'tier-legend', icon: 'crown',   fa: 'افسانه',           en: 'Legend',            dfa: 'به رده‌ی افسانه رسیدی',             den: 'Reach the Legend tier', zh: '传奇', dzh: '达到传奇段位' },
+    { id: 'night-owl',   icon: 'moon',    fa: 'شب‌زنده‌دار',      en: 'Night owl',         dfa: 'بین دو تا پنج بامداد بازی کردی',     den: 'Play between 2 and 5 AM', zh: '夜猫子', dzh: '在凌晨两点到五点之间玩' },
+    { id: 'td-win',      icon: 'tower',   fa: 'برج‌بان',          en: 'Tower keeper',      dfa: 'یک نقشه‌ی دفاع از برج را بردی',      den: 'Win a tower defence map', zh: '守塔人', dzh: '通关一张塔防地图' },
+    { id: 'td-perfect',  icon: 'shield',  fa: 'بی‌خش',            en: 'Flawless',          dfa: 'یک نقشه را بدون از دست دادن جان بردی', den: 'Win a map without losing a life', zh: '毫发无伤', dzh: '一条命都没丢就通关' },
+    { id: 'td-stars',    icon: 'star',    fa: 'سه ستاره',         en: 'Three stars',       dfa: 'در یک نقشه سه ستاره گرفتی',          den: 'Earn three stars on a map', zh: '三颗星', dzh: '在一张地图上拿到三星' },
+    { id: 'td-endless',  icon: 'infinity',fa: 'موج سی',           en: 'Wave thirty',       dfa: 'در حالت بی‌پایان به موج سی رسیدی',    den: 'Reach wave 30 in endless mode', zh: '第三十波', dzh: '无尽模式打到第三十波' },
+    { id: 'sd-win',      icon: 'grid',    fa: 'اولین سودوکو',     en: 'First sudoku',      dfa: 'یک سودوکو را کامل کردی',             den: 'Complete a sudoku', zh: '首个数独', dzh: '完成一局数独' },
+    { id: 'sd-expert',   icon: 'brain',   fa: 'سودوکوی خبره',     en: 'Expert sudoku',     dfa: 'یک سودوکوی خبره را حل کردی',         den: 'Solve an expert sudoku', zh: '专家数独', dzh: '解开一局专家数独' },
+    { id: 'sd-clean',    icon: 'sparkle', fa: 'بی‌راهنمایی',      en: 'No help',           dfa: 'سودوکو را بدون راهنمایی و بدون خطا تمام کردی', den: 'Finish a sudoku with no hints and no mistakes', zh: '不用提示', dzh: '无提示、无错误完成数独' },
+    { id: 'sd-fast',     icon: 'bolt',    fa: 'سریع',             en: 'Speedy',            dfa: 'سودوکوی متوسط را زیر پنج دقیقه حل کردی', den: 'Solve a medium sudoku under five minutes', zh: '手快', dzh: '五分钟内解开中等数独' },
+    { id: 'ms-win',      icon: 'mine',    fa: 'مین‌یاب',          en: 'Sweeper',           dfa: 'یک مین‌روب را بردی',                 den: 'Win a minesweeper game', zh: '扫雷成功', dzh: '赢下一局扫雷' },
+    { id: 'ms-large',    icon: 'mine',    fa: 'میدان بزرگ',       en: 'Big field',         dfa: 'مین‌روب بزرگ را بردی',               den: 'Win a large minesweeper board', zh: '大雷区', dzh: '赢下大号扫雷棋盘' },
+    { id: 'ms-fast',     icon: 'bolt',    fa: 'دست تند',          en: 'Quick hands',       dfa: 'مین‌روب کوچک را زیر سی ثانیه بردی',   den: 'Win a small board under 30 seconds', zh: '快手', dzh: '三十秒内赢下小号棋盘' },
+    { id: 'dt-win',      icon: 'box',     fa: 'جعبه‌گیر',         en: 'Box taker',         dfa: 'یک دست نقطه‌بازی را بردی',           den: 'Win a dots and boxes match', zh: '抢格子', dzh: '赢下一局点格棋' },
+    { id: 'dt-hard',     icon: 'brain',   fa: 'مغلوب‌کننده',      en: 'Mind beater',       dfa: 'حریف سخت را شکست دادی',              den: 'Beat the hard AI', zh: '智胜', dzh: '击败困难电脑' },
+    { id: 'dt-chain',    icon: 'link',    fa: 'زنجیره‌ساز',       en: 'Chain master',      dfa: 'در یک نوبت پنج مربع گرفتی',          den: 'Take five boxes in one turn', zh: '连锁高手', dzh: '一回合拿下五个格子' },
+    { id: 'dt-shutout',  icon: 'crown',   fa: 'قلعه‌ی بسته',      en: 'Shutout',           dfa: 'حریف را بدون هیچ مربعی نگه داشتی',    den: 'Win without conceding a box', zh: '零封', dzh: '一个格子都不让对手拿' }
   ];
 
   var achApi = {
@@ -765,8 +837,8 @@
       mutate('achievements', function (a) { a[id] = Date.now(); return a; });
       Chogan.ui.toast({
         icon: d.icon,
-        title: state.settings.lang === 'fa' ? d.fa : d.en,
-        sub: state.settings.lang === 'fa' ? d.dfa : d.den
+        title: Chogan.achText(d).title,
+        sub: Chogan.achText(d).sub
       });
       audioApi.sfx('coin');
       Chogan.haptic('success');
