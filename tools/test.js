@@ -12,13 +12,15 @@ const os = require('os');
 const { spawnSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
+// زبان‌های اپ، به همان ترتیب جدول LOCALES در هسته
+const LOCALE_CODES = ['fa', 'en', 'zh'];
 let failures = 0;
 let checks = 0;
 // حداقل تعداد بررسی‌ای که یک اجرای کامل باید داشته باشد. قبلاً اگر یک گروه کامل
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 394;
+const MIN_CHECKS = 455;
 
 function ok(cond, msg) {
   checks++;
@@ -238,14 +240,15 @@ function testTd() {
 }
 
 /* --------------------------------------------------- فایل‌های ثابت */
+let games = [];
 function testFiles() {
   head('فایل‌ها و فهرست');
-  const games = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games;
+  games = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games;
   ok(games.length >= 4, 'games.json حداقل چهار بازی دارد');
   for (const g of games) {
     ok(fs.existsSync(path.join(ROOT, 'www', g.path)), g.id + ': فایل بازی هست');
     ok(fs.existsSync(path.join(ROOT, 'www', g.icon)), g.id + ': آیکون هست');
-    ok(g.name.fa && g.name.en && g.summary.fa && g.summary.en, g.id + ': نام و توضیح دوزبانه دارد');
+    ok(LOCALE_CODES.every((c) => g.name[c] && g.summary[c]), g.id + ': برای هر زبان جدول هسته نام و توضیح دارد (' + LOCALE_CODES.join(',') + ')');
     ok(/^#[0-9A-Fa-f]{6}$/.test(g.color), g.id + ': رنگ تأکید معتبر است');
     const html = fs.readFileSync(path.join(ROOT, 'www', g.path), 'utf8');
     ok(/dir="rtl"/.test(html), g.id + ': صفحه راست‌چین است');
@@ -299,7 +302,24 @@ function testFiles() {
   const CHANGELOG_LIMIT = 500;
   const verSrcTxt = fs.readFileSync(path.join(ROOT, 'www/version.js'), 'utf8');
   const code = verSrcTxt.match(/APP_VERSION_CODE\s*=\s*(\d+)/)[1];
-  for (const loc of ['en-US', 'fa']) {
+  const flDir = path.join(ROOT, 'fastlane/metadata/android');
+  const flLocales = fs.readdirSync(flDir).filter((d) => fs.statSync(path.join(flDir, d)).isDirectory());
+  ok(flLocales.length > 0, 'فهرست زبان‌های فستلین خالی نیست');
+  for (const need of ['en-US', 'fa']) ok(flLocales.indexOf(need) >= 0, 'متادیتای فستلین برای ' + need + ' هست');
+  for (const loc of flLocales) {
+    // عنوان و توضیح کوتاه سقف دارند و اف‌دروید بی‌صدا می‌بردشان
+    for (const [file, cap] of [['title.txt', 50], ['short_description.txt', 80]]) {
+      const fp = path.join(flDir, loc, file);
+      if (!fs.existsSync(fp)) continue;
+      const text = fs.readFileSync(fp, 'utf8').trim();
+      ok(text.length > 0 && text.length <= cap, loc + '/' + file + ': ' + text.length + ' نویسه، سقف ' + cap);
+    }
+  }
+  // هر زبانی که پوشه‌ی توضیح انتشار دارد باید برای کد نسخه‌ی فعلی هم یکی داشته باشد،
+  // وگرنه کاربر آن زبان توضیح نسخه‌ی قبلی را می‌بیند
+  const clLocales = flLocales.filter((l) => fs.existsSync(path.join(flDir, l, 'changelogs')));
+  ok(clLocales.length >= 2, 'زبان‌های دارای توضیح انتشار: ' + clLocales.join(','));
+  for (const loc of clLocales) {
     const dir = path.join(ROOT, 'fastlane/metadata/android', loc, 'changelogs');
     for (const f of fs.readdirSync(dir)) {
       const text = fs.readFileSync(path.join(dir, f), 'utf8');
@@ -712,6 +732,79 @@ function testDevScript() {
   ok(launches.length >= 2, 'هر دو مسیر اجرای کروم پروفایل صریح می‌دهند (' + launches.length + ')');
 }
 
+// زبان‌ها. جدول هسته مرجع است و داده‌ها باید با آن بخوانند. برگشت کلید ترجمه‌نشده
+// باید انگلیسی باشد نه فارسی، وگرنه زبان سوم وسط متنش فارسی راست‌به‌چپ می‌گیرد.
+function testLocales() {
+  head('زبان‌ها');
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  const table = (core.match(/var LOCALES = \[([\s\S]*?)\];/) || [])[1] || '';
+  ok(table.length > 0, 'جدول LOCALES در هسته هست');
+  const codes = (table.match(/code:\s*'([a-z-]+)'/g) || []).map((m) => m.split("'")[1]);
+  ok(codes.join(',') === LOCALE_CODES.join(','), 'کدهای زبان: ' + codes.join(','));
+  ok(/code: 'fa'[^}]*dir: 'rtl'/.test(table), 'فارسی راست‌به‌چپ است');
+  ok((table.match(/dir: 'rtl'/g) || []).length === 1, 'فقط فارسی راست‌به‌چپ است');
+  for (const c of codes) ok(new RegExp("code: '" + c + "'[^}]*date: '").test(table), c + ': قالب تاریخ دارد');
+
+  const iEn = core.indexOf('localStrings.en[key]');
+  const iFa = core.indexOf('localStrings.fa[key]');
+  ok(iEn > 0 && iFa > iEn, 'کلید ترجمه‌نشده اول به انگلیسی برمی‌گردد، بعد فارسی');
+
+  // تشخیص زبان دستگاه را واقعاً اجرا می‌کنیم، نه اینکه به رجکس نگاه کنیم
+  const fn = (core.match(/function deviceLang\(\)[\s\S]*?\n  \}/) || [])[0];
+  ok(!!fn, 'تابع deviceLang پیدا شد');
+  const cases = [
+    ['fa-IR', 'fa'], ['fa', 'fa'],
+    ['zh-CN', 'zh'], ['zh', 'zh'], ['zh-Hans-CN', 'zh'], ['zh-SG', 'zh'],
+    // فقط چینی ساده‌شده داریم؛ سنتی باید انگلیسی بگیرد نه ترجمه‌ی اشتباه
+    ['zh-TW', 'en'], ['zh-HK', 'en'], ['zh-Hant', 'en'],
+    ['en-GB', 'en'], ['de-DE', 'en'], ['', 'en']
+  ];
+  ok(cases.length > 0, 'فهرست حالت‌های زبان دستگاه خالی نیست');
+  for (const [tag, want] of cases) {
+    const sb = { out: null, global: { navigator: { languages: tag ? [tag] : [], language: tag } } };
+    vm.createContext(sb);
+    vm.runInContext(fn + '\nout = deviceLang();', sb);
+    ok(sb.out === want, 'زبان دستگاه ' + (tag || '<خالی>') + ' → ' + want + ' (آمد ' + sb.out + ')');
+  }
+
+  // دیکشنری هر زبان نباید کلیدی داشته باشد که در انگلیسی نیست: آن یعنی غلط تایپی
+  // که برگشت خودکار پنهانش می‌کند. کلید کم داشتن مجاز است، چون برگشت برای همین است.
+  const files = ['www/lib/chogan.js', 'www/index.html', 'template/game/index.html']
+    .concat(games.map((g) => 'www/' + g.path));
+  ok(files.length > 3, 'فهرست فایل‌های دیکشنری خالی نیست');
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    const dict = (code) => {
+      const m = src.match(new RegExp("\\n\\s{4,8}" + code + ":\\s*\\{"));
+      if (!m) return null;
+      let i = src.indexOf('{', m.index), depth = 0, j = i;
+      for (; j < src.length; j++) {
+        if (src[j] === '{') depth++;
+        else if (src[j] === '}' && --depth === 0) break;
+      }
+      return new Set((src.slice(i, j).match(/[{,]\s*([A-Za-z_][A-Za-z0-9_]*)\s*:/g) || [])
+        .map((x) => x.replace(/[{,\s:]/g, '')));
+    };
+    const en = dict('en');
+    ok(!!en && en.size > 0, f + ': دیکشنری انگلیسی دارد');
+    for (const c of LOCALE_CODES) {
+      if (c === 'en') continue;
+      const d = dict(c);
+      if (!d) { ok(c !== 'fa', f + ': دیکشنری ' + c + ' اختیاری است'); continue; }
+      const stray = [...d].filter((k) => !en.has(k));
+      ok(stray.length === 0, f + ' · ' + c + ': کلید بی‌جفت ندارد' + (stray.length ? ' (' + stray.join(',') + ')' : ''));
+    }
+  }
+
+  // منیفست وب: نام برند لاتین می‌ماند، توضیح چینی اضافه شده
+  const man = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/manifest.webmanifest'), 'utf8'));
+  const dloc = man.description_localized || {};
+  const nloc = man.name_localized || {};
+  ok(!!dloc['zh-Hans'], 'منیفست توضیح چینی ساده‌شده دارد');
+  ok((dloc['zh-Hans'] || {}).dir === 'ltr', 'توضیح چینی چپ‌به‌راست است');
+  ok(!nloc['zh-Hans'], 'نام برند برای چینی ترجمه نشده و لاتین می‌ماند');
+}
+
 testFiles();
 testSudoku();
 testMines();
@@ -722,6 +815,7 @@ testDeployGate();
 testWebChanged();
 testBrowserCheckExits();
 testDevScript();
+testLocales();
 
 testSw().then(testVerifyDeploy).then(function () {
   head('کامل بودن اجرا');

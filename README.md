@@ -15,7 +15,7 @@ Chogan is a small collection of finishable games in a single app. Free, open sou
 | Minesweeper | No-guess generation, four sizes, chording and flags, daily challenge |
 | Dots and Boxes | Two players on one phone, or three levels of AI |
 
-Around the games: a daily challenge that is identical on every device with no server at all, a weekly offline league with five tiers, over thirty awards, a shared coin that is only ever spent on hints and cosmetics, stats and a profile, and a bilingual Persian and English interface with light and dark themes.
+Around the games: a daily challenge that is identical on every device with no server at all, a weekly offline league with five tiers, over thirty awards, a shared coin that is only ever spent on hints and cosmetics, stats and a profile, and a Persian, English and Simplified Chinese interface with light and dark themes.
 
 ### Why it needs no permissions
 
@@ -81,7 +81,7 @@ MIT, see [LICENSE](LICENSE). The Vazirmatn font is under the OFL; its licence te
 | مین‌روب | تولید بدون حدس، چهار اندازه، کورد و پرچم، چالش روزانه |
 | نقطه‌بازی | دو نفره روی یک گوشی یا مقابل هوش مصنوعی با سه سطح |
 
-بیرون از بازی‌ها: چالش روزانه‌ی مشترک برای همه‌ی دستگاه‌ها بدون هیچ سروری، لیگ هفتگی آفلاین با پنج رده، بیش از سی دستاورد، سکه‌ی مشترک که فقط خرج راهنمایی و تزئینات می‌شود، آمار و پروفایل، و رابط دوزبانه‌ی فارسی و انگلیسی با تم روشن و تاریک.
+بیرون از بازی‌ها: چالش روزانه‌ی مشترک برای همه‌ی دستگاه‌ها بدون هیچ سروری، لیگ هفتگی آفلاین با پنج رده، بیش از سی دستاورد، سکه‌ی مشترک که فقط خرج راهنمایی و تزئینات می‌شود، آمار و پروفایل، و رابط فارسی، انگلیسی و چینی ساده‌شده با تم روشن و تاریک.
 
 ### چرا هیچ مجوزی نمی‌خواهد
 
@@ -103,7 +103,7 @@ www/
 android/                   پروژه‌ی اندروید، فقط یک فایل جاوا
 template/game/             اسکلت بازی جدید
 tools/                     تست خودکار موتورها و بررسی مرورگر
-fastlane/metadata/         متادیتای اف‌دروید، دوزبانه
+fastlane/metadata/         متادیتای اف‌دروید، سه‌زبانه
 ```
 
 ### اجرای محلی

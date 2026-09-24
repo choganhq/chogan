@@ -50,7 +50,7 @@ shot() {
 # هر زبان تصویر خودش را می‌گیرد. تصویر رابط فارسی داخل متادیتای انگلیسی
 # فقط کاربر را گیج می‌کند.
 TODAY=$(date +%Y-%m-%d)
-for lang in fa en; do
+for lang in fa en zh; do
   mkdir -p "$OUT/$lang"
   shot 1 "index.html" light "$lang"
   shot 2 "games%2Ftower-defence%2Findex.html" light "$lang"
@@ -69,4 +69,5 @@ copy_to() {
 }
 copy_to fa fa
 copy_to en-US en
+copy_to zh-CN zh
 echo "تصویرها برای هر زبان جدا ساخته و در متادیتا گذاشته شدند"
