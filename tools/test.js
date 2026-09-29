@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 455;
+const MIN_CHECKS = 471;
 
 function ok(cond, msg) {
   checks++;
@@ -174,6 +174,36 @@ function testTd() {
     if (err) ok(false, 'مسیر بذر ' + i + ': ' + err);
   }
   ok(true, '۱۲۰ نقشه‌ی تصادفی همه معتبرند');
+
+  // ذخیره پیش از موج اول (#66): برج چیده‌شده یعنی بازی در جریان است. قبلاً
+  // فقط wave > 0 حساب می‌شد و صفحه خانه‌ی ذخیره را همان‌جا پاک می‌کرد.
+  ok(typeof E.inProgress === 'function', 'موتور تابع inProgress دارد');
+  const inProg = typeof E.inProgress === 'function' ? E.inProgress : () => null;
+  const fresh = E.createGame({ path: E.genPath(rng(4242), { minTurns: 5 }) });
+  ok(inProg(fresh) === false, 'تخته‌ی دست‌نخورده در جریان نیست');
+  let spot = null;
+  for (let rr = 0; rr < E.GH && !spot; rr++) {
+    for (let cc = 0; cc < E.GW && !spot; cc++) if (E.canBuild(fresh, rr, cc)) spot = { r: rr, c: cc };
+  }
+  ok(!!spot, 'خانه‌ی قابل ساخت روی نقشه پیدا شد');
+  ok(!!E.build(fresh, spot.r, spot.c, 'archer'), 'برج پیش از موج اول ساخته شد');
+  ok(fresh.wave === 0 && fresh.towers.length === 1, 'هنوز موج اول شروع نشده و یک برج روی تخته است');
+  ok(inProg(fresh) === true, 'یک برج پیش از موج اول یعنی بازی در جریان است');
+  // مسیر برگشت، همان شیء ساده‌ای را می‌بیند که از localStorage درآمده
+  ok(inProg(JSON.parse(JSON.stringify(fresh))) === true, 'ذخیره‌ی سریال‌شده هم در جریان است');
+  const started = E.createGame({ path: E.genPath(rng(99), { minTurns: 5 }) });
+  E.startWave(started, rng(7));
+  ok(started.towers.length === 0 && inProg(started) === true, 'موج شروع‌شده بدون برج هم در جریان است');
+  fresh.over = true;
+  ok(inProg(fresh) === false, 'بازی تمام‌شده در جریان نیست');
+  ok(inProg(null) === false, 'ذخیره‌ی نبوده در جریان نیست');
+
+  // و صفحه باید همین گزاره را صدا بزند، نه شرط خودش را داشته باشد
+  const tdHtml = fs.readFileSync(path.join(ROOT, 'www/games/tower-defence/index.html'), 'utf8');
+  const page = tdHtml.slice(tdHtml.indexOf('/* ==== ENGINE END ==== */'));
+  ok(page.length > 1000, 'بخش صفحه‌ی دفاع از برج خوانده شد');
+  ok((page.match(/E\.inProgress\(/g) || []).length >= 3, 'ذخیره، برگشت و شروع دوباره هر سه از inProgress استفاده می‌کنند');
+  ok(!/S\.wave === 0|\.s\.wave > 0/.test(page), 'شرط قدیمی wave در صفحه نمانده است');
 
   const daily = E.genPath(rng(12345), { minTurns: 5 });
   const daily2 = E.genPath(rng(12345), { minTurns: 5 });
