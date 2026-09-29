@@ -443,6 +443,19 @@ function TdEngineFactory() {
   // بازی از همان اولین برج «در جریان» است، نه از موج یک. پیش از این، ذخیره
   // فقط با wave > 0 نگه داشته می‌شد و برج‌های چیده‌شده‌ی پیش از موج اول با
   // بیرون رفتن از صفحه پاک می‌شدند (#66).
+  // آنچه پیش‌نمایش پیش از خرید باید نشان بدهد. در موتور است تا بدون مرورگر
+  // تست شود و برد نمایش‌داده‌شده دقیقاً برد برجِ تازه‌ساخته باشد، نه عددی که
+  // در کد رسم کپی شده (#65).
+  function buildPreview(S, r, c, kind) {
+    var def = TOWERS[kind];
+    if (!S || !def) return null;
+    var st = towerStats(kind, 0);
+    return {
+      kind: kind, range: st.range, cost: def.cost, color: def.color,
+      fits: canBuild(S, r, c) && S.money >= def.cost
+    };
+  }
+
   function inProgress(S) {
     if (!S || S.over) return false;
     return S.wave > 0 || (!!S.towers && S.towers.length > 0);
@@ -464,7 +477,7 @@ function TdEngineFactory() {
     pathGeometry: pathGeometry, posAt: posAt, createGame: createGame,
     canBuild: canBuild, towerAt: towerAt, build: build, upgrade: upgrade,
     sell: sell, sellValue: sellValue, startWave: startWave, step: step, stars: stars,
-    inProgress: inProgress
+    inProgress: inProgress, buildPreview: buildPreview
   };
   if (typeof self !== 'undefined') self.TdEngine = api;
   return api;
@@ -612,6 +625,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
   function arm(k) {
     armed = k;
     selected = null;
+    buildCell = null;
     KINDS.forEach(function (x) {
       dockBtns[x].btn.setAttribute('aria-pressed', armed === x ? 'true' : 'false');
     });
@@ -652,6 +666,15 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
   ctx.mount();
 
   /* --------------------------------------------------------- رنگ‌ها */
+
+  // رنگ برج‌ها در موتور به شکل #RRGGBB است و برای پرکردن دایره شفافیت می‌خواهد
+  function hexA(hex, a) {
+    var h = String(hex).replace('#', '');
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    var n = parseInt(h, 16);
+    if (isNaN(n) || h.length !== 6) return 'rgba(224,122,95,' + a + ')';
+    return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+  }
 
   var CO = {};
   function readColors() {
@@ -829,8 +852,22 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
       g.lineWidth = 2;
       g.stroke();
     }
-    if (buildCell) {
-      g.strokeStyle = CO.good;
+    // پیش‌نمایش برد پیش از خرید (#65). برد از خود موتور خوانده می‌شود و با
+    // سطح ساخت (صفر) حساب می‌شود، وگرنه بازیکن بردی می‌بیند که نمی‌خرد.
+    var pv = buildCell && armed ? E.buildPreview(S, buildCell.r, buildCell.c, armed) : null;
+    if (pv) {
+      var fits = pv.fits;
+      var cx = (buildCell.c + 0.5) * cs, cy = (buildCell.r + 0.5) * cs;
+      g.beginPath();
+      g.arc(cx, cy, pv.range * cs, 0, Math.PI * 2);
+      g.fillStyle = fits ? hexA(pv.color, 0.14) : 'rgba(0,0,0,.06)';
+      g.fill();
+      g.strokeStyle = fits ? pv.color : CO.bad;
+      g.lineWidth = 2;
+      g.setLineDash([6, 5]);
+      g.stroke();
+      g.setLineDash([]);
+      g.strokeStyle = fits ? CO.good : CO.bad;
       g.lineWidth = 3;
       g.strokeRect(buildCell.c * cs + 2, buildCell.r * cs + 2, cs - 4, cs - 4);
     }
@@ -989,7 +1026,55 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
 
   /* ---------------------------------------------------------- ورودی */
 
+  // نگه داشتن انگشت روی خانه، برد برج در دست را نشان می‌دهد و چیزی نمی‌خرد.
+  // بدون این، تنها راه دیدن برد یک برج خریدن آن بود (#65).
+  var HOLD_MS = 320, holdTimer = null, holdFired = false, holdFrom = null;
+
+  function cellOf(ev) {
+    var rect = canvas.getBoundingClientRect();
+    var c = Math.floor((ev.clientX - rect.left) / cs);
+    var r = Math.floor((ev.clientY - rect.top) / cs);
+    if (r < 0 || c < 0 || r >= E.GH || c >= E.GW) return null;
+    return { r: r, c: c };
+  }
+  function showRange(cell) {
+    var next = (armed && S && !S.over) ? cell : null;
+    var same = (!next && !buildCell) ||
+      (next && buildCell && next.r === buildCell.r && next.c === buildCell.c);
+    if (same) return;
+    buildCell = next;
+    draw();
+  }
+  function clearHold() {
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+    holdFrom = null;
+  }
+
+  canvas.addEventListener('pointermove', function (ev) {
+    if (ev.pointerType === 'mouse') { showRange(cellOf(ev)); return; }
+    // انگشت که سُر خورد، دیگر نگه داشتن نیست
+    if (holdFrom && Math.abs(ev.clientX - holdFrom.x) + Math.abs(ev.clientY - holdFrom.y) > 12) clearHold();
+    else if (holdFired) showRange(cellOf(ev));
+  });
+  canvas.addEventListener('pointerleave', function () { clearHold(); showRange(null); });
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (ev.pointerType === 'mouse' || !armed || !S || S.over) return;
+    var cell = cellOf(ev);
+    if (!cell) return;
+    holdFrom = { x: ev.clientX, y: ev.clientY };
+    holdTimer = setTimeout(function () {
+      holdTimer = null;
+      holdFired = true;
+      C.haptic('light');
+      showRange(cell);
+    }, HOLD_MS);
+  });
+  canvas.addEventListener('pointerup', function () { clearHold(); });
+  canvas.addEventListener('pointercancel', function () { clearHold(); holdFired = false; showRange(null); });
+
   canvas.addEventListener('click', function (ev) {
+    // رها کردن انگشت بعد از پیش‌نمایش نباید برج بخرد
+    if (holdFired) { holdFired = false; showRange(null); return; }
     if (!S || S.over) return;
     var rect = canvas.getBoundingClientRect();
     var c = Math.floor((ev.clientX - rect.left) / cs);

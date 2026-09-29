@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 471;
+const MIN_CHECKS = 497;
 
 function ok(cond, msg) {
   checks++;
@@ -198,12 +198,47 @@ function testTd() {
   ok(inProg(fresh) === false, 'بازی تمام‌شده در جریان نیست');
   ok(inProg(null) === false, 'ذخیره‌ی نبوده در جریان نیست');
 
+  // پیش‌نمایش برد پیش از خرید (#65)
+  ok(typeof E.buildPreview === 'function', 'موتور تابع buildPreview دارد');
+  const pv = typeof E.buildPreview === 'function' ? E.buildPreview : () => null;
+  const board = E.createGame({ path: E.genPath(rng(777), { minTurns: 5 }) });
+  let openCell = null;
+  for (let rr = 0; rr < E.GH && !openCell; rr++) {
+    for (let cc = 0; cc < E.GW && !openCell; cc++) if (E.canBuild(board, rr, cc)) openCell = { r: rr, c: cc };
+  }
+  ok(!!openCell, 'خانه‌ی خالی برای پیش‌نمایش پیدا شد');
+  const kinds = Object.keys(E.TOWERS);
+  ok(kinds.length === 4, 'چهار نوع برج هست');
+  const ranges = [];
+  for (const k of kinds) {
+    const p1 = pv(board, openCell.r, openCell.c, k);
+    ok(!!p1, k + ': پیش‌نمایش برمی‌گردد');
+    // برد باید از خود موتور بیاید و با سطحی باشد که ساخته می‌شود، یعنی صفر
+    ok(p1 && p1.range === E.towerStats(k, 0).range, k + ': برد پیش‌نمایش همان برد برج تازه‌ساخته است');
+    ok(p1 && p1.cost === E.TOWERS[k].cost, k + ': هزینه‌ی پیش‌نمایش درست است');
+    if (p1) ranges.push(p1.range);
+  }
+  ok(new Set(ranges).size > 1, 'بردها بین برج‌ها فرق دارند، پس عدد ثابت نیست');
+  ok((pv(board, openCell.r, openCell.c, 'archer') || {}).fits === true, 'خانه‌ی خالی با پول کافی قابل ساخت است');
+  ok((pv(board, board.path[3].r, board.path[3].c, 'archer') || { fits: true }).fits === false, 'روی مسیر قابل ساخت نیست');
+  const poor = E.createGame({ path: board.path, money: 10 });
+  ok((pv(poor, openCell.r, openCell.c, 'archer') || { fits: true }).fits === false, 'با پول کم قابل ساخت نیست');
+  ok(pv(board, openCell.r, openCell.c, 'nope') === null, 'برج ناشناخته پیش‌نمایش ندارد');
+  ok(board.towers.length === 0 && board.money === 200, 'پیش‌نمایش نه برج می‌سازد نه پول کم می‌کند');
+
   // و صفحه باید همین گزاره را صدا بزند، نه شرط خودش را داشته باشد
   const tdHtml = fs.readFileSync(path.join(ROOT, 'www/games/tower-defence/index.html'), 'utf8');
   const page = tdHtml.slice(tdHtml.indexOf('/* ==== ENGINE END ==== */'));
   ok(page.length > 1000, 'بخش صفحه‌ی دفاع از برج خوانده شد');
   ok((page.match(/E\.inProgress\(/g) || []).length >= 3, 'ذخیره، برگشت و شروع دوباره هر سه از inProgress استفاده می‌کنند');
   ok(!/S\.wave === 0|\.s\.wave > 0/.test(page), 'شرط قدیمی wave در صفحه نمانده است');
+  ok((page.match(/E\.buildPreview\(/g) || []).length >= 1, 'رسم، پیش‌نمایش را از موتور می‌گیرد');
+  ok(!/towerStats\(armed/.test(page), 'صفحه برد پیش‌نمایش را خودش حساب نمی‌کند');
+  ok(/pointerdown/.test(page) && /holdFired/.test(page), 'نگه داشتن انگشت پیش‌نمایش می‌دهد');
+  // اسم تابع پیش‌نمایش یک بار با var preview (نوار موج بعدی) تصادم کرد و هر
+  // حرکت موشواره خطا می‌داد بی‌آنکه چیزی در کنسول بار صفحه پیدا شود
+  ok(/function showRange\(/.test(page) && !/function preview\(/.test(page), 'تابع پیش‌نمایش با نوار موج هم‌نام نیست');
+  ok(/if \(holdFired\) \{[^}]*return;/.test(page), 'رها کردن انگشت بعد از پیش‌نمایش برج نمی‌خرد');
 
   const daily = E.genPath(rng(12345), { minTurns: 5 });
   const daily2 = E.genPath(rng(12345), { minTurns: 5 });
