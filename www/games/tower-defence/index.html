@@ -440,6 +440,14 @@ function TdEngineFactory() {
     }
   }
 
+  // بازی از همان اولین برج «در جریان» است، نه از موج یک. پیش از این، ذخیره
+  // فقط با wave > 0 نگه داشته می‌شد و برج‌های چیده‌شده‌ی پیش از موج اول با
+  // بیرون رفتن از صفحه پاک می‌شدند (#66).
+  function inProgress(S) {
+    if (!S || S.over) return false;
+    return S.wave > 0 || (!!S.towers && S.towers.length > 0);
+  }
+
   function stars(S) {
     if (!S.won) return 0;
     var kept = S.lives / S.maxLives;
@@ -455,7 +463,8 @@ function TdEngineFactory() {
     towerStats: towerStats, upgradeCost: upgradeCost,
     pathGeometry: pathGeometry, posAt: posAt, createGame: createGame,
     canBuild: canBuild, towerAt: towerAt, build: build, upgrade: upgrade,
-    sell: sell, sellValue: sellValue, startWave: startWave, step: step, stars: stars
+    sell: sell, sellValue: sellValue, startWave: startWave, step: step, stars: stars,
+    inProgress: inProgress
   };
   if (typeof self !== 'undefined') self.TdEngine = api;
   return api;
@@ -1131,7 +1140,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
   /* --------------------------------------------------------- ذخیره */
 
   ctx.autosave(function () {
-    if (!S || S.over || S.wave === 0) return { inProgress: false };
+    if (!E.inProgress(S)) return { inProgress: false };
     return {
       mapId: mapId, date: S.date, prefs: prefs,
       s: {
@@ -1146,7 +1155,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
   function save() { ctx.save(); }
 
   function askNew() {
-    if (!S || S.over || S.wave === 0) { newGame(mapId, S ? S.date : null); return; }
+    if (!E.inProgress(S)) { newGame(mapId, S ? S.date : null); return; }
     C.ui.confirm({ title: C.t('restart'), body: C.t('resetWarn'), onOk: function () { finished = false; newGame(mapId, S.date); } });
   }
 
@@ -1215,7 +1224,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
       C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec.label });
     }
     ctx.tutorialIfNew(TUT);
-  } else if (saved && saved.s && saved.s.wave > 0) {
+  } else if (saved && E.inProgress(saved.s)) {
     if (saved.prefs) prefs = saved.prefs;
     mapId = saved.mapId;
     var v = saved.s;
