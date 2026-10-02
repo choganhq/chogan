@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 981;
+const MIN_CHECKS = 1046;
 
 function ok(cond, msg) {
   checks++;
@@ -1414,6 +1414,203 @@ function testBackgammon() {
   ok(!/Math\.random\(\)[^\n]*dice|rollFor/.test(page), 'صفحه خودش تاس نمی‌ریزد');
 }
 
+/* ------------------------------------------------------------- دوز */
+function testMorris() {
+  head('دوز');
+  const E = loadEngine('morris', 'MorrisEngineFactory');
+
+  // تخته از روی قاعده، مستقل از موتور: ۳۲ یال و ۱۶ سه‌تایی
+  const EDGES = [
+    [0, 1], [1, 2], [2, 14], [14, 23], [23, 22], [22, 21], [21, 9], [9, 0],
+    [3, 4], [4, 5], [5, 13], [13, 20], [20, 19], [19, 18], [18, 10], [10, 3],
+    [6, 7], [7, 8], [8, 12], [12, 17], [17, 16], [16, 15], [15, 11], [11, 6],
+    [1, 4], [4, 7], [9, 10], [10, 11], [12, 13], [13, 14], [16, 19], [19, 22]
+  ];
+  const MILLS = [
+    [0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11], [12, 13, 14], [15, 16, 17], [18, 19, 20], [21, 22, 23],
+    [0, 9, 21], [3, 10, 18], [6, 11, 15], [1, 4, 7], [16, 19, 22], [8, 12, 17], [5, 13, 20], [2, 14, 23]
+  ];
+  ok(EDGES.length === 32 && MILLS.length === 16, 'فهرست‌های مرجع آزمون کامل‌اند');
+  ok(E.N === 24 && E.ADJ.length === 24, 'تخته ۲۴ نقطه دارد');
+  let sym = true, onLine = true, deg = 0;
+  for (let a = 0; a < 24; a++) {
+    for (const b of E.ADJ[a]) {
+      deg++;
+      if (E.ADJ[b].indexOf(a) < 0) sym = false;
+      if (E.XY[a][0] !== E.XY[b][0] && E.XY[a][1] !== E.XY[b][1]) onLine = false;
+    }
+  }
+  ok(sym, 'همسایگی دوطرفه است');
+  ok(onLine, 'هر دو همسایه روی یک خط افقی یا عمودی‌اند');
+  ok(deg === 64, 'مجموع درجه‌ها ۶۴ است، یعنی ۳۲ یال (' + deg + ')');
+  const edgeKey = (a, b) => Math.min(a, b) + '-' + Math.max(a, b);
+  const want = new Set(EDGES.map((e) => edgeKey(e[0], e[1])));
+  const got = new Set();
+  E.ADJ.forEach((ns, a) => ns.forEach((b) => got.add(edgeKey(a, b))));
+  ok(want.size === got.size && [...want].every((k) => got.has(k)), 'همسایگی دقیقاً همان ۳۲ یال تخته است');
+  const millKey = (m) => m.slice().sort((x, y) => x - y).join(',');
+  const wantM = new Set(MILLS.map(millKey));
+  ok(E.MILLS.length === 16 && E.MILLS.every((m) => wantM.has(millKey(m))), 'هر ۱۶ سه‌تایی درست فهرست شده‌اند');
+  ok(E.MILLS_OF.every((ms) => ms.length === 2), 'هر نقطه دقیقاً در دو سه‌تایی است');
+
+  const B = (p1, p2) => { const b = new Array(24).fill(0); p1.forEach((q) => { b[q] = 1; }); p2.forEach((q) => { b[q] = 2; }); return b; };
+  const st = (p1, p2, hand, turn, mode) => {
+    const S = E.newState(mode || '2p', 'medium');
+    S.board = B(p1, p2); S.hand = hand.slice(); S.turn = turn;
+    S.reps = {}; S.reps[E.key(S)] = 1;
+    return S;
+  };
+
+  // تشخیص سه‌تایی
+  let b = B([0, 1], [9]);
+  ok(E.formsMill(b, 1, 2, -1), 'گذاشتن سومی روی ۰-۱-۲ سه‌تایی است');
+  ok(!E.formsMill(b, 1, 14, -1), 'نقطه‌ی بی‌ربط سه‌تایی نمی‌سازد');
+  b = B([0, 1, 14], []);
+  ok(!E.formsMill(b, 1, 2, 1), 'مهره‌ای که از خود خط می‌رود سه‌تایی همان خط را نمی‌سازد');
+  ok(E.formsMill(b, 1, 2, 14), 'آمدن از ۱۴ به ۲ سه‌تایی ۰-۱-۲ را می‌بندد');
+
+  // قاعده‌ی برداشت
+  b = B([], [3, 4, 5, 21]);
+  ok(E.removable(b, 2).join() === '21', 'مهره‌های داخل سه‌تایی در امان‌اند');
+  b = B([], [3, 4, 5, 18, 10]);
+  ok(E.removable(b, 2).join() === '3,4,5,10,18', 'وقتی همه داخل سه‌تایی‌اند، هر کدام برداشتنی است');
+  b = B([0, 1], [3, 4, 5, 21]);
+  const toTwo = E.movesOf(b, [0, 7, 5], 1).filter((m) => m.to === 2);
+  ok(toTwo.length === 1 && toTwo[0].remove === 21, 'حرکت سه‌تایی فقط با برداشت مجاز می‌آید');
+  const S0 = st([0, 1], [3, 4, 5, 21], [0, 7, 5], 1);
+  ok(!E.isLegal(S0, { from: -1, to: 2, remove: -1 }), 'سه‌تایی بدون برداشت غیرمجاز است');
+  ok(!E.isLegal(S0, { from: -1, to: 2, remove: 4 }), 'برداشت از سه‌تایی حریف غیرمجاز است');
+  ok(E.isLegal(S0, { from: -1, to: 2, remove: 21 }), 'برداشت مهره‌ی آزاد مجاز است');
+
+  // پرواز و جابه‌جایی
+  b = B([0, 4, 17], [1, 9, 13, 20]);
+  ok(E.phaseOf(b, [0, 0, 0], 1) === 'fly' && E.phaseOf(b, [0, 0, 0], 2) === 'move', 'سه مهره یعنی پرواز، چهار مهره یعنی جابه‌جایی');
+  ok(E.steps(b, [0, 0, 0], 1).length === 3 * 17, 'پرواز به هر ۱۷ نقطه‌ی خالی برای هر سه مهره');
+  const s2 = E.steps(b, [0, 0, 0], 2).map((s) => s.join('>')).sort().join(' ');
+  ok(s2 === ['1>2', '9>10', '9>21', '13>5', '13>12', '13>14', '20>19'].sort().join(' '), 'جابه‌جایی فقط به همسایه‌ی خالی (' + s2 + ')');
+  ok(E.phaseOf(b, [0, 1, 0], 1) === 'place', 'تا مهره در دست هست، مرحله گذاشتن است');
+  const Sf = st([0, 4, 17], [1, 9, 13, 20], [0, 0, 0], 1);
+  ok(E.isLegal(Sf, { from: 17, to: 23, remove: -1 }), 'با سه مهره پرواز به نقطه‌ی دور مجاز است');
+  const Sm = st([0, 4, 17, 6], [1, 9, 13, 20], [0, 0, 0], 1);
+  ok(!E.isLegal(Sm, { from: 17, to: 23, remove: -1 }), 'با چهار مهره پرواز مجاز نیست');
+
+  // باخت با دو مهره
+  const Sp = st([0, 1, 14, 21], [6, 7, 16], [0, 0, 0], 1);
+  let r = E.apply(Sp, { from: 14, to: 2, remove: 16 });
+  ok(r && r.winner === 1 && r.why === 'pieces', 'حریفی که به دو مهره برسد می‌بازد');
+  // باخت با بسته شدن راه: ۲ چهار مهره دارد و همه‌ی همسایه‌هایش پر می‌شود
+  const Sb = st([1, 9, 14, 19], [0, 2, 21, 23], [0, 0, 0], 1);
+  ok(E.hasMove(Sb.board, Sb.hand, 2), 'پیش از حرکت، حریف راه دارد');
+  r = E.apply(Sb, { from: 19, to: 22, remove: -1 });
+  ok(r && r.winner === 1 && r.why === 'blocked', 'حریف بی‌راه حرکت می‌بازد');
+  // همان وضعیت با سه مهره‌ی حریف بسته نیست چون پرواز می‌کند
+  const Sb3 = st([1, 9, 14, 19], [0, 2, 21], [0, 0, 0], 1);
+  r = E.apply(Sb3, { from: 19, to: 22, remove: -1 });
+  ok(r === null, 'حریف سه‌مهره‌ای با پرواز گیر نمی‌افتد');
+
+  // پنجاه حرکت بدون سه‌تایی
+  const Sq = st([0, 5, 18, 16], [23, 6, 20, 11], [0, 0, 0], 1);
+  Sq.quiet = E.FIFTY - 1;
+  r = E.apply(Sq, { from: 0, to: 1, remove: -1 });
+  ok(E.FIFTY === 50 && r && r.winner === 0 && r.why === 'fifty', 'پنجاهمین حرکت بدون سه‌تایی مساوی است');
+  const Sq2 = st([0, 1, 14, 21, 3], [6, 7, 16, 18], [0, 0, 0], 1);
+  Sq2.quiet = E.FIFTY - 1;
+  r = E.apply(Sq2, { from: 14, to: 2, remove: 16 });
+  ok(r === null && Sq2.quiet === 0, 'سه‌تایی شمارنده‌ی پنجاه را صفر می‌کند');
+  const Sq3 = st([0], [5], [0, 3, 3], 1);
+  E.apply(Sq3, { from: -1, to: 9, remove: -1 });
+  ok(Sq3.quiet === 0, 'گذاشتن مهره در شمارنده‌ی پنجاه حساب نمی‌شود');
+
+  // تکرار سه‌باره
+  const Sr = st([0, 5, 18, 16], [23, 6, 20, 11], [0, 0, 0], 1);
+  const loop = [{ from: 0, to: 1 }, { from: 23, to: 14 }, { from: 1, to: 0 }, { from: 14, to: 23 }];
+  let rr = null;
+  for (let i = 0; i < 4; i++) rr = E.apply(Sr, Object.assign({ remove: -1 }, loop[i]));
+  ok(rr === null && Sr.reps[E.key(Sr)] === 2, 'دومین بار یک وضعیت هنوز مساوی نیست');
+  for (let i = 0; i < 3; i++) rr = E.apply(Sr, Object.assign({ remove: -1 }, loop[i]));
+  ok(rr === null, 'پیش از سومین تکرار بازی ادامه دارد');
+  rr = E.apply(Sr, Object.assign({ remove: -1 }, loop[3]));
+  ok(rr && rr.winner === 0 && rr.why === 'repeat', 'سومین تکرار یک وضعیت مساوی است');
+
+  // برگرداندن: سه‌تایی و برداشتش یک قدم‌اند؛ دونفره یک حرکت، با حریف تا نوبت بازیکن
+  const snap = (S) => JSON.stringify([S.board, S.hand, S.turn, S.quiet, S.reps, S.history, S.result]);
+  const two = st([0, 1], [3, 4, 5, 21], [0, 7, 5], 1);
+  const before = snap(two);
+  E.apply(two, { from: -1, to: 2, remove: 21 });
+  ok(two.board[21] === 0 && two.board[2] === 1 && two.turn === 2, 'سه‌تایی و برداشت با هم ثبت شدند');
+  ok(E.takeBack(two) === 1 && snap(two) === before, 'دونفره: یک برگرداندن سه‌تایی و برداشتش را با هم برمی‌گرداند');
+  ok(E.takeBack(two) === 0 && snap(two) === before, 'روی تاریخچه‌ی خالی برگرداندن کاری نمی‌کند');
+  const ai = st([0, 1], [3, 4, 5, 21], [0, 7, 5], 1, 'ai');
+  E.apply(ai, { from: -1, to: 9, remove: -1 });
+  E.apply(ai, { from: -1, to: 22, remove: -1 });
+  const humanTurn = snap(ai);
+  E.apply(ai, { from: -1, to: 2, remove: 21 });
+  E.apply(ai, { from: -1, to: 23, remove: -1 });
+  ok(ai.turn === 1 && E.takeBack(ai) === 2 && snap(ai) === humanTurn, 'با حریف: برگرداندن تا نوبت قبلی بازیکن عقب می‌رود');
+
+  // بازی‌های بذری: پایان، پایستگی مهره، مجاز بودن هر حرکت، قدرت سطح‌ها
+  let maxMs = 0, allLegal = true, conserved = true, allEnded = true;
+  function match(a, c, seed) {
+    const S = E.newState('2p', 'medium');
+    const rnd = rng(seed);
+    const lost = [0, 0, 0];
+    let guard = 0;
+    while (!S.result) {
+      if (guard++ > 1500) { allEnded = false; break; }
+      const t0 = Date.now();
+      const m = E.aiMove(S, S.turn === 1 ? a : c, rnd);
+      maxMs = Math.max(maxMs, Date.now() - t0);
+      if (!m || !E.isLegal(S, m)) { allLegal = false; break; }
+      if (m.remove >= 0) lost[E.other(S.turn)]++;
+      E.apply(S, m);
+      for (const p of [1, 2]) if (E.countOf(S.board, p) + S.hand[p] + lost[p] !== 9) conserved = false;
+    }
+    return S.result ? S.result.winner : -1;
+  }
+  function series(strong, weak, n, seed0) {
+    let w = 0, l = 0;
+    for (let i = 0; i < n; i++) {
+      const flip = i % 2 === 1;
+      const res = flip ? match(weak, strong, seed0 + i * 977) : match(strong, weak, seed0 + i * 977);
+      const sw = flip ? 2 : 1;
+      if (res === sw) w++; else if (res > 0) l++;
+    }
+    return { w, l, n };
+  }
+  const easyGames = series('easy', 'easy', 12, 11);
+  ok(easyGames.n === 12, 'بازی‌های آسان-آسان اجرا شدند');
+  const hm = series('hard', 'medium', 8, 501);
+  ok(hm.w > hm.n / 2 && hm.w > hm.l, 'سخت از متوسط قوی‌تر است (' + hm.w + ' برد، ' + hm.l + ' باخت از ' + hm.n + ')');
+  const me = series('medium', 'easy', 10, 901);
+  ok(me.w > me.n / 2 && me.w > me.l, 'متوسط از آسان قوی‌تر است (' + me.w + ' برد، ' + me.l + ' باخت از ' + me.n + ')');
+  ok(allEnded, 'همه‌ی بازی‌های بذری تمام شدند');
+  ok(allLegal, 'هر حرکت هوش مصنوعی مجاز بود');
+  ok(conserved, 'مهره‌ها پایسته‌اند: روی تخته + در دست + برداشته = ۹');
+  ok(maxMs < 900, 'زمان فکر هوش مصنوعی قابل قبول است (' + maxMs + 'ms)');
+
+  // روزانه: یک تاریخ، یک بازی
+  const daily = (seed) => {
+    const S = E.dailyStart(rng(seed));
+    const open = JSON.stringify([S.board, S.hand, S.turn]);
+    for (let i = 0; i < 12 && !S.result; i++) E.apply(S, E.aiMove(S, 'hard', rng(seed + 1 + S.history.length)));
+    return { open, moves: JSON.stringify(S.history.map((h) => h.m)), S0: E.dailyStart(rng(seed)) };
+  };
+  const d1 = daily(2026), d2 = daily(2026);
+  ok(d1.open === d2.open && d1.moves === d2.moves, 'روزانه: یک بذر همیشه همان گشایش و همان حرکت‌های حریف را می‌دهد');
+  ok(d1.S0.history.length === 0 && d1.S0.hand[1] === 7 && d1.S0.hand[2] === 7 &&
+    E.countOf(d1.S0.board, 1) === 2 && E.countOf(d1.S0.board, 2) === 2, 'روزانه: گشایش دو مهره‌ی هر طرف است و جزو تاریخچه نیست');
+  const opens = new Set([1, 2, 3, 4, 5, 6].map((s) => daily(s * 7919).open));
+  ok(opens.size >= 4, 'روزانه: روزهای مختلف گشایش‌های مختلف دارند (' + opens.size + '/6)');
+  const starts = new Set([1, 2, 3, 4, 5, 6, 7, 8].map((s) => E.dailyStart(rng(s * 31)).turn));
+  ok(starts.size === 2, 'روزانه: گاهی بازیکن و گاهی حریف شروع می‌کند');
+
+  // صفحه باید از همین تابع‌های موتور استفاده کند، نه منطق خودش را
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/morris/index.html'), 'utf8');
+  ok(/E\.apply\(S, m\)/.test(html), 'صفحه حرکت را با apply ثبت می‌کند');
+  ok(/E\.takeBack\(S\)/.test(html), 'صفحه برگرداندن را با takeBack انجام می‌دهد');
+  ok(/E\.dailyStart\(C\.daily\('morris', daily\)\.rng\)/.test(html), 'صفحه روزانه را از بذر تاریخ می‌سازد');
+}
+
 /* ----------------------------------------------------- دفاع از برج */
 function testTd() {
   head('دفاع از برج');
@@ -2167,6 +2364,7 @@ testFreecell();
 testPeg();
 testReversi();
 testBackgammon();
+testMorris();
 testTd();
 testVersionStamp();
 testDeployGate();

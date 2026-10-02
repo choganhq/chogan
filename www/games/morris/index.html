@@ -1,0 +1,1132 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>دوز — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .mr-wrap { width: 100%; display: flex; flex-direction: column; gap: var(--s-2); align-items: center; }
+  .mr-top { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+  .mr-player {
+    width: 100%; max-width: 480px; display: flex; align-items: center; gap: var(--s-2);
+    background: var(--c-surface); border-radius: var(--r-md); padding: 8px 12px;
+    box-shadow: var(--sh-1); border: 2px solid transparent; min-height: 48px;
+    transition: border-color var(--t-mid) var(--ease), box-shadow var(--t-mid) var(--ease);
+  }
+  .mr-player--on { border-color: var(--pc); box-shadow: var(--sh-2); }
+  .mr-player__dot { width: 16px; height: 16px; border-radius: 50%; background: var(--pc); flex: 0 0 16px; }
+  .mr-player__name { flex: 1; min-width: 0; font-weight: 700; font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mr-hand { display: flex; gap: 3px; flex-wrap: wrap; justify-content: flex-end; max-width: 52%; }
+  .mr-pip { width: 11px; height: 11px; border-radius: 50%; background: var(--pc); }
+  .mr-pip--gone { background: transparent; box-shadow: inset 0 0 0 1.5px var(--c-line); }
+  .mr-count { font-weight: 800; font-size: var(--fs-md); font-variant-numeric: tabular-nums; color: var(--pc); min-width: 1.4em; text-align: center; }
+  .mr-thinking { animation: mr-blink 900ms infinite; }
+  @keyframes mr-blink { 50% { opacity: .5; } }
+  .mr-boardbox {
+    width: 100%; max-width: min(94vw, 50vh, 480px); aspect-ratio: 1;
+    background: var(--c-surface); border-radius: var(--r-lg); box-shadow: var(--sh-2);
+  }
+  .mr-canvas { width: 100%; height: 100%; display: block; touch-action: manipulation; cursor: pointer; }
+  .mr-status {
+    min-height: 40px; max-width: 480px; width: 100%; display: flex; align-items: center; justify-content: center;
+    text-align: center; font-weight: 700; font-size: var(--fs-sm); color: var(--c-text-dim);
+    border-radius: var(--r-pill); padding: 6px 14px;
+  }
+  /* بعد از سه‌تایی بازیکن باید بفهمد بازی منتظر انتخاب اوست، نه اینکه گیر کرده */
+  .mr-status--alert { background: var(--c-bad-soft); color: var(--c-bad); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function MorrisEngineFactory() {
+  'use strict';
+
+  /* تخته: ۲۴ نقطه روی سه مربع تودرتو، روی شبکه‌ی ۷ در ۷.
+     0-----------1-----------2
+     |   3-------4-------5   |
+     |   |   6---7---8   |   |
+     9---10--11      12--13--14
+     |   |   15--16--17  |   |
+     |   18------19------20  |
+     21----------22----------23                                   */
+  var XY = [
+    [0, 0], [3, 0], [6, 0], [1, 1], [3, 1], [5, 1], [2, 2], [3, 2], [4, 2],
+    [0, 3], [1, 3], [2, 3], [4, 3], [5, 3], [6, 3],
+    [2, 4], [3, 4], [4, 4], [1, 5], [3, 5], [5, 5], [0, 6], [3, 6], [6, 6]
+  ];
+  var MILLS = [
+    [0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11], [12, 13, 14], [15, 16, 17], [18, 19, 20], [21, 22, 23],
+    [0, 9, 21], [3, 10, 18], [6, 11, 15], [1, 4, 7], [16, 19, 22], [8, 12, 17], [5, 13, 20], [2, 14, 23]
+  ];
+  var N = 24, PIECES = 9;
+
+  // همسایگی از خود خط‌ها ساخته می‌شود: دو نقطه‌ی پشت سر هم روی یک خط.
+  // جدول دستی جدا یعنی دو منبع حقیقت که دیر یا زود از هم جدا می‌شوند.
+  var ADJ = [], MILLS_OF = [];
+  for (var i = 0; i < N; i++) { ADJ.push([]); MILLS_OF.push([]); }
+  for (var mi = 0; mi < MILLS.length; mi++) {
+    var L = MILLS[mi];
+    for (var k = 0; k < 3; k++) MILLS_OF[L[k]].push(mi);
+    for (var k2 = 0; k2 < 2; k2++) { ADJ[L[k2]].push(L[k2 + 1]); ADJ[L[k2 + 1]].push(L[k2]); }
+  }
+  for (var a = 0; a < N; a++) ADJ[a].sort(function (x, y) { return x - y; });
+
+  function other(p) { return p === 1 ? 2 : 1; }
+  function countOf(board, p) { var n = 0; for (var i = 0; i < N; i++) if (board[i] === p) n++; return n; }
+
+  function inMill(board, q) {
+    var p = board[q];
+    if (!p) return false;
+    var ms = MILLS_OF[q];
+    for (var i = 0; i < ms.length; i++) {
+      var L = MILLS[ms[i]];
+      if (board[L[0]] === p && board[L[1]] === p && board[L[2]] === p) return true;
+    }
+    return false;
+  }
+
+  // آیا گذاشتن p روی to — بعد از خالی شدن from — خطی کامل می‌کند؟
+  function formsMill(board, p, to, from) {
+    var ms = MILLS_OF[to];
+    for (var i = 0; i < ms.length; i++) {
+      var L = MILLS[ms[i]], full = true;
+      for (var j = 0; j < 3; j++) {
+        var q = L[j];
+        if (q === to) continue;
+        if (q === from || board[q] !== p) { full = false; break; }
+      }
+      if (full) return true;
+    }
+    return false;
+  }
+
+  // مهره‌هایی از o که برداشتنی‌اند: بیرون از سه‌تایی، مگر همه داخل باشند
+  function removable(board, o) {
+    var free = [], all = [];
+    for (var i = 0; i < N; i++) {
+      if (board[i] !== o) continue;
+      all.push(i);
+      if (!inMill(board, i)) free.push(i);
+    }
+    return free.length ? free : all;
+  }
+
+  function phaseOf(board, hand, p) {
+    if (hand[p] > 0) return 'place';
+    return countOf(board, p) === 3 ? 'fly' : 'move';
+  }
+
+  // جابه‌جایی‌های بدون برداشت: [from, to]؛ from=-1 یعنی گذاشتن از دست
+  function steps(board, hand, p) {
+    var out = [], i, j;
+    var ph = phaseOf(board, hand, p);
+    if (ph === 'place') {
+      for (i = 0; i < N; i++) if (!board[i]) out.push([-1, i]);
+    } else if (ph === 'fly') {
+      for (i = 0; i < N; i++) {
+        if (board[i] !== p) continue;
+        for (j = 0; j < N; j++) if (!board[j]) out.push([i, j]);
+      }
+    } else {
+      for (i = 0; i < N; i++) {
+        if (board[i] !== p) continue;
+        var ad = ADJ[i];
+        for (j = 0; j < ad.length; j++) if (!board[ad[j]]) out.push([i, ad[j]]);
+      }
+    }
+    return out;
+  }
+
+  // حرکت کامل: { from, to, remove }. سه‌تایی و برداشتنش یک حرکت‌اند تا
+  // برگرداندن هم یک قدم باشد و هوش مصنوعی هم برداشت را جزو انتخاب ببیند.
+  function movesOf(board, hand, p) {
+    var st = steps(board, hand, p), out = [];
+    for (var i = 0; i < st.length; i++) {
+      var f = st[i][0], t = st[i][1];
+      if (formsMill(board, p, t, f)) {
+        if (f >= 0) board[f] = 0;
+        board[t] = p;
+        var rm = removable(board, other(p));
+        board[t] = 0;
+        if (f >= 0) board[f] = p;
+        if (!rm.length) out.push({ from: f, to: t, remove: -1 });
+        for (var r = 0; r < rm.length; r++) out.push({ from: f, to: t, remove: rm[r] });
+      } else {
+        out.push({ from: f, to: t, remove: -1 });
+      }
+    }
+    return out;
+  }
+
+  function hasMove(board, hand, p) {
+    if (hand[p] > 0) { for (var i = 0; i < N; i++) if (!board[i]) return true; return false; }
+    return steps(board, hand, p).length > 0;
+  }
+
+  /* ---------------------------------------------------- وضعیت کامل */
+
+  var FIFTY = 50;   // نیم‌حرکت جابه‌جایی پشت سر هم بدون سه‌تایی
+
+  function key(S) { return S.board.join('') + '|' + S.turn + '|' + S.hand[1] + ',' + S.hand[2]; }
+
+  function newState(mode, level) {
+    var S = {
+      mode: mode || 'ai', level: level || 'medium',
+      board: new Array(N).fill(0), hand: [0, PIECES, PIECES],
+      turn: 1, quiet: 0, history: [], reps: {}, result: null
+    };
+    S.reps[key(S)] = 1;
+    return S;
+  }
+
+  // درستی یک حرکت در همین وضعیت؛ صفحه قبل از ثبت می‌پرسد
+  function isLegal(S, m) {
+    if (S.result || !m) return false;
+    var ms = movesOf(S.board, S.hand, S.turn);
+    for (var i = 0; i < ms.length; i++) {
+      if (ms[i].from === m.from && ms[i].to === m.to && ms[i].remove === m.remove) return true;
+    }
+    return false;
+  }
+
+  function judge(S) {
+    var p = S.turn, o = other(p);   // p همین حالا نوبتش شده
+    if (countOf(S.board, p) + S.hand[p] < 3) return { winner: o, why: 'pieces' };
+    if (!hasMove(S.board, S.hand, p)) return { winner: o, why: 'blocked' };
+    if (S.reps[key(S)] >= 3) return { winner: 0, why: 'repeat' };
+    if (S.quiet >= FIFTY) return { winner: 0, why: 'fifty' };
+    return null;
+  }
+
+  // یک حرکت روی وضعیت کامل. صفحه و آزمون‌ها همین را صدا می‌زنند تا
+  // برگرداندن دقیقاً عکس همان چیزی باشد که ثبت شده.
+  function apply(S, m) {
+    var p = S.turn;
+    S.history.push({ m: { from: m.from, to: m.to, remove: m.remove }, b: S.board.join(''), h: S.hand.slice(), t: p, q: S.quiet });
+    if (m.from >= 0) S.board[m.from] = 0; else S.hand[p]--;
+    S.board[m.to] = p;
+    if (m.remove >= 0) { S.board[m.remove] = 0; S.quiet = 0; }
+    else if (m.from >= 0) S.quiet++;
+    S.turn = other(p);
+    var k = key(S);
+    S.reps[k] = (S.reps[k] || 0) + 1;
+    S.result = judge(S);
+    return S.result;
+  }
+
+  function undoOne(S) {
+    var h = S.history.pop();
+    if (!h) return false;
+    var k = key(S);
+    if (S.reps[k] > 1) S.reps[k]--; else delete S.reps[k];
+    for (var i = 0; i < N; i++) S.board[i] = +h.b.charAt(i);
+    S.hand = h.h.slice();
+    S.turn = h.t;
+    S.quiet = h.q;
+    S.result = null;
+    return true;
+  }
+
+  // با حریف کامپیوتری تا نوبت بعدی بازیکن عقب می‌رود؛ دونفره یک حرکت،
+  // همان قاعده‌ی نقطه‌بازی بعد از #69.
+  function takeBack(S) {
+    var n = 0;
+    do {
+      if (!undoOne(S)) break;
+      n++;
+    } while (S.mode === 'ai' && S.turn !== 1 && n < 400);
+    return n;
+  }
+
+  /* --------------------------------------------------- هوش مصنوعی */
+
+  var WIN = 100000;
+
+  // ارزش وضعیت از دید p. مهره بیشترین وزن را دارد؛ بعد سه‌تایی‌های نیمه‌باز
+  // (دو مهره و یک خانه‌ی خالی) و در مرحله‌ی جابه‌جایی، تحرک.
+  function evaluate(board, hand, p, full) {
+    var o = other(p);
+    var cp = countOf(board, p), co = countOf(board, o);
+    var v = ((cp + hand[p]) - (co + hand[o])) * 100;
+    if (!full) return v;
+    for (var i = 0; i < MILLS.length; i++) {
+      var L = MILLS[i], np = 0, no = 0, ne = 0;
+      for (var j = 0; j < 3; j++) {
+        var x = board[L[j]];
+        if (x === p) np++; else if (x === o) no++; else ne++;
+      }
+      if (np === 2 && ne === 1) v += 14;
+      else if (no === 2 && ne === 1) v -= 14;
+      else if (np === 3) v += 9;
+      else if (no === 3) v -= 9;
+    }
+    if (!hand[p] && cp > 3) v += mobility(board, p) * 4;
+    if (!hand[o] && co > 3) {
+      var mo = mobility(board, o);
+      v -= mo * 4;
+      if (mo === 0) v += 600;
+    }
+    return v;
+  }
+  function mobility(board, p) {
+    var n = 0;
+    for (var i = 0; i < N; i++) {
+      if (board[i] !== p) continue;
+      var ad = ADJ[i];
+      for (var j = 0; j < ad.length; j++) if (!board[ad[j]]) n++;
+    }
+    return n;
+  }
+
+  function make(board, hand, p, m) {
+    if (m.from >= 0) board[m.from] = 0; else hand[p]--;
+    board[m.to] = p;
+    if (m.remove >= 0) board[m.remove] = 0;
+  }
+  function unmake(board, hand, p, m) {
+    if (m.remove >= 0) board[m.remove] = other(p);
+    board[m.to] = 0;
+    if (m.from >= 0) board[m.from] = p; else hand[p]++;
+  }
+
+  // برداشت‌ها اول، تا هرس آلفا-بتا زودتر کار کند
+  function ordered(ms) {
+    var a = [], b = [];
+    for (var i = 0; i < ms.length; i++) (ms[i].remove >= 0 ? a : b).push(ms[i]);
+    return a.concat(b);
+  }
+
+  function negamax(board, hand, p, depth, alpha, beta, ply, ctl) {
+    ctl.nodes++;
+    if (ctl.nodes > ctl.limit) { ctl.abort = true; return 0; }
+    if (countOf(board, p) + hand[p] < 3) return -WIN + ply;
+    var ms = movesOf(board, hand, p);
+    if (!ms.length) return -WIN + ply;
+    if (depth <= 0) return evaluate(board, hand, p, ctl.full);
+    ms = ordered(ms);
+    var best = -Infinity, o = other(p);
+    for (var i = 0; i < ms.length; i++) {
+      make(board, hand, p, ms[i]);
+      var v = -negamax(board, hand, o, depth - 1, -beta, -alpha, ply + 1, ctl);
+      unmake(board, hand, p, ms[i]);
+      if (ctl.abort) return 0;
+      if (v > best) best = v;
+      if (v > alpha) alpha = v;
+      if (alpha >= beta) break;
+    }
+    return best;
+  }
+
+  /* سطح‌ها:
+     آسان: یک قدم جلو را می‌بیند، فقط شمار مهره، با لغزش زیاد.
+     متوسط: دو نیم‌حرکت با ارزیابی کامل.
+     سخت: عمیق‌شونده با سقف گره، تا زمان فکر روی گوشی کند هم محدود بماند.
+     سقف گره است نه ساعت، چون روزانه باید برای همه یکسان بازی شود. */
+  var LEVELS = {
+    easy:   { depth: 1, limit: 4000,  noise: 140, full: false, blunder: 0.35 },
+    medium: { depth: 2, limit: 20000, noise: 10,  full: true,  blunder: 0 },
+    hard:   { depth: 6, limit: 40000, noise: 2,   full: true,  blunder: 0 }
+  };
+
+  function aiMove(S, level, rnd) {
+    rnd = rnd || Math.random;
+    var cfg = LEVELS[level] || LEVELS.medium;
+    var p = S.turn;
+    var board = S.board.slice(), hand = S.hand.slice();
+    var ms = ordered(movesOf(board, hand, p));
+    if (!ms.length) return null;
+    if (cfg.blunder && rnd() < cfg.blunder) return ms[Math.floor(rnd() * ms.length)];
+    // لغزش از قبل برای هر حرکت قرعه می‌شود تا ترتیب جست‌وجو در عمق‌های
+    // مختلف روی آن اثر نگذارد و نتیجه قطعی بماند.
+    var jitter = [];
+    for (var j = 0; j < ms.length; j++) jitter.push(rnd() * cfg.noise);
+    var best = null, o = other(p);
+    for (var d = 1; d <= cfg.depth; d++) {
+      var ctl = { nodes: 0, limit: cfg.limit, abort: false, full: cfg.full };
+      var bi = -1, bv = -Infinity;
+      for (var i = 0; i < ms.length; i++) {
+        make(board, hand, p, ms[i]);
+        // حرکتی که حتی با بیشترین لغزش به بهترین فعلی نمی‌رسد لازم نیست دقیق حساب شود
+        var floor = bv - cfg.noise;
+        var v = -negamax(board, hand, o, d - 1, -Infinity, -floor, 1, ctl);
+        unmake(board, hand, p, ms[i]);
+        if (ctl.abort) break;
+        v += jitter[i];
+        if (v > bv) { bv = v; bi = i; }
+      }
+      if (ctl.abort) break;
+      best = ms[bi];
+      if (bv > WIN / 2) break;     // برد قطعی پیدا شد، عمیق‌تر لازم نیست
+      // بهترین حرکت عمق قبل اول بررسی شود تا هرس عمق بعد بهتر باشد
+      var mv = ms.splice(bi, 1)[0], jv = jitter.splice(bi, 1)[0];
+      ms.unshift(mv); jitter.unshift(jv);
+    }
+    return best || ms[0];
+  }
+
+  /* ------------------------------------------------------- روزانه */
+
+  // روزانه: طرف شروع‌کننده و دو مهره‌ی اول هر طرف از تاریخ می‌آیند.
+  // گشایش جزو تاریخچه نیست تا برگرداندن به پیش از آن نرسد.
+  function dailyStart(rnd) {
+    var S = newState('ai', 'hard');
+    var first = rnd() < 0.5 ? 1 : 2;
+    for (var n = 0; n < 4; n++) {
+      var p = n % 2 === 0 ? first : other(first);
+      var free = [];
+      for (var i = 0; i < N; i++) if (!S.board[i]) free.push(i);
+      S.board[free[Math.floor(rnd() * free.length)]] = p;
+      S.hand[p]--;
+    }
+    S.turn = first;
+    S.reps = {};
+    S.reps[key(S)] = 1;
+    return S;
+  }
+
+  var api = {
+    N: N, PIECES: PIECES, XY: XY, MILLS: MILLS, ADJ: ADJ, MILLS_OF: MILLS_OF, FIFTY: FIFTY, LEVELS: LEVELS,
+    other: other, countOf: countOf, inMill: inMill, formsMill: formsMill, removable: removable,
+    phaseOf: phaseOf, steps: steps, movesOf: movesOf, hasMove: hasMove, key: key,
+    newState: newState, isLegal: isLegal, judge: judge, apply: apply, takeBack: takeBack,
+    evaluate: evaluate, aiMove: aiMove, dailyStart: dailyStart
+  };
+  if (typeof self !== 'undefined') self.MorrisEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = MorrisEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = MorrisEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'morris',
+    name: { fa: 'دوز', en: "Nine Men's Morris", zh: '九子棋' },
+    accent: '#8C6BB1',
+    mood: 'dots',
+    strings: {
+      fa: {
+        twoPlayers: 'دو نفره', vsAi: 'با حریف',
+        you: 'تو', rival: 'حریف', player1: 'بازیکن یک', player2: 'بازیکن دو', renameP2: 'نام بازیکن دو',
+        thinking: 'فکر می‌کند…', yourTurn: 'نوبت توست', playerTurn: 'نوبت {n}',
+        placeHint: 'یک مهره روی نقطه‌ی خالی بگذار', pickHint: 'یکی از مهره‌هایت را انتخاب کن',
+        toHint: 'به نقطه‌ی خالی کنارش ببر', flyHint: 'سه مهره مانده: به هر نقطه‌ی خالی می‌پری',
+        removeHint: 'سه‌تایی بستی! یکی از مهره‌های روشن‌شده‌ی حریف را بردار',
+        lostPiece: 'حریف سه‌تایی بست و یک مهره‌ات را برداشت',
+        draw: 'مساوی', playerWon: '{n} برد', inHand: 'در دست', left: 'مهره‌ی باقی‌مانده', moves: 'حرکت',
+        whyPieces: 'به دو مهره رسید', whyBlocked: 'راه حرکتی نماند', whyFifty: 'پنجاه حرکت بدون سه‌تایی', whyRepeat: 'یک وضعیت سه بار تکرار شد',
+        newMatch: 'دست تازه', undoMove: 'برگرداندن حرکت', move: 'جابه‌جایی نشانگر', cancelPick: 'لغو انتخاب',
+        dailyMorris: 'دوز روزانه', vsHard: 'مقابل حریف سخت',
+        rules: 'هر کدام نُه مهره دارید. اول مهره‌ها را یکی‌یکی روی نقطه‌ها می‌گذارید، بعد هر نوبت یک مهره را به نقطه‌ی خالی کنارش می‌برید. سه مهره در یک خط یعنی سه‌تایی: یک مهره‌ی حریف را برمی‌داری، ولی نه از سه‌تایی‌های او، مگر همه‌ی مهره‌هایش در سه‌تایی باشند. کسی که سه مهره برایش بماند به هر نقطه‌ای می‌پرد. با دو مهره یا بی‌راه حرکت، می‌بازی. پنجاه حرکت بدون سه‌تایی یا سه بار تکرار یک وضعیت یعنی مساوی.',
+        tutTitle1: 'مهره بگذار', tutText1: 'هر کدام نُه مهره دارید و نوبتی یکی را روی یک نقطه‌ی خالی می‌گذارید.',
+        tutTitle2: 'سه‌تایی ببند', tutText2: 'سه مهره‌ی خودت در یک خط که بشود، یک مهره‌ی حریف را برمی‌داری. مهره‌های داخل سه‌تایی حریف در امان‌اند، مگر همه‌اش همین باشد.',
+        tutTitle3: 'جابه‌جا کن', tutText3: 'وقتی مهره‌ها تمام شد، هر نوبت یک مهره را در امتداد خط به نقطه‌ی خالی کنارش می‌بری. با سه مهره به هر جای خالی می‌پری.',
+        tutTitle4: 'برد', tutText4: 'حریفی که به دو مهره برسد یا راه حرکتی نداشته باشد، باخته است.'
+      },
+      en: {
+        twoPlayers: 'Two players', vsAi: 'Versus AI',
+        you: 'You', rival: 'Rival', player1: 'Player 1', player2: 'Player 2', renameP2: 'Player 2 name',
+        thinking: 'Thinking…', yourTurn: 'Your turn', playerTurn: "{n}'s turn",
+        placeHint: 'Place a piece on an empty point', pickHint: 'Pick one of your pieces',
+        toHint: 'Move it to an empty point next to it', flyHint: 'Three pieces left: fly to any empty point',
+        removeHint: "A mill! Take one of your rival's highlighted pieces",
+        lostPiece: 'Your rival made a mill and took one of your pieces',
+        draw: 'Draw', playerWon: '{n} wins', inHand: 'In hand', left: 'Pieces left', moves: 'Moves',
+        whyPieces: 'Down to two pieces', whyBlocked: 'No legal move left', whyFifty: 'Fifty moves without a mill', whyRepeat: 'Same position three times',
+        newMatch: 'New match', undoMove: 'Undo move', move: 'Move cursor', cancelPick: 'Cancel selection',
+        dailyMorris: 'Daily morris', vsHard: 'against the hard AI',
+        rules: "Each side has nine pieces. First you take turns placing them on the points, then each turn you slide one piece to an empty neighbouring point. Three of yours on a line is a mill: take one of your rival's pieces, but not one in a mill unless all of them are. With three pieces left you may fly to any empty point. Down to two pieces, or with no legal move, you lose. Fifty moves without a mill, or the same position three times, is a draw.",
+        tutTitle1: 'Place', tutText1: 'Each side has nine pieces. Take turns placing them on empty points.',
+        tutTitle2: 'Make a mill', tutText2: "Three of yours on a line is a mill, and you take one of your rival's pieces. Pieces in a mill are safe unless all of them are in mills.",
+        tutTitle3: 'Move', tutText3: 'Once all are placed, slide one piece along a line to an empty neighbouring point. With three pieces left you may fly anywhere.',
+        tutTitle4: 'Win', tutText4: 'A player down to two pieces, or with no legal move, loses.'
+      },
+      zh: {
+        twoPlayers: '双人', vsAi: '对战电脑',
+        you: '你', rival: '对手', player1: '玩家一', player2: '玩家二', renameP2: '玩家二的名字',
+        thinking: '思考中…', yourTurn: '轮到你了', playerTurn: '轮到{n}',
+        placeHint: '在空点上放一枚棋子', pickHint: '选择你的一枚棋子',
+        toHint: '移到相邻的空点', flyHint: '只剩三子：可以飞到任意空点',
+        removeHint: '成三了！拿掉对手一枚高亮的棋子',
+        lostPiece: '对手成三，拿掉了你一枚棋子',
+        draw: '平局', playerWon: '{n} 获胜', inHand: '手中', left: '剩余棋子', moves: '步数',
+        whyPieces: '只剩两枚棋子', whyBlocked: '无棋可走', whyFifty: '五十步未成三', whyRepeat: '同一局面出现三次',
+        newMatch: '新一局', undoMove: '撤销一步', move: '移动光标', cancelPick: '取消选择',
+        dailyMorris: '每日九子棋', vsHard: '对战困难电脑',
+        rules: '双方各有九枚棋子。先轮流把棋子放到点上，然后每回合把一枚棋子沿线移到相邻的空点。自己的三枚棋子连成一线就是成三，可以拿掉对手一枚棋子，但不能拿成三中的棋子，除非对手的棋子全在成三中。只剩三枚棋子时可以飞到任意空点。只剩两枚棋子或无棋可走就输了。五十步未成三或同一局面出现三次为平局。',
+        tutTitle1: '放子', tutText1: '双方各有九枚棋子，轮流放到空点上。',
+        tutTitle2: '成三', tutText2: '自己的三枚棋子连成一线，就能拿掉对手一枚棋子。成三中的棋子是安全的，除非对手全部棋子都在成三中。',
+        tutTitle3: '走子', tutText3: '棋子放完后，每回合沿线把一枚棋子移到相邻的空点。只剩三枚时可以飞到任意空点。',
+        tutTitle4: '获胜', tutText4: '只剩两枚棋子或无棋可走的一方输。'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', { mode: 'ai', level: 'medium', p2name: '' });
+
+  var S = null, aiTimer = null;
+  var sel = -1;          // مهره‌ی انتخاب‌شده در مرحله‌ی جابه‌جایی
+  var pend = null;       // { from, to, rm } وقتی سه‌تایی بسته شده و برداشت مانده
+  var cur = 7, kbOn = false, pulseRaf = 0;
+
+  var canvas = el('canvas', { class: 'mr-canvas' });
+  var boardBox = el('div', { class: 'mr-boardbox' }, [canvas]);
+  var topRow = el('div', { class: 'mr-top' });
+  var rivalCard = el('div', { class: 'mr-player' });
+  var youCard = el('div', { class: 'mr-player' });
+  var statusEl = el('div', { class: 'mr-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'mr-wrap' }, [topRow, rivalCard, boardBox, youCard, statusEl]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ ساخت */
+
+  function newGame(mode, level, daily) {
+    stopAi();
+    S = daily ? E.dailyStart(C.daily('morris', daily).rng) : E.newState(mode, level);
+    S.daily = daily || null;
+    S.done = false;
+    S.startedAt = Date.now();
+    S.last = null;
+    sel = -1; pend = null;
+    render();
+    save();
+    maybeAi();
+  }
+
+  /* ------------------------------------------------------------ رنگ */
+
+  function colors() {
+    var cs = getComputedStyle(document.documentElement);
+    function v(n, f) { return (cs.getPropertyValue(n) || '').trim() || f; }
+    return {
+      line: v('--c-text-faint', '#A99C8C'),
+      point: v('--c-text-dim', '#7C7063'),
+      surface: v('--c-surface', '#FFFFFF'),
+      text: v('--c-text', '#2C2620'),
+      bad: v('--c-bad', '#C8574B'),
+      p1: v('--game', '#8C6BB1'),
+      p2: v('--c-accent', '#E07A5F')
+    };
+  }
+  function pcol(col, p) { return p === 1 ? col.p1 : col.p2; }
+
+  /* ------------------------------------------------------------ رسم */
+
+  // تخته‌ی صفحه و تخته‌ی کارت نتیجه هر دو از همین تابع کشیده می‌شوند
+  function drawBoard(g, size, v) {
+    var col = v.col;
+    var pad = size * 0.075, step = (size - pad * 2) / 6;
+    function X(q) { return pad + E.XY[q][0] * step; }
+    function Y(q) { return pad + E.XY[q][1] * step; }
+    var b = v.board;
+
+    // خط‌ها
+    g.lineCap = 'round';
+    g.strokeStyle = col.line;
+    g.lineWidth = Math.max(2, step * 0.07);
+    for (var m = 0; m < E.MILLS.length; m++) {
+      var L = E.MILLS[m];
+      g.beginPath(); g.moveTo(X(L[0]), Y(L[0])); g.lineTo(X(L[2]), Y(L[2])); g.stroke();
+    }
+    // سه‌تایی‌های کامل پررنگ می‌شوند تا معلوم باشد کدام مهره‌ها در امان‌اند
+    for (var m2 = 0; m2 < E.MILLS.length; m2++) {
+      var L2 = E.MILLS[m2], o = b[L2[0]];
+      if (!o || b[L2[1]] !== o || b[L2[2]] !== o) continue;
+      g.strokeStyle = C.alpha(pcol(col, o), 0.55);
+      g.lineWidth = step * 0.2;
+      g.beginPath(); g.moveTo(X(L2[0]), Y(L2[0])); g.lineTo(X(L2[2]), Y(L2[2])); g.stroke();
+    }
+    // نقطه‌ها
+    for (var q = 0; q < E.N; q++) {
+      if (b[q]) continue;
+      g.fillStyle = col.point;
+      g.beginPath(); g.arc(X(q), Y(q), step * 0.1, 0, Math.PI * 2); g.fill();
+    }
+    // حرکت قبلی: جای خالی‌شده و مهره‌ی برداشته‌شده
+    if (v.last) {
+      g.setLineDash([step * 0.08, step * 0.08]);
+      g.lineWidth = Math.max(1.5, step * 0.04);
+      if (v.last.from >= 0 && !b[v.last.from]) {
+        g.strokeStyle = C.alpha(pcol(col, v.lastBy), 0.8);
+        g.beginPath(); g.arc(X(v.last.from), Y(v.last.from), step * 0.3, 0, Math.PI * 2); g.stroke();
+      }
+      g.setLineDash([]);
+      if (v.last.remove >= 0 && !b[v.last.remove]) {
+        var rx = X(v.last.remove), ry = Y(v.last.remove), d = step * 0.18;
+        g.strokeStyle = col.bad; g.lineWidth = Math.max(2, step * 0.06);
+        g.beginPath(); g.moveTo(rx - d, ry - d); g.lineTo(rx + d, ry + d); g.moveTo(rx + d, ry - d); g.lineTo(rx - d, ry + d); g.stroke();
+      }
+    }
+    // مقصدهای مجاز مهره‌ی انتخاب‌شده
+    if (v.targets) {
+      for (var t = 0; t < v.targets.length; t++) {
+        g.fillStyle = C.alpha(col.p1, 0.28);
+        g.beginPath(); g.arc(X(v.targets[t]), Y(v.targets[t]), step * 0.26, 0, Math.PI * 2); g.fill();
+      }
+    }
+    // مهره‌ها
+    var r = step * 0.33;
+    for (var p = 0; p < E.N; p++) {
+      if (!b[p]) continue;
+      var x = X(p), y = Y(p), c = pcol(col, b[p]);
+      g.fillStyle = c;
+      g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = C.alpha('#FFFFFF', 0.45);
+      g.lineWidth = Math.max(1.5, step * 0.045);
+      g.beginPath(); g.arc(x, y, r * 0.62, 0, Math.PI * 2); g.stroke();
+      if (v.last && v.last.to === p) {
+        g.fillStyle = C.alpha('#FFFFFF', 0.7);
+        g.beginPath(); g.arc(x, y, r * 0.2, 0, Math.PI * 2); g.fill();
+      }
+    }
+    if (v.sel >= 0) {
+      g.strokeStyle = col.text; g.lineWidth = Math.max(2, step * 0.06);
+      g.beginPath(); g.arc(X(v.sel), Y(v.sel), r + step * 0.08, 0, Math.PI * 2); g.stroke();
+    }
+    // مهره‌های برداشتنی، با تپش تا چشم را بگیرد
+    if (v.rm) {
+      var k = v.pulse === undefined ? 1 : v.pulse;
+      for (var i = 0; i < v.rm.length; i++) {
+        g.strokeStyle = col.bad;
+        g.lineWidth = step * (0.06 + 0.04 * k);
+        g.beginPath(); g.arc(X(v.rm[i]), Y(v.rm[i]), r + step * (0.08 + 0.06 * k), 0, Math.PI * 2); g.stroke();
+      }
+    }
+    if (v.cursor >= 0) {
+      g.strokeStyle = col.p1; g.lineWidth = Math.max(2, step * 0.05);
+      g.setLineDash([step * 0.1, step * 0.07]);
+      var cs = step * 0.48;
+      g.strokeRect(X(v.cursor) - cs, Y(v.cursor) - cs, cs * 2, cs * 2);
+      g.setLineDash([]);
+    }
+  }
+
+  // تخته‌ای که بازیکن می‌بیند؛ وسط برداشت، حرکت سه‌تایی موقتاً روی آن نشسته
+  function viewBoard() {
+    var b = S.board.slice();
+    if (pend) {
+      if (pend.from >= 0) b[pend.from] = 0;
+      b[pend.to] = S.turn;
+    }
+    return b;
+  }
+
+  function lastBy() {
+    var h = S.history[S.history.length - 1];
+    return h ? h.t : 1;
+  }
+
+  function targetsOf(q) {
+    if (q < 0) return null;
+    var out = [];
+    var ph = E.phaseOf(S.board, S.hand, S.turn);
+    for (var i = 0; i < E.N; i++) {
+      if (S.board[i]) continue;
+      if (ph === 'fly' || E.ADJ[q].indexOf(i) >= 0) out.push(i);
+    }
+    return out;
+  }
+
+  function draw(pulse) {
+    if (!S) return;
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var size = boardBox.clientWidth || 320;
+    var px = Math.round(size * dpr);
+    if (canvas.width !== px) { canvas.width = px; canvas.height = px; }
+    var g = canvas.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, size, size);
+    drawBoard(g, size, {
+      col: colors(), board: viewBoard(), sel: sel, targets: targetsOf(sel),
+      rm: pend ? pend.rm : null, pulse: pulse, last: pend ? null : S.last, lastBy: lastBy(),
+      cursor: kbOn && !S.done ? cur : -1
+    });
+  }
+
+  function startPulse() {
+    if (pulseRaf || C.ui.reduceMotion()) { draw(); return; }
+    var t0 = performance.now();
+    var tick = function (now) {
+      if (!pend) { pulseRaf = 0; draw(); return; }
+      draw(0.5 + 0.5 * Math.sin((now - t0) / 180));
+      pulseRaf = requestAnimationFrame(tick);
+    };
+    pulseRaf = requestAnimationFrame(tick);
+  }
+
+  window.addEventListener('resize', function () { draw(); });
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    if (mq.addEventListener) mq.addEventListener('change', function () { setTimeout(draw, 60); });
+  }
+
+  /* ------------------------------------------------- تخته روی کارت نتیجه */
+  function cardPaint() {
+    var board = S.board.slice(), col = colors();
+    return function (g, W, H, c) {
+      var side = Math.min(W, H);
+      g.translate((W - side) / 2, (H - side) / 2);
+      drawBoard(g, side, {
+        col: { line: c.faint || col.line, point: c.dim || col.point, surface: c.surface || col.surface,
+          text: c.text || col.text, bad: col.bad, p1: col.p1, p2: col.p2 },
+        board: board, sel: -1, targets: null, rm: null, last: null, cursor: -1
+      });
+    };
+  }
+
+  /* --------------------------------------------------- بازیکن‌ها و وضعیت */
+
+  function busy() { return S.mode === 'ai' && S.turn === 2 && !S.done; }
+
+  function pname(i) {
+    // در دونفره «تو» برای هر دو نفر غلط است و عنوان «You wins» می‌ساخت
+    if (i === 1) return C.state.profile.name || C.t(S.mode === '2p' ? 'player1' : 'you');
+    if (S.mode === 'ai') return C.t('rival') + ' · ' + C.t(S.level);
+    return prefs.p2name || C.t('player2');
+  }
+  function piecesLeft(p) { return E.countOf(S.board, p) + S.hand[p]; }
+
+  function playerCard(box, p) {
+    var col = colors();
+    box.innerHTML = '';
+    box.className = 'mr-player' + (S.turn === p && !S.done ? ' mr-player--on' : '') +
+      (p === 2 && busy() ? ' mr-thinking' : '');
+    box.style.setProperty('--pc', pcol(col, p));
+    var pips = el('div', { class: 'mr-hand', title: C.t('inHand'), 'aria-label': C.t('inHand') + ' ' + C.num(S.hand[p]) });
+    for (var i = 0; i < E.PIECES; i++) pips.appendChild(el('span', { class: 'mr-pip' + (i < S.hand[p] ? '' : ' mr-pip--gone') }));
+    box.appendChild(el('div', { class: 'mr-player__dot' }));
+    box.appendChild(el('div', { class: 'mr-player__name', text: pname(p) }));
+    box.appendChild(pips);
+    box.appendChild(el('div', { class: 'mr-count', title: C.t('left'), text: C.num(piecesLeft(p)) }));
+  }
+
+  function drawPlayers() {
+    playerCard(rivalCard, 2);
+    playerCard(youCard, 1);
+    setStatus();
+  }
+
+  function setStatus() {
+    var txt, alert = false;
+    if (S.done && S.result) {
+      txt = S.result.winner ? C.t('playerWon', { n: pname(S.result.winner) }) : C.t('draw');
+      txt += ' · ' + whyText(S.result.why);
+    } else if (busy()) {
+      txt = C.t('thinking');
+    } else if (pend) {
+      txt = C.t('removeHint'); alert = true;
+    } else {
+      var who = S.mode === 'ai' ? C.t('yourTurn') : C.t('playerTurn', { n: pname(S.turn) });
+      var ph = E.phaseOf(S.board, S.hand, S.turn);
+      var hint = ph === 'place' ? C.t('placeHint') : (ph === 'fly' ? C.t('flyHint') : (sel >= 0 ? C.t('toHint') : C.t('pickHint')));
+      txt = who + ' · ' + hint;
+      // بازیکن باید بفهمد چرا مهره‌اش غیب شد
+      if (S.mode === 'ai' && S.last && S.last.remove >= 0 && lastBy() === 2) txt = C.t('lostPiece') + ' · ' + hint;
+    }
+    statusEl.textContent = txt;
+    statusEl.className = 'mr-status' + (alert ? ' mr-status--alert' : '');
+  }
+  function whyText(w) {
+    return C.t({ pieces: 'whyPieces', blocked: 'whyBlocked', fifty: 'whyFifty', repeat: 'whyRepeat' }[w] || 'whyPieces');
+  }
+
+  function render() {
+    topRow.innerHTML = '';
+    if (S.daily) {
+      topRow.appendChild(el('span', { class: 'ch-badge ch-badge--accent' },
+        [C.icon('calendar', 14), el('span', { text: C.t('dailyMorris') + ' — ' + C.num(S.daily) })]));
+      topRow.appendChild(el('span', { class: 'ch-badge', text: C.t('vsHard') }));
+    } else {
+      // انتخابگرها بازی را از نو می‌سازند، پس اگر دستی در جریان است اول تأیید
+      var guard = function (same, go) {
+        if (same) return;
+        if (S.history.length && !S.done) {
+          C.ui.confirm({ title: C.t('newMatch'), body: C.t('resetWarn'), onOk: go, onCancel: function () { render(); } });
+          render();
+          return;
+        }
+        go();
+      };
+      topRow.appendChild(C.ui.segmented([
+        { value: 'ai', label: C.t('vsAi') }, { value: '2p', label: C.t('twoPlayers') }
+      ], S.mode, function (v) {
+        guard(v === S.mode, function () {
+          prefs.mode = v; ctx.store.set('prefs', prefs);
+          newGame(v, S.level);
+        });
+      }));
+      if (S.mode === 'ai') {
+        topRow.appendChild(C.ui.segmented([
+          { value: 'easy', label: C.t('easy') }, { value: 'medium', label: C.t('medium') }, { value: 'hard', label: C.t('hard') }
+        ], S.level, function (v) {
+          guard(v === S.level, function () {
+            prefs.level = v; ctx.store.set('prefs', prefs);
+            newGame(S.mode, v);
+          });
+        }));
+      }
+    }
+    if (S.mode === '2p' && !S.daily) {
+      rivalCard.classList.add('ch-tap');
+      rivalCard.onclick = renameP2;
+    } else {
+      rivalCard.onclick = null;
+    }
+    drawPlayers();
+    draw();
+  }
+
+  /* ----------------------------------------------------------- حرکت */
+
+  function pointAt(clientX, clientY) {
+    var r = canvas.getBoundingClientRect();
+    var size = r.width;
+    var pad = size * 0.075, step = (size - pad * 2) / 6;
+    var x = clientX - r.left, y = clientY - r.top;
+    var best = -1, bd = Infinity;
+    for (var q = 0; q < E.N; q++) {
+      var dx = pad + E.XY[q][0] * step - x, dy = pad + E.XY[q][1] * step - y;
+      var d2 = dx * dx + dy * dy;
+      if (d2 < bd) { bd = d2; best = q; }
+    }
+    // نیم‌گام دور هر نقطه هدف لمسی است؛ روی تخته‌ی ۳۲۰ پیکسلی حدود ۴۴ پیکسل
+    return bd <= (step * 0.5) * (step * 0.5) ? best : -1;
+  }
+
+  canvas.addEventListener('click', function (e) {
+    var q = pointAt(e.clientX, e.clientY);
+    if (q < 0) return;
+    kbOn = false;
+    cur = q;
+    human(q);
+  });
+
+  function bad() { C.feedback('bad'); }
+
+  function human(q) {
+    if (!S || S.done || busy() || q < 0 || q >= E.N) return;
+    var p = S.turn;
+    if (pend) {
+      if (pend.rm.indexOf(q) >= 0) commit({ from: pend.from, to: pend.to, remove: q });
+      else { bad(); C.ui.shake(statusEl); }
+      return;
+    }
+    var ph = E.phaseOf(S.board, S.hand, p);
+    if (ph === 'place') {
+      if (S.board[q]) { bad(); return; }
+      playStep(-1, q);
+      return;
+    }
+    if (S.board[q] === p) {
+      sel = sel === q ? -1 : q;
+      C.feedback('tap');
+      draw(); setStatus();
+      return;
+    }
+    if (sel >= 0 && !S.board[q] && targetsOf(sel).indexOf(q) >= 0) { playStep(sel, q); return; }
+    bad();
+  }
+
+  // یک جابه‌جایی؛ اگر سه‌تایی بسازد، اول برداشت پرسیده می‌شود و هر دو با هم
+  // یک حرکت ثبت می‌شوند تا برگرداندن هم یک قدم باشد.
+  function playStep(from, to) {
+    var p = S.turn;
+    if (E.formsMill(S.board, p, to, from)) {
+      var b = S.board.slice();
+      if (from >= 0) b[from] = 0;
+      b[to] = p;
+      var rm = E.removable(b, E.other(p));
+      if (rm.length) {
+        pend = { from: from, to: to, rm: rm };
+        sel = -1;
+        C.audio.sfx('chain');
+        C.haptic('success');
+        setStatus();
+        startPulse();
+        return;
+      }
+    }
+    commit({ from: from, to: to, remove: -1 });
+  }
+
+  function commit(m) {
+    if (!E.isLegal(S, m)) { bad(); return; }
+    doMove(m, true);
+  }
+
+  function doMove(m, byHuman) {
+    pend = null; sel = -1;
+    var res = E.apply(S, m);
+    S.last = m;
+    if (m.remove >= 0) { C.audio.sfx('pop'); C.haptic(byHuman ? 'success' : 'error'); }
+    else { C.audio.sfx('place'); if (byHuman) C.haptic('tap'); }
+    draw();
+    drawPlayers();
+    save();
+    if (res) { finish(); return; }
+    maybeAi();
+  }
+
+  function aiRnd() {
+    // در روزانه هر حرکت حریف از تاریخ و شماره‌ی حرکت می‌آید تا برای همه یکسان باشد
+    return S.daily ? C.daily('morris', S.daily + '|' + S.history.length).rng : Math.random;
+  }
+
+  function maybeAi() {
+    stopAi();
+    if (!S || S.done || S.mode !== 'ai' || S.turn !== 2) return;
+    drawPlayers();
+    aiTimer = setTimeout(function () {
+      aiTimer = null;
+      if (!S || S.done || S.turn !== 2) return;
+      var m = E.aiMove(S, S.level, aiRnd());
+      if (!m) return;
+      doMove(m, false);
+    }, 380);
+  }
+  function stopAi() { if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; } }
+
+  function undo() {
+    if (!S || S.done) return;
+    // وسط برداشت، حرکت هنوز ثبت نشده؛ برگرداندن فقط همان را لغو می‌کند
+    if (pend) { pend = null; C.feedback('tap'); draw(); setStatus(); return; }
+    if (!S.history.length) { bad(); return; }
+    stopAi();
+    E.takeBack(S);
+    S.last = null; sel = -1;
+    C.feedback('tap');
+    draw();
+    drawPlayers();
+    save();
+    // اگر تاریخچه ته کشید و نوبت روی حریف ماند — روزانه‌ای که حریف شروع
+    // کرده — بدون این بازی قفل می‌شد.
+    maybeAi();
+  }
+
+  function finish() {
+    S.done = true;
+    S.elapsed = Date.now() - S.startedAt;
+    stopAi();
+    pend = null; sel = -1;
+    draw();
+    drawPlayers();
+    var r = S.result;
+    var won = r.winner === 1, tie = r.winner === 0;
+    var l1 = piecesLeft(1), l2 = piecesLeft(2);
+
+    // در دونفره سطح حریف معنا ندارد و نباید پاداش را تعیین کند
+    var base = S.mode === 'ai' ? ({ easy: 5, medium: 10, hard: 18 }[S.level] || 10) : 8;
+    var k = won ? 1 : (tie ? 0.6 : 0.35);
+    var coins = Math.max(2, Math.round(base * k)) + (S.daily ? 8 : 0);
+    var points = Math.max(3, Math.round(won ? base * 4 : base * 1.2 * (tie ? 1.5 : 1))) + (S.daily ? 25 : 0);
+
+    if (S.mode === 'ai' && won) {
+      C.achievements.unlock('mr-win');
+      if (S.level === 'hard') C.achievements.unlock('mr-hard');
+      if (l1 === E.PIECES) C.achievements.unlock('mr-clean');
+    }
+    if (S.daily) {
+      var firstDaily = C.stats.daily('morris', S.daily, {
+        label: C.num(l1) + ' - ' + C.num(l2), win: won, diff: l1 - l2
+      });
+      if (!firstDaily) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+
+    ctx.finish({
+      won: won,
+      title: tie ? C.t('draw')
+        : (S.mode === '2p' ? C.t('playerWon', { n: pname(r.winner) })
+          : (won ? C.t('won') : C.t('lost'))),
+      note: whyText(r.why),
+      timeMs: S.elapsed, coins: coins, points: points,
+      lines: [
+        { label: pname(1), value: C.num(l1) },
+        { label: pname(2), value: C.num(l2) },
+        { label: C.t('moves'), value: C.num(S.history.length) }
+      ],
+      shareText: 'چوگان · دوز' +
+        (S.daily ? ('\nروزانه ' + S.daily) : '') +
+        '\n' + C.num(l1) + ' - ' + C.num(l2),
+      paint: cardPaint(),
+      onAgain: S.daily ? null : function () { newGame(S.mode, S.level); }
+    });
+  }
+
+  /* --------------------------------------------------------- ذخیره */
+
+  ctx.autosave(function () {
+    if (!S || S.done || !S.history.length) return { inProgress: false };
+    return {
+      s: {
+        mode: S.mode, level: S.level, daily: S.daily,
+        board: S.board, hand: S.hand, turn: S.turn, quiet: S.quiet, reps: S.reps,
+        history: S.history, last: S.last, elapsed: Date.now() - S.startedAt
+      },
+      prefs: prefs
+    };
+  });
+  function save() { ctx.save(); }
+
+  function restore(v) {
+    S = E.newState(v.mode, v.level);
+    S.board = v.board; S.hand = v.hand; S.turn = v.turn; S.quiet = v.quiet || 0;
+    S.reps = v.reps || {}; S.history = v.history; S.last = v.last || null;
+    S.daily = v.daily || null; S.done = false;
+    S.startedAt = Date.now() - (v.elapsed || 0);
+    S.result = E.judge(S);
+  }
+
+  function askNew() {
+    var dd = S ? S.daily : null;
+    function go() {
+      // داخل روزانه باید همان دست روزانه دوباره ساخته شود، نه یک مسابقه‌ی عادی
+      if (dd) newGame('ai', 'hard', dd);
+      else newGame(S ? S.mode : prefs.mode, S ? S.level : prefs.level);
+    }
+    if (!S || S.done || !S.history.length) { go(); return; }
+    C.ui.confirm({ title: C.t('newMatch'), body: C.t('resetWarn'), onOk: go });
+  }
+
+  function renameP2() {
+    var input = el('input', {
+      type: 'text', value: prefs.p2name, maxlength: '16', placeholder: C.t('player2'),
+      style: { font: 'inherit', width: '100%', padding: '10px 14px', 'border-radius': 'var(--r-md)',
+        border: '1px solid var(--c-line)', background: 'var(--c-surface-2)', color: 'var(--c-text)' }
+    });
+    C.ui.modal({
+      title: C.t('renameP2'), body: [input],
+      actions: [{ label: C.t('cancel') }, { label: C.t('done'), kind: 'primary', onClick: function () {
+        prefs.p2name = input.value.trim().slice(0, 16);
+        ctx.store.set('prefs', prefs);
+        drawPlayers();
+      } }]
+    });
+  }
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          kb('← ↑ → ↓', C.t('move')),
+          kb('Space / Enter', C.t('play')),
+          kb('U', C.t('undoMove')),
+          kb('Esc', C.t('cancelPick'))
+        ])
+      ],
+      actions: [
+        { label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('done'), kind: 'primary' }
+      ]
+    });
+  }
+  function kb(k, what) {
+    return el('div', { class: 'ch-item' }, [
+      el('div', { class: 'ch-item__label', text: what }),
+      el('span', { class: 'ch-badge', text: k })
+    ]);
+  }
+
+  // تخته‌ی کوچک برای آموزش: سه مربع و خط‌های رابط
+  var MINI = '<g fill="none" stroke="var(--c-text-faint)" stroke-width="3">' +
+    '<rect x="55" y="10" width="90" height="90"/><rect x="70" y="25" width="60" height="60"/><rect x="85" y="40" width="30" height="30"/>' +
+    '<path d="M100 10v30M100 70v30M55 55h30M115 55h30"/></g>';
+  function pc(x, y, c) { return '<circle cx="' + x + '" cy="' + y + '" r="7" fill="' + c + '"/>'; }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' + MINI + pc(55, 10, 'var(--game)') + pc(130, 85, 'var(--c-accent)') + pc(100, 25, 'var(--game)') + '</svg>' },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' + MINI +
+        '<path d="M55 10h90" stroke="var(--game)" stroke-width="9" opacity=".5" stroke-linecap="round"/>' +
+        pc(55, 10, 'var(--game)') + pc(100, 10, 'var(--game)') + pc(145, 10, 'var(--game)') +
+        pc(70, 85, 'var(--c-accent)') + '<circle cx="70" cy="85" r="12" fill="none" stroke="var(--c-bad)" stroke-width="3"/></svg>' },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' + MINI +
+        pc(55, 55, 'var(--game)') + '<circle cx="55" cy="100" r="9" fill="var(--game)" opacity=".3"/>' +
+        '<path d="M55 64v26" stroke="var(--game)" stroke-width="3" stroke-dasharray="4 4"/>' + pc(145, 100, 'var(--c-accent)') + '</svg>' },
+    { title: C.t('tutTitle4'), text: C.t('tutText4'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' + MINI + pc(55, 10, 'var(--game)') + pc(145, 55, 'var(--game)') + pc(85, 70, 'var(--game)') +
+        pc(115, 40, 'var(--c-accent)') + pc(70, 85, 'var(--c-accent)') + '</svg>' }
+  ];
+
+  /* -------------------------------------------------------- کیبورد */
+
+  // نشانگر روی ۲۴ نقطه پیمایش می‌کند: نزدیک‌ترین نقطه در همان جهت، با
+  // ترجیح نقطه‌هایی که روی همان سطر یا ستون‌اند. تخته در راست‌چین آینه
+  // نمی‌شود، پس جهت‌نماها هم برعکس نمی‌شوند.
+  function moveCur(dx, dy) {
+    var x0 = E.XY[cur][0], y0 = E.XY[cur][1], best = cur, bs = Infinity;
+    for (var q = 0; q < E.N; q++) {
+      var ax = E.XY[q][0] - x0, ay = E.XY[q][1] - y0;
+      var along = ax * dx + ay * dy, perp = Math.abs(ax * dy - ay * dx);
+      if (along <= 0) continue;
+      var s = along + perp * 3;
+      if (s < bs) { bs = s; best = q; }
+    }
+    cur = best;
+  }
+  window.addEventListener('keydown', function (e) {
+    if (!S || S.done || busy()) return;
+    if (document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
+    if (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
+    var k = e.key;
+    if (k === 'u' || k === 'U') { undo(); e.preventDefault(); return; }
+    if (k === 'Escape') {
+      if (pend || sel >= 0) { pend = null; sel = -1; draw(); setStatus(); e.preventDefault(); }
+      return;
+    }
+    var dir = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[k];
+    if (dir) { kbOn = true; moveCur(dir[0], dir[1]); draw(); e.preventDefault(); return; }
+    if (k === ' ' || k === 'Enter') { kbOn = true; human(cur); draw(); e.preventDefault(); }
+  });
+
+  C.onPause(function () { stopAi(); });
+  C.onResume(function () { if (S && !S.done) maybeAi(); });
+
+  /* ---------------------------------------------------------- شروع */
+
+  var saved = ctx.loadSave();
+  if (saved && saved.s && saved.s.history && saved.s.history.length &&
+      (dailyDate ? saved.s.daily === dailyDate : !saved.s.daily)) {
+    if (saved.prefs && !dailyDate) prefs = saved.prefs;
+    restore(saved.s);
+    render();
+    if (S.result) finish(); else maybeAi();
+  } else if (dailyDate) {
+    newGame('ai', 'hard', dailyDate);
+    if (C.stats.dailyDone('morris', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).morris;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec.label });
+    }
+    ctx.tutorialIfNew(TUT);
+  } else {
+    newGame(prefs.mode || 'ai', prefs.level || 'medium');
+    ctx.tutorialIfNew(TUT);
+  }
+})();
+</script>
+</body>
+</html>
