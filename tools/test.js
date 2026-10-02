@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 656;
+const MIN_CHECKS = 786;
 
 function ok(cond, msg) {
   checks++;
@@ -537,6 +537,375 @@ function testMancala() {
   ok(/E\.takeBack\(S\)/.test(mcHtml), 'صفحه برگرداندن را با takeBack انجام می‌دهد');
   ok(/E\.dailyLayout\(C\.daily\('mancala'/.test(mcHtml), 'روزانه‌ی صفحه چیدمان را از بذر روز می‌سازد');
   ok(!/localStorage/.test(mcHtml), 'صفحه مستقیم به localStorage دست نمی‌زند');
+}
+
+/* --------------------------------------------------------- فری‌سل */
+function testFreecell() {
+  head('فری‌سل');
+  const E = loadEngine('freecell', 'FreecellEngineFactory');
+  const N = (c) => E.name(c);
+  const P = (s) => {
+    const c = E.parse(s);
+    if (c < 0) throw new Error('کارت ناشناخته در آزمون: ' + s);
+    return c;
+  };
+  const rows = (cols) => {
+    const out = [];
+    for (let r = 0; r < 7; r++) {
+      const row = [];
+      for (let i = 0; i < 8; i++) if (cols[i][r] !== undefined) row.push(N(cols[i][r]));
+      out.push(row.join(' '));
+    }
+    return out.join('\n');
+  };
+  const cardsOf = (S) => {
+    const all = [];
+    S.cols.forEach((c) => c.forEach((x) => all.push(x)));
+    S.cells.forEach((x) => { if (x >= 0) all.push(x); });
+    S.found.forEach((n, s) => { for (let r = 0; r < n; r++) all.push(r * 4 + s); });
+    return all;
+  };
+  const whole = (S) => { const a = cardsOf(S); return a.length === 52 && new Set(a).size === 52 && a.every((x) => x >= 0 && x < 52); };
+
+  // چیدمان منتشرشده در Rosetta Code «Deal cards for FreeCell» (خوانده‌شده ۲۰۲۶-۱۰-۰۲)
+  const DEAL1 = [
+    'JD 2D 9H JC 5D 7H 7C 5H', 'KD KC 9S 5S AD QC KH 3H', '2S KS 9D QD JS AS AH 3C',
+    '4C 5C TS QH 4H AC 4D 7S', '3S TD 4S TH 8H 2C JH 7D', '6D 8S 8D QS 6C 3D 8C TC', '6S 9C 2H 6H'
+  ].join('\n');
+  const DEAL617 = [
+    '7D AD 5C 3S 5S 8C 2D AH', 'TD 7S QD AC 6D 8H AS KH', 'TH QC 3H 9D 6S 8D 3D TC',
+    'KD 5H 9S 3C 8S 7H 4D JS', '4C QS 9C 9H 7C 6H 2C 2S', '4S TS 2H 5D JC 6C JH QH', 'JD KS KC 4H'
+  ].join('\n');
+  ok(rows(E.deal(1)) === DEAL1, 'دست ۱ همان چیدمان منتشرشده است');
+  ok(rows(E.deal(617)) === DEAL617, 'دست ۶۱۷ همان چیدمان منتشرشده است');
+
+  let allWhole = true, bad = -1;
+  for (let d = 1; d <= 32000 && allWhole; d++) {
+    const cols = E.deal(d);
+    const flat = [].concat(...cols);
+    if (flat.length !== 52 || new Set(flat).size !== 52 || cols.some((c, i) => c.length !== (i < 4 ? 7 : 6))) { allWhole = false; bad = d; }
+  }
+  ok(allWhole, 'هر ۳۲۰۰۰ دست ۵۲ کارت متمایز دارند، ستون‌ها ۷ و ۶ کارتی' + (bad > 0 ? ' (دست ' + bad + ')' : ''));
+
+  // ۱۱۹۸۲ هرگز داده نمی‌شود، حتی وقتی مولد دقیقاً به آن می‌خورد
+  const seq = (vals) => { let i = 0; return () => vals[Math.min(i++, vals.length - 1)]; };
+  ok(E.pickDeal(seq([11981.5 / 32000, 0.5])) === 16001, 'وقتی تصادف ۱۱۹۸۲ را می‌دهد دست دیگری انتخاب می‌شود');
+  ok(!E.validDeal(11982) && !E.validDeal(0) && !E.validDeal(32001) && !E.validDeal(1.5) && E.validDeal(1) && E.validDeal(32000),
+    'بازه‌ی شماره‌ی دست ۱ تا ۳۲۰۰۰ است، بدون ۱۱۹۸۲');
+
+  // روزانه: بذر را با همان کد هسته می‌سازیم، نه نسخه‌ی دوم
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  const hashSrc = (core.match(/function hash32\(str\) \{[\s\S]*?\n  \}/) || [])[0];
+  const rngSrc = (core.match(/function rng\(seed\) \{[\s\S]*?\n  \}/) || [])[0];
+  ok(!!hashSrc && !!rngSrc, 'hash32 و rng هسته پیدا شدند');
+  const dsb = {};
+  vm.createContext(dsb);
+  vm.runInContext(hashSrc + '\n' + rngSrc + '\nthis.dailyRng = function (id, key) { return rng(hash32("chogan|" + id + "|" + key)); };', dsb);
+  const dates = [];
+  for (let i = 0; i < 400; i++) { const t = new Date(Date.UTC(2026, 0, 1) + i * 86400000); dates.push(t.toISOString().slice(0, 10)); }
+  ok(dates.length === 400, 'فهرست تاریخ‌های روزانه خالی نیست');
+  let same = true, valid = true;
+  const seenDeals = new Set();
+  for (const d of dates) {
+    const a = E.pickDeal(dsb.dailyRng('freecell', d)), b = E.pickDeal(dsb.dailyRng('freecell', d));
+    if (a !== b || rows(E.newGame(a).cols) !== rows(E.newGame(b).cols)) same = false;
+    if (!E.validDeal(a)) valid = false;
+    seenDeals.add(a);
+  }
+  ok(same, 'روزانه: یک تاریخ همیشه یک دست و یک چیدمان می‌دهد');
+  ok(valid, 'روزانه: دست همیشه بین ۱ و ۳۲۰۰۰ است و هرگز ۱۱۹۸۲ نیست');
+  ok(seenDeals.size > 380, 'روزانه: روزهای مختلف دست‌های مختلف می‌گیرند (' + seenDeals.size + '/400)');
+  const page = fs.readFileSync(path.join(ROOT, 'www/games/freecell/index.html'), 'utf8');
+  ok(/E\.pickDeal\(C\.daily\('freecell', dailyDate\)\.rng\)/.test(page), 'صفحه دست روزانه را با همین pickDeal و بذر هسته می‌سازد');
+
+  // وضعیت دستی: ستون‌ها از چپ، کارت آخر هر رشته روی بقیه
+  const make = (cols, cells, found) => {
+    const S = {
+      deal: 1, cols: cols.map((c) => (c ? c.split(' ').filter(Boolean).map(P) : [])),
+      cells: (cells || []).map((x) => (x ? P(x) : -1)), found: found || [0, 0, 0, 0], hist: [], moves: 0, undos: 0
+    };
+    while (S.cols.length < 8) S.cols.push([]);
+    while (S.cells.length < 4) S.cells.push(-1);
+    return S;
+  };
+  // قاعده‌ی ستون: یک رتبه پایین‌تر، رنگ مخالف
+  const s1 = make(['5H', '6S', '6D', '7S', '6C', 'KD'], ['4C', '4D', '4S', '3C']);
+  ok(E.canMove(s1, 0, 1, 1), '۵ دل روی ۶ پیک می‌نشیند');
+  ok(!E.canMove(s1, 0, 1, 2), '۵ دل روی ۶ خشت نمی‌نشیند (هم‌رنگ)');
+  ok(!E.canMove(s1, 0, 1, 3), '۵ دل روی ۷ پیک نمی‌نشیند (رتبه)');
+  ok(E.canMove(s1, 0, 1, 4), '۵ دل روی ۶ گشنیز می‌نشیند');
+  ok(!E.canMove(s1, 1, 1, 0), '۶ پیک روی ۵ دل نمی‌نشیند (رتبه‌ی بالاتر روی پایین‌تر)');
+  // خانه‌ی آزاد
+  ok(!E.canMove(s1, 0, 1, 8), 'خانه‌ی پر کارت نمی‌گیرد');
+  const s2 = make(['5H 4S', 'KD'], ['', 'QC']);
+  ok(E.canMove(s2, 0, 1, 8), 'خانه‌ی خالی یک کارت می‌گیرد');
+  ok(!E.canMove(s2, 0, 2, 8), 'خانه‌ی آزاد رشته‌ی دوکارتی نمی‌گیرد');
+  ok(!E.canMove(s2, 9, 1, 0), 'بی‌بی گشنیز از خانه‌ی آزاد روی ۴ پیک نمی‌نشیند');
+  ok(E.canMove(s2, 9, 1, 1), 'بی‌بی گشنیز از خانه‌ی آزاد روی شاه خشت می‌نشیند');
+  ok(E.canMove(s2, 9, 1, 2), 'کارت خانه‌ی آزاد به ستون خالی می‌رود');
+  ok(!E.canMove(s2, 9, 1, 8), 'از خانه‌ی آزاد به خانه‌ی آزاد دیگر حرکت نیست');
+  // پایه
+  const s3 = make(['AH', '2H', '3H', '2C', 'AS'], [], [0, 0, 1, 0]);
+  ok(!E.canMove(s3, 0, 1, 14), 'آس دل وقتی پایه‌ی دل آس دارد دوباره نمی‌رود');
+  ok(E.canMove(s3, 1, 1, 14), '۲ دل روی آس دل در پایه می‌رود');
+  ok(!E.canMove(s3, 2, 1, 14), '۳ دل بدون ۲ دل به پایه نمی‌رود');
+  ok(!E.canMove(s3, 1, 1, 13), '۲ دل به پایه‌ی خشت نمی‌رود');
+  ok(!E.canMove(s3, 3, 1, 12), '۲ گشنیز به پایه‌ی خالی نمی‌رود');
+  ok(E.canMove(s3, 4, 1, 15), 'آس پیک به پایه‌ی خالی پیک می‌رود');
+  ok(!E.canMove(s3, 14, 1, 0), 'از پایه کارتی برداشته نمی‌شود');
+
+  // سقف رشته: (خانه‌ی آزاد + ۱) × ۲^(ستون خالی)، و نصف وقتی مقصد ستون خالی است.
+  // عددها از فرمول مسئله می‌آیند نه از maxMove موتور.
+  const RUN = 'KS QH JC TD 9S 8H 7C 6D 5S 4H 3C 2D'.split(' ');
+  const otherSuit = { C: 'S', S: 'C', D: 'H', H: 'D' };
+  const runCase = (free, empty, toEmpty, n) => {
+    const used = new Set(RUN);
+    const cols = [RUN.join(' ')];
+    if (toEmpty) cols.push('');
+    else {
+      // مقصد: یک رتبه بالاتر از اولین کارت جابه‌جاشونده، رنگ مخالف، خال دیگر
+      const above = RUN[RUN.length - n - 1];
+      const t = above[0] + otherSuit[above[1]];
+      used.add(t);
+      cols.push(t);
+    }
+    const filler = [];
+    for (let c = 0; c < 52; c++) if (!used.has(E.name(c))) filler.push(E.name(c));
+    // ستون‌های ۲ تا ۷: به اندازه‌ی لازم خالی، بقیه با یک کارت پرکننده
+    const otherEmpty = empty - (toEmpty ? 1 : 0);
+    for (let i = 2; i < 8; i++) cols.push(i - 2 < otherEmpty ? '' : filler.shift());
+    const cells = [];
+    for (let j = 0; j < 4; j++) cells.push(j < free ? '' : filler.shift());
+    const S = make(cols, cells);
+    const all = cardsOf(S);
+    if (new Set(all).size !== all.length) throw new Error('کارت تکراری در آزمون رشته');
+    if (E.freeCells(S) !== free || E.emptyCols(S) !== empty) throw new Error('وضعیت آزمون رشته اشتباه ساخته شد');
+    return { S, to: 1 };
+  };
+  const limits = [[0, 0], [1, 0], [3, 0], [4, 0], [0, 1], [1, 1], [2, 1], [0, 2], [1, 2], [4, 1]];
+  ok(limits.length > 0, 'فهرست حالت‌های سقف رشته خالی نیست');
+  for (const [f, e] of limits) {
+    const lim = (f + 1) * Math.pow(2, e);
+    const a = runCase(f, e, false, lim), b = runCase(f, e, false, lim + 1);
+    ok(E.canMove(a.S, 0, lim, a.to), 'خانه‌ی آزاد ' + f + '، ستون خالی ' + e + ': رشته‌ی ' + lim + 'تایی روی ستون پر می‌رود');
+    ok(!E.canMove(b.S, 0, lim + 1, b.to), 'خانه‌ی آزاد ' + f + '، ستون خالی ' + e + ': رشته‌ی ' + (lim + 1) + 'تایی رد می‌شود');
+  }
+  const toEmpty = [[0, 1], [1, 1], [2, 2], [0, 3], [4, 1], [1, 3]];
+  for (const [f, e] of toEmpty) {
+    const lim = (f + 1) * Math.pow(2, e - 1);
+    const a = runCase(f, e, true, lim), b = runCase(f, e, true, lim + 1);
+    ok(E.canMove(a.S, 0, lim, a.to), 'به ستون خالی، خانه‌ی آزاد ' + f + '، ستون خالی ' + e + ': ' + lim + ' کارت می‌رود');
+    ok(!E.canMove(b.S, 0, lim + 1, b.to), 'به ستون خالی، خانه‌ی آزاد ' + f + '، ستون خالی ' + e + ': ' + (lim + 1) + ' کارت رد می‌شود');
+  }
+  const s4 = make(['8S 7H 6C', '9D', '8C', 'KC', 'KD', 'KH', 'QS', 'QD'], ['', 'AC', 'AD', 'AH']);
+  ok(!E.canMove(s4, 0, 2, 1), 'رشته‌ای که اولش روی مقصد نمی‌نشیند رد می‌شود (۷ دل روی ۹ خشت)');
+  ok(E.canMove(s4, 0, 2, 2), 'دو کارت با یک خانه‌ی آزاد روی ۸ گشنیز می‌رود');
+  ok(!E.canMove(s4, 0, 3, 1), 'سه کارت با یک خانه‌ی آزاد و بدون ستون خالی رد می‌شود');
+  const s5 = make(['8S 7H 5C', '6D'], ['', '', 'AD', 'AH']);
+  ok(!E.canMove(s5, 0, 2, 1), 'رشته‌ی نامرتب (۷ دل، ۵ گشنیز) با هم جابه‌جا نمی‌شود');
+
+  // حرکت خودکار فقط کارت امن را می‌برد
+  const unsafe = make(['3H', 'KS', 'KC'], [], [1, 0, 2, 2]);
+  E.autoAll(unsafe);
+  ok(unsafe.found[2] === 2 && unsafe.cols[0].length === 1, '۳ دل وقتی ۲ گشنیز هنوز لازم است خودکار نمی‌رود');
+  ok(E.canMove(unsafe, 0, 1, 14), '... هرچند با دست می‌شود بردش');
+  const safe3 = make(['3H', 'KS', 'KC'], [], [2, 0, 2, 2]);
+  E.autoAll(safe3);
+  ok(safe3.found[2] === 3 && safe3.cols[0].length === 0, '۳ دل وقتی هر دو ۲ سیاه روی پایه‌اند خودکار می‌رود');
+  const two = make(['2D', 'KS'], [], [0, 1, 0, 0]);
+  E.autoAll(two);
+  ok(two.found[1] === 2, '۲ همیشه امن است');
+  const cellAce = make(['KS'], ['AH']);
+  E.autoAll(cellAce);
+  ok(cellAce.found[2] === 1 && cellAce.cells[0] === -1, 'آس از خانه‌ی آزاد هم خودکار می‌رود');
+  // قاعده‌ی امنیت را خود آزمون می‌سنجد
+  const safeRule = (S, c) => {
+    const r = c >> 2, s = c & 3, red = s === 1 || s === 2;
+    if (S.found[s] !== r) return false;
+    if (r <= 1) return true;
+    const opp = red ? [0, 3] : [1, 2];
+    return S.found[opp[0]] >= r && S.found[opp[1]] >= r;
+  };
+
+  // بهترین مقصد لمس: پایه، ستون پر، ستون خالی، خانه‌ی آزاد
+  const b1 = make(['AS', 'KD', '', '2H'], ['', '', '', '']);
+  ok(E.bestTarget(b1, 0, 1) === 15, 'لمس آس: پایه');
+  const b2 = make(['5H', '6S', '', 'KD']);
+  ok(E.bestTarget(b2, 0, 1) === 1, 'لمس: ستون پر پیش از ستون خالی');
+  const b3 = make(['QC 5H', 'KS', '', 'KD']);
+  ok(E.bestTarget(b3, 0, 1) === 2, 'لمس: ستون خالی پیش از خانه‌ی آزاد');
+  // کارت تنهای یک ستون به ستون خالی دیگر نمی‌رود چون هیچ چیز عوض نمی‌شود
+  const b3b = make(['5H', 'KS', '', 'KD']);
+  ok(!E.canMove(b3b, 0, 1, 2) && E.bestTarget(b3b, 0, 1) === 8, 'لمس کارت تنها: خانه‌ی آزاد، نه ستون خالی دیگر');
+  // هشت ستون با کارت قرمز بالا: هیچ کارتی روی دیگری نمی‌نشیند و هیچ‌کدام آس نیست
+  const reds = ['5H', 'KH', '3D', 'QD', '9H', '7D', 'JD', '2H'];
+  const b4 = make(reds);
+  ok(E.bestTarget(b4, 0, 1) === 8, 'لمس: خانه‌ی آزاد آخرین گزینه');
+  // خانه‌های پر با سیاه‌هایی که رتبه‌شان یکی کمتر از هیچ قرمز بالایی نیست
+  const b5 = make(reds, ['3C', '5S', '9C', 'KS']);
+  ok(E.bestTarget(b5, 0, 1) === -1, 'لمس بی‌مقصد رد می‌شود');
+  ok(!E.hasMoves(b5), 'بن‌بست تشخیص داده می‌شود');
+  ok(E.hasMoves(b4), 'با خانه‌ی آزاد بن‌بست نیست');
+
+  // بازی تصادفی: کارت‌ها پایسته‌اند، خودکار فقط امن می‌برد، برگرداندن تا ته به همان دست می‌رسد
+  let conserved = true, autoSafe = true, undoBack = true, autoCount = 0, agree = true, userMoves = 0;
+  for (let g = 0; g < 30; g++) {
+    const r = rng(g * 7907 + 11);
+    const deal = E.pickDeal(r);
+    const S = E.newGame(deal);
+    const startSnap = JSON.stringify([S.cols, S.cells, S.found]);
+    let steps = 0;
+    for (; steps < 300; steps++) {
+      const moves = [];
+      for (let f = 0; f < 12; f++) {
+        const maxN = f < 8 ? E.runLength(S.cols[f]) : 1;
+        for (let n = 1; n <= maxN; n++) for (let t = 0; t < 16; t++) if (E.canMove(S, f, n, t)) moves.push([f, n, t]);
+      }
+      // hasMoves صفحه همان چیزی را بگوید که فهرست کامل حرکت‌ها
+      if (E.hasMoves(S) !== moves.length > 0) agree = false;
+      if (!moves.length) break;
+      const m = moves[r.int(moves.length)];
+      userMoves++;
+      if (!E.move(S, m[0], m[1], m[2])) { conserved = false; break; }
+      for (;;) {
+        const before = { found: S.found.slice() };
+        const a = E.autoStep(S);
+        if (!a) break;
+        autoCount++;
+        const card = before.found[a[1] - 12] * 4 + (a[1] - 12);
+        if (!safeRule(before, card)) autoSafe = false;
+      }
+      if (!whole(S)) conserved = false;
+      if (E.won(S)) break;
+    }
+    let guard = 0;
+    while (E.undo(S) && guard++ < 1000);
+    if (JSON.stringify([S.cols, S.cells, S.found]) !== startSnap || S.moves !== 0 || S.deal !== deal) undoBack = false;
+  }
+  ok(conserved, 'در ۳۰ بازی تصادفی همیشه ۵۲ کارت متمایز روی میز است');
+  ok(autoCount > 0, 'حرکت خودکار در بازی‌های تصادفی رخ داد (' + autoCount + ')');
+  ok(autoSafe, 'هیچ حرکت خودکاری کارتی را که هنوز لازم است نبرد');
+  ok(undoBack, 'برگرداندن پیاپی به همان چیدمان اول دست برمی‌گردد و دست عوض نمی‌شود');
+  ok(userMoves > 1000, 'بازی‌های تصادفی واقعاً حرکت کردند (' + userMoves + ')');
+  ok(agree, 'تشخیص «حرکتی نمانده» با فهرست کامل حرکت‌ها یکی است');
+
+  // حل‌کننده‌ی آزمون: جست‌وجوی بهترین-اول روی حرکت‌های تک‌کارتی موتور. فقط برای
+  // اثبات بردنی بودن است و در صفحه نیست.
+  const keyOf = (S) => S.cols.map((c) => c.join(',')).sort().join('|') + '#' +
+    S.cells.filter((x) => x >= 0).sort((a, b) => a - b).join(',') + '#' + S.found.join(',');
+  const score = (S) => {
+    const left = 52 - (S.found[0] + S.found[1] + S.found[2] + S.found[3]);
+    let disorder = 0, depth = 0;
+    for (const col of S.cols) {
+      for (let k = 0; k < col.length; k++) {
+        for (let j = k + 1; j < col.length; j++) if (E.rank(col[j]) > E.rank(col[k])) { disorder++; break; }
+        if (S.found[E.suit(col[k])] === E.rank(col[k])) depth += col.length - 1 - k;
+      }
+    }
+    return left * 5 + disorder + (4 - E.freeCells(S)) + (8 - E.emptyCols(S)) + depth * 2;
+  };
+  function solve(deal, limit) {
+    const s0 = E.newGame(deal);
+    const seen = new Set([keyOf(s0)]);
+    // صف اولویت دودویی
+    const heap = [];
+    const push = (x) => { heap.push(x); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p].f <= heap[i].f) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
+    const pop = () => {
+      const top = heap[0], last = heap.pop();
+      if (heap.length) {
+        heap[0] = last;
+        let i = 0;
+        for (;;) {
+          const l = i * 2 + 1, r = l + 1;
+          let m = i;
+          if (l < heap.length && heap[l].f < heap[m].f) m = l;
+          if (r < heap.length && heap[r].f < heap[m].f) m = r;
+          if (m === i) break;
+          [heap[m], heap[i]] = [heap[i], heap[m]];
+          i = m;
+        }
+      }
+      return top;
+    };
+    push({ S: s0, path: null, f: score(s0) });
+    let n = 0;
+    while (heap.length && n < limit) {
+      const cur = pop();
+      n++;
+      if (E.won(cur.S)) {
+        const path = [];
+        for (let p = cur.path; p; p = p.prev) path.unshift(p.m);
+        return { path, nodes: n, exhausted: false };
+      }
+      for (let f = 0; f < 12; f++) {
+        for (let t = 0; t < 16; t++) {
+          if (!E.canMove(cur.S, f, 1, t)) continue;
+          const S2 = E.clone(cur.S);
+          S2.hist = [];
+          E.move(S2, f, 1, t);
+          E.autoAll(S2);
+          const k = keyOf(S2);
+          if (seen.has(k)) continue;
+          seen.add(k);
+          push({ S: S2, path: { m: [f, 1, t], prev: cur.path }, f: score(S2) });
+        }
+      }
+    }
+    return { path: null, nodes: n, exhausted: heap.length === 0 };
+  }
+  const t0 = Date.now();
+  const solvable = [1, 2, 3, 617];
+  ok(solvable.length > 0, 'فهرست دست‌های بردنی آزمون خالی نیست');
+  for (const d of solvable) {
+    const sol = solve(d, 60000);
+    ok(!!sol.path, 'دست ' + d + ': حل‌کننده راه برد پیدا کرد (' + sol.nodes + ' گره)');
+    if (!sol.path) continue;
+    // همان راه را روی بازی تازه با move و autoAll موتور، مثل صفحه، اجرا می‌کنیم
+    const S = E.newGame(d);
+    let legal = true;
+    for (const m of sol.path) {
+      if (!E.move(S, m[0], m[1], m[2])) { legal = false; break; }
+      E.autoAll(S);
+      if (!whole(S)) { legal = false; break; }
+    }
+    ok(legal && E.won(S), 'دست ' + d + ': ' + sol.path.length + ' حرکت از راه موتور تا آخر بازی شد و برد ثبت شد');
+    ok(S.moves === sol.path.length, 'دست ' + d + ': شمار حرکت‌ها همان حرکت‌های بازیکن است');
+  }
+  // ۱۱۹۸۲ با جست‌وجوی کامل: کل فضای حالت تمام می‌شود بی‌آنکه بردی پیدا شود
+  const lost = solve(11982, 200000);
+  ok(!lost.path && lost.exhausted, 'دست ۱۱۹۸۲ واقعاً بی‌جواب است (همه‌ی ' + lost.nodes + ' حالت گشته شد)');
+  const solveMs = Date.now() - t0;
+  ok(solveMs < 15000, 'حل‌ها در زمان معقول تمام شدند (' + solveMs + 'ms)');
+  console.log('  چهار دست حل و تا برد بازی شد، ۱۱۹۸۲ با ' + lost.nodes + ' حالت رد شد، ' + solveMs + 'ms');
+
+  // ذخیره‌ی خراب رد می‌شود؛ خانه‌ی null پیش‌تر آس گشنیز دوم می‌ساخت
+  const good = E.newGame(5);
+  ok(E.validState(JSON.parse(JSON.stringify(good))), 'وضعیت سالم سریال‌شده پذیرفته می‌شود');
+  const broken = [
+    ['خانه‌ی null', (x) => { x.cells[0] = null; }],
+    ['کارت تکراری', (x) => { x.cols[0][0] = x.cols[1][0]; }],
+    ['کارت گم', (x) => { x.cols[0].pop(); }],
+    ['پایه‌ی بیش از ۱۳', (x) => { x.found[0] = 14; }],
+    ['شماره‌ی دست ۱۱۹۸۲', (x) => { x.deal = 11982; }],
+    ['ستون کم', (x) => { x.cols.pop(); }],
+    ['تاریخچه‌ی خراب', (x) => { x.hist = [[0, 99, 1, 0]]; }]
+  ];
+  ok(broken.length > 0, 'فهرست ذخیره‌های خراب خالی نیست');
+  for (const [label, hurt] of broken) {
+    const x = JSON.parse(JSON.stringify(good));
+    hurt(x);
+    ok(!E.validState(x), 'ذخیره‌ی خراب رد می‌شود: ' + label);
+  }
+  ok(/E\.validState\(saved\.s\)/.test(page), 'صفحه ذخیره را پیش از ادامه با validState می‌سنجد');
+
+  // صفحه باید حرکت، برگرداندن و حرکت خودکار را از موتور بگیرد
+  const ui = page.slice(page.indexOf('/* ==== ENGINE END ==== */'));
+  ok(ui.length > 1000, 'بخش صفحه‌ی فری‌سل خوانده شد');
+  ok(/E\.move\(S, src, n, to\)/.test(ui), 'صفحه حرکت را با E.move ثبت می‌کند');
+  ok(/E\.undo\(S\)/.test(ui), 'صفحه برگرداندن را با E.undo انجام می‌دهد');
+  ok(/E\.autoAll\(S\)/.test(ui), 'صفحه حرکت خودکار را با E.autoAll انجام می‌دهد');
+  ok(/E\.bestTarget\(S, src, n\)/.test(ui), 'لمس مقصد را از E.bestTarget می‌گیرد');
+  ok(!/localStorage/.test(ui), 'صفحه مستقیم به localStorage دست نمی‌زند');
 }
 
 /* ----------------------------------------------------- دفاع از برج */
@@ -1288,6 +1657,7 @@ testMines();
 testDots();
 testNonogram();
 testMancala();
+testFreecell();
 testTd();
 testVersionStamp();
 testDeployGate();
