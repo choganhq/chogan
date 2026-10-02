@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 497;
+const MIN_CHECKS = 513;
 
 function ok(cond, msg) {
   checks++;
@@ -161,6 +161,49 @@ function testDots() {
     ok(wins >= 6, sz.join('x') + ': سخت از متوسط قوی‌تر است (' + wins + '/' + n + ')');
   }
   ok(maxMs < 900, 'زمان فکر هوش مصنوعی قابل قبول است (' + maxMs + 'ms)');
+
+  // برگرداندن حرکت در دونفره (#69). قبلاً دونفره فقط پیام می‌داد و وضعیت
+  // دست نمی‌خورد؛ حالا یک خط برمی‌گردد و با حریف کامپیوتری مثل قبل.
+  ok(typeof E.applyEdge === 'function', 'موتور تابع applyEdge دارد');
+  ok(typeof E.takeBack === 'function', 'موتور تابع takeBack دارد');
+  const apply = typeof E.applyEdge === 'function' ? E.applyEdge : () => 0;
+  const back = typeof E.takeBack === 'function' ? E.takeBack : () => 0;
+  const bd3 = E.makeBoard(3, 3);
+  const fresh = (mode) => ({
+    mode, edges: new Array(bd3.E).fill(0), owner: new Array(bd3.boxes).fill(0),
+    edgeOwner: {}, turn: 1, scores: [0, 0, 0], history: [], turnBoxes: 0
+  });
+  const snap = (S) => JSON.stringify([S.edges, S.owner, S.edgeOwner, S.turn, S.scores, S.history, S.turnBoxes]);
+  // ضلع‌های مربع اول روی تخته‌ی ۳×۳: بالا ۰، پایین ۳، چپ ۱۲، راست ۱۳
+  ok(bd3.boxEdges[0].join() === '0,3,12,13', 'ضلع‌های مربع اول همان‌اند که آزمون فرض کرده');
+
+  const two = fresh('2p');
+  const empty = snap(two);
+  apply(bd3, two, 0); apply(bd3, two, 3); apply(bd3, two, 12);
+  const beforeClose = snap(two);
+  ok(two.turn === 2, 'دونفره: پس از سه خط نوبت بازیکن دوم است');
+  ok(apply(bd3, two, 13) === 1 && two.scores[2] === 1 && two.owner[0] === 2, 'دونفره: خط چهارم مربع را به بازیکن دوم می‌دهد');
+  ok(back(bd3, two) === 1, 'دونفره: برگرداندن فقط یک خط برمی‌دارد');
+  ok(snap(two) === beforeClose, 'دونفره: پس از برگرداندن، تخته و امتیاز و نوبت همان پیش از خط آخرند');
+  ok(back(bd3, two) === 1 && two.turn === 1 && two.edges[12] === 0 && two.edges[3] === 1, 'دونفره: برگرداندن دوم نوبت را به کشنده‌ی خط قبلی می‌دهد');
+  back(bd3, two); back(bd3, two);
+  ok(snap(two) === empty, 'دونفره: با برگرداندن پیاپی به تخته‌ی خالی می‌رسد');
+  ok(back(bd3, two) === 0 && snap(two) === empty, 'دونفره: روی تخته‌ی خالی برگرداندن کاری نمی‌کند');
+
+  // با حریف: بازیکن ۰ و ۱۲ را می‌کشد، حریف ۳، بعد ۱۳ (مربع) و ۱ را
+  const ai = fresh('ai');
+  apply(bd3, ai, 0); apply(bd3, ai, 3);
+  const humanTurn = snap(ai);
+  apply(bd3, ai, 12); apply(bd3, ai, 13); apply(bd3, ai, 1);
+  ok(ai.turn === 1 && ai.scores[2] === 1, 'با حریف: حریف مربع گرفت و نوبت به بازیکن رسید');
+  ok(back(bd3, ai) === 3, 'با حریف: برگرداندن سه حرکت تا نوبت قبلی بازیکن عقب می‌رود');
+  ok(snap(ai) === humanTurn, 'با حریف: وضعیت همان پیش از حرکت قبلی بازیکن است');
+
+  // صفحه باید از همین دو تابع استفاده کند، نه منطق خودش را
+  const dtHtml = fs.readFileSync(path.join(ROOT, 'www/games/dots/index.html'), 'utf8');
+  ok(/E\.applyEdge\(bd, S, e\)/.test(dtHtml), 'صفحه حرکت را با applyEdge ثبت می‌کند');
+  ok(/E\.takeBack\(bd, S\)/.test(dtHtml), 'صفحه برگرداندن را با takeBack انجام می‌دهد');
+  ok(!/undoOnlyAi/.test(dtHtml), 'پیام «فقط با حریف کامپیوتری» از صفحه رفته است');
 }
 
 /* ----------------------------------------------------- دفاع از برج */
