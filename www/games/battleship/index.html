@@ -1,0 +1,1063 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>نبرد دریایی — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .bs-wrap { width: 100%; display: flex; flex-direction: column; gap: var(--s-2); align-items: center; }
+  .bs-top { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+  .bs-status {
+    min-height: 1.6em; margin: 0; text-align: center; font-weight: 700; font-size: var(--fs-sm);
+    color: var(--c-text-dim);
+  }
+  .bs-status b { color: var(--c-text); }
+  .bs-status--wait { animation: bs-blink 900ms infinite; }
+  @keyframes bs-blink { 50% { opacity: .45; } }
+  .bs-seas { width: 100%; display: flex; flex-direction: column; align-items: center; gap: var(--s-2); }
+  .bs-box { width: 100%; max-width: min(94vw, 50vh, 460px); }
+  .bs-box--small { max-width: min(46vw, 21vh, 200px); }
+  .bs-box[hidden] { display: none; }
+  .bs-label {
+    display: flex; align-items: center; justify-content: space-between; gap: var(--s-2);
+    font-size: var(--fs-xs); font-weight: 700; color: var(--c-text-dim); margin-bottom: 4px;
+  }
+  .bs-pips { display: flex; gap: 4px; }
+  .bs-pip { height: 7px; border-radius: 4px; background: var(--game); }
+  .bs-pip--sunk { background: var(--c-bad); opacity: .45; }
+  .bs-cv {
+    width: 100%; aspect-ratio: 1; display: block; border-radius: var(--r-md);
+    touch-action: manipulation; cursor: pointer; box-shadow: var(--sh-1);
+  }
+  .bs-tray { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+  .bs-chip {
+    font: inherit; min-height: 44px; min-width: 44px; padding: 0 10px; border-radius: var(--r-sm);
+    border: 2px solid transparent; background: var(--c-surface); box-shadow: var(--sh-1);
+    display: inline-flex; align-items: center; gap: 3px; cursor: pointer; touch-action: manipulation;
+  }
+  .bs-chip i { width: 10px; height: 14px; border-radius: 3px; background: var(--game); display: block; }
+  .bs-chip--on { border-color: var(--game); }
+  .bs-chip--placed i { opacity: .35; }
+  .bs-actions { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+  /* روی صفحه‌ی افقی پهن دو دریا کنار هم می‌نشینند تا هیچ‌کدام کوچک نشود */
+  @media (orientation: landscape) and (min-width: 720px) {
+    .bs-seas { flex-direction: row; justify-content: center; align-items: flex-end; }
+    .bs-box { max-width: min(46vw, 62vh, 460px); }
+    .bs-box--small { max-width: min(30vw, 34vh, 260px); }
+  }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function BattleshipEngineFactory() {
+  'use strict';
+
+  var N = 10;
+  var FLEET = [5, 4, 3, 3, 2];
+
+  // کشتی: { r, c, len, v } — v یعنی عمودی. خانه‌ها با شماره‌ی r*N+c.
+  function cellsOf(s) {
+    var out = [];
+    for (var k = 0; k < s.len; k++) out.push((s.r + (s.v ? k : 0)) * N + s.c + (s.v ? 0 : k));
+    return out;
+  }
+
+  function fits(s) {
+    if (!s || s.r < 0 || s.c < 0 || s.len < 1) return false;
+    return s.v ? (s.r + s.len <= N && s.c < N) : (s.c + s.len <= N && s.r < N);
+  }
+
+  // خانه‌ها به‌علاوه‌ی هشت همسایه‌شان. کشتی‌ها حتی از گوشه هم به هم نمی‌چسبند
+  // تا روی صفحه‌ی گوشی مرز هر کشتی بی‌ابهام خوانده شود.
+  function halo(cells) {
+    var f = new Array(N * N).fill(0);
+    for (var i = 0; i < cells.length; i++) {
+      var r = (cells[i] / N) | 0, c = cells[i] % N;
+      for (var dr = -1; dr <= 1; dr++) {
+        for (var dc = -1; dc <= 1; dc++) {
+          var rr = r + dr, cc = c + dc;
+          if (rr >= 0 && rr < N && cc >= 0 && cc < N) f[rr * N + cc] = 1;
+        }
+      }
+    }
+    return f;
+  }
+
+  // آیا کشتی s کنار بقیه جا می‌شود؛ skip کشتی‌ای است که دارد جابه‌جا می‌شود
+  function canPlace(ships, s, skip) {
+    if (!fits(s)) return false;
+    var others = [];
+    for (var i = 0; i < ships.length; i++) {
+      if (i === skip || !ships[i]) continue;
+      others = others.concat(cellsOf(ships[i]));
+    }
+    var h = halo(others);
+    var cs = cellsOf(s);
+    for (var k = 0; k < cs.length; k++) if (h[cs[k]]) return false;
+    return true;
+  }
+
+  function validFleet(ships) {
+    if (!ships || ships.length !== FLEET.length) return false;
+    var lens = ships.map(function (s) { return s ? s.len : 0; }).sort().join();
+    if (lens !== FLEET.slice().sort().join()) return false;
+    for (var i = 0; i < ships.length; i++) if (!canPlace(ships, ships[i], i)) return false;
+    return true;
+  }
+
+  // چیدمان تصادفی؛ بزرگ‌ها اول تا جای کوچک‌ها همیشه بماند
+  function randomFleet(rnd) {
+    for (var attempt = 0; attempt < 500; attempt++) {
+      var ships = [];
+      var ok = true;
+      for (var f = 0; f < FLEET.length && ok; f++) {
+        var placed = false;
+        for (var t = 0; t < 200; t++) {
+          var v = rnd() < 0.5;
+          var len = FLEET[f];
+          var s = {
+            r: Math.floor(rnd() * (v ? N - len + 1 : N)),
+            c: Math.floor(rnd() * (v ? N : N - len + 1)),
+            len: len, v: v
+          };
+          if (canPlace(ships, s, -1)) { ships.push(s); placed = true; break; }
+        }
+        if (!placed) ok = false;
+      }
+      if (ok) return ships;
+    }
+    throw new Error('fleet');
+  }
+
+  /* صفحه: shots برای هر خانه ۰ شلیک‌نشده، ۱ آب، ۲ اصابت. */
+  function makeBoard(ships) {
+    return {
+      ships: ships.map(function (s) { return { r: s.r, c: s.c, len: s.len, v: !!s.v }; }),
+      shots: new Array(N * N).fill(0),
+      sunk: ships.map(function () { return false; })
+    };
+  }
+
+  function shipAt(board, idx) {
+    for (var i = 0; i < board.ships.length; i++) {
+      if (cellsOf(board.ships[i]).indexOf(idx) >= 0) return i;
+    }
+    return -1;
+  }
+
+  // خانه‌های دور کشتی غرق‌شده قطعاً خالی‌اند، چون کشتی‌ها به هم نمی‌چسبند.
+  // شلیک به آن‌ها فقط یک نوبت را هدر می‌دهد، پس نه بازیکن می‌تواند نه حریف.
+  function blocked(board) {
+    var cells = [];
+    for (var i = 0; i < board.ships.length; i++) if (board.sunk[i]) cells = cells.concat(cellsOf(board.ships[i]));
+    return halo(cells);
+  }
+
+  function canFire(board, idx) {
+    if (!(idx >= 0 && idx < N * N) || idx !== Math.floor(idx)) return false;
+    if (board.shots[idx]) return false;
+    return !blocked(board)[idx];
+  }
+
+  function fire(board, idx) {
+    if (board.shots[idx]) return { result: 'repeat', ship: -1 };
+    var i = shipAt(board, idx);
+    if (i < 0) { board.shots[idx] = 1; return { result: 'miss', ship: -1 }; }
+    board.shots[idx] = 2;
+    var cs = cellsOf(board.ships[i]);
+    var all = true;
+    for (var k = 0; k < cs.length; k++) if (board.shots[cs[k]] !== 2) { all = false; break; }
+    if (all) { board.sunk[i] = true; return { result: 'sunk', ship: i }; }
+    return { result: 'hit', ship: i };
+  }
+
+  function allSunk(board) {
+    for (var i = 0; i < board.sunk.length; i++) if (!board.sunk[i]) return false;
+    return board.sunk.length > 0;
+  }
+
+  // چیزی که شلیک‌کننده واقعاً می‌داند: شلیک‌ها و کشتی‌های غرق‌شده، نه جای بقیه.
+  // هوش مصنوعی فقط همین را می‌گیرد تا تقلب از ساختار کد ناممکن باشد.
+  function knowledge(board) {
+    var sunkCells = [], remaining = [];
+    for (var i = 0; i < board.ships.length; i++) {
+      if (board.sunk[i]) sunkCells = sunkCells.concat(cellsOf(board.ships[i]));
+      else remaining.push(board.ships[i].len);
+    }
+    // ترتیب کشتی‌ها در آرایه هم نباید چیزی لو بدهد
+    sunkCells.sort(function (a, b) { return a - b; });
+    remaining.sort(function (a, b) { return b - a; });
+    return { shots: board.shots.slice(), sunkCells: sunkCells, remaining: remaining };
+  }
+
+  function knowParts(k) {
+    var sunk = new Array(N * N).fill(0);
+    for (var i = 0; i < k.sunkCells.length; i++) sunk[k.sunkCells[i]] = 1;
+    var block = halo(k.sunkCells);
+    var open = [], free = [];
+    for (var j = 0; j < N * N; j++) {
+      if (k.shots[j] === 2 && !sunk[j]) open.push(j);
+      if (!k.shots[j] && !block[j]) free.push(j);
+    }
+    return { sunk: sunk, block: block, open: open, free: free };
+  }
+
+  function pick(list, rnd) { return list[Math.floor(rnd() * list.length)]; }
+
+  // شکار و هدف: دور اصابت باز را می‌زند و اگر دو اصابت هم‌راستا دارد
+  // در همان راستا ادامه می‌دهد؛ وگرنه شطرنجی و تصادفی می‌گردد.
+  function huntTarget(k, kp, rnd) {
+    var freeF = new Array(N * N).fill(0);
+    for (var i = 0; i < kp.free.length; i++) freeF[kp.free[i]] = 1;
+    if (kp.open.length) {
+      var openF = new Array(N * N).fill(0);
+      for (var o = 0; o < kp.open.length; o++) openF[kp.open[o]] = 1;
+      var start = kp.open[0];
+      // گروه اصابت‌های باز به‌هم‌چسبیده‌ی این خانه
+      var group = [start], seen = {};
+      seen[start] = 1;
+      for (var g = 0; g < group.length; g++) {
+        var x = group[g], r = (x / N) | 0, c = x % N;
+        var nb = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
+        for (var q = 0; q < 4; q++) {
+          var rr = nb[q][0], cc = nb[q][1], y = rr * N + cc;
+          if (rr < 0 || rr >= N || cc < 0 || cc >= N || seen[y] || !openF[y]) continue;
+          seen[y] = 1; group.push(y);
+        }
+      }
+      var cand = [];
+      if (group.length >= 2) {
+        var vert = ((group[0] / N) | 0) !== ((group[1] / N) | 0);
+        var lo = Math.min.apply(null, group), hi = Math.max.apply(null, group);
+        var step = vert ? N : 1;
+        var before = lo - step, after = hi + step;
+        if (vert ? before >= 0 : (before >= 0 && ((before / N) | 0) === ((lo / N) | 0))) cand.push(before);
+        if (vert ? after < N * N : ((after / N) | 0) === ((hi / N) | 0)) cand.push(after);
+      } else {
+        var r0 = (start / N) | 0, c0 = start % N;
+        if (r0 > 0) cand.push(start - N);
+        if (r0 < N - 1) cand.push(start + N);
+        if (c0 > 0) cand.push(start - 1);
+        if (c0 < N - 1) cand.push(start + 1);
+      }
+      cand = cand.filter(function (z) { return freeF[z]; });
+      if (cand.length) return pick(cand, rnd);
+    }
+    var par = kp.free.filter(function (z) { return (((z / N) | 0) + z % N) % 2 === 0; });
+    return pick(par.length ? par : kp.free, rnd);
+  }
+
+  // چگالی احتمال: هر جای ممکن برای هر کشتی باقی‌مانده که با دانسته‌ها جور
+  // است شمرده می‌شود. جایی که اصابت باز را بپوشاند وزن خیلی بیشتری دارد، و
+  // جایی که کنار اصابت باز باشد ولی آن را نپوشاند ناممکن است، چون آن اصابت
+  // مال کشتی دیگری است و کشتی‌ها به هم نمی‌چسبند.
+  function density(k, kp) {
+    var score = new Array(N * N).fill(0);
+    var openF = new Array(N * N).fill(0);
+    for (var o = 0; o < kp.open.length; o++) openF[kp.open[o]] = 1;
+    var targeting = kp.open.length > 0;
+    for (var li = 0; li < k.remaining.length; li++) {
+      var len = k.remaining[li];
+      for (var v = 0; v < 2; v++) {
+        for (var r = 0; r < N; r++) {
+          for (var c = 0; c < N; c++) {
+            var s = { r: r, c: c, len: len, v: !!v };
+            if (!fits(s)) continue;
+            var cs = cellsOf(s), bad = false, covers = 0;
+            for (var i = 0; i < cs.length; i++) {
+              var x = cs[i];
+              if (k.shots[x] === 1 || kp.sunk[x] || kp.block[x]) { bad = true; break; }
+              if (k.shots[x] === 2) covers++;
+            }
+            if (bad) continue;
+            var h = halo(cs);
+            for (var j = 0; j < N * N && !bad; j++) if (h[j] && openF[j] && cs.indexOf(j) < 0) bad = true;
+            if (bad) continue;
+            if (targeting && !covers) continue;
+            var w = covers ? Math.pow(30, covers) : 1;
+            for (var m = 0; m < cs.length; m++) if (!k.shots[cs[m]]) score[cs[m]] += w;
+          }
+        }
+      }
+    }
+    return score;
+  }
+
+  /* شلیک هوش مصنوعی فقط از روی دانسته‌ها.
+     آسان: تصادفی. متوسط: شکار و هدف. سخت: چگالی احتمال. */
+  function aiShot(k, level, rnd) {
+    rnd = rnd || Math.random;
+    var kp = knowParts(k);
+    if (!kp.free.length) return -1;
+    if (level === 'easy') return pick(kp.free, rnd);
+    if (level === 'medium') return huntTarget(k, kp, rnd);
+    var score = density(k, kp);
+    var best = -1, top = [];
+    for (var i = 0; i < kp.free.length; i++) {
+      var x = kp.free[i];
+      if (score[x] > best) { best = score[x]; top = [x]; }
+      else if (score[x] === best) top.push(x);
+    }
+    return pick(top, rnd);
+  }
+
+  /* یک دست کامل: بازیکن به صفحه‌ی foe شلیک می‌کند، حریف به me.
+     نوبت‌ها یکی‌یکی‌اند، چه شلیک بخورد چه نخورد. */
+  function newGame(myShips, foeShips, level) {
+    return {
+      me: makeBoard(myShips), foe: makeBoard(foeShips), level: level,
+      turn: 'me', shots: { me: 0, ai: 0 }, log: [], winner: null
+    };
+  }
+
+  function playerFire(G, idx) {
+    if (G.winner || G.turn !== 'me' || !canFire(G.foe, idx)) return null;
+    var res = fire(G.foe, idx);
+    G.shots.me++;
+    G.log.push({ by: 'me', i: idx, r: res.result });
+    if (allSunk(G.foe)) G.winner = 'me'; else G.turn = 'ai';
+    return { i: idx, result: res.result, ship: res.ship };
+  }
+
+  function aiFire(G, rnd) {
+    if (G.winner || G.turn !== 'ai') return null;
+    var idx = aiShot(knowledge(G.me), G.level, rnd);
+    if (idx < 0) return null;
+    var res = fire(G.me, idx);
+    G.shots.ai++;
+    G.log.push({ by: 'ai', i: idx, r: res.result });
+    if (allSunk(G.me)) G.winner = 'ai'; else G.turn = 'me';
+    return { i: idx, result: res.result, ship: res.ship };
+  }
+
+  var api = {
+    N: N, FLEET: FLEET, cellsOf: cellsOf, fits: fits, halo: halo, canPlace: canPlace,
+    validFleet: validFleet, randomFleet: randomFleet, makeBoard: makeBoard, shipAt: shipAt,
+    blocked: blocked, canFire: canFire, fire: fire, allSunk: allSunk, knowledge: knowledge,
+    aiShot: aiShot, newGame: newGame, playerFire: playerFire, aiFire: aiFire
+  };
+  if (typeof self !== 'undefined') self.BattleshipEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = BattleshipEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = BattleshipEngineFactory();
+  var N = E.N;
+
+  C.boot({});
+  var NAME = { fa: 'نبرد دریایی', en: 'Battleship', zh: '海战棋' };
+  var ctx = C.game({
+    id: 'battleship',
+    name: NAME,
+    accent: '#3A7AAA',
+    mood: 'minesweeper',
+    strings: {
+      fa: {
+        placeTitle: 'ناوگانت را بچین', placeHint: 'کشتی را انتخاب کن و روی دریا بزن. روی خودش بزنی می‌چرخد.',
+        placeDone: 'ناوگان آماده است', rotate: 'چرخاندن', randomFleet: 'چیدن تصادفی', startBattle: 'شروع نبرد',
+        notHere: 'اینجا جا نمی‌شود؛ کشتی‌ها به هم نمی‌چسبند',
+        yourFleet: 'ناوگان تو', foeSea: 'دریای حریف',
+        yourTurn: 'نوبت توست، شلیک کن', aiming: 'حریف نشانه می‌گیرد…',
+        shotYou: 'شلیک تو', shotAi: 'شلیک حریف', miss: 'آب', hit: 'اصابت', sunk: 'غرق شد',
+        shots: 'شلیک', accuracy: 'دقت', shipsLeft: 'کشتی‌های سالم تو', rival: 'حریف',
+        newMatch: 'دست تازه', dailyBs: 'نبرد دریایی روزانه', vsMedium: 'مقابل حریف متوسط',
+        ship: 'کشتی {n} خانه‌ای', move: 'جابه‌جایی', fireKey: 'شلیک یا گذاشتن کشتی', pickShip: 'انتخاب کشتی',
+        wonIn: 'برد در {n} شلیک',
+        tutTitle1: 'ناوگان را بچین', tutText1: 'پنج کشتی داری: ۵، ۴، ۳، ۳ و ۲ خانه. هیچ دو کشتی‌ای حتی از گوشه به هم نمی‌چسبند. دکمه‌ی تصادفی هم هست.',
+        tutTitle2: 'نوبتی شلیک کنید', tutText2: 'هر نوبت یک شلیک. آب، اصابت یا غرق. اولین کسی که همه‌ی ناوگان حریف را غرق کند می‌برد.',
+        tutTitle3: 'دور کشتی غرق‌شده خالی است', tutText3: 'چون کشتی‌ها به هم نمی‌چسبند، خانه‌های دور کشتی غرق‌شده علامت می‌خورند و لازم نیست آنجا شلیک کنی.'
+      },
+      en: {
+        placeTitle: 'Place your fleet', placeHint: 'Pick a ship and tap the sea. Tap it again to rotate.',
+        placeDone: 'Fleet ready', rotate: 'Rotate', randomFleet: 'Random', startBattle: 'Start battle',
+        notHere: 'It does not fit here; ships never touch',
+        yourFleet: 'Your fleet', foeSea: 'Rival waters',
+        yourTurn: 'Your turn, fire', aiming: 'Rival is aiming…',
+        shotYou: 'Your shot', shotAi: 'Rival shot', miss: 'Miss', hit: 'Hit', sunk: 'Sunk',
+        shots: 'Shots', accuracy: 'Accuracy', shipsLeft: 'Your ships afloat', rival: 'Rival',
+        newMatch: 'New match', dailyBs: 'Daily battleship', vsMedium: 'against the medium AI',
+        ship: '{n}-cell ship', move: 'Move', fireKey: 'Fire or place ship', pickShip: 'Pick ship',
+        wonIn: 'Won in {n} shots',
+        tutTitle1: 'Place your fleet', tutText1: 'You have five ships: 5, 4, 3, 3 and 2 cells. No two ships touch, not even at a corner. There is a random button too.',
+        tutTitle2: 'Take turns firing', tutText2: 'One shot per turn: miss, hit or sunk. The first to sink the whole rival fleet wins.',
+        tutTitle3: 'Around a wreck is empty', tutText3: 'Ships never touch, so the cells around a sunk ship get marked and you never need to fire there.'
+      },
+      zh: {
+        placeTitle: '布置舰队', placeHint: '选一艘船，点海面放下。再点一次可以旋转。',
+        placeDone: '舰队就绪', rotate: '旋转', randomFleet: '随机布置', startBattle: '开战',
+        notHere: '这里放不下；船与船不能相邻',
+        yourFleet: '你的舰队', foeSea: '对手海域',
+        yourTurn: '轮到你开炮', aiming: '对手正在瞄准…',
+        shotYou: '你的炮击', shotAi: '对手炮击', miss: '落空', hit: '命中', sunk: '击沉',
+        shots: '炮击', accuracy: '命中率', shipsLeft: '你剩下的船', rival: '对手',
+        newMatch: '新一局', dailyBs: '每日海战棋', vsMedium: '对战中等电脑',
+        ship: '{n} 格船', move: '移动', fireKey: '开炮或放船', pickShip: '选择船只',
+        wonIn: '{n} 炮获胜',
+        tutTitle1: '布置舰队', tutText1: '你有五艘船：5、4、3、3、2 格。任何两艘船都不相邻，连斜角也不行。也可以随机布置。',
+        tutTitle2: '轮流开炮', tutText2: '每回合一炮：落空、命中或击沉。先击沉对方全部舰队的人获胜。',
+        tutTitle3: '沉船周围是空的', tutText3: '因为船不相邻，被击沉的船周围会被标出，不必再往那里开炮。'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', { level: 'medium' });
+  // روزانه با حریف متوسط است: سخت بیشتر شانسِ چیدمان را می‌سنجد تا مهارت را،
+  // و بازی روزانه باید برای همه منصفانه و تمام‌شدنی بماند.
+  var DAILY_LEVEL = 'medium';
+
+  var S = null, aiTimer = null;
+  var cur = { me: 44, foe: 44 }, kbUsed = false, hover = -1;
+
+  var top = el('div', { class: 'bs-top' });
+  var status = el('p', { class: 'bs-status', role: 'status', 'aria-live': 'polite' });
+  var cvFoe = el('canvas', { class: 'bs-cv', role: 'img' });
+  var cvMe = el('canvas', { class: 'bs-cv', role: 'img' });
+  var foePips = el('div', { class: 'bs-pips' });
+  var mePips = el('div', { class: 'bs-pips' });
+  var foeTitle = el('span'), meTitle = el('span');
+  var foeBox = el('div', { class: 'bs-box' }, [el('div', { class: 'bs-label' }, [foeTitle, foePips]), cvFoe]);
+  var meBox = el('div', { class: 'bs-box' }, [el('div', { class: 'bs-label' }, [meTitle, mePips]), cvMe]);
+  var seas = el('div', { class: 'bs-seas' }, [foeBox, meBox]);
+  var tray = el('div', { class: 'bs-tray' });
+  var actions = el('div', { class: 'bs-actions' });
+  var wrap = el('div', { class: 'bs-wrap' }, [top, status, seas, tray, actions]);
+
+  ctx.stat('shots', C.t('shots'));
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ ساخت */
+
+  function freshPlace(level, daily) {
+    stopAi();
+    S = {
+      phase: 'place', level: level, daily: daily || null,
+      ships: E.FLEET.map(function () { return null; }), sel: 0, vert: false,
+      G: null, startedAt: Date.now(), lastMe: -1, lastAi: -1, msgMe: '', msgAi: ''
+    };
+    hover = -1;
+    ctx.setStat('shots', 0);
+    render();
+    save();
+  }
+
+  // ناوگان حریف در روزانه از تاریخ می‌آید تا برای همه یکی باشد؛ ناوگان خود
+  // بازیکن آزاد است، پس فقط همین سمت را می‌شود قطعی کرد.
+  function foeFleet() {
+    return S.daily ? E.randomFleet(C.daily('battleship', S.daily).rng) : E.randomFleet(Math.random);
+  }
+
+  function startBattle() {
+    if (!S || S.phase !== 'place' || !E.validFleet(S.ships)) { C.feedback('bad'); return; }
+    S.G = E.newGame(S.ships, foeFleet(), S.level);
+    S.phase = 'battle';
+    S.startedAt = Date.now();
+    hover = -1;
+    C.feedback('good');
+    render();
+    save();
+  }
+
+  /* ------------------------------------------------------------ رسم */
+
+  function palette() {
+    var cs = getComputedStyle(document.documentElement);
+    function v(n, f) { var x = cs.getPropertyValue(n).trim(); return x || f; }
+    return {
+      water: v('--c-surface-2', '#F7F1E8'), line: v('--c-line', '#E7DACA'),
+      ship: v('--game', '#3A7AAA'), text: v('--c-text', '#2C2620'),
+      dim: v('--c-text-dim', '#7C7063'), faint: v('--c-text-faint', '#A99C8C'),
+      bad: v('--c-bad', '#C8574B'), good: v('--c-good', '#5C9A6B')
+    };
+  }
+
+  // یک دریا را روی بوم می‌کشد؛ صفحه و کارت نتیجه هر دو از همین استفاده می‌کنند.
+  // o: { ships, board, reveal, sel, preview, cursor, last }
+  function paintSea(g, x0, y0, size, o, P) {
+    var cs = size / N, board = o.board;
+    g.save();
+    g.translate(x0, y0);
+    g.fillStyle = P.water;
+    C.rrect(g, 0, 0, size, size, cs * 0.35);
+    g.fill();
+
+    var blk = board ? E.blocked(board) : null;
+    var ships = o.ships || [];
+    for (var i = 0; i < ships.length; i++) {
+      var s = ships[i];
+      if (!s) continue;
+      var sunk = !!(board && board.sunk[i]);
+      if (!sunk && !o.reveal) continue;
+      var w = s.v ? 1 : s.len, h = s.v ? s.len : 1;
+      g.globalAlpha = sunk ? 0.32 : (o.ghost ? 0.4 : 0.9);
+      g.fillStyle = sunk ? P.bad : P.ship;
+      C.rrect(g, s.c * cs + cs * 0.1, s.r * cs + cs * 0.1, w * cs - cs * 0.2, h * cs - cs * 0.2, cs * 0.34);
+      g.fill();
+      g.globalAlpha = 1;
+      if (o.sel === i) {
+        g.strokeStyle = P.text;
+        g.lineWidth = Math.max(2, cs * 0.08);
+        C.rrect(g, s.c * cs + cs * 0.06, s.r * cs + cs * 0.06, w * cs - cs * 0.12, h * cs - cs * 0.12, cs * 0.36);
+        g.stroke();
+      }
+    }
+    if (o.preview) {
+      g.globalAlpha = 0.45;
+      g.fillStyle = o.preview.ok ? P.ship : P.bad;
+      for (var p = 0; p < o.preview.cells.length; p++) {
+        var pc = o.preview.cells[p];
+        C.rrect(g, (pc % N) * cs + cs * 0.12, ((pc / N) | 0) * cs + cs * 0.12, cs * 0.76, cs * 0.76, cs * 0.2);
+        g.fill();
+      }
+      g.globalAlpha = 1;
+    }
+
+    // خط‌های شبکه
+    g.strokeStyle = P.line;
+    g.lineWidth = Math.max(1, cs * 0.03);
+    g.beginPath();
+    for (var k = 1; k < N; k++) {
+      g.moveTo(k * cs, 0); g.lineTo(k * cs, size);
+      g.moveTo(0, k * cs); g.lineTo(size, k * cs);
+    }
+    g.stroke();
+
+    if (board) {
+      for (var x = 0; x < N * N; x++) {
+        var cx = (x % N) * cs + cs / 2, cy = ((x / N) | 0) * cs + cs / 2;
+        var sh = board.shots[x];
+        if (sh === 1) {
+          g.fillStyle = P.dim;
+          g.globalAlpha = 0.6;
+          g.beginPath(); g.arc(cx, cy, cs * 0.13, 0, Math.PI * 2); g.fill();
+          g.globalAlpha = 1;
+        } else if (sh === 2) {
+          g.fillStyle = P.bad;
+          g.beginPath(); g.arc(cx, cy, cs * 0.27, 0, Math.PI * 2); g.fill();
+          g.strokeStyle = P.water;
+          g.lineWidth = Math.max(1.5, cs * 0.07);
+          g.beginPath();
+          g.moveTo(cx - cs * 0.12, cy - cs * 0.12); g.lineTo(cx + cs * 0.12, cy + cs * 0.12);
+          g.moveTo(cx + cs * 0.12, cy - cs * 0.12); g.lineTo(cx - cs * 0.12, cy + cs * 0.12);
+          g.stroke();
+        } else if (blk[x]) {
+          g.fillStyle = P.faint;
+          g.globalAlpha = 0.55;
+          g.beginPath(); g.arc(cx, cy, cs * 0.07, 0, Math.PI * 2); g.fill();
+          g.globalAlpha = 1;
+        }
+      }
+    }
+    if (o.last >= 0) {
+      g.strokeStyle = P.text;
+      g.lineWidth = Math.max(1.5, cs * 0.06);
+      g.beginPath();
+      g.arc((o.last % N) * cs + cs / 2, ((o.last / N) | 0) * cs + cs / 2, cs * 0.4, 0, Math.PI * 2);
+      g.stroke();
+    }
+    if (o.cursor >= 0) {
+      g.strokeStyle = P.ship;
+      g.lineWidth = Math.max(2, cs * 0.1);
+      C.rrect(g, (o.cursor % N) * cs + cs * 0.06, ((o.cursor / N) | 0) * cs + cs * 0.06, cs * 0.88, cs * 0.88, cs * 0.18);
+      g.stroke();
+    }
+    g.restore();
+  }
+
+  function fitCanvas(cv) {
+    var w = cv.clientWidth || 300;
+    var d = window.devicePixelRatio || 1;
+    var px = Math.round(w * d);
+    if (cv.width !== px) { cv.width = px; cv.height = px; }
+    var g = cv.getContext('2d');
+    g.setTransform(d, 0, 0, d, 0, 0);
+    g.clearRect(0, 0, w, w);
+    return { g: g, w: w };
+  }
+
+  function draw() {
+    if (!S) return;
+    var P = palette();
+    if (S.phase === 'place') {
+      var f = fitCanvas(cvMe);
+      paintSea(f.g, 0, 0, f.w, {
+        ships: S.ships, reveal: true, sel: S.sel, preview: placePreview(),
+        cursor: kbUsed ? cur.me : -1, last: -1
+      }, P);
+      return;
+    }
+    var G = S.G, over = S.phase === 'over';
+    var ff = fitCanvas(cvFoe);
+    paintSea(ff.g, 0, 0, ff.w, {
+      board: G.foe, ships: G.foe.ships, reveal: over, ghost: over, sel: -1,
+      cursor: (kbUsed && !over) ? cur.foe : -1, last: S.lastMe,
+      preview: (!over && hover >= 0 && E.canFire(G.foe, hover) && !busy()) ? { cells: [hover], ok: true } : null
+    }, P);
+    var fm = fitCanvas(cvMe);
+    paintSea(fm.g, 0, 0, fm.w, { board: G.me, ships: G.me.ships, reveal: true, sel: -1, cursor: -1, last: S.lastAi }, P);
+  }
+
+  function pips(box, board, ships) {
+    box.innerHTML = '';
+    for (var i = 0; i < ships.length; i++) {
+      var sunk = !!(board && board.sunk[i]);
+      box.appendChild(el('i', { class: 'bs-pip' + (sunk ? ' bs-pip--sunk' : ''), style: { width: (ships[i] ? ships[i].len : E.FLEET[i]) * 6 + 'px' } }));
+    }
+  }
+
+  function busy() { return !!(S && S.phase === 'battle' && S.G && S.G.turn === 'ai'); }
+
+  function render() {
+    top.innerHTML = '';
+    if (S.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' },
+        [C.icon('calendar', 14), el('span', { text: C.t('dailyBs') + ' — ' + C.num(S.daily) })]));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('vsMedium') }));
+    } else if (S.phase === 'place') {
+      // سختی فقط پیش از نبرد عوض می‌شود؛ وسط نبرد یعنی دست تازه
+      top.appendChild(C.ui.segmented([
+        { value: 'easy', label: C.t('easy') }, { value: 'medium', label: C.t('medium') }, { value: 'hard', label: C.t('hard') }
+      ], S.level, function (v) {
+        S.level = v;
+        prefs.level = v;
+        ctx.store.set('prefs', prefs);
+      }));
+    } else {
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('rival') + ' · ' + C.t(S.level) }));
+    }
+
+    var placing = S.phase === 'place';
+    foeBox.hidden = placing;
+    meBox.classList.toggle('bs-box--small', !placing);
+    foeTitle.textContent = C.t('foeSea');
+    meTitle.textContent = C.t('yourFleet');
+    cvFoe.setAttribute('aria-label', C.t('foeSea'));
+    cvMe.setAttribute('aria-label', C.t('yourFleet'));
+    tray.hidden = !placing;
+    actions.hidden = !placing;
+    if (placing) { renderTray(); pips(mePips, null, S.ships); }
+    else { pips(foePips, S.G.foe, S.G.foe.ships); pips(mePips, S.G.me, S.G.me.ships); ctx.setStat('shots', S.G.shots.me); }
+    renderStatus();
+    draw();
+  }
+
+  function renderStatus(msg) {
+    status.classList.remove('bs-status--wait');
+    status.innerHTML = '';
+    if (msg) { status.textContent = msg; return; }
+    if (S.phase === 'place') {
+      status.textContent = E.validFleet(S.ships) ? C.t('placeDone') : C.t('placeHint');
+      return;
+    }
+    if (S.phase === 'over') { status.textContent = S.G.winner === 'me' ? C.t('won') : C.t('lost'); return; }
+    var parts = [];
+    if (S.msgMe) parts.push(C.t('shotYou') + ': ' + S.msgMe);
+    if (S.msgAi) parts.push(C.t('shotAi') + ': ' + S.msgAi);
+    var head = el('b', { text: busy() ? C.t('aiming') : C.t('yourTurn') });
+    status.appendChild(head);
+    if (parts.length) status.appendChild(document.createTextNode(' · ' + parts.join(' · ')));
+    if (busy()) status.classList.add('bs-status--wait');
+  }
+
+  function renderTray() {
+    tray.innerHTML = '';
+    for (var i = 0; i < E.FLEET.length; i++) {
+      (function (k) {
+        var bars = [];
+        for (var j = 0; j < E.FLEET[k]; j++) bars.push(el('i'));
+        var b = el('button', {
+          type: 'button',
+          class: 'bs-chip' + (S.sel === k ? ' bs-chip--on' : '') + (S.ships[k] ? ' bs-chip--placed' : ''),
+          'aria-label': C.t('ship', { n: C.num(E.FLEET[k]) }),
+          'aria-pressed': S.sel === k ? 'true' : 'false'
+        }, bars);
+        b.addEventListener('click', function () { selectShip(k); });
+        tray.appendChild(b);
+      })(i);
+    }
+    actions.innerHTML = '';
+    var rot = el('button', { type: 'button', class: 'ch-btn ch-btn--soft' }, [C.icon('refresh', 18), el('span', { text: C.t('rotate') })]);
+    rot.addEventListener('click', function () { C.feedback('tap'); rotateSel(); });
+    var rnd = el('button', { type: 'button', class: 'ch-btn ch-btn--soft' }, [C.icon('sparkle', 18), el('span', { text: C.t('randomFleet') })]);
+    rnd.addEventListener('click', function () { C.feedback('tap'); randomize(); });
+    var go = el('button', { type: 'button', class: 'ch-btn ch-btn--primary', text: C.t('startBattle') });
+    go.disabled = !E.validFleet(S.ships);
+    go.addEventListener('click', startBattle);
+    actions.appendChild(rot);
+    actions.appendChild(rnd);
+    actions.appendChild(go);
+  }
+
+  /* ------------------------------------------------------- چیدمان */
+
+  // کشتی‌ای که روی این خانه نشسته، در حالت چیدمان
+  function placedAt(idx) {
+    for (var i = 0; i < S.ships.length; i++) {
+      if (S.ships[i] && E.cellsOf(S.ships[i]).indexOf(idx) >= 0) return i;
+    }
+    return -1;
+  }
+
+  // لنگر کشتی خانه‌ی لمس‌شده است، ولی اگر بیرون می‌زد به داخل هل داده می‌شود؛
+  // وگرنه لمس نزدیک لبه هیچ‌وقت جواب نمی‌داد و بازیکن نمی‌فهمید چرا.
+  function shipFor(k, idx, vert) {
+    var len = E.FLEET[k];
+    var r = (idx / N) | 0, c = idx % N;
+    if (vert) r = Math.min(r, N - len); else c = Math.min(c, N - len);
+    return { r: r, c: c, len: len, v: !!vert };
+  }
+
+  function placePreview() {
+    if (S.phase !== 'place' || S.sel < 0) return null;
+    var at = kbUsed ? cur.me : hover;
+    if (at < 0) return null;
+    var on = placedAt(at);
+    if (on >= 0) return null;
+    var s = shipFor(S.sel, at, S.vert);
+    return { cells: E.cellsOf(s), ok: E.canPlace(S.ships, s, S.sel) };
+  }
+
+  function nextFree() {
+    for (var i = 0; i < S.ships.length; i++) if (!S.ships[i]) return i;
+    return -1;
+  }
+
+  function selectShip(k) {
+    if (S.phase !== 'place') return;
+    S.sel = k;
+    if (S.ships[k]) S.vert = S.ships[k].v;
+    C.feedback('select');
+    render();
+  }
+
+  function tapMe(idx) {
+    if (!S || S.phase !== 'place') return;
+    var on = placedAt(idx);
+    if (on >= 0 && on !== S.sel) { selectShip(on); return; }
+    if (on >= 0) { rotateSel(); return; }
+    if (S.sel < 0) return;
+    var s = shipFor(S.sel, idx, S.vert);
+    if (!E.canPlace(S.ships, s, S.sel)) { refuse(); return; }
+    S.ships[S.sel] = s;
+    S.sel = nextFree();
+    C.feedback('place');
+    render();
+  }
+
+  function rotateSel() {
+    if (S.phase !== 'place') return;
+    if (S.sel < 0 || !S.ships[S.sel]) { S.vert = !S.vert; render(); return; }
+    var old = S.ships[S.sel];
+    var s = shipFor(S.sel, old.r * N + old.c, !old.v);
+    if (!E.canPlace(S.ships, s, S.sel)) { refuse(); return; }
+    S.ships[S.sel] = s;
+    S.vert = s.v;
+    C.feedback('place');
+    render();
+  }
+
+  function randomize() {
+    if (S.phase !== 'place') return;
+    S.ships = E.randomFleet(Math.random);
+    S.sel = -1;
+    render();
+  }
+
+  function refuse() {
+    C.feedback('bad');
+    C.ui.shake(cvMe);
+    renderStatus(C.t('notHere'));
+  }
+
+  /* ----------------------------------------------------------- نبرد */
+
+  function word(r) { return C.t(r === 'miss' ? 'miss' : (r === 'sunk' ? 'sunk' : 'hit')); }
+
+  function tapFoe(idx) {
+    if (!S || S.phase !== 'battle' || busy()) return;
+    if (!E.canFire(S.G.foe, idx)) { C.feedback('bad'); return; }
+    var res = E.playerFire(S.G, idx);
+    if (!res) return;
+    S.lastMe = idx;
+    S.msgMe = word(res.result);
+    if (res.result === 'sunk') { C.audio.sfx('boom'); C.haptic('success'); }
+    else if (res.result === 'hit') { C.audio.sfx('hit'); C.haptic('success'); }
+    else { C.audio.sfx('place'); C.haptic('tap'); }
+    after();
+  }
+
+  function after() {
+    save();
+    render();
+    if (S.G.winner) { finish(); return; }
+    maybeAi();
+  }
+
+  // مکث کوتاه تا بازیکن جای شلیک حریف را ببیند، نه اینکه منتظر بماند
+  function maybeAi() {
+    stopAi();
+    if (!busy()) return;
+    aiTimer = setTimeout(function () {
+      aiTimer = null;
+      if (!busy()) return;
+      var rnd = S.daily ? C.daily('battleship', S.daily + '|' + S.G.shots.ai).rng : Math.random;
+      var res = E.aiFire(S.G, rnd);
+      if (!res) return;
+      S.lastAi = res.i;
+      S.msgAi = word(res.result);
+      if (res.result !== 'miss') { C.audio.sfx(res.result === 'sunk' ? 'boom' : 'hit'); C.haptic('warn'); }
+      else C.audio.sfx('tick');
+      after();
+    }, 700);
+  }
+  function stopAi() { if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; } }
+
+  function finish() {
+    stopAi();
+    var G = S.G;
+    S.phase = 'over';
+    S.elapsed = Date.now() - S.startedAt;
+    render();
+    var won = G.winner === 'me';
+    var hits = 0;
+    for (var i = 0; i < N * N; i++) if (G.foe.shots[i] === 2) hits++;
+    var acc = G.shots.me ? Math.round(hits * 100 / G.shots.me) : 0;
+    var afloat = G.me.sunk.filter(function (x) { return !x; }).length;
+
+    // همان بازه‌ی نقطه‌بازی تا هیچ بازی‌ای راه میان‌بر سکه و لیگ نشود
+    var base = { easy: 5, medium: 10, hard: 18 }[S.level] || 10;
+    var coins = Math.max(2, Math.round(won ? base : base * 0.35)) + (S.daily ? 8 : 0);
+    var points = Math.max(3, Math.round(won ? base * 4 : base * 1.2)) + (S.daily ? 25 : 0);
+
+    if (won) {
+      C.achievements.unlock('bs-win');
+      if (S.level === 'hard') C.achievements.unlock('bs-hard');
+      if (afloat === G.me.ships.length) C.achievements.unlock('bs-intact');
+      C.stats.best('battleship', 'shots', G.shots.me, true);
+    }
+    if (S.daily) {
+      var first = C.stats.daily('battleship', S.daily, {
+        label: won ? C.t('wonIn', { n: C.num(G.shots.me) }) : C.t('lost'), win: won, diff: afloat
+      });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+
+    var foe = JSON.parse(JSON.stringify(G.foe));
+    var name = C.t('appName') + ' · ' + (NAME[C.state.settings.lang] || NAME.en);
+    ctx.finish({
+      won: won,
+      title: won ? C.t('won') : C.t('lost'),
+      timeMs: S.elapsed, coins: coins, points: points,
+      lines: [
+        { label: C.t('shots'), value: C.num(G.shots.me) },
+        { label: C.t('accuracy'), value: C.num(acc) + '%' },
+        { label: C.t('shipsLeft'), value: C.num(afloat) + ' / ' + C.num(G.me.ships.length) },
+        { label: C.t('rival'), value: C.t(S.level) }
+      ],
+      shareText: name + (S.daily ? ('\n' + C.t('daily') + ' ' + S.daily) : '') + '\n' +
+        (won ? C.t('wonIn', { n: C.num(G.shots.me) }) : C.t('lost')) + ' · ' + C.t('accuracy') + ' ' + C.num(acc) + '%',
+      paint: function (g, W, H) {
+        var side = Math.min(W, H);
+        paintSea(g, (W - side) / 2, (H - side) / 2, side,
+          { board: foe, ships: foe.ships, reveal: true, ghost: true, sel: -1, cursor: -1, last: -1 }, palette());
+      },
+      onAgain: S.daily ? null : function () { freshPlace(S.level); }
+    });
+  }
+
+  /* --------------------------------------------------------- ذخیره */
+
+  ctx.autosave(function () {
+    if (!S || S.phase !== 'battle' || !S.G) return { inProgress: false };
+    return {
+      v: 1, level: S.level, daily: S.daily, G: S.G,
+      elapsed: Date.now() - S.startedAt, lastMe: S.lastMe, lastAi: S.lastAi
+    };
+  });
+  function save() { ctx.save(); }
+
+  function askNew() {
+    function go() { freshPlace(S && S.daily ? DAILY_LEVEL : prefs.level, S ? S.daily : dailyDate); }
+    if (!S || S.phase !== 'battle') { go(); return; }
+    C.ui.confirm({ title: C.t('newMatch'), body: C.t('resetWarn'), onOk: go });
+  }
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('tutText1') }),
+        el('p', { class: 'ch-dim', text: C.t('tutText2') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          kb('← ↑ → ↓', C.t('move')),
+          kb('Space / Enter', C.t('fireKey')),
+          kb('R', C.t('rotate')),
+          kb('X', C.t('randomFleet')),
+          kb('1 – 5', C.t('pickShip'))
+        ])
+      ],
+      actions: [
+        { label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('done'), kind: 'primary' }
+      ]
+    });
+  }
+  function kb(k, what) {
+    return el('div', { class: 'ch-item' }, [
+      el('div', { class: 'ch-item__label', text: what }),
+      el('span', { class: 'ch-badge', text: k })
+    ]);
+  }
+
+  var GRID = function (x, y) {
+    var s = '';
+    for (var i = 0; i <= 4; i++) {
+      s += '<path d="M' + (x + i * 20) + ' ' + y + 'v80M' + x + ' ' + (y + i * 20) + 'h80" stroke="var(--c-line)" stroke-width="2"/>';
+    }
+    return '<rect x="' + x + '" y="' + y + '" width="80" height="80" rx="8" fill="var(--c-surface-2)"/>' + s;
+  };
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' + GRID(60, 15) +
+        '<rect x="62" y="17" width="56" height="16" rx="7" fill="var(--game)"/>' +
+        '<rect x="122" y="57" width="16" height="36" rx="7" fill="var(--game)"/></svg>' },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' + GRID(60, 15) +
+        '<circle cx="90" cy="45" r="6" fill="var(--c-bad)"/><circle cx="110" cy="45" r="6" fill="var(--c-bad)"/>' +
+        '<circle cx="70" cy="85" r="3.5" fill="var(--c-text-dim)"/><circle cx="130" cy="25" r="3.5" fill="var(--c-text-dim)"/></svg>' },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' + GRID(60, 15) +
+        '<rect x="82" y="37" width="36" height="16" rx="7" fill="var(--c-bad)" opacity=".35"/>' +
+        '<g fill="var(--c-text-faint)"><circle cx="70" cy="25" r="2.5"/><circle cx="90" cy="25" r="2.5"/><circle cx="110" cy="25" r="2.5"/><circle cx="130" cy="25" r="2.5"/>' +
+        '<circle cx="70" cy="45" r="2.5"/><circle cx="130" cy="45" r="2.5"/>' +
+        '<circle cx="70" cy="65" r="2.5"/><circle cx="90" cy="65" r="2.5"/><circle cx="110" cy="65" r="2.5"/><circle cx="130" cy="65" r="2.5"/></g>' +
+        '<circle cx="90" cy="45" r="6" fill="var(--c-bad)"/><circle cx="110" cy="45" r="6" fill="var(--c-bad)"/></svg>' }
+  ];
+
+  /* ------------------------------------------------------ ورودی */
+
+  function cellOf(cv, e) {
+    var r = cv.getBoundingClientRect();
+    if (!r.width) return -1;
+    var c = Math.floor((e.clientX - r.left) / r.width * N);
+    var rr = Math.floor((e.clientY - r.top) / r.height * N);
+    if (c < 0 || c >= N || rr < 0 || rr >= N) return -1;
+    return rr * N + c;
+  }
+  cvMe.addEventListener('click', function (e) {
+    var i = cellOf(cvMe, e);
+    kbUsed = false;
+    if (i >= 0) tapMe(i);
+  });
+  cvFoe.addEventListener('click', function (e) {
+    var i = cellOf(cvFoe, e);
+    kbUsed = false;
+    if (i >= 0) tapFoe(i);
+  });
+  // پیش‌نمایش فقط برای موس؛ روی لمس، اشاره‌ای در کار نیست
+  function hoverOn(cv) {
+    cv.addEventListener('pointermove', function (e) {
+      if (e.pointerType !== 'mouse') return;
+      var i = cellOf(cv, e);
+      if (i !== hover) { hover = i; draw(); }
+    });
+    cv.addEventListener('pointerleave', function () { if (hover >= 0) { hover = -1; draw(); } });
+  }
+  hoverOn(cvMe);
+  hoverOn(cvFoe);
+
+  window.addEventListener('keydown', function (e) {
+    if (!S || S.phase === 'over') return;
+    if (document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
+    if (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
+    var k = e.key, placing = S.phase === 'place';
+    var which = placing ? 'me' : 'foe';
+    var d = { ArrowUp: -N, ArrowDown: N, ArrowLeft: -1, ArrowRight: 1 }[k];
+    // دریا روی بوم با مختصات ثابت کشیده می‌شود و در راست‌چین آینه نمی‌شود،
+    // پس جهت‌نماها هم برعکس نمی‌شوند.
+    if (d) {
+      var p = cur[which], r = (p / N) | 0, c = p % N;
+      if (d === -N && r > 0) p -= N;
+      if (d === N && r < N - 1) p += N;
+      if (d === -1 && c > 0) p -= 1;
+      if (d === 1 && c < N - 1) p += 1;
+      cur[which] = p;
+      kbUsed = true;
+      draw();
+      e.preventDefault();
+      return;
+    }
+    if (k === ' ' || k === 'Enter') {
+      kbUsed = true;
+      if (placing) {
+        if (S.sel < 0 && E.validFleet(S.ships) && placedAt(cur.me) < 0) startBattle();
+        else tapMe(cur.me);
+      } else tapFoe(cur.foe);
+      e.preventDefault();
+      return;
+    }
+    if (!placing) return;
+    if (k === 'r' || k === 'R') { rotateSel(); e.preventDefault(); return; }
+    if (k === 'x' || k === 'X') { randomize(); e.preventDefault(); return; }
+    var n = parseInt(k, 10);
+    if (n >= 1 && n <= E.FLEET.length) { selectShip(n - 1); e.preventDefault(); }
+  });
+
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(seas);
+  else window.addEventListener('resize', draw);
+  // رنگ‌های بوم از توکن‌ها خوانده می‌شوند؛ با عوض شدن تم سیستم باید دوباره کشیده شود
+  try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw); } catch (e) { /* مرورگر قدیمی */ }
+
+  C.onPause(function () { stopAi(); });
+  C.onResume(function () { if (S && S.phase === 'battle') maybeAi(); });
+
+  /* ---------------------------------------------------------- شروع */
+
+  function restore(v) {
+    if (!v || v.v !== 1 || !v.G || !v.G.me || !v.G.foe || v.G.winner) return false;
+    if (!E.validFleet(v.G.me.ships) || !E.validFleet(v.G.foe.ships)) return false;
+    S = {
+      phase: 'battle', level: v.level, daily: v.daily || null,
+      ships: v.G.me.ships, sel: -1, vert: false, G: v.G,
+      startedAt: Date.now() - (v.elapsed || 0), lastMe: v.lastMe, lastAi: v.lastAi, msgMe: '', msgAi: ''
+    };
+    render();
+    maybeAi();
+    return true;
+  }
+
+  var saved = ctx.loadSave();
+  if (dailyDate) {
+    if (!(saved && saved.daily === dailyDate && restore(saved))) freshPlace(DAILY_LEVEL, dailyDate);
+    if (C.stats.dailyDone('battleship', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).battleship;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec.label });
+    }
+    ctx.tutorialIfNew(TUT);
+  } else if (!(saved && restore(saved))) {
+    freshPlace(prefs.level || 'medium');
+    ctx.tutorialIfNew(TUT);
+  }
+})();
+</script>
+</body>
+</html>
