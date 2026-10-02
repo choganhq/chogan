@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 524;
+const MIN_CHECKS = 592;
 
 function ok(cond, msg) {
   checks++;
@@ -204,6 +204,186 @@ function testDots() {
   ok(/E\.applyEdge\(bd, S, e\)/.test(dtHtml), 'صفحه حرکت را با applyEdge ثبت می‌کند');
   ok(/E\.takeBack\(bd, S\)/.test(dtHtml), 'صفحه برگرداندن را با takeBack انجام می‌دهد');
   ok(!/undoOnlyAi/.test(dtHtml), 'پیام «فقط با حریف کامپیوتری» از صفحه رفته است');
+}
+
+/* --------------------------------------------------------- نونوگرام */
+function testNonogram() {
+  head('نونوگرام');
+  const E = loadEngine('nonogram', 'NonogramEngineFactory');
+  const J = (x) => JSON.stringify(x);
+
+  // عددهای یک خط، از روی قانون: طول دسته‌های پر پشت سر هم به ترتیب
+  ok(J(E.clueOf([1, 1, 0, 1, 0, 0, 1, 1, 1])) === '[2,1,3]', 'عددهای خط [۲،۱،۳] درست‌اند');
+  ok(J(E.clueOf([0, 0, 0, 0])) === '[]', 'خط خالی عدد ندارد');
+  ok(J(E.clueOf([1, 1, 1, 1, 1])) === '[5]', 'خط تمام‌پر یک دسته‌ی پنج است');
+
+  // جدول دست‌ساز ۵×۵ (یک قلب) با عددهایی که از روی شکل با دست شمرده شده‌اند
+  const heart = [
+    0, 1, 0, 1, 0,
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+    0, 1, 1, 1, 0,
+    0, 0, 1, 0, 0
+  ];
+  const heartRows = [[1, 1], [5], [5], [3], [1]];
+  const heartCols = [[2], [4], [4], [4], [2]];
+  const hc = E.cluesOf(heart, 5);
+  ok(J(hc.rows) === J(heartRows), 'قلب: عددهای سطرها همان شمارش دستی‌اند');
+  ok(J(hc.cols) === J(heartCols), 'قلب: عددهای ستون‌ها همان شمارش دستی‌اند');
+  const hs = E.solve(heartRows, heartCols);
+  ok(hs.solved && J(hs.grid) === J(heart), 'قلب: حل‌کننده از عددها دقیقاً همان شکل را می‌سازد');
+
+  // قانون‌های شناخته‌شده‌ی یک خط
+  ok(J(E.solveLine([4], [-1, -1, -1, -1, -1])) === '[-1,1,1,1,-1]', 'دسته‌ی ۴ در ۵ خانه: سه خانه‌ی وسط حتماً پرند');
+  ok(J(E.solveLine([], [-1, -1, -1])) === '[0,0,0]', 'خط بی‌عدد: همه خالی‌اند');
+  ok(J(E.solveLine([2, 2], [-1, -1, -1, -1, -1])) === '[1,1,0,1,1]', 'دو دسته‌ی ۲ در ۵ خانه فقط یک چیدمان دارد');
+  ok(E.solveLine([3], [-1, 0, -1, 0, -1]) === null, 'دسته‌ی ۳ بین خانه‌های خالی جا نمی‌شود: تناقض');
+  ok(J(E.solveLine([1], [-1, 1, -1, -1])) === '[0,1,0,0]', 'دسته‌ی ۱ که جایش معلوم است بقیه را خالی می‌کند');
+
+  // حل‌کننده‌ی خط را با شمردن همه‌ی چیدمان‌ها مقایسه می‌کنیم، برای هر خط تا ۷ خانه
+  // و هر ترکیب خانه‌ی معلوم. این مستقل از برنامه‌ریزی پویای موتور است.
+  let lineCases = 0, lineBad = 0;
+  for (let n = 1; n <= 7; n++) {
+    const full = [];
+    for (let m = 0; m < (1 << n); m++) {
+      const L = [];
+      for (let i = 0; i < n; i++) L.push((m >> i) & 1);
+      full.push(L);
+    }
+    const byClue = {};
+    for (const L of full) (byClue[J(E.clueOf(L))] = byClue[J(E.clueOf(L))] || []).push(L);
+    const partials = [];
+    for (let m = 0; m < Math.pow(3, n); m++) {
+      const P = []; let x = m;
+      for (let i = 0; i < n; i++) { P.push((x % 3) - 1); x = Math.floor(x / 3); }
+      partials.push(P);
+    }
+    for (const key of Object.keys(byClue)) {
+      const clue = JSON.parse(key);
+      for (const P of partials) {
+        lineCases++;
+        const fits = byClue[key].filter((L) => P.every((v, i) => v === -1 || v === L[i]));
+        let want = null;
+        if (fits.length) want = P.map((v, i) => fits.every((L) => L[i] === 1) ? 1 : (fits.every((L) => L[i] === 0) ? 0 : -1));
+        if (J(E.solveLine(clue, P)) !== J(want)) lineBad++;
+      }
+    }
+  }
+  ok(lineCases > 10000, 'مقایسه با شمارش کامل روی ' + lineCases + ' حالت اجرا شد');
+  ok(lineBad === 0, 'حل‌کننده‌ی خط با شمارش همه‌ی چیدمان‌ها می‌خواند (' + lineBad + ' اختلاف)');
+
+  // تولید: برای هر اندازه بذرهای زیاد. جدول فقط وقتی پذیرفته است که حل‌کننده‌ی
+  // خطی بدون حدس کاملش کند و نتیجه همان جدول تولیدشده باشد.
+  let maxMs = 0, maxTries = 0;
+  for (const [n, count] of [[5, 40], [10, 40], [15, 25]]) {
+    let solved = 0, same = 0, clues = 0, dens = 0, ran = 0;
+    for (let i = 0; i < count; i++) {
+      const t0 = Date.now();
+      const pz = E.generate(rng(n * 1000 + i * 37 + 1), n);
+      maxMs = Math.max(maxMs, Date.now() - t0);
+      maxTries = Math.max(maxTries, pz.tries);
+      ran++;
+      const r = E.solve(pz.rows, pz.cols);
+      if (r.solved) solved++;
+      if (J(r.grid) === J(pz.solution)) same++;
+      const c = E.cluesOf(pz.solution, n);
+      if (J(c.rows) === J(pz.rows) && J(c.cols) === J(pz.cols) && pz.solution.length === n * n) clues++;
+      const f = pz.solution.reduce((a, b) => a + b, 0) / (n * n);
+      if (f >= 0.45 && f <= 0.65) dens++;
+    }
+    ok(ran === count && count > 0, n + '×' + n + ': ' + ran + ' جدول ساخته شد');
+    ok(solved === count, n + '×' + n + ': همه بدون حدس حل شدند (' + solved + '/' + count + ')');
+    ok(same === count, n + '×' + n + ': جواب حل‌کننده همان جدول تولیدشده است (' + same + '/' + count + ')');
+    ok(clues === count, n + '×' + n + ': عددها از خود جدول حساب شده‌اند (' + clues + '/' + count + ')');
+    ok(dens === count, n + '×' + n + ': پرشدگی بین ۴۵ و ۶۵ درصد است (' + dens + '/' + count + ')');
+  }
+  ok(maxMs < 300, 'تولید سریع است (بیشینه ' + maxMs + 'ms)');
+  ok(maxTries < 100, 'تولید به سقف قطعی نمی‌رسد (بیشینه ' + maxTries + ' تلاش)');
+
+  // روزانه: همان مسیر صفحه، C.daily('nonogram', date) با hash32 و rng خود هسته
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  const hashSrc = (core.match(/function hash32\(str\) \{[\s\S]*?\n  \}/) || [])[0];
+  const rngSrc = (core.match(/function rng\(seed\) \{[\s\S]*?\n  \}/) || [])[0];
+  ok(!!hashSrc && !!rngSrc, 'hash32 و rng هسته پیدا شدند');
+  const sb = {};
+  vm.createContext(sb);
+  vm.runInContext(hashSrc + '\n' + rngSrc + '\nthis.daily = function (d) { return rng(hash32("chogan|nonogram|" + d)); };', sb);
+  const d1 = E.generate(sb.daily('2026-10-02'), 10), d2 = E.generate(sb.daily('2026-10-02'), 10);
+  const d3 = E.generate(sb.daily('2026-10-03'), 10);
+  ok(d1.n === 10 && J(d1.solution) === J(d2.solution) && J(d1.rows) === J(d2.rows), 'روزانه: یک تاریخ همیشه یک جدول می‌دهد');
+  ok(J(d1.solution) !== J(d3.solution), 'روزانه: دو تاریخ دو جدول متفاوت می‌دهند');
+  const pageHtml = fs.readFileSync(path.join(ROOT, 'www/games/nonogram/index.html'), 'utf8');
+  ok(/C\.daily\('nonogram', daily\)\.rng/.test(pageHtml) && /newGame\(10, dailyDate\)/.test(pageHtml), 'صفحه روزانه‌ی ۱۰×۱۰ را با C.daily می‌سازد');
+
+  // کشیدن انگشت: محور قفل می‌شود
+  ok(J(E.strokeCells(5, 0, 3)) === '[0,1,2,3]', 'کشیدن افقی خانه‌های یک سطر را می‌دهد');
+  ok(J(E.strokeCells(5, 16, 1)) === '[16,11,6,1]', 'کشیدن عمودی رو به بالا ستون شروع را نگه می‌دارد');
+  ok(J(E.strokeCells(5, 0, 16)) === '[0,5,10,15]', 'کشیدن کج روی محور با جابه‌جایی بیشتر قفل می‌شود');
+
+  // یک ضربه = یک قدم برگرداندن؛ پر کردن با کشیدن از روی ضربدر و خانه‌ی پر رد می‌شود
+  const S = E.newState({ n: 5, rows: heartRows, cols: heartCols });
+  const snap = () => J([S.cells, S.history]);
+  const empty = snap();
+  let base = S.cells.slice();
+  E.applyStroke(S, base, [2], 0, E.MARK);
+  ok(E.commit(S, base) === 1 && S.history.length === 1, 'ضربدر یک قدم ثبت می‌کند');
+  const afterMark = snap();
+  base = S.cells.slice();
+  ok(E.targetFor(base[0], 'fill') === E.FILL && E.targetFor(E.FILL, 'fill') === E.BLANK, 'پر کردن روی خانه‌ی پر پاکش می‌کند');
+  E.applyStroke(S, base, E.strokeCells(5, 0, 4), E.BLANK, E.FILL);
+  ok(J(S.cells.slice(0, 5)) === J([1, 1, 2, 1, 1]), 'کشیدن برای پر کردن ضربدر سر راه را دست نمی‌زند');
+  ok(E.commit(S, base) === 4 && S.history.length === 2, 'کل کشیدن یک قدم است');
+  base = S.cells.slice();
+  ok(E.commit(S, base) === 0 && S.history.length === 2, 'ضربه‌ی بی‌اثر چیزی به تاریخچه اضافه نمی‌کند');
+  ok(E.undo(S) && snap() === afterMark, 'برگرداندن کل کشیدن را با هم برمی‌گرداند');
+  ok(E.undo(S) && snap() === empty, 'برگرداندن دوم به جدول خالی می‌رسد');
+  ok(!E.undo(S) && snap() === empty, 'روی جدول خالی برگرداندن کاری نمی‌کند');
+
+  // برد با جور شدن عددها، با ضربدرها یا بی آن‌ها؛ یک خانه‌ی اشتباه کافی است تا نبرد
+  const W = E.newState({ n: 5, rows: heartRows, cols: heartCols });
+  for (let i = 0; i < 25; i++) W.cells[i] = heart[i] ? E.FILL : E.MARK;
+  ok(E.isSolved(W), 'قلب پرشده با ضربدرها در بقیه حل‌شده است');
+  for (let i = 0; i < 25; i++) if (W.cells[i] === E.MARK) W.cells[i] = E.BLANK;
+  ok(E.isSolved(W), 'قلب پرشده بدون ضربدر هم حل‌شده است');
+  W.cells[0] = E.FILL;
+  ok(!E.isSolved(W), 'یک خانه‌ی اضافه یعنی حل نشده');
+  const ld = E.linesDone(W);
+  ok(!ld.rows[0] && ld.rows[1] && !ld.cols[0] && ld.cols[1], 'فقط سطر و ستون خانه‌ی اضافه جور نیستند');
+  // جدولی با دو جواب: هر دو قطر عددها را برآورده می‌کنند و هر دو برد حساب می‌شوند
+  const two = E.newState({ n: 2, rows: [[1], [1]], cols: [[1], [1]] });
+  two.cells = [1, 0, 0, 1];
+  const diagA = E.isSolved(two);
+  two.cells = [0, 1, 1, 0];
+  ok(diagA && E.isSolved(two), 'هر جوابی که با عددها بخواند برد است');
+  ok(!E.solve([[1], [1]], [[1], [1]]).solved, 'همان جدول دوجوابی را حل‌کننده‌ی بدون حدس رد می‌کند');
+
+  // بازی تصادفی: هر ترتیبی از ضربه‌ها با برگرداندن کامل به جدول خالی می‌رسد
+  let roundTrips = 0;
+  for (let g = 0; g < 30; g++) {
+    const r = rng(9000 + g);
+    const pz = E.generate(r, 10);
+    const T = E.newState(pz);
+    const blank = J(T.cells);
+    let strokes = 0;
+    for (let k = 0; k < 60; k++) {
+      const a = r.int(100), b = r.int(100);
+      const b0 = T.cells.slice();
+      const how = r() < 0.3 ? 'mark' : 'fill';
+      const from = b0[a];
+      E.applyStroke(T, b0, E.strokeCells(10, a, b), from, E.targetFor(from, how));
+      if (E.commit(T, b0)) strokes++;
+    }
+    let undone = 0;
+    while (E.undo(T)) undone++;
+    if (undone === strokes && J(T.cells) === blank && T.history.length === 0) roundTrips++;
+  }
+  ok(roundTrips === 30, 'برگرداندن پیاپی هر بازی تصادفی را به جدول خالی می‌رساند (' + roundTrips + '/30)');
+
+  // صفحه باید از همین تابع‌ها استفاده کند، نه منطق خودش را
+  ok(/E\.applyStroke\(S, /.test(pageHtml) && /E\.commit\(S, d\.base\)/.test(pageHtml), 'صفحه ضربه را با applyStroke و commit ثبت می‌کند');
+  ok(/E\.undo\(S\)/.test(pageHtml) && /E\.isSolved\(S\)/.test(pageHtml), 'صفحه برگرداندن و برد را از موتور می‌گیرد');
+  ok(/C\.stats\.best\('nonogram', 'time-' \+ n, elapsed, true\)/.test(pageHtml), 'بهترین زمان برای هر اندازه جدا ثبت می‌شود');
+  console.log('  بیشینه‌ی زمان تولید ' + maxMs + 'ms، بیشینه‌ی تلاش ' + maxTries);
 }
 
 /* ----------------------------------------------------- دفاع از برج */
@@ -953,6 +1133,7 @@ testFiles();
 testSudoku();
 testMines();
 testDots();
+testNonogram();
 testTd();
 testVersionStamp();
 testDeployGate();

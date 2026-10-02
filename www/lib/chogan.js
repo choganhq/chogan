@@ -822,7 +822,10 @@
     { id: 'dt-win',      icon: 'box',     fa: 'جعبه‌گیر',         en: 'Box taker',         dfa: 'یک دست نقطه‌بازی را بردی',           den: 'Win a dots and boxes match', zh: '抢格子', dzh: '赢下一局点格棋' },
     { id: 'dt-hard',     icon: 'brain',   fa: 'مغلوب‌کننده',      en: 'Mind beater',       dfa: 'حریف سخت را شکست دادی',              den: 'Beat the hard AI', zh: '智胜', dzh: '击败困难电脑' },
     { id: 'dt-chain',    icon: 'link',    fa: 'زنجیره‌ساز',       en: 'Chain master',      dfa: 'در یک نوبت پنج مربع گرفتی',          den: 'Take five boxes in one turn', zh: '连锁高手', dzh: '一回合拿下五个格子' },
-    { id: 'dt-shutout',  icon: 'crown',   fa: 'قلعه‌ی بسته',      en: 'Shutout',           dfa: 'حریف را بدون هیچ مربعی نگه داشتی',    den: 'Win without conceding a box', zh: '零封', dzh: '一个格子都不让对手拿' }
+    { id: 'dt-shutout',  icon: 'crown',   fa: 'قلعه‌ی بسته',      en: 'Shutout',           dfa: 'حریف را بدون هیچ مربعی نگه داشتی',    den: 'Win without conceding a box', zh: '零封', dzh: '一个格子都不让对手拿' },
+    { id: 'ng-win',      icon: 'grid',    fa: 'اولین تصویر',      en: 'First picture',     dfa: 'یک نونوگرام را حل کردی',             den: 'Solve a nonogram', zh: '第一幅图', dzh: '解开一道数织' },
+    { id: 'ng-large',    icon: 'palette', fa: 'بوم بزرگ',         en: 'Big canvas',        dfa: 'یک نونوگرام پانزده در پانزده را حل کردی', den: 'Solve a 15×15 nonogram', zh: '大画布', dzh: '解开一道15×15数织' },
+    { id: 'ng-fast',     icon: 'bolt',    fa: 'قلم تند',          en: 'Quick brush',       dfa: 'نونوگرام ده در ده را زیر سه دقیقه حل کردی', den: 'Solve a 10×10 nonogram under three minutes', zh: '快笔', dzh: '三分钟内解开10×10数织' }
   ];
 
   var achApi = {
