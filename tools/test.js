@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 1441;
+const MIN_CHECKS = 1514;
 
 function ok(cond, msg) {
   checks++;
@@ -1989,6 +1989,147 @@ function testBridges() {
   ok(/E\.check\(g, S\.bridges\)/.test(brHtml), 'صفحه برد را با همان بررسی قانون می‌سنجد');
 }
 
+/* ------------------------------------------------------------ رمزشکن */
+function testCodebreaker() {
+  head('رمزشکن');
+  const E = loadEngine('mastermind', 'CodebreakerEngineFactory');
+  const fb = (s, g) => { const f = E.feedback(s, g); return f.b + 'b' + f.w + 'w'; };
+
+  // پاسخ‌ها با دست از روی قانون حساب شده‌اند، نه از روی خروجی همین موتور.
+  // تکرار رنگ در هر دو طرف همان جایی است که پیاده‌سازی‌های خانه‌به‌خانه غلط می‌شمارند.
+  const cases = [
+    [[0, 1, 2, 3], [0, 1, 2, 3], '4b0w', 'حدس کامل'],
+    [[0, 1, 2, 3], [4, 5, 4, 5], '0b0w', 'هیچ رنگ مشترک'],
+    [[0, 1, 2, 3], [3, 2, 1, 0], '0b4w', 'همه‌ی رنگ‌ها درست، همه جابه‌جا'],
+    [[0, 0, 1, 1], [1, 1, 0, 0], '0b4w', 'دو جفت تکراری، همه جابه‌جا'],
+    [[0, 0, 1, 1], [0, 1, 0, 1], '2b2w', 'دو جفت تکراری، نیمه جابه‌جا'],
+    [[0, 0, 0, 1], [0, 1, 1, 1], '2b0w', 'تکرار در هر دو طرف: رنگ اضافه سفید نمی‌گیرد'],
+    [[0, 1, 1, 2], [1, 1, 1, 1], '2b0w', 'حدس یک‌رنگ فقط به اندازه‌ی رمز می‌شمارد'],
+    [[1, 1, 2, 2], [2, 1, 1, 3], '1b2w', 'تکرار در هر دو طرف با یک سیاه'],
+    [[3, 3, 3, 3], [3, 0, 0, 0], '1b0w', 'رمز یک‌رنگ، یک خانه درست'],
+    [[0, 1, 2, 3], [0, 0, 0, 0], '1b0w', 'حدس تکراری روی رمز بی‌تکرار'],
+    [[5, 4, 5, 4], [4, 5, 5, 5], '1b2w', 'سیاه پیش از سفید از شمار کم می‌شود'],
+    [[0, 0, 1, 7, 7], [7, 0, 7, 0, 1], '1b4w', 'پنج‌خانه با هشت رنگ'],
+    [[2, 2, 2, 6, 6], [6, 6, 2, 2, 2], '1b4w', 'پنج‌خانه، دو رنگ تکراری']
+  ];
+  ok(cases.length > 0, 'فهرست حالت‌های بازخورد خالی نیست');
+  for (const [s, g, want, why] of cases) {
+    const got = fb(s, g);
+    ok(got === want, 'بازخورد ' + s.join('') + ' / ' + g.join('') + ' = ' + want + ' (' + why + ') — آمد ' + got);
+  }
+
+  // قرینگی و حد: جای رمز و حدس عوض شود پاسخ همان است، و سیاه+سفید از خانه‌ها بیشتر نمی‌شود
+  const r = rng(8301);
+  let sym = 0, bounded = 0, exact = 0;
+  const N = 400;
+  for (let i = 0; i < N; i++) {
+    const lv = E.LEVEL_IDS[i % 3];
+    const a = E.makeSecret(r, lv), b = E.makeSecret(r, i % 2 ? 'hard' : lv);
+    if (b.length !== a.length) b.length = a.length;
+    const g = b.map((x) => x % E.LEVELS[lv].colors);
+    if (fb(a, g) === fb(g, a)) sym++;
+    const f = E.feedback(a, g);
+    if (f.b >= 0 && f.w >= 0 && f.b + f.w <= a.length) bounded++;
+    if (E.feedback(a, a).b === a.length && E.feedback(a, a).w === 0) exact++;
+  }
+  ok(sym === N, 'بازخورد قرینه است (' + sym + '/' + N + ')');
+  ok(bounded === N, 'سیاه و سفید منفی نیستند و از تعداد خانه‌ها بیشتر نمی‌شوند (' + bounded + '/' + N + ')');
+  ok(exact === N, 'رمز در برابر خودش همیشه تمام‌سیاه است');
+
+  // رمزها قانون سطح را رعایت می‌کنند
+  for (const lv of E.LEVEL_IDS) {
+    const L = E.LEVELS[lv];
+    let good = 0, repeats = 0;
+    const seen = new Set();
+    for (let i = 0; i < 300; i++) {
+      const s = E.makeSecret(rng(500 + i), lv);
+      if (E.validCode(L, s, true)) good++;
+      if (new Set(s).size < s.length) repeats++;
+      for (const c of s) seen.add(c);
+    }
+    ok(good === 300, lv + ': همه‌ی رمزها طول و رنگ درست دارند');
+    ok(seen.size === L.colors, lv + ': همه‌ی ' + L.colors + ' رنگ در رمزها دیده می‌شوند (' + seen.size + ')');
+    ok(L.repeats ? repeats > 0 : repeats === 0, lv + (L.repeats ? ': رمز با تکرار هم ساخته می‌شود' : ': رمز آسان تکرار ندارد'));
+  }
+  ok(E.LEVELS.easy.pegs === 4 && E.LEVELS.easy.colors === 6 && !E.LEVELS.easy.repeats, 'آسان: ۴ از ۶ بی‌تکرار');
+  ok(E.LEVELS.normal.pegs === 4 && E.LEVELS.normal.colors === 6 && E.LEVELS.normal.repeats, 'معمولی: ۴ از ۶ با تکرار');
+  ok(E.LEVELS.hard.pegs === 5 && E.LEVELS.hard.colors === 8 && E.LEVELS.hard.repeats, 'سخت: ۵ از ۸ با تکرار');
+  ok(E.LEVEL_IDS.every((id) => E.LEVELS[id].rows === 10), 'هر سطح ده حدس دارد');
+
+  // حل‌کننده‌ی ساده همه‌ی ۱۲۹۶ رمز معمولی را زیر ده حدس می‌شکند؛ یعنی ده حدس
+  // برای بازیکنی که فقط حدس جور با سرنخ‌ها می‌زند کافی است.
+  const t0 = Date.now();
+  for (const lv of ['easy', 'normal']) {
+    const L = E.LEVELS[lv];
+    const total = Math.pow(L.colors, L.pegs);
+    let n = 0, worst = 0, solvedRight = 0;
+    for (let i = 0; i < total; i++) {
+      const s = E.codeAt(L, i);
+      if (!E.validCode(L, s, true)) continue;
+      const gs = E.solve(lv, s) || [];
+      n++;
+      worst = Math.max(worst, gs.length || 99);
+      if (gs.length && gs[gs.length - 1].join() === s.join()) solvedRight++;
+    }
+    ok(n === (lv === 'easy' ? 360 : 1296), lv + ': همه‌ی رمزهای ممکن بررسی شدند (' + n + ')');
+    ok(solvedRight === n, lv + ': حل‌کننده هر رمز را پیدا کرد (' + solvedRight + '/' + n + ')');
+    ok(worst <= 10, lv + ': بدترین حالت در ده حدس (' + worst + ')');
+  }
+  let hardIn10 = 0, hardFound = 0;
+  const HN = 40;
+  for (let i = 0; i < HN; i++) {
+    const s = E.makeSecret(rng(9000 + i * 17), 'hard');
+    const gs = E.solve('hard', s) || [];
+    if (gs.length && gs[gs.length - 1].join() === s.join()) hardFound++;
+    if (gs.length && gs.length <= 10) hardIn10++;
+  }
+  ok(hardFound === HN, 'سخت: حل‌کننده همه‌ی ' + HN + ' رمز را پیدا کرد (' + hardFound + ')');
+  ok(hardIn10 >= HN * 0.9, 'سخت: دست‌کم نود درصد در ده حدس (' + hardIn10 + '/' + HN + ')');
+  ok(Date.now() - t0 < 8000, 'حل همه‌ی رمزها زیر هشت ثانیه (' + (Date.now() - t0) + 'ms)');
+
+  // حالت بازی: ثبت، پایان، و نبود برگشت
+  const S = E.newState('normal', [0, 0, 1, 2]);
+  ok(E.submit(S, [0, 0, 1]) === null && S.rows.length === 0, 'حدس ناقص ثبت نمی‌شود');
+  ok(E.submit(S, [0, 0, 1, 6]) === null && S.rows.length === 0, 'رنگ بیرون از سطح ثبت نمی‌شود');
+  ok(E.submit(S, [0, 0, 1, -1]) === null && S.rows.length === 0, 'خانه‌ی خالی ثبت نمی‌شود');
+  const row = E.submit(S, [2, 0, 0, 1]);
+  ok(row && row.b === 1 && row.w === 3 && S.rows.length === 1, 'حدس کامل ثبت شد با بازخورد درست (1b3w)');
+  ok(S.cur.join() === '-1,-1,-1,-1', 'بعد از ثبت ردیف تازه خالی است');
+  ok(!S.done && !S.won, 'حدس غلط بازی را تمام نمی‌کند');
+  ok(E.submit(S, [0, 0, 1, 2]) && S.won && S.done && S.rows.length === 2, 'حدس درست می‌برد');
+  ok(E.submit(S, [0, 0, 0, 0]) === null && S.rows.length === 2, 'بعد از پایان حدسی ثبت نمی‌شود');
+  ok(typeof E.undo !== 'function' && typeof E.takeBack !== 'function', 'موتور راهی برای برگرداندن حدس ثبت‌شده ندارد');
+  const lose = E.newState('hard', [7, 7, 7, 7, 7]);
+  for (let i = 0; i < 10; i++) E.submit(lose, [0, 1, 2, 3, 4]);
+  ok(lose.done && !lose.won && lose.rows.length === 10, 'ده حدس غلط بازی را با باخت تمام می‌کند');
+  ok(E.submit(lose, [7, 7, 7, 7, 7]) === null, 'حدس یازدهم پذیرفته نمی‌شود');
+
+  // ذخیره‌ی دست‌کاری‌شده نباید بار شود
+  const okSave = JSON.parse(JSON.stringify(S));
+  ok(E.validState(okSave), 'ذخیره‌ی سالم پذیرفته می‌شود');
+  const forged = JSON.parse(JSON.stringify(S)); forged.rows[0].b = 4;
+  ok(!E.validState(forged), 'ذخیره‌ای که بازخوردش با رمز نمی‌خواند رد می‌شود');
+  ok(!E.validState({ level: 'easy', secret: [0, 0, 1, 2], rows: [], cur: [-1, -1, -1, -1] }), 'رمز تکراری در سطح آسان رد می‌شود');
+  ok(!E.validState(null), 'ذخیره‌ی خالی رد می‌شود');
+
+  // روزانه: همان بذر هسته، پس یک تاریخ برای همه یک رمز است
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  const hashSrc = (core.match(/function hash32\(str\) \{[\s\S]*?\n  \}/) || [])[0];
+  ok(!!hashSrc, 'تابع hash32 هسته پیدا شد');
+  const hash32 = hashSrc ? vm.runInNewContext('(' + hashSrc + ')') : () => 0;
+  const daily = (d) => E.makeSecret(rng(hash32('chogan|mastermind|' + d)), 'normal').join('');
+  ok(daily('2026-10-02') === daily('2026-10-02'), 'رمز روزانه برای یک تاریخ همیشه یکی است');
+  const days = new Set();
+  for (let i = 1; i <= 28; i++) days.add(daily('2026-02-' + String(i).padStart(2, '0')));
+  ok(days.size >= 20, 'روزهای مختلف رمزهای مختلف دارند (' + days.size + '/28)');
+
+  // صفحه باید از همین موتور استفاده کند
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/mastermind/index.html'), 'utf8');
+  ok(/E\.submit\(S, S\.cur\)/.test(html), 'صفحه حدس را با submit موتور ثبت می‌کند');
+  ok(/C\.daily\('mastermind', daily\)\.rng/.test(html) && /newGame\('normal', dailyDate\)/.test(html), 'روزانه سطح معمولی و بذر هسته را می‌گیرد');
+  ok(!/mastermind/i.test(html.replace(/'mastermind'|\.mastermind\b/g, '')), 'نام تجاری Mastermind در صفحه نیامده');
+}
+
 /* ----------------------------------------------------- دفاع از برج */
 function testTd() {
   head('دفاع از برج');
@@ -2745,6 +2886,7 @@ testBackgammon();
 testMorris();
 testBattleship();
 testBridges();
+testCodebreaker();
 testTd();
 testVersionStamp();
 testDeployGate();

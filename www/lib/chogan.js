@@ -849,7 +849,10 @@
     { id: 'bs-intact',   icon: 'shield',  fa: 'ناوگان سالم',      en: 'Fleet intact',      dfa: 'بدون از دست دادن هیچ کشتی‌ای بردی',   den: 'Win without losing a ship', zh: '舰队完好', dzh: '一艘船都没损失就获胜' },
     { id: 'br-win',      icon: 'link',    fa: 'پل‌ساز',           en: 'Bridge builder',    dfa: 'یک پازل پل‌ها را حل کردی',            den: 'Solve a bridges puzzle', zh: '架桥人', dzh: '解开一道数桥' },
     { id: 'br-large',    icon: 'grid',    fa: 'مجمع‌الجزایر',     en: 'Archipelago',       dfa: 'پازل پل‌های یازده در یازده را حل کردی', den: 'Solve an 11×11 bridges puzzle', zh: '群岛', dzh: '解开一道 11×11 数桥' },
-    { id: 'br-clean',    icon: 'sparkle', fa: 'یک‌نفس',           en: 'In one go',         dfa: 'پازل پل‌ها را بدون برگرداندن حل کردی', den: 'Solve a bridges puzzle without undo', zh: '一气呵成', dzh: '不撤销解开一道数桥' }
+    { id: 'br-clean',    icon: 'sparkle', fa: 'یک‌نفس',           en: 'In one go',         dfa: 'پازل پل‌ها را بدون برگرداندن حل کردی', den: 'Solve a bridges puzzle without undo', zh: '一气呵成', dzh: '不撤销解开一道数桥' },
+    { id: 'cb-win',      icon: 'lock',    fa: 'رمزگشا',           en: 'Codebreaker',       dfa: 'یک رمز را شکستی',                    den: 'Crack a code', zh: '解码者', dzh: '破解一个密码' },
+    { id: 'cb-hard',     icon: 'brain',   fa: 'قفل سخت',          en: 'Hard lock',         dfa: 'رمز سخت را شکستی',                   den: 'Crack a hard code', zh: '硬锁', dzh: '破解一个困难密码' },
+    { id: 'cb-quick',    icon: 'bolt',    fa: 'چهار حدس',         en: 'Four guesses',      dfa: 'رمز معمولی یا سخت را در چهار حدس یا کمتر شکستی', den: 'Crack a normal or hard code in four guesses or fewer', zh: '四次破解', dzh: '四次以内破解普通或困难密码' }
   ];
 
   var achApi = {
