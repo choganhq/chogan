@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 1514;
+const MIN_CHECKS = 1519;
 
 function ok(cond, msg) {
   checks++;
@@ -204,6 +204,26 @@ function testDots() {
   ok(/E\.applyEdge\(bd, S, e\)/.test(dtHtml), 'صفحه حرکت را با applyEdge ثبت می‌کند');
   ok(/E\.takeBack\(bd, S\)/.test(dtHtml), 'صفحه برگرداندن را با takeBack انجام می‌دهد');
   ok(!/undoOnlyAi/.test(dtHtml), 'پیام «فقط با حریف کامپیوتری» از صفحه رفته است');
+
+  // نام بازیکن یک (#90): تابع واقعی صفحه را با هسته‌ی ساختگی اجرا می‌کنیم
+  const pAt = dtHtml.indexOf('function pname(i) {');
+  ok(pAt > 0, 'تابع pname در صفحه هست');
+  let pd = 0, pEnd = pAt;
+  for (let i = dtHtml.indexOf('{', pAt); i < dtHtml.length; i++) {
+    if (dtHtml[i] === '{') pd++;
+    else if (dtHtml[i] === '}' && --pd === 0) { pEnd = i + 1; break; }
+  }
+  const mkName = (profileName, mode) => {
+    const fakeC = { state: { profile: { name: profileName } }, t: (k) => '<' + k + '>' };
+    try {
+      return vm.runInNewContext('(function (C, S, prefs) { ' + dtHtml.slice(pAt, pEnd) + ' return pname; })', {})(
+        fakeC, { mode, level: 'hard' }, { p2name: '' });
+    } catch (e) { ok(false, 'pname اجرا نشد: ' + e.message); return () => undefined; }
+  };
+  ok(mkName('', '2p')(1) === '<player1>', 'دونفره بی‌نام: بازیکن یک، نه «تو»');
+  ok(mkName('', 'ai')(1) === '<you>', 'با حریف بی‌نام: همان «تو»');
+  ok(mkName('Sara', '2p')(1) === 'Sara', 'نام پروفایل همچنان اول است');
+  ok(mkName('', '2p')(2) === '<player2>', 'بازیکن دو تغییری نکرده');
 }
 
 /* --------------------------------------------------------- نونوگرام */
