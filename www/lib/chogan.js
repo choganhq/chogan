@@ -846,7 +846,10 @@
     { id: 'mr-clean',    icon: 'shield',  fa: 'بی‌تلفات',          en: 'Not a scratch',     dfa: 'دوز را بدون از دست دادن حتی یک مهره بردی', den: 'Win at morris without losing a piece', zh: '全身而退', dzh: '一枚棋子都没丢就赢下九子棋' },
     { id: 'bs-win',      icon: 'flag',    fa: 'دریاسالار',        en: 'Admiral',           dfa: 'یک نبرد دریایی را بردی',              den: 'Win a battleship match', zh: '海军上将', dzh: '赢下一局海战棋' },
     { id: 'bs-hard',     icon: 'brain',   fa: 'ناخدای زیرک',      en: 'Sharp captain',     dfa: 'حریف سخت نبرد دریایی را شکست دادی',   den: 'Beat the hard battleship AI', zh: '精明舰长', dzh: '击败困难海战棋电脑' },
-    { id: 'bs-intact',   icon: 'shield',  fa: 'ناوگان سالم',      en: 'Fleet intact',      dfa: 'بدون از دست دادن هیچ کشتی‌ای بردی',   den: 'Win without losing a ship', zh: '舰队完好', dzh: '一艘船都没损失就获胜' }
+    { id: 'bs-intact',   icon: 'shield',  fa: 'ناوگان سالم',      en: 'Fleet intact',      dfa: 'بدون از دست دادن هیچ کشتی‌ای بردی',   den: 'Win without losing a ship', zh: '舰队完好', dzh: '一艘船都没损失就获胜' },
+    { id: 'br-win',      icon: 'link',    fa: 'پل‌ساز',           en: 'Bridge builder',    dfa: 'یک پازل پل‌ها را حل کردی',            den: 'Solve a bridges puzzle', zh: '架桥人', dzh: '解开一道数桥' },
+    { id: 'br-large',    icon: 'grid',    fa: 'مجمع‌الجزایر',     en: 'Archipelago',       dfa: 'پازل پل‌های یازده در یازده را حل کردی', den: 'Solve an 11×11 bridges puzzle', zh: '群岛', dzh: '解开一道 11×11 数桥' },
+    { id: 'br-clean',    icon: 'sparkle', fa: 'یک‌نفس',           en: 'In one go',         dfa: 'پازل پل‌ها را بدون برگرداندن حل کردی', den: 'Solve a bridges puzzle without undo', zh: '一气呵成', dzh: '不撤销解开一道数桥' }
   ];
 
   var achApi = {

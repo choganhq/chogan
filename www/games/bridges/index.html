@@ -1,0 +1,842 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>پل‌ها — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .br-wrap { width: 100%; display: flex; flex-direction: column; gap: var(--s-3); align-items: center; }
+  .br-top { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+  .br-boardbox {
+    width: 100%; max-width: min(94vw, 62vh, 560px);
+    background: var(--c-surface); border-radius: var(--r-lg); box-shadow: var(--sh-2);
+  }
+  /* کشیدن از روی جزیره با اشاره‌گر خوانده می‌شود؛ با manipulation مرورگر
+     کشیدن را پیمایش حساب می‌کرد و pointerup هیچ‌وقت نمی‌رسید. */
+  .br-svg { width: 100%; height: auto; display: block; touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer; }
+  .br-num { font-weight: 800; font-family: inherit; pointer-events: none; }
+  .br-island { transition: fill var(--t-fast) var(--ease); }
+  .br-bridge--new { animation: br-draw 220ms var(--ease) backwards; }
+  @keyframes br-draw { from { stroke-dasharray: 0 400; } }
+  .br-done { animation: br-pop 320ms var(--ease-back); transform-box: fill-box; transform-origin: center; }
+  @keyframes br-pop { 50% { transform: scale(1.16); } }
+  .br-status { color: var(--c-text-dim); font-size: var(--fs-sm); min-height: 1.4em; text-align: center; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function BridgesEngineFactory() {
+  'use strict';
+
+  // اندازه‌ها و بازه‌ی تعداد جزیره. جزیره‌ی بیشتر روی تخته‌ی کوچک یعنی
+  // پل‌های کوتاه و تخته‌ی شلوغ که با انگشت سخت زده می‌شود.
+  var SIZES = {
+    7: { min: 9, max: 12, len: 4 },
+    9: { min: 14, max: 18, len: 5 },
+    11: { min: 20, max: 26, len: 6 }
+  };
+  var DR = [-1, 0, 1, 0], DC = [0, 1, 0, -1];   // بالا، راست، پایین، چپ
+
+  // گراف همسایگی: هر دو جزیره‌ی هم‌سطر یا هم‌ستون که جزیره‌ای بینشان
+  // نیست یک یال‌اند. یال‌هایی که یک خانه‌ی مشترک دارند هم‌دیگر را قطع می‌کنند.
+  function build(size, islands) {
+    var at = {};
+    for (var i = 0; i < islands.length; i++) at[islands[i].r * size + islands[i].c] = i;
+    var edges = [], adj = [], dir = [], cellEdges = {};
+    for (var k = 0; k < islands.length; k++) { adj.push([]); dir.push([-1, -1, -1, -1]); }
+    for (var a = 0; a < islands.length; a++) {
+      for (var d = 1; d <= 2; d++) {          // فقط راست و پایین تا هر یال یک بار ساخته شود
+        var r = islands[a].r + DR[d], c = islands[a].c + DC[d], cells = [];
+        while (r >= 0 && c >= 0 && r < size && c < size && at[r * size + c] === undefined) {
+          cells.push(r * size + c);
+          r += DR[d]; c += DC[d];
+        }
+        if (r < 0 || c < 0 || r >= size || c >= size) continue;
+        var b = at[r * size + c], e = edges.length;
+        edges.push({ a: a, b: b, h: d === 1, cells: cells });
+        adj[a].push(e); adj[b].push(e);
+        dir[a][d] = e; dir[b][(d + 2) % 4] = e;
+        for (var q = 0; q < cells.length; q++) (cellEdges[cells[q]] = cellEdges[cells[q]] || []).push(e);
+      }
+    }
+    var cross = edges.map(function () { return []; });
+    for (var cell in cellEdges) {
+      var es = cellEdges[cell];
+      for (var x = 0; x < es.length; x++) {
+        for (var y = 0; y < es.length; y++) if (x !== y) cross[es[x]].push(es[y]);
+      }
+    }
+    return { size: size, islands: islands, edges: edges, adj: adj, dir: dir, cross: cross };
+  }
+
+  function connected(n, edges, has) {
+    if (n === 0) return true;
+    var parent = [];
+    for (var i = 0; i < n; i++) parent.push(i);
+    function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+    var groups = n;
+    for (var e = 0; e < edges.length; e++) {
+      if (!has(e)) continue;
+      var ra = find(edges[e].a), rb = find(edges[e].b);
+      if (ra !== rb) { parent[ra] = rb; groups--; }
+    }
+    return groups === 1;
+  }
+
+  /* --------------------------------------------------------- حل‌کننده
+     شمارش جواب تا سقف limit. هر یال بازه‌ی [lo, hi] دارد و انتشار قید
+     از سه قانون بازی می‌آید: شمار هر جزیره، قطع نشدن پل‌ها، و پیوستگی.
+     پیوستگی با یک بررسی ارزان اعمال می‌شود: اگر حتی با همه‌ی یال‌های هنوز
+     ممکن گراف دو تکه باشد، این شاخه مرده است.                                */
+  function solve(g, limit) {
+    limit = limit || 2;
+    var N = g.islands.length, M = g.edges.length;
+    var need = g.islands.map(function (p) { return p.n; });
+    var lo = [], hi = [];
+    for (var e = 0; e < M; e++) {
+      var na = need[g.edges[e].a], nb = need[g.edges[e].b], h = Math.min(2, na, nb);
+      // دو جزیره‌ی ۱ با هم، یا دو جزیره‌ی ۲ با پل دوتایی، جزیره‌ی بسته می‌سازند
+      if (N > 2 && na === 1 && nb === 1) h = 0;
+      if (N > 2 && na === 2 && nb === 2) h = Math.min(h, 1);
+      lo.push(0); hi.push(h);
+    }
+    var count = 0, first = null, nodes = 0;
+
+    function propagate(lo, hi) {
+      var changed = true;
+      while (changed) {
+        changed = false;
+        for (var i = 0; i < N; i++) {
+          var es = g.adj[i], sl = 0, sh = 0, k;
+          for (k = 0; k < es.length; k++) { sl += lo[es[k]]; sh += hi[es[k]]; }
+          if (sl > need[i] || sh < need[i]) return false;
+          for (k = 0; k < es.length; k++) {
+            var x = es[k];
+            var nl = Math.max(lo[x], need[i] - (sh - hi[x]));
+            var nh = Math.min(hi[x], need[i] - (sl - lo[x]));
+            if (nl > nh) return false;
+            if (nl !== lo[x] || nh !== hi[x]) {
+              sl += nl - lo[x]; sh += nh - hi[x];
+              lo[x] = nl; hi[x] = nh; changed = true;
+            }
+          }
+        }
+        for (var e2 = 0; e2 < M; e2++) {
+          if (!lo[e2]) continue;
+          var cr = g.cross[e2];
+          for (var j = 0; j < cr.length; j++) {
+            if (lo[cr[j]]) return false;
+            if (hi[cr[j]]) { hi[cr[j]] = 0; changed = true; }
+          }
+        }
+      }
+      return connected(N, g.edges, function (e) { return hi[e] > 0; });
+    }
+
+    function search(lo, hi) {
+      nodes++;
+      if (!propagate(lo, hi)) return;
+      // شاخه روی یالی که کمترین حالت را دارد
+      var pick = -1, best = 9;
+      for (var e = 0; e < M; e++) {
+        var w = hi[e] - lo[e];
+        if (w > 0 && w < best) { best = w; pick = e; if (w === 1) break; }
+      }
+      if (pick < 0) {
+        count++;
+        if (!first) first = lo.slice();
+        return;
+      }
+      for (var v = hi[pick]; v >= lo[pick] && count < limit; v--) {
+        var l2 = lo.slice(), h2 = hi.slice();
+        l2[pick] = h2[pick] = v;
+        search(l2, h2);
+      }
+    }
+    search(lo, hi);
+    return { count: count, solution: first, nodes: nodes };
+  }
+
+  /* ---------------------------------------------------------- سازنده
+     اول یک جواب پیوسته می‌سازیم: از یک جزیره شروع، هر بار از جزیره‌ای
+     موجود در یک جهت پلی تا جزیره‌ی تازه، بی‌آنکه از روی پل یا جزیره‌ی
+     دیگری رد شود. بعد چند پل اضافه بین همسایه‌ها تا حلقه هم پیدا شود.
+     عددها از همین جواب می‌آیند و پازل فقط وقتی پذیرفته می‌شود که حل‌کننده
+     ثابت کند جواب دیگری ندارد.                                              */
+  function grow(rnd, size, target, maxLen) {
+    var occ = [], i;
+    for (i = 0; i < size * size; i++) occ.push(0);   // ۰ خالی، ۱ جزیره، ۲ زیر پل
+    var islands = [], links = [];
+    function free(r, c) { return r >= 0 && c >= 0 && r < size && c < size && occ[r * size + c] === 0; }
+    function lonely(r, c) {
+      // دو جزیره‌ی چسبیده جایی برای پل ندارند و با انگشت هم زده نمی‌شوند
+      for (var d = 0; d < 4; d++) {
+        var rr = r + DR[d], cc = c + DC[d];
+        if (rr >= 0 && cc >= 0 && rr < size && cc < size && occ[rr * size + cc] === 1) return false;
+      }
+      return true;
+    }
+    var r0 = Math.floor(rnd() * size), c0 = Math.floor(rnd() * size);
+    occ[r0 * size + c0] = 1;
+    islands.push({ r: r0, c: c0 });
+    var tries = 0;
+    while (islands.length < target && tries < target * 60) {
+      tries++;
+      var from = Math.floor(rnd() * islands.length);
+      var d = Math.floor(rnd() * 4);
+      var len = 2 + Math.floor(rnd() * (maxLen - 1));
+      var r = islands[from].r, c = islands[from].c, ok = true, path = [];
+      for (var s = 1; s < len; s++) {
+        if (!free(r + DR[d] * s, c + DC[d] * s)) { ok = false; break; }
+        path.push((r + DR[d] * s) * size + c + DC[d] * s);
+      }
+      var tr = r + DR[d] * len, tc = c + DC[d] * len;
+      if (!ok || !free(tr, tc) || !lonely(tr, tc)) continue;
+      for (var p = 0; p < path.length; p++) occ[path[p]] = 2;
+      occ[tr * size + tc] = 1;
+      islands.push({ r: tr, c: tc });
+      links.push({ a: from, b: islands.length - 1, k: rnd() < 0.4 ? 2 : 1 });
+    }
+    if (islands.length < target) return null;
+
+    var g = build(size, islands), cnt = g.edges.map(function () { return 0; });
+    for (var l = 0; l < links.length; l++) {
+      var e = edgeOf(g, links[l].a, links[l].b);
+      if (e < 0) return null;
+      cnt[e] = links[l].k;
+    }
+    // پل اضافه فقط روی خانه‌های خالی، تا هیچ پلی را قطع نکند
+    for (var e2 = 0; e2 < g.edges.length; e2++) {
+      if (cnt[e2] || rnd() > 0.3) continue;
+      var cells = g.edges[e2].cells, clear = true;
+      for (var q = 0; q < cells.length; q++) if (occ[cells[q]] !== 0) { clear = false; break; }
+      if (!clear) continue;
+      for (q = 0; q < cells.length; q++) occ[cells[q]] = 2;
+      cnt[e2] = rnd() < 0.3 ? 2 : 1;
+    }
+    for (i = 0; i < islands.length; i++) {
+      var n = 0;
+      for (var k = 0; k < g.adj[i].length; k++) n += cnt[g.adj[i][k]];
+      islands[i].n = n;
+    }
+    return { g: g, solution: cnt };
+  }
+
+  function edgeOf(g, a, b) {
+    for (var k = 0; k < g.adj[a].length; k++) {
+      var e = g.edges[g.adj[a][k]];
+      if ((e.a === a && e.b === b) || (e.a === b && e.b === a)) return g.adj[a][k];
+    }
+    return -1;
+  }
+
+  // ترتیب جزیره‌ها سطر به سطر، تا یک پازل همیشه یک شکل ذخیره شود
+  function canonical(size, islands) {
+    return islands.slice().sort(function (p, q) { return (p.r * size + p.c) - (q.r * size + q.c); })
+      .map(function (p) { return { r: p.r, c: p.c, n: p.n }; });
+  }
+
+  function generate(rnd, size) {
+    var cfg = SIZES[size] || SIZES[9];
+    for (var attempt = 0; attempt < 400; attempt++) {
+      var target = cfg.min + Math.floor(rnd() * (cfg.max - cfg.min + 1));
+      var lay = grow(rnd, size, target, cfg.len);
+      if (!lay) continue;
+      var g = build(size, canonical(size, lay.g.islands));
+      var res = solve(g, 2);
+      if (res.count === 1) return { size: size, islands: g.islands, solution: res.solution, attempts: attempt + 1 };
+    }
+    return null;
+  }
+
+  /* ------------------------------------------------------- حرکت و قانون */
+  function blocked(g, b, e) {
+    var cr = g.cross[e];
+    for (var i = 0; i < cr.length; i++) if (b[cr[i]] > 0) return true;
+    return false;
+  }
+
+  function sumAt(g, b, i) {
+    var n = 0;
+    for (var k = 0; k < g.adj[i].length; k++) n += b[g.adj[i][k]];
+    return n;
+  }
+
+  // ۰→۱→۲→۰. اگر پل تازه پل دیگری را قطع کند پذیرفته نمی‌شود و ‎-1‎ برمی‌گردد.
+  function cycle(g, S, e) {
+    if (!(e >= 0 && e < g.edges.length)) return -1;
+    var next = (S.bridges[e] + 1) % 3;
+    if (next > 0 && blocked(g, S.bridges, e)) return -1;
+    S.history.push({ e: e, v: S.bridges[e] });
+    S.bridges[e] = next;
+    return next;
+  }
+
+  function undo(S) {
+    var h = S.history.pop();
+    if (!h) return -1;
+    S.bridges[h.e] = h.v;
+    return h.e;
+  }
+
+  function check(g, b) {
+    var counts = true, crossing = false;
+    for (var i = 0; i < g.islands.length; i++) if (sumAt(g, b, i) !== g.islands[i].n) { counts = false; break; }
+    for (var e = 0; e < g.edges.length && !crossing; e++) if (b[e] > 0 && blocked(g, b, e)) crossing = true;
+    var conn = connected(g.islands.length, g.edges, function (x) { return b[x] > 0; });
+    return { counts: counts, crossing: crossing, connected: conn, solved: counts && !crossing && conn };
+  }
+
+  // نزدیک‌ترین یال به یک نقطه بر حسب خانه‌ی شبکه؛ لمس بین دو جزیره از همین می‌رود
+  function edgeAt(g, x, y, reach) {
+    reach = reach || 0.5;
+    var best = -1, bd = reach;
+    for (var e = 0; e < g.edges.length; e++) {
+      var E = g.edges[e], A = g.islands[E.a], B = g.islands[E.b], dist, along, lo, hi;
+      if (E.h) { dist = Math.abs(y - A.r); along = x; lo = Math.min(A.c, B.c); hi = Math.max(A.c, B.c); }
+      else { dist = Math.abs(x - A.c); along = y; lo = Math.min(A.r, B.r); hi = Math.max(A.r, B.r); }
+      // نزدیک جزیره‌ها لمس مال خود جزیره است، نه پل
+      if (along <= lo + 0.4 || along >= hi - 0.4) continue;
+      if (dist < bd) { bd = dist; best = e; }
+    }
+    return best;
+  }
+
+  var api = {
+    SIZES: SIZES, build: build, solve: solve, generate: generate, edgeOf: edgeOf,
+    cycle: cycle, undo: undo, check: check, blocked: blocked, sumAt: sumAt, edgeAt: edgeAt
+  };
+  if (typeof self !== 'undefined') self.BridgesEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = BridgesEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = BridgesEngineFactory();
+  var NS = 'http://www.w3.org/2000/svg';
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'bridges',
+    name: { fa: 'پل‌ها', en: 'Bridges' },
+    accent: '#D46A9E',
+    mood: 'sudoku',
+    strings: {
+      fa: {
+        size: 'اندازه', islands: 'جزیره', newPuzzle: 'پازل تازه', undoMove: 'برگرداندن حرکت',
+        dailyBridges: 'پل‌های روزانه', solvedIn: 'در {t} حل شد',
+        notLinked: 'عددها درست‌اند، ولی همه‌ی جزیره‌ها باید به هم وصل باشند',
+        crossing: 'پل‌ها از روی هم رد نمی‌شوند', noNeighbour: 'در این جهت جزیره‌ای نیست',
+        moveIsland: 'رفتن به جزیره‌ی کناری', toggleBridge: 'پل به همان سمت',
+        tutTitle1: 'جزیره‌ها را وصل کن',
+        tutText1: 'بین دو جزیره‌ی هم‌ردیف یا هم‌ستون پل بکش: روی فاصله‌ی بینشان بزن، یا از یک جزیره به سمت دیگری بکش.',
+        tutTitle2: 'عدد هر جزیره',
+        tutText2: 'عدد هر جزیره یعنی چند پل به آن می‌رسد. بین دو جزیره یک یا دو پل می‌شود: زدن دوم پل را دوتا می‌کند و زدن سوم پاکش می‌کند.',
+        tutTitle3: 'همه به هم',
+        tutText3: 'پل‌ها از روی هم رد نمی‌شوند. آخر کار همه‌ی جزیره‌ها باید یک شبکه‌ی پیوسته باشند.'
+      },
+      en: {
+        size: 'Size', islands: 'Islands', newPuzzle: 'New puzzle', undoMove: 'Undo move',
+        dailyBridges: 'Daily bridges', solvedIn: 'Solved in {t}',
+        notLinked: 'The numbers fit, but every island must be connected',
+        crossing: 'Bridges cannot cross', noNeighbour: 'No island that way',
+        moveIsland: 'Go to the next island', toggleBridge: 'Bridge that way',
+        tutTitle1: 'Connect the islands',
+        tutText1: 'Build bridges between islands in the same row or column: tap the gap between them, or drag from one island towards another.',
+        tutTitle2: 'Each number',
+        tutText2: 'An island\'s number is how many bridges reach it. Two islands can share one or two bridges: a second tap makes it double, a third removes it.',
+        tutTitle3: 'All together',
+        tutText3: 'Bridges may not cross. When you finish, every island must be part of one connected network.'
+      },
+      zh: {
+        size: '尺寸', islands: '岛屿', newPuzzle: '新谜题', undoMove: '撤销一步',
+        dailyBridges: '每日数桥', solvedIn: '用时 {t} 解开',
+        notLinked: '数字都对了，但所有岛屿必须连成一片',
+        crossing: '桥不能交叉', noNeighbour: '这个方向没有岛屿',
+        moveIsland: '移到相邻岛屿', toggleBridge: '朝这个方向架桥',
+        tutTitle1: '连接岛屿',
+        tutText1: '在同一行或同一列的两个岛屿之间架桥：点它们之间的空隙，或从一个岛屿拖向另一个。',
+        tutTitle2: '岛上的数字',
+        tutText2: '岛上的数字表示有几座桥连到它。两个岛之间可以架一座或两座桥：再点一次变成两座，第三次就拆掉。',
+        tutTitle3: '连成一片',
+        tutText3: '桥不能交叉。最后所有岛屿必须连成一个整体。'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var DAILY_SIZE = 9;
+  var prefs = ctx.store.get('prefs', { size: 7 });
+  if (!E.SIZES[prefs.size]) prefs.size = 7;
+
+  var S = null, g = null, cur = 0, lastEdge = -1;
+
+  var svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('class', 'br-svg');
+  var boardBox = el('div', { class: 'br-boardbox' }, [svg]);
+  var top = el('div', { class: 'br-top' });
+  var status = el('div', { class: 'br-status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'br-wrap' }, [top, boardBox, status]);
+
+  ctx.stat('isl', C.t('islands'));
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newPuzzle'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ ساخت */
+
+  function newGame(size, daily) {
+    var rnd = daily ? C.daily('bridges', daily).rng : Math.random;
+    var p = E.generate(rnd, size);
+    // سازنده با چهارصد تلاش عملاً همیشه جواب می‌دهد؛ این فقط جلوی صفحه‌ی خالی را می‌گیرد
+    if (!p) p = E.generate(daily ? C.daily('bridges', daily + '|2').rng : Math.random, 7);
+    start({
+      size: p.size, islands: p.islands, daily: daily || null,
+      bridges: null, history: [], undos: 0, touched: false, elapsed: 0
+    });
+  }
+
+  function start(v) {
+    g = E.build(v.size, v.islands);
+    var bridges = v.bridges && v.bridges.length === g.edges.length ? v.bridges : g.edges.map(function () { return 0; });
+    S = {
+      size: v.size, islands: v.islands, daily: v.daily || null,
+      bridges: bridges, history: v.history || [], undos: v.undos || 0,
+      touched: !!v.touched, done: false, elapsed: v.elapsed || 0, since: Date.now()
+    };
+    cur = 0; lastEdge = -1;
+    layout();
+    render();
+    paint(true);
+    save();
+  }
+
+  function elapsed() { return S.elapsed + (S.since ? Date.now() - S.since : 0); }
+
+  /* ------------------------------------------------------------ رسم */
+
+  var GAP = 60, PAD = 40, RAD = 22;
+  var layers = null;
+  function px(c) { return PAD + c * GAP; }
+
+  function layout() {
+    var W = PAD * 2 + GAP * (S.size - 1);
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + W);
+    svg.innerHTML = '';
+    layers = {};
+    ['grid', 'bridges', 'cursor', 'islands'].forEach(function (k) {
+      layers[k] = document.createElementNS(NS, 'g');
+      svg.appendChild(layers[k]);
+    });
+    // نقطه‌های کم‌رنگ شبکه چشم را روی سطر و ستون نگه می‌دارند
+    for (var r = 0; r < S.size; r++) {
+      for (var c = 0; c < S.size; c++) {
+        var d = document.createElementNS(NS, 'circle');
+        d.setAttribute('cx', px(c)); d.setAttribute('cy', px(r)); d.setAttribute('r', '2.5');
+        d.setAttribute('fill', 'var(--c-surface-3)');
+        layers.grid.appendChild(d);
+      }
+    }
+  }
+
+  function line(parent, x1, y1, x2, y2, stroke, w, cls) {
+    var ln = document.createElementNS(NS, 'line');
+    ln.setAttribute('x1', x1); ln.setAttribute('y1', y1);
+    ln.setAttribute('x2', x2); ln.setAttribute('y2', y2);
+    ln.setAttribute('stroke', stroke); ln.setAttribute('stroke-width', w);
+    ln.setAttribute('stroke-linecap', 'round');
+    if (cls) ln.setAttribute('class', cls);
+    parent.appendChild(ln);
+    return ln;
+  }
+
+  // تکه‌های هر پل، جدا از رسم تا کارت نتیجه هم همین را بکشد
+  function bridgeSegs(e, k) {
+    var ed = g.edges[e], A = g.islands[ed.a], B = g.islands[ed.b];
+    var x1 = px(A.c), y1 = px(A.r), x2 = px(B.c), y2 = px(B.r), off = k === 2 ? 7 : 0;
+    var ox = ed.h ? 0 : off, oy = ed.h ? off : 0;
+    if (k === 1) return [[x1, y1, x2, y2]];
+    return [[x1 - ox, y1 - oy, x2 - ox, y2 - oy], [x1 + ox, y1 + oy, x2 + ox, y2 + oy]];
+  }
+
+  function paint(full, popIsland) {
+    layers.bridges.innerHTML = '';
+    for (var e = 0; e < g.edges.length; e++) {
+      var k = S.bridges[e];
+      if (!k) continue;
+      var segs = bridgeSegs(e, k);
+      for (var s = 0; s < segs.length; s++) {
+        line(layers.bridges, segs[s][0], segs[s][1], segs[s][2], segs[s][3], 'var(--game)', 5,
+          !full && e === lastEdge ? 'br-bridge--new' : '');
+      }
+    }
+    layers.islands.innerHTML = '';
+    var doneCount = 0;
+    for (var i = 0; i < g.islands.length; i++) {
+      var p = g.islands[i], have = E.sumAt(g, S.bridges, i);
+      var state = have === p.n ? 'done' : (have > p.n ? 'over' : 'open');
+      if (state === 'done') doneCount++;
+      var circ = document.createElementNS(NS, 'circle');
+      circ.setAttribute('cx', px(p.c)); circ.setAttribute('cy', px(p.r)); circ.setAttribute('r', RAD);
+      circ.setAttribute('fill', state === 'done' ? 'var(--game)' : 'var(--c-surface)');
+      circ.setAttribute('stroke', state === 'over' ? 'var(--c-bad)' : (state === 'done' ? 'var(--game)' : 'var(--c-text-dim)'));
+      circ.setAttribute('stroke-width', state === 'over' ? 4 : 3);
+      circ.setAttribute('class', 'br-island' + (popIsland && popIsland.indexOf(i) >= 0 && state === 'done' ? ' br-done' : ''));
+      layers.islands.appendChild(circ);
+      var t = document.createElementNS(NS, 'text');
+      t.setAttribute('x', px(p.c)); t.setAttribute('y', px(p.r) + 9);
+      t.setAttribute('text-anchor', 'middle'); t.setAttribute('font-size', '26');
+      // روی دایره‌ی پرشده با رنگ بازی، سفید در هر دو تم خواناست
+      t.setAttribute('fill', state === 'done' ? '#FFFFFF' : (state === 'over' ? 'var(--c-bad)' : 'var(--c-text)'));
+      t.setAttribute('class', 'br-num');
+      t.textContent = C.num(p.n);
+      layers.islands.appendChild(t);
+    }
+    ctx.setStat('isl', C.num(doneCount) + '/' + C.num(g.islands.length));
+    paintCursor();
+  }
+
+  var kbUsed = false;
+  function paintCursor() {
+    layers.cursor.innerHTML = '';
+    if (!kbUsed || !g.islands[cur] || S.done) return;
+    var p = g.islands[cur];
+    var ring = document.createElementNS(NS, 'circle');
+    ring.setAttribute('cx', px(p.c)); ring.setAttribute('cy', px(p.r)); ring.setAttribute('r', RAD + 7);
+    ring.setAttribute('fill', 'none'); ring.setAttribute('stroke', 'var(--game)');
+    ring.setAttribute('stroke-width', '3'); ring.setAttribute('stroke-dasharray', '6 5');
+    layers.cursor.appendChild(ring);
+  }
+
+  function render() {
+    top.innerHTML = '';
+    if (S.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' },
+        [C.icon('calendar', 14), el('span', { text: C.t('dailyBridges') + ' — ' + C.num(S.daily) })]));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.num(S.size) + '×' + C.num(S.size) }));
+    } else {
+      top.appendChild(C.ui.segmented([7, 9, 11].map(function (n) {
+        return { value: n, label: C.num(n) + '×' + C.num(n) };
+      }), S.size, function (v) {
+        if (v === S.size) return;
+        var go = function () { prefs.size = v; ctx.store.set('prefs', prefs); newGame(v); };
+        if (S.touched && !S.done) {
+          C.ui.confirm({ title: C.t('newPuzzle'), body: C.t('resetWarn'), onOk: go, onCancel: function () { render(); } });
+          render();
+          return;
+        }
+        go();
+      }));
+    }
+    status.textContent = '';
+  }
+
+  /* ------------------------------------------------------- کارت نتیجه */
+  function cardPaint() {
+    var n = S.size, bridges = S.bridges.slice(), VB = PAD * 2 + GAP * (n - 1);
+    var segs = [];
+    for (var e = 0; e < g.edges.length; e++) if (bridges[e]) segs = segs.concat(bridgeSegs(e, bridges[e]));
+    var isl = g.islands.slice();
+    return function (gc, W, H, col) {
+      var side = Math.min(W, H), k = side / VB;
+      gc.translate((W - side) / 2, (H - side) / 2);
+      gc.scale(k, k);
+      gc.lineCap = 'round';
+      gc.strokeStyle = col.game; gc.lineWidth = 5;
+      for (var s = 0; s < segs.length; s++) {
+        gc.beginPath(); gc.moveTo(segs[s][0], segs[s][1]); gc.lineTo(segs[s][2], segs[s][3]); gc.stroke();
+      }
+      gc.textAlign = 'center'; gc.textBaseline = 'middle';
+      gc.font = '800 26px Vazirmatn, system-ui, sans-serif';
+      for (var i = 0; i < isl.length; i++) {
+        gc.fillStyle = col.game;
+        gc.beginPath(); gc.arc(px(isl[i].c), px(isl[i].r), RAD, 0, Math.PI * 2); gc.fill();
+        gc.fillStyle = '#FFFFFF';
+        gc.fillText(C.num(isl[i].n), px(isl[i].c), px(isl[i].r) + 1);
+      }
+    };
+  }
+
+  /* ----------------------------------------------------------- حرکت */
+
+  function tapEdge(e) {
+    if (!S || S.done) return;
+    if (e < 0) { C.feedback('bad'); C.ui.shake(boardBox); return; }
+    var before = g.islands.map(function (p, i) { return E.sumAt(g, S.bridges, i); });
+    var v = E.cycle(g, S, e);
+    if (v < 0) {
+      // پل تازه از روی پل دیگری رد می‌شد
+      C.feedback('bad');
+      C.ui.shake(boardBox);
+      status.textContent = C.t('crossing');
+      return;
+    }
+    S.touched = true;
+    lastEdge = v > 0 ? e : -1;
+    var ed = g.edges[e], pop = [];
+    [ed.a, ed.b].forEach(function (i) {
+      if (E.sumAt(g, S.bridges, i) === g.islands[i].n && before[i] !== g.islands[i].n) pop.push(i);
+    });
+    if (pop.length) { C.audio.sfx('pop'); C.haptic('tap'); }
+    else { C.audio.sfx(v ? 'place' : 'tap'); C.haptic('tap'); }
+    paint(false, pop);
+    save();
+    afterMove();
+  }
+
+  function afterMove() {
+    var chk = E.check(g, S.bridges);
+    status.textContent = chk.counts && !chk.crossing && !chk.connected ? C.t('notLinked') : '';
+    if (chk.solved) finish();
+  }
+
+  function undo() {
+    if (!S || S.done) return;
+    if (E.undo(S) < 0) { C.feedback('bad'); return; }
+    S.undos++;
+    lastEdge = -1;
+    C.feedback('tap');
+    paint(true);
+    save();
+    afterMove();
+  }
+
+  /* ---------------------------------------------------- لمس و کشیدن */
+
+  function toGrid(ev) {
+    var m = svg.getScreenCTM();
+    if (!m) return null;
+    var pt = svg.createSVGPoint();
+    pt.x = ev.clientX; pt.y = ev.clientY;
+    var q = pt.matrixTransform(m.inverse());
+    return { x: (q.x - PAD) / GAP, y: (q.y - PAD) / GAP };
+  }
+  function islandAt(q) {
+    for (var i = 0; i < g.islands.length; i++) {
+      var dx = q.x - g.islands[i].c, dy = q.y - g.islands[i].r;
+      if (dx * dx + dy * dy <= 0.45 * 0.45) return i;
+    }
+    return -1;
+  }
+
+  var press = null;
+  svg.addEventListener('pointerdown', function (ev) {
+    if (!S || S.done || (ev.button !== undefined && ev.button > 0)) return;
+    var q = toGrid(ev);
+    if (!q) return;
+    press = { id: ev.pointerId, q: q, island: islandAt(q) };
+    try { svg.setPointerCapture(ev.pointerId); } catch (e) { /* قدیمی‌ها ندارند */ }
+  });
+  svg.addEventListener('pointercancel', function () { press = null; });
+  svg.addEventListener('pointerup', function (ev) {
+    if (!press || ev.pointerId !== press.id) return;
+    var p = press;
+    press = null;
+    var q = toGrid(ev);
+    if (!q) return;
+    var dx = q.x - p.q.x, dy = q.y - p.q.y;
+    if (p.island >= 0 && Math.max(Math.abs(dx), Math.abs(dy)) >= 0.6) {
+      // کشیدن از جزیره: جهت غالب، همسایه‌ی همان سمت
+      var d = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : (dy > 0 ? 2 : 0);
+      cur = p.island;
+      var e = g.dir[p.island][d];
+      if (e < 0) status.textContent = C.t('noNeighbour');
+      tapEdge(e);
+      return;
+    }
+    if (p.island >= 0) { cur = p.island; paintCursor(); return; }
+    var hit = E.edgeAt(g, q.x, q.y, 0.5);
+    if (hit >= 0) tapEdge(hit);
+  });
+
+  /* ---------------------------------------------------------- پایان */
+
+  function finish() {
+    S.done = true;
+    S.elapsed = elapsed();
+    S.since = null;
+    paint(true);
+    var secs = Math.round(S.elapsed / 1000);
+    var base = { 7: 6, 9: 12, 11: 20 }[S.size] || 12;
+    var speed = C.clamp(1.6 - secs / 900, 0.6, 1.6);
+    var coins = Math.round(base * speed) + (S.daily ? 8 : 0);
+    var points = Math.round(base * 4 * speed) + (S.daily ? 25 : 0);
+
+    C.stats.best('bridges', 'time-' + S.size, S.elapsed, true);
+    C.achievements.unlock('br-win');
+    if (S.size === 11) C.achievements.unlock('br-large');
+    if (!S.undos) C.achievements.unlock('br-clean');
+    if (S.daily) {
+      var firstDaily = C.stats.daily('bridges', S.daily, { label: C.time(S.elapsed), win: true });
+      if (!firstDaily) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+
+    ctx.finish({
+      won: true,
+      title: C.t('won'),
+      timeMs: S.elapsed, coins: coins, points: points,
+      lines: [
+        { label: C.t('size'), value: C.num(S.size) + '×' + C.num(S.size) },
+        { label: C.t('islands'), value: C.num(g.islands.length) },
+        { label: C.t('time'), value: C.time(S.elapsed) }
+      ],
+      shareText: 'چوگان · پل‌ها ' + C.num(S.size) + '×' + C.num(S.size) +
+        (S.daily ? ('\nروزانه ' + S.daily) : '') +
+        '\n' + C.time(S.elapsed),
+      paint: cardPaint(),
+      onAgain: S.daily ? null : function () { newGame(S.size); }
+    });
+  }
+
+  /* --------------------------------------------------------- ذخیره */
+
+  ctx.autosave(function () {
+    // touched هیچ‌وقت برنمی‌گردد: اگر بازیکن همه‌ی حرکت‌ها را برگرداند، پازل
+    // نباید با بستن صفحه عوض شود.
+    if (!S || S.done || !S.touched) return { inProgress: false };
+    return {
+      s: {
+        size: S.size, islands: S.islands, daily: S.daily, bridges: S.bridges,
+        history: S.history, undos: S.undos, touched: true, elapsed: elapsed()
+      },
+      prefs: prefs
+    };
+  });
+  function save() { ctx.save(); }
+
+  function askNew() {
+    var dd = S ? S.daily : null;
+    function go() {
+      // داخل روزانه همان پازل روزانه از نو چیده می‌شود، نه یک پازل عادی
+      if (dd) newGame(DAILY_SIZE, dd);
+      else newGame(S ? S.size : prefs.size);
+    }
+    if (!S || S.done || !S.touched) { go(); return; }
+    C.ui.confirm({ title: C.t('newPuzzle'), body: C.t('resetWarn'), onOk: go });
+  }
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('tutText1') }),
+        el('p', { class: 'ch-dim', text: C.t('tutText2') }),
+        el('p', { class: 'ch-dim', text: C.t('tutText3') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          kb('← ↑ → ↓', C.t('moveIsland')),
+          kb('Shift + ← ↑ → ↓', C.t('toggleBridge')),
+          kb('U / Ctrl+Z', C.t('undoMove'))
+        ])
+      ],
+      actions: [
+        { label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('done'), kind: 'primary' }
+      ]
+    });
+  }
+  function kb(k, what) {
+    return el('div', { class: 'ch-item' }, [
+      el('div', { class: 'ch-item__label', text: what }),
+      el('span', { class: 'ch-badge', text: k })
+    ]);
+  }
+
+  function artIsland(x, y, n, filled) {
+    return '<circle cx="' + x + '" cy="' + y + '" r="14" fill="' + (filled ? 'var(--game)' : 'var(--c-surface)') +
+      '" stroke="' + (filled ? 'var(--game)' : 'var(--c-text-dim)') + '" stroke-width="3"/>' +
+      '<text x="' + x + '" y="' + (y + 6) + '" text-anchor="middle" font-size="17" font-weight="800" fill="' +
+      (filled ? '#FFFFFF' : 'var(--c-text)') + '">' + C.num(n) + '</text>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'),
+      art: '<svg viewBox="0 0 200 110" width="100%"><path d="M50 55h100" stroke="var(--game)" stroke-width="5" stroke-linecap="round"/>' +
+        artIsland(50, 55, 1, true) + artIsland(150, 55, 3, false) + '</svg>' },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'),
+      art: '<svg viewBox="0 0 200 110" width="100%"><path d="M50 48h100M50 62h100M150 55v-40" stroke="var(--game)" stroke-width="5" stroke-linecap="round"/>' +
+        artIsland(50, 55, 2, true) + artIsland(150, 55, 3, true) + artIsland(150, 15, 1, true) + '</svg>' },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'),
+      art: '<svg viewBox="0 0 200 110" width="100%"><path d="M50 25h100M50 25v60M150 25v60M50 85h100" stroke="var(--game)" stroke-width="5" stroke-linecap="round"/>' +
+        artIsland(50, 25, 2, true) + artIsland(150, 25, 2, true) + artIsland(50, 85, 2, true) + artIsland(150, 85, 2, true) + '</svg>' }
+  ];
+
+  /* -------------------------------------------------------- کیبورد */
+
+  // تخته یک SVG با مختصات ثابت است و در راست‌چین آینه نمی‌شود، پس جهت‌نماها
+  // هم برعکس نمی‌شوند. بدون همسایه‌ی مستقیم، نزدیک‌ترین جزیره در آن سمت.
+  var KEYDIR = { ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3 };
+  var DRC = [[-1, 0], [0, 1], [1, 0], [0, -1]];
+  function stepCursor(d) {
+    var e = g.dir[cur][d];
+    if (e >= 0) return g.edges[e].a === cur ? g.edges[e].b : g.edges[e].a;
+    var p = g.islands[cur], best = -1, bs = 1e9;
+    for (var i = 0; i < g.islands.length; i++) {
+      var q = g.islands[i];
+      var along = (q.r - p.r) * DRC[d][0] + (q.c - p.c) * DRC[d][1];
+      if (along <= 0) continue;
+      var side = Math.abs((q.r - p.r) * DRC[d][1]) + Math.abs((q.c - p.c) * DRC[d][0]);
+      var score = along + side * 2;
+      if (score < bs) { bs = score; best = i; }
+    }
+    return best;
+  }
+  window.addEventListener('keydown', function (e) {
+    if (!S || S.done) return;
+    if (document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
+    var k = e.key;
+    if (k === 'u' || k === 'U' || ((e.ctrlKey || e.metaKey) && (k === 'z' || k === 'Z'))) { undo(); e.preventDefault(); return; }
+    if (KEYDIR[k] === undefined) return;
+    e.preventDefault();
+    if (!kbUsed) { kbUsed = true; paintCursor(); return; }
+    var d = KEYDIR[k];
+    if (e.shiftKey) {
+      var ed = g.dir[cur][d];
+      if (ed < 0) status.textContent = C.t('noNeighbour');
+      tapEdge(ed);
+      return;
+    }
+    var nx = stepCursor(d);
+    if (nx >= 0) { cur = nx; paintCursor(); }
+  });
+
+  C.onPause(function () { if (S && !S.done && S.since) { S.elapsed += Date.now() - S.since; S.since = null; } save(); });
+  C.onResume(function () { if (S && !S.done && !S.since) S.since = Date.now(); });
+
+  /* ---------------------------------------------------------- شروع */
+
+  var saved = ctx.loadSave();
+  var resumable = saved && saved.s && saved.s.islands && saved.s.bridges;
+  if (dailyDate) {
+    if (resumable && saved.s.daily === dailyDate) start(saved.s);
+    else newGame(DAILY_SIZE, dailyDate);
+    if (C.stats.dailyDone('bridges', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).bridges;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: C.t('solvedIn', { t: rec.label }) });
+    }
+  } else if (resumable) {
+    if (saved.prefs && E.SIZES[saved.prefs.size]) prefs = saved.prefs;
+    start(saved.s);
+  } else {
+    newGame(prefs.size);
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
