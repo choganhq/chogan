@@ -795,7 +795,7 @@
     { id: 'play-10',     icon: 'star',    fa: 'ده تایی',          en: 'Ten rounds',        dfa: 'ده بازی انجام دادی',                den: 'Play 10 games', zh: '十局', dzh: '玩满十局' },
     { id: 'play-50',     icon: 'medal',   fa: 'پنجاه تایی',       en: 'Fifty rounds',      dfa: 'پنجاه بازی انجام دادی',             den: 'Play 50 games', zh: '五十局', dzh: '玩满五十局' },
     { id: 'play-200',    icon: 'trophy',  fa: 'دویست تایی',       en: 'Two hundred',       dfa: 'دویست بازی انجام دادی',             den: 'Play 200 games', zh: '两百局', dzh: '玩满两百局' },
-    { id: 'sampler',     icon: 'palette', fa: 'همه‌چیزخور',       en: 'Sampler',           dfa: 'هر چهار بازی را امتحان کردی',        den: 'Try all four games', zh: '全都试过', dzh: '四个游戏都玩过' },
+    { id: 'sampler',     icon: 'palette', fa: 'همه‌چیزخور',       en: 'Sampler',           dfa: 'چهار بازی مختلف را امتحان کردی',     den: 'Try four different games', zh: '尝鲜者', dzh: '玩过四个不同的游戏' },
     { id: 'coins-100',   icon: 'coin',    fa: 'صد سکه',           en: 'Hundred coins',     dfa: 'در مجموع صد سکه گرفتی',             den: 'Earn 100 coins in total', zh: '一百金币', dzh: '累计获得一百金币' },
     { id: 'coins-1000',  icon: 'coin',    fa: 'هزار سکه',         en: 'Thousand coins',    dfa: 'در مجموع هزار سکه گرفتی',           den: 'Earn 1000 coins in total', zh: '一千金币', dzh: '累计获得一千金币' },
     { id: 'daily-1',     icon: 'calendar',fa: 'اولین روزانه',     en: 'First daily',       dfa: 'اولین چالش روزانه را زدی',           den: 'Finish your first daily', zh: '首个每日', dzh: '完成第一个每日挑战' },
