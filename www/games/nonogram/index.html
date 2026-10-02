@@ -1,0 +1,838 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>نونوگرام — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .ng-wrap { width: 100%; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--s-2); align-items: center; }
+  .ng-top { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+  /* تخته هر جای خالی را می‌گیرد: ۱۵×۱۵ روی گوشی بدون پهنای کامل عددهای ناخوانا می‌داد */
+  .ng-boardbox { width: 100%; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+  .ng-canvas { display: block; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  .ng-mode button { min-height: 44px; min-width: 96px; }
+  .ng-hint { font-size: var(--fs-xs); color: var(--c-text-faint); text-align: center; min-height: 1.2em; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function NonogramEngineFactory() {
+  'use strict';
+
+  // خانه‌ی جدول بازیکن: ۰ دست‌نخورده، ۱ پر، ۲ ضربدر (یعنی «مطمئنم خالی است»).
+  // خانه‌ی حل‌کننده: -۱ نامعلوم، ۰ خالی، ۱ پر.
+  var BLANK = 0, FILL = 1, MARK = 2;
+
+  // طول دسته‌های پشت سر هم یک خط؛ خط خالی آرایه‌ی خالی می‌دهد
+  function clueOf(line) {
+    var out = [], run = 0;
+    for (var i = 0; i < line.length; i++) {
+      if (line[i] === 1) run++;
+      else if (run) { out.push(run); run = 0; }
+    }
+    if (run) out.push(run);
+    return out;
+  }
+
+  function rowOf(grid, n, r) { return grid.slice(r * n, r * n + n); }
+  function colOf(grid, n, c) {
+    var out = [];
+    for (var r = 0; r < n; r++) out.push(grid[r * n + c]);
+    return out;
+  }
+
+  function cluesOf(grid, n) {
+    var rows = [], cols = [];
+    for (var r = 0; r < n; r++) rows.push(clueOf(rowOf(grid, n, r)));
+    for (var c = 0; c < n; c++) cols.push(clueOf(colOf(grid, n, c)));
+    return { rows: rows, cols: cols };
+  }
+
+  /* حل یک خط بدون حدس: هر چیدمان ممکن دسته‌ها را که با خانه‌های معلوم
+     می‌خواند در نظر می‌گیرد و فقط خانه‌ای را معلوم می‌کند که در همه‌ی آن
+     چیدمان‌ها یکسان است. با برنامه‌ریزی پویا از دو طرف، نه شمردن چیدمان‌ها،
+     تا ۱۵ خانه با هفت دسته هم آنی بماند.
+     خروجی: خط تازه، یا null اگر هیچ چیدمانی جور نشود. */
+  function solveLine(clue, L) {
+    var n = L.length, k = clue.length, i, j;
+    var zeros = [0];
+    for (i = 0; i < n; i++) zeros.push(zeros[i] + (L[i] === 0 ? 1 : 0));
+    function fits(b, s) { var len = clue[b]; return s + len <= n && zeros[s + len] - zeros[s] === 0; }
+    var fw = [], fe = [], bw = [];
+    for (i = 0; i <= n + 1; i++) {
+      fw.push(new Array(k + 2).fill(false));
+      fe.push(new Array(k + 2).fill(false));
+      bw.push(new Array(k + 2).fill(false));
+    }
+    // fw[i][j]: j دسته‌ی اول در [0,i) جا شدند و خانه‌ی i می‌تواند دسته شروع کند.
+    // fe[i][j]: همان، ولی دسته‌ی آخر دقیقاً در i تمام شد و i باید خالی باشد.
+    fw[0][0] = true;
+    for (i = 0; i < n; i++) {
+      for (j = 0; j <= k; j++) {
+        if ((fw[i][j] || fe[i][j]) && L[i] !== 1) fw[i + 1][j] = true;
+        if (j < k && fw[i][j] && fits(j, i)) fe[i + clue[j]][j + 1] = true;
+      }
+    }
+    if (!(fw[n][k] || fe[n][k])) return null;
+    // bw[i][j]: دسته‌های j به بعد در [i,n) جا می‌شوند
+    function noStart(p, b) { return p === n ? b === k : (L[p] !== 1 && bw[p + 1][b]); }
+    bw[n][k] = true;
+    for (i = n - 1; i >= 0; i--) {
+      for (j = k; j >= 0; j--) {
+        var v = L[i] !== 1 && bw[i + 1][j];
+        if (!v && j < k && fits(j, i) && noStart(i + clue[j], j + 1)) v = true;
+        bw[i][j] = v;
+      }
+    }
+    var canEmpty = new Array(n).fill(false), cover = new Array(n + 1).fill(0);
+    for (i = 0; i < n; i++) {
+      if (L[i] !== 1) {
+        for (j = 0; j <= k; j++) if ((fw[i][j] || fe[i][j]) && bw[i + 1][j]) { canEmpty[i] = true; break; }
+      }
+      for (j = 0; j < k; j++) {
+        if (fw[i][j] && fits(j, i) && noStart(i + clue[j], j + 1)) { cover[i]++; cover[i + clue[j]]--; }
+      }
+    }
+    var out = L.slice(), acc = 0;
+    for (i = 0; i < n; i++) {
+      acc += cover[i];
+      var canFill = acc > 0;
+      if (!canFill && !canEmpty[i]) return null;
+      if (L[i] !== -1) continue;
+      out[i] = canFill && !canEmpty[i] ? 1 : (!canFill && canEmpty[i] ? 0 : -1);
+    }
+    return out;
+  }
+
+  // فقط با منطق خط به خط، بدون هیچ حدسی. جدولی که این‌جا کامل نشود به
+  // بازیکن داده نمی‌شود، چون یعنی جایی باید شانسی انتخاب کند.
+  function solve(rows, cols) {
+    var n = rows.length, g = new Array(n * n).fill(-1);
+    var dirty = new Array(2 * n).fill(true), any = true, guard = 0;
+    while (any && guard++ < 4 * n * n) {
+      any = false;
+      for (var l = 0; l < 2 * n; l++) {
+        if (!dirty[l]) continue;
+        dirty[l] = false;
+        var isRow = l < n, x = isRow ? l : l - n;
+        var L = isRow ? rowOf(g, n, x) : colOf(g, n, x);
+        var res = solveLine(isRow ? rows[x] : cols[x], L);
+        if (!res) return { grid: g, solved: false, contradiction: true };
+        for (var t = 0; t < n; t++) {
+          if (res[t] === L[t]) continue;
+          g[isRow ? x * n + t : t * n + x] = res[t];
+          dirty[isRow ? n + t : t] = true;
+          any = true;
+        }
+      }
+    }
+    return { grid: g, solved: g.indexOf(-1) < 0, contradiction: false };
+  }
+
+  // نویز تصادفی با یک دور صاف‌کردن اکثریتی: لکه‌های به‌هم‌چسبیده شبیه تصویر
+  // می‌شوند و جدول نویز خالص هم کمتر بدون حدس حل می‌شود.
+  function randomGrid(rnd, n, p) {
+    var g = [], i;
+    for (i = 0; i < n * n; i++) g.push(rnd() < p ? 1 : 0);
+    var h = g.slice();
+    for (var r = 0; r < n; r++) {
+      for (var c = 0; c < n; c++) {
+        var s = 0, cnt = 0;
+        for (var dr = -1; dr <= 1; dr++) {
+          for (var dc = -1; dc <= 1; dc++) {
+            var rr = r + dr, cc = c + dc;
+            if (rr < 0 || cc < 0 || rr >= n || cc >= n) continue;
+            cnt++; s += g[rr * n + cc];
+          }
+        }
+        h[r * n + c] = s * 2 > cnt ? 1 : (s * 2 < cnt ? 0 : g[r * n + c]);
+      }
+    }
+    return h;
+  }
+
+  var FILL_MIN = 0.45, FILL_MAX = 0.65;
+
+  function generate(rnd, n) {
+    var p = 0.53, tries = 0;
+    for (;;) {
+      tries++;
+      // سقف قطعی: جدول تمام‌پر همیشه بدون حدس حل می‌شود، پس حلقه هیچ‌وقت
+      // بی‌پایان نمی‌ماند. در آزمون‌ها هرگز به این‌جا نمی‌رسد.
+      var g = tries > 600 ? new Array(n * n).fill(1) : randomGrid(rnd, n, p);
+      var filled = 0;
+      for (var i = 0; i < g.length; i++) filled += g[i];
+      var dens = filled / g.length;
+      if (tries <= 600 && (dens < FILL_MIN || dens > FILL_MAX)) continue;
+      var cl = cluesOf(g, n);
+      var res = solve(cl.rows, cl.cols);
+      if (res.solved) return { n: n, solution: g, rows: cl.rows, cols: cl.cols, tries: tries };
+    }
+  }
+
+  function newState(pz) {
+    return { n: pz.n, rows: pz.rows, cols: pz.cols, cells: new Array(pz.n * pz.n).fill(BLANK), history: [] };
+  }
+
+  /* کشیدن انگشت: محور روی سطر یا ستون خانه‌ی شروع قفل می‌شود، هر کدام که
+     جابه‌جایی بیشتری دارد؛ کشیدن کج یک خط مرتب می‌دهد نه پله‌پله. */
+  function strokeCells(n, a, b) {
+    var ar = (a / n) | 0, ac = a % n, br = (b / n) | 0, bc = b % n;
+    var out = [], k;
+    if (Math.abs(br - ar) >= Math.abs(bc - ac)) {
+      var dr = br >= ar ? 1 : -1;
+      for (k = ar; k !== br + dr; k += dr) out.push(k * n + ac);
+    } else {
+      var dc = bc >= ac ? 1 : -1;
+      for (k = ac; k !== bc + dc; k += dc) out.push(ar * n + k);
+    }
+    return out;
+  }
+
+  // مقصد یک ضربه از خانه‌ی شروع: روی همان نوع دوباره زدن پاکش می‌کند
+  function targetFor(cur, mode) {
+    if (mode === 'mark') return cur === MARK ? BLANK : MARK;
+    return cur === FILL ? BLANK : FILL;
+  }
+
+  // فقط خانه‌هایی که پیش از ضربه هم‌نوع خانه‌ی شروع بودند عوض می‌شوند، تا
+  // کشیدن برای پر کردن، ضربدرها و خانه‌های پر سر راه را خراب نکند.
+  function applyStroke(S, base, cells, from, to) {
+    for (var i = 0; i < S.cells.length; i++) S.cells[i] = base[i];
+    for (var k = 0; k < cells.length; k++) if (base[cells[k]] === from) S.cells[cells[k]] = to;
+  }
+
+  // یک ضربه یا یک کشیدن کامل، یک قدم برگرداندن است
+  function commit(S, base) {
+    var idx = [], old = [];
+    for (var i = 0; i < S.cells.length; i++) {
+      if (S.cells[i] !== base[i]) { idx.push(i); old.push(base[i]); }
+    }
+    if (idx.length) S.history.push({ i: idx, v: old });
+    return idx.length;
+  }
+
+  function undo(S) {
+    var h = S.history.pop();
+    if (!h) return false;
+    for (var k = 0; k < h.i.length; k++) S.cells[h.i[k]] = h.v[k];
+    return true;
+  }
+
+  function filledOf(cells) {
+    var out = [];
+    for (var i = 0; i < cells.length; i++) out.push(cells[i] === FILL ? 1 : 0);
+    return out;
+  }
+  function sameClue(a, b) {
+    if (a.length !== b.length) return false;
+    for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+
+  // خطی که خانه‌های پرش دقیقاً عددهایش را می‌دهد؛ صفحه عددهایش را کم‌رنگ می‌کند
+  function linesDone(S) {
+    var f = filledOf(S.cells), n = S.n, rows = [], cols = [];
+    for (var r = 0; r < n; r++) rows.push(sameClue(clueOf(rowOf(f, n, r)), S.rows[r]));
+    for (var c = 0; c < n; c++) cols.push(sameClue(clueOf(colOf(f, n, c)), S.cols[c]));
+    return { rows: rows, cols: cols };
+  }
+
+  // برد یعنی همه‌ی عددها جور شوند، نه برابری با جدول تولیدشده. جواب یکتاست
+  // پس نتیجه یکی است، ولی بازیکن هیچ‌وقت به خاطر جوابی که عددها را
+  // برآورده می‌کند بازنده حساب نمی‌شود.
+  function isSolved(S) {
+    var d = linesDone(S);
+    return d.rows.every(Boolean) && d.cols.every(Boolean);
+  }
+
+  var api = {
+    BLANK: BLANK, FILL: FILL, MARK: MARK, FILL_MIN: FILL_MIN, FILL_MAX: FILL_MAX,
+    clueOf: clueOf, cluesOf: cluesOf, solveLine: solveLine, solve: solve,
+    randomGrid: randomGrid, generate: generate, newState: newState,
+    strokeCells: strokeCells, targetFor: targetFor, applyStroke: applyStroke,
+    commit: commit, undo: undo, linesDone: linesDone, isSolved: isSolved
+  };
+  if (typeof self !== 'undefined') self.NonogramEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = NonogramEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = NonogramEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'nonogram',
+    name: { fa: 'نونوگرام', en: 'Nonogram', zh: '数织' },
+    accent: '#4FA3A5',
+    accentSoft: '#DDF0F0',
+    // حال آرام سودوکو؛ پازل تک‌نفره‌ی بی‌عجله همان حال را می‌خواهد
+    mood: 'sudoku',
+    strings: {
+      fa: {
+        size: 'اندازه', fillMode: 'پر کردن', markMode: 'ضربدر',
+        newPuzzle: 'جدول تازه', undoMove: 'برگرداندن', move: 'جابه‌جایی',
+        fillKey: 'پر یا پاک کردن خانه', markKey: 'ضربدر زدن یا برداشتن',
+        dailyNono: 'نونوگرام روزانه', solved: 'تصویر کامل شد', longPress: 'نگه داشتن انگشت یا کلیک راست: ضربدر',
+        tutTitle1: 'عددها', tutText1: 'عددهای کنار هر سطر و بالای هر ستون می‌گویند چند خانه‌ی پرِ پشت سر هم، به ترتیب، در آن خط هست. بین دو دسته دست‌کم یک خانه‌ی خالی است.',
+        tutTitle2: 'پر کن، ضربدر بزن', tutText2: 'یک ضربه خانه را پر می‌کند. خانه‌ای را که مطمئنی خالی است ضربدر بزن: با دکمه‌ی ضربدر یا با نگه داشتن انگشت. برای یک ردیف کامل انگشت را بکش.',
+        tutTitle3: 'تصویر', tutText3: 'خطی که جور شد عددهایش کم‌رنگ می‌شود. همه که جور شدند تصویر کامل است. هیچ جدولی حدس لازم ندارد؛ همه فقط با منطق حل می‌شوند.'
+      },
+      en: {
+        size: 'Size', fillMode: 'Fill', markMode: 'Cross',
+        newPuzzle: 'New puzzle', undoMove: 'Undo', move: 'Move',
+        fillKey: 'Fill or clear a cell', markKey: 'Cross or uncross a cell',
+        dailyNono: 'Daily nonogram', solved: 'Picture complete', longPress: 'Long press or right click: cross',
+        tutTitle1: 'The numbers', tutText1: 'The numbers beside each row and above each column give, in order, the lengths of the runs of filled cells in that line. Runs are separated by at least one empty cell.',
+        tutTitle2: 'Fill and cross', tutText2: 'Tap to fill a cell. Cross out a cell you know is empty, with the cross button or a long press. Drag to paint a whole run.',
+        tutTitle3: 'The picture', tutText3: 'A line that matches its numbers fades out. When every line matches, the picture is complete. No puzzle needs a guess; each one is solvable by logic alone.'
+      },
+      zh: {
+        size: '尺寸', fillMode: '涂色', markMode: '打叉',
+        newPuzzle: '新谜题', undoMove: '撤销', move: '移动',
+        fillKey: '涂色或清除格子', markKey: '打叉或取消打叉',
+        dailyNono: '每日数织', solved: '图案完成', longPress: '长按或右键：打叉',
+        tutTitle1: '数字', tutText1: '每行左侧和每列上方的数字，按顺序表示该行或列中连续涂色格子的长度。相邻两段之间至少隔一个空格。',
+        tutTitle2: '涂色与打叉', tutText2: '轻点一格即可涂色。确定为空的格子可以打叉：用打叉按钮或长按。拖动可一次涂满一整段。',
+        tutTitle3: '图案', tutText3: '数字全部对上的行或列会变淡。所有行列都对上时，图案就完成了。每道题都无需猜测，只靠推理即可解开。'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', { size: 10 });
+  if ([5, 10, 15].indexOf(prefs.size) < 0) prefs.size = 10;
+
+  var S = null, mode = 'fill', timerId = null;
+  var cursor = { r: 0, c: 0, show: false };
+  var G = null;            // هندسه‌ی آخرین چیدمان بوم
+
+  var canvas = el('canvas', { class: 'ng-canvas' });
+  var boardBox = el('div', { class: 'ng-boardbox' }, [canvas]);
+  var top = el('div', { class: 'ng-top' });
+  var modeRow = el('div', { class: 'ng-top' });
+  var hint = el('div', { class: 'ng-hint' });
+  var wrap = el('div', { class: 'ng-wrap' }, [top, boardBox, modeRow, hint]);
+
+  ctx.stat('time', C.t('time'));
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undoMove });
+  ctx.button({ icon: 'refresh', label: C.t('newPuzzle'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ ساخت */
+
+  function newGame(n, daily) {
+    var rnd = daily ? C.daily('nonogram', daily).rng : Math.random;
+    var pz = E.generate(rnd, n);
+    S = E.newState(pz);
+    S.daily = daily || null;
+    S.elapsed = 0;
+    S.done = false;
+    cursor = { r: 0, c: 0, show: false };
+    render();
+    save();
+    startTimer();
+  }
+
+  /* ------------------------------------------------------------ رسم */
+
+  function tok(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function fontFamily() { return getComputedStyle(document.body).fontFamily || 'system-ui, sans-serif'; }
+
+  // بزرگ‌ترین خانه‌ای که تخته و عددها با هم جا شوند. اندازه‌ی قلم عددها از خود
+  // خانه می‌آید ولی هیچ‌وقت زیر ۱۰ پیکسل نمی‌رود تا ۱۵×۱۵ روی گوشی خوانا بماند.
+  function layout() {
+    if (!S) return;
+    var n = S.n;
+    var availW = Math.max(120, boardBox.clientWidth);
+    var availH = Math.max(120, boardBox.clientHeight);
+    var g = canvas.getContext('2d');
+    var fam = fontFamily();
+    var maxCol = 1;
+    for (var c = 0; c < n; c++) maxCol = Math.max(maxCol, S.cols[c].length || 1);
+    var best = null;
+    for (var s = 64; s >= 8; s--) {
+      var f = C.clamp(Math.round(s * 0.62), 10, 18);
+      g.font = '700 ' + f + 'px ' + fam;
+      // رقم «۱» فارسی باریک است؛ با فاصله‌ی کمتر «۱ ۲ ۱» شبیه ۱۲۱ خوانده می‌شد
+      var gap = Math.round(f * 0.75), rowW = 0;
+      for (var r = 0; r < n; r++) {
+        var w = 0, cl = S.rows[r].length ? S.rows[r] : [0];
+        for (var k = 0; k < cl.length; k++) w += g.measureText(C.num(cl[k])).width + (k ? gap : 0);
+        rowW = Math.max(rowW, w);
+      }
+      rowW = Math.ceil(rowW + f * 0.9);
+      var lineH = Math.round(f * 1.18);
+      var colH = Math.ceil(maxCol * lineH + f * 0.5);
+      best = { s: s, f: f, gap: gap, lineH: lineH, gx: rowW, gy: colH, W: rowW + n * s + 2, H: colH + n * s + 2 };
+      if (best.W <= availW && best.H <= availH) break;
+    }
+    G = best;
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(G.W * dpr);
+    canvas.height = Math.round(G.H * dpr);
+    canvas.style.width = G.W + 'px';
+    canvas.style.height = G.H + 'px';
+    G.dpr = dpr;
+    draw();
+  }
+
+  function draw() {
+    if (!S || !G) return;
+    var g = canvas.getContext('2d');
+    var n = S.n, s = G.s, gx = G.gx, gy = G.gy;
+    var col = {
+      surface: tok('--c-surface'), surface2: tok('--c-surface-2'), line: tok('--c-line'),
+      text: tok('--c-text'), faint: tok('--c-text-faint'), dim: tok('--c-text-dim'),
+      game: tok('--game') || '#4FA3A5', soft: tok('--game-soft') || '#DDF0F0'
+    };
+    g.setTransform(G.dpr, 0, 0, G.dpr, 0, 0);
+    g.clearRect(0, 0, G.W, G.H);
+    var done = E.linesDone(S);
+    var focusR = (cursor.show && !S.done) ? cursor.r : -1;
+    var focusC = (cursor.show && !S.done) ? cursor.c : -1;
+
+    // زمینه‌ی ناحیه‌ی عددها؛ سطر و ستون زیر نشانگر رنگ ملایم می‌گیرند تا در
+    // ۱۵×۱۵ چشم عدد درست را گم نکند
+    g.fillStyle = col.surface2;
+    C.rrect(g, 0, gy, gx - 2, n * s, 8); g.fill();
+    C.rrect(g, gx, 0, n * s, gy - 2, 8); g.fill();
+    g.fillStyle = col.soft;
+    if (focusR >= 0) g.fillRect(0, gy + focusR * s, gx - 2, s);
+    if (focusC >= 0) g.fillRect(gx + focusC * s, 0, s, gy - 2);
+
+    // عددها
+    g.font = '700 ' + G.f + 'px ' + fontFamily();
+    g.textBaseline = 'middle';
+    for (var r = 0; r < n; r++) {
+      var cl = S.rows[r].length ? S.rows[r] : [0];
+      g.fillStyle = done.rows[r] ? col.faint : col.text;
+      g.textAlign = 'right';
+      // تخته آینه نمی‌شود، پس عددها هم مثل خانه‌ها از چپ به راست‌اند
+      var x = gx - Math.round(G.f * 0.45);
+      for (var k = cl.length - 1; k >= 0; k--) {
+        var t = C.num(cl[k]);
+        g.fillText(t, x, gy + r * s + s / 2 + 1);
+        x -= g.measureText(t).width + G.gap;
+      }
+    }
+    g.textAlign = 'center';
+    for (var c = 0; c < n; c++) {
+      var cc = S.cols[c].length ? S.cols[c] : [0];
+      g.fillStyle = done.cols[c] ? col.faint : col.text;
+      var y = gy - Math.round(G.f * 0.25) - G.lineH / 2;
+      for (var q = cc.length - 1; q >= 0; q--) {
+        g.fillText(C.num(cc[q]), gx + c * s + s / 2, y + 1);
+        y -= G.lineH;
+      }
+    }
+
+    // خانه‌ها
+    g.fillStyle = col.surface;
+    g.fillRect(gx, gy, n * s, n * s);
+    if (focusR >= 0) {
+      g.fillStyle = col.soft;
+      g.globalAlpha = 0.55;
+      g.fillRect(gx, gy + focusR * s, n * s, s);
+      g.fillRect(gx + focusC * s, gy, s, n * s);
+      g.globalAlpha = 1;
+    }
+    var pad = Math.max(1, Math.round(s * 0.06));
+    for (var i = 0; i < n * n; i++) {
+      var v = S.cells[i];
+      if (!v) continue;
+      var rx = gx + (i % n) * s, ry = gy + ((i / n) | 0) * s;
+      if (v === E.FILL) {
+        g.fillStyle = col.game;
+        C.rrect(g, rx + pad, ry + pad, s - pad * 2, s - pad * 2, Math.max(1, s * 0.12));
+        g.fill();
+      } else if (v === E.MARK && !S.done) {
+        g.strokeStyle = col.faint;
+        g.lineWidth = Math.max(1.4, s * 0.08);
+        g.lineCap = 'round';
+        var m = s * 0.3;
+        g.beginPath();
+        g.moveTo(rx + m, ry + m); g.lineTo(rx + s - m, ry + s - m);
+        g.moveTo(rx + s - m, ry + m); g.lineTo(rx + m, ry + s - m);
+        g.stroke();
+      }
+    }
+
+    // خطوط جدول؛ هر پنج خانه پررنگ‌تر تا شمردن آسان شود
+    for (var L = 0; L <= n; L++) {
+      var major = L % 5 === 0;
+      g.strokeStyle = major ? col.dim : col.line;
+      g.lineWidth = major ? 1.6 : 1;
+      g.globalAlpha = major ? 0.6 : 1;
+      g.beginPath();
+      g.moveTo(gx + L * s, gy); g.lineTo(gx + L * s, gy + n * s);
+      g.moveTo(gx, gy + L * s); g.lineTo(gx + n * s, gy + L * s);
+      g.stroke();
+      g.globalAlpha = 1;
+    }
+
+    if (cursor.show && !S.done) {
+      g.strokeStyle = col.game;
+      g.lineWidth = 2.5;
+      g.strokeRect(gx + cursor.c * s + 1.5, gy + cursor.r * s + 1.5, s - 3, s - 3);
+    }
+  }
+
+  function render() {
+    top.innerHTML = '';
+    modeRow.innerHTML = '';
+    if (S.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' },
+        [C.icon('calendar', 14), el('span', { text: C.t('dailyNono') + ' — ' + C.num(S.daily) })]));
+    } else {
+      top.appendChild(C.ui.segmented([5, 10, 15].map(function (n) {
+        return { value: n, label: C.num(n) + '×' + C.num(n) };
+      }), S.n, function (v) {
+        if (v === S.n) return;
+        var go = function () {
+          prefs.size = v; ctx.store.set('prefs', prefs);
+          newGame(v, null);
+        };
+        if (S.history.length && !S.done) {
+          C.ui.confirm({ title: C.t('newPuzzle'), body: C.t('resetWarn'), onOk: go, onCancel: function () { render(); } });
+          return;
+        }
+        go();
+      }));
+    }
+    var seg = C.ui.segmented([
+      { value: 'fill', label: C.t('fillMode') }, { value: 'mark', label: C.t('markMode') }
+    ], mode, function (v) { mode = v; });
+    seg.classList.add('ng-mode');
+    modeRow.appendChild(seg);
+    hint.textContent = C.t('longPress');
+    ctx.setStat('time', C.time(S.elapsed));
+    layout();
+  }
+
+  /* ----------------------------------------------------------- لمس */
+
+  var drag = null, pressTimer = null;
+
+  function cellAt(ev, clampIn) {
+    if (!G) return -1;
+    var rect = canvas.getBoundingClientRect();
+    var x = ev.clientX - rect.left - G.gx, y = ev.clientY - rect.top - G.gy;
+    var c = Math.floor(x / G.s), r = Math.floor(y / G.s), n = S.n;
+    if (clampIn) { c = C.clamp(c, 0, n - 1); r = C.clamp(r, 0, n - 1); }
+    else if (c < 0 || r < 0 || c >= n || r >= n) return -1;
+    return r * n + c;
+  }
+
+  function beginStroke(i, how) {
+    var base = S.cells.slice();
+    var from = base[i];
+    drag = { start: i, last: i, base: base, from: from, to: E.targetFor(from, how), how: how, moved: false };
+    E.applyStroke(S, base, [i], drag.from, drag.to);
+    cursor.r = (i / S.n) | 0; cursor.c = i % S.n;
+    draw();
+  }
+
+  function endStroke() {
+    if (!drag) return;
+    clearTimeout(pressTimer);
+    var d = drag;
+    drag = null;
+    var changed = E.commit(S, d.base);
+    if (!changed) { draw(); return; }
+    if (d.to === E.FILL) C.audio.sfx('place');
+    else if (d.to === E.MARK) C.audio.sfx('flag');
+    else C.audio.sfx('tap');
+    C.haptic('tap');
+    afterChange();
+  }
+
+  function afterChange() {
+    draw();
+    if (E.isSolved(S)) { finish(); return; }
+    save();
+  }
+
+  canvas.addEventListener('pointerdown', function (e) {
+    if (!S || S.done || drag) return;
+    var i = cellAt(e, false);
+    if (i < 0) return;
+    e.preventDefault();
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* مرورگر قدیمی */ }
+    cursor.show = false;
+    beginStroke(i, e.button === 2 ? 'mark' : mode);
+    drag.pointerId = e.pointerId;
+    // نگه داشتن روی همان خانه ضربه را به ضربدر تبدیل می‌کند؛ بدون جابه‌جا
+    // کردن کلید حالت، که روی گوشی با یک دست دست‌وپاگیر است
+    if (e.pointerType !== 'mouse' && mode === 'fill') {
+      pressTimer = setTimeout(function () {
+        if (!drag || drag.moved || drag.how === 'mark') return;
+        drag.how = 'mark';
+        drag.to = E.targetFor(drag.from, 'mark');
+        E.applyStroke(S, drag.base, [drag.start], drag.from, drag.to);
+        C.haptic('select');
+        draw();
+      }, 430);
+    }
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    var i = cellAt(e, true);
+    if (i === drag.last) return;
+    drag.last = i;
+    if (i !== drag.start) { drag.moved = true; clearTimeout(pressTimer); }
+    E.applyStroke(S, drag.base, E.strokeCells(S.n, drag.start, i), drag.from, drag.to);
+    draw();
+  });
+  canvas.addEventListener('pointerup', function (e) {
+    if (drag && e.pointerId === drag.pointerId) endStroke();
+  });
+  canvas.addEventListener('pointercancel', function (e) {
+    if (drag && e.pointerId === drag.pointerId) endStroke();
+  });
+  canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  /* ----------------------------------------------------------- حرکت */
+
+  function undoMove() {
+    if (!S || S.done) return;
+    if (!E.undo(S)) { C.feedback('bad'); return; }
+    draw();
+    save();
+  }
+
+  // یک ضربه‌ی کیبورد، همان مسیر لمس: یک قدم برگرداندن
+  function keyAct(how) {
+    var i = cursor.r * S.n + cursor.c;
+    beginStroke(i, how);
+    endStroke();
+  }
+
+  function finish() {
+    S.done = true;
+    stopTimer();
+    // ضربدرها کار بازیکن بودند، جزو تصویر نیستند
+    for (var i = 0; i < S.cells.length; i++) if (S.cells[i] !== E.FILL) S.cells[i] = E.BLANK;
+    draw();
+    var n = S.n, elapsed = S.elapsed;
+    var secs = Math.round(elapsed / 1000);
+    var base = { 5: 4, 10: 12, 15: 24 }[n] || 10;
+    var par = { 5: 120, 10: 600, 15: 1500 }[n] || 600;
+    var speed = C.clamp(1.7 - secs / par, 0.6, 1.7);
+    var coins = Math.round(base * speed) + (S.daily ? 8 : 0);
+    var points = Math.round(base * 4 * speed) + (S.daily ? 25 : 0);
+
+    var isBest = C.stats.best('nonogram', 'time-' + n, elapsed, true);
+    C.achievements.unlock('ng-win');
+    if (n === 15) C.achievements.unlock('ng-large');
+    if (n === 10 && elapsed < 180000) C.achievements.unlock('ng-fast');
+    if (S.daily) {
+      var firstDaily = C.stats.daily('nonogram', S.daily, { label: C.time(elapsed), ms: elapsed, size: n });
+      if (!firstDaily) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    var snap = { n: n, cells: S.cells.slice(), daily: S.daily };
+
+    ctx.finish({
+      won: true, title: C.t('solved'), timeMs: elapsed, coins: coins, points: points,
+      note: isBest ? C.t('best') + '!' : null,
+      lines: [
+        { label: C.t('time'), value: C.time(elapsed) },
+        { label: C.t('size'), value: C.num(n) + '×' + C.num(n) }
+      ],
+      shareText: 'چوگان · نونوگرام ' + C.num(n) + '×' + C.num(n) +
+        (snap.daily ? ('\nروزانه ' + snap.daily) : '') + '\nزمان ' + C.time(elapsed),
+      paint: cardPaint(snap),
+      onAgain: snap.daily ? null : function () { newGame(snap.n, null); }
+    });
+  }
+
+  /* ------------------------------------------------- تخته روی کارت نتیجه */
+  // از وضعیت پایان کپی گرفته می‌شود: پنجره‌ی نتیجه بعد از «دوباره» هم می‌تواند
+  // باز بماند و کارت باید همان تصویر را نشان بدهد.
+  function cardPaint(snap) {
+    return function (g, W, H, col) {
+      var side = Math.min(W, H), n = snap.n, s = side / n;
+      var ox = (W - side) / 2, oy = (H - side) / 2;
+      g.fillStyle = col.surface2;
+      C.rrect(g, ox, oy, side, side, 18);
+      g.fill();
+      g.fillStyle = tok('--game') || '#4FA3A5';
+      for (var i = 0; i < n * n; i++) {
+        if (snap.cells[i] !== E.FILL) continue;
+        C.rrect(g, ox + (i % n) * s + 1.5, oy + ((i / n) | 0) * s + 1.5, s - 3, s - 3, Math.max(2, s * 0.14));
+        g.fill();
+      }
+    };
+  }
+
+  /* --------------------------------------------------------- زمان‌سنج */
+
+  function startTimer() {
+    stopTimer();
+    var last = Date.now();
+    timerId = setInterval(function () {
+      var now = Date.now();
+      if (S && !S.done) { S.elapsed += now - last; ctx.setStat('time', C.time(S.elapsed)); }
+      last = now;
+    }, 250);
+  }
+  function stopTimer() { if (timerId) { clearInterval(timerId); timerId = null; } }
+  C.onPause(function () { stopTimer(); if (drag) endStroke(); });
+  C.onResume(function () { if (S && !S.done) startTimer(); });
+
+  /* --------------------------------------------------------- ذخیره */
+
+  // جدول تازه‌ای که هنوز دست نخورده ذخیره نمی‌شود، همان رفتار نقطه‌بازی؛
+  // وگرنه نشان «ادامه» در منو برای جدول خالی هم روشن می‌ماند
+  ctx.autosave(function () {
+    if (!S || S.done || !S.history.length) return { inProgress: false };
+    return {
+      s: { n: S.n, rows: S.rows, cols: S.cols, cells: S.cells, history: S.history, elapsed: S.elapsed, daily: S.daily },
+      prefs: prefs
+    };
+  });
+  function save() { ctx.save(); }
+
+  function askNew() {
+    var dd = S ? S.daily : null;
+    function go() { newGame(dd ? 10 : (S ? S.n : prefs.size), dd); }
+    if (!S || S.done || !S.history.length) { go(); return; }
+    C.ui.confirm({ title: C.t('newPuzzle'), body: C.t('resetWarn'), onOk: go });
+  }
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('tutText1') }),
+        el('p', { class: 'ch-dim', text: C.t('tutText2') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          kb('← ↑ → ↓', C.t('move')),
+          kb('Space / Enter', C.t('fillKey')),
+          kb('X', C.t('markKey')),
+          kb('U / Ctrl+Z', C.t('undoMove'))
+        ])
+      ],
+      actions: [
+        { label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('done'), kind: 'primary' }
+      ]
+    });
+  }
+  function kb(k, what) {
+    return el('div', { class: 'ch-item' }, [
+      el('div', { class: 'ch-item__label', text: what }),
+      el('span', { class: 'ch-badge', text: k })
+    ]);
+  }
+
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'),
+      art: '<svg viewBox="0 0 200 110" width="100%"><g font-family="sans-serif" font-weight="700" font-size="15" fill="var(--c-text)" text-anchor="end">' +
+        '<text x="52" y="61">2 1</text></g>' +
+        '<g fill="var(--game)"><rect x="60" y="47" width="20" height="20" rx="3"/><rect x="82" y="47" width="20" height="20" rx="3"/><rect x="126" y="47" width="20" height="20" rx="3"/></g>' +
+        '<rect x="58" y="45" width="110" height="24" rx="4" fill="none" stroke="var(--c-line)" stroke-width="2"/></svg>' },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'),
+      art: '<svg viewBox="0 0 200 110" width="100%"><g fill="var(--game)"><rect x="40" y="45" width="22" height="22" rx="3"/><rect x="64" y="45" width="22" height="22" rx="3"/><rect x="88" y="45" width="22" height="22" rx="3" opacity=".5"/></g>' +
+        '<path d="M120 50l12 12M132 50l-12 12M144 50l12 12M156 50l-12 12" stroke="var(--c-text-faint)" stroke-width="3" stroke-linecap="round"/>' +
+        '<path d="M44 84h60" stroke="var(--game)" stroke-width="3" stroke-dasharray="4 4"/><path d="M104 84l-7-5v10z" fill="var(--game)"/></svg>' },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'),
+      art: '<svg viewBox="0 0 200 110" width="100%"><g fill="var(--game)">' +
+        '<rect x="85" y="20" width="14" height="14" rx="2"/><rect x="101" y="20" width="14" height="14" rx="2"/>' +
+        '<rect x="69" y="36" width="14" height="14" rx="2"/><rect x="85" y="36" width="14" height="14" rx="2"/><rect x="101" y="36" width="14" height="14" rx="2"/><rect x="117" y="36" width="14" height="14" rx="2"/>' +
+        '<rect x="85" y="52" width="14" height="14" rx="2"/><rect x="101" y="52" width="14" height="14" rx="2"/>' +
+        '<rect x="93" y="68" width="14" height="22" rx="2"/></g></svg>' }
+  ];
+
+  /* -------------------------------------------------------- کیبورد */
+
+  window.addEventListener('keydown', function (e) {
+    if (!S || S.done) return;
+    if (document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
+    if (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
+    var k = e.key, n = S.n;
+    if (k === 'u' || k === 'U' || ((e.ctrlKey || e.metaKey) && (k === 'z' || k === 'Z'))) { undoMove(); e.preventDefault(); return; }
+    // تخته آینه نمی‌شود، پس جهت‌نماها در راست‌چین هم برعکس نمی‌شوند
+    var moves = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+    if (moves[k]) {
+      if (cursor.show) {
+        cursor.r = C.clamp(cursor.r + moves[k][0], 0, n - 1);
+        cursor.c = C.clamp(cursor.c + moves[k][1], 0, n - 1);
+      }
+      cursor.show = true;
+      draw();
+      e.preventDefault();
+      return;
+    }
+    if (k === ' ' || k === 'Enter') { cursor.show = true; keyAct('fill'); e.preventDefault(); return; }
+    if (k === 'x' || k === 'X') { cursor.show = true; keyAct('mark'); e.preventDefault(); }
+  });
+
+  if (window.ResizeObserver) new ResizeObserver(function () { layout(); }).observe(boardBox);
+  else window.addEventListener('resize', layout);
+  // رنگ‌های بوم از توکن‌ها خوانده می‌شوند؛ با عوض شدن پوسته باید دوباره کشیده شود
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    if (mq.addEventListener) mq.addEventListener('change', function () { draw(); });
+  }
+  if (window.MutationObserver) {
+    new MutationObserver(function () { draw(); })
+      .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style'] });
+  }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { layout(); });
+
+  /* ---------------------------------------------------------- شروع */
+
+  function restore(v) {
+    S = {
+      n: v.n, rows: v.rows, cols: v.cols, cells: v.cells, history: v.history || [],
+      elapsed: v.elapsed || 0, daily: v.daily || null, done: false
+    };
+    cursor = { r: 0, c: 0, show: false };
+    render();
+    startTimer();
+  }
+  function validSave(v) {
+    return v && [5, 10, 15].indexOf(v.n) >= 0 && v.rows && v.rows.length === v.n &&
+      v.cols && v.cols.length === v.n && v.cells && v.cells.length === v.n * v.n;
+  }
+
+  var saved = ctx.loadSave();
+  if (dailyDate) {
+    // ذخیره‌ی روزانه جایگاه جدای خودش را دارد، پس ادامه‌دادنش بازی عادی را نمی‌سوزاند
+    if (saved && validSave(saved.s) && saved.s.daily === dailyDate) restore(saved.s);
+    else newGame(10, dailyDate);
+    if (C.stats.dailyDone('nonogram', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).nonogram;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec.label });
+    }
+    ctx.tutorialIfNew(TUT);
+  } else if (saved && validSave(saved.s) && !saved.s.daily) {
+    if (saved.prefs) prefs = saved.prefs;
+    restore(saved.s);
+  } else {
+    newGame(prefs.size, null);
+    ctx.tutorialIfNew(TUT);
+  }
+})();
+</script>
+</body>
+</html>
