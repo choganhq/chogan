@@ -1,0 +1,751 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>رمزشکن — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .cb-wrap { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: var(--s-3); align-items: center; }
+  .cb-top { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+  .cb-board {
+    width: 100%; display: flex; flex-direction: column; gap: 3px;
+    background: var(--c-surface); border-radius: var(--r-lg); box-shadow: var(--sh-1); padding: 8px 10px;
+  }
+  .cb-row { display: flex; align-items: center; gap: 8px; min-height: 34px; border-radius: var(--r-md); padding: 2px 6px; }
+  .cb-row__n { width: 22px; flex: 0 0 22px; text-align: center; font-size: var(--fs-xs); color: var(--c-text-faint); font-variant-numeric: tabular-nums; }
+  .cb-pegs { flex: 1; display: flex; gap: 6px; justify-content: center; align-items: center; }
+  .cb-peg { width: 28px; height: 28px; flex: 0 0 28px; display: block; }
+  .cb-peg svg { display: block; width: 100%; height: 100%; }
+  .cb-row--future .cb-peg { opacity: .55; }
+  .cb-row--cur { background: var(--game-soft); min-height: 56px; }
+  .cb-slot {
+    width: 44px; height: 44px; flex: 0 0 44px; padding: 3px; border: 0; border-radius: 50%;
+    background: transparent; cursor: pointer; touch-action: manipulation;
+    transition: transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+  }
+  .cb-slot svg { display: block; width: 100%; height: 100%; }
+  .cb-slot:active { transform: scale(.9); }
+  .cb-slot--sel { box-shadow: 0 0 0 3px var(--game); }
+  .cb-slot--fill svg { animation: cb-pop 200ms var(--ease-back) backwards; }
+  .cb-pins { width: 42px; flex: 0 0 42px; display: grid; grid-template-columns: repeat(var(--pc, 2), 10px); gap: 3px; justify-content: center; align-content: center; }
+  .cb-pin { width: 10px; height: 10px; border-radius: 50%; box-sizing: border-box; }
+  .cb-pin--b { background: var(--c-text); }
+  .cb-pin--w { border: 2px solid var(--c-text); }
+  .cb-pin--n { background: var(--c-surface-3); transform: scale(.6); }
+  .cb-new .cb-pin { animation: cb-pop 320ms var(--ease-back) backwards; }
+  .cb-new .cb-pin:nth-child(2) { animation-delay: 60ms; }
+  .cb-new .cb-pin:nth-child(3) { animation-delay: 120ms; }
+  .cb-new .cb-pin:nth-child(4) { animation-delay: 180ms; }
+  .cb-new .cb-pin:nth-child(5) { animation-delay: 240ms; }
+  @keyframes cb-pop { from { transform: scale(0); } }
+  .cb-secret { border-bottom: 2px dashed var(--c-line); border-radius: 0; padding-bottom: 6px; margin-bottom: 3px; }
+  .cb-secret .cb-row__n { color: var(--game); }
+  .cb-hidden { fill: var(--c-surface-3); }
+  .cb-hidden-q { fill: var(--c-text-faint); font: 800 13px var(--f); }
+  .cb-pal { display: grid; gap: 8px; grid-template-columns: repeat(var(--n, 6), 44px); justify-content: center; }
+  .cb-color {
+    width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; background: transparent;
+    cursor: pointer; touch-action: manipulation; transition: transform var(--t-fast) var(--ease);
+  }
+  .cb-color svg { display: block; width: 100%; height: 100%; }
+  .cb-color:active { transform: scale(.88); }
+  .cb-color:disabled { opacity: .35; cursor: default; }
+  .cb-acts { display: flex; gap: var(--s-2); width: 100%; }
+  .cb-acts .ch-btn { flex: 1; }
+  .cb-left { font-size: var(--fs-sm); color: var(--c-text-dim); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function CodebreakerEngineFactory() {
+  'use strict';
+
+  // سه سطح همان سه‌تایی است که در ایشو #83 آمده. آسان بی‌تکرار است تا
+  // بازیکن تازه‌کار با پرسش «یک رنگ دو بار هست؟» درگیر نشود.
+  var LEVELS = {
+    easy:   { pegs: 4, colors: 6, repeats: false, rows: 10 },
+    normal: { pegs: 4, colors: 6, repeats: true,  rows: 10 },
+    hard:   { pegs: 5, colors: 8, repeats: true,  rows: 10 }
+  };
+  var LEVEL_IDS = ['easy', 'normal', 'hard'];
+
+  function makeSecret(rnd, levelId) {
+    var L = LEVELS[levelId];
+    var out = [], i;
+    if (L.repeats) {
+      for (i = 0; i < L.pegs; i++) out.push(Math.floor(rnd() * L.colors));
+      return out;
+    }
+    var pool = [];
+    for (i = 0; i < L.colors; i++) pool.push(i);
+    for (i = 0; i < L.pegs; i++) {
+      var j = i + Math.floor(rnd() * (pool.length - i));
+      var t = pool[i]; pool[i] = pool[j]; pool[j] = t;
+      out.push(pool[i]);
+    }
+    return out;
+  }
+
+  /* سیاه: رنگ درست در جای درست. سفید: رنگ درست در جای غلط.
+     سفید از روی شمار هر رنگ حساب می‌شود، نه با جست‌وجوی خانه‌به‌خانه،
+     چون روش خانه‌به‌خانه وقتی رنگی در هر دو طرف تکرار شده یک مهره را دو
+     بار می‌شمارد — رایج‌ترین باگ این بازی. */
+  function feedback(secret, guess) {
+    var black = 0, cs = {}, cg = {}, i;
+    for (i = 0; i < secret.length; i++) {
+      if (secret[i] === guess[i]) black++;
+      cs[secret[i]] = (cs[secret[i]] || 0) + 1;
+      cg[guess[i]] = (cg[guess[i]] || 0) + 1;
+    }
+    var common = 0;
+    for (var k in cs) if (cg[k]) common += Math.min(cs[k], cg[k]);
+    return { b: black, w: common - black };
+  }
+
+  function validCode(L, code, forSecret) {
+    if (!code || code.length !== L.pegs) return false;
+    var seen = {};
+    for (var i = 0; i < code.length; i++) {
+      var c = code[i];
+      if (typeof c !== 'number' || c !== (c | 0) || c < 0 || c >= L.colors) return false;
+      if (forSecret && !L.repeats && seen[c]) return false;
+      seen[c] = 1;
+    }
+    return true;
+  }
+
+  function emptyRow(L) {
+    var r = [];
+    for (var i = 0; i < L.pegs; i++) r.push(-1);
+    return r;
+  }
+
+  function newState(levelId, secret) {
+    var L = LEVELS[levelId];
+    return { level: levelId, secret: secret.slice(), rows: [], cur: emptyRow(L), done: false, won: false };
+  }
+
+  /* ثبت یک حدس. تنها راه تغییر ردیف‌ها همین است و راه برگشتی ندارد:
+     حدس ثبت‌شده در روزانه برای همه یکی است و برگرداندنش یعنی دیدن
+     پاسخ بدون پرداختن هزینه‌اش. خروجی ردیف تازه است، یا null اگر حدس
+     ناقص یا بازی تمام است. */
+  function submit(S, guess) {
+    var L = LEVELS[S.level];
+    if (!L || S.done || !validCode(L, guess, false)) return null;
+    var f = feedback(S.secret, guess);
+    var row = { g: guess.slice(), b: f.b, w: f.w };
+    S.rows.push(row);
+    S.cur = emptyRow(L);
+    if (f.b === L.pegs) { S.won = true; S.done = true; }
+    else if (S.rows.length >= L.rows) S.done = true;
+    return row;
+  }
+
+  // ذخیره‌ی خراب یا دست‌کاری‌شده نباید صفحه را بشکند؛ بهتر است دست تازه شروع شود
+  function validState(S) {
+    if (!S || typeof S !== 'object') return false;
+    var L = LEVELS[S.level];
+    if (!L || !validCode(L, S.secret, true) || !Array.isArray(S.rows) || !Array.isArray(S.cur)) return false;
+    if (S.cur.length !== L.pegs || S.rows.length > L.rows) return false;
+    for (var i = 0; i < S.cur.length; i++) {
+      if (S.cur[i] !== -1 && !(S.cur[i] >= 0 && S.cur[i] < L.colors && S.cur[i] === (S.cur[i] | 0))) return false;
+    }
+    for (var r = 0; r < S.rows.length; r++) {
+      var row = S.rows[r];
+      if (!row || !validCode(L, row.g, false)) return false;
+      var f = feedback(S.secret, row.g);
+      if (f.b !== row.b || f.w !== row.w) return false;
+    }
+    return true;
+  }
+
+  function consistent(code, rows) {
+    for (var i = 0; i < rows.length; i++) {
+      var f = feedback(code, rows[i].g);
+      if (f.b !== rows[i].b || f.w !== rows[i].w) return false;
+    }
+    return true;
+  }
+
+  function codeAt(L, n) {
+    var out = [];
+    for (var i = 0; i < L.pegs; i++) { out.unshift(n % L.colors); n = Math.floor(n / L.colors); }
+    return out;
+  }
+
+  /* حل‌کننده‌ی ساده برای آزمون‌ها: همیشه اولین رمزی را حدس می‌زند که با
+     همه‌ی پاسخ‌های قبلی جور است. جست‌وجو از جای حدس قبلی ادامه می‌دهد،
+     چون هر رمز پیش از آن یک بار ناجور بوده و با پاسخ بیشتر جور نمی‌شود. */
+  function solve(levelId, secret, maxGuesses) {
+    var L = LEVELS[levelId];
+    var total = Math.pow(L.colors, L.pegs);
+    var rows = [];
+    var n = 0;
+    maxGuesses = maxGuesses || 50;
+    while (rows.length < maxGuesses) {
+      var g = null;
+      for (; n < total; n++) {
+        var code = codeAt(L, n);
+        if (validCode(L, code, true) && consistent(code, rows)) { g = code; n++; break; }
+      }
+      if (!g) return null;
+      var f = feedback(secret, g);
+      rows.push({ g: g, b: f.b, w: f.w });
+      if (f.b === L.pegs) break;
+    }
+    return rows.map(function (r) { return r.g; });
+  }
+
+  var api = {
+    LEVELS: LEVELS, LEVEL_IDS: LEVEL_IDS, makeSecret: makeSecret, codeAt: codeAt,
+    feedback: feedback, validCode: validCode, emptyRow: emptyRow, newState: newState,
+    submit: submit, validState: validState, consistent: consistent, solve: solve
+  };
+  if (typeof self !== 'undefined') self.CodebreakerEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = CodebreakerEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = CodebreakerEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'mastermind',
+    name: { fa: 'رمزشکن', en: 'Code Breaker', zh: '猜密码' },
+    accent: '#5E60CE',
+    mood: 'sudoku',
+    scroll: true,
+    strings: {
+      fa: {
+        normal: 'معمولی', submit: 'ثبت حدس', erase: 'پاک کردن', newCode: 'رمز تازه',
+        dailyCode: 'رمز روزانه', secret: 'رمز', level: 'سطح', guesses: 'حدس‌ها',
+        ofTen: '{n} از {m}', left: '{n} حدس مانده', incomplete: 'اول همه‌ی خانه‌ها را پر کن',
+        cracked: 'رمز را شکستی', notCracked: 'رمز نشکست', slot: 'خانه‌ی {n}', empty: 'خالی',
+        moveSlot: 'خانه‌ی قبلی و بعدی', putColor: 'گذاشتن رنگ', exactPin: 'رنگ و جای درست',
+        nearPin: 'رنگ درست، جای غلط', noRepeat: 'در سطح آسان رنگ تکراری در رمز نیست.',
+        levelsText: 'آسان: ۴ خانه از ۶ رنگ، بی‌تکرار. معمولی: ۴ خانه از ۶ رنگ، تکرار مجاز. سخت: ۵ خانه از ۸ رنگ، تکرار مجاز.',
+        col0: 'دایره‌ی قرمز', col1: 'مربع آبی', col2: 'مثلث نارنجی', col3: 'لوزی سبز',
+        col4: 'بعلاوه‌ی صورتی', col5: 'ستاره‌ی آبی روشن', col6: 'ضربدر زرد', col7: 'مساوی خاکستری',
+        tutTitle1: 'رمز را پیدا کن', tutText1: 'یک رمز چهارخانه‌ای از رنگ‌ها پنهان است. ده حدس داری تا پیدایش کنی.',
+        tutTitle2: 'نشانه‌ها', tutText2: 'بعد از هر حدس، هر دایره‌ی پر یعنی یک رنگ درست در جای درست و هر حلقه‌ی توخالی یعنی رنگ درست در جای غلط. ترتیب نشانه‌ها ربطی به ترتیب خانه‌ها ندارد.',
+        tutTitle3: 'رنگ و شکل', tutText3: 'هر رنگ شکل خودش را هم دارد، پس بدون تشخیص رنگ هم می‌شود بازی کرد. تا پیش از ثبت، خانه‌های ردیف را هر چقدر خواستی عوض کن؛ حدس ثبت‌شده برنمی‌گردد.'
+      },
+      en: {
+        normal: 'Normal', submit: 'Submit guess', erase: 'Erase', newCode: 'New code',
+        dailyCode: 'Daily code', secret: 'Code', level: 'Level', guesses: 'Guesses',
+        ofTen: '{n} of {m}', left: '{n} guesses left', incomplete: 'Fill every slot first',
+        cracked: 'Code cracked', notCracked: 'Code not cracked', slot: 'Slot {n}', empty: 'empty',
+        moveSlot: 'Previous and next slot', putColor: 'Place colour', exactPin: 'Right colour, right place',
+        nearPin: 'Right colour, wrong place', noRepeat: 'On easy, no colour repeats in the code.',
+        levelsText: 'Easy: 4 slots, 6 colours, no repeats. Normal: 4 slots, 6 colours, repeats allowed. Hard: 5 slots, 8 colours, repeats allowed.',
+        col0: 'red circle', col1: 'blue square', col2: 'orange triangle', col3: 'green diamond',
+        col4: 'pink plus', col5: 'sky-blue star', col6: 'yellow cross', col7: 'grey equals',
+        tutTitle1: 'Find the code', tutText1: 'A code of four colours is hidden. You have ten guesses to find it.',
+        tutTitle2: 'The pins', tutText2: 'After each guess, every filled pin means one colour in the right place and every hollow ring means a right colour in the wrong place. The pins are not in slot order.',
+        tutTitle3: 'Colour and shape', tutText3: 'Every colour also has its own shape, so you can play without telling colours apart. Change the row as much as you like before you submit; a submitted guess stays.'
+      },
+      zh: {
+        normal: '普通', submit: '提交猜测', erase: '清除', newCode: '新密码',
+        dailyCode: '每日密码', secret: '密码', level: '难度', guesses: '猜测次数',
+        ofTen: '{n} / {m}', left: '还剩 {n} 次', incomplete: '请先填满所有格子',
+        cracked: '密码破解成功', notCracked: '没能破解密码', slot: '第 {n} 格', empty: '空',
+        moveSlot: '上一格和下一格', putColor: '放入颜色', exactPin: '颜色和位置都对',
+        nearPin: '颜色对，位置不对', noRepeat: '简单难度的密码里没有重复颜色。',
+        levelsText: '简单：4 格 6 色，不重复。普通：4 格 6 色，可重复。困难：5 格 8 色，可重复。',
+        col0: '红色圆形', col1: '蓝色方形', col2: '橙色三角', col3: '绿色菱形',
+        col4: '粉色加号', col5: '天蓝五角星', col6: '黄色叉号', col7: '灰色等号',
+        tutTitle1: '找出密码', tutText1: '藏着一个由四种颜色组成的密码。你有十次机会把它猜出来。',
+        tutTitle2: '提示针', tutText2: '每次猜测后，每个实心点表示有一个颜色位置都对，每个空心圈表示颜色对但位置不对。提示针的顺序与格子顺序无关。',
+        tutTitle3: '颜色和形状', tutText3: '每种颜色都有自己的形状，分不清颜色也能玩。提交前可以随意更改这一行；提交后的猜测不能撤回。'
+      }
+    }
+  });
+
+  /* رنگ مهره‌ها توکن اختصاصی همین بازی است و عمداً در هر دو تم یکی است،
+     چون خود رنگ بخشی از رمز است. پالت از اوکابه-ایتو گرفته شده که برای
+     کوررنگی طراحی شده، و هر رنگ شکل خودش را هم دارد تا بازی بدون تشخیص
+     رنگ هم ممکن باشد (#83). ink رنگ شکل روی مهره است تا روی رنگ روشن هم
+     خوانا بماند. */
+  var PEG = [
+    { c: '#D55E00', ink: '#FFFFFF', d: 'M12 6.6a5.4 5.4 0 1 0 0 10.8a5.4 5.4 0 1 0 0-10.8z' },
+    { c: '#0072B2', ink: '#FFFFFF', d: 'M7.2 7.2h9.6v9.6h-9.6z' },
+    { c: '#E69F00', ink: '#2C2620', d: 'M12 6.2l6.2 11h-12.4z' },
+    { c: '#009E73', ink: '#FFFFFF', d: 'M12 5.6l6.4 6.4l-6.4 6.4l-6.4-6.4z' },
+    { c: '#CC79A7', ink: '#2C2620', d: 'M10.4 6.4h3.2v4h4v3.2h-4v4h-3.2v-4h-4v-3.2h4z' },
+    { c: '#56B4E9', ink: '#2C2620', d: 'M12 6L13.7 10.3L18.3 10.6L14.8 13.5L15.9 17.9L12 15.5L8.1 17.9L9.2 13.5L5.7 10.6L10.3 10.3Z' },
+    { c: '#F0E442', ink: '#2C2620', d: 'M8.4 6.2l3.6 3.6l3.6-3.6l2.2 2.2l-3.6 3.6l3.6 3.6l-2.2 2.2l-3.6-3.6l-3.6 3.6l-2.2-2.2l3.6-3.6l-3.6-3.6z' },
+    { c: '#7A7A7A', ink: '#FFFFFF', d: 'M6.4 7.8h11.2v3h-11.2zM6.4 13.2h11.2v3h-11.2z' }
+  ];
+
+  function pegSvg(c) {
+    if (c < 0) {
+      return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="var(--c-surface-2)" ' +
+        'stroke="var(--c-text-faint)" stroke-width="1.2" stroke-dasharray="3 2.4"/></svg>';
+    }
+    var p = PEG[c];
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="' + p.c +
+      '" stroke="rgba(0,0,0,.22)" stroke-width="1"/><path d="' + p.d + '" fill="' + p.ink + '"/></svg>';
+  }
+  function hiddenSvg() {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" class="cb-hidden"/>' +
+      '<text x="12" y="16.5" text-anchor="middle" class="cb-hidden-q">?</text></svg>';
+  }
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', { level: 'normal' });
+  if (!E.LEVELS[prefs.level]) prefs.level = 'normal';
+
+  var S = null, sel = 0, fresh = -1;
+
+  var top = el('div', { class: 'cb-top' });
+  var board = el('div', { class: 'cb-board' });
+  var pal = el('div', { class: 'cb-pal' });
+  var eraseBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button' }, [C.icon('eraser', 18), el('span', { text: C.t('erase') })]);
+  var submitBtn = el('button', { class: 'ch-btn ch-btn--primary', type: 'button' }, [C.icon('check', 18), el('span', { text: C.t('submit') })]);
+  var acts = el('div', { class: 'cb-acts' }, [eraseBtn, submitBtn]);
+  var wrap = el('div', { class: 'cb-wrap' }, [top, board, pal, acts]);
+  eraseBtn.addEventListener('click', erase);
+  submitBtn.addEventListener('click', trySubmit);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  // در روزانه دکمه‌ی رمز تازه نیست: شروع دوباره یعنی پاک کردن حدس‌های ثبت‌شده،
+  // و حدس ثبت‌شده نباید برگردد (#83).
+  if (!dailyDate) ctx.button({ icon: 'refresh', label: C.t('newCode'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  function L() { return E.LEVELS[S.level]; }
+
+  /* ------------------------------------------------------------ ساخت */
+
+  function newGame(levelId, daily) {
+    var rnd = daily ? C.daily('mastermind', daily).rng : Math.random;
+    var st = E.newState(levelId, E.makeSecret(rnd, levelId));
+    st.daily = daily || null;
+    st.startedAt = Date.now();
+    S = st;
+    sel = 0; fresh = -1;
+    render();
+    save();
+  }
+
+  /* ------------------------------------------------------------ رسم */
+
+  function render() {
+    renderTop();
+    renderBoard();
+    renderPalette();
+    var full = S.cur.indexOf(-1) < 0;
+    submitBtn.disabled = S.done;
+    // ناقص بودن ردیف دکمه را از کار نمی‌اندازد تا ضربه‌اش بگوید چه کم است
+    submitBtn.setAttribute('aria-disabled', (!full || S.done) ? 'true' : 'false');
+    submitBtn.style.opacity = full ? '' : '.6';
+    eraseBtn.disabled = S.done;
+  }
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (S.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' },
+        [C.icon('calendar', 14), el('span', { text: C.t('dailyCode') + ' — ' + C.num(S.daily) })]));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('normal') }));
+      return;
+    }
+    top.appendChild(C.ui.segmented(E.LEVEL_IDS.map(function (id) {
+      return { value: id, label: C.t(id) };
+    }), S.level, function (v) {
+      if (v === S.level) return;
+      var go = function () {
+        prefs.level = v; ctx.store.set('prefs', prefs);
+        newGame(v, null);
+      };
+      if (started() && !S.done) {
+        C.ui.confirm({ title: C.t('newCode'), body: C.t('resetWarn'), onOk: go, onCancel: function () { renderTop(); } });
+        renderTop();
+        return;
+      }
+      go();
+    }));
+  }
+
+  function started() { return S.rows.length > 0 || S.cur.some(function (c) { return c >= 0; }); }
+
+  function pinsEl(row, isNew) {
+    var n = L().pegs;
+    var box = el('div', { class: 'cb-pins' + (isNew ? ' cb-new' : ''), style: { '--pc': n > 4 ? 3 : 2 } });
+    if (!row) return box;
+    box.setAttribute('aria-label', C.t('exactPin') + ' ' + C.num(row.b) + '، ' + C.t('nearPin') + ' ' + C.num(row.w));
+    box.setAttribute('role', 'img');
+    for (var i = 0; i < n; i++) {
+      var k = i < row.b ? 'b' : (i < row.b + row.w ? 'w' : 'n');
+      box.appendChild(el('span', { class: 'cb-pin cb-pin--' + k }));
+    }
+    return box;
+  }
+
+  function peg(c) {
+    var s = el('span', { class: 'cb-peg' });
+    s.innerHTML = pegSvg(c);
+    return s;
+  }
+
+  function renderBoard() {
+    var Lv = L();
+    board.innerHTML = '';
+    // ردیف رمز: تا پایان پنهان
+    var sp = el('div', { class: 'cb-pegs' });
+    for (var i = 0; i < Lv.pegs; i++) {
+      if (S.done) sp.appendChild(peg(S.secret[i]));
+      else { var h = el('span', { class: 'cb-peg' }); h.innerHTML = hiddenSvg(); sp.appendChild(h); }
+    }
+    var secretRow = el('div', { class: 'cb-row cb-secret' }, [
+      el('span', { class: 'cb-row__n' }, [C.icon(S.done ? 'check' : 'lock', 16)]), sp, el('div', { class: 'cb-pins' })
+    ]);
+    secretRow.setAttribute('aria-label', C.t('secret'));
+    board.appendChild(secretRow);
+
+    for (var r = 0; r < Lv.rows; r++) {
+      var row = S.rows[r];
+      var isCur = !S.done && r === S.rows.length;
+      var pegs = el('div', { class: 'cb-pegs' });
+      var cls = 'cb-row';
+      if (row) {
+        for (var k = 0; k < Lv.pegs; k++) pegs.appendChild(peg(row.g[k]));
+      } else if (isCur) {
+        cls += ' cb-row--cur';
+        for (var s = 0; s < Lv.pegs; s++) pegs.appendChild(slotBtn(s));
+      } else {
+        cls += ' cb-row--future';
+        for (var f = 0; f < Lv.pegs; f++) pegs.appendChild(peg(-1));
+      }
+      var line = el('div', { class: cls }, [
+        el('span', { class: 'cb-row__n', text: C.num(r + 1) }), pegs, pinsEl(row, r === fresh)
+      ]);
+      if (isCur) line.id = 'cb-cur';
+      board.appendChild(line);
+    }
+    fresh = -1;
+  }
+
+  function slotBtn(i) {
+    var c = S.cur[i];
+    var b = el('button', {
+      type: 'button',
+      class: 'cb-slot' + (i === sel ? ' cb-slot--sel' : '') + (c >= 0 ? ' cb-slot--fill' : ''),
+      'aria-label': C.t('slot', { n: C.num(i + 1) }) + ': ' + (c >= 0 ? C.t('col' + c) : C.t('empty')),
+      'aria-pressed': i === sel ? 'true' : 'false'
+    });
+    b.innerHTML = pegSvg(c);
+    b.addEventListener('click', function () { tapSlot(i); });
+    return b;
+  }
+
+  function renderPalette() {
+    var Lv = L();
+    pal.innerHTML = '';
+    // هشت رنگ در یک ردیف روی گوشی باریک زیر ۴۴ پیکسل می‌رفت
+    pal.style.setProperty('--n', Lv.colors > 6 ? 4 : Lv.colors);
+    for (var c = 0; c < Lv.colors; c++) {
+      (function (col) {
+        var b = el('button', { type: 'button', class: 'cb-color', 'aria-label': C.t('col' + col) });
+        b.innerHTML = pegSvg(col);
+        b.disabled = S.done;
+        b.addEventListener('click', function () { putColor(col); });
+        pal.appendChild(b);
+      })(c);
+    }
+  }
+
+  /* ----------------------------------------------------------- حرکت */
+
+  function tapSlot(i) {
+    if (!S || S.done) return;
+    // ضربه‌ی دوم روی خانه‌ی انتخاب‌شده خالی‌اش می‌کند؛ راه سریع برای اصلاح با یک دست
+    if (i === sel && S.cur[i] >= 0) { S.cur[i] = -1; C.feedback('tap'); save(); }
+    else { sel = i; C.feedback('select'); }
+    render();
+  }
+
+  function putColor(c) {
+    if (!S || S.done || !(c >= 0 && c < L().colors)) return;
+    S.cur[sel] = c;
+    C.audio.sfx('place');
+    C.haptic('tap');
+    // به اولین خانه‌ی خالی بعدی برو تا چهار ضربه یعنی یک ردیف کامل
+    var n = L().pegs;
+    for (var k = 1; k <= n; k++) {
+      var j = (sel + k) % n;
+      if (S.cur[j] < 0) { sel = j; break; }
+      if (k === n) sel = Math.min(sel + 1, n - 1);
+    }
+    save();
+    render();
+  }
+
+  function erase() {
+    if (!S || S.done) return;
+    if (S.cur[sel] < 0 && sel > 0) sel--;
+    if (S.cur[sel] < 0) { C.feedback('bad'); return; }
+    S.cur[sel] = -1;
+    C.feedback('tap');
+    save();
+    render();
+  }
+
+  function moveSel(d) {
+    if (!S || S.done) return;
+    sel = C.clamp(sel + d, 0, L().pegs - 1);
+    render();
+  }
+
+  function trySubmit() {
+    if (!S || S.done) return;
+    if (S.cur.indexOf(-1) >= 0) {
+      C.feedback('bad');
+      var cur = document.getElementById('cb-cur');
+      if (cur) C.ui.shake(cur);
+      C.ui.toast({ icon: 'info', title: C.t('incomplete') });
+      return;
+    }
+    var row = E.submit(S, S.cur);
+    if (!row) { C.feedback('bad'); return; }
+    fresh = S.rows.length - 1;
+    sel = 0;
+    if (S.won) C.audio.sfx('chain');
+    else if (row.b > 0) { C.audio.sfx('pop'); C.haptic('tap'); }
+    else { C.audio.sfx('place'); C.haptic('tap'); }
+    save();
+    render();
+    if (S.done) { finish(); return; }
+    var cur2 = document.getElementById('cb-cur');
+    if (cur2 && cur2.scrollIntoView) cur2.scrollIntoView({ block: 'nearest' });
+  }
+
+  /* --------------------------------------------------------- پایان */
+
+  function pinsText(row, n) {
+    var s = '';
+    for (var i = 0; i < n; i++) s += i < row.b ? '●' : (i < row.b + row.w ? '○' : '·');
+    return s;
+  }
+
+  function finish() {
+    var Lv = L();
+    var used = S.rows.length;
+    var won = S.won;
+    var elapsed = Date.now() - S.startedAt;
+    var base = { easy: 5, normal: 10, hard: 18 }[S.level] || 10;
+    // هر حدس صرفه‌جویی‌شده یک دهم پایه اضافه می‌کند، هم‌اندازه‌ی پاداش نقطه‌بازی
+    var k = 1 + (Lv.rows - used) / 10;
+    var coins = won ? Math.max(2, Math.round(base * k)) : Math.max(2, Math.round(base * 0.35));
+    var points = won ? Math.max(3, Math.round(base * 4 * k)) : Math.max(3, Math.round(base * 1.2));
+    if (S.daily) { coins += 8; points += 25; }
+
+    if (won) {
+      C.achievements.unlock('cb-win');
+      if (S.level === 'hard') C.achievements.unlock('cb-hard');
+      if (S.level !== 'easy' && used <= 4) C.achievements.unlock('cb-quick');
+      C.stats.best('mastermind', 'guesses-' + S.level, used, true);
+    }
+    var score = (won ? C.num(used) : '×') + '/' + C.num(Lv.rows);
+    if (S.daily) {
+      var firstDaily = C.stats.daily('mastermind', S.daily, { label: score, win: won, guesses: used });
+      if (!firstDaily) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    var lines = S.rows.map(function (r) { return pinsText(r, Lv.pegs); });
+    ctx.clearSave();
+    ctx.finish({
+      won: won,
+      title: won ? C.t('cracked') : C.t('notCracked'),
+      timeMs: elapsed, coins: coins, points: points,
+      lines: [
+        { label: C.t('guesses'), value: C.t('ofTen', { n: C.num(used), m: C.num(Lv.rows) }) },
+        { label: C.t('level'), value: C.t(S.level) }
+      ],
+      shareText: 'چوگان · رمزشکن · ' + C.t(S.level) +
+        (S.daily ? ('\nروزانه ' + S.daily) : '') + '\n' + score + '\n' + lines.join('\n'),
+      paint: cardPaint(),
+      onAgain: S.daily ? null : function () { newGame(S.level, null); }
+    });
+  }
+
+  /* ------------------------------------------------- تخته روی کارت نتیجه */
+  function cardPaint() {
+    var Lv = L(), rows = S.rows.map(function (r) { return { g: r.g.slice(), b: r.b, w: r.w }; });
+    var secret = S.secret.slice();
+    var paths = PEG.map(function (p) { return typeof Path2D !== 'undefined' ? new Path2D(p.d) : null; });
+    return function (g, W, H, col) {
+      var n = Lv.pegs, lines = rows.length + 1;
+      var cell = Math.min(W / (n + 2.2), H / (lines + 0.5), 96);
+      var bw = cell * (n + 2), bh = cell * (lines + 0.4);
+      var x0 = (W - bw) / 2, y0 = (H - bh) / 2;
+      var rtl = document.documentElement.dir === 'rtl';
+      var pinsX = rtl ? x0 : x0 + cell * n + cell * 0.4;
+      var pegsX = rtl ? x0 + cell * 1.6 : x0;
+      function drawPeg(cx, cy, size, c) {
+        g.save();
+        g.translate(cx - size / 2, cy - size / 2);
+        g.scale(size / 24, size / 24);
+        g.beginPath(); g.arc(12, 12, 11, 0, Math.PI * 2);
+        g.fillStyle = PEG[c].c; g.fill();
+        if (paths[c]) { g.fillStyle = PEG[c].ink; g.fill(paths[c]); }
+        g.restore();
+      }
+      function drawRow(y, code, row) {
+        // در راست‌چین خانه‌ی اول روی تخته سمت راست است؛ کارت باید همان ترتیب را نشان دهد
+        for (var i = 0; i < n; i++) drawPeg(pegsX + cell * ((rtl ? n - 1 - i : i) + 0.5), y + cell / 2, cell * 0.8, code[i]);
+        if (!row) return;
+        var per = n > 4 ? 3 : 2, pr = cell * 0.1, gap = cell * 0.3;
+        for (var p = 0; p < n; p++) {
+          var px = pinsX + cell * 0.6 + (p % per - (per - 1) / 2) * gap;
+          var py = y + cell / 2 + (Math.floor(p / per) - 0.5) * gap;
+          g.beginPath(); g.arc(px, py, pr, 0, Math.PI * 2);
+          if (p < row.b) { g.fillStyle = col.text; g.fill(); }
+          else if (p < row.b + row.w) { g.strokeStyle = col.text; g.lineWidth = cell * 0.045; g.stroke(); }
+          else { g.fillStyle = col.surface3; g.fill(); }
+        }
+      }
+      drawRow(y0, secret, null);
+      g.strokeStyle = col.line; g.lineWidth = 3; g.setLineDash([10, 8]);
+      g.beginPath(); g.moveTo(x0, y0 + cell * 1.2); g.lineTo(x0 + bw, y0 + cell * 1.2); g.stroke();
+      g.setLineDash([]);
+      for (var r = 0; r < rows.length; r++) drawRow(y0 + cell * (r + 1.4), rows[r].g, rows[r]);
+    };
+  }
+
+  /* --------------------------------------------------------- ذخیره */
+
+  ctx.autosave(function () {
+    if (!S || S.done || !started()) return { inProgress: false };
+    return {
+      s: {
+        level: S.level, secret: S.secret, rows: S.rows, cur: S.cur, daily: S.daily,
+        elapsed: Date.now() - S.startedAt
+      },
+      sel: sel,
+      prefs: prefs
+    };
+  });
+  function save() { ctx.save(); }
+
+  function askNew() {
+    function go() { newGame(S ? S.level : prefs.level, null); }
+    if (!S || S.done || !started()) { go(); return; }
+    C.ui.confirm({ title: C.t('newCode'), body: C.t('resetWarn'), onOk: go });
+  }
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('tutText2') }),
+        el('p', { class: 'ch-dim', text: C.t('levelsText') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          kb('1 – 8', C.t('putColor')),
+          kb('← →', C.t('moveSlot')),
+          kb('Backspace', C.t('erase')),
+          kb('Enter', C.t('submit'))
+        ])
+      ],
+      actions: [
+        { label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('done'), kind: 'primary' }
+      ]
+    });
+  }
+  function kb(k, what) {
+    return el('div', { class: 'ch-item' }, [
+      el('div', { class: 'ch-item__label', text: what }),
+      el('span', { class: 'ch-badge', text: k })
+    ]);
+  }
+
+  function artRow(codes, x0, y0) {
+    var s = '';
+    for (var i = 0; i < codes.length; i++) {
+      var p = PEG[codes[i]];
+      s += '<g transform="translate(' + (x0 + i * 30) + ' ' + y0 + ')"><circle cx="12" cy="12" r="11" fill="' + p.c + '"/>' +
+        '<path d="' + p.d + '" fill="' + p.ink + '"/></g>';
+    }
+    return s;
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' +
+        '<g fill="var(--c-surface-3)"><circle cx="52" cy="55" r="13"/><circle cx="84" cy="55" r="13"/><circle cx="116" cy="55" r="13"/><circle cx="148" cy="55" r="13"/></g>' +
+        '<g fill="var(--c-text-faint)" font-weight="800" font-size="15" text-anchor="middle"><text x="52" y="60">?</text><text x="84" y="60">?</text><text x="116" y="60">?</text><text x="148" y="60">?</text></g></svg>' },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' + artRow([0, 1, 2, 3], 24, 43) +
+        '<circle cx="164" cy="48" r="5" fill="var(--c-text)"/><circle cx="178" cy="48" r="4" fill="none" stroke="var(--c-text)" stroke-width="2"/>' +
+        '<circle cx="164" cy="62" r="4" fill="none" stroke="var(--c-text)" stroke-width="2"/><circle cx="178" cy="62" r="3" fill="var(--c-surface-3)"/></svg>' },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' + artRow([0, 1, 2, 3, 4], 28, 24) + artRow([5, 6, 7], 58, 60) + '</svg>' }
+  ];
+
+  /* -------------------------------------------------------- کیبورد */
+
+  // رقم فارسی و عربی هم پذیرفته می‌شود چون صفحه‌کلید فارسی گوشی همان را می‌فرستد
+  var DIGITS = '۱۲۳۴۵۶۷۸١٢٣٤٥٦٧٨';
+  window.addEventListener('keydown', function (e) {
+    if (!S || S.done) return;
+    if (document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
+    // Enter روی دکمه‌ی پالت یا خانه همیشه ثبت حدس است؛ وگرنه بعد از یک ضربه با
+    // موش، Enter همان رنگ را دوباره می‌گذاشت. دکمه‌های سربرگ کار خودشان را می‌کنند.
+    if (tag === 'BUTTON' && (e.key === ' ' || (e.key === 'Enter' && !wrap.contains(tg)))) return;
+    var k = e.key, d = -1;
+    if (k >= '1' && k <= '8' && k.length === 1) d = +k - 1;
+    else if (DIGITS.indexOf(k) >= 0 && k.length === 1) d = DIGITS.indexOf(k) % 8;
+    if (d >= 0) { if (d < L().colors) putColor(d); e.preventDefault(); return; }
+    // ردیف در راست‌چین از راست شروع می‌شود؛ جهت‌نما باید همان سمتی برود که روی صفحه می‌بینی
+    var rtl = document.documentElement.dir === 'rtl';
+    if (k === 'ArrowLeft') { moveSel(rtl ? 1 : -1); e.preventDefault(); return; }
+    if (k === 'ArrowRight') { moveSel(rtl ? -1 : 1); e.preventDefault(); return; }
+    if (k === 'Backspace' || k === 'Delete') { erase(); e.preventDefault(); return; }
+    if (k === 'Enter') { trySubmit(); e.preventDefault(); }
+  });
+
+  /* ---------------------------------------------------------- شروع */
+
+  var saved = ctx.loadSave();
+  var resumed = false;
+  if (saved && saved.s && E.validState(saved.s) && (dailyDate ? saved.s.daily === dailyDate : !saved.s.daily)) {
+    var v = saved.s;
+    S = E.newState(v.level, v.secret);
+    S.rows = v.rows; S.cur = v.cur; S.daily = v.daily || null;
+    S.startedAt = Date.now() - (v.elapsed || 0);
+    sel = C.clamp(saved.sel | 0, 0, E.LEVELS[v.level].pegs - 1);
+    if (saved.prefs && E.LEVELS[saved.prefs.level]) prefs = saved.prefs;
+    resumed = true;
+    render();
+  }
+  if (!resumed) {
+    if (dailyDate) {
+      newGame('normal', dailyDate);
+      if (C.stats.dailyDone('mastermind', dailyDate)) {
+        var rec = C.stats.dailyOf(dailyDate).mastermind;
+        C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec.label });
+      }
+    } else {
+      newGame(prefs.level, null);
+    }
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
