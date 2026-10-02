@@ -1,0 +1,643 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>میخ‌پران — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .pg-wrap { width: 100%; display: flex; flex-direction: column; gap: var(--s-3); align-items: center; }
+  .pg-top { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; min-height: 28px; }
+  .pg-boardbox { width: 100%; max-width: min(94vw, 58vh, 520px); }
+  .pg-svg { width: 100%; height: auto; display: block; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .pg-shape { fill: var(--c-surface); }
+  .pg-hole { fill: var(--c-surface-3); }
+  .pg-peg { fill: var(--game); transition: transform var(--t-fast) var(--ease); transform-box: fill-box; transform-origin: center; }
+  .pg-shine { fill: #FFFFFF; opacity: .32; pointer-events: none; }
+  .pg-peg--sel { stroke: var(--c-text); stroke-width: 6; transform: scale(1.08); }
+  .pg-peg--new { animation: pg-land 240ms var(--ease-back) backwards; }
+  .pg-peg--dead { opacity: .55; }
+  .pg-target { fill: none; stroke: var(--game); stroke-width: 5; stroke-dasharray: 9 7; opacity: .9; }
+  .pg-cursor { fill: none; stroke: var(--game); stroke-width: 5; opacity: .5; }
+  .pg-ghost { fill: var(--game); opacity: .85; pointer-events: none; }
+  .pg-status { color: var(--c-text-dim); font-size: var(--fs-sm); text-align: center; min-height: 1.4em; }
+  @keyframes pg-land { from { transform: scale(.6); } to { transform: scale(1); } }
+  @media (prefers-reduced-motion: reduce) { .pg-peg, .pg-peg--new { animation: none; transition: none; } }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function PegEngineFactory() {
+  'use strict';
+
+  // تخته‌ی انگلیسی: شبکه‌ی ۷ در ۷ که چهار گوشه‌ی ۲ در ۲ اش حذف شده، ۳۳ سوراخ.
+  // خانه‌ها با شماره‌ی r*7+c نام‌گذاری می‌شوند تا رسم و ذخیره یک زبان داشته باشند.
+  var N = 7, CENTRE = 24;
+  var VALID = [], HOLES = [], HI = [];
+  for (var cell = 0; cell < N * N; cell++) {
+    var r = (cell / N) | 0, c = cell % N;
+    var v = (r >= 2 && r <= 4) || (c >= 2 && c <= 4);
+    VALID.push(v);
+    HI.push(v ? HOLES.length : -1);
+    if (v) HOLES.push(cell);
+  }
+
+  // همه‌ی پرش‌های هندسی ممکن یک بار ساخته می‌شوند؛ حرکت مجاز یعنی یکی از
+  // همین‌ها که مبدأ و وسطش میخ دارد و مقصدش خالی است.
+  var JUMPS = [];
+  var DIRS = [[0, 1], [1, 0], [0, -1], [-1, 0]];
+  for (var h = 0; h < HOLES.length; h++) {
+    var r0 = (HOLES[h] / N) | 0, c0 = HOLES[h] % N;
+    for (var d = 0; d < 4; d++) {
+      var r2 = r0 + 2 * DIRS[d][0], c2 = c0 + 2 * DIRS[d][1];
+      if (r2 < 0 || r2 >= N || c2 < 0 || c2 >= N || !VALID[r2 * N + c2]) continue;
+      JUMPS.push({ from: HOLES[h], over: (r0 + DIRS[d][0]) * N + c0 + DIRS[d][1], to: r2 * N + c2 });
+    }
+  }
+
+  // هشت تقارن مربع (چهار چرخش، با و بدون آینه) روی شماره‌ی خانه
+  var SYM = [], SYM_INV = [];
+  for (var t = 0; t < 8; t++) {
+    var perm = [], inv = [];
+    for (var q = 0; q < N * N; q++) {
+      var a = (q / N) | 0, b = q % N, tmp;
+      for (var k = 0; k < (t & 3); k++) { tmp = a; a = b; b = N - 1 - tmp; }
+      if (t & 4) b = N - 1 - b;
+      perm.push(a * N + b);
+    }
+    for (var q2 = 0; q2 < N * N; q2++) inv[perm[q2]] = q2;
+    SYM.push(perm); SYM_INV.push(inv);
+  }
+
+  var POW = [];
+  for (var p = 0, x = 1; p < HOLES.length; p++, x *= 2) POW.push(x);
+
+  function startBoard(empty) {
+    var bd = [];
+    for (var i = 0; i < N * N; i++) bd.push(VALID[i] && i !== empty ? 1 : 0);
+    return bd;
+  }
+
+  function pegCount(bd) {
+    var n = 0;
+    for (var i = 0; i < HOLES.length; i++) if (bd[HOLES[i]]) n++;
+    return n;
+  }
+
+  function legal(bd, m) { return bd[m.from] === 1 && bd[m.over] === 1 && bd[m.to] === 0; }
+
+  function jumpAt(bd, from, to) {
+    for (var i = 0; i < JUMPS.length; i++) {
+      var m = JUMPS[i];
+      if (m.from === from && m.to === to) return legal(bd, m) ? m : null;
+    }
+    return null;
+  }
+
+  function movesFrom(bd, from) {
+    var out = [];
+    for (var i = 0; i < JUMPS.length; i++) if (JUMPS[i].from === from && legal(bd, JUMPS[i])) out.push(JUMPS[i]);
+    return out;
+  }
+
+  function legalMoves(bd) {
+    var out = [];
+    for (var i = 0; i < JUMPS.length; i++) if (legal(bd, JUMPS[i])) out.push(JUMPS[i]);
+    return out;
+  }
+
+  function isOver(bd) {
+    for (var i = 0; i < JUMPS.length; i++) if (legal(bd, JUMPS[i])) return false;
+    return true;
+  }
+
+  /* وضعیت کامل یک دست. صفحه و آزمون‌ها هر دو از همین دو تابع حرکت و
+     برگرداندن استفاده می‌کنند تا برگرداندن دقیقاً عکس همان حرکت ثبت‌شده باشد. */
+  function newGame(empty) {
+    return { start: empty, board: startBoard(empty), history: [] };
+  }
+
+  function applyMove(S, from, to) {
+    var m = jumpAt(S.board, from, to);
+    if (!m) return false;
+    S.board[m.from] = 0; S.board[m.over] = 0; S.board[m.to] = 1;
+    S.history.push([m.from, m.over, m.to]);
+    return true;
+  }
+
+  function undo(S) {
+    var h = S.history.pop();
+    if (!h) return false;
+    S.board[h[0]] = 1; S.board[h[1]] = 1; S.board[h[2]] = 0;
+    return true;
+  }
+
+  // تخته از روی شروع و تاریخچه دوباره ساخته می‌شود؛ ذخیره‌ی دست‌خورده یا
+  // ناسازگار به‌جای تخته‌ی غیرممکن، null می‌دهد و صفحه دست تازه می‌سازد.
+  function replay(start, history) {
+    if (typeof start !== 'number' || !VALID[start] || !history || typeof history.length !== 'number') return null;
+    var S = newGame(start);
+    for (var i = 0; i < history.length; i++) {
+      var h = history[i];
+      if (!h || !applyMove(S, h[0], h[2]) || S.history[i][1] !== h[1]) return null;
+    }
+    return S;
+  }
+
+  function result(bd) {
+    var n = pegCount(bd);
+    return { pegs: n, won: n === 1, centre: n === 1 && bd[CENTRE] === 1 };
+  }
+
+  // پاداش در همان بازه‌ی نقطه‌بازی: برد ۱۰ سکه و ۴۰ امتیاز، مرکز کمی بیشتر
+  function reward(pegs, centre) {
+    if (pegs === 1) return centre ? { coins: 14, points: 56 } : { coins: 10, points: 40 };
+    return { coins: Math.max(2, 9 - pegs), points: Math.max(4, 32 - pegs * 4) };
+  }
+
+  /* حل‌کننده: جست‌وجوی عمقی با حافظه‌ی وضعیت‌های بن‌بست روی نقشه‌ی بیتی ۳۳ سوراخ.
+     هزینه‌ی جست‌وجو به ترتیب پرش‌ها بسته است و برای یک شروع و تصویر قرینه‌اش
+     تا صد برابر فرق می‌کند (سوراخ بالایی ۲٫۴ میلیون گره، قرینه‌اش ده هزار)،
+     پس هر هشت تصویر قرینه را با سقف گره‌ی رو به رشد امتحان می‌کنیم و راه‌حل را
+     به تخته‌ی اصلی برمی‌گردانیم. target منفی یعنی یک میخ هر جا. */
+  function dfs(start, target, budget) {
+    var bd = start.slice(), n = 0, key = 0;
+    for (var i = 0; i < HOLES.length; i++) if (bd[HOLES[i]]) { n++; key += POW[i]; }
+    var dead = new Set(), path = [], nodes = 0, over = false;
+    function rec() {
+      if (n === 1) return target < 0 || bd[target] === 1;
+      if (dead.has(key)) return false;
+      if (++nodes > budget) { over = true; return false; }
+      for (var j = 0; j < JUMPS.length; j++) {
+        var m = JUMPS[j];
+        if (bd[m.from] && bd[m.over] && !bd[m.to]) {
+          bd[m.from] = 0; bd[m.over] = 0; bd[m.to] = 1; n--;
+          var dk = POW[HI[m.to]] - POW[HI[m.from]] - POW[HI[m.over]];
+          key += dk; path.push(m);
+          if (rec()) return true;
+          path.pop(); key -= dk; n++;
+          bd[m.from] = 1; bd[m.over] = 1; bd[m.to] = 0;
+          if (over) return false;
+        }
+      }
+      dead.add(key);
+      return false;
+    }
+    if (n === 0) return { ok: false, path: null };
+    var found = rec();
+    if (over) return null;            // نامعلوم: سقف گره پر شد
+    return { ok: found, path: found ? path.slice() : null };
+  }
+
+  function solve(bd, target) {
+    if (target === undefined) target = -1;
+    var budgets = [20000, 400000, Infinity];
+    for (var s = 0; s < budgets.length; s++) {
+      for (var t2 = 0; t2 < 8; t2++) {
+        var map = SYM[t2], back = SYM_INV[t2], img = [];
+        for (var i = 0; i < N * N; i++) img[map[i]] = bd[i];
+        var res = dfs(img, target < 0 ? -1 : map[target], budgets[s]);
+        if (!res) continue;
+        // حل‌ناپذیری یک تصویر قرینه یعنی حل‌ناپذیری خود تخته
+        if (!res.ok) return null;
+        return res.path.map(function (m) { return { from: back[m.from], over: back[m.over], to: back[m.to] }; });
+      }
+    }
+    return null;
+  }
+
+  /* شروع‌های روزانه: سوراخ خالی‌ای که حل‌کننده ثابت کرده تا یک میخ پیش می‌رود.
+     روی تخته‌ی انگلیسی هر ۳۳ شروع تک‌خالی چنین‌اند؛ tools/test.js این فهرست
+     را یکی‌یکی با حل‌کننده دوباره ثابت می‌کند تا فهرست هیچ‌وقت ادعای بی‌پشتوانه نباشد.
+     در صفحه چیزی حل نمی‌شود، پس باز شدن صفحه هزینه‌ای ندارد. */
+  var DAILY_HOLES = HOLES.slice();
+
+  function dailyHole(rnd) {
+    return DAILY_HOLES[Math.floor(rnd() * DAILY_HOLES.length) % DAILY_HOLES.length];
+  }
+
+  var api = {
+    N: N, CENTRE: CENTRE, VALID: VALID, HOLES: HOLES, JUMPS: JUMPS, SYM: SYM, DAILY_HOLES: DAILY_HOLES,
+    startBoard: startBoard, pegCount: pegCount, jumpAt: jumpAt, movesFrom: movesFrom,
+    legalMoves: legalMoves, isOver: isOver, newGame: newGame, applyMove: applyMove, undo: undo,
+    replay: replay, result: result, reward: reward, solve: solve, dailyHole: dailyHole
+  };
+  if (typeof self !== 'undefined') self.PegEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = PegEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = PegEngineFactory();
+  var NS = 'http://www.w3.org/2000/svg';
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'peg',
+    name: { fa: 'میخ‌پران', en: 'Peg Solitaire', zh: '孔明棋' },
+    accent: '#9AA84A',
+    accentSoft: '#EEF1DB',
+    mood: 'sudoku',
+    strings: {
+      fa: {
+        pegs: 'میخ', moves: 'حرکت', newBoard: 'تخته‌ی تازه', undoMove: 'برگرداندن حرکت',
+        dailyPeg: 'میخ‌پران روزانه', perfect: 'بی‌نقص! آخرین میخ در مرکز',
+        onePeg: 'یک میخ ماند', pegsLeftN: '{n} میخ ماند', pegsLeft: 'میخ‌های مانده',
+        centre: 'مرکز', yes: 'آره', no: 'نه', undos: 'برگرداندن',
+        pickPeg: 'یک میخ را بردار', pickTarget: 'سوراخ مقصد را بزن', canMove: '{n} پرش ممکن',
+        move: 'جابه‌جایی', selectJump: 'برداشتن میخ / پرش', deselect: 'رها کردن میخ',
+        tutTitle1: 'بپر و بردار', tutText1: 'یک میخ از روی میخ کناری، افقی یا عمودی، به سوراخ خالی پشتش می‌پرد و میخ وسط برداشته می‌شود.',
+        tutTitle2: 'یک میخ', tutText2: 'وقتی دیگر پرشی نماند بازی تمام است. یک میخ یعنی برد، و اگر همان یکی وسط تخته باشد بی‌نقص است.',
+        tutTitle3: 'بی‌حساب برگرد', tutText3: 'هر چند بار خواستی حرکت را برگردان. میخ را بزن و بعد مقصد را، یا بکشش.'
+      },
+      en: {
+        pegs: 'Pegs', moves: 'Moves', newBoard: 'New board', undoMove: 'Undo move',
+        dailyPeg: 'Daily peg solitaire', perfect: 'Perfect! Last peg in the centre',
+        onePeg: 'One peg left', pegsLeftN: '{n} pegs left', pegsLeft: 'Pegs left',
+        centre: 'Centre', yes: 'Yes', no: 'No', undos: 'Undos',
+        pickPeg: 'Pick up a peg', pickTarget: 'Tap the hole to land in', canMove: '{n} jumps possible',
+        move: 'Move', selectJump: 'Pick up peg / jump', deselect: 'Put the peg down',
+        tutTitle1: 'Jump and remove', tutText1: 'A peg jumps over a neighbouring peg, across or up and down, into the empty hole behind it. The jumped peg is removed.',
+        tutTitle2: 'One peg', tutText2: 'The game ends when no jump is left. One peg left is a win, and one peg in the very centre is perfect.',
+        tutTitle3: 'Undo freely', tutText3: 'Take back as many moves as you like. Tap a peg and then its target, or drag it.'
+      },
+      zh: {
+        pegs: '棋子', moves: '步数', newBoard: '新棋盘', undoMove: '撤销一步',
+        dailyPeg: '每日孔明棋', perfect: '完美！最后一枚在正中',
+        onePeg: '只剩一枚', pegsLeftN: '剩下 {n} 枚', pegsLeft: '剩余棋子',
+        centre: '正中', yes: '是', no: '否', undos: '撤销',
+        pickPeg: '选一枚棋子', pickTarget: '点要落下的空位', canMove: '可跳 {n} 步',
+        move: '移动', selectJump: '选棋 / 跳', deselect: '放下棋子',
+        tutTitle1: '跳过并吃掉', tutText1: '一枚棋子横向或纵向跳过相邻的棋子，落到它后面的空位，被跳过的棋子拿走。',
+        tutTitle2: '只剩一枚', tutText2: '没有可跳的棋时游戏结束。只剩一枚就是赢，而最后一枚正好在中心就是完美。',
+        tutTitle3: '随意撤销', tutText3: '想撤销几步都可以。先点棋子再点目标，或者直接拖过去。'
+      }
+    }
+  });
+
+  var dailyDate = new URLSearchParams(location.search).get('daily');
+
+  var S = null;            // { start, board, history, daily, done, startedAt, undos, last }
+  var sel = -1;            // خانه‌ی میخ برداشته‌شده
+  var cur = E.CENTRE;      // نشانگر کیبورد
+
+  var svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('class', 'pg-svg');
+  svg.setAttribute('viewBox', '0 0 700 700');
+  var boardBox = el('div', { class: 'pg-boardbox' }, [svg]);
+  var top = el('div', { class: 'pg-top' });
+  var status = el('div', { class: 'pg-status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'pg-wrap' }, [top, boardBox, status]);
+
+  ctx.stat('pegs', C.t('pegs'));
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newBoard'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ ساخت */
+
+  function newGame(daily) {
+    var start = daily ? E.dailyHole(C.daily('peg', daily).rng) : E.CENTRE;
+    var g = E.newGame(start);
+    S = { start: start, board: g.board, history: g.history, daily: daily || null,
+      done: false, startedAt: Date.now(), undos: 0, last: -1 };
+    sel = -1;
+    render();
+    save();
+  }
+
+  /* ------------------------------------------------------------ رسم */
+
+  var CELL = 100;
+  function cx(cell) { return (cell % E.N) * CELL + CELL / 2; }
+  function cy(cell) { return ((cell / E.N) | 0) * CELL + CELL / 2; }
+  // شکل صلیبی تخته؛ همان مسیر در کارت نتیجه هم کشیده می‌شود
+  var SHAPE = 'M215 8h270a22 22 0 0 1 22 22v185h163a22 22 0 0 1 22 22v226a22 22 0 0 1-22 22H507v163a22 22 0 0 1-22 22H215a22 22 0 0 1-22-22V485H30a22 22 0 0 1-22-22V237a22 22 0 0 1 22-22h163V30a22 22 0 0 1 22-22z';
+
+  function node(tag, attrs) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    return n;
+  }
+
+  function render() {
+    top.innerHTML = '';
+    if (S.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' },
+        [C.icon('calendar', 14), el('span', { text: C.t('dailyPeg') + ' — ' + C.num(S.daily) })]));
+    }
+    paint();
+  }
+
+  function paint() {
+    svg.innerHTML = '';
+    svg.appendChild(node('path', { d: SHAPE, class: 'pg-shape' }));
+    var targets = sel >= 0 ? E.movesFrom(S.board, sel).map(function (m) { return m.to; }) : [];
+    var anyMove = !S.done && !E.isOver(S.board);
+    for (var i = 0; i < E.HOLES.length; i++) {
+      var c = E.HOLES[i];
+      svg.appendChild(node('circle', { cx: cx(c), cy: cy(c), r: 15, class: 'pg-hole' }));
+      if (S.board[c]) {
+        var cls = 'pg-peg' + (c === sel ? ' pg-peg--sel' : '') + (c === S.last ? ' pg-peg--new' : '') +
+          (S.done ? ' pg-peg--dead' : '');
+        svg.appendChild(node('circle', { cx: cx(c), cy: cy(c), r: 33, class: cls, 'data-cell': c }));
+        svg.appendChild(node('circle', { cx: cx(c) - 10, cy: cy(c) - 11, r: 10, class: 'pg-shine' }));
+      }
+      if (targets.indexOf(c) >= 0) svg.appendChild(node('circle', { cx: cx(c), cy: cy(c), r: 30, class: 'pg-target' }));
+    }
+    if (kbOn && !S.done) {
+      svg.appendChild(node('rect', { x: cx(cur) - 46, y: cy(cur) - 46, width: 92, height: 92, rx: 18, class: 'pg-cursor' }));
+    }
+    var pegs = E.pegCount(S.board);
+    ctx.setStat('pegs', pegs);
+    if (S.done) status.textContent = '';
+    else if (sel >= 0) status.textContent = C.t('pickTarget');
+    else status.textContent = anyMove ? C.t('canMove', { n: C.num(E.legalMoves(S.board).length) }) : '';
+    S.last = -1;
+  }
+
+  /* ----------------------------------------------- لمس و کشیدن */
+
+  // مختصات صفحه به خانه‌ی تخته. getScreenCTM هر مقیاس و جابه‌جایی را حساب می‌کند.
+  function cellAt(ev) {
+    var m = svg.getScreenCTM();
+    if (!m) return -1;
+    var pt = svg.createSVGPoint();
+    pt.x = ev.clientX; pt.y = ev.clientY;
+    var p = pt.matrixTransform(m.inverse());
+    var c = Math.floor(p.x / CELL), r = Math.floor(p.y / CELL);
+    if (c < 0 || c >= E.N || r < 0 || r >= E.N) return -1;
+    var cell = r * E.N + c;
+    return E.VALID[cell] ? cell : -1;
+  }
+  function svgPoint(ev) {
+    var pt = svg.createSVGPoint();
+    pt.x = ev.clientX; pt.y = ev.clientY;
+    return pt.matrixTransform(svg.getScreenCTM().inverse());
+  }
+
+  var drag = null;   // { from, x0, y0, ghost, moved }
+
+  svg.addEventListener('pointerdown', function (ev) {
+    if (!S || S.done || document.querySelector('.ch-scrim')) return;
+    kbOn = false;
+    var c = cellAt(ev);
+    if (c < 0) { if (sel >= 0) { sel = -1; paint(); } return; }
+    if (sel >= 0 && E.jumpAt(S.board, sel, c)) { doMove(sel, c); return; }
+    if (S.board[c] && E.movesFrom(S.board, c).length) {
+      sel = c;
+      C.feedback('select');
+      paint();
+      drag = { from: c, x0: ev.clientX, y0: ev.clientY, ghost: null, moved: false };
+      try { svg.setPointerCapture(ev.pointerId); } catch (e) { /* موس قدیمی */ }
+      ev.preventDefault();
+      return;
+    }
+    if (S.board[c]) C.feedback('bad');      // میخی که پرشی ندارد
+    if (sel >= 0) { sel = -1; paint(); }
+  });
+
+  svg.addEventListener('pointermove', function (ev) {
+    if (!drag) return;
+    if (!drag.moved && Math.abs(ev.clientX - drag.x0) + Math.abs(ev.clientY - drag.y0) < 8) return;
+    drag.moved = true;
+    var p = svgPoint(ev);
+    if (!drag.ghost) {
+      drag.ghost = node('circle', { r: 36, class: 'pg-ghost' });
+      svg.appendChild(drag.ghost);
+    }
+    drag.ghost.setAttribute('cx', p.x);
+    drag.ghost.setAttribute('cy', p.y);
+  });
+
+  function endDrag(ev, cancelled) {
+    if (!drag) return;
+    var d = drag;
+    drag = null;
+    if (d.ghost) d.ghost.remove();
+    if (cancelled || !d.moved) return;           // ضربه: میخ برداشته می‌ماند تا مقصد را بزند
+    var c = cellAt(ev);
+    if (c >= 0 && E.jumpAt(S.board, d.from, c)) doMove(d.from, c);
+    else if (c !== d.from) { sel = -1; paint(); }
+  }
+  svg.addEventListener('pointerup', function (ev) { endDrag(ev, false); });
+  svg.addEventListener('pointercancel', function (ev) { endDrag(ev, true); });
+
+  /* ----------------------------------------------------------- حرکت */
+
+  function doMove(from, to) {
+    if (!E.applyMove(S, from, to)) { C.feedback('bad'); return; }
+    sel = -1;
+    S.last = to;
+    cur = to;
+    C.audio.sfx('pop');
+    C.haptic('tap');
+    paint();
+    save();
+    if (E.isOver(S.board)) finish();
+  }
+
+  function undo() {
+    if (!S || S.done) return;
+    if (!E.undo(S)) { C.feedback('bad'); return; }
+    S.undos++;
+    sel = -1;
+    C.feedback('tap');
+    paint();
+    save();
+  }
+
+  function finish() {
+    S.done = true;
+    sel = -1;
+    var elapsed = Date.now() - S.startedAt;
+    var res = E.result(S.board);
+    var rw = E.reward(res.pegs, res.centre);
+    var coins = rw.coins + (S.daily ? 8 : 0);
+    var points = rw.points + (S.daily ? 25 : 0);
+    paint();
+
+    if (res.won) {
+      C.achievements.unlock('pg-win');
+      if (res.centre) C.achievements.unlock('pg-centre');
+      if (!S.undos) C.achievements.unlock('pg-clean');
+    }
+    C.stats.best('peg', 'pegs', res.pegs, true);
+    if (S.daily) {
+      var firstDaily = C.stats.daily('peg', S.daily, {
+        label: res.centre ? C.t('perfect') : C.t('pegsLeftN', { n: C.num(res.pegs) }), win: res.won, pegs: res.pegs
+      });
+      if (!firstDaily) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+
+    var title = res.centre ? C.t('perfect') : (res.won ? C.t('onePeg') : C.t('pegsLeftN', { n: C.num(res.pegs) }));
+    var paintCard = cardPaint();
+    ctx.finish({
+      won: res.won,
+      title: title,
+      timeMs: elapsed, coins: coins, points: points,
+      lines: [
+        { label: C.t('pegsLeft'), value: C.num(res.pegs) },
+        { label: C.t('moves'), value: C.num(S.history.length) },
+        { label: C.t('undos'), value: C.num(S.undos) }
+      ],
+      shareText: 'چوگان · میخ‌پران' + (S.daily ? ('\nروزانه ' + S.daily) : '') +
+        '\n' + (res.centre ? 'بی‌نقص، یک میخ در مرکز' : (C.num(res.pegs) + ' میخ ماند')),
+      paint: paintCard,
+      onAgain: S.daily ? null : function () { newGame(null); }
+    });
+  }
+
+  /* ------------------------------------------------- تخته روی کارت نتیجه */
+  function cardPaint() {
+    var bd = S.board.slice();
+    return function (g, W, H, col) {
+      var side = Math.min(W, H), k = side / 700;
+      g.translate((W - side) / 2, (H - side) / 2);
+      g.scale(k, k);
+      g.fillStyle = col.surface2;
+      try { g.fill(new Path2D(SHAPE)); } catch (e) { /* بوم بدون Path2D */ }
+      for (var i = 0; i < E.HOLES.length; i++) {
+        var c = E.HOLES[i];
+        g.beginPath();
+        if (bd[c]) { g.fillStyle = col.game; g.arc(cx(c), cy(c), 33, 0, Math.PI * 2); }
+        else { g.fillStyle = col.surface3; g.arc(cx(c), cy(c), 15, 0, Math.PI * 2); }
+        g.fill();
+      }
+    };
+  }
+
+  /* --------------------------------------------------------- ذخیره */
+
+  ctx.autosave(function () {
+    if (!S || S.done || !S.history.length) return { inProgress: false };
+    return {
+      s: { start: S.start, board: S.board, history: S.history, daily: S.daily,
+        undos: S.undos, elapsed: Date.now() - S.startedAt }
+    };
+  });
+  function save() { ctx.save(); }
+
+  function askNew() {
+    var dd = S ? S.daily : null;
+    // داخل روزانه همان شروع روزانه دوباره ساخته می‌شود، نه تخته‌ی عادی
+    function go() { newGame(dd); }
+    if (!S || S.done || !S.history.length) { go(); return; }
+    C.ui.confirm({ title: C.t('newBoard'), body: C.t('resetWarn'), onOk: go });
+  }
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('tutText1') }),
+        el('p', { class: 'ch-dim', text: C.t('tutText2') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          kb('← ↑ → ↓', C.t('move')),
+          kb('Space / Enter', C.t('selectJump')),
+          kb('Esc', C.t('deselect')),
+          kb('U', C.t('undoMove'))
+        ])
+      ],
+      actions: [
+        { label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('done'), kind: 'primary' }
+      ]
+    });
+  }
+  function kb(k, what) {
+    return el('div', { class: 'ch-item' }, [
+      el('div', { class: 'ch-item__label', text: what }),
+      el('span', { class: 'ch-badge', text: k })
+    ]);
+  }
+
+  function tutPeg(x, y, fill) {
+    return '<circle cx="' + x + '" cy="' + y + '" r="15" fill="' + (fill || 'var(--game)') + '"/>';
+  }
+  function tutHole(x, y) { return '<circle cx="' + x + '" cy="' + y + '" r="7" fill="var(--c-surface-3)"/>'; }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' + tutPeg(50, 55) + tutPeg(100, 55) + tutHole(150, 55) +
+        '<path d="M50 30 Q100 0 150 30" fill="none" stroke="var(--game)" stroke-width="5" stroke-linecap="round" stroke-dasharray="8 8"/>' +
+        '<path d="M88 43 112 67M112 43 88 67" stroke="var(--c-bad)" stroke-width="5" stroke-linecap="round"/></svg>' },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' +
+        tutHole(70, 25) + tutHole(100, 25) + tutHole(130, 25) + tutHole(70, 55) + tutPeg(100, 55) + tutHole(130, 55) +
+        tutHole(70, 85) + tutHole(100, 85) + tutHole(130, 85) + '</svg>' },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' + tutPeg(60, 55) + tutHole(100, 55) + tutPeg(140, 55, 'var(--c-surface-3)') +
+        '<path d="M140 85a40 30 0 1 1-80 0" fill="none" stroke="var(--game)" stroke-width="5" stroke-linecap="round"/>' +
+        '<path d="M60 85l-10-12M60 85l14-6" stroke="var(--game)" stroke-width="5" stroke-linecap="round"/></svg>' }
+  ];
+
+  /* -------------------------------------------------------- کیبورد */
+
+  // تخته یک SVG با مختصات ثابت است و در راست‌چین آینه نمی‌شود، پس جهت‌نماها
+  // هندسی‌اند. نشانگر از گوشه‌های حذف‌شده می‌پرد تا هیچ‌وقت روی جای بی‌سوراخ نماند.
+  var kbOn = false;
+  function moveCur(dr, dc) {
+    var r = (cur / E.N) | 0, c = cur % E.N;
+    for (var s = 1; s < E.N; s++) {
+      var r2 = r + dr * s, c2 = c + dc * s;
+      if (r2 < 0 || r2 >= E.N || c2 < 0 || c2 >= E.N) return;
+      if (E.VALID[r2 * E.N + c2]) { cur = r2 * E.N + c2; return; }
+    }
+  }
+  function pressCur() {
+    if (sel >= 0 && E.jumpAt(S.board, sel, cur)) { doMove(sel, cur); return; }
+    if (sel === cur) { sel = -1; paint(); return; }
+    if (S.board[cur] && E.movesFrom(S.board, cur).length) { sel = cur; C.feedback('select'); paint(); return; }
+    C.feedback('bad');
+  }
+  window.addEventListener('keydown', function (e) {
+    if (!S || S.done) return;
+    if (document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
+    if (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
+    var k = e.key;
+    if (k === 'u' || k === 'U') { undo(); e.preventDefault(); return; }
+    if (k === 'Escape') { if (sel >= 0) { sel = -1; paint(); } return; }
+    var arrows = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+    if (arrows[k]) { kbOn = true; moveCur(arrows[k][0], arrows[k][1]); paint(); e.preventDefault(); return; }
+    if (k === ' ' || k === 'Enter') { kbOn = true; pressCur(); if (!S.done) paint(); e.preventDefault(); }
+  });
+
+  /* ---------------------------------------------------------- شروع */
+
+  var saved = ctx.loadSave();
+  var v = saved && saved.s;
+  var restored = v ? E.replay(v.start, v.history) : null;
+  // ذخیره‌ی روزانه فقط برای همان روز معتبر است؛ هسته جایش را جدا می‌کند،
+  // ولی شروعش هم باید همان سوراخ امروز باشد.
+  if (restored && restored.history.length && (v.daily || null) === (dailyDate || null) &&
+      (!dailyDate || v.start === E.dailyHole(C.daily('peg', dailyDate).rng))) {
+    S = { start: restored.start, board: restored.board, history: restored.history, daily: v.daily || null,
+      done: false, startedAt: Date.now() - (v.elapsed || 0), undos: v.undos || 0, last: -1 };
+    render();
+  } else {
+    newGame(dailyDate || null);
+    if (dailyDate && C.stats.dailyDone('peg', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).peg;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec.label });
+    }
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
