@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 786;
+const MIN_CHECKS = 845;
 
 function ok(cond, msg) {
   checks++;
@@ -908,6 +908,146 @@ function testFreecell() {
   ok(!/localStorage/.test(ui), 'صفحه مستقیم به localStorage دست نمی‌زند');
 }
 
+/* ---------------------------------------------------------- میخ‌پران */
+function testPeg() {
+  head('میخ‌پران');
+  const E = loadEngine('peg', 'PegEngineFactory');
+  const cell = (r, c) => r * 7 + c;
+  const empty = () => new Array(49).fill(0);
+
+  // تخته‌ی انگلیسی: ۳۳ سوراخ، چهار گوشه‌ی ۲×۲ بیرون
+  ok(E.HOLES.length === 33, 'تخته ۳۳ سوراخ دارد (' + E.HOLES.length + ')');
+  ok(E.CENTRE === cell(3, 3) && E.VALID[E.CENTRE], 'مرکز خانه‌ی سطر ۴ ستون ۴ است');
+  ok([[0, 0], [1, 1], [0, 6], [1, 5], [5, 0], [6, 1], [5, 6], [6, 6]].every(([r, c]) => !E.VALID[cell(r, c)]), 'گوشه‌ها سوراخ ندارند');
+  // ۷۶ پرش هندسی: شمارش دستی روی تخته‌ی انگلیسی
+  ok(E.JUMPS.length === 76, 'تعداد پرش‌های هندسی ۷۶ است (' + E.JUMPS.length + ')');
+  ok(E.JUMPS.length > 0 && E.JUMPS.every((m) => E.VALID[m.from] && E.VALID[m.over] && E.VALID[m.to] &&
+    Math.abs(m.to - m.from) === 2 * Math.abs(m.over - m.from) && (m.from + m.to) === 2 * m.over), 'هر پرش از سوراخ به سوراخ است و میخ وسط دقیقاً بینشان است');
+
+  // قانون پرش روی تخته‌های دست‌ساز
+  const b1 = empty();
+  b1[cell(3, 1)] = 1; b1[cell(3, 2)] = 1;                 // دو میخ کنار هم، مقصد (۳،۳) خالی
+  ok(!!E.jumpAt(b1, cell(3, 1), cell(3, 3)), 'پرش افقی روی میخ به سوراخ خالی مجاز است');
+  ok(!E.jumpAt(b1, cell(3, 2), cell(3, 4)), 'پرش روی سوراخ خالی مجاز نیست');
+  ok(!!E.jumpAt(b1, cell(3, 2), cell(3, 0)), 'پرش به عقب، به سوراخ لبه، هم مجاز است');
+  ok(!E.jumpAt(b1, cell(3, 1), cell(3, 2)), 'جابه‌جایی یک‌خانه‌ای مجاز نیست');
+  b1[cell(3, 3)] = 1;
+  ok(!E.jumpAt(b1, cell(3, 1), cell(3, 3)), 'فرود روی میخ مجاز نیست');
+  const b2 = empty();
+  b2[cell(2, 2)] = 1; b2[cell(3, 3)] = 1;
+  ok(!E.jumpAt(b2, cell(2, 2), cell(4, 4)), 'پرش اریب مجاز نیست');
+  const b3 = empty();
+  b3[cell(4, 2)] = 1; b3[cell(5, 2)] = 1;
+  ok(!!E.jumpAt(b3, cell(4, 2), cell(6, 2)), 'پرش عمودی به پایین مجاز است');
+  const b4 = empty();
+  b4[cell(2, 3)] = 1; b4[cell(2, 2)] = 1;
+  ok(!!E.jumpAt(b4, cell(2, 3), cell(2, 1)), 'پرش به سوراخ لبه‌ی بازوی چپ مجاز است');
+  b4[cell(2, 1)] = 0; b4[cell(1, 2)] = 1; b4[cell(2, 2)] = 0;
+  ok(E.legalMoves(b4).length === 0 && E.isOver(b4), 'دو میخ بی‌همسایه: هیچ پرشی نیست و بازی تمام است');
+  const S1 = { start: -1, board: b3.slice(), history: [] };
+  ok(E.applyMove(S1, cell(4, 2), cell(6, 2)) && S1.board[cell(4, 2)] === 0 && S1.board[cell(5, 2)] === 0 && S1.board[cell(6, 2)] === 1,
+    'پرش میخ مبدأ و میخ وسط را برمی‌دارد و مقصد را پر می‌کند');
+  ok(!E.applyMove(S1, cell(6, 2), cell(4, 2)) && S1.history.length === 1, 'حرکت غیرمجاز وضعیت را عوض نمی‌کند');
+
+  // شروع استاندارد: ۳۲ میخ، مرکز خالی، دقیقاً چهار پرش و همه به مرکز
+  const std = E.startBoard(E.CENTRE);
+  ok(E.pegCount(std) === 32 && std[E.CENTRE] === 0, 'شروع استاندارد ۳۲ میخ با مرکز خالی است');
+  const first = E.legalMoves(std);
+  ok(first.length === 4 && first.every((m) => m.to === E.CENTRE), 'در شروع استاندارد چهار پرش هست و همه به مرکز');
+
+  // بازی‌های تصادفی: هر پرش دقیقاً یک میخ کم می‌کند، بازی دقیقاً وقتی تمام است
+  // که پرش مجازی نماند، و برگرداندن پیاپی به خود شروع می‌رسد
+  let perJump = true, endRule = true, undoBack = true, replayOk = true, played = 0;
+  for (let g = 0; g < 300; g++) {
+    const r = rng(g * 7919 + 11);
+    const start = E.HOLES[r.int(E.HOLES.length)];
+    const S = E.newGame(start);
+    const init = JSON.stringify(S.board);
+    for (let step = 0; step < 40; step++) {
+      const ms = E.legalMoves(S.board);
+      if (E.isOver(S.board) !== (ms.length === 0)) endRule = false;
+      if (!ms.length) break;
+      const before = E.pegCount(S.board);
+      const m = ms[r.int(ms.length)];
+      if (!E.applyMove(S, m.from, m.to)) { perJump = false; break; }
+      if (E.pegCount(S.board) !== before - 1) perJump = false;
+    }
+    if (!E.isOver(S.board)) endRule = false;
+    if (E.pegCount(S.board) !== 32 - S.history.length) perJump = false;
+    const re = E.replay(start, S.history);
+    if (!re || JSON.stringify(re.board) !== JSON.stringify(S.board)) replayOk = false;
+    while (E.undo(S)) { /* تا ته */ }
+    if (JSON.stringify(S.board) !== init) undoBack = false;
+    played++;
+  }
+  ok(played === 300, 'سیصد بازی تصادفی اجرا شد');
+  ok(perJump, 'هر پرش دقیقاً یک میخ کم می‌کند');
+  ok(endRule, 'بازی دقیقاً وقتی تمام است که هیچ پرشی مجاز نباشد');
+  ok(replayOk, 'تخته از روی شروع و تاریخچه دوباره ساخته می‌شود');
+  ok(undoBack, 'برگرداندن بی‌حساب تا خود شروع می‌رسد');
+  ok(E.replay(E.CENTRE, [[cell(3, 1), cell(3, 2), cell(3, 3)], [cell(3, 1), cell(3, 2), cell(3, 3)]]) === null, 'ذخیره‌ی ناسازگار رد می‌شود');
+  ok(E.replay(0, []) === null, 'شروع روی گوشه‌ی بی‌سوراخ رد می‌شود');
+
+  // نتیجه و پاداش
+  const one = empty(); one[E.CENTRE] = 1;
+  const oneOff = empty(); oneOff[cell(0, 3)] = 1;
+  ok(E.result(one).won && E.result(one).centre, 'یک میخ در مرکز: برد بی‌نقص');
+  ok(E.result(oneOff).won && !E.result(oneOff).centre, 'یک میخ بیرون مرکز: برد ساده');
+  ok(!E.result(b4).won && E.result(b4).pegs === 2, 'دو میخ: برد نیست');
+  const rw = [1, 2, 3, 6].map((n) => E.reward(n, false));
+  ok(E.reward(1, true).coins > rw[0].coins && rw[0].coins > rw[1].coins && rw[1].coins > rw[2].coins && rw[2].coins >= rw[3].coins,
+    'میخ کمتر پاداش بیشتر');
+  ok(rw[0].coins === 10 && rw[0].points === 40, 'پاداش برد هم‌اندازه‌ی نقطه‌بازی است');
+
+  // حل‌کننده
+  let t0 = Date.now();
+  const sol = E.solve(std, E.CENTRE);
+  const solMs = Date.now() - t0;
+  const check = (startHole, path, target) => {
+    const S = E.newGame(startHole);
+    for (const m of path || []) if (!E.applyMove(S, m.from, m.to)) return false;
+    return E.pegCount(S.board) === 1 && (target < 0 || S.board[target] === 1);
+  };
+  ok(!!sol && sol.length === 31, 'حل‌کننده شروع استاندارد را در ۳۱ پرش حل می‌کند');
+  ok(check(E.CENTRE, sol, E.CENTRE), 'راه‌حل با قانون بازی اجرا می‌شود و یک میخ در مرکز می‌ماند');
+  ok(E.solve(b4) === null, 'دو میخ بی‌همسایه: حل‌کننده راه‌حلی نمی‌دهد');
+  const twoFar = empty(); twoFar[cell(3, 0)] = 1; twoFar[cell(3, 1)] = 1;
+  ok(E.solve(twoFar, cell(3, 2)) !== null && E.solve(twoFar, E.CENTRE) === null, 'حل‌کننده مقصد آخرین میخ را رعایت می‌کند');
+
+  // هر شروع روزانه با حل‌کننده تا یک میخ پیش می‌رود
+  ok(E.DAILY_HOLES.length > 0, 'فهرست شروع‌های روزانه خالی نیست');
+  t0 = Date.now();
+  let dailyOk = 0;
+  for (const h of E.DAILY_HOLES) {
+    const p = E.solve(E.startBoard(h), -1);
+    if (E.VALID[h] && p && check(h, p, -1)) dailyOk++;
+    else ok(false, 'شروع روزانه‌ی خانه‌ی ' + h + ' حل نشد');
+  }
+  const dailyMs = Date.now() - t0;
+  ok(dailyOk === E.DAILY_HOLES.length, 'همه‌ی ' + dailyOk + ' شروع روزانه تا یک میخ حل می‌شوند');
+  ok(solMs + dailyMs < 15000, 'حل‌کننده سریع است (' + (solMs + dailyMs) + 'ms)');
+
+  // بذر روزانه با همان hash32 و rng هسته، تا تاریخ به همان سوراخ صفحه برسد
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  const fnSrc = (name) => (core.match(new RegExp('  function ' + name + '\\([\\s\\S]*?\\n  \\}')) || [''])[0];
+  const coreRng = vm.runInNewContext(fnSrc('hash32') + fnSrc('rng') + '; (function (g, d) { return rng(hash32("chogan|" + g + "|" + d)); })', {});
+  const dates = [];
+  for (let i = 0; i < 90; i++) dates.push(new Date(Date.UTC(2026, 9, 1 + i)).toISOString().slice(0, 10));
+  ok(dates.length === 90, 'نود تاریخ برای روزانه ساخته شد');
+  const holes = dates.map((d) => E.dailyHole(coreRng('peg', d)));
+  ok(holes.every((h) => E.DAILY_HOLES.indexOf(h) >= 0), 'هر روزانه یکی از شروع‌های ثابت‌شده است');
+  ok(dates.every((d, i) => E.dailyHole(coreRng('peg', d)) === holes[i]), 'یک تاریخ همیشه همان شروع را می‌دهد');
+  ok(new Set(holes).size >= 10, 'روزانه‌ها تنوع دارند (' + new Set(holes).size + ' سوراخ متفاوت در ۹۰ روز)');
+
+  // صفحه باید حرکت و برگرداندن را از موتور بگیرد، نه منطق خودش
+  const pgHtml = fs.readFileSync(path.join(ROOT, 'www/games/peg/index.html'), 'utf8');
+  ok(/E\.applyMove\(S, from, to\)/.test(pgHtml), 'صفحه حرکت را با applyMove ثبت می‌کند');
+  ok(/E\.undo\(S\)/.test(pgHtml), 'صفحه برگرداندن را با undo موتور انجام می‌دهد');
+  ok(/E\.replay\(v\.start, v\.history\)/.test(pgHtml), 'صفحه ذخیره را از روی تاریخچه بازسازی می‌کند');
+  ok(/C\.daily\('peg', /.test(pgHtml) && /E\.dailyHole\(/.test(pgHtml), 'صفحه شروع روزانه را از بذر هسته می‌گیرد');
+  ok(!/E\.solve\(/.test(pgHtml.split('/* ==== ENGINE END ==== */')[1] || 'E.solve('), 'صفحه هنگام بار شدن چیزی حل نمی‌کند');
+}
+
 /* ----------------------------------------------------- دفاع از برج */
 function testTd() {
   head('دفاع از برج');
@@ -1658,6 +1798,7 @@ testDots();
 testNonogram();
 testMancala();
 testFreecell();
+testPeg();
 testTd();
 testVersionStamp();
 testDeployGate();
