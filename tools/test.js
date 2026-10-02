@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 1519;
+const MIN_CHECKS = 1651;
 
 function ok(cond, msg) {
   checks++;
@@ -2150,6 +2150,233 @@ function testCodebreaker() {
   ok(!/mastermind/i.test(html.replace(/'mastermind'|\.mastermind\b/g, '')), 'نام تجاری Mastermind در صفحه نیامده');
 }
 
+/* ----------------------------------------------------------- آجرشکن */
+function testBreakout() {
+  head('آجرشکن');
+  const E = loadEngine('breakout', 'BreakoutEngineFactory');
+
+  // مرحله‌ها: دوازده تا، هر کدام خوانا، با دست‌کم یک آجر شکستنی و داخل زمین
+  ok(E.LEVELS.length === 12, 'دوازده مرحله‌ی ثابت هست (' + E.LEVELS.length + ')');
+  ok(E.COLS * E.BW === E.W, 'ستون‌های آجر دقیقاً پهنای زمین را پر می‌کنند');
+  for (let i = 0; i < E.LEVELS.length; i++) {
+    const rows = E.LEVELS[i];
+    const p = E.parseLevel(rows);
+    ok(p.errors.length === 0, 'مرحله‌ی ' + (i + 1) + ': بی‌ایراد خوانده شد' + (p.errors.length ? ' (' + p.errors.join('; ') + ')' : ''));
+    ok(rows.length <= E.ROWS && rows.every((r) => r.length === E.COLS && /^[.123#]+$/.test(r)),
+      'مرحله‌ی ' + (i + 1) + ': در شبکه‌ی ' + E.COLS + '×' + E.ROWS + ' جا می‌شود');
+    const breakable = rows.join('').replace(/[^123]/g, '').length;
+    ok(breakable > 0 && p.breakable === breakable, 'مرحله‌ی ' + (i + 1) + ': ' + breakable + ' آجر شکستنی');
+    ok(p.bricks.length > 0 && p.bricks.every((k) => k.x >= 0 && k.x + k.w <= E.W + 1e-9 && k.y >= 0 && k.y + k.h <= E.PY - 60),
+      'مرحله‌ی ' + (i + 1) + ': همه‌ی آجرها داخل زمین و دور از راکت‌اند');
+  }
+  ok(E.parseLevel(['111']).errors.length > 0, 'سطر کوتاه رد می‌شود');
+  ok(E.parseLevel(['1111x1111111']).errors.length > 0, 'نویسه‌ی ناشناخته رد می‌شود');
+  ok(E.parseLevel(['############']).errors.length > 0, 'مرحله‌ی بدون آجر شکستنی رد می‌شود');
+
+  // توپی که از بالا روی راکت می‌آید؛ راکت ثابت در x
+  function dropOn(offset) {
+    const S = E.createGame(0, { rows: ['1...........'] });
+    S.attached = false;
+    S.px = 180;
+    S.ball.x = 180 + offset; S.ball.y = E.PY - E.R - 1; S.ball.vx = 0; S.ball.vy = S.speed;
+    const ev = E.step(S, 180);
+    return { S, hit: ev.some((e) => e.type === 'paddle') };
+  }
+  const mid = dropOn(0), right = dropOn(E.PW / 2), left = dropOn(-E.PW / 2);
+  const deg = (b) => Math.atan2(b.vx, -b.vy) * 180 / Math.PI;
+  ok(mid.hit && Math.abs(mid.S.ball.vx) < 1e-9 && mid.S.ball.vy < 0, 'وسط راکت توپ را صاف بالا می‌فرستد');
+  ok(right.hit && deg(right.S.ball) > 45 && deg(right.S.ball) <= 60, 'لبه‌ی راست توپ را به راست کج می‌کند (' + deg(right.S.ball).toFixed(1) + '°)');
+  ok(left.hit && Math.abs(deg(left.S.ball) + deg(right.S.ball)) < 1e-9, 'لبه‌ی چپ قرینه‌ی لبه‌ی راست است');
+  const sp = Math.hypot(right.S.ball.vx, right.S.ball.vy);
+  ok(Math.abs(sp - right.S.speed) < 1e-6, 'برگشت از راکت سرعت را عوض نمی‌کند');
+
+  // توپ قائم زیر یک آجر و راکت درست زیر توپ: هر رفت‌وبرگشت یک ضربه
+  function bounceUnder(rows, col, steps) {
+    const S = E.createGame(0, { rows });
+    const x = col * E.BW + E.BW / 2;
+    S.px = x; S.attached = false;
+    S.ball.x = x; S.ball.y = E.PY - E.R; S.ball.vx = 0; S.ball.vy = -S.speed;
+    const events = [];
+    for (let i = 0; i < steps && S.state === 'play'; i++) events.push(...E.step(S, x));
+    return { S, events };
+  }
+  const two = bounceUnder(['.....2......'], 5, 4000);
+  const brickHits = two.events.filter((e) => e.type === 'brick');
+  ok(brickHits.length === 2 && !brickHits[0].destroyed && brickHits[1].destroyed, 'آجر دوضربه‌ای با ضربه‌ی دوم می‌شکند');
+  ok(two.S.state === 'won', 'شکستن آخرین آجر مرحله را تمام می‌کند');
+  ok(two.S.score === 5 + 5 + 20 + 3 * 50, 'امتیاز: ۵ برای هر ضربه، ۱۰ برابر سختی برای شکستن، ۵۰ برای هر توپ مانده (' + two.S.score + ')');
+  const steel = bounceUnder(['.....#......', '1...........'], 5, 3000);
+  const steelHits = steel.events.filter((e) => e.type === 'steel').length;
+  ok(steelHits >= 5 && steel.S.bricks[0].hp === 1 && steel.S.state === 'play', 'آجر فولادی با ' + steelHits + ' ضربه نمی‌شکند و بردی حساب نمی‌شود');
+  const onlySteelLeft = E.createGame(0, { rows: ['#1..........'] });
+  onlySteelLeft.bricks[1].hp = 0;
+  ok(E.breakableLeft(onlySteelLeft) === 0, 'آجر فولادی در شمار آجرهای مانده نیست');
+
+  // تونل نزدن: توپ با سرعت بیشینه و بسیار بیشتر از آن، از زاویه‌های مختلف به یک
+  // آجر تک شلیک می‌شود. با گام ساده، در بیست برابر سرعت توپ در هر گام ۸۷ واحد
+  // جلو می‌رود، بیش از سه برابر ضخامت آجر به‌علاوه‌ی قطر توپ.
+  const angles = [];
+  for (let a = -55; a <= 55; a += 10) angles.push(a);
+  ok(angles.length > 0, 'فهرست زاویه‌های شلیک خالی نیست');
+  for (const mult of [1, 4, 20]) {
+    let missed = 0, tries = 0;
+    for (const a of angles) {
+      for (const dxOff of [-12, 0, 12]) {
+        tries++;
+        const S = E.createGame(0, { rows: ['............', '............', '............', '............', '.....1......'], speed: E.MAX_SPEED * mult });
+        const k = S.bricks[0];
+        const cx = k.x + k.w / 2 + dxOff, cy = k.y + k.h / 2;
+        const rad = a * Math.PI / 180;
+        S.attached = false; S.px = 30;
+        S.ball.x = cx - Math.sin(rad) * 140; S.ball.y = cy + Math.cos(rad) * 140;
+        S.ball.vx = Math.sin(rad) * S.speed; S.ball.vy = -Math.cos(rad) * S.speed;
+        let hit = false;
+        for (let i = 0; i < 400 && !hit && S.state === 'play'; i++) {
+          if (E.step(S, 30).some((e) => e.type === 'brick')) hit = true;
+          if (!hit && S.ball.y < k.y - E.R - 1 && S.ball.vy < 0) break;
+        }
+        if (!hit) missed++;
+      }
+    }
+    ok(missed === 0, 'سرعت ' + mult + '× بیشینه: توپ از آجر رد نشد (' + (tries - missed) + '/' + tries + ')');
+  }
+  // در بازی واقعی با سرعت بیشینه: توپ هیچ‌وقت داخل دیوار یا آجر زنده نیست
+  for (let L = 0; L < E.LEVELS.length; L++) {
+    const S = E.createGame(L, { speed: E.MAX_SPEED });
+    const r = rng(9100 + L);
+    let off = 0, bad = 0, steps = 0;
+    for (let i = 0; i < 4000 && S.state === 'play'; i++) {
+      if (S.attached) E.launch(S);
+      const ev = E.step(S, S.ball.x + off);
+      steps++;
+      if (ev.some((e) => e.type === 'paddle')) off = (r() * 2 - 1) * E.PW * 0.45;
+      const b = S.ball, eps = 1e-6;
+      if (b.x < E.R - eps || b.x > E.W - E.R + eps || b.y < E.R - eps) bad++;
+      for (const k of S.bricks) {
+        if (k.hp > 0 && b.x > k.x - E.R + eps && b.x < k.x + k.w + E.R - eps && b.y > k.y - E.R + eps && b.y < k.y + k.h + E.R - eps) bad++;
+      }
+    }
+    ok(steps > 1000 && bad === 0, 'مرحله‌ی ' + (L + 1) + ' با سرعت بیشینه: ' + steps + ' گام بی‌نفوذ در دیوار و آجر (' + bad + ' نفوذ)');
+  }
+
+  // گام ثابت: ورودی یکسان، مسیر یکسان؛ و تکه‌تکه کردن زمان در فریم‌ها نتیجه را عوض نمی‌کند
+  // راکت دنبال‌کننده با لغزش سینوسی: تابع قطعی وضعیت، تا توپ نیفتد و مسیر بلند بماند
+  const paddleAt = (s) => s.ball.x + 26 * Math.sin(s.steps / 37);
+  function directPath(level, n) {
+    const S = E.createGame(level), path = [];
+    for (let i = 0; i < n && S.state === 'play'; i++) {
+      if (S.attached) E.launch(S);
+      E.step(S, paddleAt(S));
+      path.push(S.ball.x.toFixed(6) + ',' + S.ball.y.toFixed(6));
+    }
+    return { S, path };
+  }
+  const p1 = directPath(2, 6000), p2 = directPath(2, 6000);
+  ok(p1.path.length === 6000 && p1.S.hits > 0 && new Set(p1.path).size > 1000, 'مسیر آزمون واقعاً حرکت کرد و ' + p1.S.hits + ' ضربه به آجر زد');
+  ok(p1.path.join('|') === p2.path.join('|'), 'ورودی یکسان، مسیر توپ یکسان');
+  function framedPath(level, n, nextDt) {
+    const S = E.createGame(level), path = [];
+    let acc = 0, guard = 0;
+    // ورودی پیش از هر گام صدا می‌خورد؛ مسیر گام قبلی را همین‌جا برمی‌داریم
+    // چون advance چند گام را در یک فریم می‌برد.
+    const input = (s) => {
+      if (s.steps > 0) path[s.steps - 1] = s.ball.x.toFixed(6) + ',' + s.ball.y.toFixed(6);
+      if (s.attached) E.launch(s);
+      return paddleAt(s);
+    };
+    while (S.steps < n && S.state === 'play' && guard++ < 100000) acc = E.advance(S, acc, nextDt(), input, null);
+    path[S.steps - 1] = S.ball.x.toFixed(6) + ',' + S.ball.y.toFixed(6);
+    return { S, path };
+  }
+  const jitter = rng(4242);
+  const f30 = framedPath(2, 6000, () => 1 / 30);
+  const f144 = framedPath(2, 6000, () => 1 / 144);
+  const fRand = framedPath(2, 6000, () => 0.004 + jitter() * 0.05);
+  const cmp = (a, b) => a.S.steps >= 6000 && b.S.steps >= 6000 && a.S.bricks.map((k) => k.hp).join() === b.S.bricks.map((k) => k.hp).join() &&
+    a.S.ball.x === b.S.ball.x && a.S.ball.y === b.S.ball.y && a.S.score === b.S.score;
+  const at6000 = (f) => { const S = E.createGame(2); for (let i = 0; i < f.S.steps; i++) { if (S.attached) E.launch(S); E.step(S, paddleAt(S)); } return S; };
+  ok(cmp(f30, { S: at6000(f30) }), '۳۰ فریم در ثانیه همان نتیجه‌ی گام‌به‌گام را می‌دهد');
+  ok(cmp(f144, { S: at6000(f144) }), '۱۴۴ فریم در ثانیه همان نتیجه‌ی گام‌به‌گام را می‌دهد');
+  ok(cmp(fRand, { S: at6000(fRand) }), 'فریم‌های نامنظم همان نتیجه‌ی گام‌به‌گام را می‌دهند');
+  const firstN = (f) => f.path.slice(0, 6000).join('|');
+  ok(firstN(f30) === p1.path.join('|') && firstN(f144) === p1.path.join('|') && firstN(fRand) === p1.path.join('|'),
+    'مسیر گام‌به‌گام در هر سه نرخ فریم با مسیر مستقیم یکی است');
+  const big = E.createGame(0);
+  E.launch(big);
+  const before = big.steps;
+  E.advance(big, 0, 5, () => 180, null);
+  // ۰٫۱ ثانیه دوازده گام است؛ خطای ممیز شناور ممکن است یکی کمتر بدهد
+  ok(big.steps - before >= 11 && big.steps - before <= 12,
+    'یک فریم پنج‌ثانیه‌ای بیش از ۰٫۱ ثانیه فیزیک جلو نمی‌برد (' + (big.steps - before) + ' گام)');
+
+  // راکت خودکار که توپ را دنبال می‌کند هر مرحله را در زمان محدود تمام می‌کند
+  const BOUND = 60000;   // ۵۰۰ ثانیه‌ی بازی
+  for (let L = 0; L < E.LEVELS.length; L++) {
+    const S = E.createGame(L), r = rng(L * 31 + 1);
+    let off = 0;
+    while (S.state === 'play' && S.steps < BOUND) {
+      if (S.attached) E.launch(S);
+      const ev = E.step(S, S.ball.x + off);
+      if (ev.some((e) => e.type === 'paddle')) off = (r() * 2 - 1) * E.PW * 0.4;
+    }
+    ok(S.state === 'won', 'مرحله‌ی ' + (L + 1) + ': راکت دنبال‌کننده در ' + S.steps + ' گام (سقف ' + BOUND + ') تمامش کرد');
+    if (L === 0) ok(S.lost === 0 && E.stars(S) === 3, 'مرحله‌ی ۱: بدون از دست دادن توپ، سه ستاره');
+  }
+
+  // توپ‌ها: سه توپ، بعد از هر افتادن توپ روی راکت برمی‌گردد
+  const lose = E.createGame(4);
+  let lostEv = 0;
+  for (let i = 0; i < 20000 && lose.state === 'play'; i++) {
+    if (lose.attached) {
+      if (lose.lost === 1) ok(lose.lives === 2 && lose.speed === E.baseSpeed(4) && lose.ball.vy === 0, 'بعد از افتادن اول: دو توپ، سرعت پایه، توپ روی راکت');
+      E.launch(lose);
+    }
+    // راکت عمداً دور از توپ
+    lostEv += E.step(lose, lose.ball.x < 180 ? 330 : 30).filter((e) => e.type === 'lost').length;
+  }
+  ok(lose.state === 'lost' && lose.lives === 0 && lostEv === 3, 'با سه توپ افتاده مرحله باخته است');
+  ok(E.step(lose, 100).length === 0 && E.launch(lose) === false, 'بعد از باخت گام و پرتاب کاری نمی‌کنند');
+  ok(E.stars(lose) === 0, 'مرحله‌ی باخته ستاره ندارد');
+
+  // روزانه: یک مرحله از روی بذر روز
+  const days = [];
+  for (let d = 0; d < 60; d++) days.push(E.dailyLevel(rng(20261000 + d)));
+  ok(days.length === 60 && days.every((x) => x >= 0 && x < 12 && x === Math.floor(x)), 'مرحله‌ی روزانه همیشه یکی از دوازده تاست');
+  ok(new Set(days).size >= 6, 'روزهای مختلف مرحله‌های مختلف می‌دهند (' + new Set(days).size + ' مرحله در ۶۰ روز)');
+  ok(E.dailyLevel(rng(777)) === E.dailyLevel(rng(777)), 'بذر یکسان، مرحله‌ی روزانه‌ی یکسان');
+
+  // ذخیره و ادامه
+  const mid2 = directPath(1, 3000).S;
+  const data = JSON.parse(JSON.stringify(E.serialize(mid2)));
+  const back = E.restore(data);
+  ok(!!back && back.bricks.map((k) => k.hp).join() === mid2.bricks.map((k) => k.hp).join() &&
+    back.lives === mid2.lives && back.score === mid2.score && back.level === 1 && back.attached === true,
+    'ذخیره و ادامه: آجرها، توپ‌ها و امتیاز همان‌اند و توپ روی راکت است');
+  ok(mid2.hits > 0 && mid2.bricks.some((k) => k.hp < k.max), 'ذخیره‌ی آزمون آجر شکسته داشت');
+  ok(E.restore(Object.assign({}, data, { hp: data.hp.slice(1) })) === null, 'ذخیره با تعداد آجر نادرست رد می‌شود');
+  ok(E.restore(Object.assign({}, data, { level: 12 })) === null && E.restore(Object.assign({}, data, { lives: 0 })) === null && E.restore(null) === null,
+    'ذخیره‌ی خراب رد می‌شود');
+
+  // پیشرفت: هر مرحله مرحله‌ی بعد را باز می‌کند، بهترین‌ها کم نمی‌شوند
+  let prog = { unlocked: 1, best: {}, complete: false };
+  prog = E.recordClear(prog, 0, 2, 500);
+  ok(prog.unlocked === 2 && prog.best[0].stars === 2, 'تمام کردن مرحله‌ی ۱ مرحله‌ی ۲ را باز می‌کند');
+  prog = E.recordClear(prog, 0, 1, 900);
+  ok(prog.unlocked === 2 && prog.best[0].stars === 2 && prog.best[0].score === 900, 'بازی دوباره ستاره‌ی بهتر را کم نمی‌کند و امتیاز بهتر را نگه می‌دارد');
+  ok(!prog.complete, 'هنوز کل بازی تمام نشده');
+  prog = E.recordClear(prog, 11, 3, 100);
+  ok(prog.complete && prog.unlocked === 12, 'مرحله‌ی دوازده بازی را تمام می‌کند و بیش از دوازده باز نمی‌شود');
+
+  // صفحه همین موتور را صدا می‌زند
+  const boHtml = fs.readFileSync(path.join(ROOT, 'www/games/breakout/index.html'), 'utf8');
+  ok(/E\.advance\(S, acc, dt, input, onEvents\)/.test(boHtml), 'صفحه فیزیک را با advance و گام ثابت جلو می‌برد');
+  ok(/E\.launch\(S\)/.test(boHtml), 'صفحه پرتاب را با launch انجام می‌دهد');
+  ok(/E\.dailyLevel\(C\.daily\('breakout'/.test(boHtml), 'روزانه‌ی صفحه مرحله را از بذر روز می‌گیرد');
+  ok(/C\.onPause\(function \(\) \{\s*if \(S && !over && !S\.attached\) paused = true;/.test(boHtml), 'پنهان شدن برنامه بازی را نگه می‌دارد');
+  ok(!/localStorage/.test(boHtml), 'صفحه مستقیم به localStorage دست نمی‌زند');
+  ok(!/window\.(__|[A-Za-z]*[Dd]ebug)/.test(boHtml), 'قلاب اشکال‌زدایی روی window نیست');
+}
+
 /* ----------------------------------------------------- دفاع از برج */
 function testTd() {
   head('دفاع از برج');
@@ -2907,6 +3134,7 @@ testMorris();
 testBattleship();
 testBridges();
 testCodebreaker();
+testBreakout();
 testTd();
 testVersionStamp();
 testDeployGate();

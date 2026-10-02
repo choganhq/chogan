@@ -1,0 +1,942 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>آجرشکن — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* رنگ آجرها جدا از توکن‌های عمومی، چون سه درجه‌ی سختی باید در هر دو تم از
+     هم و از زمینه جدا خوانده شوند. درجه‌ی دو همان رنگ تأکید بازی است. */
+  :root { --bo-b1: #7CC3E6; --bo-b3: #23739B; --bo-steel: #9AA3AB; --bo-field: #F4F9FC; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bo-b1: #2F6F8F; --bo-b3: #9AD6F2; --bo-steel: #5A636B; --bo-field: #1A1814; }
+  }
+  :root[data-theme="dark"] { --bo-b1: #2F6F8F; --bo-b3: #9AD6F2; --bo-steel: #5A636B; --bo-field: #1A1814; }
+  /* کشیدن انگشت هر جای صفحه راکت را می‌برد؛ با manipulation مرورگر همان کشیدن
+     را اسکرول یا بزرگ‌نمایی حساب می‌کرد و راکت وسط بازی گیر می‌کرد. */
+  .ch-gamemain { touch-action: none; user-select: none; -webkit-user-select: none; }
+  .bo-wrap { width: 100%; height: 100%; display: flex; flex-direction: column; gap: var(--s-2); align-items: center; }
+  .bo-top { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+  .bo-top:empty { display: none; }
+  .bo-canvasbox { flex: 1; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
+  .bo-canvas { border-radius: var(--r-md); box-shadow: var(--sh-2); display: block; touch-action: none; }
+  .bo-levels { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s-2); }
+  .bo-lv {
+    min-height: 56px; border: 2px solid transparent; border-radius: var(--r-md);
+    background: var(--c-surface-2); color: var(--c-text); font: inherit; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    touch-action: manipulation;
+  }
+  .bo-lv b { font-size: var(--fs-lg); font-variant-numeric: tabular-nums; }
+  .bo-lv--on { border-color: var(--game); }
+  .bo-lv--done { background: var(--game-soft); }
+  .bo-lv[disabled] { opacity: .45; cursor: default; }
+  .bo-lv__stars { display: flex; gap: 1px; color: var(--c-gold); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function BreakoutEngineFactory() {
+  'use strict';
+
+  // زمین در واحدهای ثابت است و صفحه فقط بزرگش می‌کند؛ نتیجه‌ی فیزیک نباید به
+  // اندازه‌ی صفحه یا تعداد فریم گوشی بستگی داشته باشد.
+  var W = 360, H = 480, COLS = 12, ROWS = 10;
+  var BW = W / COLS, BH = 16, TOP = 36;
+  var R = 5;                      // شعاع توپ
+  var PW = 64, PH = 10, PY = H - 40;
+  var DT = 1 / 120;               // گام ثابت
+  var MAX_FRAME = 0.1;            // بعد از یک گیر طولانی، فیزیک یک‌باره جلو نپرد
+  var MAX_SPEED = 520, SPEED_STEP = 3;
+  var MAX_ANGLE = Math.PI / 3;    // لبه‌ی راکت توپ را تا شصت درجه از قائم کج می‌کند
+  var LIVES = 3;
+  var IDLE_LIMIT = 40;            // برخورد پشت سر هم بدون راکت یا آجر شکستنی
+
+  /* مرحله‌ها: هر سطر دوازده نویسه.
+     «.» خالی · «1» تا «3» تعداد ضربه · «#» آجر فولادی که نمی‌شکند. */
+  var LEVELS = [
+    ['............',
+     '............',
+     '111111111111',
+     '111111111111',
+     '111111111111',
+     '111111111111'],
+    ['............',
+     '.....11.....',
+     '....1111....',
+     '...111111...',
+     '..11111111..',
+     '.1111111111.',
+     '222222222222'],
+    ['............',
+     '222222222222',
+     '............',
+     '111111111111',
+     '111111111111',
+     '............',
+     '222222222222'],
+    ['............',
+     '1.1.1.1.1.1.',
+     '.2.2.2.2.2.2',
+     '1.1.1.1.1.1.',
+     '.2.2.2.2.2.2',
+     '1.1.1.1.1.1.',
+     '.1.1.1.1.1.1'],
+    ['............',
+     '.....22.....',
+     '....2112....',
+     '...211112...',
+     '..21111112..',
+     '...211112...',
+     '....2112....',
+     '.....22.....'],
+    ['............',
+     '333333333333',
+     '222222222222',
+     '111111111111',
+     '............',
+     '##..####..##'],
+    ['............',
+     '2.2.2..2.2.2',
+     '2.2.2..2.2.2',
+     '3.3.3..3.3.3',
+     '2.2.2..2.2.2',
+     '1.1.1..1.1.1',
+     '1.1.1..1.1.1'],
+    ['............',
+     '..1......1..',
+     '...1....1...',
+     '..22222222..',
+     '.22.2222.22.',
+     '222222222222',
+     '2.22222222.2',
+     '2.2......2.2',
+     '...33..33...'],
+    ['............',
+     '............',
+     '#2222222222#',
+     '#2333333332#',
+     '#2311111132#',
+     '#2311111132#',
+     '#2333333332#',
+     '#2222222222#'],
+    ['............',
+     '333.........',
+     '222333......',
+     '111222333...',
+     '...111222333',
+     '......111222',
+     '.........111',
+     '##........##'],
+    ['............',
+     '333333333333',
+     '322222222223',
+     '321111111123',
+     '............',
+     '...######...',
+     '............',
+     '1..........1'],
+    ['............',
+     '3.3.3333.3.3',
+     '333333333333',
+     '2#2#2222#2#2',
+     '222222222222',
+     '1111.11.1111',
+     '111111111111',
+     '#....##....#']
+  ];
+
+  function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
+
+  // متن مرحله را به آجر تبدیل می‌کند و هر ایرادی را می‌گوید، تا مرحله‌ی خراب
+  // در آزمون گیر بیفتد نه وسط بازی.
+  function parseLevel(rows) {
+    var bricks = [], errors = [], breakable = 0;
+    if (!rows || !rows.length) errors.push('empty');
+    else if (rows.length > ROWS) errors.push('rows ' + rows.length + ' > ' + ROWS);
+    for (var r = 0; rows && r < rows.length; r++) {
+      var line = rows[r];
+      if (typeof line !== 'string' || line.length !== COLS) { errors.push('row ' + r + ' width'); continue; }
+      for (var c = 0; c < COLS; c++) {
+        var ch = line[c];
+        if (ch === '.') continue;
+        var steel = ch === '#';
+        var hp = steel ? 1 : parseInt(ch, 10);
+        if (!steel && !(hp >= 1 && hp <= 3)) { errors.push('row ' + r + ' col ' + c + ' "' + ch + '"'); continue; }
+        if (!steel) breakable++;
+        bricks.push({ r: r, c: c, x: c * BW, y: TOP + r * BH, w: BW, h: BH, hp: hp, max: hp, steel: steel });
+      }
+    }
+    if (!breakable) errors.push('no breakable brick');
+    return { bricks: bricks, breakable: breakable, errors: errors };
+  }
+
+  function baseSpeed(level) { return 260 + level * 10; }
+
+  function createGame(level, opts) {
+    opts = opts || {};
+    var p = parseLevel(opts.rows || LEVELS[level]);
+    var S = {
+      level: level, bricks: p.bricks,
+      ball: { x: W / 2, y: PY - R, vx: 0, vy: 0 },
+      px: W / 2, lives: LIVES, attached: true,
+      speed: opts.speed || baseSpeed(level),
+      score: 0, steps: 0, state: 'play', serves: 0, lost: 0, idle: 0, hits: 0
+    };
+    return S;
+  }
+
+  function breakableLeft(S) {
+    var n = 0;
+    for (var i = 0; i < S.bricks.length; i++) if (!S.bricks[i].steel && S.bricks[i].hp > 0) n++;
+    return n;
+  }
+
+  function launch(S) {
+    if (!S.attached || S.state !== 'play') return false;
+    // زاویه‌ی پرتاب ثابت و یک‌درمیان چپ و راست، تا با ورودی یکسان مسیر یکسان باشد
+    var a = (S.serves % 2 ? -1 : 1) * 0.35;
+    S.ball.vx = S.speed * Math.sin(a);
+    S.ball.vy = -S.speed * Math.cos(a);
+    S.attached = false;
+    S.serves++;
+    S.idle = 0;
+    return true;
+  }
+
+  function setSpeed(S, v) {
+    var b = S.ball, cur = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+    S.speed = v;
+    if (cur > 0) { b.vx *= v / cur; b.vy *= v / cur; }
+  }
+
+  function bouncePaddle(S, ev) {
+    var b = S.ball;
+    var off = clamp((b.x - S.px) / (PW / 2 + R), -1, 1);
+    var a = off * MAX_ANGLE;
+    b.vx = S.speed * Math.sin(a);
+    b.vy = -S.speed * Math.cos(a);
+    if (b.y > PY - R) b.y = PY - R;
+    S.idle = 0;
+    ev.push({ type: 'paddle', off: off });
+  }
+
+  /* برخورد جاروبی: توپ نقطه است و هر مستطیل به اندازه‌ی شعاع توپ پهن‌تر.
+     زمان ورود به مستطیل را روی مسیر همین گام حساب می‌کنیم، پس توپ هر قدر هم
+     تند باشد از آجر نازک یا دیواره رد نمی‌شود. خروجی: t بین ۰ و ۱ و جهت. */
+  function sweepBox(x, y, dx, dy, x0, y0, x1, y1) {
+    var tx0, tx1, ty0, ty1;
+    if (dx === 0) {
+      if (x <= x0 || x >= x1) return null;
+      tx0 = -Infinity; tx1 = Infinity;
+    } else {
+      var a = (x0 - x) / dx, b = (x1 - x) / dx;
+      tx0 = Math.min(a, b); tx1 = Math.max(a, b);
+    }
+    if (dy === 0) {
+      if (y <= y0 || y >= y1) return null;
+      ty0 = -Infinity; ty1 = Infinity;
+    } else {
+      var c = (y0 - y) / dy, d = (y1 - y) / dy;
+      ty0 = Math.min(c, d); ty1 = Math.max(c, d);
+    }
+    var tin = Math.max(tx0, ty0), tout = Math.min(tx1, ty1);
+    // از قبل داخل بودن یا دور شدن برخورد نیست؛ وگرنه توپ روی همان سطحی که
+    // تازه از آن برگشته دوباره برمی‌گشت و می‌چسبید.
+    if (tout <= 1e-9 || tin > tout || tin > 1 || tin < -1e-9) return null;
+    var nx = tx0 >= ty0 - 1e-12, ny = ty0 >= tx0 - 1e-12;
+    return { t: Math.max(0, tin), nx: nx, ny: ny };
+  }
+
+  function sweep(S, ev) {
+    var b = S.ball, rem = 1, guard = 0;
+    while (rem > 1e-9 && guard++ < 12 && S.state === 'play') {
+      var dx = b.vx * DT * rem, dy = b.vy * DT * rem;
+      var best = null, t;
+      if (dx < 0) { t = Math.max(0, (R - b.x) / dx); if (t <= 1 && (!best || t < best.t)) best = { t: t, nx: true, ny: false, kind: 'wall' }; }
+      if (dx > 0) { t = Math.max(0, (W - R - b.x) / dx); if (t <= 1 && (!best || t < best.t)) best = { t: t, nx: true, ny: false, kind: 'wall' }; }
+      if (dy < 0) { t = Math.max(0, (R - b.y) / dy); if (t <= 1 && (!best || t < best.t)) best = { t: t, nx: false, ny: true, kind: 'wall' }; }
+      for (var i = 0; i < S.bricks.length; i++) {
+        var k = S.bricks[i];
+        if (k.hp <= 0) continue;
+        var h = sweepBox(b.x, b.y, dx, dy, k.x - R, k.y - R, k.x + k.w + R, k.y + k.h + R);
+        if (h && (!best || h.t < best.t)) { best = h; best.kind = 'brick'; best.brick = k; }
+      }
+      if (dy > 0) {
+        var hp = sweepBox(b.x, b.y, dx, dy, S.px - PW / 2 - R, PY - R, S.px + PW / 2 + R, PY + PH + R);
+        if (hp && (!best || hp.t < best.t)) { best = hp; best.kind = 'paddle'; }
+      }
+      if (!best) { b.x += dx; b.y += dy; break; }
+      b.x += dx * best.t; b.y += dy * best.t;
+      rem *= (1 - best.t);
+      if (best.kind === 'paddle') { bouncePaddle(S, ev); continue; }
+      if (best.nx) b.vx = -b.vx;
+      if (best.ny) b.vy = -b.vy;
+      if (best.kind === 'wall') { S.idle++; ev.push({ type: 'wall' }); }
+      else hitBrick(S, best.brick, ev);
+      if (S.idle > IDLE_LIMIT) unstick(S);
+    }
+  }
+
+  function hitBrick(S, k, ev) {
+    if (k.steel) { S.idle++; ev.push({ type: 'steel', x: k.x, y: k.y }); return; }
+    S.idle = 0;
+    S.hits++;
+    k.hp--;
+    S.score += 5;
+    if (k.hp <= 0) S.score += 10 * k.max;
+    setSpeed(S, Math.min(MAX_SPEED, S.speed + SPEED_STEP));
+    ev.push({ type: 'brick', destroyed: k.hp <= 0, x: k.x, y: k.y, w: k.w, h: k.h, max: k.max });
+    if (breakableLeft(S) === 0) {
+      S.state = 'won';
+      S.score += S.lives * 50;
+      ev.push({ type: 'won' });
+    }
+  }
+
+  // توپ بین فولاد و دیواره در مداری بسته گیر کرده؛ کمی به قائم نزدیکش می‌کنیم
+  // تا بازی بدون کمک بازیکن تمام‌نشدنی نشود.
+  function unstick(S) {
+    var b = S.ball, s = S.speed;
+    var a = Math.atan2(b.vx, Math.abs(b.vy));
+    a = Math.abs(a) < 0.05 ? 0.2 : a * 0.8;
+    var down = b.vy > 0 ? 1 : -1;
+    b.vx = s * Math.sin(a);
+    b.vy = down * s * Math.cos(a);
+    S.idle = 0;
+  }
+
+  // یک گام ثابت. paddleX جایی است که بازیکن راکت را می‌خواهد.
+  function step(S, paddleX) {
+    var ev = [];
+    if (S.state !== 'play') return ev;
+    S.steps++;
+    if (typeof paddleX === 'number' && paddleX === paddleX) S.px = clamp(paddleX, PW / 2, W - PW / 2);
+    var b = S.ball;
+    if (S.attached) { b.x = S.px; b.y = PY - R; return ev; }
+    // راکت خودش زیر توپ رفته: برگشت، نه عبور از داخل راکت
+    if (b.vy > 0 && b.y >= PY - R && b.y < PY + PH && Math.abs(b.x - S.px) <= PW / 2 + R) bouncePaddle(S, ev);
+    sweep(S, ev);
+    if (S.state === 'play' && b.y - R > H) {
+      S.lives--;
+      S.lost++;
+      ev.push({ type: 'lost' });
+      if (S.lives <= 0) { S.state = 'lost'; ev.push({ type: 'over' }); }
+      else {
+        S.attached = true;
+        S.speed = baseSpeed(S.level);
+        b.vx = 0; b.vy = 0; b.x = S.px; b.y = PY - R;
+      }
+    }
+    return ev;
+  }
+
+  // فریم‌های نامنظم را به گام‌های ثابت تبدیل می‌کند. صفحه و آزمون هر دو از
+  // همین استفاده می‌کنند تا «مستقل از نرخ فریم» ادعا نباشد، آزموده باشد.
+  function advance(S, acc, frameDt, input, onEvents) {
+    acc += Math.min(Math.max(frameDt, 0), MAX_FRAME);
+    while (acc >= DT && S.state === 'play') {
+      var ev = step(S, input(S));
+      acc -= DT;
+      if (onEvents && ev.length) onEvents(ev);
+    }
+    if (S.state !== 'play') acc = 0;
+    return acc;
+  }
+
+  function stars(S) { return S.state === 'won' ? S.lives : 0; }
+
+  function dailyLevel(rng) { return Math.floor(rng() * LEVELS.length) % LEVELS.length; }
+
+  // ذخیره‌ی میان‌مرحله: آجرها، جان و امتیاز. توپ هنگام ادامه روی راکت
+  // برمی‌گردد چون وسط پرواز ادامه دادن یعنی توپی که بازیکن ندیده افتاد.
+  function serialize(S) {
+    return {
+      level: S.level, hp: S.bricks.map(function (k) { return k.hp; }),
+      lives: S.lives, score: S.score, lost: S.lost, serves: S.serves, hits: S.hits
+    };
+  }
+  function restore(d) {
+    if (!d || typeof d.level !== 'number' || d.level < 0 || d.level >= LEVELS.length) return null;
+    var S = createGame(d.level);
+    if (!Array.isArray(d.hp) || d.hp.length !== S.bricks.length) return null;
+    for (var i = 0; i < S.bricks.length; i++) {
+      var v = d.hp[i] | 0;
+      S.bricks[i].hp = clamp(v, 0, S.bricks[i].max);
+    }
+    if (!(d.lives >= 1 && d.lives <= LIVES)) return null;
+    if (breakableLeft(S) === 0) return null;
+    S.lives = d.lives | 0;
+    S.score = Math.max(0, d.score | 0);
+    S.lost = Math.max(0, d.lost | 0);
+    S.serves = Math.max(0, d.serves | 0);
+    S.hits = Math.max(0, d.hits | 0);
+    return S;
+  }
+
+  // پیشرفت: مرحله‌ی بعدی با تمام کردن هر مرحله باز می‌شود و بهترین‌ها کم نمی‌شوند
+  function recordClear(prog, level, st, score) {
+    var p = {
+      unlocked: Math.max(1, (prog && prog.unlocked) | 0),
+      best: Object.assign({}, (prog && prog.best) || {}),
+      complete: !!(prog && prog.complete)
+    };
+    p.unlocked = Math.min(LEVELS.length, Math.max(p.unlocked, level + 2));
+    var old = p.best[level] || { stars: 0, score: 0 };
+    p.best[level] = { stars: Math.max(old.stars, st), score: Math.max(old.score, score) };
+    if (level === LEVELS.length - 1) p.complete = true;
+    return p;
+  }
+
+  var api = {
+    W: W, H: H, COLS: COLS, ROWS: ROWS, BW: BW, BH: BH, TOP: TOP, R: R,
+    PW: PW, PH: PH, PY: PY, DT: DT, MAX_SPEED: MAX_SPEED, MAX_ANGLE: MAX_ANGLE, LIVES: LIVES,
+    LEVELS: LEVELS, parseLevel: parseLevel, baseSpeed: baseSpeed, createGame: createGame,
+    launch: launch, step: step, advance: advance, breakableLeft: breakableLeft,
+    stars: stars, dailyLevel: dailyLevel, serialize: serialize, restore: restore,
+    recordClear: recordClear, sweepBox: sweepBox
+  };
+  if (typeof self !== 'undefined') self.BreakoutEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = BreakoutEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = BreakoutEngineFactory();
+  var NLEV = E.LEVELS.length;
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'breakout',
+    name: { fa: 'آجرشکن', en: 'Breakout', zh: '打砖块' },
+    accent: '#3FA7D6',
+    mood: 'dots',
+    strings: {
+      fa: {
+        level: 'مرحله', lives: 'توپ', chooseLevel: 'انتخاب مرحله', levelN: 'مرحله‌ی {n}',
+        tapLaunch: 'برای پرتاب بزن', tapResume: 'مکث — برای ادامه بزن',
+        levelClear: 'مرحله تمام شد', allClear: 'هر دوازده مرحله تمام شد!', outOfBalls: 'توپ‌ها تمام شد',
+        nextLevel: 'مرحله‌ی بعد', nextUp: 'بعدی: مرحله‌ی {n}', ballsLeft: 'توپ مانده',
+        dailyBreakout: 'آجرشکن روزانه', movePaddle: 'حرکت راکت', launchKey: 'پرتاب یا ادامه',
+        pauseKey: 'مکث', levelsKey: 'انتخاب مرحله', lockedLevel: 'اول مرحله‌ی قبل را تمام کن',
+        tutTitle1: 'راکت را بکش', tutText1: 'انگشتت را هر جای صفحه بکش؛ راکت دنبالش می‌آید. برای پرتاب توپ یک بار بزن.',
+        tutTitle2: 'زاویه دست توست', tutText2: 'توپ اگر به وسط راکت بخورد صاف بالا می‌رود و اگر به لبه‌اش بخورد کج.',
+        tutTitle3: 'همه‌ی آجرها', tutText3: 'هر مرحله سه توپ داری. آجر پررنگ چند ضربه می‌خواهد و آجر خاکستری نمی‌شکند.'
+      },
+      en: {
+        level: 'Level', lives: 'Balls', chooseLevel: 'Choose a level', levelN: 'Level {n}',
+        tapLaunch: 'Tap to launch', tapResume: 'Paused — tap to continue',
+        levelClear: 'Level cleared', allClear: 'All twelve levels cleared!', outOfBalls: 'Out of balls',
+        nextLevel: 'Next level', nextUp: 'Next: level {n}', ballsLeft: 'Balls left',
+        dailyBreakout: 'Daily breakout', movePaddle: 'Move the paddle', launchKey: 'Launch or continue',
+        pauseKey: 'Pause', levelsKey: 'Choose a level', lockedLevel: 'Clear the previous level first',
+        tutTitle1: 'Drag the paddle', tutText1: 'Drag a finger anywhere on the screen and the paddle follows. Tap once to launch the ball.',
+        tutTitle2: 'You choose the angle', tutText2: 'A ball that hits the middle of the paddle goes straight up; near the edge it flies off at an angle.',
+        tutTitle3: 'Every brick', tutText3: 'You have three balls per level. Darker bricks take more hits and grey bricks never break.'
+      },
+      zh: {
+        level: '关卡', lives: '球', chooseLevel: '选择关卡', levelN: '第{n}关',
+        tapLaunch: '点击发球', tapResume: '已暂停——点击继续',
+        levelClear: '过关', allClear: '十二关全部通关！', outOfBalls: '球用完了',
+        nextLevel: '下一关', nextUp: '下一关：第{n}关', ballsLeft: '剩余球数',
+        dailyBreakout: '每日打砖块', movePaddle: '移动挡板', launchKey: '发球或继续',
+        pauseKey: '暂停', levelsKey: '选择关卡', lockedLevel: '请先通过上一关',
+        tutTitle1: '拖动挡板', tutText1: '手指在屏幕任意位置拖动，挡板就会跟随。点一下发球。',
+        tutTitle2: '角度由你决定', tutText2: '球打在挡板中间会笔直向上，打在边缘会斜着飞出。',
+        tutTitle3: '打掉所有砖块', tutText3: '每关有三个球。深色砖块要打多次，灰色砖块打不碎。'
+      }
+    }
+  });
+
+  var dailyDate = new URLSearchParams(location.search).get('daily');
+  var prog = ctx.store.get('progress', { unlocked: 1, best: {}, complete: false });
+  var prefs = ctx.store.get('prefs', { last: 0 });
+
+  var S = null, raf = null, lastT = 0, acc = 0, paused = false, over = false, startedAt = Date.now();
+  var aim = E.W / 2;                       // جایی که راکت باید برود، در واحد زمین
+  var keys = { left: false, right: false };
+  var KEY_SPEED = 420;                     // واحد زمین در ثانیه برای جهت‌نماها
+  var flashes = [];                        // آجرهای تازه‌شکسته که محو می‌شوند
+
+  var canvas = el('canvas', { class: 'bo-canvas' });
+  var cbox = el('div', { class: 'bo-canvasbox' }, [canvas]);
+  var topRow = el('div', { class: 'bo-top' });
+  var wrap = el('div', { class: 'bo-wrap' }, [topRow, cbox]);
+
+  ctx.stat('level', C.t('level'));
+  ctx.stat('lives', C.t('lives'));
+  ctx.stat('score', C.t('score'));
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  // دکمه‌ی مکث جدا ندارد: با سه شمارنده نوار در پهنای گوشی سرریز می‌کرد و
+  // دکمه‌ی تمام‌صفحه بیرون می‌افتاد. باز کردن هر پنجره، پنهان شدن برنامه و P مکث می‌کنند.
+  var levelsBtn = ctx.button({ icon: 'grid', label: C.t('chooseLevel'), onClick: showLevels });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ---------------------------------------------------------- رنگ‌ها */
+
+  var CO = {};
+  function readColors() {
+    var cs = getComputedStyle(document.documentElement);
+    function v(n, f) { return (cs.getPropertyValue(n) || f).trim() || f; }
+    CO = {
+      field: v('--bo-field', '#F4F9FC'),
+      b1: v('--bo-b1', '#7CC3E6'),
+      b2: v('--game', '#3FA7D6'),
+      b3: v('--bo-b3', '#23739B'),
+      steel: v('--bo-steel', '#9AA3AB'),
+      ball: v('--c-text', '#2C2620'),
+      dim: v('--c-text-dim', '#7C7063'),
+      paddle: v('--game', '#3FA7D6'),
+      line: v('--c-line', '#E7DACA')
+    };
+  }
+  readColors();
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    if (mq.addEventListener) mq.addEventListener('change', function () { setTimeout(readColors, 60); });
+  }
+
+  /* ---------------------------------------------------------- اندازه */
+
+  var scale = 1, dpr = 1;
+  function resize() {
+    var boxW = cbox.clientWidth || window.innerWidth;
+    var boxH = cbox.clientHeight || (window.innerHeight - 160);
+    scale = Math.max(0.4, Math.min(boxW / E.W, boxH / E.H));
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var w = Math.floor(E.W * scale), h = Math.floor(E.H * scale);
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    draw();
+  }
+  window.addEventListener('resize', resize);
+
+  /* ---------------------------------------------------------- ساخت */
+
+  function start(level, daily) {
+    S = E.createGame(level);
+    S.daily = daily || null;
+    startedAt = Date.now();
+    acc = 0; paused = false; over = false; flashes = [];
+    aim = S.px;
+    if (!daily) { prefs.last = level; ctx.store.set('prefs', prefs); }
+    afterLoad();
+    save();
+  }
+
+  function resume(restored, saved) {
+    S = restored;
+    S.daily = saved.daily || null;
+    startedAt = Date.now() - (saved.elapsed || 0);
+    acc = 0; paused = false; over = false; flashes = [];
+    aim = S.px;
+    afterLoad();
+  }
+
+  function afterLoad() {
+    topRow.innerHTML = '';
+    if (S.daily) {
+      topRow.appendChild(el('span', { class: 'ch-badge ch-badge--accent' },
+        [C.icon('calendar', 14), el('span', { text: C.t('dailyBreakout') + ' — ' + C.num(S.daily) })]));
+      topRow.appendChild(el('span', { class: 'ch-badge', text: C.t('levelN', { n: C.num(S.level + 1) }) }));
+    }
+    levelsBtn.hidden = !!S.daily;
+    hud();
+    draw();
+  }
+
+  function hud() {
+    ctx.setStat('level', C.num(S.level + 1) + '/' + C.num(NLEV));
+    ctx.setStat('lives', S.lives);
+    ctx.setStat('score', S.score);
+  }
+
+  /* ---------------------------------------------------------- رسم */
+
+  function brickColor(k) {
+    if (k.steel) return CO.steel;
+    return k.hp >= 3 ? CO.b3 : (k.hp === 2 ? CO.b2 : CO.b1);
+  }
+
+  function paintField(g, withText) {
+    g.fillStyle = CO.field;
+    g.fillRect(0, 0, E.W, E.H);
+    for (var i = 0; i < S.bricks.length; i++) {
+      var k = S.bricks[i];
+      if (k.hp <= 0) continue;
+      g.fillStyle = brickColor(k);
+      C.rrect(g, k.x + 1.5, k.y + 1.5, k.w - 3, k.h - 3, 4);
+      g.fill();
+    }
+    var now = performance.now();
+    flashes = flashes.filter(function (f) { return now - f.at < 220; });
+    for (var j = 0; j < flashes.length; j++) {
+      var f = flashes[j], t = (now - f.at) / 220;
+      g.globalAlpha = 1 - t;
+      g.fillStyle = f.color;
+      C.rrect(g, f.x + 1.5 - t * 3, f.y + 1.5 - t * 3, f.w - 3 + t * 6, f.h - 3 + t * 6, 4);
+      g.fill();
+    }
+    g.globalAlpha = 1;
+    g.fillStyle = CO.paddle;
+    C.rrect(g, S.px - E.PW / 2, E.PY, E.PW, E.PH, 5);
+    g.fill();
+    g.fillStyle = CO.ball;
+    g.beginPath(); g.arc(S.ball.x, S.ball.y, E.R, 0, Math.PI * 2); g.fill();
+    if (withText && !over && (paused || S.attached)) {
+      g.fillStyle = CO.dim;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.font = '700 16px Vazirmatn, system-ui, sans-serif';
+      g.fillText(paused ? C.t('tapResume') : C.t('tapLaunch'), E.W / 2, E.PY - 70);
+    }
+  }
+
+  function draw() {
+    if (!S || !canvas.width) return;
+    var g = canvas.getContext('2d');
+    g.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
+    paintField(g, true);
+  }
+
+  // کارت نتیجه: زمین همان لحظه‌ی پایان، از روی مدل نه از روی بوم، تا اندازه‌ی
+  // صفحه‌ی بازیکن روی کیفیت کارت اثر نگذارد.
+  function cardPaint() {
+    var keep = S;
+    return function (g, w, h) {
+      var k = Math.min(w / E.W, h / E.H);
+      g.save();
+      g.translate((w - E.W * k) / 2, (h - E.H * k) / 2);
+      g.scale(k, k);
+      C.rrect(g, 0, 0, E.W, E.H, 18);
+      g.clip();
+      var was = S; S = keep;
+      paintField(g, false);
+      S = was;
+      g.restore();
+    };
+  }
+
+  /* ---------------------------------------------------------- حلقه */
+
+  function input() {
+    if (keys.left !== keys.right) {
+      aim += (keys.right ? 1 : -1) * KEY_SPEED * E.DT;
+      aim = C.clamp(aim, E.PW / 2, E.W - E.PW / 2);
+    }
+    return aim;
+  }
+
+  function onEvents(evs) {
+    var changed = false;
+    for (var i = 0; i < evs.length; i++) {
+      var e = evs[i];
+      if (e.type === 'brick') {
+        changed = true;
+        if (e.destroyed) {
+          C.audio.sfx('pop');
+          flashes.push({ x: e.x, y: e.y, w: e.w, h: e.h, at: performance.now(), color: e.max >= 3 ? CO.b3 : (e.max === 2 ? CO.b2 : CO.b1) });
+        } else C.audio.sfx('hit');
+      } else if (e.type === 'steel') C.audio.sfx('tick');
+      else if (e.type === 'paddle') C.audio.sfx('tap');
+      else if (e.type === 'lost') {
+        changed = true;
+        C.audio.sfx('bad'); C.haptic('error'); C.ui.shake(canvas);
+      }
+    }
+    if (changed) { hud(); save(); }
+  }
+
+  function loop(now) {
+    raf = requestAnimationFrame(loop);
+    var dt = (now - lastT) / 1000;
+    lastT = now;
+    if (!S) return;
+    // هر پنجره‌ای که باز شود — راهنما، انتخاب مرحله — بازی را نگه می‌دارد؛
+    // وگرنه توپ پشت پنجره می‌افتاد و بازیکن نمی‌دید چرا.
+    if (!over && !paused && !S.attached && document.querySelector('.ch-scrim')) setPaused(true);
+    if (!over && !paused) {
+      acc = E.advance(S, acc, dt, input, onEvents);
+      if (S.state !== 'play') finish();
+    } else acc = 0;
+    draw();
+  }
+
+  function setPaused(v) {
+    if (!S || over) return;
+    // توپ روی راکت چیزی برای نگه داشتن ندارد
+    paused = !!v && !S.attached;
+    if (paused) save();
+    draw();
+  }
+
+  /* ---------------------------------------------------------- ورودی */
+
+  function aimAt(clientX) {
+    var rect = canvas.getBoundingClientRect();
+    if (!rect.width) return;
+    aim = C.clamp((clientX - rect.left) / rect.width * E.W, E.PW / 2, E.W - E.PW / 2);
+  }
+
+  var drag = null;
+  ctx.main.addEventListener('pointerdown', function (ev) {
+    if (!S || over) return;
+    drag = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, moved: 0, wasPaused: paused };
+    // ضربه‌ای که مکث را برمی‌دارد نباید هم‌زمان توپ پرتاب کند
+    if (paused) { setPaused(false); return; }
+    aimAt(ev.clientX);
+  });
+  window.addEventListener('pointermove', function (ev) {
+    if (!S || over || paused) return;
+    if (drag && ev.pointerId === drag.id) {
+      drag.moved = Math.max(drag.moved, Math.abs(ev.clientX - drag.x) + Math.abs(ev.clientY - drag.y));
+      aimAt(ev.clientX);
+    } else if (ev.pointerType === 'mouse' && !document.querySelector('.ch-scrim')) aimAt(ev.clientX);
+  });
+  function endDrag(ev) {
+    if (!drag || ev.pointerId !== drag.id) return;
+    var d = drag;
+    drag = null;
+    if (ev.type !== 'pointerup' || d.wasPaused || !S || over) return;
+    // کشیدن و رها کردن نباید توپ را پرتاب کند؛ فقط ضربه‌ی کوتاه
+    if (d.moved < 12 && S.attached && E.launch(S)) C.feedback('tap');
+  }
+  window.addEventListener('pointerup', endDrag);
+  window.addEventListener('pointercancel', endDrag);
+
+  window.addEventListener('keydown', function (e) {
+    if (!S || over) return;
+    if (document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
+    if (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
+    var k = e.key;
+    // زمین آینه نمی‌شود، پس جهت‌نماها در راست‌چین هم برعکس نمی‌شوند
+    if (k === 'ArrowLeft' || k === 'a' || k === 'A') { keys.left = true; e.preventDefault(); return; }
+    if (k === 'ArrowRight' || k === 'd' || k === 'D') { keys.right = true; e.preventDefault(); return; }
+    if (k === ' ' || k === 'Enter' || k === 'ArrowUp') {
+      if (paused) setPaused(false);
+      else if (S.attached && E.launch(S)) C.feedback('tap');
+      e.preventDefault();
+      return;
+    }
+    if (k === 'p' || k === 'P') { setPaused(!paused); e.preventDefault(); return; }
+    if ((k === 'l' || k === 'L') && !S.daily) { showLevels(); e.preventDefault(); }
+  });
+  window.addEventListener('keyup', function (e) {
+    var k = e.key;
+    if (k === 'ArrowLeft' || k === 'a' || k === 'A') keys.left = false;
+    if (k === 'ArrowRight' || k === 'd' || k === 'D') keys.right = false;
+  });
+  window.addEventListener('blur', function () { keys.left = keys.right = false; });
+
+  /* ---------------------------------------------------------- پایان */
+
+  function finish() {
+    if (over) return;
+    over = true;
+    draw();
+    var snap = S;
+    var won = snap.state === 'won';
+    var lvl = snap.level;
+    var st = E.stars(snap);
+    var last = lvl === NLEV - 1;
+
+    // هر مرحله یک تا دو دقیقه است، پس پاداشش کمتر از یک دست کامل نقطه‌بازی
+    var coins = won ? 3 + Math.round(lvl / 2) + st : 1;
+    var points = won ? 15 + lvl * 3 + st * 5 : 4;
+    if (snap.daily) {
+      coins += 8; points += 25;
+      var firstDaily = C.stats.daily('breakout', snap.daily, {
+        label: C.t('levelN', { n: C.num(lvl + 1) }) + ' · ' + C.num(snap.score), win: won
+      });
+      if (!firstDaily) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    } else if (won) {
+      prog = E.recordClear(prog, lvl, st, snap.score);
+      ctx.store.set('progress', prog);
+    }
+    if (won) {
+      C.achievements.unlock('bo-first');
+      if (snap.lost === 0) C.achievements.unlock('bo-flawless');
+      if (prog.complete) C.achievements.unlock('bo-all');
+      C.stats.best('breakout', 'score' + lvl, snap.score, false);
+    }
+
+    var nextIdx = (won && !last && !snap.daily) ? lvl + 1 : null;
+    var res = ctx.finish({
+      won: won,
+      title: won ? ((last && !snap.daily) ? C.t('allClear') : C.t('levelClear')) : C.t('outOfBalls'),
+      stars: won ? st : null,
+      note: nextIdx !== null ? C.t('nextUp', { n: C.num(nextIdx + 1) }) : null,
+      timeMs: Date.now() - startedAt, coins: coins, points: points,
+      lines: [
+        { label: C.t('level'), value: C.num(lvl + 1) + '/' + C.num(NLEV) },
+        { label: C.t('score'), value: C.num(snap.score) },
+        { label: C.t('ballsLeft'), value: C.num(snap.lives) }
+      ],
+      shareText: 'چوگان · آجرشکن' + (snap.daily ? (' · روزانه ' + snap.daily) : '') +
+        '\nمرحله‌ی ' + C.num(lvl + 1) + ' · ' + (won ? 'تمام شد' : 'نیمه‌کاره') + ' · امتیاز ' + C.num(snap.score),
+      paint: cardPaint(),
+      onAgain: function () { start(nextIdx !== null ? nextIdx : lvl, snap.daily); }
+    });
+    // هسته برای دکمه‌ی اصلی همیشه «دوباره» می‌نویسد؛ بعد از برد همین دکمه
+    // مرحله‌ی بعد را باز می‌کند و برچسبش باید همان را بگوید.
+    if (nextIdx !== null && res && res.box) {
+      var pb = res.box.querySelector('.ch-modal__actions .ch-btn--primary');
+      if (pb) pb.textContent = C.t('nextLevel');
+    }
+  }
+
+  /* ---------------------------------------------------------- ذخیره */
+
+  ctx.autosave(function () {
+    // مرحله‌ای که هنوز هیچ اتفاقی در آن نیفتاده ارزش «ادامه» ندارد؛
+    // آخرین مرحله در prefs هست و از همان‌جا باز می‌شود.
+    if (!S || over || S.state !== 'play' || (S.hits === 0 && S.lost === 0)) return { inProgress: false };
+    return { s: E.serialize(S), daily: S.daily, elapsed: Date.now() - startedAt };
+  });
+  function save() { ctx.save(); }
+
+  /* ---------------------------------------------------------- مرحله‌ها */
+
+  function showLevels() {
+    if (!S || S.daily) return;
+    setPaused(true);
+    var grid = el('div', { class: 'bo-levels' });
+    var m = null;
+    for (var i = 0; i < NLEV; i++) {
+      (function (idx) {
+        var locked = idx >= prog.unlocked;
+        var best = prog.best[idx];
+        var kids = [el('b', { text: C.num(idx + 1) })];
+        if (locked) kids.push(C.icon('lock', 14));
+        else if (best && best.stars) {
+          var sr = el('span', { class: 'bo-lv__stars' });
+          for (var s = 1; s <= 3; s++) {
+            var ic = C.icon('star', 11);
+            if (s <= best.stars) ic.setAttribute('fill', 'currentColor'); else ic.style.opacity = '.4';
+            sr.appendChild(ic);
+          }
+          kids.push(sr);
+        }
+        var b = el('button', {
+          class: 'bo-lv' + (idx === S.level ? ' bo-lv--on' : '') + (best ? ' bo-lv--done' : ''),
+          type: 'button', disabled: locked,
+          'aria-label': C.t('levelN', { n: C.num(idx + 1) }) + (locked ? ' — ' + C.t('lockedLevel') : '')
+        }, kids);
+        b.addEventListener('click', function () { if (m) m.close(); pick(idx); });
+        grid.appendChild(b);
+      })(i);
+    }
+    m = C.ui.modal({ title: C.t('chooseLevel'), body: [grid], actions: [{ label: C.t('cancel') }] });
+  }
+
+  function pick(idx) {
+    if (S && !over && (S.hits > 0 || S.lost > 0)) {
+      C.ui.confirm({ title: C.t('restart'), body: C.t('resetWarn'), onOk: function () { start(idx, null); } });
+      return;
+    }
+    start(idx, null);
+  }
+
+  /* ---------------------------------------------------------- راهنما */
+
+  function showHelp() {
+    setPaused(true);
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('tutText1') }),
+        el('p', { class: 'ch-dim', text: C.t('tutText3') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          kb('← →', C.t('movePaddle')),
+          kb('Space / ↑', C.t('launchKey')),
+          kb('P', C.t('pauseKey')),
+          kb('L', C.t('levelsKey'))
+        ])
+      ],
+      actions: [
+        { label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('done'), kind: 'primary' }
+      ]
+    });
+  }
+  function kb(k, what) {
+    return el('div', { class: 'ch-item' }, [
+      el('div', { class: 'ch-item__label', text: what }),
+      el('span', { class: 'ch-badge', text: k })
+    ]);
+  }
+
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'),
+      art: '<svg viewBox="0 0 200 110" width="100%"><rect x="70" y="80" width="60" height="10" rx="5" fill="var(--game)"/>' +
+        '<circle cx="100" cy="72" r="6" fill="var(--c-text)"/>' +
+        '<path d="M60 100h80" stroke="var(--c-text-faint)" stroke-width="3" stroke-dasharray="4 5"/>' +
+        '<path d="M132 100l8 0l-6 -5M68 100l-8 0l6 -5" stroke="var(--c-text-faint)" stroke-width="3" fill="none" stroke-linecap="round"/></svg>' },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'),
+      art: '<svg viewBox="0 0 200 110" width="100%"><rect x="70" y="84" width="60" height="10" rx="5" fill="var(--game)"/>' +
+        '<path d="M100 82V20M122 82l34 -58M78 82l-34 -58" stroke="var(--c-text-faint)" stroke-width="3" stroke-dasharray="4 5"/>' +
+        '<circle cx="100" cy="20" r="6" fill="var(--c-text)"/><circle cx="156" cy="24" r="6" fill="var(--c-text)"/><circle cx="44" cy="24" r="6" fill="var(--c-text)"/></svg>' },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' +
+        '<rect x="30" y="30" width="34" height="16" rx="4" fill="var(--bo-b1)"/>' +
+        '<rect x="68" y="30" width="34" height="16" rx="4" fill="var(--game)"/>' +
+        '<rect x="106" y="30" width="34" height="16" rx="4" fill="var(--bo-b3)"/>' +
+        '<rect x="144" y="30" width="34" height="16" rx="4" fill="var(--bo-steel)"/>' +
+        '<g fill="var(--c-text)"><circle cx="80" cy="80" r="6"/><circle cx="100" cy="80" r="6"/><circle cx="120" cy="80" r="6"/></g></svg>' }
+  ];
+
+  /* ---------------------------------------------------------- چرخه‌ی عمر */
+
+  // پنهان شدن برنامه یعنی مکث؛ برگشتن فقط با ضربه‌ی خود بازیکن ادامه می‌دهد.
+  C.onPause(function () {
+    if (S && !over && !S.attached) paused = true;
+    keys.left = keys.right = false;
+    if (raf) { cancelAnimationFrame(raf); raf = null; }
+  });
+  C.onResume(function () {
+    if (!raf) { lastT = performance.now(); acc = 0; raf = requestAnimationFrame(loop); }
+  });
+
+  /* ---------------------------------------------------------- شروع */
+
+  var saved = ctx.loadSave();
+  var restored = saved && saved.s ? E.restore(saved.s) : null;
+  if (dailyDate) {
+    var dl = E.dailyLevel(C.daily('breakout', dailyDate).rng);
+    if (restored && restored.level === dl && saved.daily === dailyDate) resume(restored, saved);
+    else start(dl, dailyDate);
+    if (C.stats.dailyDone('breakout', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).breakout;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec.label });
+    }
+  } else if (restored) {
+    resume(restored, saved);
+  } else {
+    start(C.clamp(prefs.last | 0, 0, Math.max(0, Math.min(NLEV, prog.unlocked) - 1)), null);
+  }
+  ctx.tutorialIfNew(TUT);
+
+  resize();
+  setTimeout(resize, 30);
+  lastT = performance.now();
+  raf = requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
