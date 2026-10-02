@@ -825,7 +825,10 @@
     { id: 'dt-shutout',  icon: 'crown',   fa: 'قلعه‌ی بسته',      en: 'Shutout',           dfa: 'حریف را بدون هیچ مربعی نگه داشتی',    den: 'Win without conceding a box', zh: '零封', dzh: '一个格子都不让对手拿' },
     { id: 'ng-win',      icon: 'grid',    fa: 'اولین تصویر',      en: 'First picture',     dfa: 'یک نونوگرام را حل کردی',             den: 'Solve a nonogram', zh: '第一幅图', dzh: '解开一道数织' },
     { id: 'ng-large',    icon: 'palette', fa: 'بوم بزرگ',         en: 'Big canvas',        dfa: 'یک نونوگرام پانزده در پانزده را حل کردی', den: 'Solve a 15×15 nonogram', zh: '大画布', dzh: '解开一道15×15数织' },
-    { id: 'ng-fast',     icon: 'bolt',    fa: 'قلم تند',          en: 'Quick brush',       dfa: 'نونوگرام ده در ده را زیر سه دقیقه حل کردی', den: 'Solve a 10×10 nonogram under three minutes', zh: '快笔', dzh: '三分钟内解开10×10数织' }
+    { id: 'ng-fast',     icon: 'bolt',    fa: 'قلم تند',          en: 'Quick brush',       dfa: 'نونوگرام ده در ده را زیر سه دقیقه حل کردی', den: 'Solve a 10×10 nonogram under three minutes', zh: '快笔', dzh: '三分钟内解开10×10数织' },
+    { id: 'mc-win',      icon: 'gem',     fa: 'دانه‌کار',          en: 'Sower',             dfa: 'یک دست منقله را از حریف بردی',        den: 'Win a mancala match against the AI', zh: '播种人', dzh: '对战电脑赢下一局播棋' },
+    { id: 'mc-hard',     icon: 'brain',   fa: 'استاد منقله',      en: 'Mancala master',    dfa: 'حریف سخت منقله را شکست دادی',         den: 'Beat the hard mancala AI', zh: '播棋大师', dzh: '击败困难的播棋电脑' },
+    { id: 'mc-capture',  icon: 'bolt',    fa: 'درو',              en: 'Harvest',           dfa: 'با یک حرکت ده دانه یا بیشتر گرفتی',    den: 'Capture ten or more seeds in one move', zh: '大丰收', dzh: '一步吃掉十颗或更多种子' }
   ];
 
   var achApi = {

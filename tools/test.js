@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 592;
+const MIN_CHECKS = 656;
 
 function ok(cond, msg) {
   checks++;
@@ -384,6 +384,159 @@ function testNonogram() {
   ok(/E\.undo\(S\)/.test(pageHtml) && /E\.isSolved\(S\)/.test(pageHtml), 'صفحه برگرداندن و برد را از موتور می‌گیرد');
   ok(/C\.stats\.best\('nonogram', 'time-' \+ n, elapsed, true\)/.test(pageHtml), 'بهترین زمان برای هر اندازه جدا ثبت می‌شود');
   console.log('  بیشینه‌ی زمان تولید ' + maxMs + 'ms، بیشینه‌ی تلاش ' + maxTries);
+}
+
+/* ------------------------------------------------------------ منقله */
+function testMancala() {
+  head('منقله');
+  const E = loadEngine('mancala', 'MancalaEngineFactory');
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  // هر جواب مورد انتظار دستی از روی قاعده نوشته شده، نه با اجرای همین کد.
+  // ترتیب خانه‌ها: ۰..۵ گودال‌های پایین، ۶ خانه‌ی پایین، ۷..۱۲ بالا، ۱۳ خانه‌ی بالا.
+  const sowCase = (name, board, p, pit, want, check) => {
+    const b = board.slice();
+    const before = E.total(b);
+    const info = E.sow(b, p, pit);
+    ok(same(b, want), name + ': تخته ' + JSON.stringify(b));
+    ok(E.total(b) === before, name + ': تعداد دانه ثابت ماند');
+    if (check) check(info);
+  };
+
+  // کاشتن ساده از تخته‌ی آغاز
+  sowCase('کاشتن', E.newBoard(4), 0, 0,
+    [0, 5, 5, 5, 5, 4, 0, 4, 4, 4, 4, 4, 4, 0],
+    (i) => ok(!i.extra && i.next === 1 && same(i.path, [1, 2, 3, 4]), 'کاشتن: مسیر ۱ تا ۴ و نوبت به حریف'));
+  // نوبت دوباره: چهار دانه از گودال ۲ آخرش در خانه می‌افتد
+  sowCase('نوبت دوباره', E.newBoard(4), 0, 2,
+    [4, 4, 0, 5, 5, 5, 1, 4, 4, 4, 4, 4, 4, 0],
+    (i) => ok(i.extra && i.next === 0 && i.last === 6, 'نوبت دوباره: آخرین دانه در خانه، نوبت همان بازیکن'));
+  // رد شدن از خانه‌ی حریف، بازیکن پایین
+  sowCase('رد شدن از خانه‌ی بالا', [0, 2, 0, 0, 0, 9, 0, 1, 1, 1, 1, 1, 1, 0], 0, 5,
+    [1, 3, 0, 0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 0],
+    (i) => ok(same(i.path, [6, 7, 8, 9, 10, 11, 12, 0, 1]) && i.path.indexOf(13) < 0 && !i.capture,
+      'رد شدن: مسیر از ۱۳ نمی‌گذرد ' + JSON.stringify(i.path)));
+  // رد شدن از خانه‌ی پایین، بازیکن بالا، و گرفتن در پایانش
+  sowCase('رد شدن از خانه‌ی پایین', [1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 9, 0], 1, 12,
+    [2, 2, 2, 2, 0, 2, 0, 1, 0, 0, 0, 0, 0, 4],
+    (i) => ok(i.path.indexOf(6) < 0 && i.capture === 3 && i.captureFrom === 4 && i.next === 0,
+      'رد شدن: بالا از ۶ رد شد و گودال خالی ۸ سه دانه گرفت'));
+  // گرفتن
+  sowCase('گرفتن', [1, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0], 0, 0,
+    [0, 0, 0, 1, 0, 0, 4, 2, 0, 0, 0, 0, 0, 0],
+    (i) => ok(i.capture === 4 && i.captureFrom === 11 && !i.over, 'گرفتن: دانه‌ی آخر و سه دانه‌ی روبه‌رو به خانه رفتند'));
+  // روبه‌روی خالی: هیچ گرفتنی نیست و دانه سر جایش می‌ماند
+  sowCase('روبه‌روی خالی', [1, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0], 0, 0,
+    [0, 1, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0],
+    (i) => ok(i.capture === 0 && i.next === 1 && !i.over, 'روبه‌روی خالی: چیزی گرفته نشد و نوبت به حریف رسید'));
+  // دور کامل با سیزده دانه: از گودال مبدأ رد نمی‌شود و در آن گرفته می‌شود
+  sowCase('دور کامل', [13, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 0, 0,
+    [0, 1, 1, 1, 1, 1, 3, 1, 1, 1, 1, 1, 0, 0],
+    (i) => ok(i.capture === 2 && i.last === 0, 'دور کامل: آخرین دانه در گودال مبدأ نشست و گرفت'));
+  // پایان: ردیف پایین خالی شد، دانه‌های بالا به خانه‌ی بالا
+  sowCase('پایان با ردیف خالی', [0, 0, 0, 0, 0, 1, 5, 3, 0, 2, 0, 0, 0, 4], 0, 5,
+    [0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 9],
+    (i) => ok(i.over && same(i.sweep, [0, 5]), 'پایان: پنج دانه‌ی بالا به صاحبش رسید'));
+  // پایان وقتی ردیف خودِ بازیکن بالا خالی می‌شود
+  sowCase('پایان ردیف بالا', [2, 0, 1, 0, 0, 0, 3, 0, 0, 0, 0, 0, 1, 7], 1, 12,
+    [0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 8],
+    (i) => ok(i.over && same(i.sweep, [3, 0]), 'پایان: سه دانه‌ی پایین به خانه‌ی پایین رفت'));
+
+  ok(same(E.legalMoves([0, 3, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0], 0), [1, 3]), 'گودال خالی حرکت مجاز نیست');
+  const st0 = E.newState('2p', null, E.newBoard(4));
+  ok(E.applyMove(st0, 7) === null && st0.history.length === 0, 'گودال حریف را نمی‌شود کاشت');
+
+  // ناوردا روی بازی‌های بذری: دانه ثابت، هر بازی تمام می‌شود
+  const levels = ['easy', 'medium', 'hard'];
+  let games = 0, conserved = true, ended = true, maxMs = 0;
+  for (let i = 0; i < 24; i++) {
+    const r = rng(i * 389 + 11);
+    const board = i % 3 === 0 ? E.newBoard(4) : E.dailyLayout(rng(i * 53 + 2));
+    const S = E.newState('2p', null, board);
+    const a = levels[i % 3], b = levels[(i + 1) % 3];
+    let n = 0;
+    while (!S.done && n < 400) {
+      const t0 = Date.now();
+      const m = E.aiMove(S.board, S.turn, S.turn === 0 ? a : b, r);
+      maxMs = Math.max(maxMs, Date.now() - t0);
+      if (!E.applyMove(S, m)) { conserved = false; break; }
+      if (E.total(S.board) !== 48) conserved = false;
+      n++;
+    }
+    games++;
+    if (!S.done || E.sideSeeds(S.board, 0) || E.sideSeeds(S.board, 1) || S.board[6] + S.board[13] !== 48) ended = false;
+  }
+  ok(games === 24, 'بیست‌وچهار بازی بذری اجرا شد');
+  ok(conserved, 'در همه‌ی حرکت‌ها جمع دانه‌ها ۴۸ ماند و هر حرکت هوش مصنوعی مجاز بود');
+  ok(ended, 'همه‌ی بازی‌ها تمام شدند و همه‌ی دانه‌ها در دو خانه‌اند');
+
+  // قدرت: هر جفت دوازده بازی، نیمی با شروع هر طرف، نیمی از چیدمان روزانه
+  function versus(x, y) {
+    let w = 0;
+    for (let i = 0; i < 12; i++) {
+      const r = rng(i * 131 + 7);
+      const S = E.newState('2p', null, i < 4 ? E.newBoard(4) : E.dailyLayout(rng(i * 17 + 1)));
+      const lv = i % 2 === 0 ? [x, y] : [y, x];
+      while (!S.done) {
+        const t0 = Date.now();
+        E.applyMove(S, E.aiMove(S.board, S.turn, lv[S.turn], r));
+        maxMs = Math.max(maxMs, Date.now() - t0);
+      }
+      const mine = i % 2 === 0 ? S.board[6] : S.board[13];
+      if (mine > 24) w++;
+    }
+    return w;
+  }
+  const hm = versus('hard', 'medium');
+  ok(hm >= 10, 'سخت از متوسط قوی‌تر است (' + hm + '/12)');
+  const me = versus('medium', 'easy');
+  ok(me >= 9, 'متوسط از آسان قوی‌تر است (' + me + '/12)');
+  ok(maxMs < 900, 'زمان فکر هوش مصنوعی قابل قبول است (' + maxMs + 'ms)');
+
+  // روزانه
+  const d1 = E.dailyLayout(rng(20261002)), d2 = E.dailyLayout(rng(20261002));
+  ok(same(d1, d2), 'روزانه: یک بذر همیشه یک چیدمان');
+  let layoutsOk = true, distinct = new Set();
+  for (let i = 0; i < 40; i++) {
+    const L = E.dailyLayout(rng(i * 7919 + 1));
+    distinct.add(L.join());
+    if (E.total(L) !== 48 || L[6] || L[13]) layoutsOk = false;
+    for (let k = 0; k < 6; k++) if (L[k] < 1 || L[k] !== L[7 + k]) layoutsOk = false;
+  }
+  ok(layoutsOk, 'روزانه: ۴۸ دانه، هر گودال دست‌کم یکی، گودال iام دو طرف برابر');
+  ok(distinct.size > 30, 'روزانه: بذرهای مختلف چیدمان‌های مختلف می‌دهند (' + distinct.size + '/40)');
+
+  // برگرداندن: دونفره یک حرکت، با حریف تا نوبت قبلی بازیکن
+  const snap = (S) => JSON.stringify([S.board, S.turn, S.history, S.done]);
+  const two = E.newState('2p', null, E.newBoard(4));
+  const empty = snap(two);
+  E.applyMove(two, 0);
+  const afterFirst = snap(two);
+  E.applyMove(two, 7);
+  ok(two.turn === 0, 'دونفره: پس از دو حرکت بی‌جایزه نوبت پایین است');
+  ok(E.takeBack(two) === 1 && snap(two) === afterFirst, 'دونفره: برگرداندن فقط یک حرکت برمی‌دارد');
+  ok(E.takeBack(two) === 1 && snap(two) === empty, 'دونفره: برگرداندن دوم به تخته‌ی آغاز می‌رسد');
+  ok(E.takeBack(two) === 0 && snap(two) === empty, 'دونفره: روی تخته‌ی آغاز برگرداندن کاری نمی‌کند');
+
+  const ai = E.newState('ai', 'hard', E.newBoard(4));
+  E.applyMove(ai, 2);                    // نوبت دوباره
+  const humanTurn = snap(ai);
+  E.applyMove(ai, 0);
+  E.applyMove(ai, 7);
+  ok(ai.turn === 0 && ai.history.length === 3, 'با حریف: پس از حرکت حریف نوبت به بازیکن رسید');
+  ok(E.takeBack(ai) === 2 && snap(ai) === humanTurn, 'با حریف: برگرداندن تا پیش از حرکت قبلی بازیکن عقب می‌رود');
+  ok(E.takeBack(ai) === 1 && ai.history.length === 0 && ai.turn === 0, 'با حریف: نوبت دوباره‌ی خود بازیکن یک حرکت جدا برمی‌گردد');
+
+  const finished = E.newState('2p', null, [0, 0, 0, 0, 0, 1, 5, 3, 0, 2, 0, 0, 0, 4]);
+  E.applyMove(finished, 5);
+  ok(finished.done, 'وضعیت پس از حرکت پایانی تمام‌شده است');
+  ok(E.takeBack(finished) === 1 && !finished.done && finished.board[5] === 1, 'برگرداندن حرکت پایانی بازی را دوباره باز می‌کند');
+
+  // صفحه باید از همین تابع‌ها استفاده کند، نه منطق خودش را
+  const mcHtml = fs.readFileSync(path.join(ROOT, 'www/games/mancala/index.html'), 'utf8');
+  ok(/E\.applyMove\(S, pit\)/.test(mcHtml), 'صفحه حرکت را با applyMove ثبت می‌کند');
+  ok(/E\.takeBack\(S\)/.test(mcHtml), 'صفحه برگرداندن را با takeBack انجام می‌دهد');
+  ok(/E\.dailyLayout\(C\.daily\('mancala'/.test(mcHtml), 'روزانه‌ی صفحه چیدمان را از بذر روز می‌سازد');
+  ok(!/localStorage/.test(mcHtml), 'صفحه مستقیم به localStorage دست نمی‌زند');
 }
 
 /* ----------------------------------------------------- دفاع از برج */
@@ -1134,6 +1287,7 @@ testSudoku();
 testMines();
 testDots();
 testNonogram();
+testMancala();
 testTd();
 testVersionStamp();
 testDeployGate();
