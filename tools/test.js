@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 1046;
+const MIN_CHECKS = 1116;
 
 function ok(cond, msg) {
   checks++;
@@ -1611,6 +1611,188 @@ function testMorris() {
   ok(/E\.dailyStart\(C\.daily\('morris', daily\)\.rng\)/.test(html), 'صفحه روزانه را از بذر تاریخ می‌سازد');
 }
 
+/* ----------------------------------------------------- نبرد دریایی */
+function testBattleship() {
+  head('نبرد دریایی');
+  const E = loadEngine('battleship', 'BattleshipEngineFactory');
+  const N = 10;
+  ok(E.N === N && E.FLEET.join() === '5,4,3,3,2', 'تخته ۱۰×۱۰ و ناوگان ۵، ۴، ۳، ۳، ۲ است');
+
+  // بررسی مستقل از موتور: خانه‌ها و فاصله‌ی چبیشف را خود آزمون حساب می‌کند
+  const cells = (s) => Array.from({ length: s.len }, (_, k) => [s.r + (s.v ? k : 0), s.c + (s.v ? 0 : k)]);
+  function legal(ships) {
+    if (ships.length !== 5) return 'تعداد';
+    if (ships.map((s) => s.len).sort().join() !== '2,3,3,4,5') return 'اندازه‌ها';
+    for (const s of ships) for (const [r, c] of cells(s)) if (r < 0 || r >= N || c < 0 || c >= N) return 'بیرون تخته';
+    for (let a = 0; a < ships.length; a++) {
+      for (let b = a + 1; b < ships.length; b++) {
+        for (const [r1, c1] of cells(ships[a])) {
+          for (const [r2, c2] of cells(ships[b])) {
+            if (Math.max(Math.abs(r1 - r2), Math.abs(c1 - c2)) <= 1) return 'چسبیده یا روی هم';
+          }
+        }
+      }
+    }
+    return '';
+  }
+
+  // چیدمان دستی با جواب معلوم
+  const hand = [
+    { r: 0, c: 0, len: 5, v: false },   // ردیف ۰، ستون ۰ تا ۴
+    { r: 2, c: 0, len: 4, v: true },    // ستون ۰، ردیف ۲ تا ۵
+    { r: 2, c: 2, len: 3, v: false },   // ردیف ۲، ستون ۲ تا ۴
+    { r: 9, c: 7, len: 3, v: false },   // ردیف ۹، ستون ۷ تا ۹
+    { r: 5, c: 9, len: 2, v: true }     // ستون ۹، ردیف ۵ و ۶
+  ];
+  ok(legal(hand) === '' && E.validFleet(hand), 'چیدمان دستی با یک خانه فاصله مجاز است');
+  const without = (i) => hand.map((s, k) => (k === i ? null : s));
+  ok(!E.canPlace(without(2), { r: 1, c: 5, len: 3, v: false }, 2), 'کشتی که از گوشه به کشتی دیگر بچسبد رد می‌شود');
+  ok(!E.canPlace(without(2), { r: 1, c: 2, len: 3, v: false }, 2), 'کشتی که از پهلو بچسبد رد می‌شود');
+  ok(!E.canPlace(without(2), { r: 0, c: 3, len: 3, v: true }, 2), 'کشتی روی کشتی دیگر رد می‌شود');
+  ok(!E.canPlace(without(2), { r: 4, c: 8, len: 3, v: false }, 2), 'کشتی بیرون‌زده از تخته رد می‌شود');
+  ok(!E.canPlace(without(2), { r: 8, c: 2, len: 3, v: true }, 2), 'کشتی عمودی بیرون‌زده از پایین رد می‌شود');
+  ok(E.canPlace(without(2), { r: 2, c: 2, len: 3, v: true }, 2), 'همان کشتی با یک خانه فاصله جا می‌شود');
+  ok(!E.validFleet(hand.slice(0, 4)), 'ناوگان چهارکشتی معتبر نیست');
+  ok(!E.validFleet(hand.map((s, k) => (k === 4 ? { r: 8, c: 5, len: 2, v: false } : s))), 'ناوگان با دو کشتی گوشه‌به‌گوشه معتبر نیست');
+  ok(!E.validFleet(hand.map((s, k) => (k === 4 ? { r: 5, c: 9, len: 3, v: true } : s))), 'ناوگان با اندازه‌ی اشتباه معتبر نیست');
+
+  // ناوگان تصادفی همیشه قانونی است
+  const fleets = [];
+  for (let i = 0; i < 300; i++) fleets.push(E.randomFleet(rng(i * 7919 + 11)));
+  ok(fleets.length === 300, 'فهرست ناوگان‌های تصادفی خالی نیست');
+  const badFleets = fleets.map(legal).filter((x) => x);
+  ok(badFleets.length === 0, 'هر ۳۰۰ ناوگان تصادفی قانونی‌اند' + (badFleets.length ? ' (' + badFleets[0] + ')' : ''));
+  ok(fleets.every((f) => E.validFleet(f)), 'موتور هم همه را معتبر می‌داند');
+  ok(new Set(fleets.map((f) => JSON.stringify(f))).size > 290, 'ناوگان‌های تصادفی واقعاً گوناگون‌اند');
+
+  // شلیک روی تخته‌ی دستی: جواب از روی چیدمان معلوم است
+  const b = E.makeBoard(hand);
+  ok(E.fire(b, 77).result === 'miss' && b.shots[77] === 1, 'شلیک به آب: آب');
+  ok(E.fire(b, 0).result === 'hit' && b.shots[0] === 2, 'شلیک به کشتی: اصابت');
+  ok(E.fire(b, 0).result === 'repeat' && !E.canFire(b, 0), 'شلیک دوباره به همان خانه ممنوع است');
+  ok(E.fire(b, 59).result === 'hit', 'خانه‌ی اول کشتی دوخانه‌ای: اصابت');
+  ok(!b.sunk[4], 'کشتی با یک اصابت غرق نشده');
+  ok(E.fire(b, 69).result === 'sunk' && b.sunk[4], 'خانه‌ی آخر کشتی دوخانه‌ای: غرق');
+  const blk = E.blocked(b);
+  ok([48, 49, 58, 68, 78, 79].every((x) => blk[x] && !E.canFire(b, x)), 'خانه‌های دور کشتی غرق‌شده خالی و بسته‌اند');
+  ok(!blk[47] && E.canFire(b, 47) && !blk[0], 'خانه‌ی دورتر بسته نیست');
+  ok(!E.allSunk(b), 'با یک کشتی غرق‌شده بازی تمام نشده');
+  for (const s of hand) for (const [r, c] of cells(s)) E.fire(b, r * N + c);
+  ok(E.allSunk(b) && b.sunk.every(Boolean), 'با زدن همه‌ی خانه‌های کشتی‌ها همه غرق‌اند');
+  ok(b.shots.filter((x) => x === 2).length === 17, 'هفده خانه اصابت خورده، به اندازه‌ی کل ناوگان');
+
+  // نوبت‌ها یکی‌یکی‌اند و شلیک بی‌جا نوبت را عوض نمی‌کند
+  const G = E.newGame(hand, hand, 'medium');
+  ok(E.aiFire(G, rng(1)) === null && G.shots.ai === 0, 'حریف پیش از نوبتش شلیک نمی‌کند');
+  const p1 = E.playerFire(G, 0);
+  ok(p1 && p1.result === 'hit' && G.turn === 'ai', 'بعد از اصابت هم نوبت به حریف می‌رسد');
+  ok(E.playerFire(G, 1) === null && G.shots.me === 1, 'بازیکن در نوبت حریف نمی‌تواند شلیک کند');
+  ok(E.aiFire(G, rng(2)) !== null && G.turn === 'me' && G.shots.ai === 1, 'حریف یک شلیک می‌کند و نوبت برمی‌گردد');
+  ok(E.playerFire(G, 0) === null && G.turn === 'me', 'شلیک تکراری رد می‌شود و نوبت می‌ماند');
+
+  // هوش مصنوعی جای کشتی‌های پنهان را نمی‌بیند: دو تخته با دانسته‌ی یکسان
+  // ولی کشتی‌های متفاوت باید شلیک یکسان بگیرند.
+  const other = [
+    { r: 0, c: 0, len: 2, v: true }, { r: 3, c: 3, len: 5, v: false }, { r: 5, c: 0, len: 4, v: true },
+    { r: 9, c: 2, len: 3, v: false }, { r: 6, c: 6, len: 3, v: true }
+  ];
+  ok(legal(other) === '', 'چیدمان دوم دستی قانونی است');
+  const A = E.makeBoard(hand), B = E.makeBoard(other);
+  E.fire(A, 0); E.fire(B, 0); E.fire(A, 77); E.fire(B, 77);
+  ok(JSON.stringify(E.knowledge(A)) === JSON.stringify(E.knowledge(B)), 'دانسته‌ی دو تخته یکی است');
+  for (const lv of ['easy', 'medium', 'hard']) {
+    ok(E.aiShot(E.knowledge(A), lv, rng(5)) === E.aiShot(E.knowledge(B), lv, rng(5)), lv + ': شلیک فقط از دانسته‌ها می‌آید');
+  }
+
+  // هدف‌گیری روی وضعیت دستی: اصابت ۴۴ و آب در ۴۳، ۴۵، ۳۴ — تنها ادامه ۵۴ است
+  const T = E.makeBoard([{ r: 4, c: 4, len: 3, v: true }, { r: 0, c: 8, len: 2, v: true }, { r: 9, c: 0, len: 5, v: false },
+    { r: 0, c: 0, len: 4, v: false }, { r: 6, c: 8, len: 3, v: true }]);
+  ok(E.validFleet(T.ships), 'تخته‌ی هدف‌گیری قانونی است');
+  for (const x of [44, 43, 45, 34]) E.fire(T, x);
+  for (const lv of ['medium', 'hard']) ok(E.aiShot(E.knowledge(T), lv, rng(3)) === 54, lv + ': دنباله‌ی اصابت را می‌زند (۵۴)');
+  E.fire(T, 54);
+  const nextHard = E.aiShot(E.knowledge(T), 'hard', rng(4));
+  ok(nextHard === 64, 'سخت: بعد از دو اصابت عمودی در همان راستا ادامه می‌دهد (آمد ' + nextHard + ')');
+
+  // بازی‌های بذردار: هر کشتی بالاخره غرق می‌شود و قدرت سطح‌ها به ترتیب است
+  let maxMs = 0;
+  const avg = {};
+  for (const lv of ['easy', 'medium', 'hard']) {
+    let total = 0, allDone = true, worst = 0;
+    const n = 40;
+    for (let i = 0; i < n; i++) {
+      const r = rng(i * 977 + 5);
+      const bd = E.makeBoard(E.randomFleet(r));
+      let s = 0;
+      while (!E.allSunk(bd) && s < 100) {
+        const t0 = Date.now();
+        const x = E.aiShot(E.knowledge(bd), lv, r);
+        maxMs = Math.max(maxMs, Date.now() - t0);
+        if (x < 0 || !E.canFire(bd, x)) { allDone = false; break; }
+        E.fire(bd, x);
+        s++;
+      }
+      if (!E.allSunk(bd) || !bd.sunk.every(Boolean)) allDone = false;
+      total += s; worst = Math.max(worst, s);
+    }
+    avg[lv] = total / n;
+    ok(allDone && worst <= 100, lv + ': در هر ۴۰ بازی همه‌ی کشتی‌ها غرق شدند (بیشینه ' + worst + ' شلیک)');
+  }
+  ok(avg.hard < avg.medium && avg.medium < avg.easy,
+    'سخت کمتر از متوسط و متوسط کمتر از آسان شلیک لازم دارد (' + avg.hard + ' / ' + avg.medium + ' / ' + avg.easy + ')');
+  ok(avg.medium - avg.hard >= 2 && avg.easy - avg.medium >= 20, 'فاصله‌ی سطح‌ها شانسی نیست');
+  ok(maxMs < 900, 'زمان فکر هوش مصنوعی قابل قبول است (' + maxMs + 'ms)');
+
+  // دست کامل بازیکن در برابر حریف تا آخر
+  let ended = 0;
+  for (let i = 0; i < 20; i++) {
+    const r = rng(i * 31 + 9);
+    const g = E.newGame(E.randomFleet(r), E.randomFleet(r), ['easy', 'medium', 'hard'][i % 3]);
+    let guard = 0;
+    while (!g.winner && guard++ < 250) {
+      if (g.turn === 'me') E.playerFire(g, E.aiShot(E.knowledge(g.foe), 'medium', r));
+      else E.aiFire(g, r);
+    }
+    const loser = g.winner === 'me' ? g.me : g.foe;
+    const winnerB = g.winner === 'me' ? g.foe : g.me;
+    if (g.winner && E.allSunk(winnerB) && !E.allSunk(loser) && Math.abs(g.shots.me - g.shots.ai) <= 1) ended++;
+  }
+  ok(ended === 20, 'هر ۲۰ دست بذردار با یک برنده تمام شدند (' + ended + ')');
+
+  // روزانه: ناوگان حریف و ترتیب شلیکش از بذر می‌آید؛ صفحه برای هر شلیک
+  // بذر «تاریخ|شماره‌ی شلیک» می‌سازد و همین‌جا شبیه‌سازی می‌شود.
+  function daily(seed) {
+    const g = E.newGame(hand, E.randomFleet(rng(seed)), 'medium');
+    let q = 0;
+    while (!g.winner && q < 250) {
+      if (g.turn === 'me') {
+        let x = 0;
+        while (!E.canFire(g.foe, x)) x++;
+        E.playerFire(g, x);
+      } else E.aiFire(g, rng(seed * 1000 + g.shots.ai));
+      q++;
+    }
+    return JSON.stringify([g.foe.ships, g.log]);
+  }
+  ok(daily(20261002) === daily(20261002), 'روزانه: یک تاریخ همان ناوگان و همان شلیک‌ها را می‌دهد');
+  ok(daily(20261002) !== daily(20261003), 'روزانه: تاریخ دیگر دست دیگری است');
+
+  // صفحه از همین موتور استفاده می‌کند و برگرداندن ندارد (شلیک اطلاعات لو می‌دهد)
+  const page = fs.readFileSync(path.join(ROOT, 'www/games/battleship/index.html'), 'utf8');
+  ok(/E\.playerFire\(S\.G, idx\)/.test(page) && /E\.aiFire\(S\.G, rnd\)/.test(page), 'صفحه شلیک‌ها را با موتور ثبت می‌کند');
+  ok(/C\.daily\('battleship', S\.daily\)\.rng/.test(page) && /C\.daily\('battleship', S\.daily \+ '\|' \+ S\.G\.shots\.ai\)/.test(page),
+    'صفحه ناوگان و شلیک‌های روزانه را از تاریخ می‌گیرد');
+  ok(!/icon: 'undo'/.test(page) && !/takeBack/.test(page), 'نبرد دریایی دکمه‌ی برگرداندن ندارد');
+  ok(/ctx\.autosave\(/.test(page), 'صفحه ذخیره‌ی خودکار دارد');
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  const used = (page.match(/unlock\('([a-z-]+)'\)/g) || []).map((m) => m.split("'")[1]);
+  ok(used.length === 3, 'صفحه سه دستاورد باز می‌کند');
+  for (const id of used) {
+    const row = (core.match(new RegExp("\\{ id: '" + id + "'[^\\n]*\\}")) || [''])[0];
+    ok(['fa', 'en', 'zh', 'dfa', 'den', 'dzh'].every((k) => new RegExp('\\b' + k + ": '[^']+'").test(row)), id + ': در جدول دستاوردها با هر سه زبان هست');
+  }
+}
+
 /* ----------------------------------------------------- دفاع از برج */
 function testTd() {
   head('دفاع از برج');
@@ -2365,6 +2547,7 @@ testPeg();
 testReversi();
 testBackgammon();
 testMorris();
+testBattleship();
 testTd();
 testVersionStamp();
 testDeployGate();

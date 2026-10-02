@@ -843,7 +843,10 @@
     { id: 'bg-gammon',   icon: 'crown',   fa: 'مارس',             en: 'Gammon',            dfa: 'تخته‌نرد را با مارس یا بک‌گمون بردی', den: 'Win a gammon or a backgammon', zh: '全胜', dzh: '以全胜或完胜赢下双陆棋' },
     { id: 'mr-win',      icon: 'medal',   fa: 'دوزباز',           en: 'Morris winner',     dfa: 'یک دست دوز را از هوش مصنوعی بردی',    den: 'Win a game of morris against the AI', zh: '九子棋胜者', dzh: '在九子棋中战胜电脑' },
     { id: 'mr-hard',     icon: 'brain',   fa: 'استاد دوز',        en: 'Morris master',     dfa: 'حریف سخت دوز را شکست دادی',          den: 'Beat the hard morris AI', zh: '九子棋大师', dzh: '击败九子棋困难电脑' },
-    { id: 'mr-clean',    icon: 'shield',  fa: 'بی‌تلفات',          en: 'Not a scratch',     dfa: 'دوز را بدون از دست دادن حتی یک مهره بردی', den: 'Win at morris without losing a piece', zh: '全身而退', dzh: '一枚棋子都没丢就赢下九子棋' }
+    { id: 'mr-clean',    icon: 'shield',  fa: 'بی‌تلفات',          en: 'Not a scratch',     dfa: 'دوز را بدون از دست دادن حتی یک مهره بردی', den: 'Win at morris without losing a piece', zh: '全身而退', dzh: '一枚棋子都没丢就赢下九子棋' },
+    { id: 'bs-win',      icon: 'flag',    fa: 'دریاسالار',        en: 'Admiral',           dfa: 'یک نبرد دریایی را بردی',              den: 'Win a battleship match', zh: '海军上将', dzh: '赢下一局海战棋' },
+    { id: 'bs-hard',     icon: 'brain',   fa: 'ناخدای زیرک',      en: 'Sharp captain',     dfa: 'حریف سخت نبرد دریایی را شکست دادی',   den: 'Beat the hard battleship AI', zh: '精明舰长', dzh: '击败困难海战棋电脑' },
+    { id: 'bs-intact',   icon: 'shield',  fa: 'ناوگان سالم',      en: 'Fleet intact',      dfa: 'بدون از دست دادن هیچ کشتی‌ای بردی',   den: 'Win without losing a ship', zh: '舰队完好', dzh: '一艘船都没损失就获胜' }
   ];
 
   var achApi = {
