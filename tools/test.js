@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 1116;
+const MIN_CHECKS = 1441;
 
 function ok(cond, msg) {
   checks++;
@@ -1793,6 +1793,202 @@ function testBattleship() {
   }
 }
 
+/* ------------------------------------------------------------- پل‌ها */
+// قانون‌ها اینجا مستقل از موتور دوباره نوشته شده‌اند تا جواب سازنده با
+// تعریف بازی سنجیده شود، نه با همان کدی که آن را ساخته (#82).
+function bridgesPairs(islands) {
+  // همسایه‌های هم‌سطر یا هم‌ستون بدون جزیره‌ی بینشان
+  const out = [];
+  for (let a = 0; a < islands.length; a++) {
+    for (let b = a + 1; b < islands.length; b++) {
+      const A = islands[a], B = islands[b];
+      if (A.r !== B.r && A.c !== B.c) continue;
+      const between = islands.some((P) => P !== A && P !== B && (A.r === B.r
+        ? P.r === A.r && P.c > Math.min(A.c, B.c) && P.c < Math.max(A.c, B.c)
+        : P.c === A.c && P.r > Math.min(A.r, B.r) && P.r < Math.max(A.r, B.r)));
+      if (!between) out.push([a, b]);
+    }
+  }
+  return out;
+}
+function bridgesCross(islands, p, q) {
+  const [A, B] = [islands[p[0]], islands[p[1]]], [C, D] = [islands[q[0]], islands[q[1]]];
+  const h1 = A.r === B.r, h2 = C.r === D.r;
+  if (h1 === h2) return false;
+  const [H1, H2, V1, V2] = h1 ? [A, B, C, D] : [C, D, A, B];
+  return V1.c > Math.min(H1.c, H2.c) && V1.c < Math.max(H1.c, H2.c) &&
+    H1.r > Math.min(V1.r, V2.r) && H1.r < Math.max(V1.r, V2.r);
+}
+// links: [[a, b, k]]. خروجی: فهرست قانون‌های شکسته
+function bridgesRules(islands, links) {
+  const bad = [];
+  const pairs = bridgesPairs(islands).map((p) => p.join());
+  const sum = islands.map(() => 0);
+  const adj = islands.map(() => []);
+  for (const [a, b, k] of links) {
+    if (pairs.indexOf([Math.min(a, b), Math.max(a, b)].join()) < 0) bad.push('پل ' + a + '-' + b + ' مستقیم و آزاد نیست');
+    if (k < 1 || k > 2) bad.push('پل ' + a + '-' + b + ' تعداد ' + k + ' دارد');
+    sum[a] += k; sum[b] += k; adj[a].push(b); adj[b].push(a);
+  }
+  islands.forEach((p, i) => { if (sum[i] !== p.n) bad.push('جزیره‌ی ' + i + ': ' + sum[i] + ' به‌جای ' + p.n); });
+  for (let x = 0; x < links.length; x++) {
+    for (let y = x + 1; y < links.length; y++) {
+      if (bridgesCross(islands, links[x], links[y])) bad.push('پل‌های ' + links[x].slice(0, 2) + ' و ' + links[y].slice(0, 2) + ' هم را قطع می‌کنند');
+    }
+  }
+  const seen = new Set([0]), stack = [0];
+  while (stack.length) for (const n of adj[stack.pop()]) if (!seen.has(n)) { seen.add(n); stack.push(n); }
+  if (islands.length && seen.size !== islands.length) bad.push('پیوسته نیست (' + seen.size + '/' + islands.length + ')');
+  return bad;
+}
+// جست‌وجوی کامل و ساده، بدون هیچ ترفند موتور، فقط برای تخته‌های کوچک
+function bridgesBrute(islands, limit) {
+  const pairs = bridgesPairs(islands);
+  const vals = pairs.map(() => 0), sum = islands.map(() => 0);
+  const lastPair = islands.map(() => -1);
+  pairs.forEach((p, i) => { lastPair[p[0]] = i; lastPair[p[1]] = i; });
+  let count = 0;
+  (function go(i) {
+    if (count >= limit) return;
+    if (i === pairs.length) {
+      const links = pairs.map((p, j) => [p[0], p[1], vals[j]]).filter((l) => l[2] > 0);
+      if (bridgesRules(islands, links).length === 0) count++;
+      return;
+    }
+    const [a, b] = pairs[i];
+    for (let k = 0; k <= 2; k++) {
+      if (sum[a] + k > islands[a].n || sum[b] + k > islands[b].n) break;
+      vals[i] = k; sum[a] += k; sum[b] += k;
+      // جزیره‌ای که آخرین یالش گذشت باید همین حالا کامل باشد
+      if ((lastPair[a] !== i || sum[a] === islands[a].n) && (lastPair[b] !== i || sum[b] === islands[b].n)) go(i + 1);
+      sum[a] -= k; sum[b] -= k; vals[i] = 0;
+    }
+  })(0);
+  return count;
+}
+
+function testBridges() {
+  head('پل‌ها');
+  const E = loadEngine('bridges', 'BridgesEngineFactory');
+  for (const f of ['build', 'solve', 'generate', 'cycle', 'undo', 'check', 'edgeAt', 'edgeOf']) {
+    ok(typeof E[f] === 'function', 'موتور تابع ' + f + ' دارد');
+  }
+  const links = (g, b) => g.edges.map((e, i) => [e.a, e.b, b[i]]).filter((l) => l[2] > 0);
+
+  // پازل دستی T: یک ۱، یک ۴، یک ۲ و یک ۱. تنها جواب: ۱ و ۲ و ۱ پل از ۴.
+  const t = E.build(5, [{ r: 0, c: 0, n: 1 }, { r: 0, c: 2, n: 4 }, { r: 0, c: 4, n: 2 }, { r: 3, c: 2, n: 1 }]);
+  const tr = E.solve(t, 2);
+  ok(tr.count === 1, 'پازل T دقیقاً یک جواب دارد (' + tr.count + ')');
+  const want = { '0-1': 1, '1-2': 2, '1-3': 1 };
+  ok(!!tr.solution && t.edges.every((e, i) => (want[e.a + '-' + e.b] || 0) === tr.solution[i]),
+    'حل‌کننده جواب شناخته‌شده‌ی پازل T را می‌دهد');
+
+  // چهار جزیره‌ی ۲ در گوشه‌ها: پل دوتایی هم شمارها را درست می‌کند ولی دو تکه می‌شود،
+  // پس تنها جواب حلقه‌ی پل‌های تکی است. اینجا قانون پیوستگی کار اصلی را می‌کند.
+  const sq = E.build(3, [{ r: 0, c: 0, n: 2 }, { r: 0, c: 2, n: 2 }, { r: 2, c: 0, n: 2 }, { r: 2, c: 2, n: 2 }]);
+  ok(sq.edges.length === 4, 'مربع چهار یال دارد');
+  const sr = E.solve(sq, 2);
+  ok(sr.count === 1 && !!sr.solution && sr.solution.every((v) => v === 1), 'مربع ۲ها: تنها جواب حلقه‌ی پل‌های تکی است');
+  const split = sq.edges.map((e) => (e.h ? 2 : 0));
+  const cs = E.check(sq, split);
+  ok(cs.counts === true, 'دو پل دوتایی افقی شمار همه‌ی جزیره‌ها را درست می‌کند');
+  ok(cs.connected === false && cs.solved === false, 'برد رد می‌شود: شمارها درست ولی شبکه دو تکه است');
+  ok(bridgesRules(sq.islands, links(sq, split)).length > 0, 'قانون مستقل هم آن را رد می‌کند');
+  ok(E.check(sq, [1, 1, 1, 1]).solved === true, 'حلقه‌ی تکی برد است');
+  ok(E.check(sq, [1, 1, 1, 0]).solved === false, 'شمار ناقص برد نیست');
+
+  // نردبان ۲ ۳ ۱ / ۲ ۳ ۱: شمارها دو جواب دارند، دو ردیف جدا با پل دوتایی یا
+  // نردبان پیوسته. قاعده‌های پیش‌فرض ۱-۱ و ۲-۲ جدا را نمی‌کشند، فقط پیوستگی.
+  const ld = E.build(5, [{ r: 0, c: 0, n: 2 }, { r: 0, c: 2, n: 3 }, { r: 0, c: 4, n: 1 },
+    { r: 2, c: 0, n: 2 }, { r: 2, c: 2, n: 3 }, { r: 2, c: 4, n: 1 }]);
+  const lr = E.solve(ld, 3);
+  const ldWant = { '0-1': 1, '1-2': 1, '0-3': 1, '1-4': 1, '3-4': 1, '4-5': 1 };
+  ok(lr.count === 1, 'نردبان: حل‌کننده با قانون پیوستگی فقط یک جواب می‌شمارد (' + lr.count + ')');
+  ok(!!lr.solution && ld.edges.every((e, i) => (ldWant[e.a + '-' + e.b] || 0) === lr.solution[i]),
+    'نردبان: حل‌کننده جواب پیوسته‌ی شناخته‌شده را می‌دهد');
+  const rows = ld.edges.map((e) => (e.a + '-' + e.b === '0-1' || e.a + '-' + e.b === '3-4' ? 2 : (e.h ? 1 : 0)));
+  ok(bridgesRules(ld.islands, links(ld, rows)).join() === 'پیوسته نیست (3/6)', 'نردبان: دو ردیف جدا فقط قانون پیوستگی را می‌شکند');
+  ok(E.check(ld, rows).counts === true && E.check(ld, rows).solved === false, 'نردبان: دو ردیف جدا برد نیست');
+  // دو پل افقی موازی: لمس نزدیک ردیف بالا مال بالایی است، وسط دو ردیف مال هیچ‌کدام
+  ok(E.edgeAt(ld, 1, 0.3) === E.edgeOf(ld, 0, 1), 'لمس نزدیک پل بالا همان پل بالا را می‌دهد');
+  ok(E.edgeAt(ld, 1, 1.7) === E.edgeOf(ld, 3, 4), 'لمس نزدیک پل پایین همان پل پایین را می‌دهد');
+  ok(E.edgeAt(ld, 1.2, 1) === -1, 'لمس وسط دو ردیف، دور از هر دو پل، یال نیست');
+
+  // صلیب: پل افقی ۰-۱ و عمودی ۲-۳ از خانه‌ی (۱،۲) رد می‌شوند
+  const x = E.build(5, [{ r: 0, c: 2, n: 1 }, { r: 1, c: 0, n: 1 }, { r: 1, c: 4, n: 1 }, { r: 3, c: 2, n: 1 }]);
+  const eh = E.edgeOf(x, 1, 2), ev = E.edgeOf(x, 0, 3);
+  ok(eh >= 0 && ev >= 0 && x.edges[eh].h && !x.edges[ev].h, 'یال افقی و عمودی صلیب پیدا شدند');
+  ok(x.cross[eh].indexOf(ev) >= 0 && x.cross[ev].indexOf(eh) >= 0, 'دو یال صلیب هم را قطع می‌کنند');
+  ok(E.solve(x, 2).count === 0, 'صلیب ۱ها جواب ندارد: یا قطع می‌شود یا دو تکه');
+  const XS = { bridges: x.edges.map(() => 0), history: [] };
+  ok(E.cycle(x, XS, eh) === 1, 'پل افقی گذاشته شد');
+  const beforeCross = JSON.stringify(XS);
+  ok(E.cycle(x, XS, ev) === -1, 'پلی که پل دیگر را قطع کند پذیرفته نمی‌شود');
+  ok(JSON.stringify(XS) === beforeCross, 'حرکت ردشده وضعیت و تاریخچه را دست نمی‌زند');
+  ok(E.check(x, x.edges.map((e, i) => (i === eh || i === ev ? 1 : 0))).crossing === true, 'بررسی برد پل‌های متقاطع را می‌بیند');
+
+  // چرخه‌ی ۰←۱←۲←۰ و برگرداندن بی‌حد
+  const TS = { bridges: t.edges.map(() => 0), history: [] };
+  const e01 = E.edgeOf(t, 0, 1), e12 = E.edgeOf(t, 1, 2);
+  const seq = [E.cycle(t, TS, e12), E.cycle(t, TS, e12), E.cycle(t, TS, e12), E.cycle(t, TS, e01)];
+  ok(seq.join() === '1,2,0,1', 'زدن پیاپی ۰ ← ۱ ← ۲ ← ۰ می‌چرخد (' + seq.join() + ')');
+  ok(E.undo(TS) === e01 && TS.bridges[e01] === 0, 'برگرداندن آخرین پل را برمی‌دارد');
+  ok(E.undo(TS) === e12 && TS.bridges[e12] === 2, 'برگرداندن دوم پل دوتایی را برمی‌گرداند');
+  E.undo(TS); E.undo(TS);
+  ok(TS.bridges.every((v) => v === 0) && TS.history.length === 0, 'با برگرداندن پیاپی به تخته‌ی خالی می‌رسد');
+  ok(E.undo(TS) === -1, 'روی تخته‌ی خالی برگرداندن کاری نمی‌کند');
+
+  // لمس: وسط فاصله‌ی دو جزیره یال است، روی خود جزیره یا جای خالی نه
+  ok(E.edgeAt(t, 1, 0.1) === e01, 'لمس بین جزیره‌ی ۰ و ۱ همان یال را می‌دهد');
+  ok(E.edgeAt(t, 2, 1.5) === E.edgeOf(t, 1, 3), 'لمس روی فاصله‌ی عمودی یال عمودی را می‌دهد');
+  ok(E.edgeAt(t, 0, 0) === -1, 'لمس روی خود جزیره یال نیست');
+  ok(E.edgeAt(t, 4, 3) === -1, 'لمس جای خالی یال نیست');
+
+  // پازل‌های ساخته‌شده، هر اندازه چند بذر
+  const sizes = Object.keys(E.SIZES || {}).map(Number);
+  ok(sizes.join() === '7,9,11', 'سه اندازه: ' + sizes.join());
+  let maxMs = 0, made = 0, brute = 0;
+  for (const sz of sizes) {
+    const cfg = E.SIZES[sz];
+    for (let i = 0; i < 12; i++) {
+      const t0 = Date.now();
+      const p = E.generate(rng(9100 + sz * 37 + i * 613), sz);
+      maxMs = Math.max(maxMs, Date.now() - t0);
+      ok(!!p, sz + ': پازل ساخته شد');
+      if (!p) continue;
+      made++;
+      const g = E.build(p.size, p.islands);
+      const n = p.islands.length;
+      ok(n >= cfg.min && n <= cfg.max, sz + ': تعداد جزیره در بازه است (' + n + ')');
+      ok(p.islands.every((q) => q.r >= 0 && q.c >= 0 && q.r < sz && q.c < sz && q.n >= 1 && q.n <= 8),
+        sz + ': جزیره‌ها داخل تخته و عددشان بین ۱ و ۸ است');
+      ok(!p.islands.some((a) => p.islands.some((b) => Math.abs(a.r - b.r) + Math.abs(a.c - b.c) === 1)),
+        sz + ': هیچ دو جزیره‌ای چسبیده نیستند');
+      const bad = bridgesRules(p.islands, links(g, p.solution));
+      ok(bad.length === 0, sz + ': جواب همه‌ی قانون‌ها را دارد' + (bad.length ? ' (' + bad.slice(0, 3).join('؛ ') + ')' : ''));
+      ok(E.solve(g, 2).count === 1, sz + ': جواب یکتاست');
+      ok(E.check(g, p.solution).solved === true, sz + ': بررسی برد جواب را می‌پذیرد');
+      // تأیید یکتایی با جست‌وجوی کامل مستقل، فقط روی تخته‌ی کوچک که سریع است
+      if (sz === 7) {
+        const bc = bridgesBrute(p.islands, 2);
+        ok(bc === 1, '۷: جست‌وجوی مستقل هم دقیقاً یک جواب می‌یابد (' + bc + ')');
+        brute++;
+      }
+    }
+  }
+  ok(made === sizes.length * 12 && brute === 12, 'همه‌ی پازل‌ها و بررسی‌های مستقل اجرا شدند (' + made + '، ' + brute + ')');
+  ok(maxMs < 400, 'ساختن پازل صفحه را قفل نمی‌کند (بیشینه ' + maxMs + 'ms)');
+
+  // روزانه: یک بذر همیشه یک پازل؛ صفحه بذر را از C.daily می‌گیرد
+  const d1 = E.generate(rng(20261002), 9), d2 = E.generate(rng(20261002), 9), d3 = E.generate(rng(20261003), 9);
+  ok(JSON.stringify(d1) === JSON.stringify(d2), 'یک بذر همیشه یک پازل می‌دهد');
+  ok(JSON.stringify(d1.islands) !== JSON.stringify(d3.islands), 'بذر دیگر پازل دیگری می‌دهد');
+  const brHtml = fs.readFileSync(path.join(ROOT, 'www/games/bridges/index.html'), 'utf8');
+  ok(/C\.daily\('bridges', daily\)\.rng/.test(brHtml), 'صفحه پازل روزانه را از C.daily می‌سازد');
+  ok(/E\.cycle\(g, S, e\)/.test(brHtml) && /E\.undo\(S\)/.test(brHtml), 'صفحه حرکت و برگرداندن را با همین موتور انجام می‌دهد');
+  ok(/E\.check\(g, S\.bridges\)/.test(brHtml), 'صفحه برد را با همان بررسی قانون می‌سنجد');
+}
+
 /* ----------------------------------------------------- دفاع از برج */
 function testTd() {
   head('دفاع از برج');
@@ -2548,6 +2744,7 @@ testReversi();
 testBackgammon();
 testMorris();
 testBattleship();
+testBridges();
 testTd();
 testVersionStamp();
 testDeployGate();
