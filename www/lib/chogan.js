@@ -834,7 +834,10 @@
     { id: 'fc-fast',     icon: 'bolt',    fa: 'ورق‌باز تند',      en: 'Quick dealer',      dfa: 'فری‌سل را زیر چهار دقیقه بردی',       den: 'Win FreeCell in under four minutes', zh: '快手发牌', dzh: '四分钟内赢下空当接龙' },
     { id: 'pg-win',      icon: 'sparkle', fa: 'تک‌میخ',           en: 'Last peg',          dfa: 'میخ‌پران را با یک میخ تمام کردی',     den: 'Finish peg solitaire with one peg left', zh: '仅剩一枚', dzh: '孔明棋只剩一枚棋子' },
     { id: 'pg-centre',   icon: 'crown',   fa: 'دل تخته',          en: 'Dead centre',       dfa: 'آخرین میخ را وسط تخته نشاندی',       den: 'Leave the last peg in the centre', zh: '正中央', dzh: '最后一枚棋子落在正中' },
-    { id: 'pg-clean',    icon: 'brain',   fa: 'بی‌برگشت',         en: 'No take-backs',     dfa: 'بدون برگرداندن به یک میخ رسیدی',     den: 'Get down to one peg without undoing', zh: '一步不悔', dzh: '不撤销就只剩一枚' }
+    { id: 'pg-clean',    icon: 'brain',   fa: 'بی‌برگشت',         en: 'No take-backs',     dfa: 'بدون برگرداندن به یک میخ رسیدی',     den: 'Get down to one peg without undoing', zh: '一步不悔', dzh: '不撤销就只剩一枚' },
+    { id: 'rv-win',      icon: 'medal',   fa: 'برگرداننده',       en: 'Flipper',           dfa: 'یک دست ریورسی را مقابل حریف بردی',    den: 'Win a reversi match against the AI', zh: '翻盘手', dzh: '对战电脑赢下一局黑白棋' },
+    { id: 'rv-hard',     icon: 'brain',   fa: 'استاد محاصره',     en: 'Outflanker',        dfa: 'در ریورسی حریف سخت را شکست دادی',     den: 'Beat the hard AI at reversi', zh: '包围大师', dzh: '在黑白棋中击败困难电脑' },
+    { id: 'rv-corners',  icon: 'crown',   fa: 'چهار گوشه',        en: 'Four corners',      dfa: 'با هر چهار گوشه‌ی تخته ریورسی را بردی', den: 'Win at reversi holding all four corners', zh: '四角皆占', dzh: '占据全部四个角赢下黑白棋' }
   ];
 
   var achApi = {

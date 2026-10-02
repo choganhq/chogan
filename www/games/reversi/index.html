@@ -1,0 +1,890 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>ریورسی — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* رنگ مهره‌ها جزو قاعده‌ی بازی است، نه تم: سیاه و سفید باید در هر دو تم
+     سیاه و سفید بمانند. نمد تخته در تاریک کمی تیره‌تر است تا چشم را نزند. */
+  :root { --rv-felt: #2F8F6B; --rv-grid: rgba(0, 0, 0, .28); --rv-black: #1F2421; --rv-white: #F7F4EC; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --rv-felt: #23705A; --rv-grid: rgba(0, 0, 0, .4); } }
+  :root[data-theme="dark"] { --rv-felt: #23705A; --rv-grid: rgba(0, 0, 0, .4); }
+
+  .rv-wrap { width: 100%; display: flex; flex-direction: column; gap: var(--s-3); align-items: center; }
+  .rv-top { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+  .rv-players { display: flex; gap: var(--s-2); width: 100%; max-width: 520px; }
+  .rv-player {
+    flex: 1; display: flex; align-items: center; gap: var(--s-2);
+    background: var(--c-surface); border-radius: var(--r-md); padding: 8px 12px;
+    box-shadow: var(--sh-1); border: 2px solid transparent; min-height: 44px;
+    transition: border-color var(--t-mid) var(--ease), transform var(--t-mid) var(--ease);
+    min-width: 0;
+  }
+  .rv-player--on { border-color: var(--game); transform: translateY(-2px); box-shadow: var(--sh-2); }
+  .rv-player__disc { width: 18px; height: 18px; border-radius: 50%; flex: 0 0 18px; box-shadow: 0 0 0 1.5px var(--c-text-faint); }
+  .rv-player__name { flex: 1; min-width: 0; font-weight: 700; font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rv-player__score { font-weight: 800; font-size: var(--fs-lg); font-variant-numeric: tabular-nums; }
+  .rv-boardbox { width: 100%; max-width: min(96vw, 58vh, 520px); aspect-ratio: 1; }
+  .rv-canvas { width: 100%; height: 100%; display: block; touch-action: manipulation; cursor: pointer; border-radius: var(--r-md); box-shadow: var(--sh-2); }
+  .rv-thinking { animation: rv-blink 900ms infinite; }
+  @keyframes rv-blink { 50% { opacity: .45; } }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function ReversiEngineFactory() {
+  'use strict';
+
+  // تخته‌ی ۸×۸ یک آرایه‌ی ۶۴تایی است: ۰ خالی، ۱ سیاه که شروع می‌کند، ۲ سفید
+  var N = 8, CELLS = 64;
+  var DR = [-1, -1, -1, 0, 0, 1, 1, 1];
+  var DC = [-1, 0, 1, -1, 1, -1, 0, 1];
+  var CORNERS = [0, 7, 56, 63];
+
+  // وزن خانه‌ها: گوشه هیچ‌وقت برنمی‌گردد پس بیشترین ارزش را دارد، و خانه‌ی
+  // قطری کنار گوشه‌ی خالی راه گوشه را به حریف باز می‌کند پس منفی است.
+  var WEIGHTS = [
+    100, -20, 10,  5,  5, 10, -20, 100,
+    -20, -50, -2, -2, -2, -2, -50, -20,
+     10,  -2, -1, -1, -1, -1,  -2,  10,
+      5,  -2, -1, -1, -1, -1,  -2,   5,
+      5,  -2, -1, -1, -1, -1,  -2,   5,
+     10,  -2, -1, -1, -1, -1,  -2,  10,
+    -20, -50, -2, -2, -2, -2, -50, -20,
+    100, -20, 10,  5,  5, 10, -20, 100
+  ];
+  // سه خانه‌ی کنار هر گوشه؛ وقتی گوشه پر شد دیگر خطری ندارند
+  var NEAR = { 0: [1, 8, 9], 7: [6, 15, 14], 56: [57, 48, 49], 63: [62, 55, 54] };
+
+  function initial() {
+    var b = [];
+    for (var i = 0; i < CELLS; i++) b.push(0);
+    b[27] = 2; b[28] = 1; b[35] = 1; b[36] = 2;
+    return b;
+  }
+
+  // مهره‌هایی که گذاشتن p در خانه‌ی i برمی‌گرداند. فهرست خالی یعنی حرکت غیرمجاز.
+  function flipsFor(b, i, p) {
+    var out = [];
+    if (b[i] !== 0) return out;
+    var r0 = (i / N) | 0, c0 = i % N, o = 3 - p;
+    for (var d = 0; d < 8; d++) {
+      var r = r0 + DR[d], c = c0 + DC[d], run = [];
+      while (r >= 0 && r < N && c >= 0 && c < N && b[r * N + c] === o) {
+        run.push(r * N + c);
+        r += DR[d]; c += DC[d];
+      }
+      if (run.length && r >= 0 && r < N && c >= 0 && c < N && b[r * N + c] === p) {
+        for (var k = 0; k < run.length; k++) out.push(run[k]);
+      }
+    }
+    return out;
+  }
+
+  // همان بررسی بدون ساختن فهرست؛ جست‌وجوی حریف سخت صدها هزار بار صدایش می‌زند
+  function canPlay(b, i, p) {
+    if (b[i] !== 0) return false;
+    var r0 = (i / N) | 0, c0 = i % N, o = 3 - p;
+    for (var d = 0; d < 8; d++) {
+      var r = r0 + DR[d], c = c0 + DC[d], n = 0;
+      while (r >= 0 && r < N && c >= 0 && c < N && b[r * N + c] === o) { r += DR[d]; c += DC[d]; n++; }
+      if (n && r >= 0 && r < N && c >= 0 && c < N && b[r * N + c] === p) return true;
+    }
+    return false;
+  }
+
+  function legalMoves(b, p) {
+    var out = [];
+    for (var i = 0; i < CELLS; i++) if (canPlay(b, i, p)) out.push(i);
+    return out;
+  }
+
+  function count(b) {
+    var n = [0, 0, 0];
+    for (var i = 0; i < CELLS; i++) n[b[i]]++;
+    return n;
+  }
+
+  function isOver(b) { return !legalMoves(b, 1).length && !legalMoves(b, 2).length; }
+
+  function newState(mode) {
+    return { mode: mode || 'ai', board: initial(), turn: 1, history: [] };
+  }
+
+  // یک حرکت روی وضعیت کامل. صفحه و آزمون‌ها همین را صدا می‌زنند تا
+  // برگرداندن دقیقاً عکس همان چیزی باشد که ثبت شده.
+  // خروجی null اگر حرکت غیرمجاز است، وگرنه { flips, passed, over }؛
+  // passed شماره‌ی بازیکنی است که حرکتی نداشت و نوبتش رد شد.
+  function applyMove(S, i) {
+    var p = S.turn;
+    var f = flipsFor(S.board, i, p);
+    if (!f.length) return null;
+    S.history.push({ i: i, t: p, f: f });
+    S.board[i] = p;
+    for (var k = 0; k < f.length; k++) S.board[f[k]] = p;
+    var o = 3 - p, passed = 0, over = false;
+    if (legalMoves(S.board, o).length) S.turn = o;
+    else if (legalMoves(S.board, p).length) { S.turn = p; passed = o; }
+    else { S.turn = o; over = true; }
+    return { flips: f, passed: passed, over: over };
+  }
+
+  // با حریف کامپیوتری تا نوبت قبلی بازیکن عقب می‌رود؛ دونفره فقط یک حرکت،
+  // همان قاعده‌ی نقطه‌بازی بعد از #69.
+  function takeBack(S) {
+    var n = 0;
+    do {
+      var h = S.history.pop();
+      if (!h) break;
+      S.board[h.i] = 0;
+      for (var k = 0; k < h.f.length; k++) S.board[h.f[k]] = 3 - h.t;
+      S.turn = h.t;
+      n++;
+    } while (S.mode === 'ai' && S.turn !== 1 && n < 200);
+    return n;
+  }
+
+  /* ------------------------------------------------------- هوش مصنوعی */
+
+  function posScore(b, p) {
+    var s = 0, o = 3 - p;
+    for (var i = 0; i < CELLS; i++) {
+      if (b[i] === p) s += WEIGHTS[i];
+      else if (b[i] === o) s -= WEIGHTS[i];
+    }
+    return s;
+  }
+
+  // ارزیابی حریف سخت: وزن خانه‌ها، به‌علاوه‌ی آزادی حرکت و گوشه‌ها. وقتی گوشه
+  // گرفته شد منفی بودن خانه‌های کنارش برداشته می‌شود؛ وگرنه حریف از پر کردن
+  // لبه‌ای که پشتش گوشه‌ی خودش است هم می‌ترسید.
+  function evaluate(b, p) {
+    var o = 3 - p;
+    var s = posScore(b, p);
+    for (var k = 0; k < 4; k++) {
+      var c = CORNERS[k];
+      if (b[c] === p) s += 30; else if (b[c] === o) s -= 30;
+      if (b[c] !== 0) {
+        var nb = NEAR[c];
+        for (var j = 0; j < 3; j++) {
+          if (b[nb[j]] === p) s -= WEIGHTS[nb[j]];
+          else if (b[nb[j]] === o) s += WEIGHTS[nb[j]];
+        }
+      }
+    }
+    s += 6 * (legalMoves(b, p).length - legalMoves(b, o).length);
+    return s;
+  }
+
+  // خانه‌های پرارزش اول بررسی شوند تا هرس آلفا-بتا زودتر ببرد
+  var ORDER = (function () {
+    var idx = [];
+    for (var i = 0; i < CELLS; i++) idx.push(i);
+    return idx.sort(function (a, c) { return WEIGHTS[c] - WEIGHTS[a] || a - c; });
+  })();
+
+  function orderedMoves(b, p) {
+    var out = [];
+    for (var k = 0; k < CELLS; k++) if (canPlay(b, ORDER[k], p)) out.push(ORDER[k]);
+    return out;
+  }
+
+  function finalScore(b, p) {
+    var n = count(b);
+    return (n[p] - n[3 - p]) * 1000;
+  }
+
+  // نگامکس با هرس آلفا-بتا، با گذاشتن و برداشتن درجا تا آرایه کپی نشود
+  function negamax(b, p, depth, alpha, beta, exact) {
+    var moves = orderedMoves(b, p);
+    if (!moves.length) {
+      if (!legalMoves(b, 3 - p).length) return finalScore(b, p);
+      return -negamax(b, 3 - p, depth, -beta, -alpha, exact);
+    }
+    if (depth <= 0) return exact ? finalScore(b, p) : evaluate(b, p);
+    var best = -Infinity;
+    for (var m = 0; m < moves.length; m++) {
+      var i = moves[m];
+      var f = flipsFor(b, i, p);
+      b[i] = p;
+      for (var k = 0; k < f.length; k++) b[f[k]] = p;
+      var v = -negamax(b, 3 - p, depth - 1, -beta, -alpha, exact);
+      b[i] = 0;
+      for (var k2 = 0; k2 < f.length; k2++) b[f[k2]] = 3 - p;
+      if (v > best) best = v;
+      if (best > alpha) alpha = best;
+      if (alpha >= beta) break;
+    }
+    return best;
+  }
+
+  var HARD_DEPTH = 5, EXACT_EMPTIES = 10;
+
+  /* انتخاب حرکت.
+     آسان: تصادفی میان حرکت‌های مجاز.
+     متوسط: یک قدم جلو، بیشترین وزن خانه‌ها بعد از حرکت.
+     سخت: آلفا-بتا پنج لایه با آزادی حرکت و گوشه، و در ده خانه‌ی آخر
+           تا پایان بازی دقیق حساب می‌کند. */
+  function aiMove(board, p, level, rnd) {
+    rnd = rnd || Math.random;
+    var moves = legalMoves(board, p);
+    if (!moves.length) return -1;
+    if (level === 'easy') return moves[Math.floor(rnd() * moves.length)];
+    var b = board.slice();
+    var best = moves[0], bestScore = -Infinity;
+    if (level === 'medium') {
+      for (var m = 0; m < moves.length; m++) {
+        var f = flipsFor(b, moves[m], p);
+        var c = b.slice();
+        c[moves[m]] = p;
+        for (var k = 0; k < f.length; k++) c[f[k]] = p;
+        // تصادف فقط بین حرکت‌های هم‌ارزش تصمیم می‌گیرد
+        var s = posScore(c, p) + rnd() * 0.5;
+        if (s > bestScore) { bestScore = s; best = moves[m]; }
+      }
+      return best;
+    }
+    var empties = count(b)[0];
+    var exact = empties <= EXACT_EMPTIES;
+    var depth = exact ? empties : HARD_DEPTH;
+    var alpha = -Infinity;
+    var ordered = orderedMoves(b, p);
+    for (var j = 0; j < ordered.length; j++) {
+      var i = ordered[j];
+      var fl = flipsFor(b, i, p);
+      b[i] = p;
+      for (var q = 0; q < fl.length; q++) b[fl[q]] = p;
+      // پنجره یک واحد بازتر از بهترین تا حرکت هم‌ارزش هم امتیاز دقیق بگیرد
+      // و تصادف بتواند میانشان انتخاب کند
+      var v = -negamax(b, 3 - p, depth - 1, -Infinity, -(alpha - 1), exact);
+      b[i] = 0;
+      for (var q2 = 0; q2 < fl.length; q2++) b[fl[q2]] = 3 - p;
+      var sv = v + rnd() * 0.5;
+      if (sv > bestScore) { bestScore = sv; best = i; }
+      if (v > alpha) alpha = v;
+    }
+    return best;
+  }
+
+  // گشایش روزانه: چند حرکت تصادفی ولی قطعی از روی بذر روز، تا همه از یک
+  // وضعیت یکسان، و هر روز تازه، مقابل حریف سخت شروع کنند.
+  function dailyOpening(rnd, plies) {
+    var S = newState('ai');
+    for (var k = 0; k < plies; k++) {
+      var moves = legalMoves(S.board, S.turn);
+      if (!moves.length) break;
+      applyMove(S, moves[Math.floor(rnd() * moves.length)]);
+    }
+    return { board: S.board, turn: S.turn, moves: S.history.map(function (h) { return h.i; }) };
+  }
+
+  var api = {
+    N: N, CORNERS: CORNERS,
+    initial: initial, flipsFor: flipsFor, legalMoves: legalMoves, count: count, isOver: isOver,
+    newState: newState, applyMove: applyMove, takeBack: takeBack,
+    evaluate: evaluate, aiMove: aiMove, dailyOpening: dailyOpening
+  };
+  if (typeof self !== 'undefined') self.ReversiEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = ReversiEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = ReversiEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'reversi',
+    name: { fa: 'ریورسی', en: 'Reversi', zh: '黑白棋' },
+    accent: '#2F8F6B',
+    // آهنگ آرام سودوکو؛ ریورسی هم بازی فکر کردن است، نه سرعت
+    mood: 'sudoku',
+    strings: {
+      fa: {
+        twoPlayers: 'دو نفره', vsAi: 'با حریف',
+        you: 'تو', rival: 'حریف', player2: 'بازیکن دو', renameP2: 'نام بازیکن دو',
+        draw: 'مساوی', playerWon: '{n} برد', move: 'جابه‌جایی', discs: 'مهره',
+        newMatch: 'دست تازه', undoMove: 'برگرداندن حرکت',
+        dailyReversi: 'ریورسی روزانه', vsHard: 'مقابل حریف سخت',
+        passNote: '{n} حرکتی ندارد و نوبتش رد شد',
+        boardLabel: 'تخته‌ی ریورسی',
+        tutTitle1: 'محاصره کن', tutText1: 'مهره‌ات را جایی بگذار که مهره‌های حریف در یک خط، بین آن و یکی از مهره‌های خودت گیر بیفتند. همه‌شان رنگ تو می‌شوند.',
+        tutTitle2: 'خانه‌های مجاز', tutText2: 'فقط جایی می‌شود گذاشت که دست‌کم یک مهره برگردد؛ نقطه‌های کوچک همین خانه‌ها را نشان می‌دهند. اگر حرکتی نداری، نوبتت رد می‌شود.',
+        tutTitle3: 'گوشه‌ها', tutText3: 'مهره‌ی گوشه هیچ‌وقت برنمی‌گردد. وقتی هیچ‌کدام حرکتی نداشته باشید بازی تمام است و مهره‌ی بیشتر می‌برد.'
+      },
+      en: {
+        twoPlayers: 'Two players', vsAi: 'Versus AI',
+        you: 'You', rival: 'Rival', player2: 'Player 2', renameP2: 'Player 2 name',
+        draw: 'Draw', playerWon: '{n} wins', move: 'Move', discs: 'Discs',
+        newMatch: 'New match', undoMove: 'Undo move',
+        dailyReversi: 'Daily reversi', vsHard: 'against the hard AI',
+        passNote: '{n} has no move and passes',
+        boardLabel: 'Reversi board',
+        tutTitle1: 'Outflank', tutText1: 'Place a disc so that a line of your rival\'s discs is trapped between it and one of yours. They all turn your colour.',
+        tutTitle2: 'Legal moves', tutText2: 'You may only play where at least one disc flips; the small dots show those squares. With no move, you pass.',
+        tutTitle3: 'Corners', tutText3: 'A corner disc can never flip. When neither of you can move the game ends, and more discs wins.'
+      },
+      zh: {
+        twoPlayers: '双人', vsAi: '对战电脑',
+        you: '你', rival: '对手', player2: '玩家二', renameP2: '玩家二的名字',
+        draw: '平局', playerWon: '{n} 获胜', move: '移动', discs: '棋子',
+        newMatch: '新一局', undoMove: '撤销一步',
+        dailyReversi: '每日黑白棋', vsHard: '对战困难电脑',
+        passNote: '{n} 无处可下，跳过一回合',
+        boardLabel: '黑白棋棋盘',
+        tutTitle1: '夹住对手', tutText1: '落子时让对手的一排棋子夹在新子和你已有的棋子之间，它们都会变成你的颜色。',
+        tutTitle2: '可落子处', tutText2: '只能下在至少能翻转一枚棋子的位置，小圆点标出了这些格子。无处可下时跳过一回合。',
+        tutTitle3: '角落', tutText3: '角上的棋子永远不会被翻转。双方都无处可下时对局结束，棋子多者获胜。'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', { mode: 'ai', level: 'medium', p2name: '' });
+
+  // روزانه بعد از چهار حرکت گشایش به بازیکن می‌رسد؛ عدد زوج تا نوبت همیشه با سیاه باشد
+  var DAILY_PLIES = 4;
+  var FLIP_MS = 300;
+
+  var S = null, aiTimer = null, anim = null, rafOn = false;
+  var kbOn = false, cur = { r: 2, c: 3 };
+
+  var cv = document.createElement('canvas');
+  cv.className = 'rv-canvas';
+  cv.setAttribute('role', 'img');
+  cv.setAttribute('aria-label', C.t('boardLabel'));
+  var boardBox = el('div', { class: 'rv-boardbox' }, [cv]);
+  var top = el('div', { class: 'rv-top' });
+  var playersRow = el('div', { class: 'rv-players' });
+  var wrap = el('div', { class: 'rv-wrap' }, [top, playersRow, boardBox]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ ساخت */
+
+  function newGame(mode, level, daily) {
+    stopAi();
+    anim = null;
+    var st = E.newState(mode);
+    S = {
+      mode: mode, level: level, daily: daily || null,
+      board: st.board, turn: st.turn, history: [],
+      done: false, startedAt: Date.now(), last: -1
+    };
+    if (daily) {
+      var op = E.dailyOpening(C.daily('reversi', daily).rng, DAILY_PLIES);
+      S.board = op.board;
+      S.turn = op.turn;
+      S.last = op.moves.length ? op.moves[op.moves.length - 1] : -1;
+    }
+    render();
+    save();
+    maybeAi();
+  }
+
+  /* ------------------------------------------------------------ رسم */
+
+  function colors() {
+    var cs = getComputedStyle(document.documentElement);
+    var v = function (n, f) { return cs.getPropertyValue(n).trim() || f; };
+    return {
+      felt: v('--rv-felt', '#2F8F6B'), grid: v('--rv-grid', 'rgba(0,0,0,.28)'),
+      black: v('--rv-black', '#1F2421'), white: v('--rv-white', '#F7F4EC'),
+      mark: v('--c-gold', '#D9A441')
+    };
+  }
+
+  function discAt(g, cx, cy, r, who, sx, col) {
+    g.save();
+    g.translate(cx, cy);
+    g.scale(Math.max(0.05, sx), 1);
+    g.beginPath(); g.arc(0, r * 0.09, r, 0, Math.PI * 2);
+    g.fillStyle = 'rgba(0,0,0,.28)'; g.fill();
+    g.beginPath(); g.arc(0, 0, r, 0, Math.PI * 2);
+    g.fillStyle = who === 1 ? col.black : col.white; g.fill();
+    g.lineWidth = Math.max(1, r * 0.07);
+    g.strokeStyle = 'rgba(0,0,0,.35)'; g.stroke();
+    g.restore();
+  }
+
+  // تخته را هم صفحه می‌کشد هم کارت نتیجه، پس فقط به آرگومان‌هایش نگاه می‌کند
+  // o: { board, last, legal, legalWho, anim, now, cursor }
+  function paintBoard(g, W, o, col) {
+    var pad = Math.round(W * 0.025), cell = (W - pad * 2) / 8;
+    g.fillStyle = col.felt;
+    C.rrect(g, 0, 0, W, W, Math.round(W * 0.035));
+    g.fill();
+    g.strokeStyle = col.grid; g.lineWidth = Math.max(1, W / 360);
+    g.beginPath();
+    for (var k = 0; k <= 8; k++) {
+      var p = pad + k * cell;
+      g.moveTo(pad, p); g.lineTo(W - pad, p);
+      g.moveTo(p, pad); g.lineTo(p, W - pad);
+    }
+    g.stroke();
+    g.fillStyle = col.grid;
+    [[2, 2], [2, 6], [6, 2], [6, 6]].forEach(function (q) {
+      g.beginPath(); g.arc(pad + q[1] * cell, pad + q[0] * cell, Math.max(2, cell * 0.06), 0, Math.PI * 2); g.fill();
+    });
+
+    var R = cell * 0.4;
+    var a = o.anim, t = 1;
+    if (a) t = Math.max(0, Math.min(1, ((o.now || 0) - a.t0) / FLIP_MS));
+    var flipping = {};
+    if (a && t < 1) for (var f = 0; f < a.flips.length; f++) flipping[a.flips[f]] = 1;
+
+    for (var i = 0; i < 64; i++) {
+      var who = o.board[i];
+      if (!who) continue;
+      var cx = pad + (i % 8 + 0.5) * cell, cy = pad + (((i / 8) | 0) + 0.5) * cell;
+      if (flipping[i]) {
+        // نیم اول رنگ قبلی باریک می‌شود، نیم دوم رنگ تازه باز می‌شود
+        discAt(g, cx, cy, R, t < 0.5 ? 3 - who : who, Math.abs(Math.cos(Math.PI * t)), col);
+      } else if (a && t < 1 && i === a.i) {
+        discAt(g, cx, cy, R * (0.55 + 0.45 * Math.min(1, t * 2)), who, 1, col);
+      } else {
+        discAt(g, cx, cy, R, who, 1, col);
+      }
+    }
+    if (o.last >= 0 && o.board[o.last]) {
+      g.fillStyle = col.mark;
+      g.beginPath();
+      g.arc(pad + (o.last % 8 + 0.5) * cell, pad + (((o.last / 8) | 0) + 0.5) * cell, Math.max(2.5, cell * 0.08), 0, Math.PI * 2);
+      g.fill();
+    }
+    if (o.legal && o.legal.length) {
+      g.globalAlpha = 0.55;
+      g.fillStyle = o.legalWho === 1 ? col.black : col.white;
+      for (var m = 0; m < o.legal.length; m++) {
+        var j = o.legal[m];
+        g.beginPath();
+        g.arc(pad + (j % 8 + 0.5) * cell, pad + (((j / 8) | 0) + 0.5) * cell, Math.max(3, cell * 0.12), 0, Math.PI * 2);
+        g.fill();
+      }
+      g.globalAlpha = 1;
+    }
+    if (o.cursor) {
+      g.strokeStyle = col.mark; g.lineWidth = Math.max(2, cell * 0.07);
+      C.rrect(g, pad + o.cursor.c * cell + 2, pad + o.cursor.r * cell + 2, cell - 4, cell - 4, cell * 0.14);
+      g.stroke();
+    }
+  }
+
+  function draw(now) {
+    if (!S) return;
+    var dpr = window.devicePixelRatio || 1;
+    var W = boardBox.clientWidth || 320;
+    var px = Math.round(W * dpr);
+    if (cv.width !== px) { cv.width = px; cv.height = px; }
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, W);
+    var showLegal = !S.done && !busy();
+    paintBoard(g, W, {
+      board: S.board, last: S.last, anim: anim, now: now || performance.now(),
+      legal: showLegal ? E.legalMoves(S.board, S.turn) : null, legalWho: S.turn,
+      cursor: kbOn && !S.done ? cur : null
+    }, colors());
+  }
+
+  function startAnim(i, flips) {
+    if (C.ui.reduceMotion()) { anim = null; draw(); return; }
+    anim = { i: i, flips: flips, t0: performance.now() };
+    if (!rafOn) { rafOn = true; requestAnimationFrame(tick); }
+  }
+  function tick(now) {
+    if (anim && now - anim.t0 < FLIP_MS) { draw(now); requestAnimationFrame(tick); return; }
+    anim = null; rafOn = false; draw();
+  }
+
+  /* ------------------------------------------------- تخته روی کارت نتیجه */
+  function cardPaint() {
+    var board = S.board.slice(), last = S.last;
+    return function (g, W, H) {
+      var side = Math.min(W, H);
+      g.translate((W - side) / 2, (H - side) / 2);
+      paintBoard(g, side, { board: board, last: last }, colors());
+    };
+  }
+
+  function busy() { return S.mode === 'ai' && S.turn === 2 && !S.done; }
+
+  function render() {
+    top.innerHTML = '';
+    if (S.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' },
+        [C.icon('calendar', 14), el('span', { text: C.t('dailyReversi') + ' — ' + C.num(S.daily) })]));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('vsHard') }));
+    } else {
+      // هر دو انتخابگر بازی را از نو می‌سازند، پس اگر دستی در جریان است اول تأیید
+      var guard = function (same, go) {
+        if (same) return;
+        if (S.history.length && !S.done) {
+          C.ui.confirm({ title: C.t('newMatch'), body: C.t('resetWarn'), onOk: go, onCancel: function () { render(); } });
+          render();
+          return;
+        }
+        go();
+      };
+      top.appendChild(C.ui.segmented([
+        { value: 'ai', label: C.t('vsAi') }, { value: '2p', label: C.t('twoPlayers') }
+      ], S.mode, function (v) {
+        guard(v === S.mode, function () {
+          prefs.mode = v; ctx.store.set('prefs', prefs);
+          newGame(v, S.level);
+        });
+      }));
+      if (S.mode === 'ai') {
+        top.appendChild(C.ui.segmented([
+          { value: 'easy', label: C.t('easy') }, { value: 'medium', label: C.t('medium') }, { value: 'hard', label: C.t('hard') }
+        ], S.level, function (v) {
+          guard(v === S.level, function () {
+            prefs.level = v; ctx.store.set('prefs', prefs);
+            newGame(S.mode, v);
+          });
+        }));
+      }
+    }
+    drawPlayers();
+    draw();
+  }
+
+  function pname(i) {
+    if (i === 1) return C.state.profile.name || C.t('you');
+    if (S.mode === 'ai') return C.t('rival') + ' · ' + C.t(S.level);
+    return prefs.p2name || C.t('player2');
+  }
+
+  function drawPlayers() {
+    playersRow.innerHTML = '';
+    var n = E.count(S.board);
+    for (var i = 1; i <= 2; i++) {
+      (function (p) {
+        var box = el('div', {
+          class: 'rv-player' + (S.turn === p && !S.done ? ' rv-player--on' : '')
+        }, [
+          el('div', { class: 'rv-player__disc', style: { background: p === 1 ? 'var(--rv-black)' : 'var(--rv-white)' } }),
+          el('div', { class: 'rv-player__name', text: pname(p) }),
+          el('div', { class: 'rv-player__score', 'aria-label': C.t('discs'), text: C.num(n[p]) })
+        ]);
+        if (p === 2 && S.mode === '2p' && !S.daily) {
+          box.classList.add('ch-tap');
+          box.addEventListener('click', renameP2);
+        }
+        if (p === 2 && busy()) box.classList.add('rv-thinking');
+        playersRow.appendChild(box);
+      })(i);
+    }
+  }
+
+  /* ----------------------------------------------------------- حرکت */
+
+  function cellAt(clientX, clientY) {
+    var r = cv.getBoundingClientRect();
+    var W = r.width, pad = Math.round(W * 0.025), cell = (W - pad * 2) / 8;
+    var c = Math.floor((clientX - r.left - pad) / cell), row = Math.floor((clientY - r.top - pad) / cell);
+    if (c < 0 || c > 7 || row < 0 || row > 7) return -1;
+    return row * 8 + c;
+  }
+
+  cv.addEventListener('click', function (e) {
+    var i = cellAt(e.clientX, e.clientY);
+    if (i < 0) return;
+    if (kbOn) { kbOn = false; }
+    human(i);
+  });
+
+  function human(i) {
+    if (!S || S.done || busy() || !(i >= 0 && i < 64)) return;
+    if (!E.flipsFor(S.board, i, S.turn).length) {
+      // روی خانه‌ی خالی ولی غیرمجاز فقط لرزش کوتاه؛ روی مهره هیچ
+      if (!S.board[i]) C.haptic('error');
+      draw();
+      return;
+    }
+    doMove(i, true);
+  }
+
+  function doMove(i, byHuman) {
+    var res = E.applyMove(S, i);
+    if (!res) return;
+    S.last = i;
+    startAnim(i, res.flips);
+    C.audio.sfx(res.flips.length >= 5 ? 'chain' : 'place');
+    if (byHuman) C.haptic('tap');
+    drawPlayers();
+    draw();
+    save();
+    if (res.over) { finish(); return; }
+    if (res.passed) {
+      C.ui.toast({ icon: 'info', title: C.t('passNote', { n: pname(res.passed) }), ms: 2200 });
+    }
+    maybeAi();
+  }
+
+  function maybeAi() {
+    stopAi();
+    if (!S || S.done || S.mode !== 'ai' || S.turn !== 2) return;
+    drawPlayers();
+    draw();
+    aiTimer = setTimeout(function () {
+      aiTimer = null;
+      if (!S || S.done || S.turn !== 2) return;
+      var rnd = S.daily ? C.daily('reversi', S.daily + '|' + S.history.length).rng : Math.random;
+      var m = E.aiMove(S.board, 2, S.level, rnd);
+      if (m < 0) { if (E.isOver(S.board)) finish(); return; }
+      doMove(m, false);
+    }, 520);
+  }
+  function stopAi() { if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; } }
+
+  function undo() {
+    if (!S || S.done) return;
+    if (!S.history.length) { C.feedback('bad'); return; }
+    stopAi();
+    E.takeBack(S);
+    anim = null;
+    S.last = S.history.length ? S.history[S.history.length - 1].i : -1;
+    C.feedback('tap');
+    drawPlayers();
+    draw();
+    save();
+    // اگر تاریخچه ته کشید و نوبت روی حریف ماند، بدون این بازی قفل می‌شد
+    maybeAi();
+  }
+
+  function finish() {
+    S.done = true;
+    S.elapsed = Date.now() - S.startedAt;
+    stopAi();
+    drawPlayers();
+    draw();
+    var n = E.count(S.board);
+    var s1 = n[1], s2 = n[2];
+    var won = s1 > s2;
+    var tie = s1 === s2;
+    var margin = s1 - s2;
+
+    // همان بازه‌ی پاداش نقطه‌بازی؛ در دونفره سطح حریف معنا ندارد
+    var base = S.mode === 'ai' ? ({ easy: 5, medium: 10, hard: 18 }[S.level] || 10) : 8;
+    var coins = Math.max(2, Math.round(won ? base : base * 0.35)) + (S.daily ? 8 : 0);
+    var points = Math.max(3, Math.round(won ? base * 4 : base * 1.2)) + (S.daily ? 25 : 0);
+
+    if (S.mode === 'ai' && won) {
+      C.achievements.unlock('rv-win');
+      if (S.level === 'hard') C.achievements.unlock('rv-hard');
+      if (E.CORNERS.every(function (c) { return S.board[c] === 1; })) C.achievements.unlock('rv-corners');
+    }
+    if (won) C.stats.best('reversi', 'margin', margin, false);
+    if (S.daily) {
+      var firstDaily = C.stats.daily('reversi', S.daily, {
+        label: C.num(s1) + ' - ' + C.num(s2), win: won, diff: margin
+      });
+      if (!firstDaily) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+
+    ctx.finish({
+      won: won,
+      title: tie ? C.t('draw')
+        : (S.mode === '2p' ? C.t('playerWon', { n: pname(s1 > s2 ? 1 : 2) })
+          : (won ? C.t('won') : C.t('lost'))),
+      timeMs: S.elapsed, coins: coins, points: points,
+      lines: [
+        { label: pname(1), value: C.num(s1) },
+        { label: pname(2), value: C.num(s2) }
+      ],
+      shareText: 'چوگان · ریورسی' +
+        (S.daily ? ('\nروزانه ' + S.daily) : '') +
+        '\n' + C.num(s1) + ' - ' + C.num(s2),
+      paint: cardPaint(),
+      onAgain: S.daily ? null : function () { newGame(S.mode, S.level); }
+    });
+  }
+
+  /* --------------------------------------------------------- ذخیره */
+
+  ctx.autosave(function () {
+    if (!S || S.done || !S.history.length) return { inProgress: false };
+    return {
+      s: {
+        mode: S.mode, level: S.level, daily: S.daily,
+        board: S.board, turn: S.turn, history: S.history, last: S.last,
+        elapsed: Date.now() - S.startedAt
+      },
+      prefs: prefs
+    };
+  });
+  function save() { ctx.save(); }
+
+  function restore(v) {
+    S = {
+      mode: v.mode, level: v.level, daily: v.daily || null,
+      board: v.board, turn: v.turn, history: v.history, last: typeof v.last === 'number' ? v.last : -1,
+      done: false, startedAt: Date.now() - (v.elapsed || 0)
+    };
+    render();
+    // اگر صفحه درست بعد از حرکت آخر بسته شده بود، دست تمام‌شده باید نتیجه بگیرد نه قفل بماند
+    if (E.isOver(S.board)) finish(); else maybeAi();
+  }
+  function validSave(sv) {
+    return !!(sv && sv.s && Array.isArray(sv.s.board) && sv.s.board.length === 64 &&
+      Array.isArray(sv.s.history) && sv.s.history.length && (sv.s.turn === 1 || sv.s.turn === 2));
+  }
+
+  function askNew() {
+    var dd = S ? S.daily : null;
+    function go() {
+      // داخل روزانه باید همان دست روزانه دوباره ساخته شود، نه یک مسابقه‌ی عادی
+      if (dd) newGame('ai', 'hard', dd);
+      else newGame(S ? S.mode : prefs.mode, S ? S.level : prefs.level);
+    }
+    if (!S || S.done || !S.history.length) { go(); return; }
+    C.ui.confirm({ title: C.t('newMatch'), body: C.t('resetWarn'), onOk: go });
+  }
+
+  function renameP2() {
+    var input = el('input', {
+      type: 'text', value: prefs.p2name, maxlength: '16', placeholder: C.t('player2'),
+      style: { font: 'inherit', width: '100%', padding: '10px 14px', 'border-radius': 'var(--r-md)',
+        border: '1px solid var(--c-line)', background: 'var(--c-surface-2)', color: 'var(--c-text)' }
+    });
+    C.ui.modal({
+      title: C.t('renameP2'), body: [input],
+      actions: [{ label: C.t('cancel') }, { label: C.t('done'), kind: 'primary', onClick: function () {
+        prefs.p2name = input.value.trim().slice(0, 16);
+        ctx.store.set('prefs', prefs);
+        drawPlayers();
+      } }]
+    });
+  }
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('tutText1') }),
+        el('p', { class: 'ch-dim', text: C.t('tutText2') }),
+        el('p', { class: 'ch-dim', text: C.t('tutText3') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          kb('← ↑ → ↓', C.t('move')),
+          kb('Space / Enter', C.t('play')),
+          kb('U', C.t('undoMove'))
+        ])
+      ],
+      actions: [
+        { label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('done'), kind: 'primary' }
+      ]
+    });
+  }
+  function kb(k, what) {
+    return el('div', { class: 'ch-item' }, [
+      el('div', { class: 'ch-item__label', text: what }),
+      el('span', { class: 'ch-badge', text: k })
+    ]);
+  }
+
+  // تصویرهای آموزش روی همان نمد و همان مهره‌های تخته
+  function tutCell(x, y, who) {
+    return '<circle cx="' + x + '" cy="' + y + '" r="15" fill="var(--rv-' + (who === 1 ? 'black' : 'white') +
+      ')" stroke="rgba(0,0,0,.35)" stroke-width="2"/>';
+  }
+  function tutRow(cells) {
+    var s = '<svg viewBox="0 0 220 60" width="100%"><rect x="5" y="5" width="210" height="50" rx="8" fill="var(--rv-felt)"/>';
+    for (var k = 0; k < cells.length; k++) {
+      var x = 30 + k * 40;
+      if (cells[k] === 1 || cells[k] === 2) s += tutCell(x, 30, cells[k]);
+      else if (cells[k] === 3) s += '<circle cx="' + x + '" cy="30" r="5" fill="var(--rv-black)" opacity=".5"/>';
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tutRow([1, 2, 2, 2, 1, 0]) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tutRow([3, 2, 2, 1, 0, 3]) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'),
+      art: '<svg viewBox="0 0 220 110" width="100%"><rect x="55" y="5" width="110" height="100" rx="10" fill="var(--rv-felt)"/>' +
+        tutCell(77, 27, 1) + tutCell(143, 27, 1) + tutCell(77, 83, 1) + tutCell(143, 83, 2) +
+        '<circle cx="77" cy="27" r="21" fill="none" stroke="var(--c-gold)" stroke-width="3"/>' +
+        '<circle cx="143" cy="27" r="21" fill="none" stroke="var(--c-gold)" stroke-width="3"/>' +
+        '<circle cx="77" cy="83" r="21" fill="none" stroke="var(--c-gold)" stroke-width="3"/></svg>' }
+  ];
+
+  /* -------------------------------------------------------- کیبورد */
+
+  window.addEventListener('keydown', function (e) {
+    if (!S || S.done || busy()) return;
+    if (document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
+    if (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
+    var k = e.key;
+    if (k === 'u' || k === 'U') { undo(); e.preventDefault(); return; }
+    // تخته‌ی بوم در راست‌چین آینه نمی‌شود، پس جهت‌نماها هم برعکس نمی‌شوند
+    var d = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[k];
+    if (d) {
+      // اولین فشار فقط نشانگر را نشان می‌دهد تا جای شروعش معلوم باشد
+      if (kbOn) { cur.r = C.clamp(cur.r + d[0], 0, 7); cur.c = C.clamp(cur.c + d[1], 0, 7); }
+      kbOn = true;
+      draw();
+      e.preventDefault();
+      return;
+    }
+    if (k === ' ' || k === 'Enter') {
+      kbOn = true;
+      human(cur.r * 8 + cur.c);
+      e.preventDefault();
+    }
+  });
+
+  C.onPause(function () { stopAi(); });
+  C.onResume(function () { if (S && !S.done) maybeAi(); });
+
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(boardBox);
+  else window.addEventListener('resize', function () { draw(); });
+  // تم خودکار وقتی گوشی شب و روز می‌کند رنگ نمد را عوض می‌کند و بوم خودش خبر ندارد
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    if (mq.addEventListener) mq.addEventListener('change', function () { draw(); });
+  }
+
+  /* ---------------------------------------------------------- شروع */
+
+  var saved = ctx.loadSave();
+  if (dailyDate) {
+    // روزانه خانه‌ی ذخیره‌ی جدای خودش را دارد، پس دست نیمه‌کاره‌ی همان روز ادامه می‌یابد
+    if (validSave(saved)) restore(saved.s);
+    else newGame('ai', 'hard', dailyDate);
+    if (C.stats.dailyDone('reversi', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).reversi;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec.label });
+    }
+    ctx.tutorialIfNew(TUT);
+  } else if (validSave(saved)) {
+    if (saved.prefs) prefs = saved.prefs;
+    restore(saved.s);
+  } else {
+    newGame(prefs.mode || 'ai', prefs.level || 'medium');
+    ctx.tutorialIfNew(TUT);
+  }
+})();
+</script>
+</body>
+</html>
