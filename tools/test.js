@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 845;
+const MIN_CHECKS = 911;
 
 function ok(cond, msg) {
   checks++;
@@ -1048,6 +1048,160 @@ function testPeg() {
   ok(!/E\.solve\(/.test(pgHtml.split('/* ==== ENGINE END ==== */')[1] || 'E.solve('), 'صفحه هنگام بار شدن چیزی حل نمی‌کند');
 }
 
+/* ----------------------------------------------------------- ریورسی */
+function testReversi() {
+  head('ریورسی');
+  const E = loadEngine('reversi', 'ReversiEngineFactory');
+  const at = (r, c) => r * 8 + c;
+  const empty = () => new Array(64).fill(0);
+  const sorted = (a) => a.slice().sort((x, y) => x - y).join(',');
+
+  // شروع استاندارد: d4 و e5 سفید، e4 و d5 سیاه، و سیاه شروع می‌کند
+  const init = E.initial();
+  ok(init[at(3, 3)] === 2 && init[at(4, 4)] === 2 && init[at(3, 4)] === 1 && init[at(4, 3)] === 1 &&
+    init.filter((x) => x).length === 4, 'شروع استاندارد چهار مهره‌ی وسط');
+  ok(E.newState('2p').turn === 1, 'سیاه شروع می‌کند');
+  // چهار حرکت مجاز اول سیاه در هر کتاب قواعد: d3، c4، f5، e6
+  ok(sorted(E.legalMoves(init, 1)) === sorted([at(2, 3), at(3, 2), at(4, 5), at(5, 4)]), 'حرکت‌های مجاز اول سیاه d3 c4 f5 e6 است');
+
+  // هر هشت جهت جدا، با فاصله‌ی دو و سه مهره
+  const dirs = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+  ok(dirs.length === 8, 'فهرست جهت‌ها هشت‌تایی است');
+  for (const [dr, dc] of dirs) {
+    for (const run of [1, 2]) {
+      const b = empty();
+      const want = [];
+      for (let k = 1; k <= run; k++) { b[at(3 + dr * k, 3 + dc * k)] = 2; want.push(at(3 + dr * k, 3 + dc * k)); }
+      b[at(3 + dr * (run + 1), 3 + dc * (run + 1))] = 1;
+      ok(sorted(E.flipsFor(b, at(3, 3), 1)) === sorted(want), 'جهت ' + dr + ',' + dc + ' با ' + run + ' مهره درست برمی‌گردد');
+    }
+  }
+  // هر هشت جهت با هم
+  const star = empty();
+  const ring = [];
+  for (const [dr, dc] of dirs) { star[at(3 + dr, 3 + dc)] = 2; ring.push(at(3 + dr, 3 + dc)); star[at(3 + 2 * dr, 3 + 2 * dc)] = 1; }
+  ok(sorted(E.flipsFor(star, at(3, 3), 1)) === sorted(ring), 'یک حرکت هر هشت جهت را با هم برمی‌گرداند');
+  const sStar = { mode: '2p', board: star.slice(), turn: 1, history: [] };
+  const rStar = E.applyMove(sStar, at(3, 3));
+  ok(rStar && rStar.flips.length === 8 && ring.every((i) => sStar.board[i] === 1), 'applyMove هر هشت مهره را سیاه می‌کند');
+
+  // بدون مهره‌ی خودی در انتهای خط، چیزی برنمی‌گردد و حرکت غیرمجاز است
+  const open = empty();
+  open[at(0, 1)] = 2; open[at(0, 2)] = 2; open[at(5, 5)] = 1;
+  ok(E.flipsFor(open, at(0, 0), 1).length === 0, 'خط باز (بدون مهره‌ی خودی در انتها) برنمی‌گردد');
+  const sOpen = { mode: '2p', board: open.slice(), turn: 1, history: [] };
+  ok(E.applyMove(sOpen, at(0, 0)) === null && sOpen.board.join() === open.join() && sOpen.history.length === 0,
+    'حرکت بدون برگرداندن رد می‌شود و چیزی عوض نمی‌شود');
+  ok(E.legalMoves(open, 1).indexOf(at(0, 0)) < 0, 'خانه‌ی بدون برگرداندن در فهرست حرکت‌های مجاز نیست');
+  ok(E.applyMove({ mode: '2p', board: init.slice(), turn: 1, history: [] }, at(3, 3)) === null, 'روی خانه‌ی پر نمی‌شود گذاشت');
+  // خط نباید از لبه‌ی سطر به سطر بعد بپیچد: خانه‌ی ۸ همسایه‌ی ۷ نیست
+  const wrapB = empty();
+  wrapB[at(1, 0)] = 2; wrapB[at(1, 1)] = 1;
+  ok(E.flipsFor(wrapB, at(0, 7), 1).length === 0, 'خط از لبه‌ی تخته به سطر بعد نمی‌پیچد');
+
+  // رد شدن نوبت و پایان بازی
+  const pass = empty();
+  pass[at(0, 0)] = 1; pass[at(0, 1)] = 2;
+  pass[at(7, 0)] = 1; pass[at(7, 1)] = 2; pass[at(7, 2)] = 2;
+  const sPass = { mode: '2p', board: pass, turn: 1, history: [] };
+  const r1 = E.applyMove(sPass, at(0, 2));
+  ok(r1 && r1.passed === 2 && !r1.over && sPass.turn === 1, 'سفید حرکتی ندارد: نوبتش رد می‌شود و سیاه دوباره بازی می‌کند');
+  ok(E.legalMoves(sPass.board, 2).length === 0, 'در همان وضعیت سفید واقعاً حرکتی ندارد');
+  const r2 = E.applyMove(sPass, at(7, 3));
+  ok(r2 && r2.over && E.isOver(sPass.board), 'وقتی هیچ‌کدام حرکتی ندارند بازی تمام است');
+  ok(E.count(sPass.board)[1] === 7 && E.count(sPass.board)[2] === 0, 'شمار پایانی ۷ به ۰');
+  ok(!E.isOver(init), 'شروع بازی تمام‌شده نیست');
+
+  // برگرداندن: دونفره یک حرکت، با حریف تا نوبت قبلی بازیکن
+  const snap = (S) => JSON.stringify([S.board, S.turn, S.history]);
+  const two = E.newState('2p');
+  const start = snap(two);
+  E.applyMove(two, at(2, 3));
+  const afterOne = snap(two);
+  E.applyMove(two, at(2, 2));
+  ok(two.turn === 1, 'دونفره: بعد از دو حرکت نوبت سیاه است');
+  ok(E.takeBack(two) === 1 && snap(two) === afterOne, 'دونفره: برگرداندن فقط یک حرکت برمی‌دارد');
+  ok(E.takeBack(two) === 1 && snap(two) === start, 'دونفره: برگرداندن دوم به شروع می‌رسد');
+  ok(E.takeBack(two) === 0 && snap(two) === start, 'دونفره: در شروع برگرداندن کاری نمی‌کند');
+  const ai = E.newState('ai');
+  E.applyMove(ai, at(2, 3)); E.applyMove(ai, at(2, 2));
+  const humanTurn = snap(ai);
+  E.applyMove(ai, at(3, 2)); E.applyMove(ai, E.legalMoves(ai.board, 2)[0]);
+  ok(ai.turn === 1 && E.takeBack(ai) === 2 && snap(ai) === humanTurn, 'با حریف: برگرداندن تا نوبت قبلی بازیکن عقب می‌رود');
+  // با حریف وقتی حریف رد کرده: فقط حرکت آخر بازیکن برمی‌گردد
+  const aiPass = { mode: 'ai', board: pass.slice(), turn: 1, history: [] };
+  aiPass.board = empty();
+  aiPass.board[at(0, 0)] = 1; aiPass.board[at(0, 1)] = 2;
+  aiPass.board[at(7, 0)] = 1; aiPass.board[at(7, 1)] = 2; aiPass.board[at(7, 2)] = 2;
+  E.applyMove(aiPass, at(0, 2));
+  const beforeSecond = snap(aiPass);
+  E.applyMove(aiPass, at(7, 3));
+  ok(E.takeBack(aiPass) === 1 && snap(aiPass) === beforeSecond, 'با حریف: بعد از رد شدن نوبت حریف فقط حرکت آخر بازیکن برمی‌گردد');
+
+  // بازی‌های بذردار: پایان می‌گیرند، شمار با تخته می‌خواند، سخت از متوسط و متوسط از آسان قوی‌تر
+  function match(a, b, r) {
+    const S = E.newState('2p');
+    let guard = 0, maxMs = 0, countOk = true, legalOk = true;
+    while (!E.isOver(S.board)) {
+      if (guard++ > 70) throw new Error('بازی تمام نشد');
+      const p = S.turn;
+      const before = E.count(S.board);
+      const t0 = Date.now();
+      const m = E.aiMove(S.board, p, p === 1 ? a : b, r);
+      maxMs = Math.max(maxMs, Date.now() - t0);
+      if (E.legalMoves(S.board, p).indexOf(m) < 0) legalOk = false;
+      const res = E.applyMove(S, m);
+      if (!res) { legalOk = false; break; }
+      const n = E.count(S.board);
+      const byHand = [0, 1, 2].map((v) => S.board.filter((x) => x === v).length);
+      if (n.join() !== byHand.join() || n[p] !== before[p] + 1 + res.flips.length ||
+        n[3 - p] !== before[3 - p] - res.flips.length || n[1] + n[2] !== 4 + S.history.length) countOk = false;
+    }
+    const n = E.count(S.board);
+    return { n, maxMs, countOk, legalOk, moves: S.history.length };
+  }
+  let maxMs = 0, allEnd = 0, allCount = true, allLegal = true;
+  const strength = [['hard', 'medium', 10], ['medium', 'easy', 10]];
+  for (const [strong, weak, games] of strength) {
+    let wins = 0;
+    for (let i = 0; i < games; i++) {
+      const r = rng(i * 977 + 5);
+      const m = i % 2 === 0 ? match(strong, weak, r) : match(weak, strong, r);
+      maxMs = Math.max(maxMs, m.maxMs);
+      allEnd++;
+      allCount = allCount && m.countOk;
+      allLegal = allLegal && m.legalOk;
+      const diff = i % 2 === 0 ? m.n[1] - m.n[2] : m.n[2] - m.n[1];
+      if (diff > 0) wins++;
+    }
+    ok(wins >= 7, strong + ' از ' + weak + ' قوی‌تر است (' + wins + '/' + games + ')');
+  }
+  ok(allEnd === 20, 'هر بیست بازی بذردار تمام شد (' + allEnd + ')');
+  ok(allLegal, 'هوش مصنوعی فقط حرکت مجاز می‌دهد');
+  ok(allCount, 'شمار مهره‌ها بعد از هر حرکت با تخته می‌خواند');
+  // سقف مثل نقطه‌بازی؛ روی این لپ‌تاپ بیشینه حدود ۹۰ میلی‌ثانیه است
+  ok(maxMs < 900, 'زمان فکر حریف سخت قابل قبول است (' + maxMs + 'ms)');
+  ok(E.aiMove(sPass.board, 2, 'hard', rng(1)) === -1, 'بدون حرکت مجاز هوش مصنوعی -۱ می‌دهد');
+
+  // روزانه: یک تاریخ، یک گشایش
+  const o1 = E.dailyOpening(rng(20261002), 4), o2 = E.dailyOpening(rng(20261002), 4);
+  ok(o1.moves.length === 4 && o1.turn === 1, 'گشایش روزانه چهار حرکت است و نوبت با بازیکن است');
+  ok(JSON.stringify(o1) === JSON.stringify(o2), 'یک بذر، یک گشایش');
+  ok(o1.board.filter((x) => x).length === 8, 'بعد از گشایش هشت مهره روی تخته است');
+  const variety = new Set();
+  for (let s = 0; s < 12; s++) variety.add(E.dailyOpening(rng(s * 31 + 7), 4).moves.join());
+  ok(variety.size > 1, 'روزهای مختلف گشایش‌های مختلف دارند (' + variety.size + '/12)');
+
+  // صفحه باید از همین تابع‌ها استفاده کند، نه منطق خودش را
+  const rvHtml = fs.readFileSync(path.join(ROOT, 'www/games/reversi/index.html'), 'utf8');
+  ok(/E\.applyMove\(S, i\)/.test(rvHtml), 'صفحه حرکت را با applyMove ثبت می‌کند');
+  ok(/E\.takeBack\(S\)/.test(rvHtml), 'صفحه برگرداندن را با takeBack انجام می‌دهد');
+  ok(/E\.dailyOpening\(C\.daily\('reversi'/.test(rvHtml), 'روزانه گشایش را از بذر C.daily می‌سازد');
+  // «اتللو» نشان تجاری است؛ نام عمومی بازی ریورسی است
+  const gj = fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8');
+  ok(!/othello|اتللو|奥赛罗/i.test(rvHtml + gj), 'نام تجاری اتللو در صفحه و فهرست نیست');
+}
+
 /* ----------------------------------------------------- دفاع از برج */
 function testTd() {
   head('دفاع از برج');
@@ -1799,6 +1953,7 @@ testNonogram();
 testMancala();
 testFreecell();
 testPeg();
+testReversi();
 testTd();
 testVersionStamp();
 testDeployGate();
