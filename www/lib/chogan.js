@@ -852,7 +852,10 @@
     { id: 'br-clean',    icon: 'sparkle', fa: 'یک‌نفس',           en: 'In one go',         dfa: 'پازل پل‌ها را بدون برگرداندن حل کردی', den: 'Solve a bridges puzzle without undo', zh: '一气呵成', dzh: '不撤销解开一道数桥' },
     { id: 'cb-win',      icon: 'lock',    fa: 'رمزگشا',           en: 'Codebreaker',       dfa: 'یک رمز را شکستی',                    den: 'Crack a code', zh: '解码者', dzh: '破解一个密码' },
     { id: 'cb-hard',     icon: 'brain',   fa: 'قفل سخت',          en: 'Hard lock',         dfa: 'رمز سخت را شکستی',                   den: 'Crack a hard code', zh: '硬锁', dzh: '破解一个困难密码' },
-    { id: 'cb-quick',    icon: 'bolt',    fa: 'چهار حدس',         en: 'Four guesses',      dfa: 'رمز معمولی یا سخت را در چهار حدس یا کمتر شکستی', den: 'Crack a normal or hard code in four guesses or fewer', zh: '四次破解', dzh: '四次以内破解普通或困难密码' }
+    { id: 'cb-quick',    icon: 'bolt',    fa: 'چهار حدس',         en: 'Four guesses',      dfa: 'رمز معمولی یا سخت را در چهار حدس یا کمتر شکستی', den: 'Crack a normal or hard code in four guesses or fewer', zh: '四次破解', dzh: '四次以内破解普通或困难密码' },
+    { id: 'bo-first',    icon: 'grid',    fa: 'دیوار اول',        en: 'First wall',        dfa: 'یک مرحله‌ی آجرشکن را تمام کردی',      den: 'Clear a breakout level', zh: '第一面墙', dzh: '通关一关打砖块' },
+    { id: 'bo-flawless', icon: 'shield',  fa: 'بی‌افت',           en: 'Not a ball lost',   dfa: 'یک مرحله را بدون از دست دادن توپ تمام کردی', den: 'Clear a level without losing a ball', zh: '一球不丢', dzh: '一个球都没丢就通关一关' },
+    { id: 'bo-all',      icon: 'trophy',  fa: 'دیوارشکن',         en: 'Wall breaker',      dfa: 'هر دوازده مرحله‌ی آجرشکن را تمام کردی', den: 'Clear all twelve breakout levels', zh: '破墙者', dzh: '通关全部十二关打砖块' }
   ];
 
   var achApi = {
