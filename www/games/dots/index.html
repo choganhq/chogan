@@ -92,6 +92,44 @@ function DotsEngineFactory() {
     return closed;
   }
 
+  // یک حرکت روی وضعیت کامل بازی؛ صفحه و آزمون‌ها همین را صدا می‌زنند تا
+  // برگرداندن دقیقاً عکس همان چیزی باشد که ثبت شده.
+  function applyEdge(bd, S, e) {
+    if (!S.edgeOwner) S.edgeOwner = {};
+    S.history.push({ e: e, turn: S.turn, scores: S.scores.slice(), turnBoxes: S.turnBoxes });
+    S.edgeOwner[e] = S.turn;
+    var got = play(bd, S.edges, S.owner, e, S.turn);
+    if (got > 0) {
+      S.scores[S.turn] += got;
+      S.turnBoxes += got;
+    } else {
+      S.turnBoxes = 0;
+      S.turn = S.turn === 1 ? 2 : 1;
+    }
+    return got;
+  }
+
+  // با حریف کامپیوتری تا نوبت بعدی بازیکن عقب می‌رود. دونفره فقط یک خط،
+  // چون دو نفر روی یک گوشی‌اند و اشتباه یک ضربه است؛ پیش‌تر دونفره اصلاً
+  // برگرداندن نداشت و یک خط اشتباه کل دست را خراب می‌کرد (#69).
+  function takeBack(bd, S) {
+    var n = 0;
+    do {
+      var h = S.history.pop();
+      if (!h) break;
+      S.edges[h.e] = 0;
+      if (S.edgeOwner) delete S.edgeOwner[h.e];
+      S.scores = h.scores;
+      S.turn = h.turn;
+      S.turnBoxes = h.turnBoxes;
+      // مالکیت مربع‌هایی که با این یال بسته شده بودند برداشته شود
+      var bs = bd.edgeBoxes[h.e];
+      for (var i = 0; i < bs.length; i++) if (sides(bd, S.edges, bs[i]) < 4) S.owner[bs[i]] = 0;
+      n++;
+    } while (S.mode === 'ai' && S.turn !== 1 && n < 200);
+    return n;
+  }
+
   function freeBoxes(bd, edges, owner) {
     var out = [];
     for (var b = 0; b < bd.boxes; b++) if (!owner[b] && sides(bd, edges, b) === 3) out.push(b);
@@ -339,7 +377,7 @@ function DotsEngineFactory() {
     makeBoard: makeBoard, sides: sides, legalMoves: legalMoves, play: play,
     freeBoxes: freeBoxes, freeEdgeOf: freeEdgeOf, safeMoves: safeMoves,
     openGroups: openGroups, isLoop: isLoop, captureCascade: captureCascade,
-    aiMove: aiMove, endgame: endgame
+    aiMove: aiMove, endgame: endgame, applyEdge: applyEdge, takeBack: takeBack
   };
   if (typeof self !== 'undefined') self.DotsEngine = api;
   return api;
@@ -367,7 +405,6 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
         thinking: 'فکر می‌کند…', yourTurn: 'نوبت توست', draw: 'مساوی', playerWon: '{n} برد', move: 'جابه‌جایی',
         rotate: 'چرخاندن خط',
         boxes: 'مربع', newMatch: 'دست تازه', undoMove: 'برگرداندن حرکت',
-        undoOnlyAi: 'برگرداندن فقط در بازی با حریف کامپیوتری است',
         dailyDots: 'نقطه‌بازی روزانه', vsHard: 'مقابل حریف سخت',
         tutTitle1: 'خط بکش', tutText1: 'هر نوبت یک خط بین دو نقطه‌ی کنار هم می‌کشی.',
         tutTitle2: 'مربع ببند', tutText2: 'هر کس چهارمین ضلع یک مربع را بکشد، آن مربع مال او می‌شود و دوباره نوبت خودش است.',
@@ -379,7 +416,6 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
         thinking: 'Thinking…', yourTurn: 'Your turn', draw: 'Draw', playerWon: '{n} wins', move: 'Move',
         rotate: 'Rotate line',
         boxes: 'Boxes', newMatch: 'New match', undoMove: 'Undo move',
-        undoOnlyAi: 'Undo is only available against the AI',
         dailyDots: 'Daily dots and boxes', vsHard: 'against the hard AI',
         tutTitle1: 'Draw a line', tutText1: 'On your turn you draw one line between two neighbouring dots.',
         tutTitle2: 'Close a box', tutText2: 'Draw the fourth side of a box and it is yours, and you move again.',
@@ -391,7 +427,6 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
         thinking: '思考中…', yourTurn: '轮到你了', draw: '平局', playerWon: '{n} 获胜', move: '移动',
         rotate: '旋转连线',
         boxes: '格子', newMatch: '新一局', undoMove: '撤销一步',
-        undoOnlyAi: '只有对战电脑时才能撤销',
         dailyDots: '每日点格棋', vsHard: '对战困难电脑',
         tutTitle1: '画一条线', tutText1: '每回合在相邻的两个点之间画一条线。',
         tutTitle2: '围成格子', tutText2: '画下一个格子的第四条边，这个格子就归你，而且你可以再走一步。',
@@ -692,23 +727,16 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
   }
 
   function doMove(e, byHuman) {
-    if (!S.edgeOwner) S.edgeOwner = {};
-    S.history.push({ e: e, turn: S.turn, scores: S.scores.slice(), turnBoxes: S.turnBoxes });
-    S.edgeOwner[e] = S.turn;
     var before = S.owner.slice();
-    var got = E.play(bd, S.edges, S.owner, e, S.turn);
+    var got = E.applyEdge(bd, S, e);
     S.lastEdge = e;
     S.newBoxes = [];
     for (var b = 0; b < bd.boxes; b++) if (!before[b] && S.owner[b]) S.newBoxes.push(b);
     if (got > 0) {
-      S.scores[S.turn] += got;
-      S.turnBoxes += got;
       C.audio.sfx(S.turnBoxes >= 3 ? 'chain' : 'pop');
       C.haptic('success');
       if (S.turnBoxes >= 5 && S.turn === 1) C.achievements.unlock('dt-chain');
     } else {
-      S.turnBoxes = 0;
-      S.turn = S.turn === 1 ? 2 : 1;
       C.audio.sfx('place');
       if (byHuman) C.haptic('tap');
     }
@@ -736,23 +764,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
 
   function undo() {
     if (!S || S.done) return;
-    if (S.mode !== 'ai') { C.ui.toast({ icon: 'info', title: C.t('undoOnlyAi') }); return; }
     if (!S.history.length) { C.feedback('bad'); return; }
     stopAi();
-    // تا جایی برگرد که دوباره نوبت بازیکن باشد
-    var guard = 0;
-    do {
-      var h = S.history.pop();
-      if (!h) break;
-      S.edges[h.e] = 0;
-      delete S.edgeOwner[h.e];
-      S.scores = h.scores;
-      S.turn = h.turn;
-      S.turnBoxes = h.turnBoxes;
-      // مالکیت مربع‌هایی که با این یال بسته شده بودند برداشته شود
-      var bs = bd.edgeBoxes[h.e];
-      for (var i = 0; i < bs.length; i++) if (E.sides(bd, S.edges, bs[i]) < 4) S.owner[bs[i]] = 0;
-    } while (S.turn !== 1 && guard++ < 200);
+    E.takeBack(bd, S);
     S.lastEdge = -1;
     C.feedback('tap');
     repaint(true);
