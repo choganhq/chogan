@@ -1,0 +1,1008 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>فری‌سل — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* روی کارت در تم تاریک یک پله روشن‌تر از سطح است؛ با --c-surface کارت تیره
+     روی زمینه‌ی تیره گم می‌شد و ستون‌های بلند یک لکه‌ی یکدست بودند. */
+  :root { --fc-face: var(--c-surface); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --fc-face: var(--c-surface-3); } }
+  :root[data-theme="dark"] { --fc-face: var(--c-surface-3); }
+
+  .fc-wrap { flex: 1; min-height: 0; align-self: stretch; display: flex; flex-direction: column; align-items: center; gap: var(--s-2); }
+  .fc-top { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+  .fc-board { position: relative; flex: 1; min-height: 0; width: 100%; max-width: 680px; }
+  /* کشیدن کارت با انگشت نباید صفحه را جابه‌جا کند */
+  .fc-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: pointer; }
+  .fc-input {
+    font: inherit; width: 100%; padding: 10px 14px; border-radius: var(--r-md);
+    border: 1px solid var(--c-line); background: var(--c-surface-2); color: var(--c-text);
+    text-align: center; direction: ltr;
+  }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function FreecellEngineFactory() {
+  'use strict';
+
+  // کارت یک عدد ۰ تا ۵۱ است: رتبه × ۴ + خال، با ترتیب خال‌های مولد مایکروسافت
+  // (گشنیز، خشت، دل، پیک). همین ترتیب لازم است تا شماره‌ی دست با برنامه‌های
+  // دیگر یکی باشد.
+  var SUITS = 'CDHS', RANKS = 'A23456789TJQK';
+  var MAX_DEAL = 32000;
+  // تنها دست شناخته‌شده‌ی بی‌جواب بین ۳۲۰۰۰ دست اصلی
+  var BAD_DEAL = 11982;
+  // مکان‌ها با یک عدد: ۰ تا ۷ ستون، ۸ تا ۱۱ خانه‌ی آزاد، ۱۲ تا ۱۵ پایه‌ی هر خال
+  var CELL = 8, FOUND = 12;
+
+  function rank(c) { return c >> 2; }
+  function suit(c) { return c & 3; }
+  function isRed(c) { var s = c & 3; return s === 1 || s === 2; }
+  function name(c) { return RANKS[c >> 2] + SUITS[c & 3]; }
+  function parse(s) {
+    var r = RANKS.indexOf(s[0]), u = SUITS.indexOf(s[1]);
+    return r < 0 || u < 0 ? -1 : r * 4 + u;
+  }
+
+  function validDeal(n) { return n === Math.floor(n) && n >= 1 && n <= MAX_DEAL && n !== BAD_DEAL; }
+
+  // دست تصادفی؛ ۱۱۹۸۲ هیچ‌وقت داده نمی‌شود چون بازیکن وقتش را روی دستی
+  // می‌گذاشت که بردنی نیست.
+  function pickDeal(rnd) {
+    for (var i = 0; i < 100; i++) {
+      var d = 1 + Math.floor(rnd() * MAX_DEAL);
+      if (validDeal(d)) return d;
+    }
+    return 1;
+  }
+
+  // مولد کلاسیک مایکروسافت. حالت تا ۲^۳۱ است و ضرب در ۲۱۴۰۱۳ زیر ۲^۵۳ می‌ماند،
+  // پس عدد معمولی جاوااسکریپت دقیق است و BigInt لازم نیست.
+  function deal(n) {
+    var state = n, deck = [], cols = [[], [], [], [], [], [], [], []];
+    for (var i = 0; i < 52; i++) deck.push(i);
+    for (var k = 0; k < 52; k++) {
+      state = (state * 214013 + 2531011) % 2147483648;
+      var r = Math.floor(state / 65536);
+      var len = deck.length, j = r % len;
+      var card = deck[j];
+      deck[j] = deck[len - 1];
+      deck.pop();
+      cols[k % 8].push(card);
+    }
+    return cols;
+  }
+
+  function newGame(n) {
+    var S = { deal: n, cols: deal(n), cells: [-1, -1, -1, -1], found: [0, 0, 0, 0], hist: [], moves: 0, undos: 0 };
+    autoAll(S);
+    return S;
+  }
+
+  function clone(S) {
+    return {
+      deal: S.deal, cols: S.cols.map(function (c) { return c.slice(); }), cells: S.cells.slice(),
+      found: S.found.slice(), hist: S.hist.map(function (h) { return h.slice(); }), moves: S.moves, undos: S.undos
+    };
+  }
+
+  function canStack(a, b) { return rank(b) === rank(a) + 1 && isRed(a) !== isRed(b); }
+
+  // آیا کارت‌های from به بعد یک رشته‌ی نزولی یک‌درمیان رنگ‌اند
+  function isRun(col, from) {
+    if (from < 0 || from >= col.length) return false;
+    for (var k = from; k < col.length - 1; k++) if (!canStack(col[k + 1], col[k])) return false;
+    return true;
+  }
+  function runLength(col) {
+    if (!col.length) return 0;
+    var k = col.length - 1;
+    while (k > 0 && canStack(col[k], col[k - 1])) k--;
+    return col.length - k;
+  }
+
+  function freeCells(S) { var n = 0; for (var i = 0; i < 4; i++) if (S.cells[i] < 0) n++; return n; }
+  function emptyCols(S) { var n = 0; for (var i = 0; i < 8; i++) if (!S.cols[i].length) n++; return n; }
+
+  // سقف رشته‌ای که با حرکت‌های تک‌کارتی جابه‌جا می‌شود. ستون خالی مقصد
+  // جای موقت حساب نمی‌شود، پس سقف نصف می‌شود.
+  function maxMove(S, toEmpty) {
+    var e = emptyCols(S) - (toEmpty ? 1 : 0);
+    return (freeCells(S) + 1) * Math.pow(2, Math.max(0, e));
+  }
+
+  function firstCard(S, from, n) {
+    if (from < CELL) { var col = S.cols[from]; return col[col.length - n]; }
+    if (from < FOUND) return S.cells[from - CELL];
+    return -1;
+  }
+
+  function canMove(S, from, n, to) {
+    if (from === to || n < 1 || from < 0 || to < 0 || to > 15 || from >= FOUND) return false;
+    var c;
+    if (from < CELL) {
+      var col = S.cols[from];
+      if (n > col.length || !isRun(col, col.length - n)) return false;
+      c = col[col.length - n];
+    } else {
+      if (n !== 1 || S.cells[from - CELL] < 0) return false;
+      c = S.cells[from - CELL];
+    }
+    if (to < CELL) {
+      var dst = S.cols[to];
+      if (!dst.length) {
+        // بردن کل یک ستون به ستون خالی دیگر هیچ چیزی را عوض نمی‌کند
+        if (from < CELL && n === S.cols[from].length) return false;
+        return n <= maxMove(S, true);
+      }
+      return canStack(c, dst[dst.length - 1]) && n <= maxMove(S, false);
+    }
+    // از یک خانه‌ی آزاد به خانه‌ی آزاد دیگر هم چیزی عوض نمی‌شود
+    if (to < FOUND) return n === 1 && from < CELL && S.cells[to - CELL] < 0;
+    return n === 1 && suit(c) === to - FOUND && S.found[to - FOUND] === rank(c);
+  }
+
+  // جابه‌جایی بی‌قید؛ هم حرکت و هم برعکسش در برگرداندن از همین می‌گذرند
+  function shift(S, from, n, to) {
+    var cards;
+    if (from < CELL) cards = S.cols[from].splice(S.cols[from].length - n, n);
+    else if (from < FOUND) { cards = [S.cells[from - CELL]]; S.cells[from - CELL] = -1; }
+    else { var s = from - FOUND; S.found[s]--; cards = [S.found[s] * 4 + s]; }
+    if (to < CELL) for (var i = 0; i < cards.length; i++) S.cols[to].push(cards[i]);
+    else if (to < FOUND) S.cells[to - CELL] = cards[0];
+    else S.found[to - FOUND]++;
+    return cards;
+  }
+
+  // یک حرکت. تاریخچه [از، به، تعداد، خودکار] است تا برگرداندن دقیقاً عکس
+  // همان چیزی باشد که ثبت شده و دست هیچ‌وقت عوض نشود.
+  function move(S, from, n, to, auto) {
+    if (!canMove(S, from, n, to)) return false;
+    shift(S, from, n, to);
+    S.hist.push([from, to, n, auto ? 1 : 0]);
+    if (!auto) S.moves++;
+    return true;
+  }
+
+  function userMoves(S) {
+    for (var i = S.hist.length - 1; i >= 0; i--) if (!S.hist[i][3]) return true;
+    return false;
+  }
+
+  // آخرین حرکت بازیکن و هر حرکت خودکاری که پشتش آمده برمی‌گردد. حرکت‌های
+  // خودکار اول دست، پیش از هر حرکتی از بازیکن، دست نمی‌خورند.
+  function undo(S) {
+    if (!userMoves(S)) return 0;
+    var n = 0;
+    while (S.hist.length) {
+      var h = S.hist.pop();
+      shift(S, h[1], h[2], h[0]);
+      n++;
+      if (!h[3]) { S.moves--; S.undos++; break; }
+    }
+    return n;
+  }
+
+  // کارتی امن به پایه می‌رود که دیگر به کارش نیاز نیست: آس و دو همیشه،
+  // بقیه وقتی هر دو کارت یک رتبه پایین‌ترِ رنگ مخالف روی پایه‌اند.
+  function isSafe(S, c) {
+    var r = rank(c);
+    if (S.found[suit(c)] !== r) return false;
+    if (r <= 1) return true;
+    var o = isRed(c) ? [0, 3] : [1, 2];
+    return S.found[o[0]] >= r && S.found[o[1]] >= r;
+  }
+
+  function autoStep(S) {
+    for (var i = 0; i < 12; i++) {
+      var c = i < CELL ? (S.cols[i].length ? S.cols[i][S.cols[i].length - 1] : -1) : S.cells[i - CELL];
+      if (c < 0 || !isSafe(S, c)) continue;
+      var to = FOUND + suit(c);
+      if (move(S, i, 1, to, true)) return [i, to, 1];
+    }
+    return null;
+  }
+  function autoAll(S) {
+    var out = [], m;
+    while ((m = autoStep(S))) out.push(m);
+    return out;
+  }
+
+  // بهترین جای کارت یا رشته‌ای که لمس شده: پایه، ستون پر، ستون خالی، خانه‌ی آزاد
+  function bestTarget(S, from, n) {
+    var i;
+    if (n === 1) {
+      var c = firstCard(S, from, 1);
+      if (c >= 0 && canMove(S, from, 1, FOUND + suit(c))) return FOUND + suit(c);
+    }
+    for (i = 0; i < 8; i++) if (S.cols[i].length && canMove(S, from, n, i)) return i;
+    for (i = 0; i < 8; i++) if (!S.cols[i].length && canMove(S, from, n, i)) return i;
+    if (n === 1 && from < CELL) for (i = 0; i < 4; i++) if (canMove(S, from, 1, CELL + i)) return CELL + i;
+    return -1;
+  }
+
+  // آیا هنوز حرکتی هست که چیزی را عوض کند
+  function hasMoves(S) {
+    for (var f = 0; f < 12; f++) {
+      var maxN = f < CELL ? runLength(S.cols[f]) : (S.cells[f - CELL] >= 0 ? 1 : 0);
+      for (var n = 1; n <= maxN; n++) {
+        for (var t = 0; t < 16; t++) {
+          if (f >= CELL && t >= CELL && t < FOUND) continue;
+          if (canMove(S, f, n, t)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // ذخیره‌ی خراب نباید بازی را خراب کند: هر ۵۲ کارت دقیقاً یک بار، جای درست.
+  // خانه‌ی null در JSON با شرط ‎>= 0‎ کارت آس گشنیز دیده می‌شد.
+  function validState(S) {
+    if (!S || !validDeal(S.deal) || !Array.isArray(S.cols) || S.cols.length !== 8 ||
+      !Array.isArray(S.cells) || S.cells.length !== 4 || !Array.isArray(S.found) || S.found.length !== 4) return false;
+    var seen = {}, n = 0;
+    var take = function (c) {
+      if (typeof c !== 'number' || c !== Math.floor(c) || c < 0 || c > 51 || seen[c]) return false;
+      seen[c] = 1; n++;
+      return true;
+    };
+    for (var i = 0; i < 8; i++) {
+      if (!Array.isArray(S.cols[i])) return false;
+      for (var k = 0; k < S.cols[i].length; k++) if (!take(S.cols[i][k])) return false;
+    }
+    for (var j = 0; j < 4; j++) {
+      if (S.cells[j] !== -1 && !take(S.cells[j])) return false;
+      var f = S.found[j];
+      if (typeof f !== 'number' || f !== Math.floor(f) || f < 0 || f > 13) return false;
+      for (var r = 0; r < f; r++) if (!take(r * 4 + j)) return false;
+    }
+    if (n !== 52) return false;
+    var h = S.hist || [];
+    if (!Array.isArray(h)) return false;
+    for (var q = 0; q < h.length; q++) {
+      var e = h[q];
+      if (!Array.isArray(e) || e.length !== 4 || !(e[0] >= 0 && e[0] < 16) || !(e[1] >= 0 && e[1] < 16) || !(e[2] >= 1 && e[2] <= 13)) return false;
+    }
+    return true;
+  }
+
+  function won(S) { return S.found[0] + S.found[1] + S.found[2] + S.found[3] === 52; }
+
+  var api = {
+    SUITS: SUITS, RANKS: RANKS, MAX_DEAL: MAX_DEAL, BAD_DEAL: BAD_DEAL, CELL: CELL, FOUND: FOUND,
+    rank: rank, suit: suit, isRed: isRed, name: name, parse: parse,
+    validDeal: validDeal, pickDeal: pickDeal, deal: deal, newGame: newGame, clone: clone,
+    canStack: canStack, isRun: isRun, runLength: runLength, freeCells: freeCells, emptyCols: emptyCols,
+    maxMove: maxMove, canMove: canMove, move: move, undo: undo, userMoves: userMoves,
+    isSafe: isSafe, autoStep: autoStep, autoAll: autoAll, bestTarget: bestTarget,
+    hasMoves: hasMoves, won: won, validState: validState
+  };
+  if (typeof self !== 'undefined') self.FreecellEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = FreecellEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = FreecellEngineFactory();
+  var CELL = E.CELL, FOUND = E.FOUND;
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'freecell',
+    name: { fa: 'فری‌سل', en: 'FreeCell', zh: '空当接龙' },
+    accent: '#C9545F',
+    mood: 'sudoku',
+    strings: {
+      fa: {
+        table: 'میز ورق', moves: 'حرکت', movesN: '{n} حرکت', dealN: 'دست {n}', dailyFc: 'فری‌سل روزانه',
+        newDeal: 'دست تازه', randomDeal: 'دست تصادفی', playDeal: 'بازی این دست',
+        dealNumber: 'شماره‌ی دست', dealHint: 'یک عدد از ۱ تا ۳۲۰۰۰. هر شماره همان چیدمانی است که در برنامه‌های دیگر فری‌سل هم هست.',
+        badDeal: 'این شماره دست نیست', restartDaily: 'از اول همین دست',
+        undoMove: 'برگرداندن حرکت', noMoves: 'دیگر حرکتی نمانده', noMovesSub: 'چند حرکت برگردان یا دست تازه بگیر.',
+        kbColumn: 'رفتن بین ستون‌ها', kbCard: 'انتخاب کارت یا ردیف بالا', kbAuto: 'فرستادن به بهترین جا',
+        kbPick: 'برداشتن و گذاشتن', kbCancel: 'رها کردن کارت برداشته', kbNew: 'دست تازه',
+        rules: 'چهار پایه را از آس تا شاه، هر خال جدا، پر کن. در ستون‌ها هر کارت روی کارتی یک رتبه بالاتر با رنگ مخالف می‌نشیند. هر خانه‌ی آزاد یک کارت جا دارد. چند کارت مرتب با هم جابه‌جا می‌شوند اگر خانه‌ی آزاد و ستون خالی کافی باشد.',
+        tutTitle1: 'هدف', tutText1: 'همه‌ی کارت‌ها را به چهار پایه‌ی بالا ببر: هر خال از آس تا شاه.',
+        tutTitle2: 'ستون‌ها و خانه‌های آزاد', tutText2: 'کارت روی کارتی یک رتبه بالاتر با رنگ مخالف می‌نشیند. چهار خانه‌ی آزاد هر کدام یک کارت را موقتاً نگه می‌دارند.',
+        tutTitle3: 'بزن یا بکش', tutText3: 'روی کارت بزن تا به بهترین جا برود، یا بکشش هر جا که خواستی. برگرداندن بی‌حد است و کارت‌هایی که دیگر لازم نیستند خودشان به پایه می‌روند.'
+      },
+      en: {
+        table: 'Card table', moves: 'Moves', movesN: '{n} moves', dealN: 'Deal {n}', dailyFc: 'Daily FreeCell',
+        newDeal: 'New deal', randomDeal: 'Random deal', playDeal: 'Play this deal',
+        dealNumber: 'Deal number', dealHint: 'A number from 1 to 32000. Each number is the same layout as in other FreeCell programs.',
+        badDeal: 'That is not a deal number', restartDaily: 'Restart this deal',
+        undoMove: 'Undo move', noMoves: 'No moves left', noMovesSub: 'Undo a few moves or start a new deal.',
+        kbColumn: 'Move between columns', kbCard: 'Pick a card or the top row', kbAuto: 'Send to the best place',
+        kbPick: 'Pick up and put down', kbCancel: 'Drop the picked card', kbNew: 'New deal',
+        rules: 'Fill the four foundations from ace to king, one suit each. In the columns a card goes on a card one rank higher of the other colour. Each free cell holds one card. An ordered run moves as one when there are enough free cells and empty columns.',
+        tutTitle1: 'The goal', tutText1: 'Move every card to the four foundations at the top: each suit from ace to king.',
+        tutTitle2: 'Columns and free cells', tutText2: 'A card goes on a card one rank higher of the other colour. The four free cells each hold one card for a while.',
+        tutTitle3: 'Tap or drag', tutText3: 'Tap a card to send it to the best place, or drag it wherever you like. Undo is unlimited, and cards that are no longer needed go to the foundations by themselves.'
+      },
+      zh: {
+        table: '牌桌', moves: '步数', movesN: '{n} 步', dealN: '第 {n} 局', dailyFc: '每日空当接龙',
+        newDeal: '新牌局', randomDeal: '随机牌局', playDeal: '玩这一局',
+        dealNumber: '牌局编号', dealHint: '1 到 32000 之间的数字。每个编号的牌面与其他空当接龙程序相同。',
+        badDeal: '这不是有效的牌局编号', restartDaily: '重新开始这一局',
+        undoMove: '撤销一步', noMoves: '没有可走的步了', noMovesSub: '撤销几步，或者开一局新的。',
+        kbColumn: '在列之间移动', kbCard: '选择牌或顶部一行', kbAuto: '送到最佳位置',
+        kbPick: '拿起和放下', kbCancel: '放弃拿起的牌', kbNew: '新牌局',
+        rules: '把四个收牌区按花色从 A 收到 K。列中的牌只能放在大一点、颜色相反的牌上。每个空当只能放一张牌。空当和空列足够时，一串顺序牌可以一起移动。',
+        tutTitle1: '目标', tutText1: '把所有牌移到上方的四个收牌区：每种花色从 A 到 K。',
+        tutTitle2: '列和空当', tutText2: '牌只能放在大一点、颜色相反的牌上。四个空当各能暂放一张牌。',
+        tutTitle3: '点击或拖动', tutText3: '点击一张牌，它会去最合适的位置；也可以拖到任何你想放的地方。撤销没有次数限制，不再需要的牌会自动收走。'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+
+  var S = null, L = null, dpr = 1;
+  var press = null, drag = null, anim = null, picked = null;
+  var cur = { top: false, i: 0, k: -1 }, kbOn = false;
+  var pausedAt = 0, stuckShown = false, movesEl = null;
+
+  var cv = el('canvas', { class: 'fc-canvas', 'aria-label': C.t('table') });
+  var board = el('div', { class: 'fc-board' }, [cv]);
+  var top = el('div', { class: 'fc-top' });
+  var wrap = el('div', { class: 'fc-wrap' }, [top, board]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newDeal'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ ساخت */
+
+  function start(n, daily) {
+    S = E.newGame(n);
+    S.daily = daily || null;
+    S.done = false;
+    S.startedAt = Date.now();
+    resetUi();
+  }
+
+  function resetUi() {
+    press = null; drag = null; anim = null; picked = null; stuckShown = false;
+    cur = { top: false, i: 0, k: -1 };
+    renderTop();
+    draw();
+  }
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (S.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' },
+        [C.icon('calendar', 14), el('span', { text: C.t('dailyFc') + ' — ' + C.num(S.daily) })]));
+    }
+    top.appendChild(el('span', { class: 'ch-badge', text: C.t('dealN', { n: C.num(S.deal) }) }));
+    // شمار حرکت این‌جاست نه در نوار بالا: آن‌جا با سه دکمه عنوان بازی را می‌برید
+    movesEl = el('span', { class: 'ch-badge' });
+    top.appendChild(movesEl);
+    setMoves();
+  }
+  function setMoves() { if (movesEl) movesEl.textContent = C.t('movesN', { n: C.num(S.moves) }); }
+
+  /* ------------------------------------------------------------ اندازه */
+
+  function layout() {
+    var W = board.clientWidth, H = board.clientHeight;
+    var gap = Math.max(3, Math.round(W * 0.014));
+    var cw = Math.floor((W - gap * 9) / 8);
+    // روی صفحه‌ی پهن و کوتاه، ارتفاع کارت باید هم جا بشود
+    cw = Math.max(20, Math.min(cw, 92, Math.floor(H * 0.2 / 1.4)));
+    var ch = Math.round(cw * 1.4);
+    var bw = cw * 8 + gap * 7;
+    L = {
+      W: W, H: H, gap: gap, cw: cw, ch: ch,
+      x0: Math.round((W - bw) / 2), ty: 2, cy: 2 + ch + Math.round(gap * 2.5),
+      // نوار پیدای هر کارت باید رتبه و خال گوشه را کامل نشان دهد
+      ov: Math.max(16, Math.round(cw * 0.48))
+    };
+  }
+
+  function colX(i) { return L.x0 + i * (L.cw + L.gap); }
+  // ستون بلند فشرده می‌شود تا آخرین کارت هم داخل صفحه بماند
+  function overlap(n) {
+    if (n <= 1) return L.ov;
+    var room = L.H - L.cy - L.ch - 4;
+    return Math.max(5, Math.min(L.ov, room / (n - 1)));
+  }
+  function cardY(i, k) { return L.cy + k * overlap(S.cols[i].length); }
+
+  // جای هر کارت روی صفحه؛ برای جابه‌جایی نرم بین دو وضعیت
+  function positions() {
+    var p = {};
+    for (var i = 0; i < 8; i++) {
+      for (var k = 0; k < S.cols[i].length; k++) p[S.cols[i][k]] = { x: colX(i), y: cardY(i, k) };
+    }
+    for (var j = 0; j < 4; j++) {
+      if (S.cells[j] >= 0) p[S.cells[j]] = { x: colX(j), y: L.ty };
+      for (var r = 0; r < S.found[j]; r++) p[r * 4 + j] = { x: colX(4 + j), y: L.ty };
+    }
+    return p;
+  }
+
+  /* ------------------------------------------------------------ رسم */
+
+  var GLYPH = ['♣︎', '♦︎', '♥︎', '♠︎'];
+  var RANK_TXT = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+
+  function tokens() {
+    var cs = getComputedStyle(document.documentElement);
+    var v = function (n, f) { return cs.getPropertyValue(n).trim() || f; };
+    return {
+      face: v('--fc-face', '#FFFFFF'), line: v('--c-line', '#E7DACA'), slot: v('--c-surface-2', '#F7F1E8'),
+      text: v('--c-text', '#2C2620'), red: v('--c-bad', '#C8574B'), faint: v('--c-text-faint', '#A99C8C'),
+      gold: v('--c-gold', '#D9A441'), game: v('--game', '#C9545F'),
+      font: getComputedStyle(document.body).fontFamily || 'system-ui, sans-serif'
+    };
+  }
+
+  function drawCard(g, T, c, x, y, mark) {
+    var w = L.cw, h = L.ch;
+    var r = Math.max(3, Math.round(w * 0.1));
+    g.fillStyle = T.face;
+    C.rrect(g, x, y, w, h, r);
+    g.fill();
+    g.lineWidth = mark ? 2.5 : 1;
+    g.strokeStyle = mark ? T.gold : T.line;
+    g.stroke();
+    var s = E.suit(c);
+    g.fillStyle = E.isRed(c) ? T.red : T.text;
+    var fs = Math.max(10, Math.round(w * 0.36));
+    var pad = Math.max(2, Math.round(w * 0.07));
+    g.textBaseline = 'top';
+    g.textAlign = 'left';
+    g.font = '800 ' + fs + 'px ' + T.font;
+    g.fillText(RANK_TXT[E.rank(c)], x + pad, y + pad);
+    g.textAlign = 'right';
+    g.font = fs + 'px ' + T.font;
+    g.fillText(GLYPH[s], x + w - pad, y + pad);
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.font = Math.round(w * 0.6) + 'px ' + T.font;
+    g.fillText(GLYPH[s], x + w / 2, y + h * 0.64);
+  }
+
+  function drawSlot(g, T, x, y, glyph, glyphColor) {
+    g.fillStyle = T.slot;
+    C.rrect(g, x, y, L.cw, L.ch, Math.max(3, Math.round(L.cw * 0.1)));
+    g.fill();
+    g.lineWidth = 1;
+    g.strokeStyle = T.line;
+    g.stroke();
+    if (glyph) {
+      g.fillStyle = glyphColor;
+      g.globalAlpha = 0.45;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.font = Math.round(L.cw * 0.55) + 'px ' + T.font;
+      g.fillText(glyph, x + L.cw / 2, y + L.ch / 2);
+      g.globalAlpha = 1;
+    }
+  }
+
+  function draw() {
+    if (!S) return;
+    var w = board.clientWidth, h = board.clientHeight;
+    if (!w || !h) return;
+    dpr = window.devicePixelRatio || 1;
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+      cv.width = Math.round(w * dpr);
+      cv.height = Math.round(h * dpr);
+    }
+    layout();
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+    try { g.direction = 'ltr'; } catch (e) { /* وب‌ویو قدیمی */ }
+    var T = tokens();
+    var now = performance.now();
+    var moving = {}, prog = 1;
+    if (anim) {
+      prog = Math.min(1, (now - anim.t0) / anim.ms);
+      if (prog >= 1) anim = null;
+      else for (var q = 0; q < anim.cards.length; q++) moving[anim.cards[q]] = 1;
+    }
+    var dragging = {};
+    if (drag) for (var d = 0; d < drag.cards.length; d++) dragging[drag.cards[d]] = 1;
+    var markSrc = picked ? picked : null;
+
+    // ردیف بالا: خانه‌های آزاد و پایه‌ها
+    for (var i = 0; i < 4; i++) {
+      drawSlot(g, T, colX(i), L.ty, null);
+      var cc = S.cells[i];
+      if (cc >= 0 && !moving[cc] && !dragging[cc]) drawCard(g, T, cc, colX(i), L.ty, markSrc && markSrc.src === CELL + i);
+      drawSlot(g, T, colX(4 + i), L.ty, GLYPH[i], i === 1 || i === 2 ? T.red : T.text);
+      for (var r = S.found[i] - 1; r >= 0; r--) {
+        var fc = r * 4 + i;
+        if (moving[fc]) continue;
+        drawCard(g, T, fc, colX(4 + i), L.ty, false);
+        break;
+      }
+    }
+    // ستون‌ها
+    for (var col = 0; col < 8; col++) {
+      var cards = S.cols[col];
+      if (!cards.length) { drawSlot(g, T, colX(col), L.cy, null); continue; }
+      for (var k = 0; k < cards.length; k++) {
+        var c = cards[k];
+        if (moving[c] || dragging[c]) continue;
+        var mk = markSrc && markSrc.src === col && k >= cards.length - markSrc.n;
+        drawCard(g, T, c, colX(col), cardY(col, k), mk);
+      }
+    }
+    // نشانگر کیبورد
+    if (kbOn && !drag) {
+      var b = cursorBox();
+      g.lineWidth = 3;
+      g.strokeStyle = T.game;
+      C.rrect(g, b.x - 3, b.y - 3, L.cw + 6, b.h + 6, Math.max(5, Math.round(L.cw * 0.14)));
+      g.stroke();
+    }
+    // کارت‌های در حال جابه‌جایی
+    if (anim) {
+      var e = 1 - Math.pow(1 - prog, 3);
+      for (var m = 0; m < anim.cards.length; m++) {
+        var mc = anim.cards[m], a = anim.from[mc], z = anim.to[mc];
+        drawCard(g, T, mc, a.x + (z.x - a.x) * e, a.y + (z.y - a.y) * e, false);
+      }
+      requestAnimationFrame(draw);
+    }
+    if (drag) {
+      for (var n = 0; n < drag.cards.length; n++) {
+        drawCard(g, T, drag.cards[n], drag.x + drag.dx, drag.y + drag.dy + n * L.ov, true);
+      }
+    }
+  }
+
+  // هر کارتی که جایش عوض شده از جای قبلی سر می‌خورد. کارت‌های کشیده‌شده از
+  // جایی شروع می‌کنند که انگشت رهایشان کرد، نه از ستون اولشان.
+  function startAnim(before) {
+    var after = positions(), cards = [], from = {}, to = {};
+    for (var key in after) {
+      var a = before[key], b = after[key];
+      if (a && (a.x !== b.x || a.y !== b.y)) { cards.push(+key); from[key] = a; to[key] = b; }
+    }
+    if (!cards.length) { anim = null; draw(); return; }
+    // ترتیب رسم: کارت پایین‌تر هر ستون روی کارت بالاتر
+    cards.sort(function (x, y) { return to[x].y - to[y].y; });
+    anim = { t0: performance.now(), ms: 170, cards: cards, from: from, to: to };
+    draw();
+  }
+
+  /* ------------------------------------------------------- پیدا کردن */
+
+  function colAt(x) {
+    var i = Math.floor((x - L.x0 + L.gap / 2) / (L.cw + L.gap));
+    return i >= 0 && i < 8 ? i : -1;
+  }
+
+  // چه چیزی زیر این نقطه است: { src، n } برای کارت قابل برداشتن
+  function hitTest(x, y) {
+    var i = colAt(x);
+    if (i < 0) return null;
+    if (y >= L.ty && y <= L.ty + L.ch) {
+      if (i < 4 && S.cells[i] >= 0) return { src: CELL + i, n: 1 };
+      return null;
+    }
+    var cards = S.cols[i];
+    if (!cards.length || y < L.cy) return null;
+    var last = cards.length - 1;
+    if (y >= cardY(i, last)) return y <= cardY(i, last) + L.ch ? { src: i, n: 1 } : null;
+    var k = Math.floor((y - L.cy) / overlap(cards.length));
+    return k >= 0 && k < last ? { src: i, n: cards.length - k } : null;
+  }
+
+  function dropAt(x, y, card) {
+    var i = colAt(x);
+    if (i < 0) return -1;
+    if (y < L.cy - L.gap) {
+      if (i >= 4) return FOUND + E.suit(card);
+      if (S.cells[i] < 0) return CELL + i;
+      for (var j = 0; j < 4; j++) if (S.cells[j] < 0) return CELL + j;
+      return CELL + i;
+    }
+    return i;
+  }
+
+  function srcCards(src, n) {
+    if (src < CELL) return S.cols[src].slice(S.cols[src].length - n);
+    return [S.cells[src - CELL]];
+  }
+  function srcPos(src, n) {
+    if (src < CELL) return { x: colX(src), y: cardY(src, S.cols[src].length - n) };
+    return { x: colX(src - CELL), y: L.ty };
+  }
+
+  /* ----------------------------------------------------------- حرکت */
+
+  function blocked() { return !S || S.done || !!document.querySelector('.ch-scrim'); }
+
+  function tap(src, n) {
+    if (src < CELL && !E.isRun(S.cols[src], S.cols[src].length - n)) { C.feedback('bad'); return; }
+    var to = E.bestTarget(S, src, n);
+    if (to < 0) { C.feedback('bad'); return; }
+    doMove(src, n, to, null);
+  }
+
+  function doMove(src, n, to, dropPos) {
+    var before = positions();
+    if (dropPos) {
+      var cs = srcCards(src, n);
+      for (var i = 0; i < cs.length; i++) before[cs[i]] = { x: dropPos.x, y: dropPos.y + i * L.ov };
+    }
+    if (!E.move(S, src, n, to)) { C.feedback('bad'); draw(); return false; }
+    var autos = E.autoAll(S);
+    picked = null;
+    C.feedback('place');
+    if (autos.length) setTimeout(function () { C.audio.sfx('pop'); }, 120);
+    setMoves();
+    startAnim(before);
+    if (E.won(S)) { setTimeout(finish, 260); S.done = true; return true; }
+    save();
+    if (!E.hasMoves(S)) {
+      if (!stuckShown) C.ui.toast({ icon: 'info', title: C.t('noMoves'), sub: C.t('noMovesSub'), ms: 4200 });
+      stuckShown = true;
+    } else stuckShown = false;
+    return true;
+  }
+
+  function undo() {
+    if (!S || S.done) return;
+    var before = positions();
+    if (!E.undo(S)) { C.feedback('bad'); return; }
+    picked = null;
+    stuckShown = false;
+    C.feedback('tap');
+    setMoves();
+    startAnim(before);
+    save();
+  }
+
+  /* --------------------------------------------------------- لمس و موش */
+
+  function pt(e) {
+    var r = cv.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  cv.addEventListener('pointerdown', function (e) {
+    if (blocked() || press) return;
+    kbOn = false;
+    var p = pt(e);
+    var hit = hitTest(p.x, p.y);
+    if (!hit) { if (picked) { picked = null; draw(); } return; }
+    press = { id: e.pointerId, x0: p.x, y0: p.y, hit: hit };
+    try { cv.setPointerCapture(e.pointerId); } catch (err) { /* بی‌خیال */ }
+  });
+
+  cv.addEventListener('pointermove', function (e) {
+    if (!press || e.pointerId !== press.id) return;
+    var p = pt(e);
+    if (!drag) {
+      if (Math.abs(p.x - press.x0) + Math.abs(p.y - press.y0) < 8) return;
+      var h = press.hit;
+      // رشته‌ی نامرتب را نمی‌شود با هم برداشت، پس کشیدنش هم شروع نمی‌شود
+      if (h.src < CELL && !E.isRun(S.cols[h.src], S.cols[h.src].length - h.n)) return;
+      var sp = srcPos(h.src, h.n);
+      drag = { src: h.src, n: h.n, cards: srcCards(h.src, h.n), dx: sp.x - press.x0, dy: sp.y - press.y0, x: p.x, y: p.y };
+      picked = null;
+    }
+    drag.x = p.x; drag.y = p.y;
+    draw();
+  });
+
+  function endPress(e, cancelled) {
+    if (!press || e.pointerId !== press.id) return;
+    var h = press.hit;
+    press = null;
+    if (drag) {
+      var d = drag;
+      drag = null;
+      if (cancelled) { draw(); return; }
+      var p = pt(e);
+      var to = dropAt(p.x, p.y, d.cards[0]);
+      if (to < 0 || to === d.src || !E.canMove(S, d.src, d.n, to)) {
+        if (to >= 0 && to !== d.src) C.feedback('bad');
+        var back = positions(), from = {};
+        for (var i = 0; i < d.cards.length; i++) from[d.cards[i]] = { x: d.x + d.dx, y: d.y + d.dy + i * L.ov };
+        for (var key in back) if (!from[key]) from[key] = back[key];
+        startAnim(from);
+        return;
+      }
+      doMove(d.src, d.n, to, { x: d.x + d.dx, y: d.y + d.dy });
+      return;
+    }
+    if (!cancelled && !blocked()) tap(h.src, h.n);
+  }
+  cv.addEventListener('pointerup', function (e) { endPress(e, false); });
+  cv.addEventListener('pointercancel', function (e) { endPress(e, true); });
+
+  /* -------------------------------------------------------- کیبورد */
+
+  // نشانگر روی ستون i و کارت k است، یا روی خانه‌ی i ردیف بالا.
+  // جهت‌نماها آینه نمی‌شوند چون تخته‌ی بوم در راست‌چین هم چپ‌به‌راست است.
+  function curK() {
+    var n = S.cols[cur.i].length;
+    if (cur.k < 0 || cur.k >= n) cur.k = n - 1;
+    return cur.k;
+  }
+  function cursorBox() {
+    if (cur.top) return { x: colX(cur.i), y: L.ty, h: L.ch };
+    var k = curK();
+    if (k < 0) return { x: colX(cur.i), y: L.cy, h: L.ch };
+    var last = S.cols[cur.i].length - 1;
+    return { x: colX(cur.i), y: cardY(cur.i, k), h: (cardY(cur.i, last) - cardY(cur.i, k)) + L.ch };
+  }
+  function curTarget() {
+    if (!cur.top) return cur.i;
+    if (cur.i >= 4) return FOUND + E.suit(srcCards(picked.src, picked.n)[0]);
+    if (S.cells[cur.i] < 0) return CELL + cur.i;
+    for (var j = 0; j < 4; j++) if (S.cells[j] < 0) return CELL + j;
+    return CELL + cur.i;
+  }
+  function curSource() {
+    if (cur.top) return cur.i < 4 && S.cells[cur.i] >= 0 ? { src: CELL + cur.i, n: 1 } : null;
+    var k = curK();
+    return k < 0 ? null : { src: cur.i, n: S.cols[cur.i].length - k };
+  }
+
+  window.addEventListener('keydown', function (e) {
+    if (!S || document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
+    if (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
+    var k = e.key;
+    if ((k === 'z' || k === 'Z') && (e.ctrlKey || e.metaKey)) { undo(); e.preventDefault(); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (k === 'u' || k === 'U') { undo(); e.preventDefault(); return; }
+    if (k === 'n' || k === 'N') { askNew(); e.preventDefault(); return; }
+    if (S.done) return;
+    var handled = true;
+    if (k === 'ArrowLeft') { cur.i = Math.max(0, cur.i - 1); cur.k = -1; }
+    else if (k === 'ArrowRight') { cur.i = Math.min(7, cur.i + 1); cur.k = -1; }
+    else if (k === 'ArrowUp') {
+      if (!cur.top) {
+        var kk = curK();
+        if (kk > 0 && E.isRun(S.cols[cur.i], kk - 1)) cur.k = kk - 1;
+        else cur.top = true;
+      }
+    } else if (k === 'ArrowDown') {
+      if (cur.top) { cur.top = false; cur.k = -1; }
+      else if (curK() < S.cols[cur.i].length - 1) cur.k = curK() + 1;
+    } else if (k === 'Enter') {
+      var s = curSource();
+      if (s) tap(s.src, s.n); else C.feedback('bad');
+      cur.k = -1;
+    } else if (k === ' ') {
+      if (picked) {
+        var to = curTarget();
+        if (to !== picked.src) doMove(picked.src, picked.n, to, null);
+        picked = null;
+        cur.k = -1;
+      } else {
+        var s2 = curSource();
+        if (s2 && (s2.src >= CELL || E.isRun(S.cols[s2.src], S.cols[s2.src].length - s2.n))) { picked = s2; C.feedback('select'); }
+        else C.feedback('bad');
+      }
+    } else if (k === 'Escape') {
+      if (picked) picked = null; else handled = false;
+    } else handled = false;
+    if (handled) { kbOn = true; e.preventDefault(); draw(); }
+  });
+
+  /* ---------------------------------------------------------- پایان */
+
+  function finish() {
+    var ms = Date.now() - S.startedAt;
+    S.done = true;
+    var clean = S.undos === 0;
+    var coins = 12 + (clean ? 3 : 0) + (S.daily ? 8 : 0);
+    var points = 48 + (S.daily ? 25 : 0);
+    C.achievements.unlock('fc-win');
+    if (clean) C.achievements.unlock('fc-clean');
+    if (ms < 4 * 60 * 1000) C.achievements.unlock('fc-fast');
+    C.stats.best('freecell', 'timeMs', ms, true);
+    C.stats.best('freecell', 'moves', S.moves, true);
+    if (S.daily) {
+      var first = C.stats.daily('freecell', S.daily, { label: C.t('movesN', { n: C.num(S.moves) }), win: true });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    var kings = [];
+    for (var s = 0; s < 4; s++) if (S.found[s]) kings.push((S.found[s] - 1) * 4 + s);
+    ctx.finish({
+      won: true,
+      title: C.t('won'),
+      timeMs: ms, coins: coins, points: points,
+      lines: [
+        { label: C.t('dealNumber'), value: C.num(S.deal) },
+        { label: C.t('moves'), value: C.num(S.moves) },
+        { label: C.t('time'), value: C.time(ms) }
+      ],
+      shareText: 'چوگان · فری‌سل، دست ' + C.num(S.deal) + (S.daily ? ('\nروزانه ' + S.daily) : '') +
+        '\n' + C.num(S.moves) + ' حرکت در ' + C.time(ms),
+      paint: cardPaint(kings),
+      onAgain: S.daily ? null : function () { start(E.pickDeal(Math.random), null); }
+    });
+    draw();
+  }
+
+  // چهار شاه روی پایه‌ها، تنها چیزی که آخر بازی روی تخته می‌ماند
+  function cardPaint(kings) {
+    return function (g, W, H, col) {
+      var cw = Math.min(W / 4.8, H / 1.5), ch = cw * 1.4, gap = cw * 0.2;
+      var x0 = (W - (cw * 4 + gap * 3)) / 2, y0 = (H - ch) / 2;
+      var font = getComputedStyle(document.body).fontFamily || 'system-ui, sans-serif';
+      var red = getComputedStyle(document.documentElement).getPropertyValue('--c-bad').trim() || '#C8574B';
+      try { g.direction = 'ltr'; } catch (e) { /* وب‌ویو قدیمی */ }
+      for (var i = 0; i < kings.length; i++) {
+        var c = kings[i], x = x0 + i * (cw + gap);
+        g.fillStyle = col.surface2;
+        C.rrect(g, x, y0, cw, ch, cw * 0.1);
+        g.fill();
+        g.fillStyle = E.isRed(c) ? red : col.text;
+        g.textAlign = 'left'; g.textBaseline = 'top';
+        g.font = '800 ' + Math.round(cw * 0.32) + 'px ' + font;
+        g.fillText(RANK_TXT[E.rank(c)], x + cw * 0.08, y0 + cw * 0.08);
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.font = Math.round(cw * 0.6) + 'px ' + font;
+        g.fillText(GLYPH[E.suit(c)], x + cw / 2, y0 + ch * 0.6);
+      }
+    };
+  }
+
+  /* --------------------------------------------------------- ذخیره */
+
+  ctx.autosave(function () {
+    if (!S || S.done || !E.userMoves(S)) return { inProgress: false };
+    return {
+      s: {
+        deal: S.deal, daily: S.daily, cols: S.cols, cells: S.cells, found: S.found,
+        hist: S.hist, moves: S.moves, undos: S.undos,
+        elapsed: (pausedAt || Date.now()) - S.startedAt
+      }
+    };
+  });
+  function save() { ctx.save(); }
+
+  // زمان بازی فقط وقتی اپ باز است می‌گذرد
+  C.onPause(function () { if (!pausedAt) pausedAt = Date.now(); });
+  C.onResume(function () {
+    if (pausedAt && S) S.startedAt += Date.now() - pausedAt;
+    pausedAt = 0;
+  });
+
+  function askNew() {
+    if (document.querySelector('.ch-scrim')) return;
+    var busy = S && !S.done && E.userMoves(S);
+    if (S && S.daily) {
+      var dd = S.daily, dn = S.deal;
+      if (!busy) { start(dn, dd); return; }
+      C.ui.confirm({ title: C.t('restartDaily'), body: C.t('resetWarn'), onOk: function () { start(dn, dd); } });
+      return;
+    }
+    var input = el('input', { class: 'fc-input', type: 'text', inputmode: 'numeric', maxlength: '5', placeholder: C.num(1) + '–' + C.num(32000) });
+    var body = [el('p', { class: 'ch-dim', text: C.t('dealHint') }), input];
+    if (busy) body.unshift(el('p', { class: 'ch-dim', text: C.t('resetWarn') }));
+    C.ui.modal({
+      title: C.t('newDeal'), body: body,
+      actions: [
+        { label: C.t('cancel') },
+        { label: C.t('randomDeal'), onClick: function () { start(E.pickDeal(Math.random), null); save(); } },
+        { label: C.t('playDeal'), kind: 'primary', onClick: function () {
+          // رقم فارسی و عربی هم پذیرفته می‌شود چون صفحه‌کلید گوشی فارسی همان را می‌دهد
+          var raw = input.value.replace(/[۰-۹]/g, function (d) { return String(d.charCodeAt(0) - 0x06F0); })
+            .replace(/[٠-٩]/g, function (d) { return String(d.charCodeAt(0) - 0x0660); }).trim();
+          var n = /^\d+$/.test(raw) ? parseInt(raw, 10) : NaN;
+          if (!E.validDeal(n)) { C.ui.toast({ icon: 'info', title: C.t('badDeal') }); return; }
+          start(n, null);
+          save();
+        } }
+      ]
+    });
+    setTimeout(function () { try { input.focus(); } catch (e) { /* بی‌خیال */ } }, 60);
+  }
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          kb('← →', C.t('kbColumn')),
+          kb('↑ ↓', C.t('kbCard')),
+          kb('Enter', C.t('kbAuto')),
+          kb('Space', C.t('kbPick')),
+          kb('Esc', C.t('kbCancel')),
+          kb('U / Ctrl+Z', C.t('undoMove')),
+          kb('N', C.t('kbNew'))
+        ])
+      ],
+      actions: [
+        { label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('done'), kind: 'primary' }
+      ]
+    });
+  }
+  function kb(k, what) {
+    return el('div', { class: 'ch-item' }, [
+      el('div', { class: 'ch-item__label', text: what }),
+      el('span', { class: 'ch-badge', text: k })
+    ]);
+  }
+
+  function svgCard(x, y, label, red) {
+    return '<rect x="' + x + '" y="' + y + '" width="34" height="48" rx="5" fill="var(--fc-face)" stroke="var(--c-line)"/>' +
+      '<text x="' + (x + 4) + '" y="' + (y + 15) + '" font-size="13" font-weight="800" fill="' + (red ? 'var(--c-bad)' : 'var(--c-text)') + '">' + label + '</text>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'),
+      art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr">' +
+        svgCard(20, 30, 'A♣︎', false) + svgCard(62, 30, 'A♦︎', true) +
+        svgCard(104, 30, '2♥︎', true) + svgCard(146, 30, 'K♠︎', false) + '</svg>' },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'),
+      art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr">' +
+        svgCard(40, 14, '8♠︎', false) + svgCard(40, 36, '7♥︎', true) + svgCard(40, 58, '6♣︎', false) +
+        '<rect x="120" y="30" width="34" height="48" rx="5" fill="none" stroke="var(--game)" stroke-width="2" stroke-dasharray="4 3"/></svg>' },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'),
+      art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr">' +
+        svgCard(30, 40, '5♦︎', true) + svgCard(130, 20, '6♠︎', false) +
+        '<path d="M70 62 C 100 62, 110 52, 128 50" stroke="var(--game)" stroke-width="4" fill="none" stroke-linecap="round"/>' +
+        '<path d="M120 42 l 9 8 -11 5" stroke="var(--game)" stroke-width="4" fill="none" stroke-linecap="round"/></svg>' }
+  ];
+
+  window.addEventListener('resize', function () { draw(); });
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(board);
+
+  /* ---------------------------------------------------------- شروع */
+
+  function resume(v) {
+    S = {
+      deal: v.deal, cols: v.cols, cells: v.cells, found: v.found, hist: v.hist || [],
+      moves: v.moves || 0, undos: v.undos || 0, daily: v.daily || null, done: false,
+      startedAt: Date.now() - (v.elapsed || 0)
+    };
+    resetUi();
+  }
+
+  var saved = ctx.loadSave();
+  var sv = saved && E.validState(saved.s) ? saved.s : null;
+  if (dailyDate) {
+    // صفحه‌ی روزانه جای ذخیره‌ی جدای خودش را دارد، پس همین دست ادامه می‌یابد
+    if (sv && sv.daily === dailyDate) resume(sv);
+    else start(E.pickDeal(C.daily('freecell', dailyDate).rng), dailyDate);
+    if (C.stats.dailyDone('freecell', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).freecell;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (sv && !sv.daily) {
+    resume(sv);
+  } else {
+    start(E.pickDeal(Math.random), null);
+  }
+  ctx.tutorialIfNew(TUT);
+  // اندازه‌ی تخته بعد از اولین چیدمان صفحه معلوم می‌شود
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

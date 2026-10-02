@@ -828,7 +828,10 @@
     { id: 'ng-fast',     icon: 'bolt',    fa: 'قلم تند',          en: 'Quick brush',       dfa: 'نونوگرام ده در ده را زیر سه دقیقه حل کردی', den: 'Solve a 10×10 nonogram under three minutes', zh: '快笔', dzh: '三分钟内解开10×10数织' },
     { id: 'mc-win',      icon: 'gem',     fa: 'دانه‌کار',          en: 'Sower',             dfa: 'یک دست منقله را از حریف بردی',        den: 'Win a mancala match against the AI', zh: '播种人', dzh: '对战电脑赢下一局播棋' },
     { id: 'mc-hard',     icon: 'brain',   fa: 'استاد منقله',      en: 'Mancala master',    dfa: 'حریف سخت منقله را شکست دادی',         den: 'Beat the hard mancala AI', zh: '播棋大师', dzh: '击败困难的播棋电脑' },
-    { id: 'mc-capture',  icon: 'bolt',    fa: 'درو',              en: 'Harvest',           dfa: 'با یک حرکت ده دانه یا بیشتر گرفتی',    den: 'Capture ten or more seeds in one move', zh: '大丰收', dzh: '一步吃掉十颗或更多种子' }
+    { id: 'mc-capture',  icon: 'bolt',    fa: 'درو',              en: 'Harvest',           dfa: 'با یک حرکت ده دانه یا بیشتر گرفتی',    den: 'Capture ten or more seeds in one move', zh: '大丰收', dzh: '一步吃掉十颗或更多种子' },
+    { id: 'fc-win',      icon: 'crown',   fa: 'چهار شاه',         en: 'Four kings',        dfa: 'یک دست فری‌سل را بردی',              den: 'Win a game of FreeCell', zh: '四王归位', dzh: '赢下一局空当接龙' },
+    { id: 'fc-clean',    icon: 'sparkle', fa: 'بی‌برگشت',         en: 'No take-backs',     dfa: 'فری‌سل را بدون برگرداندن حتی یک حرکت بردی', den: 'Win FreeCell without undoing a move', zh: '落子无悔', dzh: '不撤销任何一步赢下空当接龙' },
+    { id: 'fc-fast',     icon: 'bolt',    fa: 'ورق‌باز تند',      en: 'Quick dealer',      dfa: 'فری‌سل را زیر چهار دقیقه بردی',       den: 'Win FreeCell in under four minutes', zh: '快手发牌', dzh: '四分钟内赢下空当接龙' }
   ];
 
   var achApi = {
