@@ -840,7 +840,10 @@
     { id: 'rv-corners',  icon: 'crown',   fa: 'چهار گوشه',        en: 'Four corners',      dfa: 'با هر چهار گوشه‌ی تخته ریورسی را بردی', den: 'Win at reversi holding all four corners', zh: '四角皆占', dzh: '占据全部四个角赢下黑白棋' },
     { id: 'bg-win',      icon: 'medal',   fa: 'نردباز',           en: 'Backgammon player', dfa: 'یک دست تخته‌نرد را از حریف بردی',     den: 'Win a backgammon game against the AI', zh: '双陆棋手', dzh: '对战电脑赢下一局双陆棋' },
     { id: 'bg-hard',     icon: 'brain',   fa: 'استاد تخته',       en: 'Board master',      dfa: 'حریف سخت تخته‌نرد را بردی',           den: 'Beat the hard backgammon AI', zh: '棋盘大师', dzh: '击败困难难度的双陆棋电脑' },
-    { id: 'bg-gammon',   icon: 'crown',   fa: 'مارس',             en: 'Gammon',            dfa: 'تخته‌نرد را با مارس یا بک‌گمون بردی', den: 'Win a gammon or a backgammon', zh: '全胜', dzh: '以全胜或完胜赢下双陆棋' }
+    { id: 'bg-gammon',   icon: 'crown',   fa: 'مارس',             en: 'Gammon',            dfa: 'تخته‌نرد را با مارس یا بک‌گمون بردی', den: 'Win a gammon or a backgammon', zh: '全胜', dzh: '以全胜或完胜赢下双陆棋' },
+    { id: 'mr-win',      icon: 'medal',   fa: 'دوزباز',           en: 'Morris winner',     dfa: 'یک دست دوز را از هوش مصنوعی بردی',    den: 'Win a game of morris against the AI', zh: '九子棋胜者', dzh: '在九子棋中战胜电脑' },
+    { id: 'mr-hard',     icon: 'brain',   fa: 'استاد دوز',        en: 'Morris master',     dfa: 'حریف سخت دوز را شکست دادی',          den: 'Beat the hard morris AI', zh: '九子棋大师', dzh: '击败九子棋困难电脑' },
+    { id: 'mr-clean',    icon: 'shield',  fa: 'بی‌تلفات',          en: 'Not a scratch',     dfa: 'دوز را بدون از دست دادن حتی یک مهره بردی', den: 'Win at morris without losing a piece', zh: '全身而退', dzh: '一枚棋子都没丢就赢下九子棋' }
   ];
 
   var achApi = {
