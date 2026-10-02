@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 513;
+const MIN_CHECKS = 524;
 
 function ok(cond, msg) {
   checks++;
@@ -913,6 +913,42 @@ function testLocales() {
   ok(!nloc['zh-Hans'], 'نام برند برای چینی ترجمه نشده و لاتین می‌ماند');
 }
 
+/* ------------------------------------------------- منو و دستاوردها */
+// تابع واقعی منو را بیرون می‌کشیم و با هسته‌ی ساختگی اجرا می‌کنیم (#85).
+function testMenu() {
+  head('منو');
+  const menu = fs.readFileSync(path.join(ROOT, 'www/index.html'), 'utf8');
+  const at = menu.indexOf('function bestLine(g) {');
+  ok(at > 0, 'تابع bestLine در منو هست');
+  let depth = 0, end = at;
+  for (let i = menu.indexOf('{', at); i < menu.length; i++) {
+    if (menu[i] === '{') depth++;
+    else if (menu[i] === '}' && --depth === 0) { end = i + 1; break; }
+  }
+  const byGame = {
+    'new-game': { plays: 3, wins: 2 },
+    'no-wins': { plays: 1, wins: 0 },
+    dots: { plays: 4, wins: 3, best: { margin: 7 } }
+  };
+  const fakeC = {
+    stats: { get: () => ({ byGame }) },
+    t: (k) => '<' + k + '>', num: (n) => String(n), time: (n) => 't' + n
+  };
+  let bestLine = () => undefined;
+  try { bestLine = vm.runInNewContext('(function (C) { ' + menu.slice(at, end) + ' return bestLine; })', {})(fakeC); }
+  catch (e) { ok(false, 'bestLine اجرا نشد: ' + e.message); }
+  ok(bestLine({ id: 'new-game' }) === '<wins> 2', 'بازی بدون خط مخصوص شمار بردهایش را نشان می‌دهد');
+  ok(bestLine({ id: 'no-wins' }) === '<wins> 0', 'بازی بی‌برد هم مثل قبلِ نقطه‌بازی «برد ۰» نشان می‌دهد');
+  ok(bestLine({ id: 'dots' }) === '<wins> 3', 'نقطه‌بازی همان خط قبلی را نشان می‌دهد');
+  ok(bestLine({ id: 'never-played' }) === null, 'بازی بازی‌نشده خطی ندارد');
+
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  const sampler = (core.match(/\{ id: 'sampler'[^\n]*\}/) || [''])[0];
+  ok(sampler.length > 0, 'دستاورد sampler در جدول هست');
+  ok(!/هر چهار|all four|四个游戏都/.test(sampler), 'متن sampler دیگر «هر چهار بازی» نمی‌گوید');
+  ok(/>= 4\) achApi\.unlock\('sampler'\)/.test(core), 'شرط sampler همان چهار بازی مختلف است');
+}
+
 testFiles();
 testSudoku();
 testMines();
@@ -924,6 +960,7 @@ testWebChanged();
 testBrowserCheckExits();
 testDevScript();
 testLocales();
+testMenu();
 
 testSw().then(testVerifyDeploy).then(function () {
   head('کامل بودن اجرا');
