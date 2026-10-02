@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 911;
+const MIN_CHECKS = 981;
 
 function ok(cond, msg) {
   checks++;
@@ -1202,6 +1202,218 @@ function testReversi() {
   ok(!/othello|اتللو|奥赛罗/i.test(rvHtml + gj), 'نام تجاری اتللو در صفحه و فهرست نیست');
 }
 
+/* --------------------------------------------------------- تخته‌نرد */
+function testBackgammon() {
+  head('تخته‌نرد');
+  const E = loadEngine('backgammon', 'BackgammonEngineFactory');
+
+  // وضعیت دستی با خانه‌های مطلق (همان شماره‌گذاری بازیکن ۱). مهره‌ای که روی
+  // تخته و بار نیست بیرون‌رفته حساب می‌شود تا هر طرف همیشه ۱۵ مهره داشته باشد.
+  function pos(w, b, bar) {
+    const pts = new Array(24).fill(0);
+    for (const k in w) pts[k - 1] += w[k];
+    for (const k in b) pts[k - 1] -= b[k];
+    const br = [0, (bar && bar[1]) || 0, (bar && bar[2]) || 0];
+    const on = (p) => br[p] + pts.reduce((s, v) => s + (p === 1 ? Math.max(v, 0) : Math.max(-v, 0)), 0);
+    return { pts, bar: br, off: [0, 15 - on(1), 15 - on(2)] };
+  }
+  const fmt = (L) => L.map((m) => m.from + '>' + m.to + '/' + m.die).sort().join(' ');
+
+  // ---------------------------------------------------- چیدمان شروع
+  const init = E.initial();
+  ok(E.count(init, 1) === 15 && E.count(init, 2) === 15, 'شروع: هر طرف ۱۵ مهره');
+  ok(E.pips(init, 1) === 167 && E.pips(init, 2) === 167, 'شروع: شمار پیپ هر طرف ۱۶۷ (' + E.pips(init, 1) + '، ' + E.pips(init, 2) + ')');
+  ok(init.pts[23] === 2 && init.pts[12] === 5 && init.pts[7] === 3 && init.pts[5] === 5, 'شروع: مهره‌های بازیکن ۱ روی ۲۴، ۱۳، ۸ و ۶');
+  ok(init.pts[0] === -2 && init.pts[11] === -5 && init.pts[16] === -3 && init.pts[18] === -5, 'شروع: مهره‌های بازیکن ۲ قرینه‌اند');
+
+  // ------------------------------------------------------------ بار
+  const onBar = pos({ 13: 5, 6: 9 }, { 1: 15 }, { 1: 1 });
+  let L = E.legalSteps(onBar, 1, [3, 5]);
+  ok(L.length > 0 && L.every((m) => m.from === 25), 'بار: تا مهره روی بار است فقط ورود مجاز است (' + fmt(L) + ')');
+  ok(fmt(L) === '25>20/5 25>22/3', 'بار: ورود با هر دو تاس روی ۲۲ و ۲۰');
+  const twoBar = pos({ 6: 13 }, { 1: 15 }, { 1: 2 });
+  const tb = E.newGame(1);
+  Object.assign(tb, twoBar, { turn: 1, left: [3, 5], dice: [3, 5], hist: [], winner: 0 });
+  E.play(tb, { from: 25, to: 22, die: 3 });
+  L = E.legal(tb);
+  ok(L.length === 1 && L[0].from === 25 && L[0].to === 20, 'بار: با دو مهره روی بار تاس دوم هم باید ورود باشد');
+  const closed = pos({ 6: 14 }, { 19: 2, 20: 2, 21: 2, 22: 2, 23: 2, 24: 2, 1: 3 }, { 1: 1 });
+  let blockedAll = true;
+  for (let a = 1; a <= 6; a++) for (let b = 1; b <= 6; b++) {
+    if (E.legalSteps(closed, 1, E.diceLeft([a, b])).length) blockedAll = false;
+  }
+  ok(blockedAll, 'بار: خانه‌ی بسته‌ی حریف با هیچ تاسی ورود نمی‌دهد');
+  const cs = E.newGame(2);
+  Object.assign(cs, closed, { turn: 1, left: [6, 6, 6, 6], dice: [6, 6], hist: [], winner: 0 });
+  ok(E.canEnd(cs) && E.play(cs, { from: 13, to: 7, die: 6 }) === null, 'بار: پشت خانه‌ی بسته فقط پایان نوبت ممکن است');
+  const oneOpen = pos({ 6: 14 }, { 19: 2, 20: 2, 21: 2, 23: 2, 24: 2, 1: 5 }, { 1: 1 });
+  ok(fmt(E.legalSteps(oneOpen, 1, [3, 5])) === '25>22/3', 'بار: فقط خانه‌ی باز ۲۲ با تاس ۳ ورود می‌دهد');
+  // بازیکن ۲ از سمت دیگر وارد می‌شود: خانه‌ی مطلق تاس
+  const p2bar = pos({ 24: 15 }, { 19: 14 }, { 2: 1 });
+  L = E.legalSteps(p2bar, 2, [2, 4]);
+  ok(L.length === 2 && L.every((m) => m.from === 25) && L.map((m) => E.absPoint(2, m.to)).sort().join() === '2,4',
+    'بار: بازیکن ۲ روی خانه‌های مطلق ۲ و ۴ وارد می‌شود');
+
+  // ----------------------------------------------------------- زدن
+  const hitPos = pos({ 13: 2, 6: 13 }, { 10: 1, 19: 14 });
+  const hm = E.legalSteps(hitPos, 1, [3, 1]).find((m) => m.from === 13 && m.to === 10);
+  ok(!!hm && hm.hit === true, 'زدن: نشستن روی تک‌مهره‌ی حریف زدن است');
+  const hb = { pts: hitPos.pts.slice(), bar: hitPos.bar.slice(), off: hitPos.off.slice() };
+  E.applyStep(hb, 1, hm || { from: 13, to: 10, die: 3 });
+  ok(hb.bar[2] === 1 && hb.pts[9] === 1, 'زدن: مهره‌ی زده‌شده روی بار می‌رود و خانه مال زننده می‌شود');
+  ok(E.count(hb, 1) === 15 && E.count(hb, 2) === 15, 'زدن: تعداد مهره‌ها ثابت می‌ماند');
+  const blockedPt = pos({ 13: 2, 6: 13 }, { 10: 2, 19: 13 });
+  ok(!E.stepsFor(blockedPt, 1, 3).some((m) => m.from === 13), 'خانه‌ی دومهره‌ای حریف بسته است');
+
+  // --------------------------------------------- هر دو تاس / تاس بزرگ‌تر
+  // ۱۰←۴ به‌تنهایی مجاز است ولی بعدش تاس ۱ بازی نمی‌شود، در حالی که ۸←۲ و ۲←۱ هر دو را بازی می‌کند
+  const both = pos({ 10: 1, 8: 1 }, { 9: 2, 7: 2, 3: 2, 20: 9 });
+  ok(E.stepsFor(both, 1, 6).some((m) => m.from === 10 && m.to === 4), 'هر دو تاس: ۱۰←۴ به‌تنهایی حرکت مجازی است');
+  ok(fmt(E.legalSteps(both, 1, [6, 1])) === '8>2/6', 'هر دو تاس: فقط حرکتی که راه تاس دوم را باز می‌گذارد مجاز است (' + fmt(E.legalSteps(both, 1, [6, 1])) + ')');
+  ok(E.turnPlays(both, 1, [6, 1]).max === 2, 'هر دو تاس: نوبت کامل دو حرکت است');
+  const larger = pos({ 10: 1 }, { 2: 2, 20: 13 });
+  ok(E.stepsFor(larger, 1, 2).some((m) => m.from === 10 && m.to === 8), 'تاس بزرگ‌تر: ۱۰←۸ به‌تنهایی مجاز است');
+  ok(fmt(E.legalSteps(larger, 1, [6, 2])) === '10>4/6', 'تاس بزرگ‌تر: وقتی فقط یکی بازی می‌شود، بزرگ‌تر اجباری است (' + fmt(E.legalSteps(larger, 1, [6, 2])) + ')');
+  const tpL = E.turnPlays(larger, 1, [6, 2]);
+  ok(tpL.max === 1 && tpL.plays.length === 1 && tpL.plays[0].steps[0].die === 6, 'تاس بزرگ‌تر: هوش مصنوعی هم همان را می‌بیند');
+  // اگر بزرگ‌تر بازی‌شدنی نیست، کوچک‌تر
+  const smallOnly = pos({ 10: 1 }, { 4: 2, 2: 2, 20: 11 });
+  ok(fmt(E.legalSteps(smallOnly, 1, [6, 2])) === '10>8/2', 'تاس بزرگ‌تر: اگر بسته است کوچک‌تر بازی می‌شود');
+
+  // ------------------------------------------------------------- جفت
+  ok(E.diceLeft([3, 3]).join() === '3,3,3,3' && E.diceLeft([2, 5]).join() === '2,5', 'جفت چهار حرکت می‌دهد');
+  ok(E.turnPlays(init, 1, [3, 3, 3, 3]).max === 4, 'جفت: از چیدمان شروع چهار حرکت بازی می‌شود');
+  const dbl = E.newGame(3);
+  Object.assign(dbl, E.initial(), { turn: 1, left: [3, 3, 3, 3], dice: [3, 3], hist: [], winner: 0 });
+  let played = 0;
+  for (let i = 0; i < 5; i++) { const l = E.legal(dbl); if (l.length && E.play(dbl, l[0])) played++; }
+  ok(played === 4 && dbl.left.length === 0 && E.canEnd(dbl), 'جفت: درست چهار حرکت و بعد پایان نوبت');
+  const dblPart = pos({ 10: 1 }, { 1: 2, 20: 13 });
+  ok(E.turnPlays(dblPart, 1, [3, 3, 3, 3]).max === 2, 'جفت: اگر فقط دو حرکت ممکن است، همان دو');
+  // جفت‌ها ترتیب‌های زیادی دارند؛ هر وضعیت پایانی فقط یک بار و هر نوبت با قانون‌ها می‌خواند
+  const six = E.turnPlays(init, 1, [6, 6, 6, 6]);
+  const keys = new Set(six.plays.map((p) => E.key(p.B)));
+  ok(six.plays.length > 0 && keys.size === six.plays.length, 'جفت: وضعیت‌های پایانی تکراری حذف شده‌اند (' + six.plays.length + ')');
+  let replayOk = six.plays.length > 0;
+  for (const p of six.plays) {
+    const t = E.newGame(4);
+    Object.assign(t, E.initial(), { turn: 1, left: [6, 6, 6, 6], dice: [6, 6], hist: [], winner: 0 });
+    for (const m of p.steps) if (!E.play(t, m)) replayOk = false;
+    if (E.key(t) !== E.key(p.B)) replayOk = false;
+  }
+  ok(replayOk, 'جفت: هر نوبت هوش مصنوعی با play حرکت‌به‌حرکت پذیرفته می‌شود');
+
+  // ------------------------------------------------------- بیرون بردن
+  const exact = pos({ 6: 2, 3: 1 }, { 20: 15 });
+  L = E.legalSteps(exact, 1, [6, 3]);
+  ok(L.some((m) => m.from === 6 && m.to === 0 && m.die === 6) && L.some((m) => m.from === 3 && m.to === 0 && m.die === 3),
+    'بیرون بردن: تاس دقیق بیرون می‌برد (' + fmt(L) + ')');
+  const high = pos({ 4: 1, 2: 1 }, { 20: 15 });
+  ok(fmt(E.stepsFor(high, 1, 6)) === '4>0/6', 'بیرون بردن: تاس بزرگ‌تر فقط از بالاترین خانه‌ی پر');
+  ok(fmt(E.stepsFor(high, 1, 3)) === '4>1/3', 'بیرون بردن: تاس ۳ از خانه‌ی ۲ بیرون نمی‌برد چون ۴ بالاتر است');
+  const inner = pos({ 6: 1, 1: 1 }, { 20: 15 });
+  ok(fmt(E.stepsFor(inner, 1, 5)) === '6>1/5', 'بیرون بردن: وقتی خانه‌ی بالاتر پر است، تاس ۵ از ۱ بیرون نمی‌برد');
+  const outside = pos({ 7: 1, 3: 1 }, { 20: 15 });
+  ok(!E.stepsFor(outside, 1, 3).some((m) => m.to === 0), 'بیرون بردن: با مهره‌ای بیرون از خانه هیچ مهره‌ای بیرون نمی‌رود');
+  ok(!E.stepsFor(pos({ 3: 14 }, { 20: 15 }, { 1: 1 }), 1, 3).some((m) => m.to === 0), 'بیرون بردن: با مهره‌ی روی بار هم نه');
+  const p2off = pos({ 1: 15 }, { 21: 1, 23: 1 });
+  ok(fmt(E.stepsFor(p2off, 2, 6)) === '4>0/6', 'بیرون بردن: برای بازیکن ۲ هم بالاترین خانه از دید خودش');
+
+  // -------------------------------------------------- نتیجه‌ی پایانی
+  const fin = (w, b, bar) => Object.assign(E.newGame(5), pos(w, b, bar), { winner: 1 });
+  ok(E.result(fin({}, { 18: 14, 13: 1 })) === 2, 'مارس: بازنده چیزی بیرون نبرده');
+  ok(E.result(fin({}, { 18: 14, 3: 1 })) === 3, 'بک‌گمون: مهره‌ی بازنده در خانه‌ی برنده');
+  ok(E.result(fin({}, { 18: 14 }, { 2: 1 })) === 3, 'بک‌گمون: مهره‌ی بازنده روی بار');
+  ok(E.result(fin({}, { 18: 14 })) === 1, 'برد ساده: بازنده یک مهره بیرون برده');
+
+  // ------------------------------------------- شروع، تاس و برگرداندن
+  let openOk = true;
+  for (let s = 0; s < 300; s++) {
+    const g = E.newGame(s * 2654435761);
+    const [a, b] = g.opening;
+    if (a === b || a < 1 || a > 6 || b < 1 || b > 6 || g.turn !== (a > b ? 1 : 2) || g.left.join() !== a + ',' + b) openOk = false;
+  }
+  ok(openOk, 'شروع: هر طرف یک تاس، مساوی دوباره، بزرگ‌تر با همان دو تاس شروع می‌کند');
+  const u = E.newGame(777);
+  const before = JSON.stringify(u);
+  const first = E.legal(u)[0];
+  ok(!!E.play(u, first) && E.undo(u) && JSON.stringify(u) === before, 'برگرداندن: وضعیت و تاس دقیقاً همان پیش از حرکت');
+  ok(E.undo(u) === false, 'برگرداندن: اول نوبت چیزی برای برگرداندن نیست');
+  while (!E.canEnd(u)) E.play(u, E.legal(u)[0]);
+  ok(E.endTurn(u) && u.dice.join() === E.rollFor(777, 2).join() && u.hist.length === 0, 'تاس نوبت بعد از بذر و شماره‌ی نوبت می‌آید');
+  ok(E.undo(u) === false, 'برگرداندن از مرز نوبت عقب‌تر نمی‌رود');
+
+  // ------------------------------------- بازی‌های کامل هوش مصنوعی
+  function match(seed, l1, l2, check) {
+    const S = E.newGame(seed);
+    let turns = 0, maxMs = 0, bad = '';
+    const log = [];
+    while (!S.winner && turns < 1000) {
+      const t0 = Date.now();
+      const steps = E.aiPlay(S, S.turn === 1 ? l1 : l2);
+      maxMs = Math.max(maxMs, Date.now() - t0);
+      log.push(S.dice.join('') + ':' + steps.map((m) => m.from + '-' + m.to).join(','));
+      for (const m of steps) {
+        if (!E.play(S, m)) { bad = bad || 'حرکت رد شد ' + JSON.stringify(m); break; }
+        if (check && (E.count(S, 1) !== 15 || E.count(S, 2) !== 15)) bad = bad || 'تعداد مهره عوض شد';
+        if (S.winner) break;
+      }
+      if (bad) break;
+      if (!S.winner && !E.endTurn(S)) { bad = 'پایان نوبت ممکن نبود'; break; }
+      turns++;
+    }
+    return { winner: S.winner, kind: E.result(S), turns, maxMs, bad, log: log.join(' ') };
+  }
+  let maxMs = 0, allEnd = true, allOk = true, kinds = new Set();
+  const levels = ['easy', 'medium', 'hard'];
+  for (let i = 0; i < 24; i++) {
+    const r = match(i * 104729 + 7, levels[i % 3], levels[(i + 1) % 3], true);
+    maxMs = Math.max(maxMs, r.maxMs);
+    if (!r.winner) allEnd = false;
+    if (r.bad) { allOk = false; console.log('    ' + r.bad); }
+    kinds.add(r.kind);
+  }
+  ok(allOk, 'بازی‌های خودکار: هر حرکت پذیرفته شد و هر طرف همیشه ۱۵ مهره داشت');
+  ok(allEnd, 'بازی‌های خودکار: همه به پایان رسیدند');
+  ok([...kinds].every((k) => k >= 1 && k <= 3), 'بازی‌های خودکار: نتیجه ساده، مارس یا بک‌گمون است (' + [...kinds].join(',') + ')');
+
+  function series(a, b, n) {
+    let wins = 0;
+    for (let i = 0; i < n; i++) {
+      const swap = i % 2 === 1;
+      const r = swap ? match(i * 7919 + 11, b, a) : match(i * 7919 + 11, a, b);
+      maxMs = Math.max(maxMs, r.maxMs);
+      if (r.winner === (swap ? 2 : 1)) wins++;
+    }
+    return wins;
+  }
+  const hm2 = series('hard', 'medium', 200);
+  ok(hm2 > 110, 'سخت از متوسط قوی‌تر است (' + hm2 + '/200)');
+  const me = series('medium', 'easy', 30);
+  ok(me > 15, 'متوسط از آسان قوی‌تر است (' + me + '/30)');
+  ok(maxMs < 900, 'زمان فکر هوش مصنوعی در هر نوبت قابل قبول است (' + maxMs + 'ms)');
+  console.log('  سخت در برابر متوسط ' + hm2 + '/200، متوسط در برابر آسان ' + me + '/30، بیشینه‌ی فکر ' + maxMs + 'ms');
+
+  // ------------------------------------------ روزانه و ادامه‌ی بازی
+  const d1 = match(0xC0FFEE, 'hard', 'hard'), d2 = match(0xC0FFEE, 'hard', 'hard'), d3 = match(0xC0FFEF, 'hard', 'hard');
+  ok(d1.log.length > 0 && d1.log === d2.log, 'یک بذر روزانه همیشه همان بازی را می‌دهد');
+  ok(d1.log !== d3.log, 'بذر دیگر بازی دیگری می‌دهد');
+  // بازی ذخیره‌شده و برگشته همان آینده را دارد
+  const live = E.newGame(4242);
+  for (let t = 0; t < 6; t++) { for (const m of E.aiPlay(live, 'hard')) E.play(live, m); E.endTurn(live); }
+  const resumed = JSON.parse(JSON.stringify(live));
+  const fut = (S) => { const out = []; for (let t = 0; t < 8 && !S.winner; t++) { const st = E.aiPlay(S, 'medium'); out.push(S.dice.join('') + st.map((m) => m.from + '-' + m.to).join()); for (const m of st) E.play(S, m); E.endTurn(S); } return out.join('|'); };
+  ok(fut(live) === fut(resumed), 'بازی ادامه‌داده‌شده همان تاس‌ها و همان آینده را دارد');
+
+  // صفحه باید از موتور بگذرد و تاس روزانه را از هسته بگیرد
+  const bgHtml = fs.readFileSync(path.join(ROOT, 'www/games/backgammon/index.html'), 'utf8');
+  const page = bgHtml.slice(bgHtml.indexOf('/* ==== ENGINE END ==== */'));
+  ok(page.length > 1000, 'بخش صفحه‌ی تخته‌نرد خوانده شد');
+  ok(/E\.play\(S, m\)/.test(page) && /E\.undo\(S\)/.test(page) && /E\.endTurn\(S\)/.test(page), 'صفحه حرکت، برگرداندن و پایان نوبت را با موتور انجام می‌دهد');
+  ok(/C\.daily\('backgammon', daily\)\.seed/.test(page), 'تاس روزانه از بذر هسته می‌آید');
+  ok(!/Math\.random\(\)[^\n]*dice|rollFor/.test(page), 'صفحه خودش تاس نمی‌ریزد');
+}
+
 /* ----------------------------------------------------- دفاع از برج */
 function testTd() {
   head('دفاع از برج');
@@ -1954,6 +2166,7 @@ testMancala();
 testFreecell();
 testPeg();
 testReversi();
+testBackgammon();
 testTd();
 testVersionStamp();
 testDeployGate();

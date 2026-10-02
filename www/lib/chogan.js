@@ -837,7 +837,10 @@
     { id: 'pg-clean',    icon: 'brain',   fa: 'بی‌برگشت',         en: 'No take-backs',     dfa: 'بدون برگرداندن به یک میخ رسیدی',     den: 'Get down to one peg without undoing', zh: '一步不悔', dzh: '不撤销就只剩一枚' },
     { id: 'rv-win',      icon: 'medal',   fa: 'برگرداننده',       en: 'Flipper',           dfa: 'یک دست ریورسی را مقابل حریف بردی',    den: 'Win a reversi match against the AI', zh: '翻盘手', dzh: '对战电脑赢下一局黑白棋' },
     { id: 'rv-hard',     icon: 'brain',   fa: 'استاد محاصره',     en: 'Outflanker',        dfa: 'در ریورسی حریف سخت را شکست دادی',     den: 'Beat the hard AI at reversi', zh: '包围大师', dzh: '在黑白棋中击败困难电脑' },
-    { id: 'rv-corners',  icon: 'crown',   fa: 'چهار گوشه',        en: 'Four corners',      dfa: 'با هر چهار گوشه‌ی تخته ریورسی را بردی', den: 'Win at reversi holding all four corners', zh: '四角皆占', dzh: '占据全部四个角赢下黑白棋' }
+    { id: 'rv-corners',  icon: 'crown',   fa: 'چهار گوشه',        en: 'Four corners',      dfa: 'با هر چهار گوشه‌ی تخته ریورسی را بردی', den: 'Win at reversi holding all four corners', zh: '四角皆占', dzh: '占据全部四个角赢下黑白棋' },
+    { id: 'bg-win',      icon: 'medal',   fa: 'نردباز',           en: 'Backgammon player', dfa: 'یک دست تخته‌نرد را از حریف بردی',     den: 'Win a backgammon game against the AI', zh: '双陆棋手', dzh: '对战电脑赢下一局双陆棋' },
+    { id: 'bg-hard',     icon: 'brain',   fa: 'استاد تخته',       en: 'Board master',      dfa: 'حریف سخت تخته‌نرد را بردی',           den: 'Beat the hard backgammon AI', zh: '棋盘大师', dzh: '击败困难难度的双陆棋电脑' },
+    { id: 'bg-gammon',   icon: 'crown',   fa: 'مارس',             en: 'Gammon',            dfa: 'تخته‌نرد را با مارس یا بک‌گمون بردی', den: 'Win a gammon or a backgammon', zh: '全胜', dzh: '以全胜或完胜赢下双陆棋' }
   ];
 
   var achApi = {
