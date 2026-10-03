@@ -14,8 +14,19 @@ Chogan is a small collection of finishable games in a single app. Free, open sou
 | Sudoku | Four difficulties with a guaranteed unique solution, notes, hints and a daily challenge |
 | Minesweeper | No-guess generation, four sizes, chording and flags, daily challenge |
 | Dots and Boxes | Two players on one phone, or three levels of AI |
+| Backgammon | Two players or three levels of AI, dice that undo can never re-roll, gammons count double |
+| Mancala | Kalah rules, two players or three levels of AI |
+| Nonogram | Three sizes, every puzzle solvable by logic alone |
+| FreeCell | The classic numbered deals, never the one unwinnable deal, unlimited undo |
+| Reversi | Two players or three levels of AI |
+| Nine Men's Morris | Two players or three levels of AI |
+| Peg Solitaire | Leave one peg, in the centre for a perfect game |
+| Battleship | Against an AI that only knows what you would know |
+| Bridges | Three sizes, every puzzle with exactly one solution |
+| Code Breaker | Three levels, colour-blind friendly |
+| Breakout | Twelve fixed levels, three balls each |
 
-Around the games: a daily challenge that is identical on every device with no server at all, a weekly offline league with five tiers, over thirty awards, a shared coin that is only ever spent on hints and cosmetics, stats and a profile, and a Persian, English and Simplified Chinese interface with light and dark themes.
+Around the games: a daily challenge that is identical on every device with no server at all, a weekly offline league with five tiers, over sixty awards, a shared coin that is only ever spent on hints and cosmetics, stats and a profile, and a Persian, English and Simplified Chinese interface with light and dark themes.
 
 ### Why it needs no permissions
 
@@ -80,8 +91,19 @@ MIT, see [LICENSE](LICENSE). The Vazirmatn font is under the OFL; its licence te
 | سودوکو | چهار سختی با جواب یکتای تضمین‌شده، یادداشت، راهنمایی و چالش روزانه |
 | مین‌روب | تولید بدون حدس، چهار اندازه، کورد و پرچم، چالش روزانه |
 | نقطه‌بازی | دو نفره روی یک گوشی یا مقابل هوش مصنوعی با سه سطح |
+| تخته‌نرد | دو نفره یا مقابل هوش مصنوعی با سه سطح، تاسی که با برگرداندن عوض نمی‌شود، مارس دو برابر |
+| منقله | قانون کلاه، دو نفره یا مقابل هوش مصنوعی با سه سطح |
+| نونوگرام | سه اندازه، هر جدول فقط با منطق حل می‌شود |
+| فری‌سل | دست‌های شماره‌دار کلاسیک، هرگز دست بی‌جواب، برگرداندن بی‌حد |
+| ریورسی | دو نفره یا مقابل هوش مصنوعی با سه سطح |
+| دوز | دو نفره یا مقابل هوش مصنوعی با سه سطح |
+| میخ‌پران | یک میخ بماند، در مرکز یعنی بی‌نقص |
+| نبرد دریایی | مقابل حریفی که فقط همان را می‌داند که تو می‌دانی |
+| پل‌ها | سه اندازه، هر جدول دقیقاً یک جواب |
+| رمزشکن | سه سطح، مناسب کوررنگی |
+| آجرشکن | دوازده مرحله‌ی ثابت، سه توپ در هر مرحله |
 
-بیرون از بازی‌ها: چالش روزانه‌ی مشترک برای همه‌ی دستگاه‌ها بدون هیچ سروری، لیگ هفتگی آفلاین با پنج رده، بیش از سی دستاورد، سکه‌ی مشترک که فقط خرج راهنمایی و تزئینات می‌شود، آمار و پروفایل، و رابط فارسی، انگلیسی و چینی ساده‌شده با تم روشن و تاریک.
+بیرون از بازی‌ها: چالش روزانه‌ی مشترک برای همه‌ی دستگاه‌ها بدون هیچ سروری، لیگ هفتگی آفلاین با پنج رده، بیش از شصت دستاورد، سکه‌ی مشترک که فقط خرج راهنمایی و تزئینات می‌شود، آمار و پروفایل، و رابط فارسی، انگلیسی و چینی ساده‌شده با تم روشن و تاریک.
 
 ### چرا هیچ مجوزی نمی‌خواهد
 
@@ -127,7 +149,7 @@ cd android && gradle assembleDebug
 ### تست
 
 ```bash
-node tools/test.js        # موتور هر چهار بازی، از دل همان فایل‌های منتشرشده
+node tools/test.js        # موتور همه‌ی بازی‌ها، از دل همان فایل‌های منتشرشده
 tools/browser-check.sh    # منو و همه‌ی بازی‌ها در کروم بدون سر
 ```
 
