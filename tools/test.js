@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 1651;
+const MIN_CHECKS = 1659;
 
 function ok(cond, msg) {
   checks++;
@@ -926,6 +926,30 @@ function testFreecell() {
   ok(/E\.autoAll\(S\)/.test(ui), 'صفحه حرکت خودکار را با E.autoAll انجام می‌دهد');
   ok(/E\.bestTarget\(S, src, n\)/.test(ui), 'لمس مقصد را از E.bestTarget می‌گیرد');
   ok(!/localStorage/.test(ui), 'صفحه مستقیم به localStorage دست نمی‌زند');
+
+  // بوم پهن، تخته‌ی همان‌اندازه (#102): تابع واقعی layout صفحه با پهناهای مختلف
+  const fcHtml = fs.readFileSync(path.join(ROOT, 'www/games/freecell/index.html'), 'utf8');
+  const lAt = fcHtml.indexOf('function layout() {');
+  ok(lAt > 0, 'تابع layout فری‌سل پیدا شد');
+  let lDepth = 0, lEnd = lAt;
+  for (let i = fcHtml.indexOf('{', lAt); i < fcHtml.length; i++) {
+    if (fcHtml[i] === '{') lDepth++;
+    else if (fcHtml[i] === '}' && --lDepth === 0) { lEnd = i + 1; break; }
+  }
+  const consts = (fcHtml.match(/^ {2}var BOARD_MAX = \d+;$/m) || [''])[0];
+  const fcLayout = (W, H) => {
+    try {
+      return vm.runInNewContext('(function (board) { var L; ' + consts + fcHtml.slice(lAt, lEnd) + ' layout(); return L; })', {})(
+        { clientWidth: W, clientHeight: H });
+    } catch (e) { ok(false, 'layout اجرا نشد: ' + e.message); return {}; }
+  };
+  const narrow = fcLayout(680, 900), wide = fcLayout(1600, 900), phone = fcLayout(360, 900);
+  // گوشی: عددهای دستی از همان فرمول، gap=max(3,round(360×0.014))=5 و cw=floor((360−45)/8)=39
+  ok(phone.cw === 39 && phone.gap === 5, 'گوشی ۳۶۰: اندازه‌ی کارت و فاصله همان قبل است (' + phone.cw + '/' + phone.gap + ')');
+  ok(wide.cw === narrow.cw && wide.gap === narrow.gap && wide.ov === narrow.ov && wide.ch === narrow.ch,
+    'بوم پهن تخته را بزرگ‌تر یا بازتر نمی‌کند (' + [narrow.cw, narrow.gap] + ' / ' + [wide.cw, wide.gap] + ')');
+  ok(wide.x0 === narrow.x0 + (1600 - 680) / 2, 'تخته وسط بوم پهن است (x0 ' + wide.x0 + ')');
+  ok(!/\.fc-board \{[^}]*max-width/.test(fcHtml), 'بوم سقف پهنای ۶۸۰ ندارد، پس کارت در حال کشیدن بریده نمی‌شود');
 }
 
 /* ---------------------------------------------------------- میخ‌پران */
