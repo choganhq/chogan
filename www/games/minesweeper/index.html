@@ -16,7 +16,18 @@
     border: 3px solid var(--c-line); border-radius: var(--r-md);
     box-shadow: var(--sh-2); overflow: hidden;
     --ms-inner-r: calc(var(--r-md) - 3px);
+    position: relative;
   }
+  /* لبه‌ای که ستون پنهان دارد محو می‌شود و پیکان می‌گیرد (#101) */
+  .ms-frame::before, .ms-frame::after {
+    content: ''; position: absolute; top: 0; bottom: 0; width: 30px; z-index: 1;
+    pointer-events: none; opacity: 0; transition: opacity var(--t-fast) var(--ease);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; font-weight: 800; color: var(--game);
+  }
+  .ms-frame::before { content: '‹'; left: 0; background: linear-gradient(to right, var(--c-line) 35%, transparent); }
+  .ms-frame::after { content: '›'; right: 0; background: linear-gradient(to left, var(--c-line) 35%, transparent); }
+  .ms-frame.ms-more-left::before, .ms-frame.ms-more-right::after { opacity: 1; }
   .ms-scroll {
     max-width: 100%; overflow: auto; overscroll-behavior: contain;
     background: var(--c-line); border-radius: var(--ms-inner-r);
@@ -247,9 +258,21 @@ function MinesEngineFactory() {
     return pool[Math.floor((rnd ? rnd() : Math.random()) * pool.length)];
   }
 
+  // کدام لبه‌ی تخته ستون پنهان دارد. گوشی نوار اسکرول نمی‌کشد، پس بی نشانه
+  // ستون سیزدهمِ تخته‌ی ۱۶تایی آخرین ستون به نظر می‌آمد و عددهایش غلط (#101).
+  // در راست‌چین کروم scrollLeft از صفر به منفی می‌رود.
+  function scrollEdges(scrollLeft, scrollWidth, clientWidth, rtl) {
+    var max = scrollWidth - clientWidth;
+    if (max <= 1) return { left: false, right: false };
+    var pos = Math.min(max, Math.abs(scrollLeft));
+    var atStart = pos > 1, atEnd = pos < max - 1;
+    return rtl ? { left: atEnd, right: atStart } : { left: atStart, right: atEnd };
+  }
+
   var api = {
     makeNeighbors: makeNeighbors, layMines: layMines, counts: counts,
-    floodOpen: floodOpen, solvable: solvable, generate: generate, safeHint: safeHint
+    floodOpen: floodOpen, solvable: solvable, generate: generate, safeHint: safeHint,
+    scrollEdges: scrollEdges
   };
   if (typeof self !== 'undefined') self.MinesEngine = api;
   return api;
@@ -453,7 +476,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
         board.appendChild(b);
       })(i);
     }
-    roundCorners();
+    roundCorners();    // sizeCells پیش از ساختن خانه‌ها اجرا می‌شود و تخته‌ی خالی را می‌سنجد
+    markEdges();
   }
 
   // شعاع گوشه‌های بیرونی روی چهار خانه‌ی گوشه، هم‌مرکز با قاب.
@@ -479,8 +503,17 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
     var cs = Math.floor((avail - sp.cols * 2) / sp.cols);
     cs = C.clamp(cs, 26, 42);
     board.style.setProperty('--cs', cs + 'px');
+    markEdges();
   }
   window.addEventListener('resize', function () { if (S) sizeCells(); });
+
+  function markEdges() {
+    var rtl = getComputedStyle(scroll).direction === 'rtl';
+    var e = E.scrollEdges(scroll.scrollLeft, scroll.scrollWidth, scroll.clientWidth, rtl);
+    frame.classList.toggle('ms-more-left', e.left);
+    frame.classList.toggle('ms-more-right', e.right);
+  }
+  scroll.addEventListener('scroll', markEdges, { passive: true });
 
   function render() {
     top.innerHTML = '';
