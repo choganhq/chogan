@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 1659;
+const MIN_CHECKS = 1668;
 
 function ok(cond, msg) {
   checks++;
@@ -119,6 +119,21 @@ function testMines() {
     ok(noGuess >= 4, s.n + ': بیشتر تخته‌ها بدون حدس تولید شدند (' + noGuess + '/5)');
     ok(maxMs < 900, s.n + ': تولید سریع است (' + maxMs + 'ms)');
   }
+
+  // ستون‌های پنهان (#101): گوشی نوار اسکرول نمی‌کشد، پس لبه‌ی پنهان باید نشانه بگیرد
+  ok(typeof E.scrollEdges === 'function', 'موتور تابع scrollEdges دارد');
+  const se = typeof E.scrollEdges === 'function' ? E.scrollEdges : () => ({});
+  const sj = (x) => JSON.stringify(x);
+  // تخته‌ی ۱۶ستونه‌ی ۴۴۶ پیکسلی در قاب ۳۸۱ پیکسلی، همان اندازه‌های گزارش
+  ok(sj(se(0, 446, 381, false)) === sj({ left: false, right: true }), 'چپ‌به‌راست، اول: فقط راست پنهان است');
+  ok(sj(se(30, 446, 381, false)) === sj({ left: true, right: true }), 'چپ‌به‌راست، وسط: هر دو لبه پنهان‌اند');
+  ok(sj(se(65, 446, 381, false)) === sj({ left: true, right: false }), 'چپ‌به‌راست، آخر: فقط چپ پنهان است');
+  ok(sj(se(0, 446, 381, true)) === sj({ left: true, right: false }), 'راست‌به‌چپ، اول: فقط چپ پنهان است');
+  ok(sj(se(-65, 446, 381, true)) === sj({ left: false, right: true }), 'راست‌به‌چپ، آخر: فقط راست پنهان است');
+  ok(sj(se(0, 250, 250, false)) === sj({ left: false, right: false }), 'تخته‌ای که جا می‌شود هیچ لبه‌ی پنهانی ندارد');
+  ok(sj(se(0, 251, 250, false)) === sj({ left: false, right: false }), 'یک پیکسل گردکردن لبه‌ی پنهان حساب نمی‌شود');
+  const msHtml = fs.readFileSync(path.join(ROOT, 'www/games/minesweeper/index.html'), 'utf8');
+  ok(/E\.scrollEdges\(scroll\.scrollLeft, scroll\.scrollWidth, scroll\.clientWidth, rtl\)/.test(msHtml), 'صفحه لبه‌ها را از scrollEdges می‌گیرد');
 }
 
 /* ------------------------------------------------------- نقطه‌بازی */
