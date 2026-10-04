@@ -574,9 +574,9 @@ function testMancala() {
   ok(!/localStorage/.test(mcHtml), 'صفحه مستقیم به localStorage دست نمی‌زند');
 }
 
-/* --------------------------------------------------------- فری‌سل */
+/* --------------------------------------------------------- سلول‌آزاد */
 function testFreecell() {
-  head('فری‌سل');
+  head('سلول‌آزاد');
   const E = loadEngine('freecell', 'FreecellEngineFactory');
   const N = (c) => E.name(c);
   const P = (s) => {
@@ -935,7 +935,7 @@ function testFreecell() {
 
   // صفحه باید حرکت، برگرداندن و حرکت خودکار را از موتور بگیرد
   const ui = page.slice(page.indexOf('/* ==== ENGINE END ==== */'));
-  ok(ui.length > 1000, 'بخش صفحه‌ی فری‌سل خوانده شد');
+  ok(ui.length > 1000, 'بخش صفحه‌ی سلول‌آزاد خوانده شد');
   ok(/E\.move\(S, src, n, to\)/.test(ui), 'صفحه حرکت را با E.move ثبت می‌کند');
   ok(/E\.undo\(S\)/.test(ui), 'صفحه برگرداندن را با E.undo انجام می‌دهد');
   ok(/E\.autoAll\(S\)/.test(ui), 'صفحه حرکت خودکار را با E.autoAll انجام می‌دهد');
@@ -945,7 +945,7 @@ function testFreecell() {
   // بوم پهن، تخته‌ی همان‌اندازه (#102): تابع واقعی layout صفحه با پهناهای مختلف
   const fcHtml = fs.readFileSync(path.join(ROOT, 'www/games/freecell/index.html'), 'utf8');
   const lAt = fcHtml.indexOf('function layout() {');
-  ok(lAt > 0, 'تابع layout فری‌سل پیدا شد');
+  ok(lAt > 0, 'تابع layout سلول‌آزاد پیدا شد');
   let lDepth = 0, lEnd = lAt;
   for (let i = fcHtml.indexOf('{', lAt); i < fcHtml.length; i++) {
     if (fcHtml[i] === '{') lDepth++;
