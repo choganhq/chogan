@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 1674;
+const MIN_CHECKS = 1680;
 
 function ok(cond, msg) {
   checks++;
@@ -3163,6 +3163,29 @@ function testMenu() {
   ok(backLine.length > 0, 'دکمه‌ی بازگشت نوار بازی پیدا شد');
   ok(/Chogan\.icon\(Chogan\.isRtl\(\) \? 'forward' : 'back'/.test(backLine), 'نوار بازی پیکان بازگشت را با جهت متن انتخاب می‌کند');
   ok(/C\.icon\(C\.isRtl\(\) \? 'forward' : 'back'/.test(menu), 'منو هم همان قاعده را دارد');
+
+  // دکمه‌ی تمام‌صفحه در اپ نصب‌شده (#108): تابع واقعی available با محیط ساختگی
+  const fsAt = core.indexOf('available: function () {');
+  ok(fsAt > 0, 'تابع fullscreen.available پیدا شد');
+  let fd = 0, fsEnd = fsAt;
+  for (let i = core.indexOf('{', fsAt); i < core.length; i++) {
+    if (core[i] === '{') fd++;
+    else if (core[i] === '}' && --fd === 0) { fsEnd = i + 1; break; }
+  }
+  const fsAvail = (mode, opts) => {
+    const o = opts || {};
+    const g = { matchMedia: (q) => ({ matches: q.split(',').some((part) => part.indexOf('display-mode: ' + mode) >= 0) }) };
+    if (o.capacitor) g.Capacitor = {};
+    const doc = { fullscreenEnabled: o.api !== false, documentElement: { requestFullscreen: o.api !== false ? () => 0 : undefined } };
+    try {
+      return vm.runInNewContext('(function (global, document) { return (function ' + core.slice(fsAt + 'available: function'.length, fsEnd) + ')(); })', {})(g, doc);
+    } catch (e) { ok(false, 'available اجرا نشد: ' + e.message); return undefined; }
+  };
+  ok(fsAvail('browser') === true, 'مرورگر: دکمه‌ی تمام‌صفحه هست');
+  ok(fsAvail('standalone') === true, 'اپ نصب‌شده (پنجره‌ی نواردار): دکمه‌ی تمام‌صفحه هست');
+  ok(fsAvail('fullscreen') === false, 'از قبل تمام‌صفحه: دکمه نیست');
+  ok(fsAvail('standalone', { capacitor: true }) === false, 'داخل اپ اندروید: دکمه نیست');
+  ok(fsAvail('browser', { api: false }) === false, 'مرورگر بی Fullscreen API: دکمه نیست');
 }
 
 testFiles();

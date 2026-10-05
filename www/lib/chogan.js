@@ -1399,12 +1399,14 @@
   /* ------------------------------------------------------ تمام‌صفحه */
   // اپ چندصفحه‌ای است و هر بازی سند خودش را دارد، پس مرورگر با هر ناوبری از
   // تمام‌صفحه بیرون می‌آید. دکمه هم در منو و هم در نوار بازی می‌نشیند تا
-  // برگرداندنش یک ضربه باشد. در حالت نصب‌شده اصلاً لازم نیست.
+  // برگرداندنش یک ضربه باشد. اپ نصب‌شده روی دسکتاپ پنجره‌ی نواردار است و
+  // تمام‌صفحه به کارش می‌آید، پس فقط وقتی پنهان است که از قبل تمام‌صفحه باشد
+  // یا داخل اپ اندروید (#108).
   Chogan.fullscreen = {
     available: function () {
       try {
         if (global.Capacitor) return false;
-        if (global.matchMedia && global.matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches) return false;
+        if (global.matchMedia && global.matchMedia('(display-mode: fullscreen)').matches) return false;
         var e = document.documentElement;
         return !!(document.fullscreenEnabled && e.requestFullscreen);
       } catch (e) { return false; }
