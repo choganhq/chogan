@@ -1869,7 +1869,8 @@
     })();
 
     var title = el('div', { class: 'ch-gamebar__title ch-grow', text: cfg.name[state.settings.lang] || cfg.name.fa });
-    var backBtn = el('button', { class: 'ch-iconbtn ch-iconbtn--plain', type: 'button', 'aria-label': Chogan.t('back') }, [Chogan.icon('back', 22)]);
+    // بازگشت در راست‌چین رو به راست است، مثل پیکان‌های منو (#107)
+    var backBtn = el('button', { class: 'ch-iconbtn ch-iconbtn--plain', type: 'button', 'aria-label': Chogan.t('back') }, [Chogan.icon(Chogan.isRtl() ? 'forward' : 'back', 22)]);
     backBtn.addEventListener('click', function () { Chogan.feedback('tap'); ctx.save(); Chogan.back(); });
 
     var bar = el('header', { class: 'ch-gamebar' }, [backBtn, title]);
