@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 1668;
+const MIN_CHECKS = 1674;
 
 function ok(cond, msg) {
   checks++;
@@ -3157,6 +3157,12 @@ function testMenu() {
   ok(sampler.length > 0, 'دستاورد sampler در جدول هست');
   ok(!/هر چهار|all four|四个游戏都/.test(sampler), 'متن sampler دیگر «هر چهار بازی» نمی‌گوید');
   ok(/>= 4\) achApi\.unlock\('sampler'\)/.test(core), 'شرط sampler همان چهار بازی مختلف است');
+
+  // دکمه‌ی بازگشت نوار بازی در راست‌چین رو به راست (#107)، با همان قاعده‌ی منو
+  const backLine = (core.match(/var backBtn = [^\n]*/) || [''])[0];
+  ok(backLine.length > 0, 'دکمه‌ی بازگشت نوار بازی پیدا شد');
+  ok(/Chogan\.icon\(Chogan\.isRtl\(\) \? 'forward' : 'back'/.test(backLine), 'نوار بازی پیکان بازگشت را با جهت متن انتخاب می‌کند');
+  ok(/C\.icon\(C\.isRtl\(\) \? 'forward' : 'back'/.test(menu), 'منو هم همان قاعده را دارد');
 }
 
 testFiles();
