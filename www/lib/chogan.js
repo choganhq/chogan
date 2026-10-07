@@ -2182,6 +2182,19 @@
     return !!(s && s.inProgress);
   };
 
+  // کلید برگرداندن، یک جا برای همه‌ی بازی‌ها: U یا Ctrl+Z (روی مک Cmd+Z).
+  // بیشتر بازی‌ها فقط U را می‌شناختند (#111). با چیدمان فارسی e.key می‌شود «ع» یا
+  // «ظ»، پس وقتی کلید حرف لاتین نیست جای فیزیکی‌اش (e.code) ملاک است.
+  // Ctrl+Shift+Z در بیشتر برنامه‌ها «دوباره انجام بده» است و برنمی‌گرداند.
+  Chogan.undoKey = function (e) {
+    if (!e || e.altKey) return false;
+    var key = e.key || '';
+    var k = /^[a-z]$/i.test(key) ? key.toLowerCase()
+      : (e.code === 'KeyZ' ? 'z' : (e.code === 'KeyU' ? 'u' : ''));
+    if (e.ctrlKey || e.metaKey) return k === 'z' && !e.shiftKey;
+    return k === 'u';
+  };
+
   Chogan.version = (global.APP_VERSION || '0.0.0');
 
   // برای تست‌های خودکار در نود

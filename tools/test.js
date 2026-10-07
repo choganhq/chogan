@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 1680;
+const MIN_CHECKS = 1726;
 
 function ok(cond, msg) {
   checks++;
@@ -3125,6 +3125,44 @@ function testLocales() {
 
 /* ------------------------------------------------- منو و دستاوردها */
 // تابع واقعی منو را بیرون می‌کشیم و با هسته‌ی ساختگی اجرا می‌کنیم (#85).
+function testUndoKey() {
+  head('کلید برگرداندن');
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  const m = core.match(/  Chogan\.undoKey = (function \(e\) \{[\s\S]*?\n  \});/);
+  ok(!!m, 'هسته Chogan.undoKey دارد');
+  const undoKey = m ? vm.runInNewContext('(' + m[1] + ')', {}) : () => null;
+  const K = (key, code, mods) => Object.assign({ key, code, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false }, mods || {});
+  const cases = [
+    [K('z', 'KeyZ', { ctrlKey: true }), true, 'Ctrl+Z'],
+    [K('Z', 'KeyZ', { ctrlKey: true }), true, 'Ctrl+Z با Caps Lock'],
+    [K('z', 'KeyZ', { metaKey: true }), true, 'Cmd+Z در مک'],
+    [K('ظ', 'KeyZ', { ctrlKey: true }), true, 'Ctrl+Z با چیدمان فارسی'],
+    [K('u', 'KeyU'), true, 'U'],
+    [K('U', 'KeyU', { shiftKey: true }), true, 'Shift+U'],
+    [K('ع', 'KeyU'), true, 'U با چیدمان فارسی'],
+    [K('z', 'KeyZ', { ctrlKey: true, shiftKey: true }), false, 'Ctrl+Shift+Z (دوباره انجام بده) برنمی‌گرداند'],
+    [K('z', 'KeyZ', { ctrlKey: true, altKey: true }), false, 'Ctrl+Alt+Z برنمی‌گرداند'],
+    [K('z', 'KeyZ'), false, 'Z تنها برنمی‌گرداند'],
+    [K('u', 'KeyU', { ctrlKey: true }), false, 'Ctrl+U مال مرورگر است'],
+    [K('y', 'KeyZ', { ctrlKey: true }), false, 'چیدمان آلمانی: کلید فیزیکی Z که y می‌نویسد برنمی‌گرداند'],
+    [K('z', 'KeyY', { ctrlKey: true }), true, 'چیدمان آلمانی: حرف z هر جا که باشد برمی‌گرداند'],
+    [K('ArrowLeft', 'ArrowLeft'), false, 'جهت‌نما برنمی‌گرداند']
+  ];
+  for (const [e, want, name] of cases) ok(undoKey(e) === want, 'undoKey: ' + name);
+
+  // هر بازی‌ای که دکمه‌ی برگرداندن دارد باید کیبوردش را از همین یک تابع بگذراند،
+  // وگرنه Ctrl+Z در یکی کار می‌کند و در دیگری نه (#111)
+  const games = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games;
+  const withUndo = games.filter((g) => /icon: 'undo'|C\.icon\('undo'|tool\('undo'/.test(fs.readFileSync(path.join(ROOT, 'www', g.path), 'utf8')));
+  ok(withUndo.length >= 10, 'دست‌کم ده بازی دکمه‌ی برگرداندن دارند (' + withUndo.length + ' پیدا شد)');
+  for (const g of withUndo) {
+    const html = fs.readFileSync(path.join(ROOT, 'www', g.path), 'utf8');
+    ok(/if \(C\.undoKey\(e\)\) \{ undo(Move)?\(\);/.test(html), g.id + ': کیبورد از C.undoKey می‌گذرد');
+    ok(!/k === 'u'|k === 'z'/.test(html), g.id + ': مقایسه‌ی دستی کلید برگرداندن نمانده');
+    ok(html.indexOf("'U / Ctrl+Z'") > 0, g.id + ': راهنمای کیبورد Ctrl+Z را نشان می‌دهد');
+  }
+}
+
 function testMenu() {
   head('منو');
   const menu = fs.readFileSync(path.join(ROOT, 'www/index.html'), 'utf8');
@@ -3210,6 +3248,7 @@ testWebChanged();
 testBrowserCheckExits();
 testDevScript();
 testLocales();
+testUndoKey();
 testMenu();
 
 testSw().then(testVerifyDeploy).then(function () {
