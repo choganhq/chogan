@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 1764;
+const MIN_CHECKS = 1769;
 
 function ok(cond, msg) {
   checks++;
@@ -1471,6 +1471,32 @@ function testBackgammon() {
   ok(/E\.play\(S, m\)/.test(page) && /E\.undo\(S\)/.test(page) && /E\.endTurn\(S\)/.test(page), 'صفحه حرکت، برگرداندن و پایان نوبت را با موتور انجام می‌دهد');
   ok(/C\.daily\('backgammon', daily\)\.seed/.test(page), 'تاس روزانه از بذر هسته می‌آید');
   ok(!/Math\.random\(\)[^\n]*dice|rollFor/.test(page), 'صفحه خودش تاس نمی‌ریزد');
+
+  // اعلان شروع: «تو» دوم‌شخص است و «You starts» / «تو شروع می‌کند» غلط بود (#115)
+  const fnBody = (name) => {
+    const at = page.indexOf('function ' + name + '(');
+    if (at < 0) return '';
+    let d = 0;
+    for (let i = page.indexOf('{', at); i < page.length; i++) {
+      if (page[i] === '{') d++;
+      else if (page[i] === '}' && --d === 0) return page.slice(at, i + 1);
+    }
+    return '';
+  };
+  const stSrc = fnBody('startsTitle'), pnSrc = fnBody('pname');
+  ok(stSrc && pnSrc, 'startsTitle و pname در صفحه‌ی تخته‌نرد هستند');
+  const title = (profileName, i) => {
+    const fakeC = { state: { profile: { name: profileName } }, t: (k, o) => '<' + k + (o && o.n ? ':' + o.n : '') + '>' };
+    try {
+      return vm.runInNewContext('(function (C, S, prefs) { ' + stSrc + pnSrc + ' return startsTitle; })', {})(
+        fakeC, { mode: 'ai', level: 'hard' }, { p2name: '' })(i);
+    } catch (e) { return 'خطا: ' + e.message; }
+  };
+  ok(title('', 1) === '<youStart>', 'بی‌نام و شروع با خودت: «تو شروع می‌کنی» (' + title('', 1) + ')');
+  ok(title('Sara', 1) === '<starts:Sara>', 'با نام پروفایل: «{n} شروع می‌کند»');
+  ok(title('', 2) === '<starts:<rival> · <hard>>', 'حریف: سوم‌شخص می‌ماند');
+  const str = (lang, key) => { const m = bgHtml.match(new RegExp(key + ": '([^']*)'", 'g')); return m ? m.map((x) => x.split(": '")[1].slice(0, -1)) : []; };
+  ok(JSON.stringify(str('', 'youStart')) === JSON.stringify(['تو شروع می‌کنی', 'You start', '你先走']), 'متن youStart در هر سه زبان درست است');
 }
 
 /* ------------------------------------------------------------- دوز */
