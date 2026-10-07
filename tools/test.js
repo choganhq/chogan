@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 1726;
+const MIN_CHECKS = 1764;
 
 function ok(cond, msg) {
   checks++;
@@ -3163,6 +3163,43 @@ function testUndoKey() {
   }
 }
 
+function testShortcuts() {
+  head('میان‌برهای اپ نصب‌شده');
+  // میان‌برها از روی games.json ساخته می‌شوند (tools/shortcuts.sh). اگر بازی‌ای
+  // اضافه شود و اسکریپت اجرا نشود، میان‌برش نیست یا اسم کهنه می‌ماند (#112).
+  const man = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/manifest.webmanifest'), 'utf8'));
+  const games = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games;
+  ok(games.length > 0, 'games.json بازی دارد');
+  // کروم بیشتر از ده میان‌بر را نمی‌خواند و هشدار می‌دهد؛ ده بازی اول منو
+  const firstTen = games.slice(0, 10);
+  const sc = Array.isArray(man.shortcuts) ? man.shortcuts : [];
+  ok(sc.length === firstTen.length, 'ده بازی اول منو میان‌بر دارند (' + sc.length + ' از ' + firstTen.length + ')');
+  const want = firstTen.map((g) => ({
+    name: g.name.en,
+    name_localized: {
+      fa: { value: g.name.fa, lang: 'fa', dir: 'rtl' },
+      'zh-Hans': { value: g.name.zh, lang: 'zh-Hans', dir: 'ltr' }
+    },
+    url: g.path,
+    icons: [{ src: 'games/' + g.id + '/icon-192.png', sizes: '192x192', type: 'image/png' }]
+  }));
+  // آیکون بازی‌ای که میان‌بر ندارد فقط حجم APK را بالا می‌برد
+  games.slice(10).forEach((g) => ok(!fs.existsSync(path.join(ROOT, 'www/games', g.id, 'icon-192.png')), g.id + ': بدون میان‌بر، آیکون PNG اضافه هم ندارد'));
+  firstTen.forEach((g, i) => {
+    ok(JSON.stringify(sc[i]) === JSON.stringify(want[i]), g.id + ': میان‌بر شماره‌ی ' + (i + 1) + ' با games.json می‌خواند (tools/shortcuts.sh را اجرا کن)');
+    // آدرس نسبی و داخل scope، وگرنه مرورگر میان‌بر را نادیده می‌گیرد
+    ok(sc[i] && !/^(\/|\.\.|[a-z]+:)/i.test(sc[i].url) && fs.existsSync(path.join(ROOT, 'www', sc[i].url)), g.id + ': آدرس میان‌بر داخل اپ است و فایلش هست');
+    const png = path.join(ROOT, 'www/games', g.id, 'icon-192.png');
+    let w = 0, h = 0, sig = '';
+    try {
+      const b = fs.readFileSync(png);
+      sig = b.slice(1, 4).toString('latin1'); w = b.readUInt32BE(16); h = b.readUInt32BE(20);
+    } catch (e) { /* نبودن فایل پایین گزارش می‌شود */ }
+    ok(sig === 'PNG' && w === 192 && h === 192, g.id + ': آیکون میان‌بر PNG ۱۹۲×۱۹۲ است (' + sig + ' ' + w + '×' + h + ')');
+  });
+  ok(Object.keys(man).pop() === 'shortcuts', 'shortcuts آخرین کلید منیفست است، همان جایی که اسکریپت بازنویسی می‌کند');
+}
+
 function testMenu() {
   head('منو');
   const menu = fs.readFileSync(path.join(ROOT, 'www/index.html'), 'utf8');
@@ -3249,6 +3286,7 @@ testBrowserCheckExits();
 testDevScript();
 testLocales();
 testUndoKey();
+testShortcuts();
 testMenu();
 
 testSw().then(testVerifyDeploy).then(function () {
