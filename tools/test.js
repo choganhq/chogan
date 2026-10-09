@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 1911;
+const MIN_CHECKS = 1914;
 
 function ok(cond, msg) {
   checks++;
@@ -3304,6 +3304,13 @@ function testShortcuts() {
 
 function testMenu() {
   head('منو');
+  // ستون‌های تقویم روزانه به اندازه‌ی محتوایشان نیستند: با پانزده بازی ردیف نقطه‌ها
+  // هر ستون را ۱۱۵ پیکسل می‌کرد و تقویم از صفحه‌ی گوشی بیرون می‌زد (#123)
+  const css = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8');
+  const rule = (sel) => ((css.match(new RegExp('\\n' + sel.replace('.', '\\.') + ' \\{([^}]*)\\}')) || [])[1] || '');
+  ok(rule('.ch-cal').length > 0 && rule('.ch-day__dots').length > 0, 'قاعده‌های تقویم در chogan.css پیدا شد');
+  ok(/grid-template-columns:\s*repeat\(7,\s*minmax\(0,\s*1fr\)\)/.test(rule('.ch-cal')), 'ستون‌های تقویم با محتوا پهن نمی‌شوند');
+  ok(/display:\s*grid/.test(rule('.ch-day__dots')) && /repeat\(5,/.test(rule('.ch-day__dots')), 'نقطه‌های هر روز در پنج ستون می‌شکنند');
   const menu = fs.readFileSync(path.join(ROOT, 'www/index.html'), 'utf8');
   const at = menu.indexOf('function bestLine(g) {');
   ok(at > 0, 'تابع bestLine در منو هست');
