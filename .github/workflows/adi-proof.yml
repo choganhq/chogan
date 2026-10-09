@@ -1,0 +1,105 @@
+name: APK اثبات مالکیت کلید برای ثبت نام بسته
+
+# Play Console نام بسته‌ای را که بیرون از Play نصب دارد (Releases و اف‌دروید) فقط با
+# APK امضاشده با همان کلید ثبت می‌کند؛ فایل assets/adi-registration.properties باید
+# متن snippet خود Play را داشته باشد (#152). کلید فقط در Secrets است، پس این APK
+# فقط اینجا ساخته می‌شود. هیچ چیز منتشر نمی‌شود: خروجی یک artifact کوتاه‌عمر است.
+# https://support.google.com/googleplay/android-developer/answer/16761053
+
+on:
+  workflow_dispatch:
+    inputs:
+      snippet:
+        description: 'snippet از صفحه‌ی Upload APK در Play Console'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    name: ساخت APK اثبات مالکیت
+    runs-on: ubuntu-latest
+    steps:
+      - name: دریافت سورس
+        uses: actions/checkout@v7
+
+      - name: نصب جاوا
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: خواندن نسخه‌ی گردل از فایل wrapper
+        id: gradleversion
+        run: |
+          set -euo pipefail
+          V=$(sed -n 's|.*/gradle-\([0-9][^-]*\)-bin\.zip.*|\1|p' android/gradle/wrapper/gradle-wrapper.properties)
+          [ -n "$V" ] || { echo "نسخه‌ی گردل از gradle-wrapper.properties خوانده نشد"; exit 1; }
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: نصب گریدل
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: ${{ steps.gradleversion.outputs.version }}
+
+      # snippet از env خوانده می‌شود، نه با ${{ }} وسط اسکریپت، تا متن ورودی هرگز
+      # به‌عنوان فرمان شل اجرا نشود
+      - name: نوشتن فایل ثبت
+        env:
+          SNIPPET: ${{ inputs.snippet }}
+        run: |
+          set -euo pipefail
+          S=$(printf '%s' "$SNIPPET" | tr -d '\r')
+          [ -n "$S" ] || { echo "snippet خالی است"; exit 1; }
+          mkdir -p android/app/src/main/assets
+          printf '%s\n' "$S" > android/app/src/main/assets/adi-registration.properties
+          echo "فایل ثبت: $(wc -c < android/app/src/main/assets/adi-registration.properties) بایت"
+
+      - name: بازسازی کلید امضا از سکرت
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          [ -n "${ANDROID_KEYSTORE_BASE64:-}" ] || { echo "سکرت ANDROID_KEYSTORE_BASE64 تعریف نشده"; exit 1; }
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+      - name: بیلد نسخه‌ی ریلیز
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle --no-daemon assembleRelease
+
+      - name: پاک کردن کلید
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
+
+      # Play فقط امضای همین کلید را قبول می‌کند؛ اگر امضا یا فایل جا افتاده باشد
+      # همین‌جا شکست می‌خورد، نه بعد از آپلود در Play Console
+      - name: بررسی امضا و فایل ثبت
+        env:
+          SNIPPET: ${{ inputs.snippet }}
+        run: |
+          set -euo pipefail
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
+          "$APKSIGNER" verify --print-certs "$APK" | tee certs.txt
+          grep -q 'SHA-256 digest: c3f70a1af8a45558678d1d9b413415d1b0a4c3208835ce78c1f37c4a3a008839' certs.txt \
+            || { echo "امضاکننده کلید همیشگی چوگان نیست"; exit 1; }
+          IN=$(unzip -p "$APK" assets/adi-registration.properties | tr -d '\r\n')
+          WANT=$(printf '%s' "$SNIPPET" | tr -d '\r\n')
+          [ "$IN" = "$WANT" ] || { echo "فایل assets/adi-registration.properties در APK با snippet نمی‌خواند"; exit 1; }
+          mv "$APK" io.github.choganhq.chogan-adi-proof.apk
+          sha256sum io.github.choganhq.chogan-adi-proof.apk
+
+      - name: بارگذاری APK به‌عنوان artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: adi-proof-apk
+          path: io.github.choganhq.chogan-adi-proof.apk
+          retention-days: 1
+          if-no-files-found: error

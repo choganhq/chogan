@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2181;
+const MIN_CHECKS = 2192;
 
 function ok(cond, msg) {
   checks++;
@@ -3703,6 +3703,28 @@ function testChessPuzzles() {
   ok(fs.existsSync(tool) && /lichess_db_puzzle\.csv\.zst/.test(fs.readFileSync(tool, 'utf8')), 'سازنده‌ی فهرست در tools/ هست');
 }
 
+/* --------------------------------------------- APK اثبات مالکیت کلید */
+// Play نام بسته‌ی ما را بدون APK امضاشده با کلید خودمان ثبت نمی‌کند (#152). این ورک‌فلو
+// کلید را باز می‌کند و ورودی آزاد می‌گیرد، پس شکلش باید همین بماند.
+function testAdiProof() {
+  head('APK اثبات مالکیت');
+  const f = path.join(ROOT, '.github/workflows/adi-proof.yml');
+  ok(fs.existsSync(f), 'ورک‌فلوی adi-proof.yml هست');
+  if (!fs.existsSync(f)) return;
+  const y = fs.readFileSync(f, 'utf8');
+  const on = (y.match(/\non:\n([\s\S]*?)\n[a-z]/) || [])[1] || '';
+  ok(/^\s+workflow_dispatch:/m.test(on) && !/\b(push|pull_request|schedule|release):/.test(on), 'فقط دستی اجرا می‌شود');
+  const snipLines = y.split('\n').filter((l) => /inputs\.snippet/.test(l));
+  ok(snipLines.length === 2 &&
+    (y.match(/SNIPPET: \$\{\{ inputs\.snippet \}\}/g) || []).length === 2 &&
+    snipLines.every((l) => /^\s+SNIPPET: \$\{\{ inputs\.snippet \}\}$/.test(l)), 'snippet فقط از env خوانده می‌شود');
+  ok(/android\/app\/src\/main\/assets\/adi-registration\.properties/.test(y) && /unzip -p "\$APK" assets\/adi-registration\.properties/.test(y), 'نام فایل دقیقاً assets/adi-registration.properties و داخل APK خوانده می‌شود');
+  ok(/c3f70a1af8a45558678d1d9b413415d1b0a4c3208835ce78c1f37c4a3a008839/.test(y), 'امضاکننده با کلید همیشگی چوگان مقایسه می‌شود');
+  ok(/if: always\(\)\n\s+run: rm -f "\$RUNNER_TEMP\/release\.jks"/.test(y), 'کلید همیشه پاک می‌شود');
+  ok(/permissions:\n\s+contents: read/.test(y) && !/gh release|softprops|contents: write/.test(y), 'چیزی منتشر نمی‌شود (فقط contents: read)');
+  ok(/retention-days: 1/.test(y), 'artifact فقط یک روز می‌ماند');
+}
+
 /* ------------------------------------------------- کاشی‌های خانه */
 // هجده بازی یک‌ستونه روی گوشی ۳۹۰ پیکسلی ۲۲۶۰ پیکسل اسکرول بود (#149). پیش‌فرض
 // کاشی دو ستونه است و یک‌ستونه فقط وقتی که کاربر خودش انتخاب کرده.
@@ -3943,6 +3965,7 @@ testChessBot();
 testChessPuzzles();
 testStringKeys();
 testHomeGrid();
+testAdiProof();
 testTd();
 testVersionStamp();
 testDeployGate();
