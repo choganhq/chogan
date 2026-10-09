@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2051;
+const MIN_CHECKS = 2100;
 
 function ok(cond, msg) {
   checks++;
@@ -3467,6 +3467,77 @@ function testMahjong() {
   ok(JSON.stringify(E.deal('medium', rng(11))) === JSON.stringify(E.deal('medium', rng(11))), 'یک بذر همیشه یک دست می‌دهد');
 }
 
+/* ------------------------------------------------------------- شطرنج */
+function testChess() {
+  head('شطرنج');
+  const E = loadEngine('chess', 'ChessEngineFactory');
+  // شمارش perft مرجع استاندارد؛ تقریباً هر خطای تولید حرکت این عددها را خراب می‌کند
+  const PERFT = [
+    // عمق‌ها کم‌اند تا کل تست چند ثانیه بماند؛ قلعه، آن‌پاسان و ارتقا همین‌جا هم پوشش دارند.
+    // عمق‌های بیشتر (۱۹۷۲۸۱، ۹۷۸۶۲، ۴۳۲۳۸، ۹۴۶۷، ۶۲۳۷۹) یک بار دستی گرفته و درست بودند.
+    [E.START, [20, 400, 8902]],
+    ['r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1', [48, 2039]],
+    ['8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1', [14, 191, 2812]],
+    ['r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1', [6, 264]],
+    ['rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8', [44, 1486]]
+  ];
+  for (const [f, want] of PERFT) {
+    const S = E.parse(f);
+    const got = want.map((_, d) => E.perft(S, d + 1));
+    ok(got.join() === want.join(), 'perft ' + f.split(' ')[0].slice(0, 16) + '… ' + got.join(',') + ' (مرجع ' + want.join(',') + ')');
+  }
+  ok(E.fen(E.parse(PERFT[1][0])) === PERFT[1][0], 'FEN رفت‌وبرگشت درست است');
+
+  // بازی کردن با SAN، برای مثال‌های دستی
+  const playSan = (start, sans) => {
+    let S = E.parse(start || E.START);
+    const fens = [E.fen(S)];
+    for (const s of sans) {
+      const m = E.legal(S).find((x) => E.san(S, x) === s);
+      if (!m) return { error: s, S, fens };
+      S = E.make(S, m); fens.push(E.fen(S));
+    }
+    return { S, fens };
+  };
+  const fool = playSan(null, ['f3', 'e5', 'g4', 'Qh4#']);
+  ok(!fool.error && E.status(fool.fens).reason === 'mate' && E.status(fool.fens).winner === 'b', 'مات احمقانه: سیاه با Qh4# می‌برد');
+  const stale = E.status(['7k/5Q2/6K1/8/8/8/8/8 b - - 0 1']);
+  ok(stale.over && stale.reason === 'stalemate' && stale.winner === null, 'پات مساوی است');
+  ok(E.status(['8/8/4k3/8/8/3NK3/8/8 w - - 0 1']).reason === 'material', 'شاه و اسب در برابر شاه: مساوی');
+  ok(!E.status(['8/8/4k3/8/8/3RK3/8/8 w - - 0 1']).over, 'شاه و رخ در برابر شاه مساوی نیست');
+  ok(E.status(['8/8/4k3/8/8/3NK3/8/8 w - - 100 80']).reason === 'fifty', 'پنجاه حرکت (۱۰۰ نیم‌حرکت) مساوی است');
+  const rep = playSan(null, ['Nf3', 'Nf6', 'Ng1', 'Ng8', 'Nf3', 'Nf6', 'Ng1', 'Ng8']);
+  ok(!rep.error && E.status(rep.fens).reason === 'repetition', 'تکرار سه‌باره‌ی وضعیت آغاز مساوی است');
+  ok(!E.status(rep.fens.slice(0, 5)).over, 'دو بار تکرار هنوز مساوی نیست');
+
+  // قلعه، آن‌پاسان، ارتقا و نوشتار SAN
+  const castle = playSan('r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1', ['O-O', 'O-O-O']);
+  ok(!castle.error && castle.S.board[E.sqIdx('g1')] === 'K' && castle.S.board[E.sqIdx('f1')] === 'R' && castle.S.board[E.sqIdx('c8')] === 'k' && castle.S.board[E.sqIdx('d8')] === 'r', 'قلعه‌ی کوچک و بزرگ شاه و رخ را درست می‌گذارد');
+  const noCastle = E.legal(E.parse('r3k2r/8/8/8/8/8/4r3/R3K2R w KQkq - 0 1')).filter((m) => m.castle);
+  ok(noCastle.length === 0, 'شاه در کیش قلعه نمی‌رود');
+  const throughCheck = E.legal(E.parse('r3k2r/8/8/8/8/8/8/R3K1rR w KQkq - 0 1')).filter((m) => m.castle === 'K');
+  ok(throughCheck.length === 0, 'قلعه از خانه‌ی زیر حمله ممنوع است');
+  const rookMoved = playSan('r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1', ['Rh2', 'Ra7', 'Rh1', 'Ra8']);
+  ok(!rookMoved.error && rookMoved.S.castle === 'Qk', 'رخِ رفته و برگشته حق قلعه‌ی همان سمت را پس نمی‌گیرد (' + rookMoved.S.castle + ')');
+  const ep = playSan('4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1', ['exd6']);
+  ok(!ep.error && !ep.S.board[E.sqIdx('d5')] && ep.S.board[E.sqIdx('d6')] === 'P', 'آن‌پاسان پیاده‌ی d5 را برمی‌دارد');
+  const promo = playSan('4k3/1P6/8/8/8/8/8/4K3 w - - 0 1', ['b8=Q+']);
+  ok(!promo.error && promo.S.board[E.sqIdx('b8')] === 'Q', 'ارتقا با b8=Q+ نوشته و انجام می‌شود');
+  ok(E.legal(E.parse('4k3/1P6/8/8/8/8/8/4K3 w - - 0 1')).filter((m) => m.from === E.sqIdx('b7')).length === 4, 'ارتقا چهار انتخاب دارد');
+  const twoKnights = E.parse('4k3/8/8/8/8/8/8/1N2KN2 w - - 0 1');
+  const sans = E.legal(twoKnights).map((m) => E.san(twoKnights, m));
+  ok(sans.indexOf('Nbd2') >= 0 && sans.indexOf('Nfd2') >= 0, 'دو اسب به یک خانه: ستون مبدأ در نوشتار می‌آید');
+
+  // شطرنج دونفره روزانه ندارد؛ منو باید آن را از تقویم روزانه بیرون بگذارد (#131)
+  const gj = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games;
+  const chess = gj.find((g) => g.id === 'chess');
+  ok(chess && chess.daily === false, 'شطرنج در games.json روزانه ندارد');
+  const menuSrc = fs.readFileSync(path.join(ROOT, 'www/index.html'), 'utf8');
+  ok(/function dailyGames\(\) \{ return GAMES\.filter\(function \(g\) \{ return g\.daily !== false; \}\); \}/.test(menuSrc), 'منو بازی‌های بی‌روزانه را جدا می‌کند');
+  const dailyUses = (menuSrc.match(/dailyGames\(\)/g) || []).length;
+  ok(dailyUses >= 4, 'کارت امروز، تقویم و فهرست روز از dailyGames می‌خوانند (' + dailyUses + ')');
+}
+
 /* ---------------------------------------------- ادامه‌ی روزانه‌ی نیمه‌کاره */
 // هسته برای هر روز خانه‌ی ذخیره‌ی جدا دارد، ولی سودوکو، نقطه‌بازی، مین‌روب و دفاع از
 // برج روزانه را همیشه از نو می‌ساختند و پیشرفت همان روز با یک «بازگشت» گم می‌شد (#132).
@@ -3661,6 +3732,7 @@ testCodebreaker();
 testBreakout();
 testPasur();
 testMahjong();
+testChess();
 testTd();
 testVersionStamp();
 testDeployGate();

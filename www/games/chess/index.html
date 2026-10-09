@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>شطرنج — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* تخته شیء فیزیکی است: رنگ خانه‌ها در هر دو تم یکی است و در راست‌چین آینه نمی‌شود */
+  :root { --cs-light: #EEDCBC; --cs-dark: #B58A63; --cs-last: rgba(233, 196, 72, .5); --cs-check: rgba(220, 70, 60, .75); }
+  .cs-wrap { width: 100%; max-width: min(96vw, 62vh, 560px); display: flex; flex-direction: column; gap: var(--s-2); }
+  .cs-player { display: flex; align-items: center; gap: var(--s-2); min-height: 34px; padding: 4px 10px;
+    border-radius: var(--r-md); background: var(--c-surface); box-shadow: var(--sh-1); border: 2px solid transparent; }
+  .cs-player--on { border-color: var(--game); }
+  .cs-player__name { font-weight: 800; font-size: var(--fs-sm); }
+  .cs-player__caps { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 0; direction: ltr; justify-content: flex-end; }
+  .cs-player__caps svg { width: 18px; height: 18px; margin-inline-start: -4px; }
+  /* «+۱» در متن راست‌چین علامت را به طرف دیگر می‌برد؛ عدد جدا و چپ‌به‌راست می‌ماند */
+  .cs-player__diff { font-weight: 800; font-size: var(--fs-sm); color: var(--c-text-dim); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; }
+  .cs-board { direction: ltr; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); grid-template-rows: repeat(8, minmax(0, 1fr));
+    aspect-ratio: 1; width: 100%; border-radius: var(--r-md); overflow: hidden; box-shadow: var(--sh-2); touch-action: none; user-select: none; }
+  .cs-sq { position: relative; border: 0; padding: 0; margin: 0; cursor: pointer; background: var(--cs-light); }
+  .cs-sq--d { background: var(--cs-dark); }
+  .cs-sq--last::before { content: ''; position: absolute; inset: 0; background: var(--cs-last); }
+  .cs-sq--sel::before { content: ''; position: absolute; inset: 0; background: rgba(84, 140, 210, .45); }
+  .cs-sq--check::before { content: ''; position: absolute; inset: 0; background: radial-gradient(circle, var(--cs-check) 0%, rgba(220,70,60,0) 70%); }
+  .cs-sq--cur { outline: 3px solid var(--game); outline-offset: -3px; }
+  .cs-sq svg { position: absolute; inset: 6%; width: 88%; height: 88%; pointer-events: none; }
+  .cs-dot { position: absolute; left: 50%; top: 50%; width: 30%; height: 30%; transform: translate(-50%, -50%); border-radius: 50%; background: rgba(40, 40, 40, .28); pointer-events: none; }
+  .cs-ring { position: absolute; inset: 4%; border-radius: 50%; border: 4px solid rgba(40, 40, 40, .3); pointer-events: none; }
+  .cs-coord { position: absolute; font-size: 10px; font-weight: 800; line-height: 1; pointer-events: none; color: rgba(60, 40, 20, .55); }
+  .cs-coord--f { right: 3px; bottom: 2px; }
+  .cs-coord--r { left: 3px; top: 2px; }
+  .cs-status { min-height: 1.6em; font-weight: 800; color: var(--c-text); text-align: center; }
+  .cs-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; }
+  .cs-moves { direction: ltr; font-size: var(--fs-sm); color: var(--c-text-dim); text-align: left; max-height: 4.4em; overflow-y: auto;
+    padding: 6px 10px; background: var(--c-surface-2); border-radius: var(--r-md); font-variant-numeric: tabular-nums; }
+  .cs-moves:empty { display: none; }
+  .cs-promo { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s-2); }
+  .cs-promo button { aspect-ratio: 1; border: 0; border-radius: var(--r-md); background: var(--cs-light); cursor: pointer; padding: 6px; }
+  .cs-promo svg { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+
+<script>
+/* ==== ENGINE START ==== */
+/* قانون‌های کامل حرکت شطرنج (فیده، بدون ساعت) برای دو نفر روی یک دستگاه.
+   خانه i از ۰ تا ۶۳: سطر i >> 3 از رتبه‌ی ۸ (بالا) و ستون i & 7 از ستون a.
+   مهره با حرف FEN: بزرگ سفید، کوچک سیاه، رشته‌ی خالی یعنی خانه‌ی خالی. */
+function ChessEngineFactory() {
+  'use strict';
+  var FILES = 'abcdefgh';
+  var START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+  var KNIGHT = [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]];
+  var KING = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+  var DIAG = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+  var ORTHO = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
+  function sqName(i) { return FILES[i & 7] + (8 - (i >> 3)); }
+  function sqIdx(n) { return (8 - (+n[1])) * 8 + FILES.indexOf(n[0]); }
+  function colorOf(p) { return p ? (p === p.toUpperCase() ? 'w' : 'b') : null; }
+  function on(r, c) { return r >= 0 && r < 8 && c >= 0 && c < 8; }
+
+  function parse(fen) {
+    var parts = fen.trim().split(/\s+/), board = [];
+    parts[0].split('/').forEach(function (row) {
+      for (var k = 0; k < row.length; k++) {
+        var ch = row[k];
+        if (ch >= '1' && ch <= '8') for (var n = 0; n < +ch; n++) board.push('');
+        else board.push(ch);
+      }
+    });
+    return { board: board, turn: parts[1] || 'w', castle: parts[2] && parts[2] !== '-' ? parts[2] : '',
+      ep: parts[3] && parts[3] !== '-' ? sqIdx(parts[3]) : -1, half: +(parts[4] || 0), full: +(parts[5] || 1) };
+  }
+
+  function fen(S) {
+    var rows = [];
+    for (var r = 0; r < 8; r++) {
+      var row = '', empty = 0;
+      for (var c = 0; c < 8; c++) {
+        var p = S.board[r * 8 + c];
+        if (!p) empty++;
+        else { if (empty) { row += empty; empty = 0; } row += p; }
+      }
+      if (empty) row += empty;
+      rows.push(row);
+    }
+    return rows.join('/') + ' ' + S.turn + ' ' + (S.castle || '-') + ' ' + (S.ep >= 0 ? sqName(S.ep) : '-') + ' ' + S.half + ' ' + S.full;
+  }
+
+  function attacked(board, i, by) {
+    var r = i >> 3, c = i & 7, k, rr, cc, p;
+    // پیاده‌ی سفید از پایین حمله می‌کند، سیاه از بالا
+    var pr = by === 'w' ? r + 1 : r - 1, pawn = by === 'w' ? 'P' : 'p';
+    if (on(pr, c - 1) && board[pr * 8 + c - 1] === pawn) return true;
+    if (on(pr, c + 1) && board[pr * 8 + c + 1] === pawn) return true;
+    var N = by === 'w' ? 'N' : 'n', K = by === 'w' ? 'K' : 'k';
+    for (k = 0; k < 8; k++) {
+      rr = r + KNIGHT[k][0]; cc = c + KNIGHT[k][1];
+      if (on(rr, cc) && board[rr * 8 + cc] === N) return true;
+      rr = r + KING[k][0]; cc = c + KING[k][1];
+      if (on(rr, cc) && board[rr * 8 + cc] === K) return true;
+    }
+    var slide = function (dirs, a, b) {
+      for (var d = 0; d < dirs.length; d++) {
+        rr = r + dirs[d][0]; cc = c + dirs[d][1];
+        while (on(rr, cc)) {
+          p = board[rr * 8 + cc];
+          if (p) { if (p === a || p === b) return true; break; }
+          rr += dirs[d][0]; cc += dirs[d][1];
+        }
+      }
+      return false;
+    };
+    if (by === 'w') return slide(DIAG, 'B', 'Q') || slide(ORTHO, 'R', 'Q');
+    return slide(DIAG, 'b', 'q') || slide(ORTHO, 'r', 'q');
+  }
+
+  function kingAt(board, side) {
+    var k = side === 'w' ? 'K' : 'k';
+    return board.indexOf(k);
+  }
+  function inCheck(S, side) {
+    side = side || S.turn;
+    var k = kingAt(S.board, side);
+    return k >= 0 && attacked(S.board, k, side === 'w' ? 'b' : 'w');
+  }
+
+  function pseudo(S) {
+    var out = [], b = S.board, me = S.turn, them = me === 'w' ? 'b' : 'w';
+    var add = function (from, to, extra) {
+      var m = { from: from, to: to, piece: b[from], captured: b[to] || '' };
+      if (extra) for (var k in extra) m[k] = extra[k];
+      out.push(m);
+    };
+    for (var i = 0; i < 64; i++) {
+      var p = b[i];
+      if (!p || colorOf(p) !== me) continue;
+      var r = i >> 3, c = i & 7, t = p.toLowerCase(), rr, cc, j, d;
+      if (t === 'p') {
+        var dir = me === 'w' ? -1 : 1, startRow = me === 'w' ? 6 : 1, lastRow = me === 'w' ? 0 : 7;
+        var pushPawn = function (to, extra) {
+          if ((to >> 3) === lastRow) ['q', 'r', 'b', 'n'].forEach(function (pp) {
+            var e = { promo: me === 'w' ? pp.toUpperCase() : pp };
+            if (extra) for (var k in extra) e[k] = extra[k];
+            add(i, to, e);
+          });
+          else add(i, to, extra);
+        };
+        rr = r + dir;
+        if (on(rr, c) && !b[rr * 8 + c]) {
+          pushPawn(rr * 8 + c);
+          if (r === startRow && !b[(r + 2 * dir) * 8 + c]) add(i, (r + 2 * dir) * 8 + c, { double: true });
+        }
+        for (d = -1; d <= 1; d += 2) {
+          cc = c + d;
+          if (!on(rr, cc)) continue;
+          j = rr * 8 + cc;
+          if (b[j] && colorOf(b[j]) === them) pushPawn(j);
+          else if (j === S.ep) add(i, j, { epCapture: true, captured: me === 'w' ? 'p' : 'P' });
+        }
+      } else if (t === 'n' || t === 'k') {
+        var steps = t === 'n' ? KNIGHT : KING;
+        for (d = 0; d < 8; d++) {
+          rr = r + steps[d][0]; cc = c + steps[d][1];
+          if (!on(rr, cc)) continue;
+          j = rr * 8 + cc;
+          if (!b[j] || colorOf(b[j]) === them) add(i, j);
+        }
+        if (t === 'k') castles(S, i, add);
+      } else {
+        var dirs = t === 'b' ? DIAG : (t === 'r' ? ORTHO : DIAG.concat(ORTHO));
+        for (d = 0; d < dirs.length; d++) {
+          rr = r + dirs[d][0]; cc = c + dirs[d][1];
+          while (on(rr, cc)) {
+            j = rr * 8 + cc;
+            if (b[j]) { if (colorOf(b[j]) === them) add(i, j); break; }
+            add(i, j);
+            rr += dirs[d][0]; cc += dirs[d][1];
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  // قلعه: شاه و رخ تکان نخورده باشند (حق در castle)، خانه‌های بین خالی، و شاه نه
+  // در کیش باشد و نه از خانه‌ی زیر حمله رد شود یا رویش بنشیند
+  function castles(S, i, add) {
+    var me = S.turn, them = me === 'w' ? 'b' : 'w', b = S.board, home = me === 'w' ? 60 : 4;
+    if (i !== home || attacked(b, home, them)) return;
+    var kSide = me === 'w' ? 'K' : 'k', qSide = me === 'w' ? 'Q' : 'q', rook = me === 'w' ? 'R' : 'r';
+    if (S.castle.indexOf(kSide) >= 0 && b[home + 3] === rook && !b[home + 1] && !b[home + 2] &&
+        !attacked(b, home + 1, them) && !attacked(b, home + 2, them)) add(home, home + 2, { castle: 'K' });
+    if (S.castle.indexOf(qSide) >= 0 && b[home - 4] === rook && !b[home - 1] && !b[home - 2] && !b[home - 3] &&
+        !attacked(b, home - 1, them) && !attacked(b, home - 2, them)) add(home, home - 2, { castle: 'Q' });
+  }
+
+  function make(S, m) {
+    var b = S.board.slice(), me = S.turn, castle = S.castle;
+    b[m.to] = m.promo || m.piece;
+    b[m.from] = '';
+    if (m.epCapture) b[m.to + (me === 'w' ? 8 : -8)] = '';
+    if (m.castle === 'K') { b[m.from + 1] = b[m.from + 3]; b[m.from + 3] = ''; }
+    if (m.castle === 'Q') { b[m.from - 1] = b[m.from - 4]; b[m.from - 4] = ''; }
+    var drop = function (ch) { castle = castle.replace(ch, ''); };
+    if (m.piece === 'K') { drop('K'); drop('Q'); }
+    if (m.piece === 'k') { drop('k'); drop('q'); }
+    // رخی که از گوشه رفته یا در گوشه زده شده حق قلعه‌ی همان سمت را می‌برد
+    [m.from, m.to].forEach(function (sq) {
+      if (sq === 63) drop('K'); if (sq === 56) drop('Q'); if (sq === 7) drop('k'); if (sq === 0) drop('q');
+    });
+    var pawn = m.piece === 'P' || m.piece === 'p';
+    return {
+      board: b, turn: me === 'w' ? 'b' : 'w', castle: castle,
+      ep: m.double ? (m.from + m.to) / 2 : -1,
+      half: pawn || m.captured ? 0 : S.half + 1,
+      full: me === 'b' ? S.full + 1 : S.full
+    };
+  }
+
+  function legal(S) {
+    return pseudo(S).filter(function (m) { return !inCheck(make(S, m), S.turn); });
+  }
+
+  // کلید تکرار: چیدمان، نوبت، حق قلعه، و خانه‌ی آن‌پاسان فقط وقتی واقعاً زدنی است
+  function key(S) {
+    var ep = '-';
+    if (S.ep >= 0 && legal(S).some(function (m) { return m.epCapture; })) ep = sqName(S.ep);
+    return fen(S).split(' ').slice(0, 2).join(' ') + ' ' + (S.castle || '-') + ' ' + ep;
+  }
+
+  function insufficient(S) {
+    var minors = [], other = false;
+    S.board.forEach(function (p, i) {
+      if (!p || p === 'K' || p === 'k') return;
+      var t = p.toLowerCase();
+      if (t === 'b' || t === 'n') minors.push({ t: t, sq: ((i >> 3) + (i & 7)) % 2 });
+      else other = true;
+    });
+    if (other) return false;
+    if (minors.length <= 1) return true;
+    // فقط فیل، همه روی یک رنگ خانه
+    return minors.every(function (m) { return m.t === 'b' && m.sq === minors[0].sq; });
+  }
+
+  // وضعیت بازی از روی فهرست FEN ها (برای تکرار سه‌باره)
+  function status(fens) {
+    var S = parse(fens[fens.length - 1]);
+    var ms = legal(S), check = inCheck(S);
+    if (!ms.length) return check ? { over: true, winner: S.turn === 'w' ? 'b' : 'w', reason: 'mate', check: true }
+      : { over: true, winner: null, reason: 'stalemate' };
+    if (S.half >= 100) return { over: true, winner: null, reason: 'fifty', check: check };
+    var k = key(S), seen = 0;
+    for (var i = 0; i < fens.length; i++) if (key(parse(fens[i])) === k) seen++;
+    if (seen >= 3) return { over: true, winner: null, reason: 'repetition', check: check };
+    if (insufficient(S)) return { over: true, winner: null, reason: 'material', check: check };
+    return { over: false, check: check };
+  }
+
+  function san(S, m) {
+    var out;
+    if (m.castle) out = m.castle === 'K' ? 'O-O' : 'O-O-O';
+    else {
+      var t = m.piece.toUpperCase();
+      if (t === 'P') {
+        out = m.captured ? FILES[m.from & 7] + 'x' + sqName(m.to) : sqName(m.to);
+        if (m.promo) out += '=' + m.promo.toUpperCase();
+      } else {
+        var others = legal(S).filter(function (o) { return o.piece === m.piece && o.to === m.to && o.from !== m.from; });
+        var dis = '';
+        if (others.length) {
+          var sameFile = others.some(function (o) { return (o.from & 7) === (m.from & 7); });
+          var sameRank = others.some(function (o) { return (o.from >> 3) === (m.from >> 3); });
+          if (!sameFile) dis = FILES[m.from & 7];
+          else if (!sameRank) dis = String(8 - (m.from >> 3));
+          else dis = sqName(m.from);
+        }
+        out = t + dis + (m.captured ? 'x' : '') + sqName(m.to);
+      }
+    }
+    var N = make(S, m);
+    if (inCheck(N)) out += legal(N).length ? '+' : '#';
+    return out;
+  }
+
+  function perft(S, depth) {
+    if (!depth) return 1;
+    var ms = legal(S);
+    if (depth === 1) return ms.length;
+    var n = 0;
+    for (var i = 0; i < ms.length; i++) n += perft(make(S, ms[i]), depth - 1);
+    return n;
+  }
+
+  var VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+  function material(S, side) {
+    var v = 0;
+    S.board.forEach(function (p) { if (p && colorOf(p) === side) v += VALUE[p.toLowerCase()]; });
+    return v;
+  }
+
+  var api = {
+    START: START, FILES: FILES, parse: parse, fen: fen, legal: legal, make: make, inCheck: inCheck, attacked: attacked,
+    status: status, san: san, perft: perft, key: key, insufficient: insufficient, material: material,
+    sqName: sqName, sqIdx: sqIdx, colorOf: colorOf, VALUE: VALUE
+  };
+  if (typeof self !== 'undefined') self.ChessEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = ChessEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = ChessEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'chess',
+    name: { fa: 'شطرنج', en: 'Chess', zh: '国际象棋', de: 'Schach' },
+    accent: '#5A6B7B',
+    mood: 'menu',
+    strings: {
+      fa: {
+        white: 'سفید', black: 'سیاه', toMove: 'نوبت {c}', check: 'کیش!', mate: 'کیش و مات',
+        stalemate: 'پات: مساوی', fifty: 'پنجاه حرکت بدون زدن و حرکت پیاده: مساوی', repetition: 'تکرار سه‌باره: مساوی',
+        material: 'مهره‌ی کافی برای مات نمانده: مساوی', agreed: 'مساوی با توافق', whiteWins: 'سفید برد', blackWins: 'سیاه برد',
+        resigned: '{c} تسلیم شد', resign: 'تسلیم', resignAsk: '{c} تسلیم می‌شود؟', offerDraw: 'مساوی',
+        drawAsk: 'هر دو بازیکن با مساوی موافقید؟', autoFlip: 'چرخاندن تخته', promote: 'ارتقای پیاده به',
+        newGame: 'بازی تازه', undoMove: 'برگرداندن حرکت', board: 'صفحه‌ی شطرنج', move: 'جابه‌جایی روی تخته',
+        pick: 'انتخاب یا حرکت', flipKey: 'چرخاندن تخته', cancelPick: 'لغو انتخاب', moves: 'حرکت‌ها',
+        rules: 'قانون‌های کامل فیده بدون ساعت: قلعه، آن‌پاسان و ارتقای پیاده. مات برنده است؛ پات، تکرار سه‌باره، پنجاه حرکت بدون زدن و حرکت پیاده، و نبودن مهره‌ی کافی مساوی است. دو نفر روی یک گوشی بازی می‌کنید؛ اگر چرخاندن روشن باشد، تخته بعد از هر حرکت به سمت بازیکن بعدی می‌چرخد.',
+        tutTitle1: 'دو نفر، یک تخته', tutText1: 'شطرنج برای دو نفر روی یک گوشی. مهره‌ات را بزن، خانه‌های مجاز نشان داده می‌شوند، بعد خانه‌ی مقصد را بزن یا مهره را بکش.',
+        tutTitle2: 'قانون‌های کامل', tutText2: 'قلعه، آن‌پاسان و ارتقای پیاده همه هستند. تخته بعد از هر حرکت به سمت بازیکن بعدی می‌چرخد؛ از دکمه‌ی چرخاندن خاموشش کن.',
+        tutTitle3: 'پایان', tutText3: 'مات برنده است. پات، تکرار سه‌باره و پنجاه حرکت بی‌زدن مساوی است. برگرداندن بی‌حد است و می‌شود تسلیم شد یا با توافق مساوی کرد.'
+      },
+      en: {
+        white: 'White', black: 'Black', toMove: '{c} to move', check: 'Check!', mate: 'Checkmate',
+        stalemate: 'Stalemate: draw', fifty: 'Fifty moves without a capture or pawn move: draw', repetition: 'Threefold repetition: draw',
+        material: 'Not enough material to mate: draw', agreed: 'Draw by agreement', whiteWins: 'White wins', blackWins: 'Black wins',
+        resigned: '{c} resigned', resign: 'Resign', resignAsk: '{c} resigns?', offerDraw: 'Draw',
+        drawAsk: 'Do both players agree to a draw?', autoFlip: 'Rotate board', promote: 'Promote the pawn to',
+        newGame: 'New game', undoMove: 'Undo move', board: 'Chess board', move: 'Move on the board',
+        pick: 'Pick or move', flipKey: 'Rotate the board', cancelPick: 'Cancel selection', moves: 'Moves',
+        rules: 'Full FIDE move rules, no clock: castling, en passant and promotion. Checkmate wins; stalemate, threefold repetition, fifty moves without a capture or pawn move, and insufficient material are draws. Two players share one phone; with rotation on, the board turns to the next player after every move.',
+        tutTitle1: 'Two players, one board', tutText1: 'Chess for two on one phone. Tap a piece to see where it can go, then tap the target square, or drag the piece.',
+        tutTitle2: 'All the rules', tutText2: 'Castling, en passant and promotion are all in. The board turns to the next player after each move; switch that off with the rotate button.',
+        tutTitle3: 'The end', tutText3: 'Checkmate wins. Stalemate, threefold repetition and fifty moves without a capture are draws. Undo is unlimited, and you can resign or agree a draw.'
+      },
+      zh: {
+        white: '白方', black: '黑方', toMove: '轮到{c}', check: '将军！', mate: '将死',
+        stalemate: '逼和：平局', fifty: '五十步未吃子未动兵：平局', repetition: '三次重复局面：平局',
+        material: '子力不足以将死：平局', agreed: '协议和棋', whiteWins: '白方胜', blackWins: '黑方胜',
+        resigned: '{c}认输', resign: '认输', resignAsk: '{c}认输？', offerDraw: '和棋',
+        drawAsk: '双方都同意和棋吗？', autoFlip: '旋转棋盘', promote: '兵升变为',
+        newGame: '新一局', undoMove: '撤销一步', board: '国际象棋棋盘', move: '在棋盘上移动',
+        pick: '选择或走子', flipKey: '旋转棋盘', cancelPick: '取消选择', moves: '着法',
+        rules: '完整的国际棋联走子规则，不计时：王车易位、吃过路兵和兵升变。将死获胜；逼和、三次重复局面、五十步未吃子未动兵以及子力不足均为和棋。两人共用一部手机；开启旋转后，每走一步棋盘会转向下一位玩家。',
+        tutTitle1: '两人一盘', tutText1: '两人在一部手机上下国际象棋。点一个棋子会显示能走的格子，再点目标格或拖动棋子。',
+        tutTitle2: '完整规则', tutText2: '王车易位、吃过路兵和兵升变都有。每走一步棋盘会转向下一位玩家；可以用旋转按钮关闭。',
+        tutTitle3: '结束', tutText3: '将死获胜。逼和、三次重复和五十步未吃子为和棋。撤销不限次数，也可以认输或协议和棋。'
+      },
+      de: {
+        white: 'Weiß', black: 'Schwarz', toMove: '{c} am Zug', check: 'Schach!', mate: 'Schachmatt',
+        stalemate: 'Patt: Remis', fifty: 'Fünfzig Züge ohne Schlagen oder Bauernzug: Remis', repetition: 'Dreifache Wiederholung: Remis',
+        material: 'Zu wenig Material zum Mattsetzen: Remis', agreed: 'Remis nach Einigung', whiteWins: 'Sieg für Weiß', blackWins: 'Sieg für Schwarz',
+        resigned: 'Aufgabe: {c}', resign: 'Aufgeben', resignAsk: 'Aufgabe von {c}?', offerDraw: 'Remis',
+        drawAsk: 'Sind beide mit Remis einverstanden?', autoFlip: 'Brett drehen', promote: 'Bauer wird zu',
+        newGame: 'Neues Spiel', undoMove: 'Zug zurück', board: 'Schachbrett', move: 'Auf dem Brett bewegen',
+        pick: 'Wählen oder ziehen', flipKey: 'Brett drehen', cancelPick: 'Auswahl aufheben', moves: 'Züge',
+        rules: 'Vollständige FIDE-Zugregeln ohne Uhr: Rochade, en passant und Umwandlung. Matt gewinnt; Patt, dreifache Wiederholung, fünfzig Züge ohne Schlagen oder Bauernzug und zu wenig Material sind Remis. Ihr spielt zu zweit an einem Handy; mit eingeschalteter Drehung dreht sich das Brett nach jedem Zug zum nächsten Spieler.',
+        tutTitle1: 'Zwei Spieler, ein Brett', tutText1: 'Schach zu zweit an einem Handy. Tippe eine Figur an, um ihre Zielfelder zu sehen, dann tippe das Zielfeld an oder zieh die Figur.',
+        tutTitle2: 'Alle Regeln', tutText2: 'Rochade, en passant und Umwandlung sind dabei. Das Brett dreht sich nach jedem Zug zum nächsten Spieler; mit dem Dreh-Knopf schaltest du das ab.',
+        tutTitle3: 'Das Ende', tutText3: 'Matt gewinnt. Patt, dreifache Wiederholung und fünfzig Züge ohne Schlagen sind Remis. Zurück ist unbegrenzt, und ihr könnt aufgeben oder Remis vereinbaren.'
+      }
+    }
+  });
+
+  var prefs = ctx.store.get('prefs', { flip: true });
+  var G = null, S = null, sel = -1, targets = [], cur = -1, dragFrom = -1;
+
+  /* ------------------------------------------------------- نقش مهره‌ها */
+  // طرح‌های خودمان؛ دسته‌های رایج مهره GPL اند و با MIT جور نمی‌شوند
+  var SHAPES = {
+    p: '<circle cx="22.5" cy="14" r="5.6"/><path d="M17.5 20.5h10l3 12h-16z"/><path d="M12 33.5h21v4.5H12z"/>',
+    r: '<path d="M12 33.5h21v4.5H12zM14.5 33.5l1.5-14h13l1.5 14zM13 13h4v3h3v-3h5v3h3v-3h4v6.5H13z"/>',
+    n: '<path d="M12 38h21c.2-9-1.5-15-5-20l.5-6.5-4.5 3.5c-6.5-.5-11 4-12 10l4.5 1.5 3.5-3.5c-.5 6.5-7.5 9-8 15z"/><circle cx="20.5" cy="17" r="1.4" class="cs-eye"/>',
+    b: '<path d="M12 33.5h21v4.5H12zM16.5 33.5l1.5-6c-3.5-3-4.5-7-1.5-12l6-6 6 6c3 5 2 9-1.5 12l1.5 6z"/><circle cx="22.5" cy="7" r="2.6"/><path d="M22.5 14v8M18.5 18h8" class="cs-cut"/>',
+    q: '<path d="M11 38h23l-2-7 3.5-14-7 8-3-11-3 11-3-11-3 11-7-8 3.5 14z"/><circle cx="9.5" cy="15" r="2.4"/><circle cx="16" cy="11.5" r="2.4"/><circle cx="22.5" cy="10" r="2.4"/><circle cx="29" cy="11.5" r="2.4"/><circle cx="35.5" cy="15" r="2.4"/>',
+    k: '<path d="M12.5 38h20l-1.5-7c4-2.5 6-7 3.5-11-3-4.5-9.5-2-12 2.5-2.5-4.5-9-7-12-2.5-2.5 4 0 8.5 3.5 11z"/><path d="M22.5 5v10M18.5 9h8" class="cs-cut"/>'
+  };
+  function pieceSvg(p) {
+    var white = p === p.toUpperCase();
+    var fill = white ? '#FBF7EE' : '#2B2622', line = white ? '#2B2622' : '#F2E8D6';
+    return '<svg viewBox="0 0 45 45" xmlns="http://www.w3.org/2000/svg"><g fill="' + fill + '" stroke="' + line + '" stroke-width="1.6" stroke-linejoin="round">' +
+      SHAPES[p.toLowerCase()].replace(/class="cs-eye"/g, 'fill="' + line + '" stroke="none"').replace(/class="cs-cut"/g, 'fill="none" stroke="' + line + '" stroke-width="1.8" stroke-linecap="round"') +
+      '</g></svg>';
+  }
+
+  /* --------------------------------------------------------------- رابط */
+  var topRow = el('div', { class: 'cs-player' });
+  var bottomRow = el('div', { class: 'cs-player' });
+  var boardEl = el('div', { class: 'cs-board', role: 'grid', 'aria-label': C.t('board') });
+  var status = el('div', { class: 'cs-status', 'aria-live': 'polite' });
+  var movesEl = el('div', { class: 'cs-moves', 'aria-label': C.t('moves') });
+  var actions = el('div', { class: 'cs-actions' });
+  var wrap = el('div', { class: 'cs-wrap' }, [topRow, boardEl, bottomRow, status, actions, movesEl]);
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newGame'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  var squares = [];
+  for (var v = 0; v < 64; v++) {
+    var b = el('button', { class: 'cs-sq', type: 'button', role: 'gridcell' });
+    b.setAttribute('data-v', String(v));
+    boardEl.appendChild(b);
+    squares.push(b);
+  }
+
+  function flipped() { return prefs.flip && S && S.turn === 'b' && !(G && G.result); }
+  function sqAt(v) { return flipped() ? 63 - v : v; }     // خانه‌ی نمایشی v → خانه‌ی تخته
+  function viewOf(i) { return flipped() ? 63 - i : i; }
+
+  function sideName(c) { return C.t(c === 'w' ? 'white' : 'black'); }
+
+  function newGame() {
+    G = { fens: [E.START], sans: [], lastMove: null, result: null, startedAt: Date.now() };
+    S = E.parse(E.START);
+    sel = -1; targets = []; cur = -1;
+    render();
+    save();
+  }
+
+  function render() {
+    actions.innerHTML = '';
+    var fl = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', 'aria-pressed': prefs.flip ? 'true' : 'false' },
+      [C.icon('refresh', 16), el('span', { text: C.t('autoFlip') + (prefs.flip ? ' ✓' : '') })]);
+    fl.addEventListener('click', function () { prefs.flip = !prefs.flip; ctx.store.set('prefs', prefs); C.feedback('tap'); render(); });
+    actions.appendChild(fl);
+    if (!G.result) {
+      var dr = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', text: C.t('offerDraw') });
+      dr.addEventListener('click', function () {
+        C.ui.confirm({ title: C.t('offerDraw'), body: C.t('drawAsk'), onOk: function () { end({ over: true, winner: null, reason: 'agreed' }); } });
+      });
+      var rs = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', text: C.t('resign') });
+      rs.addEventListener('click', function () {
+        var who = S.turn;
+        C.ui.confirm({ title: C.t('resign'), body: C.t('resignAsk', { c: sideName(who) }), onOk: function () {
+          end({ over: true, winner: who === 'w' ? 'b' : 'w', reason: 'resigned', loser: who });
+        } });
+      });
+      actions.appendChild(dr);
+      actions.appendChild(rs);
+    }
+    paint();
+  }
+
+  function playerRow(box, side) {
+    box.innerHTML = '';
+    box.className = 'cs-player' + (!G.result && S.turn === side ? ' cs-player--on' : '');
+    box.appendChild(el('span', { html: pieceSvg(side === 'w' ? 'K' : 'k').replace('<svg ', '<svg width="22" height="22" ') }));
+    box.appendChild(el('span', { class: 'cs-player__name', text: sideName(side) }));
+    // مهره‌هایی که این طرف از حریف گرفته، و برتری مادی
+    var start = E.parse(E.START), them = side === 'w' ? 'b' : 'w', caps = el('span', { class: 'cs-player__caps' });
+    ['q', 'r', 'b', 'n', 'p'].forEach(function (t) {
+      var p = them === 'w' ? t.toUpperCase() : t;
+      var gone = start.board.filter(function (x) { return x === p; }).length - S.board.filter(function (x) { return x === p; }).length;
+      for (var k = 0; k < gone; k++) caps.appendChild(el('span', { html: pieceSvg(p) }));
+    });
+    box.appendChild(caps);
+    var diff = E.material(S, side) - E.material(S, them);
+    box.appendChild(el('span', { class: 'cs-player__diff', text: diff > 0 ? '+' + C.num(diff) : '' }));
+  }
+
+  function paint() {
+    var top = flipped() ? 'w' : 'b';
+    playerRow(topRow, top);
+    playerRow(bottomRow, top === 'w' ? 'b' : 'w');
+    var checkSq = !G.result || G.result.check ? (E.inCheck(S) ? S.board.indexOf(S.turn === 'w' ? 'K' : 'k') : -1) : -1;
+    for (var v = 0; v < 64; v++) {
+      var i = sqAt(v), q = squares[v], p = S.board[i];
+      var dark = ((i >> 3) + (i & 7)) % 2 === 1;
+      var cls = 'cs-sq' + (dark ? ' cs-sq--d' : '');
+      if (G.lastMove && (G.lastMove.from === i || G.lastMove.to === i)) cls += ' cs-sq--last';
+      if (i === sel) cls += ' cs-sq--sel';
+      if (i === checkSq) cls += ' cs-sq--check';
+      if (v === cur) cls += ' cs-sq--cur';
+      q.className = cls;
+      var html = p ? pieceSvg(p) : '';
+      if (targets.some(function (m) { return m.to === i; })) html += S.board[i] || targets.some(function (m) { return m.to === i && m.epCapture; }) ? '<span class="cs-ring"></span>' : '<span class="cs-dot"></span>';
+      if ((v & 7) === 7) html += '<span class="cs-coord cs-coord--r" style="left:auto;right:3px">' + (8 - (i >> 3)) + '</span>';
+      if (v >= 56) html += '<span class="cs-coord cs-coord--f" style="right:auto;left:3px">' + E.FILES[i & 7] + '</span>';
+      if (q.innerHTML !== html) q.innerHTML = html;
+      q.setAttribute('aria-label', E.sqName(i) + (p ? ' ' + p : ''));
+    }
+    var st = G.result;
+    if (st) status.textContent = resultText(st);
+    else status.textContent = C.t('toMove', { c: sideName(S.turn) }) + (E.inCheck(S) ? ' · ' + C.t('check') : '');
+    var parts = [];
+    for (var k = 0; k < G.sans.length; k += 2) parts.push((k / 2 + 1) + '. ' + G.sans[k] + (G.sans[k + 1] ? ' ' + G.sans[k + 1] : ''));
+    movesEl.textContent = parts.join('  ');
+    movesEl.scrollTop = movesEl.scrollHeight;
+  }
+
+  function resultText(st) {
+    if (st.reason === 'mate') return C.t('mate') + ' · ' + C.t(st.winner === 'w' ? 'whiteWins' : 'blackWins');
+    if (st.reason === 'resigned') return C.t('resigned', { c: sideName(st.loser) }) + ' · ' + C.t(st.winner === 'w' ? 'whiteWins' : 'blackWins');
+    return C.t(st.reason);
+  }
+
+  /* --------------------------------------------------------------- حرکت */
+
+  function select(i) {
+    sel = i;
+    targets = i >= 0 ? E.legal(S).filter(function (m) { return m.from === i; }) : [];
+  }
+
+  function tapSquare(i) {
+    if (!G || G.result) return;
+    var p = S.board[i];
+    if (sel >= 0) {
+      var ms = targets.filter(function (m) { return m.to === i; });
+      if (ms.length) { play(ms); return; }
+    }
+    if (p && E.colorOf(p) === S.turn) {
+      if (sel === i) { select(-1); C.feedback('tap'); }
+      else { select(i); C.feedback(targets.length ? 'select' : 'bad'); }
+    } else if (sel >= 0) { select(-1); C.feedback('tap'); }
+    paint();
+  }
+
+  function play(ms) {
+    if (ms.length > 1 && ms[0].promo) { askPromo(ms); return; }
+    commit(ms[0]);
+  }
+
+  function askPromo(ms) {
+    var grid = el('div', { class: 'cs-promo' });
+    var h = C.ui.modal({ title: C.t('promote'), body: [grid], actions: [{ label: C.t('cancel') }] });
+    ms.forEach(function (m) {
+      var bt = el('button', { type: 'button', html: pieceSvg(m.promo), 'aria-label': m.promo });
+      bt.addEventListener('click', function () { h.close(); commit(m); });
+      grid.appendChild(bt);
+    });
+  }
+
+  function commit(m) {
+    var text = E.san(S, m);
+    S = E.make(S, m);
+    G.fens.push(E.fen(S));
+    G.sans.push(text);
+    G.lastMove = { from: m.from, to: m.to };
+    select(-1);
+    C.audio.sfx(m.captured ? 'pop' : 'place');
+    C.haptic('tap');
+    var st = E.status(G.fens);
+    if (st.over) { end(st); return; }
+    if (st.check) C.audio.sfx('chain');
+    save();
+    render();
+  }
+
+  function end(st) {
+    G.result = st;
+    if (st.reason === 'mate') C.achievements.unlock('cs-mate');
+    ctx.clearSave();
+    render();
+    var title = st.winner ? C.t(st.winner === 'w' ? 'whiteWins' : 'blackWins') : C.t('draw');
+    ctx.finish({
+      won: !!st.winner, title: title, timeMs: Date.now() - G.startedAt, coins: st.reason === 'mate' ? 8 : 3, points: st.reason === 'mate' ? 30 : 10,
+      lines: [{ label: resultText(st), value: '' }, { label: C.t('moves'), value: C.num(Math.ceil(G.sans.length / 2)) }],
+      shareText: 'چوگان · شطرنج\n' + G.sans.join(' '),
+      onAgain: function () { newGame(); }
+    });
+  }
+
+  function undo() {
+    if (!G || G.fens.length < 2) { C.feedback('bad'); return; }
+    G.fens.pop(); G.sans.pop();
+    G.result = null;
+    S = E.parse(G.fens[G.fens.length - 1]);
+    // آخرین حرکت را از روی دو چیدمان پشت سر هم پیدا می‌کنیم تا دوباره روشن شود
+    G.lastMove = null;
+    if (G.fens.length > 1) {
+      var P = E.parse(G.fens[G.fens.length - 2]);
+      var m = E.legal(P).filter(function (x) { return E.fen(E.make(P, x)) === G.fens[G.fens.length - 1]; })[0];
+      if (m) G.lastMove = { from: m.from, to: m.to };
+    }
+    select(-1);
+    C.feedback('tap');
+    save();
+    render();
+  }
+
+  function askNew() {
+    if (!G || G.result || G.fens.length < 2) { newGame(); return; }
+    C.ui.confirm({ title: C.t('newGame'), body: C.t('resetWarn'), onOk: newGame });
+  }
+
+  /* ---------------------------------------------------- ضربه و کشیدن */
+  // نگه داشتن روی مهره انتخابش می‌کند و رها کردن روی خانه‌ی دیگر همان حرکت است،
+  // پس ضربه‌ضربه و کشیدن هر دو با یک مسیر کار می‌کنند
+  function squareFromPoint(x, y) {
+    var t = document.elementFromPoint(x, y);
+    while (t && t !== boardEl && !t.hasAttribute('data-v')) t = t.parentElement;
+    return t && t.hasAttribute('data-v') ? sqAt(+t.getAttribute('data-v')) : -1;
+  }
+  boardEl.addEventListener('pointerdown', function (e) {
+    var i = squareFromPoint(e.clientX, e.clientY);
+    if (i < 0) return;
+    cur = -1;
+    var before = sel;
+    tapSquare(i);
+    dragFrom = sel >= 0 && sel === i && before !== i ? i : -1;
+  });
+  boardEl.addEventListener('pointerup', function (e) {
+    if (dragFrom < 0) return;
+    var i = squareFromPoint(e.clientX, e.clientY);
+    var from = dragFrom;
+    dragFrom = -1;
+    if (i >= 0 && i !== from && sel === from) tapSquare(i);
+  });
+
+  window.addEventListener('keydown', function (e) {
+    if (!G || G.result) return;
+    if (document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
+    if (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter') && !tg.hasAttribute('data-v')) return;
+    var k = e.key;
+    if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (k === 'f' || k === 'F' || e.code === 'KeyF') { prefs.flip = !prefs.flip; ctx.store.set('prefs', prefs); render(); e.preventDefault(); return; }
+    if (k === 'Escape') { select(-1); paint(); return; }
+    var d = { ArrowUp: -8, ArrowDown: 8, ArrowLeft: -1, ArrowRight: 1 }[k];
+    if (d !== undefined) {
+      if (cur < 0) cur = 52;
+      else {
+        var nv = cur + d;
+        if (nv >= 0 && nv < 64 && !(d === -1 && (cur & 7) === 0) && !(d === 1 && (cur & 7) === 7)) cur = nv;
+      }
+      paint(); e.preventDefault(); return;
+    }
+    if ((k === ' ' || k === 'Enter') && cur >= 0) { tapSquare(sqAt(cur)); e.preventDefault(); }
+  });
+
+  /* ---------------------------------------------------------- راهنما */
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          kb('← ↑ → ↓', C.t('move')), kb('Space / Enter', C.t('pick')), kb('Esc', C.t('cancelPick')),
+          kb('F', C.t('flipKey')), kb('U / Ctrl+Z', C.t('undoMove'))
+        ])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function kb(k, what) {
+    return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]);
+  }
+  function artBoard(pieces, marks) {
+    var s = '<svg viewBox="0 0 200 110" width="100%"><g transform="translate(55 0)">';
+    for (var r = 0; r < 4; r++) for (var c = 0; c < 4; c++) {
+      s += '<rect x="' + (c * 22.5) + '" y="' + (r * 22.5 + 10) + '" width="22.5" height="22.5" fill="' + ((r + c) % 2 ? '#B58A63' : '#EEDCBC') + '"/>';
+    }
+    (marks || []).forEach(function (m) { s += '<circle cx="' + (m[0] * 22.5 + 11.25) + '" cy="' + (m[1] * 22.5 + 21.25) + '" r="4" fill="rgba(40,40,40,.35)"/>'; });
+    pieces.forEach(function (p) {
+      s += '<g transform="translate(' + (p[1] * 22.5) + ' ' + (p[2] * 22.5 + 10) + ') scale(.5)">' + pieceSvg(p[0]).replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '') + '</g>';
+    });
+    return s + '</g></svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: artBoard([['N', 1, 3], ['p', 2, 1]], [[0, 1], [2, 1], [3, 2]]) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: artBoard([['K', 2, 3], ['R', 1, 3], ['p', 3, 0], ['P', 0, 1]]) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: artBoard([['k', 0, 0], ['Q', 1, 1], ['K', 2, 2]]) }
+  ];
+
+  /* ---------------------------------------------------------- ذخیره */
+  ctx.autosave(function () {
+    if (!G || G.result || G.fens.length < 2) return { inProgress: false };
+    return { g: { fens: G.fens, sans: G.sans, lastMove: G.lastMove, elapsed: Date.now() - G.startedAt }, prefs: prefs };
+  });
+  function save() { ctx.save(); }
+
+  var saved = ctx.loadSave();
+  var sv = saved && saved.g;
+  if (sv && Array.isArray(sv.fens) && sv.fens.length > 1 && sv.sans && sv.sans.length === sv.fens.length - 1) {
+    if (saved.prefs) prefs = saved.prefs;
+    G = { fens: sv.fens, sans: sv.sans, lastMove: sv.lastMove || null, result: null, startedAt: Date.now() - (sv.elapsed || 0) };
+    S = E.parse(G.fens[G.fens.length - 1]);
+    render();
+  } else {
+    newGame();
+    ctx.tutorialIfNew(TUT);
+  }
+})();
+</script>
+</body>
+</html>
