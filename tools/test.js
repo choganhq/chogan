@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 1979;
+const MIN_CHECKS = 1997;
 
 function ok(cond, msg) {
   checks++;
@@ -3377,6 +3377,37 @@ function testPasur() {
   ok(JSON.stringify(r1) === JSON.stringify(r2), 'یک بذر همیشه یک دست می‌دهد');
 }
 
+/* ---------------------------------------------- ادامه‌ی روزانه‌ی نیمه‌کاره */
+// هسته برای هر روز خانه‌ی ذخیره‌ی جدا دارد، ولی سودوکو، نقطه‌بازی، مین‌روب و دفاع از
+// برج روزانه را همیشه از نو می‌ساختند و پیشرفت همان روز با یک «بازگشت» گم می‌شد (#132).
+// شاخه‌ی «اگر روزانه است» یا باید بعد از شاخه‌ای بیاید که ذخیره را می‌خواند، یا خودش بخواند.
+function testDailyResume() {
+  head('ادامه‌ی روزانه');
+  const problem = (html) => {
+    const at = html.lastIndexOf('ctx.loadSave()');
+    if (at < 0) return 'ctx.loadSave() نیست';
+    const tail = html.slice(at);
+    const di = tail.indexOf('if (dailyDate) {');
+    if (di < 0) return null;
+    const SAVE = /\b(saved|sv|restore\w*|resume\w*)\b/;
+    const conds = tail.slice(0, di).match(/if \(([^{]*)\) \{/g) || [];
+    if (conds.some((c) => SAVE.test(c))) return null;
+    let d = 0, j = tail.indexOf('{', di);
+    for (let i = j; i < tail.length; i++) {
+      if (tail[i] === '{') d++;
+      else if (tail[i] === '}' && --d === 0) { j = i; break; }
+    }
+    return SAVE.test(tail.slice(di, j)) ? null : 'شاخه‌ی روزانه بدون نگاه به ذخیره بازی تازه می‌سازد';
+  };
+  ok(games.length > 0, 'فهرست بازی‌ها خالی نیست');
+  // خودِ بررسی باید شکل خراب را بشناسد، وگرنه همیشه سبز بود
+  ok(problem("var saved = ctx.loadSave();\n  if (dailyDate) {\n    newGame('x', dailyDate);\n  } else if (saved) { restore(saved); }") !== null, 'بررسی، روزانه‌ی بی‌ذخیره را می‌گیرد');
+  for (const g of games) {
+    const why = problem(fs.readFileSync(path.join(ROOT, 'www', g.path), 'utf8'));
+    ok(!why, g.id + ': روزانه‌ی نیمه‌کاره‌ی همان روز ادامه می‌یابد' + (why ? ' (' + why + ')' : ''));
+  }
+}
+
 function testUndoKey() {
   head('کلید برگرداندن');
   const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
@@ -3546,6 +3577,7 @@ testWebChanged();
 testBrowserCheckExits();
 testDevScript();
 testLocales();
+testDailyResume();
 testUndoKey();
 testShortcuts();
 testMenu();

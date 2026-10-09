@@ -990,7 +990,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
   /* ---------------------------------------------------------- شروع */
 
   var saved = ctx.loadSave();
-  if (dailyDate) {
+  // هسته برای هر روز خانه‌ی ذخیره‌ی جدا دارد، ولی این بازی روزانه را همیشه از نو
+  // می‌ساخت و پیشرفت نیمه‌کاره‌ی همان روز گم می‌شد (#132). اول ذخیره‌ی همین روز.
+  var resume = saved && saved.s && saved.s.history && saved.s.history.length &&
+    (saved.s.daily || null) === (dailyDate || null);
+  if (resume) {
+    restoreSaved(saved);
+  } else if (dailyDate) {
     var d = C.daily('dots', dailyDate);
     newGame(5, 'ai', 'hard', dailyDate, d.rng);
     if (C.stats.dailyDone('dots', dailyDate)) {
@@ -998,8 +1004,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
       C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec.label });
     }
     ctx.tutorialIfNew(TUT);
-  } else if (saved && saved.s && saved.s.history && saved.s.history.length) {
-    if (saved.prefs) prefs = saved.prefs;
+  } else {
+    newGame(prefs.size || 5, prefs.mode || 'ai', prefs.level || 'medium');
+    ctx.tutorialIfNew(TUT);
+  }
+
+  function restoreSaved(saved) {
+    if (saved.prefs && !saved.s.daily) prefs = saved.prefs;
     var v = saved.s;
     bd = E.makeBoard(v.size, v.size);
     S = {
@@ -1011,9 +1022,6 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
     drawAll();
     render();
     maybeAi();
-  } else {
-    newGame(prefs.size || 5, prefs.mode || 'ai', prefs.level || 'medium');
-    ctx.tutorialIfNew(TUT);
   }
 })();
 </script>
