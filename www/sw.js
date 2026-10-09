@@ -16,6 +16,7 @@ const SHELL = [
   './games.json',
   './manifest.webmanifest',
   './favicon.svg',
+  './privacy.html',
   './icon-192.png',
   './icon-512.png',
   './icon-maskable-512.png',

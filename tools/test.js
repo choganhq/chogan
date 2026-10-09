@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2243;
+const MIN_CHECKS = 2251;
 
 function ok(cond, msg) {
   checks++;
@@ -3725,6 +3725,34 @@ function testAdiProof() {
   ok(/retention-days: 1/.test(y), 'artifact فقط یک روز می‌ماند');
 }
 
+/* ------------------------------------------------ Privacy policy page */
+// Play requires a public privacy policy URL (#161). The page says nothing is
+// collected and the Android app has no internet permission; these checks keep
+// that claim true and the page available offline.
+function testPrivacyPage() {
+  head('Privacy policy page');
+  const f = path.join(ROOT, 'www/privacy.html');
+  ok(fs.existsSync(f), 'www/privacy.html exists');
+  if (!fs.existsSync(f)) return;
+  const html = fs.readFileSync(f, 'utf8');
+  ok(/<section lang="fa" dir="rtl">/.test(html) && /<section lang="en" dir="ltr">/.test(html), 'Persian and English sections');
+  ok(/choganhq@gmail\.com/.test(html), 'contact email present');
+  // An undefined variable silently drops the whole declaration: var(--s-8) once
+  // removed all the page's padding and the text touched the screen edge
+  const css = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8') + html;
+  const used = [...new Set([...html.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1]))];
+  const undef = used.filter((v) => !new RegExp(v.replace(/-/g, '\\-') + '\\s*:').test(css));
+  ok(used.length > 0 && undef.length === 0, 'every CSS variable the page uses is defined' + (undef.length ? ' (missing: ' + undef.join(', ') + ')' : ''));
+  const sw = fs.readFileSync(path.join(ROOT, 'www/sw.js'), 'utf8');
+  ok(/'\.\/privacy\.html'/.test(sw), 'the service worker precaches privacy.html');
+  const manifest = fs.readFileSync(path.join(ROOT, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
+  const perms = [...manifest.matchAll(/uses-permission[^>]*android:name="([^"]+)"/g)].map((m) => m[1]);
+  ok(perms.length > 0 && perms.every((p) => p === 'android.permission.VIBRATE'), 'Android declares only VIBRATE, as the page says (' + perms.join(', ') + ')');
+  ok(/android:allowBackup="false"/.test(manifest), 'Android backup is off, as the page says');
+  const menu = fs.readFileSync(path.join(ROOT, 'www/index.html'), 'utf8');
+  ok(/href: 'privacy\.html'/.test(menu), 'the profile links to the privacy page');
+}
+
 /* ------------------------------------------------ Google Play API */
 // tools/play-api.sh holds the Play service account key and is the only path from
 // CI to Play (#159). It runs here against a mock Play: the token endpoint checks
@@ -4119,6 +4147,7 @@ testHomeGrid();
 testAdiProof();
 testEnglishCi();
 testPepkExport();
+testPrivacyPage();
 testTd();
 testVersionStamp();
 testDeployGate();
