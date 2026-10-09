@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 1920;
+const MIN_CHECKS = 1979;
 
 function ok(cond, msg) {
   checks++;
@@ -3255,6 +3255,128 @@ function testLocales() {
 
 /* ------------------------------------------------- منو و دستاوردها */
 // تابع واقعی منو را بیرون می‌کشیم و با هسته‌ی ساختگی اجرا می‌کنیم (#85).
+/* ------------------------------------------------------------- پاسور */
+function testPasur() {
+  head('پاسور');
+  const E = loadEngine('pasur', 'PasurEngineFactory');
+  const P = (str) => str.split(' ').map(E.parse);
+  const N = (arr) => arr.map(E.name).sort().join(' ');
+  const optsOf = (table, card) => E.options(P(table), E.parse(card)).map((o) => N(o)).sort();
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+  ok(E.name(E.parse('10D')) === '10D' && E.parse('10D') === E.TEN_DIAMONDS && E.parse('2C') === E.TWO_CLUBS, 'نام کارت‌ها رفت‌وبرگشت درست است');
+  // هر جواب از روی قانون دستی نوشته شده: کارت عددی با جمع ۱۱
+  ok(same(optsOf('5C 6D 4H KS', '6S'), ['5C']), '۶ با ۵ برمی‌دارد');
+  ok(same(optsOf('5C 6D 4H KS', '2H'), ['4H 5C']), '۲ با ۵ و ۴ برمی‌دارد');
+  ok(same(optsOf('5C 6D 4H KS', 'AC'), ['4H 6D']), 'آس یک است و با ۶ و ۴ برمی‌دارد');
+  ok(same(optsOf('5C 6D 4H KS', '9C'), []), '۹ راهی ندارد و روی میز می‌نشیند');
+  ok(same(optsOf('3C 3D 8H 5S', '8C'), ['3C', '3D']), 'دو راه برای ۸: هر کدام از دو سه');
+  ok(same(optsOf('3C 3D 8H 5S', '3S'), ['3C 5S', '3D 5S', '8H']), 'سه راه برای ۳');
+  ok(same(optsOf('5C QH KS JD 9H', 'JS'), ['5C 9H JD']), 'سرباز همه‌چیز جز شاه و بی‌بی را برمی‌دارد');
+  ok(same(optsOf('QH KS', 'JS'), []), 'سرباز روی میزِ فقط شاه و بی‌بی چیزی برنمی‌دارد');
+  ok(same(optsOf('QH QS 5C', 'QD'), ['QH', 'QS']), 'بی‌بی فقط یک بی‌بی برمی‌دارد');
+  ok(same(optsOf('QH 5C 6D', 'KD'), []), 'شاه بدون شاه روی میز چیزی برنمی‌دارد');
+
+  const mk = (table, h0, h1, deck) => ({ deck: P(deck || ''), table: P(table), hands: [P(h0), P(h1 || '')],
+    caps: [[], []], surs: [0, 0], turn: 0, first: 0, lastCap: -1, log: [], done: false });
+  const fix = (S) => { if (S.deck.length === 1 && S.deck[0] < 0) S.deck = []; return S; };
+
+  let S = fix(mk('4C 6D', 'AS', 'KH'));
+  let info = E.play(S, E.parse('AS'), null);
+  ok(info && info.sur && S.surs[0] === 1 && !S.table.length, 'خالی کردن میز با کارت عددی سور است');
+  S = fix(mk('4C 6D', 'JS', 'KH'));
+  info = E.play(S, E.parse('JS'), null);
+  ok(info && !info.sur && S.surs[0] === 0 && !S.table.length, 'خالی کردن میز با سرباز سور نیست');
+  S = fix(mk('3C 3D 8H 5S', '8C 2D', 'KH'));
+  ok(E.play(S, E.parse('8C'), null) === null, 'با چند راه باید یکی انتخاب شود');
+  ok(E.play(S, E.parse('8C'), P('8H')) === null, 'برداشتی که جمعش ۱۱ نیست رد می‌شود');
+  ok(E.play(S, E.parse('2D'), P('3C')) === null, 'کارتی که راه برداشت ندارد چیزی برنمی‌دارد');
+  info = E.play(S, E.parse('8C'), P('3D'));
+  ok(info && N(S.table) === '3C 5S 8H' && N(S.caps[0]) === '3D 8C' && S.turn === 1, 'برداشت انتخابی درست انجام شد');
+
+  // آخرین کارت: میز مانده به آخرین برداشت‌کننده می‌رسد و سور نیست
+  S = fix(mk('5C', 'KD', 'QS'));
+  S.lastCap = 1; S.turn = 0;
+  info = E.play(S, E.parse('KD'), null);
+  ok(info && !S.done && N(S.table) === '5C KD', 'شاه روی میز نشست');
+  info = E.play(S, E.parse('QS'), null);
+  ok(S.done && !S.table.length && N(S.caps[1]) === '5C KD QS' && S.surs[1] === 0 && info.sweep.length === 3,
+    'پایان دست: میز به آخرین برداشت‌کننده رسید و سور حساب نشد');
+
+  // دست تازه وقتی هر دو دست خالی است و دسته تمام نشده
+  S = fix(mk('9H', 'KD', 'QS', '2C 3C 4C 5C 6C 7C 8C 9C'));
+  S.first = 1;
+  E.play(S, E.parse('KD'), null); E.play(S, E.parse('QS'), null);
+  ok(S.hands[0].length === 4 && S.hands[1].length === 4 && !S.deck.length && S.turn === 1, 'دست تازه پخش شد و نوبت با شروع‌کننده است');
+
+  // امتیاز: همه‌ی گشنیز = ۷ + دو گشنیز ۲ + آس ۱ + سرباز ۱
+  S = fix(mk('', '', ''));
+  S.caps[0] = P('AC 2C 3C 4C 5C 6C 7C 8C 9C 10C JC QC KC');
+  S.caps[1] = P('10D AD JD AH');
+  S.surs = [1, 0];
+  const sc = E.score(S);
+  ok(sc[0].total === 7 + 2 + 1 + 1 + 5 && sc[0].clubs === 13, 'امتیاز همه‌ی گشنیزها با یک سور ۱۶ است (' + sc[0].total + ')');
+  ok(sc[1].total === 3 + 2 + 1 && sc[1].clubPts === 0, 'ده خشت، دو آس و یک سرباز ۶ است (' + sc[1].total + ')');
+
+
+  // حریف متوسط و سخت میزی نمی‌گذارند که با یک کارت سور شود
+  S = fix(mk('3C 4D', '2H KC', 'QS QH'));
+  const mMed = E.aiMove(S, 'medium', () => 0.5);
+  ok(mMed && E.name(mMed.card) === 'KC', 'متوسط: به‌جای ۲ (که میز را ۹ می‌کرد) شاه را گذاشت');
+  // سخت با نمونه‌گیری تصمیم می‌گیرد؛ یک بذر تنها می‌توانست شانسی رد یا قبول شود
+  let kc = 0;
+  for (let sd = 1; sd <= 8; sd++) {
+    const m = E.aiMove(fix(mk('3C 4D', '2H KC', 'QS QH')), 'hard', rng(sd * 97));
+    if (m && E.name(m.card) === 'KC') kc++;
+  }
+  ok(kc >= 6, 'سخت: در دست‌کم ۶ از ۸ بذر شاه را گذاشت (' + kc + ')');
+
+  // دست‌های کامل: هیچ کارتی گم یا تکراری نمی‌شود و جمع امتیاز ۲۰ به‌علاوه‌ی سورهاست
+  let games = 0, bad = 0, illegal = 0, wins = { hard: 0, easy: 0 }, undoOk = true, seenJackOnTable = false;
+  for (let g = 0; g < 240; g++) {
+    const r = rng(5000 + g);
+    const D = E.newDeal(r, g % 2);
+    if (D.table.some(E.isJ)) seenJackOnTable = true;
+    const all = D.deck.concat(D.table, D.hands[0], D.hands[1]);
+    if (all.length !== 52 || new Set(all).size !== 52 || D.table.length !== 4 || D.deck.length !== 40) bad++;
+    const lv = ['easy', 'medium', 'hard'][g % 3];
+    const lv2 = g < 120 ? 'easy' : 'hard';
+    let plays = 0;
+    while (!D.done && plays < 60) {
+      const before = JSON.stringify([D.table, D.hands, D.caps, D.surs, D.turn]);
+      const m = E.aiMove(D, D.turn === 0 ? lv2 : lv, r);
+      if (!m || !E.play(D, m.card, m.set)) { illegal++; break; }
+      plays++;
+      if (g === 7 && plays === 5) {
+        E.undo(D);
+        undoOk = undoOk && JSON.stringify([D.table, D.hands, D.caps, D.surs, D.turn]) === before;
+        E.play(D, m.card, m.set);
+      }
+    }
+    games++;
+    const caps = D.caps[0].concat(D.caps[1]);
+    const s2 = E.score(D);
+    if (!D.done || plays !== 48 || caps.length !== 52 || new Set(caps).size !== 52 ||
+        s2[0].total + s2[1].total !== 20 + 5 * (D.surs[0] + D.surs[1])) bad++;
+    if (lv === 'easy' && lv2 === 'hard' && s2[0].total > s2[1].total) wins.hard++;
+    if (lv === 'hard' && lv2 === 'easy' && s2[1].total > s2[0].total) wins.easy++;
+  }
+  ok(games === 240 && bad === 0 && illegal === 0, '۲۴۰ دست کامل: ۴۸ حرکت، ۵۲ کارت بی‌کم‌وکاست، امتیاز ۲۰ به‌علاوه‌ی سور (خراب ' + bad + '، غیرمجاز ' + illegal + ')');
+  ok(!seenJackOnTable, 'هیچ دستی با سرباز روی میز شروع نشد');
+  ok(undoOk, 'برگرداندن حالت را دقیقاً به قبل از حرکت برمی‌گرداند');
+  ok(wins.hard >= 25 && wins.easy >= 25, 'سخت از آسان بیشتر می‌برد، از هر دو طرف (' + wins.hard + ' و ' + wins.easy + ' از ۴۰)');
+
+  // undoTo: بازیکن و جواب حریف با هم برمی‌گردند
+  const U = E.newDeal(rng(42), 0);
+  const start = JSON.stringify([U.table, U.hands]);
+  let m0 = E.aiMove(U, 'medium', rng(1)); E.play(U, m0.card, m0.set);
+  m0 = E.aiMove(U, 'medium', rng(2)); E.play(U, m0.card, m0.set);
+  ok(E.undoTo(U, 0) && JSON.stringify([U.table, U.hands]) === start && U.turn === 0 && !U.log.length, 'برگرداندن حرکت تو جواب حریف را هم برمی‌گرداند');
+
+  const r1 = E.newDeal(rng(777), 0), r2 = E.newDeal(rng(777), 0);
+  ok(JSON.stringify(r1) === JSON.stringify(r2), 'یک بذر همیشه یک دست می‌دهد');
+}
+
 function testUndoKey() {
   head('کلید برگرداندن');
   const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
@@ -3416,6 +3538,7 @@ testBattleship();
 testBridges();
 testCodebreaker();
 testBreakout();
+testPasur();
 testTd();
 testVersionStamp();
 testDeployGate();

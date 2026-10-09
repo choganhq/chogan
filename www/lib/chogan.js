@@ -897,7 +897,10 @@
     { id: 'cb-quick',    icon: 'bolt',    fa: 'چهار حدس',         en: 'Four guesses',      dfa: 'رمز معمولی یا سخت را در چهار حدس یا کمتر شکستی', den: 'Crack a normal or hard code in four guesses or fewer', zh: '四次破解', dzh: '四次以内破解普通或困难密码', de: 'Vier Versuche', dde: 'Knack einen normalen oder schweren Code in höchstens vier Versuchen' },
     { id: 'bo-first',    icon: 'grid',    fa: 'دیوار اول',        en: 'First wall',        dfa: 'یک مرحله‌ی آجرشکن را تمام کردی',      den: 'Clear a breakout level', zh: '第一面墙', dzh: '通关一关打砖块', de: 'Erste Mauer', dde: 'Räum ein Breakout-Level ab' },
     { id: 'bo-flawless', icon: 'shield',  fa: 'بی‌افت',           en: 'Not a ball lost',   dfa: 'یک مرحله را بدون از دست دادن توپ تمام کردی', den: 'Clear a level without losing a ball', zh: '一球不丢', dzh: '一个球都没丢就通关一关', de: 'Kein Ball verloren', dde: 'Räum ein Level ab, ohne einen Ball zu verlieren' },
-    { id: 'bo-all',      icon: 'trophy',  fa: 'دیوارشکن',         en: 'Wall breaker',      dfa: 'هر دوازده مرحله‌ی آجرشکن را تمام کردی', den: 'Clear all twelve breakout levels', zh: '破墙者', dzh: '通关全部十二关打砖块', de: 'Mauerbrecher', dde: 'Räum alle zwölf Breakout-Level ab' }
+    { id: 'bo-all',      icon: 'trophy',  fa: 'دیوارشکن',         en: 'Wall breaker',      dfa: 'هر دوازده مرحله‌ی آجرشکن را تمام کردی', den: 'Clear all twelve breakout levels', zh: '破墙者', dzh: '通关全部十二关打砖块', de: 'Mauerbrecher', dde: 'Räum alle zwölf Breakout-Level ab' },
+    { id: 'ps-win',      icon: 'trophy',  fa: 'یازده‌باز',        en: 'Eleven up',         dfa: 'یک دست پاسور را از حریف بردی',        den: 'Win a game of pasur against the AI', zh: '凑十一', dzh: '在帕苏尔中战胜电脑', de: 'Elf gemacht', dde: 'Gewinne eine Partie Pasur gegen den Computer' },
+    { id: 'ps-hard',     icon: 'brain',   fa: 'استاد پاسور',      en: 'Pasur master',      dfa: 'حریف سخت پاسور را شکست دادی',         den: 'Beat the hard pasur AI', zh: '帕苏尔大师', dzh: '击败困难的帕苏尔电脑', de: 'Pasur-Meister', dde: 'Schlag den starken Pasur-Gegner' },
+    { id: 'ps-surs',     icon: 'sparkle', fa: 'سه سور',           en: 'Three surs',        dfa: 'در یک دست پاسور سه بار سور زدی',      den: 'Score three surs in one game of pasur', zh: '三次清台', dzh: '在一局帕苏尔中清台三次', de: 'Drei Surs', dde: 'Schaff drei Surs in einem Pasur-Spiel' }
   ];
 
   var achApi = {
