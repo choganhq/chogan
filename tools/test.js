@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 1997;
+const MIN_CHECKS = 2043;
 
 function ok(cond, msg) {
   checks++;
@@ -3377,6 +3377,78 @@ function testPasur() {
   ok(JSON.stringify(r1) === JSON.stringify(r2), 'یک بذر همیشه یک دست می‌دهد');
 }
 
+/* ----------------------------------------------------------- ماهجونگ */
+function testMahjong() {
+  head('ماهجونگ');
+  const E = loadEngine('mahjong', 'MahjongEngineFactory');
+  const sizes = { small: 72, medium: 108, turtle: 144 };
+  for (const k of Object.keys(sizes)) {
+    const L = E.LAYOUTS[k] || [];
+    ok(L.length === sizes[k] && new Set(L.map((p) => p.join(','))).size === L.length, k + ': ' + sizes[k] + ' جای یکتا');
+  }
+  // قانون آزادی، دستی از روی تعریف
+  const all = (n) => new Array(n).fill(true);
+  const row = [[0, 0, 0], [2, 0, 0], [4, 0, 0]];
+  ok(E.freeIn(row, all(3), 0) && !E.freeIn(row, all(3), 1) && E.freeIn(row, all(3), 2), 'ردیف سه‌تایی: دو سر آزاد، وسط بسته');
+  ok(E.freeIn(row, [true, true, false], 1), 'وسط وقتی یک طرفش باز شود آزاد است');
+  const stack = [[0, 0, 0], [0, 0, 1]];
+  ok(!E.freeIn(stack, all(2), 0) && E.freeIn(stack, all(2), 1), 'کاشی زیرِ کاشی دیگر آزاد نیست');
+  const half = [[0, 0, 0], [2, 0, 0], [1, 0, 1]];
+  ok(!E.freeIn(half, all(3), 0) && !E.freeIn(half, all(3), 1) && E.freeIn(half, all(3), 2), 'کاشیِ نیم‌جابه‌جا روی دو کاشی هر دو را می‌پوشاند');
+  const shifted = [[0, 0, 0], [2, 1, 0], [4, 0, 0]];
+  ok(!E.freeIn(shifted, all(3), 1), 'همسایه‌ی نیم‌ردیف بالاتر هم کنار حساب می‌شود');
+
+  ok(E.matches(5, 5) && E.matches(34, 37) && E.matches(38, 41) && !E.matches(34, 38) && !E.matches(0, 1) && !E.matches(33, 34),
+    'جفت‌ها: هم‌نقش، گل با گل، فصل با فصل؛ نه گل با فصل');
+
+  // هر دست با ترتیب پخشش تا آخر حل می‌شود
+  let deals = 0, solved = 0, faceOk = 0;
+  for (const k of Object.keys(sizes)) {
+    for (let sd = 0; sd < 25; sd++) {
+      const S = E.deal(k, rng(700 + sd));
+      deals++;
+      const counts = {};
+      S.faces.forEach((f) => { const key = f >= 38 ? 's' : (f >= 34 ? 'f' : f); counts[key] = (counts[key] || 0) + 1; });
+      if (S.faces.length === sizes[k] && S.faces.every((f) => f >= 0 && f <= 41) && Object.values(counts).every((c) => c % 2 === 0)) faceOk++;
+      let good = true;
+      for (const [a, b] of S.solution) if (!E.remove(S, a, b)) { good = false; break; }
+      if (good && S.done && E.left(S) === 0) solved++;
+    }
+  }
+  ok(deals === 75 && solved === 75, '۷۵ دست (سه چیدمان): همه با ترتیب پخش تا آخر حل شدند (' + solved + ')');
+  ok(faceOk === 75, 'نقش‌ها جفت‌جفت‌اند و تعداد کاشی درست است (' + faceOk + ')');
+
+  // حرکت غلط رد می‌شود و برگرداندن دقیق است
+  const S = E.deal('small', rng(5));
+  const [a0, b0] = S.solution[0];
+  const blocked = S.faces.findIndex((f, i) => !E.isFree(S, i));
+  ok(blocked >= 0 && !E.remove(S, blocked, a0), 'کاشی بسته برداشته نمی‌شود');
+  const other = E.freeTiles(S).find((i) => i !== a0 && !E.matches(S.faces[i], S.faces[a0]));
+  ok(other === undefined || !E.remove(S, a0, other), 'دو کاشیِ ناجور برداشته نمی‌شوند');
+  const before = JSON.stringify(S.gone);
+  ok(E.remove(S, a0, b0) && E.left(S) === 70, 'جفت آزاد و جور برداشته شد');
+  ok(E.undo(S) && JSON.stringify(S.gone) === before && S.undos === 1, 'برگرداندن جفت را سر جایش می‌گذارد');
+
+  // بُر زدن وسط بازی: همان نقش‌ها، باز حل‌شدنی، و برگشت‌پذیر
+  let shuffledOk = 0;
+  for (let sd = 0; sd < 20; sd++) {
+    const T = E.deal(sd % 2 ? 'medium' : 'turtle', rng(900 + sd));
+    for (let s = 0; s < 10; s++) E.remove(T, T.solution[s][0], T.solution[s][1]);
+    const bag = (X) => X.faces.filter((f, i) => !X.gone[i]).map((f) => (f >= 38 ? 's' : (f >= 34 ? 'f' : f))).sort().join();
+    const facesBefore = JSON.stringify(T.faces), bagBefore = bag(T);
+    const order = E.reshuffle(T, rng(1300 + sd));
+    const sameBag = order && bag(T) === bagBefore;
+    const undone = JSON.parse(JSON.stringify(T));
+    E.undo(undone);
+    let good = sameBag && JSON.stringify(undone.faces) === facesBefore && T.shuffles === 1;
+    for (const [a, b] of (order || [])) if (!E.remove(T, a, b)) { good = false; break; }
+    if (good && T.done) shuffledOk++;
+  }
+  ok(shuffledOk === 20, 'بُر زدن نقش‌های مانده را نگه می‌دارد، حل‌شدنی می‌ماند و برمی‌گردد (' + shuffledOk + ' از ۲۰)');
+
+  ok(JSON.stringify(E.deal('medium', rng(11))) === JSON.stringify(E.deal('medium', rng(11))), 'یک بذر همیشه یک دست می‌دهد');
+}
+
 /* ---------------------------------------------- ادامه‌ی روزانه‌ی نیمه‌کاره */
 // هسته برای هر روز خانه‌ی ذخیره‌ی جدا دارد، ولی سودوکو، نقطه‌بازی، مین‌روب و دفاع از
 // برج روزانه را همیشه از نو می‌ساختند و پیشرفت همان روز با یک «بازگشت» گم می‌شد (#132).
@@ -3570,6 +3642,7 @@ testBridges();
 testCodebreaker();
 testBreakout();
 testPasur();
+testMahjong();
 testTd();
 testVersionStamp();
 testDeployGate();
