@@ -1,16 +1,17 @@
-name: APK اثبات مالکیت کلید برای ثبت نام بسته
+name: Signed APK for Play package registration
 
-# Play Console نام بسته‌ای را که بیرون از Play نصب دارد (Releases و اف‌دروید) فقط با
-# APK امضاشده با همان کلید ثبت می‌کند؛ فایل assets/adi-registration.properties باید
-# متن snippet خود Play را داشته باشد (#152). کلید فقط در Secrets است، پس این APK
-# فقط اینجا ساخته می‌شود. هیچ چیز منتشر نمی‌شود: خروجی یک artifact کوتاه‌عمر است.
+# Play Console only registers a package name that already has installs outside Play
+# (GitHub Releases, F-Droid) against a release APK signed with that same key and
+# carrying assets/adi-registration.properties with Play's own snippet (#152). The key
+# lives only in the org secrets, so the APK can only be built here. Nothing is
+# published: the output is a short-lived artifact.
 # https://support.google.com/googleplay/android-developer/answer/16761053
 
 on:
   workflow_dispatch:
     inputs:
       snippet:
-        description: 'snippet از صفحه‌ی Upload APK در Play Console'
+        description: 'Snippet from the Upload APK screen in Play Console'
         required: true
         type: string
 
@@ -19,53 +20,53 @@ permissions:
 
 jobs:
   proof:
-    name: ساخت APK اثبات مالکیت
+    name: Build proof APK
     runs-on: ubuntu-latest
     steps:
-      - name: دریافت سورس
+      - name: Check out
         uses: actions/checkout@v7
 
-      - name: نصب جاوا
+      - name: Set up Java
         uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
 
-      - name: خواندن نسخه‌ی گردل از فایل wrapper
+      - name: Read Gradle version from the wrapper
         id: gradleversion
         run: |
           set -euo pipefail
           V=$(sed -n 's|.*/gradle-\([0-9][^-]*\)-bin\.zip.*|\1|p' android/gradle/wrapper/gradle-wrapper.properties)
-          [ -n "$V" ] || { echo "نسخه‌ی گردل از gradle-wrapper.properties خوانده نشد"; exit 1; }
+          [ -n "$V" ] || { echo "Could not read the Gradle version from gradle-wrapper.properties"; exit 1; }
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
-      - name: نصب گریدل
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: ${{ steps.gradleversion.outputs.version }}
 
-      # snippet از env خوانده می‌شود، نه با ${{ }} وسط اسکریپت، تا متن ورودی هرگز
-      # به‌عنوان فرمان شل اجرا نشود
-      - name: نوشتن فایل ثبت
+      # The snippet arrives through env, never through ${{ }} inside the script, so
+      # free text typed into the form can never run as shell
+      - name: Write the registration file
         env:
           SNIPPET: ${{ inputs.snippet }}
         run: |
           set -euo pipefail
           S=$(printf '%s' "$SNIPPET" | tr -d '\r')
-          [ -n "$S" ] || { echo "snippet خالی است"; exit 1; }
+          [ -n "$S" ] || { echo "The snippet is empty"; exit 1; }
           mkdir -p android/app/src/main/assets
           printf '%s\n' "$S" > android/app/src/main/assets/adi-registration.properties
-          echo "فایل ثبت: $(wc -c < android/app/src/main/assets/adi-registration.properties) بایت"
+          echo "Registration file: $(wc -c < android/app/src/main/assets/adi-registration.properties) bytes"
 
-      - name: بازسازی کلید امضا از سکرت
+      - name: Restore the signing key from secrets
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
-          [ -n "${ANDROID_KEYSTORE_BASE64:-}" ] || { echo "سکرت ANDROID_KEYSTORE_BASE64 تعریف نشده"; exit 1; }
+          [ -n "${ANDROID_KEYSTORE_BASE64:-}" ] || { echo "Secret ANDROID_KEYSTORE_BASE64 is not set"; exit 1; }
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
 
-      - name: بیلد نسخه‌ی ریلیز
+      - name: Build release APK
         working-directory: android
         env:
           ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/release.jks
@@ -74,13 +75,13 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: gradle --no-daemon assembleRelease
 
-      - name: پاک کردن کلید
+      - name: Remove the key
         if: always()
         run: rm -f "$RUNNER_TEMP/release.jks"
 
-      # Play فقط امضای همین کلید را قبول می‌کند؛ اگر امضا یا فایل جا افتاده باشد
-      # همین‌جا شکست می‌خورد، نه بعد از آپلود در Play Console
-      - name: بررسی امضا و فایل ثبت
+      # Play accepts only this key's signature; a wrong signer or a missing file fails
+      # here instead of as a vague rejection after the upload in Play Console
+      - name: Check signer and registration file
         env:
           SNIPPET: ${{ inputs.snippet }}
         run: |
@@ -89,14 +90,14 @@ jobs:
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
           "$APKSIGNER" verify --print-certs "$APK" | tee certs.txt
           grep -q 'SHA-256 digest: c3f70a1af8a45558678d1d9b413415d1b0a4c3208835ce78c1f37c4a3a008839' certs.txt \
-            || { echo "امضاکننده کلید همیشگی چوگان نیست"; exit 1; }
+            || { echo "The signer is not the permanent Chogan key"; exit 1; }
           IN=$(unzip -p "$APK" assets/adi-registration.properties | tr -d '\r\n')
           WANT=$(printf '%s' "$SNIPPET" | tr -d '\r\n')
-          [ "$IN" = "$WANT" ] || { echo "فایل assets/adi-registration.properties در APK با snippet نمی‌خواند"; exit 1; }
+          [ "$IN" = "$WANT" ] || { echo "assets/adi-registration.properties in the APK does not match the snippet"; exit 1; }
           mv "$APK" io.github.choganhq.chogan-adi-proof.apk
           sha256sum io.github.choganhq.chogan-adi-proof.apk
 
-      - name: بارگذاری APK به‌عنوان artifact
+      - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
         with:
           name: adi-proof-apk
