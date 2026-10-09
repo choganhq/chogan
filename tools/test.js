@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 1769;
+const MIN_CHECKS = 1776;
 
 function ok(cond, msg) {
   checks++;
@@ -80,6 +80,20 @@ function testSudoku() {
   ok(a.puzzle.join() === b.puzzle.join(), 'یک بذر همیشه یک جدول می‌دهد');
   const bad = E.conflicts([1, 1].concat(new Array(79).fill(0)));
   ok(bad[0] && bad[1], 'تشخیص تعارض کار می‌کند');
+
+  // جدولی که یک ردیف کاملاً خالی دارد واقعاً ساخته می‌شود (روزانه‌ی ۲۰۲۶-۱۰-۰۹)،
+  // و با ردیف خودکار همان ردیف تا چند پیکسل جمع می‌شد (#118)
+  const sdHtml = fs.readFileSync(path.join(ROOT, 'www/games/sudoku/index.html'), 'utf8');
+  const board = (sdHtml.match(/\.sd-board \{([^}]*)\}/) || [])[1] || '';
+  ok(board.length > 0, 'قاعده‌ی .sd-board در صفحه‌ی سودوکو پیدا شد');
+  ok(/grid-template-rows:\s*repeat\(9,\s*minmax\(0,\s*1fr\)\)/.test(board), 'ردیف‌های تخته‌ی سودوکو هم‌اندازه‌اند، نه به اندازه‌ی محتوا');
+  ok(/grid-template-columns:\s*repeat\(9,\s*minmax\(0,\s*1fr\)\)/.test(board), 'ستون‌های تخته‌ی سودوکو هم‌اندازه‌اند، نه به اندازه‌ی محتوا');
+  let emptyRow = 0;
+  for (let i = 0; i < 40 && !emptyRow; i++) {
+    const q = E.makePuzzle(rng(9000 + i), 'expert').puzzle;
+    for (let r = 0; r < 9; r++) if (q.slice(r * 9, r * 9 + 9).every((v) => !v)) emptyRow++;
+  }
+  ok(emptyRow > 0, 'مولد جدولی با ردیف کاملاً خالی هم می‌سازد، پس این حالت واقعی است');
   console.log('  ' + checks + ' بررسی، بیشینه‌ی زمان تولید ' + maxMs + 'ms');
 }
 
