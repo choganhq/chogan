@@ -1,0 +1,106 @@
+name: Signed APK for Play package registration
+
+# Play Console only registers a package name that already has installs outside Play
+# (GitHub Releases, F-Droid) against a release APK signed with that same key and
+# carrying assets/adi-registration.properties with Play's own snippet (#152). The key
+# lives only in the org secrets, so the APK can only be built here. Nothing is
+# published: the output is a short-lived artifact.
+# https://support.google.com/googleplay/android-developer/answer/16761053
+
+on:
+  workflow_dispatch:
+    inputs:
+      snippet:
+        description: 'Snippet from the Upload APK screen in Play Console'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    name: Build proof APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Read Gradle version from the wrapper
+        id: gradleversion
+        run: |
+          set -euo pipefail
+          V=$(sed -n 's|.*/gradle-\([0-9][^-]*\)-bin\.zip.*|\1|p' android/gradle/wrapper/gradle-wrapper.properties)
+          [ -n "$V" ] || { echo "Could not read the Gradle version from gradle-wrapper.properties"; exit 1; }
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: ${{ steps.gradleversion.outputs.version }}
+
+      # The snippet arrives through env, never through ${{ }} inside the script, so
+      # free text typed into the form can never run as shell
+      - name: Write the registration file
+        env:
+          SNIPPET: ${{ inputs.snippet }}
+        run: |
+          set -euo pipefail
+          S=$(printf '%s' "$SNIPPET" | tr -d '\r')
+          [ -n "$S" ] || { echo "The snippet is empty"; exit 1; }
+          mkdir -p android/app/src/main/assets
+          printf '%s\n' "$S" > android/app/src/main/assets/adi-registration.properties
+          echo "Registration file: $(wc -c < android/app/src/main/assets/adi-registration.properties) bytes"
+
+      - name: Restore the signing key from secrets
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          [ -n "${ANDROID_KEYSTORE_BASE64:-}" ] || { echo "Secret ANDROID_KEYSTORE_BASE64 is not set"; exit 1; }
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+      - name: Build release APK
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle --no-daemon assembleRelease
+
+      - name: Remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
+
+      # Play accepts only this key's signature; a wrong signer or a missing file fails
+      # here instead of as a vague rejection after the upload in Play Console
+      - name: Check signer and registration file
+        env:
+          SNIPPET: ${{ inputs.snippet }}
+        run: |
+          set -euo pipefail
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
+          "$APKSIGNER" verify --print-certs "$APK" | tee certs.txt
+          grep -q 'SHA-256 digest: c3f70a1af8a45558678d1d9b413415d1b0a4c3208835ce78c1f37c4a3a008839' certs.txt \
+            || { echo "The signer is not the permanent Chogan key"; exit 1; }
+          IN=$(unzip -p "$APK" assets/adi-registration.properties | tr -d '\r\n')
+          WANT=$(printf '%s' "$SNIPPET" | tr -d '\r\n')
+          [ "$IN" = "$WANT" ] || { echo "assets/adi-registration.properties in the APK does not match the snippet"; exit 1; }
+          mv "$APK" io.github.choganhq.chogan-adi-proof.apk
+          sha256sum io.github.choganhq.chogan-adi-proof.apk
+
+      - name: Upload APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: adi-proof-apk
+          path: io.github.choganhq.chogan-adi-proof.apk
+          retention-days: 1
+          if-no-files-found: error
