@@ -1,0 +1,118 @@
+name: Google Play
+
+# Talks to Google Play as the service account in PLAY_SERVICE_ACCOUNT_JSON (#159).
+# check: proves access without changing anything. upload: builds the signed release
+# AAB from this commit and puts it on a testing track. Production is not offered
+# here on purpose; that stays a decision in Play Console.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'check (read only) or upload'
+        required: true
+        default: check
+        type: choice
+        options: [check, upload]
+      track:
+        description: 'Track for upload'
+        required: true
+        default: internal
+        type: choice
+        options: [internal, alpha]
+      status:
+        description: 'Release status: draft until the app has been published once'
+        required: true
+        default: draft
+        type: choice
+        options: [draft, completed]
+
+permissions:
+  contents: read
+
+jobs:
+  play:
+    name: Play ${{ inputs.mode }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Check access
+        if: inputs.mode == 'check'
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: bash tools/play-api.sh check
+
+      - name: Set up Java
+        if: inputs.mode == 'upload'
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Read Gradle version from the wrapper
+        if: inputs.mode == 'upload'
+        id: gradleversion
+        run: |
+          set -euo pipefail
+          V=$(sed -n 's|.*/gradle-\([0-9][^-]*\)-bin\.zip.*|\1|p' android/gradle/wrapper/gradle-wrapper.properties)
+          [ -n "$V" ] || { echo "Could not read the Gradle version from gradle-wrapper.properties"; exit 1; }
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Gradle
+        if: inputs.mode == 'upload'
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: ${{ steps.gradleversion.outputs.version }}
+
+      - name: Read version code
+        if: inputs.mode == 'upload'
+        run: |
+          set -euo pipefail
+          VC=$(sed -n "s/^self\.APP_VERSION_CODE *= *\([0-9]*\).*/\1/p" www/version.js)
+          [ -n "$VC" ] || { echo "Could not read APP_VERSION_CODE from www/version.js"; exit 1; }
+          echo "VERSION_CODE=$VC" >> "$GITHUB_ENV"
+
+      - name: Restore the signing key from secrets
+        if: inputs.mode == 'upload'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          [ -n "${ANDROID_KEYSTORE_BASE64:-}" ] || { echo "Secret ANDROID_KEYSTORE_BASE64 is not set"; exit 1; }
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+      - name: Build release AAB
+        if: inputs.mode == 'upload'
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle --no-daemon bundleRelease
+
+      - name: Remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
+
+      # Play accepts uploads only from the registered upload key, which is ours
+      - name: Check the bundle is signed with the Chogan key
+        if: inputs.mode == 'upload'
+        run: |
+          set -euo pipefail
+          AAB=android/app/build/outputs/bundle/release/app-release.aab
+          [ -s "$AAB" ] || { echo "No bundle at $AAB"; exit 1; }
+          keytool -printcert -jarfile "$AAB" | tr -d ':' | tr 'A-F' 'a-f' \
+            | grep -q 'c3f70a1af8a45558678d1d9b413415d1b0a4c3208835ce78c1f37c4a3a008839' \
+            || { echo "The bundle is not signed with the Chogan key"; exit 1; }
+          echo "AAB=$AAB" >> "$GITHUB_ENV"
+
+      - name: Upload to Play
+        if: inputs.mode == 'upload'
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          TRACK: ${{ inputs.track }}
+          STATUS: ${{ inputs.status }}
+        run: bash tools/play-api.sh upload "$AAB" "$TRACK" "$VERSION_CODE" "$STATUS"
