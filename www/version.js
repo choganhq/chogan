@@ -1,5 +1,5 @@
 // تنها منبع نسخه در کل ریپو.
 // گریدل (versionName و versionCode)، منو و سرویس‌ورکر همین فایل را می‌خوانند.
 // با هر انتشار هر دو مقدار را بالا ببر و تگ گیت را دقیقاً v<APP_VERSION> بگذار.
-self.APP_VERSION = '0.3.5';
-self.APP_VERSION_CODE = 15;
+self.APP_VERSION = '0.3.6';
+self.APP_VERSION_CODE = 16;
