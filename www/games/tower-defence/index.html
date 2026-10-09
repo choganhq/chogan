@@ -44,14 +44,18 @@
     touch-action: manipulation;
   }
   .td-buy:active { transform: scale(.94); }
-  .td-buy[disabled] { opacity: .4; box-shadow: none; }
+  .td-buy[disabled] { opacity: .55; box-shadow: none; }
   .td-buy[aria-pressed="true"] {
     border-color: var(--tc); background: var(--c-surface-2); box-shadow: var(--sh-2);
   }
   .td-buy b { font-size: var(--fs-xs); color: var(--c-text); }
   .td-buy small { color: var(--c-gold); font-weight: 800; font-size: 11px; }
   .td-buy[disabled] small { color: var(--c-bad); }
-  .td-mark { width: 26px; height: 26px; border-radius: 8px; background: var(--tc); }
+  .td-mark { width: 28px; height: 28px; display: block; }
+  /* «پول کافی نداری» زیر نوار برج‌ها، نه به‌شکل اعلان بالای صفحه که عدد طلا را می‌پوشاند (#139) */
+  .td-note { min-height: 1.4em; color: var(--c-bad); font-weight: 700; font-size: var(--fs-sm); text-align: center; }
+  .ch-gamebar__stat.td-flash b { animation: td-flash 900ms var(--ease); }
+  @keyframes td-flash { 0%, 100% { color: inherit; transform: none; } 25%, 60% { color: var(--c-bad); transform: scale(1.18); } }
   .td-stars { display: flex; gap: 2px; }
 </style>
 </head>
@@ -513,7 +517,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
         upgrade: 'ارتقا', sell: 'فروش', level: 'سطح', range: 'برد', dps: 'آسیب',
         endless: 'حالت بی‌پایان', endlessGo: 'ادامه بده', mapDone: 'نقشه تمام شد',
         pickMap: 'نقشه', dailyMap: 'نقشه‌ی روزانه', leaked: 'رد شده', kills: 'کشته',
-        noMoney: 'پول کافی نداری', gameOver: 'قلعه سقوط کرد',
+        noMoney: 'پول کافی نداری', gameOver: 'قلعه سقوط کرد', needGold: 'پول کافی نداری: {have} از {need}',
         buildHere: 'اینجا برج بساز', cantBuild: 'روی مسیر نمی‌شود ساخت',
         pickTower: 'اول از نوار پایین یک برج انتخاب کن',
         tutTitle1: 'مسیر را ببند', tutText1: 'دشمن‌ها از بالا می‌آیند و به پایین می‌روند. کنار مسیر برج بگذار تا بزنندشان.',
@@ -528,7 +532,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
         upgrade: 'Upgrade', sell: 'Sell', level: 'Level', range: 'Range', dps: 'Damage',
         endless: 'Endless mode', endlessGo: 'Keep going', mapDone: 'Map complete',
         pickMap: 'Map', dailyMap: 'Daily map', leaked: 'Leaked', kills: 'Kills',
-        noMoney: 'Not enough gold', gameOver: 'The keep has fallen',
+        noMoney: 'Not enough gold', gameOver: 'The keep has fallen', needGold: 'Not enough gold: {have} of {need}',
         buildHere: 'Build here', cantBuild: 'You cannot build on the path',
         pickTower: 'Pick a tower from the bar below first',
         tutTitle1: 'Block the path', tutText1: 'Enemies walk from top to bottom. Place towers beside the path to stop them.',
@@ -543,7 +547,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
         upgrade: '升级', sell: '出售', level: '等级', range: '射程', dps: '伤害',
         endless: '无尽模式', endlessGo: '继续挑战', mapDone: '地图通关',
         pickMap: '地图', dailyMap: '每日地图', leaked: '漏过', kills: '击杀',
-        noMoney: '金币不足', gameOver: '要塞失守',
+        noMoney: '金币不足', gameOver: '要塞失守', needGold: '金币不足：{have} / {need}',
         buildHere: '在此建塔', cantBuild: '不能建在路径上',
         pickTower: '先从下方栏中选一座塔',
         tutTitle1: '挡住去路', tutText1: '敌人从上往下走。在路径旁边建塔来拦住它们。',
@@ -558,7 +562,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
         upgrade: 'Ausbauen', sell: 'Verkaufen', level: 'Level', range: 'Reichweite', dps: 'Schaden',
         endless: 'Endlosmodus', endlessGo: 'Weiterspielen', mapDone: 'Karte geschafft',
         pickMap: 'Karte', dailyMap: 'Tageskarte', leaked: 'Durchgelassen', kills: 'Besiegt',
-        noMoney: 'Nicht genug Gold', gameOver: 'Die Burg ist gefallen',
+        noMoney: 'Nicht genug Gold', gameOver: 'Die Burg ist gefallen', needGold: 'Nicht genug Gold: {have} von {need}',
         buildHere: 'Hier bauen', cantBuild: 'Auf dem Weg kannst du nicht bauen',
         pickTower: 'Wähl zuerst unten einen Turm aus',
         tutTitle1: 'Versperr den Weg', tutText1: 'Gegner laufen von oben nach unten. Stell Türme neben den Weg, um sie aufzuhalten.',
@@ -605,7 +609,45 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
   var speedBtn = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', text: '×' + C.num(1) });
   var bottom = el('div', { class: 'td-bottom' }, [preview, speedBtn, startBtn]);
   var dock = el('div', { class: 'td-dock' });
-  var wrap = el('div', { class: 'td-wrap' }, [top, cbox, dock, bottom]);
+  var note = el('div', { class: 'td-note', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'td-wrap' }, [top, cbox, dock, note, bottom]);
+
+  /* ----------------------------- نشان برج‌ها ----------------------------- */
+  // هر برج یک شکل پایه‌ی جدا و یک نماد سفید دارد، روی دکمه و روی نقشه یکی.
+  // قبلاً دکمه‌ها همه یک مربع رنگی بودند و با شکل برج روی نقشه نمی‌خواندند (#139).
+  var ICON = {
+    archer: { base: 'M12 2L22.5 21H1.5Z', mark: 'M7 17L17 7M17 7h-6M17 7v6' },
+    cannon: { base: 'M12 1.5a10.5 10.5 0 1 0 0.01 0Z', mark: 'M5.5 14.5l9-5 1.8 3.2-9 5ZM9 18.6a2.2 2.2 0 1 0 0.01 0Z' },
+    frost: { base: 'M12 1.5L21.1 6.75V17.25L12 22.5L2.9 17.25V6.75Z', mark: 'M12 5v14M5.9 8.5l12.2 7M5.9 15.5l12.2-7' },
+    tesla: { base: 'M5.5 1.5h13a2 2 0 0 1 2 2v17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-17a2 2 0 0 1 2-2Z', mark: 'M13.5 4L7 13h4.5l-1 7 6.5-9h-4.5Z' }
+  };
+  function iconSvg(kind, color) {
+    var i = ICON[kind];
+    return '<svg class="td-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="' + i.base + '" fill="' + color + '"/>' +
+      '<path d="' + i.mark + '" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  }
+  var iconPaths = {};
+  function iconPath(kind, part) {
+    var k = kind + part;
+    if (!iconPaths[k] && typeof Path2D === 'function') iconPaths[k] = new Path2D(ICON[kind][part]);
+    return iconPaths[k] || null;
+  }
+
+  var noteTimer = null;
+  // پیام‌های بازی زیر نوار برج‌ها می‌آیند، نه به‌شکل اعلان بالای صفحه که روی آمار
+  // و تخته می‌نشست (#139)
+  function say(text) {
+    note.textContent = text;
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(function () { note.textContent = ''; }, 2600);
+  }
+  function notEnough(need) {
+    C.feedback('bad');
+    var box = ctx.statNode('money');
+    box = box && box.parentNode;
+    if (box) { box.classList.remove('td-flash'); void box.offsetWidth; box.classList.add('td-flash'); }
+    say(C.t('needGold', { have: C.num(S ? S.money : 0), need: C.num(need) }));
+  }
 
   /* ------------------------------ نوار برج‌ها ------------------------------ */
   var armed = null;          // برجی که الان در دست است
@@ -619,17 +661,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
       style: { '--tc': def.color },
       title: C.t(k + 'D')
     }, [
-      el('div', { class: 'td-mark' }),
+      el('span', { html: iconSvg(k, def.color) }),
       el('b', { text: C.t(k) }),
       cost
     ]);
     b.addEventListener('click', function () {
       if (!S || S.over) return;
-      if (S.money < E.TOWERS[k].cost) {
-        C.feedback('bad');
-        C.ui.toast({ icon: 'coin', title: C.t('noMoney') });
-        return;
-      }
+      if (S.money < E.TOWERS[k].cost) { notEnough(E.TOWERS[k].cost); return; }
       arm(armed === k ? null : k);
       C.feedback('select');
     });
@@ -650,8 +688,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
     if (!S) return;
     KINDS.forEach(function (k) {
       var d = dockBtns[k];
-      var poor = S.money < E.TOWERS[k].cost || S.over;
+      var cost = E.TOWERS[k].cost;
+      var poor = S.money < cost || S.over;
       d.btn.disabled = poor;
+      // پیشنهاد گزارش‌دهنده: برجی که پولش نمی‌رسد «طلای تو / قیمت» نشان می‌دهد
+      d.cost.textContent = poor && !S.over ? C.num(S.money) + ' / ' + C.num(cost) : C.num(cost);
       if (poor && armed === k) arm(null);
     });
   }
@@ -957,10 +998,17 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
       g.rect(x - s * 0.85, y - s, s * 1.7, s * 2);
     }
     g.fill();
-    g.fillStyle = 'rgba(255,255,255,.55)';
-    g.beginPath();
-    g.arc(x, y - s * 0.15, s * 0.28, 0, Math.PI * 2);
-    g.fill();
+    // همان نماد دکمه‌ی برج، سفید روی شکل
+    var mk = iconPath(t.kind, 'mark');
+    if (mk) {
+      g.save();
+      var sc = (s * 1.5) / 24;
+      g.translate(x - 12 * sc, y - 12 * sc - s * 0.05);
+      g.scale(sc, sc);
+      g.strokeStyle = '#fff'; g.lineWidth = 2.4; g.lineCap = 'round'; g.lineJoin = 'round';
+      g.stroke(mk);
+      g.restore();
+    }
     // نشان سطح
     for (var l = 0; l < t.level; l++) {
       g.fillStyle = CO.gold;
@@ -1100,12 +1148,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
     if (t) { arm(null); selected = t; buildCell = null; towerPanel(t); return; }
 
     selected = null;
-    if (!E.canBuild(S, r, c)) { C.ui.toast({ icon: 'info', title: C.t('cantBuild') }); return; }
+    if (!E.canBuild(S, r, c)) { say(C.t('cantBuild')); return; }
 
     // برجی در دست نیست: به‌جای باز کردن پنجره، نوار پایین را نشان بده
     if (!armed) {
       C.audio.sfx('tap');
-      C.ui.toast({ icon: 'info', title: C.t('pickTower') });
+      say(C.t('pickTower'));
       dock.classList.remove('ch-pulse');
       void dock.offsetWidth;
       dock.classList.add('ch-pulse');
@@ -1121,8 +1169,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
       // برج در دست می‌ماند تا بشود چندتا پشت سر هم گذاشت
       refreshDock();
     } else {
-      C.feedback('bad');
-      C.ui.toast({ icon: 'coin', title: C.t('noMoney') });
+      notEnough(E.TOWERS[armed].cost);
     }
   });
 
@@ -1149,7 +1196,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TdEngineFa
         label: C.t('upgrade') + ' ' + C.num(up), kind: 'primary', onClick: function () {
           if (!S || S.towers.indexOf(t) < 0) return;
           if (E.upgrade(S, t)) { C.audio.sfx('build'); C.haptic('success'); updateHud(); save(); }
-          else { C.feedback('bad'); C.ui.toast({ icon: 'coin', title: C.t('noMoney') }); }
+          else { closePanel(); notEnough(up); }
         }
       });
     }

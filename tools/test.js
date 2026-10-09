@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2043;
+const MIN_CHECKS = 2051;
 
 function ok(cond, msg) {
   checks++;
@@ -2624,6 +2624,24 @@ function testTd() {
   for (let rr = 0; rr < E.GH; rr++) for (let cc = 0; cc < E.GW; cc++) if (E.canBuild(S2, rr, cc)) free.push([rr, cc]);
   ok(free.length > 40, 'جای ساخت برج به اندازه‌ی کافی هست (' + free.length + ')');
   ok(!E.canBuild(S2, S2.path[3].r, S2.path[3].c), 'روی مسیر نمی‌شود ساخت');
+
+  // نشان برج‌ها و پیام کم‌پولی (#139): دکمه‌ها همه یک مربع بودند و با شکل برج روی نقشه
+  // نمی‌خواندند، و اعلان «پول کافی نداری» بالای صفحه روی عدد طلا می‌نشست
+  const tdPage = fs.readFileSync(path.join(ROOT, 'www/games/tower-defence/index.html'), 'utf8');
+  const towerKinds = Object.keys(E.TOWERS);
+  ok(towerKinds.length === 4, 'چهار برج خوانده شد (' + towerKinds.join(',') + ')');
+  const tdIcons = (tdPage.match(/var ICON = \{([\s\S]*?)\n  \};/) || [])[1] || '';
+  ok(towerKinds.every((k) => new RegExp('\\b' + k + ": \\{ base: '[^']+', mark: '[^']+' \\}").test(tdIcons)), 'هر برج شکل پایه و نماد خودش را دارد');
+  const tdBases = towerKinds.map((k) => ((tdIcons.match(new RegExp(k + ": \\{ base: '([^']+)'")) || [])[1]));
+  ok(new Set(tdBases).size === 4, 'شکل پایه‌ی چهار برج با هم فرق دارد');
+  ok(/iconSvg\(k, def\.color\)/.test(tdPage) && /iconPath\(t\.kind, 'mark'\)/.test(tdPage), 'دکمه و نقشه از یک جدول نماد می‌خوانند');
+  ok(!/C\.ui\.toast\(\{ icon: 'coin', title: C\.t\('noMoney'\)/.test(tdPage), 'کم‌پولی دیگر اعلان بالای صفحه نیست');
+  ok(/C\.num\(S\.money\) \+ ' \/ ' \+ C\.num\(cost\)/.test(tdPage), 'برجی که پولش نمی‌رسد «طلا / قیمت» نشان می‌دهد');
+  const tdToasts = (tdPage.match(/C\.ui\.toast\(\{[^}]*\}/g) || []).filter((t) => t.indexOf("'dailyDone'") < 0);
+  ok(tdToasts.length === 0, 'پیام‌های وسط بازی زیر نوار برج‌ها می‌آیند، نه اعلان بالای صفحه (' + tdToasts.length + ')');
+  const coreSrc139 = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  const toastFn = (coreSrc139.match(/  ui\.toast = function \(o\) \{[\s\S]*?\n  \};/) || [''])[0];
+  ok(/_chKey === key/.test(toastFn) && /return old;/.test(toastFn), 'هسته پیام یکسان را دوباره روی هم نمی‌چیند');
 }
 
 /* --------------------------------------------------- فایل‌های ثابت */
