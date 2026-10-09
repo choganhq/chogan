@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# تصمیم می‌گیرد یک push به main نسخه‌ی وب منتشرشده را عوض می‌کند یا نه.
+# Decides whether a push to main changes the published web app.
 #
-# هر انتشار اسم کش سرویس‌ورکر را عوض می‌کند و همه‌ی کاربرها پوسته را از نو
-# می‌گیرند، پس ادغامی که فقط مستند یا اندروید را عوض کرده نباید منتشر شود.
-# این منطق اول درون YAML نوشته شد و هیچ تستی به آن نمی‌رسید، در حالی که همین
-# تصمیم است که مشخص می‌کند کاربرها نسخه‌ی تازه را می‌گیرند یا نه.
+# Every deploy renames the service worker cache and makes every user fetch the
+# shell again, so a merge that only touched docs or Android must not deploy.
+# This logic first lived inside the YAML where no test could reach it, although
+# it is exactly the decision that decides whether users get the new version.
 #
-# خروجی استاندارد دقیقاً یک خط است، deploy=true یا deploy=false؛ توضیح به stderr.
-# اگر مقایسه ممکن نباشد منتشر می‌کند: یک انتشار اضافه ارزان‌تر از یک انتشار
-# جاافتاده است. اگر خود کامیت انتشار معتبر نباشد، خروج ۲.
+# Stdout is exactly one line, deploy=true or deploy=false; explanations go to
+# stderr. When the comparison is impossible it deploys: an extra deploy is cheaper
+# than a missed one. When the deploy commit itself is invalid, exit 2.
 set -uo pipefail
 
 event="${GITHUB_EVENT_NAME:-}"
@@ -19,24 +19,24 @@ PATHS=(www/ tools/stamp-version.sh tools/verify-deploy.sh tools/web-changed.sh .
 say() { echo "$1" >&2; }
 
 if ! [[ "$after" =~ ^[0-9a-f]{40}$ ]] || ! git cat-file -e "${after}^{commit}" 2>/dev/null; then
-  say "web-changed: کامیت انتشار معتبر نیست: '$after'"; exit 2
+  say "web-changed: invalid deploy commit: '$after'"; exit 2
 fi
 
 if [ "$event" = "workflow_dispatch" ]; then
-  say "اجرای دستی؛ منتشر می‌شود"; echo "deploy=true"; exit 0
+  say "Manual run; deploying"; echo "deploy=true"; exit 0
 fi
 
 if ! [[ "$before" =~ ^[0-9a-f]{40}$ ]] || [[ "$before" =~ ^0+$ ]] || ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
-  say "کامیت قبلی در دسترس نیست ('$before')؛ منتشر می‌شود"; echo "deploy=true"; exit 0
+  say "Previous commit not available ('$before'); deploying"; echo "deploy=true"; exit 0
 fi
 
-# اگر خود diff خطا بدهد، خالی بودن خروجی را «بدون تغییر» حساب نمی‌کنیم
+# If diff itself fails, an empty output is not taken as "no change"
 if ! changed=$(git diff --name-only "$before" "$after" -- "${PATHS[@]}" 2>/dev/null); then
-  say "مقایسه‌ی $before..$after ممکن نشد؛ منتشر می‌شود"; echo "deploy=true"; exit 0
+  say "Could not compare $before..$after; deploying"; echo "deploy=true"; exit 0
 fi
 
 if [ -z "$changed" ]; then
-  say "نسخه‌ی وب عوض نشده؛ انتشار رد شد"; echo "deploy=false"
+  say "Web app unchanged; skipping the deploy"; echo "deploy=false"
 else
-  say "عوض‌شده‌های مسیر انتشار:"; printf '%s\n' "$changed" >&2; echo "deploy=true"
+  say "Changed paths that deploy:"; printf '%s\n' "$changed" >&2; echo "deploy=true"
 fi
