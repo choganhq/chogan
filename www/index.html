@@ -134,6 +134,9 @@
   var app = document.getElementById('app');
   var navIn = document.getElementById('navIn');
   var GAMES = [];
+  // بازی‌هایی که چالش روزانه دارند. شطرنج دونفره روزانه ندارد و "daily": false
+  // در games.json آن را از کارت امروز، فهرست روز و نقطه‌های تقویم بیرون می‌برد (#131)
+  function dailyGames() { return GAMES.filter(function (g) { return g.daily !== false; }); }
   var gamesLoaded = false;
   var loadError = false;
   var tab = 'home';
@@ -248,8 +251,9 @@
 
     // کارت بزرگ چالش روزانه‌ی امروز
     var today = C.dateKey();
-    var idx = Math.abs(C.hash32(today)) % GAMES.length;
-    var feat = GAMES[idx];
+    var DG = dailyGames();
+    var idx = Math.abs(C.hash32(today)) % DG.length;
+    var feat = DG[idx];
     var done = C.stats.dailyDone(feat.id, today);
     var hero = el('div', {
       class: 'ch-card ch-tap ch-enter',
@@ -350,9 +354,10 @@
           var cls = 'ch-day';
           if (future) cls += ' ch-day--future';
           if (key === C.dateKey(today)) cls += ' ch-day--today';
-          if (GAMES.length && n >= GAMES.length) cls += ' ch-day--done';
+          var DGs = dailyGames();
+          if (DGs.length && n >= DGs.length) cls += ' ch-day--done';
           var dots = el('div', { class: 'ch-day__dots' });
-          GAMES.forEach(function (g) {
+          DGs.forEach(function (g) {
             dots.appendChild(el('div', { class: 'ch-day__dot' + (rec[g.id] ? ' ch-day__dot--on' : '') }));
           });
           var b = el('button', { class: cls, type: 'button', disabled: future }, [
@@ -392,7 +397,7 @@
   function dayModal(key) {
     var rec = C.stats.dailyOf(key);
     var list = el('div', { class: 'ch-list' });
-    GAMES.forEach(function (g) {
+    dailyGames().forEach(function (g) {
       var r = rec[g.id];
       list.appendChild(el('div', { class: 'ch-item' }, [
         el('div', { style: { width: '34px', height: '34px', 'border-radius': '10px', overflow: 'hidden', flex: '0 0 34px' } },
