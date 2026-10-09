@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>ماهجونگ — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* کاشی شیء فیزیکی است و در هر دو تم رنگ عاج دارد تا نقش‌ها همیشه خوانا باشند */
+  :root { --mj-face: #FBF7EE; --mj-side: #D9CDB4; --mj-edge: #B9AB8E; }
+  .mj-wrap { width: 100%; max-width: 980px; display: flex; flex-direction: column; align-items: center; gap: var(--s-3); }
+  .mj-top { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; align-items: center; }
+  /* تخته در راست‌چین آینه نمی‌شود؛ جای کاشی‌ها بخشی از چیدمان است */
+  .mj-board { position: relative; direction: ltr; touch-action: manipulation; margin: 6px auto; }
+  .mj-tile {
+    position: absolute; padding: 0; border: 0; cursor: pointer; border-radius: 6px;
+    background: var(--mj-face); box-shadow: 3px 3px 0 var(--mj-side), 4px 4px 0 var(--mj-edge), 4px 6px 8px rgba(0,0,0,.25);
+    transition: transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+  }
+  .mj-tile svg { width: 100%; height: 100%; display: block; pointer-events: none; }
+  .mj-tile--sel { transform: translate(-2px, -3px); box-shadow: 0 0 0 3px var(--game), 5px 6px 0 var(--mj-side), 6px 7px 0 var(--mj-edge), 6px 10px 12px rgba(0,0,0,.3); }
+  .mj-tile--hint { box-shadow: 0 0 0 3px var(--c-good), 3px 3px 0 var(--mj-side), 4px 4px 0 var(--mj-edge); }
+  .mj-tile--cur { outline: 2px dashed var(--game); outline-offset: 3px; }
+  /* کاشی بسته کمی تیره‌تر است تا آزادها بی‌دردسر پیدا شوند */
+  .mj-tile--blocked { filter: brightness(.84) saturate(.8); }
+  .mj-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; }
+  .mj-actions { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+
+<script>
+/* ==== ENGINE START ==== */
+/* ماهجونگ تک‌نفره (جفت کردن کاشی‌ها). جای کاشی‌ها در واحد نیم‌کاشی است:
+   [x, y, z]، هر کاشی دو واحد پهنا و دو واحد بلندی دارد و z طبقه است.
+   نقش کاشی ۰ تا ۴۱: ۰..۸ دایره، ۹..۱۷ نی، ۱۸..۲۶ عدد، ۲۷..۳۰ باد، ۳۱..۳۳ اژدها،
+   ۳۴..۳۷ گل‌ها، ۳۸..۴۱ فصل‌ها. گل با هر گل و فصل با هر فصل جفت است. */
+function MahjongEngineFactory() {
+  'use strict';
+
+  function rect(cols, rows, x0, y0, z) {
+    var out = [];
+    for (var r = 0; r < rows; r++) for (var c = 0; c < cols; c++) out.push([x0 + c * 2, y0 + r * 2, z]);
+    return out;
+  }
+
+  var LAYOUTS = {
+    // هشت کاشی پهنا تا روی گوشی ۳۹۰ پیکسلی هر کاشی حدود ۴۴ پیکسل باشد
+    small: [].concat(rect(8, 6, 0, 0, 0), rect(6, 3, 2, 2, 1), rect(2, 3, 6, 2, 2)),
+    medium: [].concat(rect(8, 8, 0, 0, 0), rect(6, 6, 2, 2, 1), rect(4, 2, 4, 6, 2)),
+    turtle: (function () {
+      var t = [];
+      var rows = [[0, 2, 24], [2, 6, 20], [4, 4, 22], [6, 2, 24], [8, 2, 24], [10, 4, 22], [12, 6, 20], [14, 2, 24]];
+      rows.forEach(function (r) { for (var x = r[1]; x <= r[2]; x += 2) t.push([x, r[0], 0]); });
+      t.push([0, 7, 0], [26, 7, 0], [28, 7, 0]);
+      t = t.concat(rect(6, 6, 8, 2, 1), rect(4, 4, 10, 4, 2), rect(2, 2, 12, 6, 3));
+      t.push([13, 7, 4]);
+      return t;
+    })()
+  };
+
+  function matches(a, b) {
+    if (a === b) return true;
+    if (a >= 34 && a <= 37 && b >= 34 && b <= 37) return true;
+    if (a >= 38 && b >= 38) return true;
+    return false;
+  }
+
+  function overlap(a, b) { return Math.abs(a[0] - b[0]) < 2 && Math.abs(a[1] - b[1]) < 2; }
+
+  // آزاد: چیزی رویش نیست و چپ یا راستش در همان طبقه باز است
+  function freeIn(pos, alive, i) {
+    var p = pos[i], left = false, right = false;
+    for (var j = 0; j < pos.length; j++) {
+      if (j === i || !alive[j]) continue;
+      var q = pos[j];
+      if (q[2] === p[2] + 1 && overlap(p, q)) return false;
+      if (q[2] === p[2] && Math.abs(q[1] - p[1]) < 2) {
+        if (q[0] === p[0] - 2) left = true;
+        if (q[0] === p[0] + 2) right = true;
+      }
+    }
+    return !(left && right);
+  }
+
+  function shuffle(a, rnd) {
+    for (var i = a.length - 1; i > 0; i--) {
+      var k = Math.floor(rnd() * (i + 1));
+      var t = a[i]; a[i] = a[k]; a[k] = t;
+    }
+    return a;
+  }
+
+  // جفت‌های قابل استفاده برای تعداد کاشی: هر نقش معمولی دو جفت، گل‌ها و فصل‌ها هر کدام دو جفت
+  function pairPool(rnd) {
+    var pool = [];
+    for (var t = 0; t < 34; t++) { pool.push([t, t]); pool.push([t, t]); }
+    pool.push([34, 35], [36, 37], [38, 39], [40, 41]);
+    return shuffle(pool, rnd);
+  }
+
+  // پخش برعکس: از چیدمان پر، هر بار دو کاشی آزاد برداشته و یک جفت به آن‌ها داده می‌شود.
+  // همین ترتیب برداشتن یک راه حل است، پس هر دستی حل‌شدنی است.
+  function assign(pos, idx, pairs, rnd) {
+    for (var tries = 0; tries < 60; tries++) {
+      var alive = pos.map(function (_, i) { return idx.indexOf(i) >= 0; });
+      var faces = {}, order = [], ok = true, k = 0;
+      for (var left = idx.length; left > 0; left -= 2) {
+        var free = [];
+        for (var i = 0; i < pos.length; i++) if (alive[i] && freeIn(pos, alive, i)) free.push(i);
+        if (free.length < 2) { ok = false; break; }
+        var a = free.splice(Math.floor(rnd() * free.length), 1)[0];
+        var b = free[Math.floor(rnd() * free.length)];
+        var pr = pairs[k++];
+        var flip = rnd() < 0.5;
+        faces[a] = flip ? pr[1] : pr[0];
+        faces[b] = flip ? pr[0] : pr[1];
+        alive[a] = alive[b] = false;
+        order.push([a, b]);
+      }
+      if (ok) return { faces: faces, order: order };
+    }
+    return null;
+  }
+
+  function deal(layout, rnd) {
+    var pos = LAYOUTS[layout];
+    var all = pos.map(function (_, i) { return i; });
+    var pairs = pairPool(rnd).slice(0, pos.length / 2);
+    var r = assign(pos, all, pairs, rnd);
+    var faces = pos.map(function (_, i) { return r.faces[i]; });
+    return { layout: layout, faces: faces, gone: pos.map(function () { return false; }),
+      history: [], shuffles: 0, hints: 0, undos: 0, done: false, solution: r.order };
+  }
+
+  function alive(S) { return S.gone.map(function (g) { return !g; }); }
+  function isFree(S, i) { return !S.gone[i] && freeIn(LAYOUTS[S.layout], alive(S), i); }
+  function freeTiles(S) {
+    var al = alive(S), pos = LAYOUTS[S.layout], out = [];
+    for (var i = 0; i < pos.length; i++) if (al[i] && freeIn(pos, al, i)) out.push(i);
+    return out;
+  }
+  function freePairs(S) {
+    var f = freeTiles(S), out = [];
+    for (var i = 0; i < f.length; i++) for (var j = i + 1; j < f.length; j++) {
+      if (matches(S.faces[f[i]], S.faces[f[j]])) out.push([f[i], f[j]]);
+    }
+    return out;
+  }
+  function left(S) { return S.gone.filter(function (g) { return !g; }).length; }
+
+  function remove(S, i, j) {
+    if (i === j || S.done || !isFree(S, i) || !isFree(S, j) || !matches(S.faces[i], S.faces[j])) return false;
+    S.gone[i] = S.gone[j] = true;
+    S.history.push({ pair: [i, j] });
+    if (!left(S)) S.done = true;
+    return true;
+  }
+
+  function undo(S) {
+    var h = S.history.pop();
+    if (!h) return false;
+    if (h.pair) { S.gone[h.pair[0]] = S.gone[h.pair[1]] = false; S.done = false; }
+    else if (h.faces) { S.faces = h.faces; S.shuffles--; }
+    S.undos++;
+    return true;
+  }
+
+  // بُر زدن کاشی‌های مانده، دوباره با پخش برعکس تا باز هم حل‌شدنی بماند
+  function reshuffle(S, rnd) {
+    var pos = LAYOUTS[S.layout], idx = [];
+    for (var i = 0; i < pos.length; i++) if (!S.gone[i]) idx.push(i);
+    if (idx.length < 2) return false;
+    // نقش‌های مانده دوبه‌دو جفت می‌شوند: هم‌نقش‌ها با هم، گل‌ها با گل‌ها، فصل‌ها با فصل‌ها
+    var rest = idx.map(function (i) { return S.faces[i]; }).sort(function (a, b) { return a - b; });
+    var pairs = [], used = rest.map(function () { return false; });
+    for (var a = 0; a < rest.length; a++) {
+      if (used[a]) continue;
+      for (var b = a + 1; b < rest.length; b++) {
+        if (!used[b] && matches(rest[a], rest[b])) { used[a] = used[b] = true; pairs.push([rest[a], rest[b]]); break; }
+      }
+    }
+    if (pairs.length * 2 !== idx.length) return false;
+    var r = assign(pos, idx, shuffle(pairs, rnd), rnd);
+    if (!r) return false;
+    S.history.push({ faces: S.faces.slice() });
+    idx.forEach(function (i) { S.faces[i] = r.faces[i]; });
+    S.shuffles++;
+    // ترتیب حل را برمی‌گرداند تا تست بتواند حل‌شدنی ماندن را واقعاً بازی کند
+    return r.order;
+  }
+
+  var api = {
+    LAYOUTS: LAYOUTS, matches: matches, deal: deal, isFree: isFree, freeTiles: freeTiles, freePairs: freePairs,
+    left: left, remove: remove, undo: undo, reshuffle: reshuffle, freeIn: freeIn
+  };
+  if (typeof self !== 'undefined') self.MahjongEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = MahjongEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = MahjongEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'mahjong',
+    name: { fa: 'ماهجونگ', en: 'Mahjong Solitaire', zh: '麻将接龙', de: 'Mahjong' },
+    accent: '#1F8A82',
+    mood: 'menu',
+    strings: {
+      fa: {
+        small: 'کوچک', medium: 'متوسط', turtle: 'لاک‌پشت', left: 'مانده', pairs: 'جفت آزاد',
+        shuffle: 'بُر زدن', shufflesLeft: '{n} بُر مانده', hintKey: 'راهنمایی', undoMove: 'برگرداندن',
+        newDeal: 'دست تازه', noPairs: 'جفت آزادی نمانده', noPairsSub: 'بُر بزن یا چند حرکت برگردان.',
+        blocked: 'این کاشی آزاد نیست', dailyMj: 'ماهجونگ روزانه', turtleNote: 'لاک‌پشت روی صفحه‌ی بزرگ یا افقی راحت‌تر است',
+        tile: 'کاشی', board: 'تخته‌ی ماهجونگ', move: 'جابه‌جایی بین کاشی‌های آزاد', select: 'انتخاب کاشی',
+        rules: 'دو کاشی یکسان را که هر دو آزادند بزن تا برداشته شوند. کاشی آزاد است اگر چیزی رویش نباشد و دست‌کم چپ یا راستش باز باشد. هر گل با هر گل و هر فصل با هر فصل جفت می‌شود. همه‌ی کاشی‌ها را بردار تا ببری. هر دست حل‌شدنی است؛ اگر گیر کردی بُر بزن یا برگردان.',
+        tutTitle1: 'جفت آزاد', tutText1: 'دو کاشی یکسان را بزن. هر دو باید آزاد باشند: چیزی رویشان نباشد و چپ یا راستشان باز باشد.',
+        tutTitle2: 'گل و فصل', tutText2: 'گل‌ها با هم جفت می‌شوند و فصل‌ها هم با هم، حتی اگر شکلشان فرق کند.',
+        tutTitle3: 'گیر کردی؟', tutText3: 'هر دست راه حل دارد. راهنمایی یک جفت نشان می‌دهد، بُر زدن کاشی‌های مانده را حل‌شدنی می‌چیند و برگرداندن بی‌حد است.'
+      },
+      en: {
+        small: 'Small', medium: 'Medium', turtle: 'Turtle', left: 'Left', pairs: 'Free pairs',
+        shuffle: 'Shuffle', shufflesLeft: '{n} shuffles left', hintKey: 'Hint', undoMove: 'Undo',
+        newDeal: 'New deal', noPairs: 'No free pairs left', noPairsSub: 'Shuffle, or undo a few moves.',
+        blocked: 'That tile isn’t free', dailyMj: 'Daily mahjong', turtleNote: 'The turtle is easier on a large or landscape screen',
+        tile: 'Tile', board: 'Mahjong board', move: 'Move between free tiles', select: 'Pick a tile',
+        rules: 'Tap two matching tiles that are both free to remove them. A tile is free when nothing lies on it and its left or right side is open. Any flower matches any flower, and any season matches any season. Clear every tile to win. Every deal can be solved; if you get stuck, shuffle or undo.',
+        tutTitle1: 'Free pairs', tutText1: 'Tap two matching tiles. Both must be free: nothing on top, and the left or right side open.',
+        tutTitle2: 'Flowers and seasons', tutText2: 'Flowers match each other and seasons match each other, even when the pictures differ.',
+        tutTitle3: 'Stuck?', tutText3: 'Every deal has a solution. A hint shows a pair, a shuffle re-deals the tiles left so they can still be solved, and undo is unlimited.'
+      },
+      zh: {
+        small: '小', medium: '中', turtle: '乌龟', left: '剩余', pairs: '可配对',
+        shuffle: '洗牌', shufflesLeft: '还能洗 {n} 次', hintKey: '提示', undoMove: '撤销',
+        newDeal: '新一局', noPairs: '没有可配对的牌了', noPairsSub: '洗牌，或者撤销几步。',
+        blocked: '这张牌还不能拿', dailyMj: '每日麻将', turtleNote: '乌龟布局在大屏幕或横屏上更好玩',
+        tile: '牌', board: '麻将牌桌', move: '在可拿的牌之间移动', select: '选择牌',
+        rules: '点两张相同且都可拿的牌即可消除。上面没有牌、并且左边或右边空着的牌才可以拿。任意两张花牌可以配对，任意两张季节牌也可以配对。消除所有牌即获胜。每一局都有解；卡住时可以洗牌或撤销。',
+        tutTitle1: '可拿的一对', tutText1: '点两张相同的牌。两张都必须可拿：上面没有牌，左边或右边空着。',
+        tutTitle2: '花与季节', tutText2: '花牌之间可以互相配对，季节牌之间也可以，即使图案不同。',
+        tutTitle3: '卡住了？', tutText3: '每一局都有解。提示会显示一对牌，洗牌会把剩下的牌重新排成仍然可解，撤销不限次数。'
+      },
+      de: {
+        small: 'Klein', medium: 'Mittel', turtle: 'Schildkröte', left: 'Übrig', pairs: 'Freie Paare',
+        shuffle: 'Mischen', shufflesLeft: 'Noch {n}× mischen', hintKey: 'Tipp', undoMove: 'Zurück',
+        newDeal: 'Neues Spiel', noPairs: 'Keine freien Paare mehr', noPairsSub: 'Misch oder nimm ein paar Züge zurück.',
+        blocked: 'Dieser Stein ist nicht frei', dailyMj: 'Tägliches Mahjong', turtleNote: 'Die Schildkröte spielt sich auf großem oder quergestelltem Bildschirm leichter',
+        tile: 'Stein', board: 'Mahjong-Brett', move: 'Zwischen freien Steinen wechseln', select: 'Stein wählen',
+        rules: 'Tippe zwei gleiche Steine an, die beide frei sind, um sie zu entfernen. Ein Stein ist frei, wenn nichts auf ihm liegt und seine linke oder rechte Seite offen ist. Jede Blume passt zu jeder Blume, jede Jahreszeit zu jeder Jahreszeit. Räum alle Steine ab, um zu gewinnen. Jedes Spiel ist lösbar; wenn du feststeckst, misch oder nimm Züge zurück.',
+        tutTitle1: 'Freie Paare', tutText1: 'Tippe zwei gleiche Steine an. Beide müssen frei sein: nichts darauf und links oder rechts offen.',
+        tutTitle2: 'Blumen und Jahreszeiten', tutText2: 'Blumen passen zueinander und Jahreszeiten auch, selbst wenn die Bilder verschieden sind.',
+        tutTitle3: 'Feststecken?', tutText3: 'Jedes Spiel hat eine Lösung. Ein Tipp zeigt ein Paar, Mischen verteilt die übrigen Steine lösbar neu, und Zurück ist unbegrenzt.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', { layout: 'small' });
+  var MAX_SHUFFLES = 3;
+
+  var S = null, sel = -1, hint = null, cur = -1, nodes = [], tw = 44, th = 58, depth = 4;
+
+  var top = el('div', { class: 'mj-top' });
+  var board = el('div', { class: 'mj-board', role: 'group', 'aria-label': C.t('board') });
+  var actions = el('div', { class: 'mj-actions' });
+  var status = el('div', { class: 'mj-status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'mj-wrap' }, [top, board, actions, status]);
+
+  ctx.stat('left', C.t('left'));
+  ctx.stat('pairs', C.t('pairs'));
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newDeal'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------- نقش کاشی */
+
+  var NUM_ZH = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
+  var DOTS = [
+    [[20, 26]], [[20, 14], [20, 38]], [[10, 12], [20, 26], [30, 40]],
+    [[11, 14], [29, 14], [11, 38], [29, 38]], [[11, 12], [29, 12], [20, 26], [11, 40], [29, 40]],
+    [[11, 12], [29, 12], [11, 26], [29, 26], [11, 40], [29, 40]],
+    [[10, 9], [20, 13], [30, 17], [11, 31], [29, 31], [11, 43], [29, 43]],
+    [[11, 9], [29, 9], [11, 20], [29, 20], [11, 32], [29, 32], [11, 43], [29, 43]],
+    [[10, 12], [20, 12], [30, 12], [10, 26], [20, 26], [30, 26], [10, 40], [20, 40], [30, 40]]
+  ];
+  var LAYER_FACE = ['#E9DFC8', '#F2EBDB', '#F8F3E8', '#FCF9F2', '#FFFDF8'];
+  var CJK = 'Noto Serif CJK SC, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, serif';
+  var faceCache = {};
+
+  function faceSvg(f) {
+    if (faceCache[f]) return faceCache[f];
+    var s = '<svg viewBox="0 0 40 52" xmlns="http://www.w3.org/2000/svg">';
+    var txt = function (x, y, size, color, t, w) {
+      return '<text x="' + x + '" y="' + y + '" text-anchor="middle" font-family="' + CJK + '" font-size="' + size + '" font-weight="' + (w || 700) + '" fill="' + color + '">' + t + '</text>';
+    };
+    if (f < 9) {
+      var n = f + 1, r = n === 1 ? 9 : (n <= 4 ? 5.5 : 4.6);
+      DOTS[f].forEach(function (p, k) {
+        var col = n === 1 ? '#C0392B' : (k % 3 === 0 ? '#1F6FB2' : (k % 3 === 1 ? '#2E8B57' : '#C0392B'));
+        s += '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="' + r + '" fill="none" stroke="' + col + '" stroke-width="2.2"/><circle cx="' + p[0] + '" cy="' + p[1] + '" r="' + (r * 0.35) + '" fill="' + col + '"/>';
+      });
+    } else if (f < 18) {
+      var m = f - 8;
+      if (m === 1) {
+        s += '<rect x="16" y="8" width="8" height="36" rx="4" fill="#2E8B57"/><rect x="16" y="24" width="8" height="3" fill="#FBF7EE"/><circle cx="20" cy="10" r="4" fill="#C0392B"/>';
+      } else {
+        DOTS[m - 1].forEach(function (p, k) {
+          var col = (m === 5 || m === 7 || m === 9) && k === Math.floor(m / 2) ? '#C0392B' : '#2E8B57';
+          s += '<rect x="' + (p[0] - 2.3) + '" y="' + (p[1] - 6) + '" width="4.6" height="12" rx="2.2" fill="' + col + '"/><rect x="' + (p[0] - 2.3) + '" y="' + (p[1] - 0.6) + '" width="4.6" height="1.2" fill="#FBF7EE"/>';
+        });
+      }
+    } else if (f < 27) {
+      s += txt(20, 22, 17, '#1F3A5F', NUM_ZH[f - 18]) + txt(20, 45, 18, '#C0392B', '萬');
+    } else if (f < 31) {
+      s += txt(20, 35, 24, '#1F3A5F', ['東', '南', '西', '北'][f - 27]);
+    } else if (f === 31) {
+      s += txt(20, 36, 26, '#C0392B', '中');
+    } else if (f === 32) {
+      s += txt(20, 36, 26, '#2E8B57', '發');
+    } else if (f === 33) {
+      s += '<rect x="8" y="10" width="24" height="32" rx="3" fill="none" stroke="#1F6FB2" stroke-width="3"/><rect x="13" y="15" width="14" height="22" rx="2" fill="none" stroke="#1F6FB2" stroke-width="1.5"/>';
+    } else if (f < 38) {
+      // گل: پنج گلبرگ صورتی با عدد
+      for (var a = 0; a < 5; a++) {
+        var ang = a * 72 * Math.PI / 180;
+        s += '<circle cx="' + (20 + Math.cos(ang) * 7).toFixed(1) + '" cy="' + (22 + Math.sin(ang) * 7).toFixed(1) + '" r="5" fill="#E07AA0"/>';
+      }
+      s += '<circle cx="20" cy="22" r="3.5" fill="#F2C14E"/>' + txt(20, 46, 11, '#8A2D55', String(f - 33));
+    } else {
+      // فصل: خورشید نارنجی با عدد
+      s += '<circle cx="20" cy="22" r="8" fill="#E8913A"/>';
+      for (var q = 0; q < 8; q++) {
+        var ag = q * 45 * Math.PI / 180;
+        s += '<line x1="' + (20 + Math.cos(ag) * 11).toFixed(1) + '" y1="' + (22 + Math.sin(ag) * 11).toFixed(1) + '" x2="' + (20 + Math.cos(ag) * 15).toFixed(1) + '" y2="' + (22 + Math.sin(ag) * 15).toFixed(1) + '" stroke="#E8913A" stroke-width="2.4" stroke-linecap="round"/>';
+      }
+      s += txt(20, 47, 11, '#8A4A12', String(f - 37));
+    }
+    s += '</svg>';
+    faceCache[f] = s;
+    return s;
+  }
+
+  function faceName(f) {
+    if (f < 9) return (f + 1) + ' ●';
+    if (f < 18) return (f - 8) + ' |';
+    if (f < 27) return NUM_ZH[f - 18] + '萬';
+    if (f < 31) return ['東', '南', '西', '北'][f - 27];
+    if (f < 34) return ['中', '發', '□'][f - 31];
+    return f < 38 ? '✿ ' + (f - 33) : '☀ ' + (f - 37);
+  }
+
+  /* --------------------------------------------------------- ساخت */
+
+  function newGame(layout, daily) {
+    var rnd = daily ? C.daily('mahjong', daily).rng : Math.random;
+    S = E.deal(layout, rnd);
+    delete S.solution;
+    S.daily = daily || null;
+    S.startedAt = Date.now();
+    sel = -1; hint = null; cur = -1;
+    build();
+    render();
+    save();
+  }
+
+  function layoutSize() {
+    var pos = E.LAYOUTS[S.layout], maxX = 0, maxY = 0, maxZ = 0;
+    pos.forEach(function (p) { maxX = Math.max(maxX, p[0]); maxY = Math.max(maxY, p[1]); maxZ = Math.max(maxZ, p[2]); });
+    return { cols: maxX / 2 + 1, rows: maxY / 2 + 1, z: maxZ };
+  }
+
+  function sizeBoard() {
+    var L = layoutSize();
+    var avail = Math.min(wrap.clientWidth || 360, 980) - 8;
+    // ارتفاع طبقه‌ها با اندازه‌ی کاشی بزرگ می‌شود؛ با ۴ پیکسل ثابت طبقه‌ها روی صفحه‌ی
+    // بزرگ تخت دیده می‌شدند و معلوم نبود کدام کاشی رو است
+    depth = 4;
+    for (var it = 0; it < 2; it++) {
+      tw = Math.max(18, Math.min(64, Math.floor((avail - L.z * depth - 6) / L.cols)));
+      depth = Math.max(3, Math.round(tw * 0.14));
+    }
+    th = Math.round(tw * 1.3);
+    // بلندی هم محدود است تا تخته در صفحه‌ی افقی از دید بیرون نزند
+    var availH = Math.max(260, window.innerHeight - 250);
+    if (L.rows * th + L.z * depth > availH) { th = Math.floor((availH - L.z * depth) / L.rows); tw = Math.round(th / 1.3); }
+    board.style.width = (L.cols * tw + L.z * depth + 6) + 'px';
+    board.style.height = (L.rows * th + L.z * depth + 8) + 'px';
+  }
+
+  function build() {
+    board.innerHTML = '';
+    nodes = [];
+    var pos = E.LAYOUTS[S.layout];
+    sizeBoard();
+    var L = layoutSize();
+    pos.forEach(function (p, i) {
+      var b = el('button', { class: 'mj-tile', type: 'button' });
+      b.style.width = (tw - 2) + 'px';
+      b.style.height = (th - 2) + 'px';
+      // طبقه‌ی بالاتر کمی بالا و چپ می‌نشیند تا ارتفاع دیده شود
+      b.style.left = (p[0] / 2 * tw + (L.z - p[2]) * depth) + 'px';
+      b.style.top = (p[1] / 2 * th + (L.z - p[2]) * depth) + 'px';
+      // طبقه‌ی بالاتر رو، و در یک طبقه کاشیِ راست و پایین دیرتر تا سایه‌ها درست بیفتند
+      b.style.zIndex = String(p[2] * 1000 + p[1] * 10 + p[0]);
+      // هر طبقه کمی روشن‌تر از طبقه‌ی زیرش
+      b.style.background = LAYER_FACE[Math.min(p[2], LAYER_FACE.length - 1)];
+      b.addEventListener('click', function () { tap(i); });
+      board.appendChild(b);
+      nodes.push(b);
+    });
+  }
+
+  function render() {
+    top.innerHTML = '';
+    if (S.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' },
+        [C.icon('calendar', 14), el('span', { text: C.t('dailyMj') + ' — ' + C.num(S.daily) })]));
+    } else {
+      top.appendChild(C.ui.segmented([
+        { value: 'small', label: C.t('small') }, { value: 'medium', label: C.t('medium') }, { value: 'turtle', label: C.t('turtle') }
+      ], S.layout, function (v) {
+        if (v === S.layout) return;
+        var go = function () { prefs.layout = v; ctx.store.set('prefs', prefs); newGame(v); };
+        if (S.history.length && !S.done) {
+          C.ui.confirm({ title: C.t('newDeal'), body: C.t('resetWarn'), onOk: go, onCancel: function () { render(); } });
+          render();
+          return;
+        }
+        go();
+      }));
+    }
+    actions.innerHTML = '';
+    var hb = el('button', { class: 'ch-btn ch-btn--soft', type: 'button' }, [C.icon('bulb', 18), el('span', { text: C.t('hintKey') })]);
+    hb.addEventListener('click', showHint);
+    var sb = el('button', { class: 'ch-btn ch-btn--soft', type: 'button' }, [C.icon('refresh', 18),
+      // نقطه‌ی جداکننده در فارسی شبیه صفر است و «۳ ·» خوانده می‌شد «۳۰»
+      el('span', { text: C.t('shuffle') + ' (' + C.num(MAX_SHUFFLES - S.shuffles) + ')' })]);
+    sb.disabled = S.shuffles >= MAX_SHUFFLES || S.done;
+    sb.addEventListener('click', doShuffle);
+    actions.appendChild(hb);
+    actions.appendChild(sb);
+    paint();
+  }
+
+  function paint() {
+    var free = {};
+    E.freeTiles(S).forEach(function (i) { free[i] = 1; });
+    nodes.forEach(function (b, i) {
+      if (S.gone[i]) { b.style.display = 'none'; b.className = 'mj-tile'; return; }
+      b.style.display = '';
+      var f = S.faces[i];
+      if (b.getAttribute('data-f') !== String(f)) { b.innerHTML = faceSvg(f); b.setAttribute('data-f', String(f)); }
+      b.className = 'mj-tile' + (i === sel ? ' mj-tile--sel' : '') + (hint && hint.indexOf(i) >= 0 ? ' mj-tile--hint' : '') +
+        (i === cur ? ' mj-tile--cur' : '') + (free[i] ? '' : ' mj-tile--blocked');
+      b.setAttribute('aria-label', C.t('tile') + ' ' + faceName(f) + (free[i] ? '' : ' · ' + C.t('blocked')));
+    });
+    var pairs = E.freePairs(S).length;
+    ctx.setStat('left', E.left(S));
+    ctx.setStat('pairs', pairs);
+    var msg = '';
+    if (!S.done && !pairs) msg = C.t('noPairs');
+    else if (S.layout === 'turtle' && window.innerWidth < 600) msg = C.t('turtleNote');
+    status.textContent = msg;
+  }
+
+  /* --------------------------------------------------------- حرکت */
+
+  function tap(i) {
+    if (!S || S.done || S.gone[i]) return;
+    if (!E.isFree(S, i)) { C.feedback('bad'); C.ui.shake(nodes[i]); return; }
+    // راهنما تا برداشتن همان جفت روشن می‌ماند؛ قبلاً با زدن کاشی اول خاموش می‌شد
+    // و بازیکن باید جای کاشی دوم را از حفظ می‌دانست
+    if (hint && hint.indexOf(i) < 0) hint = null;
+    if (sel < 0 || sel === i) { sel = sel === i ? -1 : i; C.feedback(sel < 0 ? 'tap' : 'select'); paint(); return; }
+    if (E.matches(S.faces[sel], S.faces[i])) {
+      E.remove(S, sel, i);
+      sel = -1; hint = null;
+      C.feedback('place');
+      save();
+      paint();
+      if (S.done) { finish(); return; }
+      if (!E.freePairs(S).length) stuck();
+      return;
+    }
+    // کاشی دوم جور نبود: انتخاب به همین کاشی می‌رود
+    sel = i;
+    C.feedback('tap');
+    paint();
+  }
+
+  function stuck() {
+    var acts = [{ label: C.t('undoMove'), onClick: function () { undo(); } }];
+    if (S.shuffles < MAX_SHUFFLES) acts.push({ label: C.t('shuffle'), kind: 'primary', onClick: doShuffle });
+    else acts.push({ label: C.t('newDeal'), kind: 'primary', onClick: function () { newGame(S.layout, S.daily); } });
+    C.ui.modal({ title: C.t('noPairs'), body: [el('p', { class: 'ch-dim', text: C.t('noPairsSub') })], actions: acts });
+  }
+
+  function showHint() {
+    if (!S || S.done) return;
+    var ps = E.freePairs(S);
+    if (!ps.length) { stuck(); return; }
+    hint = ps[0];
+    S.hints++;
+    C.feedback('select');
+    save();
+    paint();
+  }
+
+  function doShuffle() {
+    if (!S || S.done || S.shuffles >= MAX_SHUFFLES) { C.feedback('bad'); return; }
+    var rnd = S.daily ? C.daily('mahjong', S.daily + '|s' + S.shuffles).rng : Math.random;
+    if (!E.reshuffle(S, rnd)) { C.feedback('bad'); return; }
+    sel = -1; hint = null;
+    C.audio.sfx('chain');
+    save();
+    render();
+  }
+
+  function undo() {
+    if (!S || S.done) return;
+    if (!E.undo(S)) { C.feedback('bad'); return; }
+    sel = -1; hint = null;
+    C.feedback('tap');
+    save();
+    render();
+  }
+
+  function finish() {
+    var elapsed = Date.now() - S.startedAt;
+    var base = { small: 8, medium: 14, turtle: 22 }[S.layout] || 10;
+    var clean = !S.hints && !S.undos && !S.shuffles;
+    var coins = base + (clean ? 4 : 0) + (S.daily ? 8 : 0);
+    var points = base * 4 + (S.daily ? 25 : 0);
+    C.achievements.unlock('mj-win');
+    if (S.layout === 'turtle') C.achievements.unlock('mj-turtle');
+    if (clean) C.achievements.unlock('mj-clean');
+    C.stats.best('mahjong', 'time-' + S.layout, elapsed, true);
+    if (S.daily) {
+      var first = C.stats.daily('mahjong', S.daily, { label: C.time(elapsed), ms: elapsed });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    ctx.finish({
+      won: true, timeMs: elapsed, coins: coins, points: points,
+      lines: [
+        { label: C.t('time'), value: C.time(elapsed) },
+        { label: C.t('hints'), value: C.num(S.hints) },
+        { label: C.t('shuffle'), value: C.num(S.shuffles) }
+      ],
+      shareText: 'چوگان · ماهجونگ' + (S.daily ? ('\nروزانه ' + S.daily) : '') + '\n' + C.time(elapsed),
+      onAgain: S.daily ? null : function () { newGame(S.layout); }
+    });
+  }
+
+  /* --------------------------------------------------------- ذخیره */
+
+  ctx.autosave(function () {
+    if (!S || S.done || !S.history.length) return { inProgress: false };
+    var copy = JSON.parse(JSON.stringify(S));
+    copy.elapsed = Date.now() - S.startedAt;
+    return { s: copy, prefs: prefs };
+  });
+  function save() { ctx.save(); }
+
+  function askNew() {
+    var go = function () { newGame(S ? S.layout : prefs.layout, S ? S.daily : null); };
+    if (!S || S.done || !S.history.length) { go(); return; }
+    C.ui.confirm({ title: C.t('newDeal'), body: C.t('resetWarn'), onOk: go });
+  }
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          kb('← →', C.t('move')),
+          kb('Space / Enter', C.t('select')),
+          kb('H', C.t('hintKey')),
+          kb('S', C.t('shuffle')),
+          kb('U / Ctrl+Z', C.t('undoMove'))
+        ])
+      ],
+      actions: [
+        { label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('done'), kind: 'primary' }
+      ]
+    });
+  }
+  function kb(k, what) {
+    return el('div', { class: 'ch-item' }, [
+      el('div', { class: 'ch-item__label', text: what }),
+      el('span', { class: 'ch-badge', text: k })
+    ]);
+  }
+
+  function artTile(x, y, f, ring) {
+    return '<g transform="translate(' + x + ' ' + y + ')"><rect x="2" y="2" width="40" height="52" rx="5" fill="#D9CDB4"/>' +
+      '<rect width="40" height="52" rx="5" fill="#FBF7EE" stroke="' + (ring ? 'var(--game)' : '#B9AB8E') + '" stroke-width="' + (ring ? 3 : 1) + '"/>' +
+      faceSvg(f).replace('<svg ', '<svg width="40" height="52" ') + '</g>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' + artTile(20, 30, 4, true) + artTile(62, 30, 12, false) + artTile(104, 30, 31, false) + artTile(146, 30, 4, true) + '</svg>' },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' + artTile(10, 30, 34, true) + artTile(56, 30, 36, true) + artTile(104, 30, 38, true) + artTile(150, 30, 41, true) + '</svg>' },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' + artTile(56, 34, 27, false) + artTile(70, 26, 20, false) + artTile(104, 30, 33, true) + '</svg>' }
+  ];
+
+  /* --------------------------------------------------------- ورودی */
+
+  window.addEventListener('keydown', function (e) {
+    if (!S || S.done) return;
+    if (document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
+    if (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
+    var k = e.key;
+    if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (k === 'h' || k === 'H' || e.code === 'KeyH') { showHint(); e.preventDefault(); return; }
+    if (k === 's' || k === 'S' || e.code === 'KeyS') { doShuffle(); e.preventDefault(); return; }
+    if (k === 'ArrowLeft' || k === 'ArrowRight') {
+      var pos = E.LAYOUTS[S.layout];
+      var free = E.freeTiles(S).sort(function (a, b) { return pos[a][0] - pos[b][0] || pos[a][1] - pos[b][1] || pos[b][2] - pos[a][2]; });
+      if (!free.length) return;
+      var at = free.indexOf(cur);
+      at = at < 0 ? 0 : (at + (k === 'ArrowRight' ? 1 : free.length - 1)) % free.length;
+      cur = free[at];
+      paint(); e.preventDefault(); return;
+    }
+    if ((k === ' ' || k === 'Enter') && cur >= 0) {
+      tap(cur);
+      if (S.gone[cur]) cur = -1;
+      e.preventDefault();
+    }
+  });
+
+  var resizeT = null;
+  window.addEventListener('resize', function () {
+    clearTimeout(resizeT);
+    resizeT = setTimeout(function () { if (S) { build(); paint(); } }, 120);
+  });
+
+  /* ---------------------------------------------------------- شروع */
+
+  function restore(v) {
+    S = v;
+    S.startedAt = Date.now() - (v.elapsed || 0);
+    sel = -1; hint = null; cur = -1;
+    build();
+    render();
+  }
+
+  var saved = ctx.loadSave();
+  // هسته برای هر روز خانه‌ی ذخیره‌ی جدا دارد؛ روزانه‌ی نیمه‌کاره هم ادامه می‌یابد
+  var resume = saved && saved.s && saved.s.faces && saved.s.history && saved.s.history.length && !saved.s.done &&
+    (saved.s.daily || null) === (dailyDate || null) && E.LAYOUTS[saved.s.layout];
+  if (resume) {
+    if (saved.prefs && !dailyDate) prefs = saved.prefs;
+    restore(saved.s);
+  } else if (dailyDate) {
+    newGame('medium', dailyDate);
+    if (C.stats.dailyDone('mahjong', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).mahjong;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec.label });
+    }
+    ctx.tutorialIfNew(TUT);
+  } else {
+    newGame(prefs.layout || 'small');
+    ctx.tutorialIfNew(TUT);
+  }
+})();
+</script>
+</body>
+</html>
