@@ -13,14 +13,14 @@ const { spawnSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
 // زبان‌های اپ، به همان ترتیب جدول LOCALES در هسته
-const LOCALE_CODES = ['fa', 'en', 'zh'];
+const LOCALE_CODES = ['fa', 'en', 'zh', 'de'];
 let failures = 0;
 let checks = 0;
 // حداقل تعداد بررسی‌ای که یک اجرای کامل باید داشته باشد. قبلاً اگر یک گروه کامل
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 1776;
+const MIN_CHECKS = 1911;
 
 function ok(cond, msg) {
   checks++;
@@ -1510,7 +1510,7 @@ function testBackgammon() {
   ok(title('Sara', 1) === '<starts:Sara>', 'با نام پروفایل: «{n} شروع می‌کند»');
   ok(title('', 2) === '<starts:<rival> · <hard>>', 'حریف: سوم‌شخص می‌ماند');
   const str = (lang, key) => { const m = bgHtml.match(new RegExp(key + ": '([^']*)'", 'g')); return m ? m.map((x) => x.split(": '")[1].slice(0, -1)) : []; };
-  ok(JSON.stringify(str('', 'youStart')) === JSON.stringify(['تو شروع می‌کنی', 'You start', '你先走']), 'متن youStart در هر سه زبان درست است');
+  ok(JSON.stringify(str('', 'youStart')) === JSON.stringify(['تو شروع می‌کنی', 'You start', '你先走', 'Du fängst an']), 'متن youStart در هر چهار زبان درست است');
 }
 
 /* ------------------------------------------------------------- دوز */
@@ -3115,7 +3115,8 @@ function testLocales() {
     ['zh-CN', 'zh'], ['zh', 'zh'], ['zh-Hans-CN', 'zh'], ['zh-SG', 'zh'],
     // فقط چینی ساده‌شده داریم؛ سنتی باید انگلیسی بگیرد نه ترجمه‌ی اشتباه
     ['zh-TW', 'en'], ['zh-HK', 'en'], ['zh-Hant', 'en'],
-    ['en-GB', 'en'], ['de-DE', 'en'], ['', 'en']
+    ['de-DE', 'de'], ['de', 'de'], ['de-AT', 'de'], ['de-CH', 'de'],
+    ['en-GB', 'en'], ['da-DK', 'en'], ['', 'en']
   ];
   ok(cases.length > 0, 'فهرست حالت‌های زبان دستگاه خالی نیست');
   for (const [tag, want] of cases) {
@@ -3154,6 +3155,64 @@ function testLocales() {
     }
   }
 
+  // آلمانی کامل ترجمه شده (#121): برگشت به انگلیسی برای کلید جاافتاده است، نه
+  // برای نصفِ یک زبان. هر دیکشنری de همه‌ی کلیدهای en را دارد و جای‌نگهدارها یکی‌اند.
+  const dictOf = (src, code) => {
+    const m = src.match(new RegExp("\\n\\s{4,8}" + code + ":\\s*\\{"));
+    if (!m) return null;
+    let i = src.indexOf('{', m.index), depth = 0, j = i;
+    for (; j < src.length; j++) {
+      if (src[j] === '{') depth++;
+      else if (src[j] === '}' && --depth === 0) break;
+    }
+    const out = {};
+    const re = /([A-Za-z_][A-Za-z0-9_]*)\s*:\s*'((?:[^'\\]|\\.)*)'/g;
+    let x;
+    while ((x = re.exec(src.slice(i, j)))) out[x[1]] = x[2];
+    return out;
+  };
+  const holes = (t) => (t.match(/\{[a-z]+\}/g) || []).sort().join();
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    const en = dictOf(src, 'en') || {}, de = dictOf(src, 'de');
+    ok(!!de, f + ': دیکشنری آلمانی دارد');
+    if (!de) continue;
+    const miss = Object.keys(en).filter((k) => !(k in de));
+    ok(Object.keys(en).length > 0 && miss.length === 0, f + ' · de: همه‌ی کلیدهای انگلیسی ترجمه شده' + (miss.length ? ' (' + miss.join(',') + ')' : ''));
+    const badHoles = Object.keys(en).filter((k) => k in de && holes(en[k]) !== holes(de[k]));
+    ok(badHoles.length === 0, f + ' · de: جای‌نگهدارها با انگلیسی یکی‌اند' + (badHoles.length ? ' (' + badHoles.join(',') + ')' : ''));
+  }
+  const achLines = core.split('\n').filter((l) => /^\s*\{ id: '[^']+',.*den: '/.test(l));
+  ok(achLines.length >= 60, 'فهرست دستاوردها خوانده شد (' + achLines.length + ')');
+  const achNoDe = achLines.filter((l) => !/ de: '[^']+', dde: '[^']+'/.test(l)).map((l) => l.match(/id: '([^']+)'/)[1]);
+  ok(achNoDe.length === 0, 'همه‌ی دستاوردها عنوان و توضیح آلمانی دارند' + (achNoDe.length ? ' (' + achNoDe.join(',') + ')' : ''));
+  // «Du» با فعل سوم‌شخص نمی‌خواند («Du gewinnt»)؛ متنی که نام بازیکن می‌گیرد بی‌فعل صرف‌شده نوشته می‌شود
+  const thirdPerson = /\{[an]\} (ist|gewinnt|würfelt|kann|hat|passt|zieht)\b/;
+  for (const g of games) {
+    const de = dictOf(fs.readFileSync(path.join(ROOT, 'www', g.path), 'utf8'), 'de') || {};
+    const bad = Object.keys(de).filter((k) => thirdPerson.test(de[k]));
+    ok(bad.length === 0, g.id + ' · de: نام بازیکن با فعل سوم‌شخص نیامده' + (bad.length ? ' (' + bad.join(',') + ')' : ''));
+  }
+
+  // نام بازی در نوار بالا از شیء name خود بازی می‌آید، نه games.json. نبودن یک
+  // زبان در آن شیء نام را فارسی نشان می‌داد: آلمانی در هر پانزده بازی، چینی در پنج تا (#121)
+  for (const g of games) {
+    const src = fs.readFileSync(path.join(ROOT, 'www', g.path), 'utf8');
+    const m = src.match(/\n    name: (\{[^\n]*\}),\n/) || src.match(/\n  var NAME = (\{[^\n]*\});\n/);
+    let obj = null;
+    try { obj = m ? vm.runInNewContext('(' + m[1] + ')') : null; } catch (e) { obj = null; }
+    ok(!!obj, g.id + ': شیء نام بازی خوانده شد');
+    const off = LOCALE_CODES.filter((c) => !obj || obj[c] !== g.name[c]);
+    ok(off.length === 0, g.id + ': نام بازی در هر زبان با games.json یکی است' + (off.length ? ' (' + off.join(',') + ')' : ''));
+  }
+  ok(!/cfg\.name\[state\.settings\.lang\] \|\| cfg\.name\.fa/.test(core), 'نام بازیِ ترجمه‌نشده به انگلیسی برمی‌گردد، نه فارسی');
+  // نام نقشه‌های دفاع از برج فقط فارسی و انگلیسی داشت و چینی و آلمانی انگلیسی می‌دیدند (#121)
+  const tdSrc = fs.readFileSync(path.join(ROOT, 'www/games/tower-defence/index.html'), 'utf8');
+  const maps = tdSrc.match(/\{ id: 'm\d', seed: \d+,[^\n]*\}/g) || [];
+  ok(maps.length === 3, 'سه نقشه‌ی ثابت دفاع از برج خوانده شد (' + maps.length + ')');
+  ok(maps.every((m) => LOCALE_CODES.every((c) => new RegExp('\\b' + c + ": '[^']+'").test(m))), 'هر نقشه در هر زبان نام دارد');
+  ok(!/lang === 'fa' \?/.test(tdSrc), 'نام نقشه با یک انتخاب دوزبانه گرفته نمی‌شود');
+
   // منیفست وب: نام برند لاتین می‌ماند، توضیح چینی اضافه شده
   const man = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/manifest.webmanifest'), 'utf8'));
   const dloc = man.description_localized || {};
@@ -3161,6 +3220,8 @@ function testLocales() {
   ok(!!dloc['zh-Hans'], 'منیفست توضیح چینی ساده‌شده دارد');
   ok((dloc['zh-Hans'] || {}).dir === 'ltr', 'توضیح چینی چپ‌به‌راست است');
   ok(!nloc['zh-Hans'], 'نام برند برای چینی ترجمه نشده و لاتین می‌ماند');
+  ok(!!dloc.de && dloc.de.dir === 'ltr', 'منیفست توضیح آلمانی دارد');
+  ok(!nloc.de, 'نام برند برای آلمانی هم لاتین می‌ماند');
 }
 
 /* ------------------------------------------------- منو و دستاوردها */
@@ -3218,7 +3279,8 @@ function testShortcuts() {
     name: g.name.en,
     name_localized: {
       fa: { value: g.name.fa, lang: 'fa', dir: 'rtl' },
-      'zh-Hans': { value: g.name.zh, lang: 'zh-Hans', dir: 'ltr' }
+      'zh-Hans': { value: g.name.zh, lang: 'zh-Hans', dir: 'ltr' },
+      de: { value: g.name.de, lang: 'de', dir: 'ltr' }
     },
     url: g.path,
     icons: [{ src: 'games/' + g.id + '/icon-192.png', sizes: '192x192', type: 'image/png' }]

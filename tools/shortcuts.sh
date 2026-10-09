@@ -44,6 +44,7 @@ shortcuts = [{
     'name_localized': {
         'fa': {'value': g['name']['fa'], 'lang': 'fa', 'dir': 'rtl'},
         'zh-Hans': {'value': g['name']['zh'], 'lang': 'zh-Hans', 'dir': 'ltr'},
+        'de': {'value': g['name']['de'], 'lang': 'de', 'dir': 'ltr'},
     },
     'url': g['path'],
     'icons': [{'src': 'games/%s/icon-192.png' % g['id'], 'sizes': '192x192', 'type': 'image/png'}],

@@ -25,8 +25,8 @@ cp -r template/game www/games/my-game
 ```json
 {
   "id": "my-game",
-  "name":    { "fa": "بازی من", "en": "My Game" },
-  "summary": { "fa": "یک جمله، کوتاه.", "en": "One short line." },
+  "name":    { "fa": "بازی من", "en": "My Game", "zh": "我的游戏", "de": "Mein Spiel" },
+  "summary": { "fa": "یک جمله، کوتاه.", "en": "One short line.", "zh": "一句话，简短。", "de": "Ein kurzer Satz." },
   "path": "games/my-game/index.html",
   "icon": "games/my-game/icon.svg",
   "color": "#A57BD1",
@@ -35,7 +35,7 @@ cp -r template/game www/games/my-game
 }
 ```
 
-`path` و `icon` مسیر کامل فایل‌اند، نه پوشه. سرویس‌ورکر دقیقاً همین رشته‌ها را کش می‌کند و منو هم دقیقاً همین‌ها را لینک می‌کند، پس هیچ حدسی وسط کار نیست. اگر بازی فایل جدا لازم داشت — مثلاً یک تصویر — مسیرش را در `files` بگذار.
+`name` و `summary` برای هر زبان جدول `LOCALES` لازم‌اند، و `name` همین بازی در `Chogan.game({ name })` باید عیناً همین‌ها باشد؛ `tools/test.js` هر دو را می‌سنجد. `path` و `icon` مسیر کامل فایل‌اند، نه پوشه. سرویس‌ورکر دقیقاً همین رشته‌ها را کش می‌کند و منو هم دقیقاً همین‌ها را لینک می‌کند، پس هیچ حدسی وسط کار نیست. اگر بازی فایل جدا لازم داشت — مثلاً یک تصویر — مسیرش را در `files` بگذار.
 
 بعد `tools/shortcuts.sh` را اجرا کن. میان‌برهای اپ وب نصب‌شده (نگه داشتن یا کلیک راست روی آیکون) از روی `games.json` در `manifest.webmanifest` نوشته می‌شوند، با یک `icon-192.png` کنار `icon.svg`. فقط ده بازی اول میان‌بر می‌گیرند، چون کروم بیشتر نمی‌خواند. اگر اجرایش نکنی، `tools/test.js` شکست می‌خورد.
 

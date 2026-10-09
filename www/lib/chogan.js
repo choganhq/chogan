@@ -178,6 +178,7 @@
       if (/^fa\b|^fa-/.test(l)) return 'fa';
       // فقط چینی ساده‌شده ترجمه داریم، پس zh-TW و zh-HK به انگلیسی می‌روند
       if (l === 'zh' || /^zh-(cn|sg|hans)/.test(l)) return 'zh';
+      if (/^de\b|^de-/.test(l)) return 'de';
       return 'en';
     } catch (e) { return 'fa'; }
   }
@@ -259,7 +260,8 @@
   var LOCALES = [
     { code: 'fa', label: 'فارسی',    dir: 'rtl', tag: 'fa',      date: 'fa-IR-u-ca-gregory' },
     { code: 'en', label: 'English',  dir: 'ltr', tag: 'en',      date: 'en-US' },
-    { code: 'zh', label: '中文', dir: 'ltr', tag: 'zh-Hans', date: 'zh-CN' }
+    { code: 'zh', label: '中文', dir: 'ltr', tag: 'zh-Hans', date: 'zh-CN' },
+    { code: 'de', label: 'Deutsch',  dir: 'ltr', tag: 'de',      date: 'de-DE' }
   ];
   function localeOf(code) {
     for (var i = 0; i < LOCALES.length; i++) if (LOCALES[i].code === code) return LOCALES[i];
@@ -389,6 +391,46 @@
       sun: '日', mon: '一', tue: '二', wed: '三', thu: '四', fri: '五', sat: '六',
       unlocks: '主题和角色', unlockCost: '解锁', owned: '已解锁', apply: '选择',
       tutorial: '玩法', gotIt: '明白了', stars: '星'
+    },
+    de: {
+      appName: 'Chogan', home: 'Start', daily: 'Täglich', league: 'Liga',
+      achievements: 'Erfolge', profile: 'Profil', settings: 'Einstellungen',
+      play: 'Spielen', resume: 'Weiter', newGame: 'Neues Spiel', again: 'Nochmal',
+      menu: 'Menü', back: 'Zurück', undo: 'Rückgängig', close: 'Schließen', cancel: 'Abbrechen', result: 'Ergebnis',
+      saveImage: 'Bild speichern', copyText: 'Text kopieren',
+      updateReady: 'Eine neue Version ist da', updateNow: 'Aktualisieren',
+      confirm: 'Bestätigen', done: 'OK', next: 'Weiter', skip: 'Überspringen',
+      start: 'Start', pause: 'Pause', resumeGame: 'Weiter', restart: 'Neu starten',
+      quit: 'Zurück zum Menü', help: 'Hilfe', share: 'Teilen', copied: 'In die Zwischenablage kopiert',
+      best: 'Rekord', score: 'Punkte', time: 'Zeit', coins: 'Münzen',
+      newBadge: 'Neu', continueBadge: 'Weiter', todayChallenge: 'Tagesrätsel',
+      todayChallengeSub: 'Jeden Tag ein neues Rätsel, für alle dasselbe',
+      won: 'Gewonnen', lost: 'Verloren', finished: 'Geschafft',
+      earned: 'Verdient', weeklyPoints: 'Wochenpunkte', tier: 'Stufe',
+      promoted: 'Aufgestiegen', demoted: 'Abgestiegen', stayed: 'Stufe gehalten',
+      bronze: 'Bronze', silver: 'Silber', gold: 'Gold', diamond: 'Diamant', legend: 'Legende',
+      seasonEnds: 'Saison endet in', days: 'T', hours: 'Std', minutes: 'Min',
+      rank: 'Platz', points: 'Punkte', you: 'Du',
+      offlineRivals: 'Offline-Gegner, auf diesem Gerät erzeugt',
+      streak: 'Serie', dayStreak: 'Tage in Folge', locked: 'Gesperrt',
+      unlockedAt: 'Freigeschaltet', totalPlays: 'Spiele', playTime: 'Spielzeit',
+      language: 'Sprache', theme: 'Design', themeAuto: 'Auto', themeLight: 'Hell', themeDark: 'Dunkel',
+      sfx: 'Soundeffekte', music: 'Musik', haptics: 'Vibration',
+      resetGame: 'Spieldaten zurücksetzen', resetAsk: 'Alle Daten dieses Spiels löschen?',
+      resetWarn: 'Das lässt sich nicht rückgängig machen.', resetDone: 'Gelöscht',
+      about: 'Über', version: 'Version', source: 'Quellcode', license: 'Lizenz',
+      aboutText: 'Kostenlos, Open Source, ohne Werbung, ohne Tracker, komplett offline.',
+      name: 'Name', country: 'Land', optional: 'optional',
+      hint: 'Tipp', hints: 'Tipps', notEnoughCoins: 'Nicht genug Münzen', hintUsed: 'Tipp genutzt',
+      coinsEarned: 'Münzen verdient', playToEarn: 'Spiel eine Runde, um Münzen zu verdienen',
+      keyboard: 'Tastatur', difficulty: 'Schwierigkeit',
+      fullscreen: 'Vollbild', exitFullscreen: 'Vollbild beenden',
+      easy: 'Leicht', medium: 'Mittel', hard: 'Schwer', expert: 'Experte',
+      today: 'Heute', dailyDone: 'Heute erledigt', dailyOpen: 'Noch nicht gespielt',
+      emptyDaily: 'Für diesen Tag ist nichts gespeichert', noAchievements: 'Noch keine Erfolge',
+      sun: 'So', mon: 'Mo', tue: 'Di', wed: 'Mi', thu: 'Do', fri: 'Fr', sat: 'Sa',
+      unlocks: 'Designs und Figuren', unlockCost: 'Freischalten', owned: 'Freigeschaltet', apply: 'Auswählen',
+      tutorial: 'Anleitung', gotIt: 'Verstanden', stars: 'Sterne'
     }
   };
   var localStrings = (function () { var o = {}; for (var i = 0; i < LOCALES.length; i++) o[LOCALES[i].code] = {}; return o; })();
@@ -791,71 +833,71 @@
   };
 
   var ACH = [
-    { id: 'first-play',  icon: 'star',    fa: 'اولین قدم',        en: 'First step',        dfa: 'اولین بازی‌ات را انجام دادی',        den: 'Play your first game', zh: '第一步', dzh: '完成第一局游戏' },
-    { id: 'play-10',     icon: 'star',    fa: 'ده تایی',          en: 'Ten rounds',        dfa: 'ده بازی انجام دادی',                den: 'Play 10 games', zh: '十局', dzh: '玩满十局' },
-    { id: 'play-50',     icon: 'medal',   fa: 'پنجاه تایی',       en: 'Fifty rounds',      dfa: 'پنجاه بازی انجام دادی',             den: 'Play 50 games', zh: '五十局', dzh: '玩满五十局' },
-    { id: 'play-200',    icon: 'trophy',  fa: 'دویست تایی',       en: 'Two hundred',       dfa: 'دویست بازی انجام دادی',             den: 'Play 200 games', zh: '两百局', dzh: '玩满两百局' },
-    { id: 'sampler',     icon: 'palette', fa: 'همه‌چیزخور',       en: 'Sampler',           dfa: 'چهار بازی مختلف را امتحان کردی',     den: 'Try four different games', zh: '尝鲜者', dzh: '玩过四个不同的游戏' },
-    { id: 'coins-100',   icon: 'coin',    fa: 'صد سکه',           en: 'Hundred coins',     dfa: 'در مجموع صد سکه گرفتی',             den: 'Earn 100 coins in total', zh: '一百金币', dzh: '累计获得一百金币' },
-    { id: 'coins-1000',  icon: 'coin',    fa: 'هزار سکه',         en: 'Thousand coins',    dfa: 'در مجموع هزار سکه گرفتی',           den: 'Earn 1000 coins in total', zh: '一千金币', dzh: '累计获得一千金币' },
-    { id: 'daily-1',     icon: 'calendar',fa: 'اولین روزانه',     en: 'First daily',       dfa: 'اولین چالش روزانه را زدی',           den: 'Finish your first daily', zh: '首个每日', dzh: '完成第一个每日挑战' },
-    { id: 'daily-25',    icon: 'calendar',fa: 'بیست‌وپنج روزانه', en: 'Daily regular',     dfa: 'بیست‌وپنج چالش روزانه زدی',          den: 'Finish 25 daily challenges', zh: '每日常客', dzh: '完成二十五个每日挑战' },
-    { id: 'streak-3',    icon: 'flame',   fa: 'سه روز پشت هم',    en: 'Three in a row',    dfa: 'سه روز پیوسته بازی کردی',           den: 'Play three days in a row', zh: '连续三天', dzh: '连续三天玩游戏' },
-    { id: 'streak-7',    icon: 'flame',   fa: 'یک هفته',          en: 'A full week',       dfa: 'هفت روز پیوسته بازی کردی',          den: 'Play seven days in a row', zh: '整整一周', dzh: '连续七天玩游戏' },
-    { id: 'streak-30',   icon: 'flame',   fa: 'یک ماه',           en: 'A full month',      dfa: 'سی روز پیوسته بازی کردی',           den: 'Play thirty days in a row', zh: '整整一月', dzh: '连续三十天玩游戏' },
-    { id: 'tier-silver', icon: 'medal',   fa: 'نقره‌ای',          en: 'Silver',            dfa: 'به رده‌ی نقره رسیدی',               den: 'Reach the Silver tier', zh: '白银', dzh: '达到白银段位' },
-    { id: 'tier-gold',   icon: 'medal',   fa: 'طلایی',            en: 'Gold',              dfa: 'به رده‌ی طلا رسیدی',                den: 'Reach the Gold tier', zh: '黄金', dzh: '达到黄金段位' },
-    { id: 'tier-diamond',icon: 'gem',     fa: 'الماسی',           en: 'Diamond',           dfa: 'به رده‌ی الماس رسیدی',              den: 'Reach the Diamond tier', zh: '钻石', dzh: '达到钻石段位' },
-    { id: 'tier-legend', icon: 'crown',   fa: 'افسانه',           en: 'Legend',            dfa: 'به رده‌ی افسانه رسیدی',             den: 'Reach the Legend tier', zh: '传奇', dzh: '达到传奇段位' },
-    { id: 'night-owl',   icon: 'moon',    fa: 'شب‌زنده‌دار',      en: 'Night owl',         dfa: 'بین دو تا پنج بامداد بازی کردی',     den: 'Play between 2 and 5 AM', zh: '夜猫子', dzh: '在凌晨两点到五点之间玩' },
-    { id: 'td-win',      icon: 'tower',   fa: 'برج‌بان',          en: 'Tower keeper',      dfa: 'یک نقشه‌ی دفاع از برج را بردی',      den: 'Win a tower defence map', zh: '守塔人', dzh: '通关一张塔防地图' },
-    { id: 'td-perfect',  icon: 'shield',  fa: 'بی‌خش',            en: 'Flawless',          dfa: 'یک نقشه را بدون از دست دادن جان بردی', den: 'Win a map without losing a life', zh: '毫发无伤', dzh: '一条命都没丢就通关' },
-    { id: 'td-stars',    icon: 'star',    fa: 'سه ستاره',         en: 'Three stars',       dfa: 'در یک نقشه سه ستاره گرفتی',          den: 'Earn three stars on a map', zh: '三颗星', dzh: '在一张地图上拿到三星' },
-    { id: 'td-endless',  icon: 'infinity',fa: 'موج سی',           en: 'Wave thirty',       dfa: 'در حالت بی‌پایان به موج سی رسیدی',    den: 'Reach wave 30 in endless mode', zh: '第三十波', dzh: '无尽模式打到第三十波' },
-    { id: 'sd-win',      icon: 'grid',    fa: 'اولین سودوکو',     en: 'First sudoku',      dfa: 'یک سودوکو را کامل کردی',             den: 'Complete a sudoku', zh: '首个数独', dzh: '完成一局数独' },
-    { id: 'sd-expert',   icon: 'brain',   fa: 'سودوکوی خبره',     en: 'Expert sudoku',     dfa: 'یک سودوکوی خبره را حل کردی',         den: 'Solve an expert sudoku', zh: '专家数独', dzh: '解开一局专家数独' },
-    { id: 'sd-clean',    icon: 'sparkle', fa: 'بی‌راهنمایی',      en: 'No help',           dfa: 'سودوکو را بدون راهنمایی و بدون خطا تمام کردی', den: 'Finish a sudoku with no hints and no mistakes', zh: '不用提示', dzh: '无提示、无错误完成数独' },
-    { id: 'sd-fast',     icon: 'bolt',    fa: 'سریع',             en: 'Speedy',            dfa: 'سودوکوی متوسط را زیر پنج دقیقه حل کردی', den: 'Solve a medium sudoku under five minutes', zh: '手快', dzh: '五分钟内解开中等数独' },
-    { id: 'ms-win',      icon: 'mine',    fa: 'مین‌یاب',          en: 'Sweeper',           dfa: 'یک مین‌روب را بردی',                 den: 'Win a minesweeper game', zh: '扫雷成功', dzh: '赢下一局扫雷' },
-    { id: 'ms-large',    icon: 'mine',    fa: 'میدان بزرگ',       en: 'Big field',         dfa: 'مین‌روب بزرگ را بردی',               den: 'Win a large minesweeper board', zh: '大雷区', dzh: '赢下大号扫雷棋盘' },
-    { id: 'ms-fast',     icon: 'bolt',    fa: 'دست تند',          en: 'Quick hands',       dfa: 'مین‌روب کوچک را زیر سی ثانیه بردی',   den: 'Win a small board under 30 seconds', zh: '快手', dzh: '三十秒内赢下小号棋盘' },
-    { id: 'dt-win',      icon: 'box',     fa: 'جعبه‌گیر',         en: 'Box taker',         dfa: 'یک دست نقطه‌بازی را بردی',           den: 'Win a dots and boxes match', zh: '抢格子', dzh: '赢下一局点格棋' },
-    { id: 'dt-hard',     icon: 'brain',   fa: 'مغلوب‌کننده',      en: 'Mind beater',       dfa: 'حریف سخت را شکست دادی',              den: 'Beat the hard AI', zh: '智胜', dzh: '击败困难电脑' },
-    { id: 'dt-chain',    icon: 'link',    fa: 'زنجیره‌ساز',       en: 'Chain master',      dfa: 'در یک نوبت پنج مربع گرفتی',          den: 'Take five boxes in one turn', zh: '连锁高手', dzh: '一回合拿下五个格子' },
-    { id: 'dt-shutout',  icon: 'crown',   fa: 'قلعه‌ی بسته',      en: 'Shutout',           dfa: 'حریف را بدون هیچ مربعی نگه داشتی',    den: 'Win without conceding a box', zh: '零封', dzh: '一个格子都不让对手拿' },
-    { id: 'ng-win',      icon: 'grid',    fa: 'اولین تصویر',      en: 'First picture',     dfa: 'یک نونوگرام را حل کردی',             den: 'Solve a nonogram', zh: '第一幅图', dzh: '解开一道数织' },
-    { id: 'ng-large',    icon: 'palette', fa: 'بوم بزرگ',         en: 'Big canvas',        dfa: 'یک نونوگرام پانزده در پانزده را حل کردی', den: 'Solve a 15×15 nonogram', zh: '大画布', dzh: '解开一道15×15数织' },
-    { id: 'ng-fast',     icon: 'bolt',    fa: 'قلم تند',          en: 'Quick brush',       dfa: 'نونوگرام ده در ده را زیر سه دقیقه حل کردی', den: 'Solve a 10×10 nonogram under three minutes', zh: '快笔', dzh: '三分钟内解开10×10数织' },
-    { id: 'mc-win',      icon: 'gem',     fa: 'دانه‌کار',          en: 'Sower',             dfa: 'یک دست منقله را از حریف بردی',        den: 'Win a mancala match against the AI', zh: '播种人', dzh: '对战电脑赢下一局播棋' },
-    { id: 'mc-hard',     icon: 'brain',   fa: 'استاد منقله',      en: 'Mancala master',    dfa: 'حریف سخت منقله را شکست دادی',         den: 'Beat the hard mancala AI', zh: '播棋大师', dzh: '击败困难的播棋电脑' },
-    { id: 'mc-capture',  icon: 'bolt',    fa: 'درو',              en: 'Harvest',           dfa: 'با یک حرکت ده دانه یا بیشتر گرفتی',    den: 'Capture ten or more seeds in one move', zh: '大丰收', dzh: '一步吃掉十颗或更多种子' },
-    { id: 'fc-win',      icon: 'crown',   fa: 'چهار شاه',         en: 'Four kings',        dfa: 'یک دست فری‌سل را بردی',              den: 'Win a game of FreeCell', zh: '四王归位', dzh: '赢下一局空当接龙' },
-    { id: 'fc-clean',    icon: 'sparkle', fa: 'بی‌برگشت',         en: 'No take-backs',     dfa: 'فری‌سل را بدون برگرداندن حتی یک حرکت بردی', den: 'Win FreeCell without undoing a move', zh: '落子无悔', dzh: '不撤销任何一步赢下空当接龙' },
-    { id: 'fc-fast',     icon: 'bolt',    fa: 'ورق‌باز تند',      en: 'Quick dealer',      dfa: 'فری‌سل را زیر چهار دقیقه بردی',       den: 'Win FreeCell in under four minutes', zh: '快手发牌', dzh: '四分钟内赢下空当接龙' },
-    { id: 'pg-win',      icon: 'sparkle', fa: 'تک‌میخ',           en: 'Last peg',          dfa: 'میخ‌پران را با یک میخ تمام کردی',     den: 'Finish peg solitaire with one peg left', zh: '仅剩一枚', dzh: '孔明棋只剩一枚棋子' },
-    { id: 'pg-centre',   icon: 'crown',   fa: 'دل تخته',          en: 'Dead centre',       dfa: 'آخرین میخ را وسط تخته نشاندی',       den: 'Leave the last peg in the centre', zh: '正中央', dzh: '最后一枚棋子落在正中' },
-    { id: 'pg-clean',    icon: 'brain',   fa: 'بی‌برگشت',         en: 'No take-backs',     dfa: 'بدون برگرداندن به یک میخ رسیدی',     den: 'Get down to one peg without undoing', zh: '一步不悔', dzh: '不撤销就只剩一枚' },
-    { id: 'rv-win',      icon: 'medal',   fa: 'برگرداننده',       en: 'Flipper',           dfa: 'یک دست ریورسی را مقابل حریف بردی',    den: 'Win a reversi match against the AI', zh: '翻盘手', dzh: '对战电脑赢下一局黑白棋' },
-    { id: 'rv-hard',     icon: 'brain',   fa: 'استاد محاصره',     en: 'Outflanker',        dfa: 'در ریورسی حریف سخت را شکست دادی',     den: 'Beat the hard AI at reversi', zh: '包围大师', dzh: '在黑白棋中击败困难电脑' },
-    { id: 'rv-corners',  icon: 'crown',   fa: 'چهار گوشه',        en: 'Four corners',      dfa: 'با هر چهار گوشه‌ی تخته ریورسی را بردی', den: 'Win at reversi holding all four corners', zh: '四角皆占', dzh: '占据全部四个角赢下黑白棋' },
-    { id: 'bg-win',      icon: 'medal',   fa: 'نردباز',           en: 'Backgammon player', dfa: 'یک دست تخته‌نرد را از حریف بردی',     den: 'Win a backgammon game against the AI', zh: '双陆棋手', dzh: '对战电脑赢下一局双陆棋' },
-    { id: 'bg-hard',     icon: 'brain',   fa: 'استاد تخته',       en: 'Board master',      dfa: 'حریف سخت تخته‌نرد را بردی',           den: 'Beat the hard backgammon AI', zh: '棋盘大师', dzh: '击败困难难度的双陆棋电脑' },
-    { id: 'bg-gammon',   icon: 'crown',   fa: 'مارس',             en: 'Gammon',            dfa: 'تخته‌نرد را با مارس یا بک‌گمون بردی', den: 'Win a gammon or a backgammon', zh: '全胜', dzh: '以全胜或完胜赢下双陆棋' },
-    { id: 'mr-win',      icon: 'medal',   fa: 'دوزباز',           en: 'Morris winner',     dfa: 'یک دست دوز را از هوش مصنوعی بردی',    den: 'Win a game of morris against the AI', zh: '九子棋胜者', dzh: '在九子棋中战胜电脑' },
-    { id: 'mr-hard',     icon: 'brain',   fa: 'استاد دوز',        en: 'Morris master',     dfa: 'حریف سخت دوز را شکست دادی',          den: 'Beat the hard morris AI', zh: '九子棋大师', dzh: '击败九子棋困难电脑' },
-    { id: 'mr-clean',    icon: 'shield',  fa: 'بی‌تلفات',          en: 'Not a scratch',     dfa: 'دوز را بدون از دست دادن حتی یک مهره بردی', den: 'Win at morris without losing a piece', zh: '全身而退', dzh: '一枚棋子都没丢就赢下九子棋' },
-    { id: 'bs-win',      icon: 'flag',    fa: 'دریاسالار',        en: 'Admiral',           dfa: 'یک نبرد دریایی را بردی',              den: 'Win a battleship match', zh: '海军上将', dzh: '赢下一局海战棋' },
-    { id: 'bs-hard',     icon: 'brain',   fa: 'ناخدای زیرک',      en: 'Sharp captain',     dfa: 'حریف سخت نبرد دریایی را شکست دادی',   den: 'Beat the hard battleship AI', zh: '精明舰长', dzh: '击败困难海战棋电脑' },
-    { id: 'bs-intact',   icon: 'shield',  fa: 'ناوگان سالم',      en: 'Fleet intact',      dfa: 'بدون از دست دادن هیچ کشتی‌ای بردی',   den: 'Win without losing a ship', zh: '舰队完好', dzh: '一艘船都没损失就获胜' },
-    { id: 'br-win',      icon: 'link',    fa: 'پل‌ساز',           en: 'Bridge builder',    dfa: 'یک پازل پل‌ها را حل کردی',            den: 'Solve a bridges puzzle', zh: '架桥人', dzh: '解开一道数桥' },
-    { id: 'br-large',    icon: 'grid',    fa: 'مجمع‌الجزایر',     en: 'Archipelago',       dfa: 'پازل پل‌های یازده در یازده را حل کردی', den: 'Solve an 11×11 bridges puzzle', zh: '群岛', dzh: '解开一道 11×11 数桥' },
-    { id: 'br-clean',    icon: 'sparkle', fa: 'یک‌نفس',           en: 'In one go',         dfa: 'پازل پل‌ها را بدون برگرداندن حل کردی', den: 'Solve a bridges puzzle without undo', zh: '一气呵成', dzh: '不撤销解开一道数桥' },
-    { id: 'cb-win',      icon: 'lock',    fa: 'رمزگشا',           en: 'Codebreaker',       dfa: 'یک رمز را شکستی',                    den: 'Crack a code', zh: '解码者', dzh: '破解一个密码' },
-    { id: 'cb-hard',     icon: 'brain',   fa: 'قفل سخت',          en: 'Hard lock',         dfa: 'رمز سخت را شکستی',                   den: 'Crack a hard code', zh: '硬锁', dzh: '破解一个困难密码' },
-    { id: 'cb-quick',    icon: 'bolt',    fa: 'چهار حدس',         en: 'Four guesses',      dfa: 'رمز معمولی یا سخت را در چهار حدس یا کمتر شکستی', den: 'Crack a normal or hard code in four guesses or fewer', zh: '四次破解', dzh: '四次以内破解普通或困难密码' },
-    { id: 'bo-first',    icon: 'grid',    fa: 'دیوار اول',        en: 'First wall',        dfa: 'یک مرحله‌ی آجرشکن را تمام کردی',      den: 'Clear a breakout level', zh: '第一面墙', dzh: '通关一关打砖块' },
-    { id: 'bo-flawless', icon: 'shield',  fa: 'بی‌افت',           en: 'Not a ball lost',   dfa: 'یک مرحله را بدون از دست دادن توپ تمام کردی', den: 'Clear a level without losing a ball', zh: '一球不丢', dzh: '一个球都没丢就通关一关' },
-    { id: 'bo-all',      icon: 'trophy',  fa: 'دیوارشکن',         en: 'Wall breaker',      dfa: 'هر دوازده مرحله‌ی آجرشکن را تمام کردی', den: 'Clear all twelve breakout levels', zh: '破墙者', dzh: '通关全部十二关打砖块' }
+    { id: 'first-play',  icon: 'star',    fa: 'اولین قدم',        en: 'First step',        dfa: 'اولین بازی‌ات را انجام دادی',        den: 'Play your first game', zh: '第一步', dzh: '完成第一局游戏', de: 'Erster Schritt', dde: 'Spiel dein erstes Spiel' },
+    { id: 'play-10',     icon: 'star',    fa: 'ده تایی',          en: 'Ten rounds',        dfa: 'ده بازی انجام دادی',                den: 'Play 10 games', zh: '十局', dzh: '玩满十局', de: 'Zehn Runden', dde: 'Spiel 10 Spiele' },
+    { id: 'play-50',     icon: 'medal',   fa: 'پنجاه تایی',       en: 'Fifty rounds',      dfa: 'پنجاه بازی انجام دادی',             den: 'Play 50 games', zh: '五十局', dzh: '玩满五十局', de: 'Fünfzig Runden', dde: 'Spiel 50 Spiele' },
+    { id: 'play-200',    icon: 'trophy',  fa: 'دویست تایی',       en: 'Two hundred',       dfa: 'دویست بازی انجام دادی',             den: 'Play 200 games', zh: '两百局', dzh: '玩满两百局', de: 'Zweihundert', dde: 'Spiel 200 Spiele' },
+    { id: 'sampler',     icon: 'palette', fa: 'همه‌چیزخور',       en: 'Sampler',           dfa: 'چهار بازی مختلف را امتحان کردی',     den: 'Try four different games', zh: '尝鲜者', dzh: '玩过四个不同的游戏', de: 'Probierer', dde: 'Probier vier verschiedene Spiele' },
+    { id: 'coins-100',   icon: 'coin',    fa: 'صد سکه',           en: 'Hundred coins',     dfa: 'در مجموع صد سکه گرفتی',             den: 'Earn 100 coins in total', zh: '一百金币', dzh: '累计获得一百金币', de: 'Hundert Münzen', dde: 'Verdiene insgesamt 100 Münzen' },
+    { id: 'coins-1000',  icon: 'coin',    fa: 'هزار سکه',         en: 'Thousand coins',    dfa: 'در مجموع هزار سکه گرفتی',           den: 'Earn 1000 coins in total', zh: '一千金币', dzh: '累计获得一千金币', de: 'Tausend Münzen', dde: 'Verdiene insgesamt 1000 Münzen' },
+    { id: 'daily-1',     icon: 'calendar',fa: 'اولین روزانه',     en: 'First daily',       dfa: 'اولین چالش روزانه را زدی',           den: 'Finish your first daily', zh: '首个每日', dzh: '完成第一个每日挑战', de: 'Erstes Tagesrätsel', dde: 'Schaff dein erstes Tagesrätsel' },
+    { id: 'daily-25',    icon: 'calendar',fa: 'بیست‌وپنج روزانه', en: 'Daily regular',     dfa: 'بیست‌وپنج چالش روزانه زدی',          den: 'Finish 25 daily challenges', zh: '每日常客', dzh: '完成二十五个每日挑战', de: 'Stammgast', dde: 'Schaff 25 Tagesrätsel' },
+    { id: 'streak-3',    icon: 'flame',   fa: 'سه روز پشت هم',    en: 'Three in a row',    dfa: 'سه روز پیوسته بازی کردی',           den: 'Play three days in a row', zh: '连续三天', dzh: '连续三天玩游戏', de: 'Drei in Folge', dde: 'Spiel drei Tage in Folge' },
+    { id: 'streak-7',    icon: 'flame',   fa: 'یک هفته',          en: 'A full week',       dfa: 'هفت روز پیوسته بازی کردی',          den: 'Play seven days in a row', zh: '整整一周', dzh: '连续七天玩游戏', de: 'Eine ganze Woche', dde: 'Spiel sieben Tage in Folge' },
+    { id: 'streak-30',   icon: 'flame',   fa: 'یک ماه',           en: 'A full month',      dfa: 'سی روز پیوسته بازی کردی',           den: 'Play thirty days in a row', zh: '整整一月', dzh: '连续三十天玩游戏', de: 'Ein ganzer Monat', dde: 'Spiel dreißig Tage in Folge' },
+    { id: 'tier-silver', icon: 'medal',   fa: 'نقره‌ای',          en: 'Silver',            dfa: 'به رده‌ی نقره رسیدی',               den: 'Reach the Silver tier', zh: '白银', dzh: '达到白银段位', de: 'Silber', dde: 'Erreiche die Silberstufe' },
+    { id: 'tier-gold',   icon: 'medal',   fa: 'طلایی',            en: 'Gold',              dfa: 'به رده‌ی طلا رسیدی',                den: 'Reach the Gold tier', zh: '黄金', dzh: '达到黄金段位', de: 'Gold', dde: 'Erreiche die Goldstufe' },
+    { id: 'tier-diamond',icon: 'gem',     fa: 'الماسی',           en: 'Diamond',           dfa: 'به رده‌ی الماس رسیدی',              den: 'Reach the Diamond tier', zh: '钻石', dzh: '达到钻石段位', de: 'Diamant', dde: 'Erreiche die Diamantstufe' },
+    { id: 'tier-legend', icon: 'crown',   fa: 'افسانه',           en: 'Legend',            dfa: 'به رده‌ی افسانه رسیدی',             den: 'Reach the Legend tier', zh: '传奇', dzh: '达到传奇段位', de: 'Legende', dde: 'Erreiche die Legendenstufe' },
+    { id: 'night-owl',   icon: 'moon',    fa: 'شب‌زنده‌دار',      en: 'Night owl',         dfa: 'بین دو تا پنج بامداد بازی کردی',     den: 'Play between 2 and 5 AM', zh: '夜猫子', dzh: '在凌晨两点到五点之间玩', de: 'Nachteule', dde: 'Spiel zwischen 2 und 5 Uhr nachts' },
+    { id: 'td-win',      icon: 'tower',   fa: 'برج‌بان',          en: 'Tower keeper',      dfa: 'یک نقشه‌ی دفاع از برج را بردی',      den: 'Win a tower defence map', zh: '守塔人', dzh: '通关一张塔防地图', de: 'Turmwächter', dde: 'Gewinne eine Karte in Turmverteidigung' },
+    { id: 'td-perfect',  icon: 'shield',  fa: 'بی‌خش',            en: 'Flawless',          dfa: 'یک نقشه را بدون از دست دادن جان بردی', den: 'Win a map without losing a life', zh: '毫发无伤', dzh: '一条命都没丢就通关', de: 'Makellos', dde: 'Gewinne eine Karte, ohne ein Leben zu verlieren' },
+    { id: 'td-stars',    icon: 'star',    fa: 'سه ستاره',         en: 'Three stars',       dfa: 'در یک نقشه سه ستاره گرفتی',          den: 'Earn three stars on a map', zh: '三颗星', dzh: '在一张地图上拿到三星', de: 'Drei Sterne', dde: 'Hol drei Sterne auf einer Karte' },
+    { id: 'td-endless',  icon: 'infinity',fa: 'موج سی',           en: 'Wave thirty',       dfa: 'در حالت بی‌پایان به موج سی رسیدی',    den: 'Reach wave 30 in endless mode', zh: '第三十波', dzh: '无尽模式打到第三十波', de: 'Welle dreißig', dde: 'Erreiche im Endlosmodus Welle 30' },
+    { id: 'sd-win',      icon: 'grid',    fa: 'اولین سودوکو',     en: 'First sudoku',      dfa: 'یک سودوکو را کامل کردی',             den: 'Complete a sudoku', zh: '首个数独', dzh: '完成一局数独', de: 'Erstes Sudoku', dde: 'Löse ein Sudoku' },
+    { id: 'sd-expert',   icon: 'brain',   fa: 'سودوکوی خبره',     en: 'Expert sudoku',     dfa: 'یک سودوکوی خبره را حل کردی',         den: 'Solve an expert sudoku', zh: '专家数独', dzh: '解开一局专家数独', de: 'Sudoku-Experte', dde: 'Löse ein Sudoku auf Experte' },
+    { id: 'sd-clean',    icon: 'sparkle', fa: 'بی‌راهنمایی',      en: 'No help',           dfa: 'سودوکو را بدون راهنمایی و بدون خطا تمام کردی', den: 'Finish a sudoku with no hints and no mistakes', zh: '不用提示', dzh: '无提示、无错误完成数独', de: 'Ohne Hilfe', dde: 'Löse ein Sudoku ohne Tipps und ohne Fehler' },
+    { id: 'sd-fast',     icon: 'bolt',    fa: 'سریع',             en: 'Speedy',            dfa: 'سودوکوی متوسط را زیر پنج دقیقه حل کردی', den: 'Solve a medium sudoku under five minutes', zh: '手快', dzh: '五分钟内解开中等数独', de: 'Flink', dde: 'Löse ein mittleres Sudoku in unter fünf Minuten' },
+    { id: 'ms-win',      icon: 'mine',    fa: 'مین‌یاب',          en: 'Sweeper',           dfa: 'یک مین‌روب را بردی',                 den: 'Win a minesweeper game', zh: '扫雷成功', dzh: '赢下一局扫雷', de: 'Minenräumer', dde: 'Gewinne ein Minesweeper-Spiel' },
+    { id: 'ms-large',    icon: 'mine',    fa: 'میدان بزرگ',       en: 'Big field',         dfa: 'مین‌روب بزرگ را بردی',               den: 'Win a large minesweeper board', zh: '大雷区', dzh: '赢下大号扫雷棋盘', de: 'Großes Feld', dde: 'Gewinne auf einem großen Minesweeper-Brett' },
+    { id: 'ms-fast',     icon: 'bolt',    fa: 'دست تند',          en: 'Quick hands',       dfa: 'مین‌روب کوچک را زیر سی ثانیه بردی',   den: 'Win a small board under 30 seconds', zh: '快手', dzh: '三十秒内赢下小号棋盘', de: 'Schnelle Hände', dde: 'Gewinne ein kleines Brett in unter 30 Sekunden' },
+    { id: 'dt-win',      icon: 'box',     fa: 'جعبه‌گیر',         en: 'Box taker',         dfa: 'یک دست نقطه‌بازی را بردی',           den: 'Win a dots and boxes match', zh: '抢格子', dzh: '赢下一局点格棋', de: 'Kästchensammler', dde: 'Gewinne eine Partie Käsekästchen' },
+    { id: 'dt-hard',     icon: 'brain',   fa: 'مغلوب‌کننده',      en: 'Mind beater',       dfa: 'حریف سخت را شکست دادی',              den: 'Beat the hard AI', zh: '智胜', dzh: '击败困难电脑', de: 'Denkerbezwinger', dde: 'Schlag den schweren Gegner' },
+    { id: 'dt-chain',    icon: 'link',    fa: 'زنجیره‌ساز',       en: 'Chain master',      dfa: 'در یک نوبت پنج مربع گرفتی',          den: 'Take five boxes in one turn', zh: '连锁高手', dzh: '一回合拿下五个格子', de: 'Kettenmeister', dde: 'Hol fünf Kästchen in einem Zug' },
+    { id: 'dt-shutout',  icon: 'crown',   fa: 'قلعه‌ی بسته',      en: 'Shutout',           dfa: 'حریف را بدون هیچ مربعی نگه داشتی',    den: 'Win without conceding a box', zh: '零封', dzh: '一个格子都不让对手拿', de: 'Zu null', dde: 'Gewinne, ohne ein Kästchen abzugeben' },
+    { id: 'ng-win',      icon: 'grid',    fa: 'اولین تصویر',      en: 'First picture',     dfa: 'یک نونوگرام را حل کردی',             den: 'Solve a nonogram', zh: '第一幅图', dzh: '解开一道数织', de: 'Erstes Bild', dde: 'Löse ein Nonogramm' },
+    { id: 'ng-large',    icon: 'palette', fa: 'بوم بزرگ',         en: 'Big canvas',        dfa: 'یک نونوگرام پانزده در پانزده را حل کردی', den: 'Solve a 15×15 nonogram', zh: '大画布', dzh: '解开一道15×15数织', de: 'Große Leinwand', dde: 'Löse ein 15×15-Nonogramm' },
+    { id: 'ng-fast',     icon: 'bolt',    fa: 'قلم تند',          en: 'Quick brush',       dfa: 'نونوگرام ده در ده را زیر سه دقیقه حل کردی', den: 'Solve a 10×10 nonogram under three minutes', zh: '快笔', dzh: '三分钟内解开10×10数织', de: 'Schneller Pinsel', dde: 'Löse ein 10×10-Nonogramm in unter drei Minuten' },
+    { id: 'mc-win',      icon: 'gem',     fa: 'دانه‌کار',          en: 'Sower',             dfa: 'یک دست منقله را از حریف بردی',        den: 'Win a mancala match against the AI', zh: '播种人', dzh: '对战电脑赢下一局播棋', de: 'Säer', dde: 'Gewinne eine Partie Mancala gegen den Computer' },
+    { id: 'mc-hard',     icon: 'brain',   fa: 'استاد منقله',      en: 'Mancala master',    dfa: 'حریف سخت منقله را شکست دادی',         den: 'Beat the hard mancala AI', zh: '播棋大师', dzh: '击败困难的播棋电脑', de: 'Mancala-Meister', dde: 'Schlag den schweren Mancala-Gegner' },
+    { id: 'mc-capture',  icon: 'bolt',    fa: 'درو',              en: 'Harvest',           dfa: 'با یک حرکت ده دانه یا بیشتر گرفتی',    den: 'Capture ten or more seeds in one move', zh: '大丰收', dzh: '一步吃掉十颗或更多种子', de: 'Ernte', dde: 'Fang zehn oder mehr Samen mit einem Zug' },
+    { id: 'fc-win',      icon: 'crown',   fa: 'چهار شاه',         en: 'Four kings',        dfa: 'یک دست فری‌سل را بردی',              den: 'Win a game of FreeCell', zh: '四王归位', dzh: '赢下一局空当接龙', de: 'Vier Könige', dde: 'Gewinne eine Partie FreeCell' },
+    { id: 'fc-clean',    icon: 'sparkle', fa: 'بی‌برگشت',         en: 'No take-backs',     dfa: 'فری‌سل را بدون برگرداندن حتی یک حرکت بردی', den: 'Win FreeCell without undoing a move', zh: '落子无悔', dzh: '不撤销任何一步赢下空当接龙', de: 'Ohne Zurücknehmen', dde: 'Gewinne FreeCell, ohne einen Zug zurückzunehmen' },
+    { id: 'fc-fast',     icon: 'bolt',    fa: 'ورق‌باز تند',      en: 'Quick dealer',      dfa: 'فری‌سل را زیر چهار دقیقه بردی',       den: 'Win FreeCell in under four minutes', zh: '快手发牌', dzh: '四分钟内赢下空当接龙', de: 'Schneller Geber', dde: 'Gewinne FreeCell in unter vier Minuten' },
+    { id: 'pg-win',      icon: 'sparkle', fa: 'تک‌میخ',           en: 'Last peg',          dfa: 'میخ‌پران را با یک میخ تمام کردی',     den: 'Finish peg solitaire with one peg left', zh: '仅剩一枚', dzh: '孔明棋只剩一枚棋子', de: 'Letzter Stift', dde: 'Beende Solitär mit einem einzigen Stift' },
+    { id: 'pg-centre',   icon: 'crown',   fa: 'دل تخته',          en: 'Dead centre',       dfa: 'آخرین میخ را وسط تخته نشاندی',       den: 'Leave the last peg in the centre', zh: '正中央', dzh: '最后一枚棋子落在正中', de: 'Mittenrein', dde: 'Lass den letzten Stift in der Mitte stehen' },
+    { id: 'pg-clean',    icon: 'brain',   fa: 'بی‌برگشت',         en: 'No take-backs',     dfa: 'بدون برگرداندن به یک میخ رسیدی',     den: 'Get down to one peg without undoing', zh: '一步不悔', dzh: '不撤销就只剩一枚', de: 'Ohne Zurücknehmen', dde: 'Komm auf einen Stift, ohne einen Zug zurückzunehmen' },
+    { id: 'rv-win',      icon: 'medal',   fa: 'برگرداننده',       en: 'Flipper',           dfa: 'یک دست ریورسی را مقابل حریف بردی',    den: 'Win a reversi match against the AI', zh: '翻盘手', dzh: '对战电脑赢下一局黑白棋', de: 'Umdreher', dde: 'Gewinne eine Partie Reversi gegen den Computer' },
+    { id: 'rv-hard',     icon: 'brain',   fa: 'استاد محاصره',     en: 'Outflanker',        dfa: 'در ریورسی حریف سخت را شکست دادی',     den: 'Beat the hard AI at reversi', zh: '包围大师', dzh: '在黑白棋中击败困难电脑', de: 'Umzingler', dde: 'Schlag den schweren Reversi-Gegner' },
+    { id: 'rv-corners',  icon: 'crown',   fa: 'چهار گوشه',        en: 'Four corners',      dfa: 'با هر چهار گوشه‌ی تخته ریورسی را بردی', den: 'Win at reversi holding all four corners', zh: '四角皆占', dzh: '占据全部四个角赢下黑白棋', de: 'Vier Ecken', dde: 'Gewinne Reversi mit allen vier Ecken' },
+    { id: 'bg-win',      icon: 'medal',   fa: 'نردباز',           en: 'Backgammon player', dfa: 'یک دست تخته‌نرد را از حریف بردی',     den: 'Win a backgammon game against the AI', zh: '双陆棋手', dzh: '对战电脑赢下一局双陆棋', de: 'Backgammon-Spieler', dde: 'Gewinne eine Partie Backgammon gegen den Computer' },
+    { id: 'bg-hard',     icon: 'brain',   fa: 'استاد تخته',       en: 'Board master',      dfa: 'حریف سخت تخته‌نرد را بردی',           den: 'Beat the hard backgammon AI', zh: '棋盘大师', dzh: '击败困难难度的双陆棋电脑', de: 'Brettmeister', dde: 'Schlag den schweren Backgammon-Gegner' },
+    { id: 'bg-gammon',   icon: 'crown',   fa: 'مارس',             en: 'Gammon',            dfa: 'تخته‌نرد را با مارس یا بک‌گمون بردی', den: 'Win a gammon or a backgammon', zh: '全胜', dzh: '以全胜或完胜赢下双陆棋', de: 'Gammon', dde: 'Gewinne ein Gammon oder Backgammon' },
+    { id: 'mr-win',      icon: 'medal',   fa: 'دوزباز',           en: 'Morris winner',     dfa: 'یک دست دوز را از هوش مصنوعی بردی',    den: 'Win a game of morris against the AI', zh: '九子棋胜者', dzh: '在九子棋中战胜电脑', de: 'Mühlensieger', dde: 'Gewinne eine Partie Mühle gegen den Computer' },
+    { id: 'mr-hard',     icon: 'brain',   fa: 'استاد دوز',        en: 'Morris master',     dfa: 'حریف سخت دوز را شکست دادی',          den: 'Beat the hard morris AI', zh: '九子棋大师', dzh: '击败九子棋困难电脑', de: 'Mühlenmeister', dde: 'Schlag den schweren Mühle-Gegner' },
+    { id: 'mr-clean',    icon: 'shield',  fa: 'بی‌تلفات',          en: 'Not a scratch',     dfa: 'دوز را بدون از دست دادن حتی یک مهره بردی', den: 'Win at morris without losing a piece', zh: '全身而退', dzh: '一枚棋子都没丢就赢下九子棋', de: 'Ohne Kratzer', dde: 'Gewinne Mühle, ohne einen Stein zu verlieren' },
+    { id: 'bs-win',      icon: 'flag',    fa: 'دریاسالار',        en: 'Admiral',           dfa: 'یک نبرد دریایی را بردی',              den: 'Win a battleship match', zh: '海军上将', dzh: '赢下一局海战棋', de: 'Admiral', dde: 'Gewinne eine Partie Schiffe versenken' },
+    { id: 'bs-hard',     icon: 'brain',   fa: 'ناخدای زیرک',      en: 'Sharp captain',     dfa: 'حریف سخت نبرد دریایی را شکست دادی',   den: 'Beat the hard battleship AI', zh: '精明舰长', dzh: '击败困难海战棋电脑', de: 'Scharfer Kapitän', dde: 'Schlag den schweren Gegner bei Schiffe versenken' },
+    { id: 'bs-intact',   icon: 'shield',  fa: 'ناوگان سالم',      en: 'Fleet intact',      dfa: 'بدون از دست دادن هیچ کشتی‌ای بردی',   den: 'Win without losing a ship', zh: '舰队完好', dzh: '一艘船都没损失就获胜', de: 'Flotte intakt', dde: 'Gewinne, ohne ein Schiff zu verlieren' },
+    { id: 'br-win',      icon: 'link',    fa: 'پل‌ساز',           en: 'Bridge builder',    dfa: 'یک پازل پل‌ها را حل کردی',            den: 'Solve a bridges puzzle', zh: '架桥人', dzh: '解开一道数桥', de: 'Brückenbauer', dde: 'Löse ein Brücken-Rätsel' },
+    { id: 'br-large',    icon: 'grid',    fa: 'مجمع‌الجزایر',     en: 'Archipelago',       dfa: 'پازل پل‌های یازده در یازده را حل کردی', den: 'Solve an 11×11 bridges puzzle', zh: '群岛', dzh: '解开一道 11×11 数桥', de: 'Archipel', dde: 'Löse ein 11×11-Brücken-Rätsel' },
+    { id: 'br-clean',    icon: 'sparkle', fa: 'یک‌نفس',           en: 'In one go',         dfa: 'پازل پل‌ها را بدون برگرداندن حل کردی', den: 'Solve a bridges puzzle without undo', zh: '一气呵成', dzh: '不撤销解开一道数桥', de: 'In einem Rutsch', dde: 'Löse ein Brücken-Rätsel ohne Rückgängig' },
+    { id: 'cb-win',      icon: 'lock',    fa: 'رمزگشا',           en: 'Codebreaker',       dfa: 'یک رمز را شکستی',                    den: 'Crack a code', zh: '解码者', dzh: '破解一个密码', de: 'Codeknacker', dde: 'Knack einen Code' },
+    { id: 'cb-hard',     icon: 'brain',   fa: 'قفل سخت',          en: 'Hard lock',         dfa: 'رمز سخت را شکستی',                   den: 'Crack a hard code', zh: '硬锁', dzh: '破解一个困难密码', de: 'Hartes Schloss', dde: 'Knack einen schweren Code' },
+    { id: 'cb-quick',    icon: 'bolt',    fa: 'چهار حدس',         en: 'Four guesses',      dfa: 'رمز معمولی یا سخت را در چهار حدس یا کمتر شکستی', den: 'Crack a normal or hard code in four guesses or fewer', zh: '四次破解', dzh: '四次以内破解普通或困难密码', de: 'Vier Versuche', dde: 'Knack einen normalen oder schweren Code in höchstens vier Versuchen' },
+    { id: 'bo-first',    icon: 'grid',    fa: 'دیوار اول',        en: 'First wall',        dfa: 'یک مرحله‌ی آجرشکن را تمام کردی',      den: 'Clear a breakout level', zh: '第一面墙', dzh: '通关一关打砖块', de: 'Erste Mauer', dde: 'Räum ein Breakout-Level ab' },
+    { id: 'bo-flawless', icon: 'shield',  fa: 'بی‌افت',           en: 'Not a ball lost',   dfa: 'یک مرحله را بدون از دست دادن توپ تمام کردی', den: 'Clear a level without losing a ball', zh: '一球不丢', dzh: '一个球都没丢就通关一关', de: 'Kein Ball verloren', dde: 'Räum ein Level ab, ohne einen Ball zu verlieren' },
+    { id: 'bo-all',      icon: 'trophy',  fa: 'دیوارشکن',         en: 'Wall breaker',      dfa: 'هر دوازده مرحله‌ی آجرشکن را تمام کردی', den: 'Clear all twelve breakout levels', zh: '破墙者', dzh: '通关全部十二关打砖块', de: 'Mauerbrecher', dde: 'Räum alle zwölf Breakout-Level ab' }
   ];
 
   var achApi = {
@@ -1855,7 +1897,7 @@
     // عنوان تب هم اسم بازی و اسم اپ را نشان می‌دهد؛ در HTML فارسی نوشته شده
     // و باید با زبان عوض شود. applyLang بعد از هر تغییر زبان صدایش می‌زند.
     Chogan.pageTitle = function () {
-      var n = (cfg.name && (cfg.name[state.settings.lang] || cfg.name.fa)) || '';
+      var n = (cfg.name && (cfg.name[state.settings.lang] || cfg.name.en || cfg.name.fa)) || '';
       return n ? (n + ' — ' + Chogan.t('appName')) : Chogan.t('appName');
     };
     Chogan.applyLang();
@@ -1870,7 +1912,7 @@
       } catch (e) { return 'session'; }
     })();
 
-    var title = el('div', { class: 'ch-gamebar__title ch-grow', text: cfg.name[state.settings.lang] || cfg.name.fa });
+    var title = el('div', { class: 'ch-gamebar__title ch-grow', text: cfg.name[state.settings.lang] || cfg.name.en || cfg.name.fa });
     // بازگشت در راست‌چین رو به راست است، مثل پیکان‌های منو (#107)
     var backBtn = el('button', { class: 'ch-iconbtn ch-iconbtn--plain', type: 'button', 'aria-label': Chogan.t('back') }, [Chogan.icon(Chogan.isRtl() ? 'forward' : 'back', 22)]);
     backBtn.addEventListener('click', function () { Chogan.feedback('tap'); ctx.save(); Chogan.back(); });
@@ -2007,7 +2049,7 @@
           actions.push({
             label: Chogan.t('share'), keepOpen: true, onClick: function () {
               Chogan.shareCard({
-                game: (cfg.name && (cfg.name[state.settings.lang] || cfg.name.fa)) || '',
+                game: (cfg.name && (cfg.name[state.settings.lang] || cfg.name.en || cfg.name.fa)) || '',
                 title: o.title || (o.won ? Chogan.t('won') : Chogan.t('finished')),
                 note: o.note || null,
                 stars: (o.stars === undefined ? null : o.stars),
