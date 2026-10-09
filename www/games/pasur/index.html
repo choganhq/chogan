@@ -1,0 +1,853 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>پاسور — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  :root { --ps-face: var(--c-surface); --ps-rival: #8C6BB1; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ps-face: var(--c-surface-3); } }
+  :root[data-theme="dark"] { --ps-face: var(--c-surface-3); }
+  .ps-wrap { width: 100%; max-width: 560px; display: flex; flex-direction: column; align-items: center; gap: var(--s-3); }
+  .ps-top { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; align-items: center; }
+  .ps-player {
+    width: 100%; display: flex; align-items: center; gap: var(--s-2);
+    background: var(--c-surface); border-radius: var(--r-md); padding: 8px 12px;
+    box-shadow: var(--sh-1); border: 2px solid transparent; min-height: 44px;
+  }
+  .ps-player--on { border-color: var(--pc); box-shadow: var(--sh-2); }
+  .ps-player__dot { width: 14px; height: 14px; border-radius: 50%; background: var(--pc); flex: 0 0 14px; }
+  .ps-player__name { flex: 1; min-width: 0; font-weight: 700; font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ps-player__stats { display: flex; gap: 10px; font-size: var(--fs-xs, 12px); color: var(--c-text-dim); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .ps-player__stats b { color: var(--pc); }
+  .ps-thinking { animation: ps-blink 900ms infinite; }
+  @keyframes ps-blink { 50% { opacity: .45; } }
+  /* کارت‌ها شیء فیزیکی‌اند: ردیف‌ها در راست‌چین آینه نمی‌شوند تا کلید ۱ همیشه کارت اول از چپ باشد */
+  .ps-row { direction: ltr; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; width: 100%; }
+  .ps-table {
+    min-height: calc(var(--cw) * 1.4 * 2 + 18px); align-content: center; padding: 10px;
+    background: var(--c-surface-2); border-radius: var(--r-lg); box-shadow: inset 0 0 0 1px var(--c-line);
+  }
+  .ps-wrap { --cw: clamp(44px, 14.5vw, 64px); }
+  .ps-card {
+    width: var(--cw); aspect-ratio: 5 / 7; border-radius: 8px; border: 1px solid var(--c-line);
+    background: var(--ps-face); color: var(--c-text); font: inherit; padding: 0; cursor: pointer;
+    position: relative; box-shadow: var(--sh-1); touch-action: manipulation;
+    transition: transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+  }
+  .ps-card[disabled] { cursor: default; }
+  .ps-card--red { color: var(--c-bad); }
+  .ps-card__r { position: absolute; top: 3px; left: 5px; font-weight: 800; font-size: calc(var(--cw) * .3); line-height: 1; }
+  .ps-card__s { position: absolute; left: 0; right: 0; bottom: 8%; text-align: center; font-size: calc(var(--cw) * .5); line-height: 1; }
+  .ps-card--opt { box-shadow: 0 0 0 2px var(--game); }
+  .ps-card--sel { transform: translateY(-6px); box-shadow: 0 0 0 3px var(--game), var(--sh-2); }
+  .ps-card--cur { outline: 2px dashed var(--game); outline-offset: 2px; }
+  .ps-card--last { box-shadow: 0 0 0 3px var(--ps-rival); }
+  .ps-card--dim { opacity: .45; }
+  .ps-back {
+    width: calc(var(--cw) * .62); aspect-ratio: 5 / 7; border-radius: 6px; border: 2px solid var(--ps-face);
+    background: repeating-linear-gradient(45deg, var(--ps-rival) 0 4px, color-mix(in srgb, var(--ps-rival) 70%, #fff) 4px 8px);
+    box-shadow: var(--sh-1);
+  }
+  .ps-hand .ps-card { width: calc(var(--cw) * 1.15); }
+  .ps-hand .ps-card__r { font-size: calc(var(--cw) * 1.15 * .3); }
+  .ps-hand .ps-card__s { font-size: calc(var(--cw) * 1.15 * .5); }
+  .ps-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; }
+  .ps-pick { display: flex; gap: var(--s-2); align-items: center; justify-content: center; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+
+<script>
+/* ==== ENGINE START ==== */
+/* پاسور با قانون‌های رایج ایرانی، تک‌دست در برابر حریف رایانه‌ای.
+   کارت عدد ۰ تا ۵۱: رتبه = c >> 2 (۰ آس … ۹ ده، ۱۰ سرباز، ۱۱ بی‌بی، ۱۲ شاه)،
+   خال = c & 3 به ترتیب گشنیز، خشت، دل، پیک. */
+function PasurEngineFactory() {
+  'use strict';
+
+  var SUITS = 'CDHS';
+  var RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+  var TWO_CLUBS = 1 * 4 + 0, TEN_DIAMONDS = 9 * 4 + 1;
+
+  function rank(c) { return c >> 2; }
+  function suit(c) { return c & 3; }
+  function isNum(c) { return rank(c) <= 9; }
+  function isJ(c) { return rank(c) === 10; }
+  function isQ(c) { return rank(c) === 11; }
+  function isK(c) { return rank(c) === 12; }
+  function val(c) { return rank(c) + 1; }
+  function isRed(c) { return suit(c) === 1 || suit(c) === 2; }
+  function name(c) { return RANKS[rank(c)] + SUITS[suit(c)]; }
+  function parse(s) {
+    var r = RANKS.indexOf(s.slice(0, -1)), u = SUITS.indexOf(s.slice(-1));
+    return r < 0 || u < 0 ? -1 : r * 4 + u;
+  }
+
+  function shuffled(rnd) {
+    var d = [];
+    for (var i = 0; i < 52; i++) d.push(i);
+    for (var j = 51; j > 0; j--) {
+      var k = Math.floor(rnd() * (j + 1));
+      var t = d[j]; d[j] = d[k]; d[k] = t;
+    }
+    return d;
+  }
+
+  function deal4(S) {
+    for (var n = 0; n < 4; n++) {
+      S.hands[S.turn].push(S.deck.pop());
+      S.hands[1 - S.turn].push(S.deck.pop());
+    }
+  }
+
+  // first: بازیکنی که اول بازی می‌کند. سرباز روی میز آغاز به زیر دسته برمی‌گردد،
+  // وگرنه بازیکن اول با یک سرباز همه‌ی میز را از همان اول جمع می‌کرد.
+  function newDeal(rnd, first) {
+    var deck = shuffled(rnd), table = [];
+    while (table.length < 4) {
+      var c = deck.pop();
+      if (isJ(c)) deck.unshift(c); else table.push(c);
+    }
+    var S = { deck: deck, table: table, hands: [[], []], caps: [[], []], surs: [0, 0],
+      turn: first || 0, first: first || 0, lastCap: -1, log: [], done: false };
+    deal4(S);
+    return S;
+  }
+
+  // همه‌ی راه‌های برداشتن با یک کارت. خالی یعنی کارت روی میز می‌نشیند.
+  function options(table, card) {
+    var out = [];
+    if (isNum(card)) {
+      var nums = table.filter(isNum), target = 11 - val(card);
+      var walk = function (i, sum, pick) {
+        if (sum === target && pick.length) out.push(pick.slice());
+        if (sum >= target) return;
+        for (var j = i; j < nums.length; j++) {
+          pick.push(nums[j]);
+          walk(j + 1, sum + val(nums[j]), pick);
+          pick.pop();
+        }
+      };
+      walk(0, 0, []);
+    } else if (isJ(card)) {
+      var all = table.filter(function (c) { return !isQ(c) && !isK(c); });
+      if (all.length) out.push(all);
+    } else {
+      var same = isQ(card) ? isQ : isK;
+      table.forEach(function (c) { if (same(c)) out.push([c]); });
+    }
+    out.forEach(function (o) { o.sort(function (a, b) { return a - b; }); });
+    return out;
+  }
+
+  function sameSet(a, b) {
+    if (!a || !b || a.length !== b.length) return false;
+    var x = a.slice().sort(function (p, q) { return p - q; });
+    var y = b.slice().sort(function (p, q) { return p - q; });
+    for (var i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+    return true;
+  }
+
+  function snapshot(S) {
+    return JSON.stringify({ deck: S.deck, table: S.table, hands: S.hands, caps: S.caps, surs: S.surs,
+      turn: S.turn, lastCap: S.lastCap, done: S.done });
+  }
+
+  // اگر کارت بتواند بردارد باید بردارد؛ وقتی چند راه هست set یکی از آن‌هاست.
+  function play(S, card, set) {
+    if (S.done) return null;
+    var p = S.turn, hand = S.hands[p], at = hand.indexOf(card);
+    if (at < 0) return null;
+    var opts = options(S.table, card), take = null;
+    if (opts.length) {
+      if (set && set.length) {
+        for (var i = 0; i < opts.length; i++) if (sameSet(opts[i], set)) take = opts[i];
+      } else if (opts.length === 1) take = opts[0];
+      if (!take) return null;
+    } else if (set && set.length) return null;
+
+    S.log.push(snapshot(S));
+    hand.splice(at, 1);
+    var info = { player: p, card: card, take: take ? take.slice() : [], sur: false, sweep: [], dealt: false };
+    if (take) {
+      S.table = S.table.filter(function (c) { return take.indexOf(c) < 0; });
+      S.caps[p].push(card);
+      Array.prototype.push.apply(S.caps[p], take);
+      S.lastCap = p;
+      // سرباز با جمع کردن میز سور نمی‌کند
+      if (!S.table.length && !isJ(card)) { S.surs[p]++; info.sur = true; }
+    } else {
+      S.table.push(card);
+    }
+    S.turn = 1 - p;
+    if (!S.hands[0].length && !S.hands[1].length) {
+      if (S.deck.length) { S.turn = S.first; deal4(S); info.dealt = true; }
+      else {
+        // کارت‌های مانده‌ی میز مال آخرین کسی است که برداشته؛ این سور حساب نمی‌شود
+        if (S.table.length && S.lastCap >= 0) {
+          info.sweep = S.table.slice();
+          Array.prototype.push.apply(S.caps[S.lastCap], S.table);
+          S.table = [];
+        }
+        S.done = true;
+      }
+    }
+    return info;
+  }
+
+  function undo(S) {
+    if (!S.log.length) return false;
+    var o = JSON.parse(S.log.pop());
+    S.deck = o.deck; S.table = o.table; S.hands = o.hands; S.caps = o.caps; S.surs = o.surs;
+    S.turn = o.turn; S.lastCap = o.lastCap; S.done = o.done;
+    return true;
+  }
+  // تا قبل از آخرین حرکت این بازیکن؛ در بازی با رایانه جواب حریف هم برمی‌گردد
+  function undoTo(S, player) {
+    var any = false;
+    while (S.log.length) {
+      var who = JSON.parse(S.log[S.log.length - 1]).turn;
+      undo(S); any = true;
+      if (who === player) break;
+    }
+    return any;
+  }
+
+  function pointsOf(cards) {
+    var v = 0;
+    cards.forEach(function (c) {
+      if (rank(c) === 0 || isJ(c)) v += 1;
+      if (c === TWO_CLUBS) v += 2;
+      if (c === TEN_DIAMONDS) v += 3;
+    });
+    return v;
+  }
+
+  // ۷ گشنیز بیشتر، ۳ ده خشت، ۲ دو گشنیز، ۱ هر آس و هر سرباز، ۵ هر سور
+  function score(S) {
+    return [0, 1].map(function (p) {
+      var cards = S.caps[p];
+      var clubs = cards.filter(function (c) { return suit(c) === 0; }).length;
+      var aces = cards.filter(function (c) { return rank(c) === 0; }).length;
+      var jacks = cards.filter(isJ).length;
+      var two = cards.indexOf(TWO_CLUBS) >= 0 ? 2 : 0;
+      var ten = cards.indexOf(TEN_DIAMONDS) >= 0 ? 3 : 0;
+      var clubPts = clubs >= 7 ? 7 : 0;
+      var surPts = S.surs[p] * 5;
+      return { clubs: clubs, clubPts: clubPts, aces: aces, jacks: jacks, two: two, ten: ten,
+        surs: S.surs[p], surPts: surPts, cards: cards.length,
+        total: clubPts + aces + jacks + two + ten + surPts };
+    });
+  }
+
+  function moves(S) {
+    var out = [];
+    S.hands[S.turn].forEach(function (c) {
+      var o = options(S.table, c);
+      if (o.length) o.forEach(function (set) { out.push({ card: c, set: set }); });
+      else out.push({ card: c, set: null });
+    });
+    return out;
+  }
+
+  // کارت‌هایی که این بازیکن نمی‌بیند: دست حریف و دسته
+  function unseen(S, p) {
+    var seen = {};
+    S.hands[p].concat(S.table, S.caps[0], S.caps[1]).forEach(function (c) { seen[c] = 1; });
+    var u = [];
+    for (var c = 0; c < 52; c++) if (!seen[c]) u.push(c);
+    return u;
+  }
+
+  // ریسک سورِ حریف روی میزی که می‌گذاریم
+  function surRisk(S, table, p) {
+    if (!table.length) return 0;
+    var u = unseen(S, p), h = S.hands[1 - p].length;
+    var count = function (pred) { return u.filter(pred).length; };
+    var need = 0;
+    if (table.every(isNum)) {
+      var s = table.reduce(function (a, c) { return a + val(c); }, 0);
+      if (s >= 1 && s <= 10) need = count(function (c) { return isNum(c) && val(c) === 11 - s; });
+    } else if (table.length === 1 && (isQ(table[0]) || isK(table[0]))) {
+      var f = isQ(table[0]) ? isQ : isK;
+      need = count(f);
+    }
+    if (!need) return 0;
+    return h > 0 ? 3 : 0;
+  }
+
+  function gainOf(table, card, set) {
+    var got = [card].concat(set);
+    var v = pointsOf(got) + 0.55 * got.filter(function (c) { return suit(c) === 0; }).length + 0.12 * got.length;
+    if (got.length - 1 === table.length && !isJ(card)) v += 5;
+    return v;
+  }
+
+  function evalMove(S, m, p, level) {
+    var v = 0, table = S.table;
+    if (m.set) {
+      var got = [m.card].concat(m.set);
+      v += pointsOf(got) + 0.55 * got.filter(function (c) { return suit(c) === 0; }).length + 0.12 * got.length;
+      var after = table.filter(function (c) { return m.set.indexOf(c) < 0; });
+      if (!after.length && !isJ(m.card)) v += 5;
+      if (level === 'medium') v -= surRisk(S, after, p);
+      // سرباز را برای برداشت کوچک خرج نکن
+      if (isJ(m.card) && got.length < 4) v -= 1.2;
+    } else {
+      var put = table.concat([m.card]);
+      v -= pointsOf([m.card]) * 0.9 + (suit(m.card) === 0 ? 0.4 : 0);
+      if (isJ(m.card)) v -= 1.5;
+      if (level === 'medium') v -= surRisk(S, put, p);
+      // کارت ریز کمتر به حریف کمک می‌کند تا به ۱۱ برسد
+      if (isNum(m.card)) v -= 0.02 * val(m.card);
+    }
+    return v;
+  }
+
+  function bestGain(table, hand) {
+    var best = { v: 0, card: -1, set: null };
+    hand.forEach(function (c) {
+      var o = options(table, c);
+      o.forEach(function (set) { var g = gainOf(table, c, set); if (g > best.v) best = { v: g, card: c, set: set }; });
+    });
+    return best;
+  }
+
+  // سخت: دست حریف را چند بار از میان کارت‌های ندیده می‌چیند، بهترین جواب حریف و
+  // بعد بهترین برداشت بعدی خودش را بازی می‌کند و میانگین می‌گیرد. حدس یک‌قدمی
+  // به‌تنهایی از متوسط جلو نمی‌زد، چون این بازی پر از شانس است.
+  function sampled(S, ms, p, rnd) {
+    var u = unseen(S, p), h = S.hands[1 - p].length, SAMPLES = 24;
+    var bestM = null, bestV = -1e9;
+    ms.forEach(function (m) {
+      var mine = S.hands[p].filter(function (c) { return c !== m.card; });
+      var table = m.set ? S.table.filter(function (c) { return m.set.indexOf(c) < 0; }) : S.table.concat([m.card]);
+      var base = m.set ? gainOf(S.table, m.card, m.set) : -(pointsOf([m.card]) * 0.9 + (suit(m.card) === 0 ? 0.4 : 0));
+      if (isJ(m.card) && (!m.set || m.set.length < 3)) base -= 1.2;
+      var tot = 0;
+      for (var k = 0; k < SAMPLES; k++) {
+        var pool = u.slice(), hand = [];
+        for (var i = 0; i < h && pool.length; i++) hand.push(pool.splice(Math.floor(rnd() * pool.length), 1)[0]);
+        var r = h ? bestGain(table, hand) : { v: 0, card: -1 };
+        var t2 = table;
+        if (r.card >= 0) t2 = table.filter(function (c) { return r.set.indexOf(c) < 0; });
+        else if (hand.length) {
+          // حریفی که برداشت ندارد کم‌ارزش‌ترین کارتش را روی میز می‌گذارد
+          var low = hand.slice().sort(function (a, b) { return pointsOf([a]) - pointsOf([b]) || rank(a) - rank(b); })[0];
+          t2 = table.concat([low]);
+        }
+        var mineNext = mine.length ? bestGain(t2, mine).v : 0;
+        tot += -r.v + 0.7 * mineNext;
+      }
+      var v = base + tot / SAMPLES + rnd() * 0.01;
+      if (v > bestV) { bestV = v; bestM = m; }
+    });
+    return bestM;
+  }
+
+  function aiMove(S, level, rnd) {
+    var ms = moves(S), p = S.turn;
+    if (!ms.length) return null;
+    if (level === 'easy' && rnd() < 0.5) return ms[Math.floor(rnd() * ms.length)];
+    if (level === 'hard') return sampled(S, ms, p, rnd);
+    var best = null, bestV = -1e9;
+    ms.forEach(function (m) {
+      var v = evalMove(S, m, p, level) + rnd() * 0.01;
+      if (v > bestV) { bestV = v; best = m; }
+    });
+    return best;
+  }
+
+  var api = {
+    SUITS: SUITS, RANKS: RANKS, TWO_CLUBS: TWO_CLUBS, TEN_DIAMONDS: TEN_DIAMONDS,
+    rank: rank, suit: suit, isNum: isNum, isJ: isJ, isQ: isQ, isK: isK, val: val, isRed: isRed,
+    name: name, parse: parse, newDeal: newDeal, options: options, play: play, undo: undo, undoTo: undoTo,
+    score: score, moves: moves, aiMove: aiMove, pointsOf: pointsOf, sameSet: sameSet
+  };
+  if (typeof self !== 'undefined') self.PasurEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = PasurEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = PasurEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'pasur',
+    name: { fa: 'پاسور', en: 'Pasur', zh: '帕苏尔', de: 'Pasur' },
+    accent: '#4A7C59',
+    mood: 'menu',
+    strings: {
+      fa: {
+        you: 'تو', rival: 'حریف', thinking: 'فکر می‌کند…', yourTurn: 'نوبت توست، یک کارت بازی کن',
+        deck: 'دسته', taken: 'کارت', clubs: 'گشنیز', surs: 'سور', sur: 'سور!',
+        newDeal: 'دست تازه', undoMove: 'برگرداندن حرکت', pickTake: 'کارت‌هایی را که برمی‌داری انتخاب کن',
+        cancelPick: 'لغو', rivalTook: 'حریف {c} زد و {n} کارت برداشت', rivalPut: 'حریف {c} را روی میز گذاشت',
+        lastSweep: 'کارت‌های مانده‌ی میز به آخرین برنده رسید', draw: 'مساوی', dailyPs: 'پاسور روزانه', vsHard: 'مقابل حریف سخت',
+        table: 'میز', hand: 'دست تو', rivalHand: 'دست حریف', playN: 'کارت شماره‌ی', pointsLine: 'امتیاز',
+        clubsPts: 'گشنیز بیشتر', tenD: 'ده خشت', twoC: 'دو گشنیز', acesJacks: 'آس و سرباز',
+        rules: 'هر کارت عددی با کارت‌هایی از میز که جمعشان با آن ۱۱ شود برمی‌دارد (آس ۱). سرباز همه‌ی میز را جز شاه و بی‌بی برمی‌دارد. بی‌بی یک بی‌بی و شاه یک شاه برمی‌دارد. اگر کارتت بتواند بردارد باید بردارد، وگرنه روی میز می‌نشیند. خالی کردن میز سور است، پنج امتیاز، ولی نه با سرباز. آخر دست: گشنیز بیشتر ۷، ده خشت ۳، دو گشنیز ۲، هر آس و هر سرباز ۱. کارت‌های مانده‌ی میز به آخرین کسی می‌رسد که برداشته.',
+        move: 'جابه‌جایی بین کارت‌های میز', toggle: 'انتخاب کارت میز', cancelKey: 'لغو انتخاب',
+        tutTitle1: 'جمع یازده', tutText1: 'کارت عددی‌ای بازی کن که با کارت‌های میز جمعشان ۱۱ شود؛ همه را برمی‌داری. اگر چند راه باشد، خودت کارت‌های میز را انتخاب می‌کنی.',
+        tutTitle2: 'سرباز، بی‌بی، شاه', tutText2: 'سرباز هر چه روی میز است جز شاه و بی‌بی را جمع می‌کند. بی‌بی بی‌بی و شاه شاه برمی‌دارد.',
+        tutTitle3: 'سور و امتیاز', tutText3: 'اگر میز را خالی کنی سور زده‌ای: پنج امتیاز. آخر دست گشنیز بیشتر ۷، ده خشت ۳، دو گشنیز ۲، و هر آس و سرباز ۱ امتیاز دارد.'
+      },
+      en: {
+        you: 'You', rival: 'Rival', thinking: 'Thinking…', yourTurn: 'Your turn, play a card',
+        deck: 'Deck', taken: 'Cards', clubs: 'Clubs', surs: 'Surs', sur: 'Sur!',
+        newDeal: 'New deal', undoMove: 'Undo move', pickTake: 'Pick the table cards you take',
+        cancelPick: 'Cancel', rivalTook: 'Rival played {c} and took {n} cards', rivalPut: 'Rival put {c} on the table',
+        lastSweep: 'The cards left on the table went to the last capture', draw: 'Draw', dailyPs: 'Daily pasur', vsHard: 'against the hard AI',
+        table: 'Table', hand: 'Your hand', rivalHand: 'Rival’s hand', playN: 'Card number', pointsLine: 'Points',
+        clubsPts: 'Most clubs', tenD: '10 of diamonds', twoC: '2 of clubs', acesJacks: 'Aces and jacks',
+        rules: 'A number card takes table cards that add up to 11 with it (ace is 1). A jack takes everything on the table except kings and queens. A queen takes one queen, a king one king. If your card can take, it must; otherwise it goes on the table. Clearing the table is a sur, worth five points, but not with a jack. At the end: most clubs 7, the 10 of diamonds 3, the 2 of clubs 2, each ace and each jack 1. Cards left on the table go to whoever took last.',
+        move: 'Move between table cards', toggle: 'Pick a table card', cancelKey: 'Cancel the pick',
+        tutTitle1: 'Make eleven', tutText1: 'Play a number card that adds up to 11 with table cards, and you take them all. If there are several ways, you pick the table cards yourself.',
+        tutTitle2: 'Jack, queen, king', tutText2: 'A jack sweeps everything on the table except kings and queens. A queen takes a queen, a king takes a king.',
+        tutTitle3: 'Sur and points', tutText3: 'Clear the table and you score a sur: five points. At the end, most clubs is worth 7, the 10 of diamonds 3, the 2 of clubs 2, and every ace and jack 1.'
+      },
+      zh: {
+        you: '你', rival: '对手', thinking: '思考中…', yourTurn: '轮到你了，出一张牌',
+        deck: '牌堆', taken: '牌', clubs: '梅花', surs: '清台', sur: '清台！',
+        newDeal: '新一局', undoMove: '撤销一步', pickTake: '选出你要拿走的桌面牌',
+        cancelPick: '取消', rivalTook: '对手打出 {c}，拿走 {n} 张', rivalPut: '对手把 {c} 放在桌上',
+        lastSweep: '桌上剩下的牌归最后一次拿牌的人', draw: '平局', dailyPs: '每日帕苏尔', vsHard: '对战困难电脑',
+        table: '桌面', hand: '你的手牌', rivalHand: '对手的手牌', playN: '第几张牌', pointsLine: '得分',
+        clubsPts: '梅花最多', tenD: '方块10', twoC: '梅花2', acesJacks: 'A 和 J',
+        rules: '数字牌可以拿走桌上与它相加等于 11 的牌（A 算 1）。J 拿走桌上除 K 和 Q 以外的所有牌。Q 拿一张 Q，K 拿一张 K。能拿就必须拿，否则放到桌上。把桌面清空叫清台，得五分，但用 J 清空不算。结束时：梅花最多得 7 分，方块10 得 3 分，梅花2 得 2 分，每张 A 和 J 各 1 分。桌上剩下的牌归最后一次拿牌的人。',
+        move: '在桌面牌之间移动', toggle: '选择桌面牌', cancelKey: '取消选择',
+        tutTitle1: '凑成十一', tutText1: '打出一张数字牌，与桌上的牌相加等于 11，就把它们全部拿走。有多种拿法时由你自己选择桌面牌。',
+        tutTitle2: 'J、Q、K', tutText2: 'J 拿走桌上除 K 和 Q 以外的所有牌。Q 拿 Q，K 拿 K。',
+        tutTitle3: '清台与计分', tutText3: '把桌面清空就是清台：五分。结束时梅花最多得 7 分，方块10 得 3 分，梅花2 得 2 分，每张 A 和 J 各 1 分。'
+      },
+      de: {
+        you: 'Du', rival: 'Gegner', thinking: 'Denkt nach…', yourTurn: 'Du bist dran, spiel eine Karte',
+        deck: 'Stapel', taken: 'Karten', clubs: 'Kreuz', surs: 'Surs', sur: 'Sur!',
+        newDeal: 'Neues Spiel', undoMove: 'Zug zurück', pickTake: 'Wähl die Karten, die du nimmst',
+        cancelPick: 'Abbrechen', rivalTook: 'Gegner spielt {c} und nimmt {n} Karten', rivalPut: 'Gegner legt {c} auf den Tisch',
+        lastSweep: 'Die übrigen Tischkarten gehen an den, der zuletzt genommen hat', draw: 'Unentschieden', dailyPs: 'Tägliches Pasur', vsHard: 'gegen die starke KI',
+        table: 'Tisch', hand: 'Deine Hand', rivalHand: 'Hand des Gegners', playN: 'Karte Nummer', pointsLine: 'Punkte',
+        clubsPts: 'Meiste Kreuz', tenD: 'Karo 10', twoC: 'Kreuz 2', acesJacks: 'Asse und Buben',
+        rules: 'Eine Zahlenkarte nimmt Tischkarten, die mit ihr zusammen 11 ergeben (Ass ist 1). Ein Bube nimmt alles auf dem Tisch außer Königen und Damen. Eine Dame nimmt eine Dame, ein König einen König. Kann deine Karte nehmen, muss sie es; sonst kommt sie auf den Tisch. Den Tisch leeren ist ein Sur und bringt fünf Punkte, aber nicht mit einem Buben. Am Ende: meiste Kreuz 7, Karo 10 drei, Kreuz 2 zwei, jedes Ass und jeder Bube 1. Übrige Tischkarten gehen an den, der zuletzt genommen hat.',
+        move: 'Zwischen Tischkarten wechseln', toggle: 'Tischkarte wählen', cancelKey: 'Auswahl aufheben',
+        tutTitle1: 'Elf machen', tutText1: 'Spiel eine Zahlenkarte, die mit Tischkarten zusammen 11 ergibt, und du nimmst sie alle. Gibt es mehrere Wege, wählst du die Tischkarten selbst.',
+        tutTitle2: 'Bube, Dame, König', tutText2: 'Ein Bube räumt alles vom Tisch außer Königen und Damen. Eine Dame nimmt eine Dame, ein König einen König.',
+        tutTitle3: 'Sur und Punkte', tutText3: 'Leerst du den Tisch, ist das ein Sur: fünf Punkte. Am Ende bringen die meisten Kreuz 7, Karo 10 drei, Kreuz 2 zwei und jedes Ass und jeder Bube 1 Punkt.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', { level: 'medium', games: 0 });
+
+  var S = null, aiTimer = null, note = '', pick = null, cur = -1, lastRival = null;
+  var GLYPH = ['♣︎', '♦︎', '♥︎', '♠︎'];
+
+  var top = el('div', { class: 'ps-top' });
+  var rivalRow = el('div', { class: 'ps-player' });
+  var rivalHand = el('div', { class: 'ps-row', 'aria-label': C.t('rivalHand') });
+  var tableRow = el('div', { class: 'ps-row ps-table', role: 'group', 'aria-label': C.t('table') });
+  var pickBar = el('div', { class: 'ps-pick' });
+  var handRow = el('div', { class: 'ps-row ps-hand', role: 'group', 'aria-label': C.t('hand') });
+  var youRow = el('div', { class: 'ps-player' });
+  var status = el('div', { class: 'ps-status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'ps-wrap' }, [top, rivalRow, rivalHand, tableRow, pickBar, handRow, youRow, status]);
+
+  ctx.stat('deck', C.t('deck'));
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newDeal'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  function cardLabel(c) { return E.RANKS[E.rank(c)] + GLYPH[E.suit(c)]; }
+
+  function cardEl(c, extra) {
+    var b = el('button', { class: 'ps-card' + (E.isRed(c) ? ' ps-card--red' : '') + (extra ? ' ' + extra : ''),
+      type: 'button', 'aria-label': cardLabel(c) }, [
+      el('span', { class: 'ps-card__r', text: E.RANKS[E.rank(c)] }),
+      el('span', { class: 'ps-card__s', text: GLYPH[E.suit(c)] })
+    ]);
+    return b;
+  }
+
+  /* ---------------------------------------------------------- ساخت */
+
+  function newGame(level, daily) {
+    stopAi();
+    var rnd = daily ? C.daily('pasur', daily).rng : Math.random;
+    // در بازی عادی نوبت شروع یکی در میان است؛ روزانه همیشه با خود بازیکن
+    var first = daily ? 0 : (prefs.games % 2);
+    S = E.newDeal(rnd, first);
+    S.level = level; S.daily = daily || null; S.startedAt = Date.now();
+    note = ''; pick = null; cur = -1; lastRival = null;
+    render();
+    save();
+    maybeAi();
+  }
+
+  /* ---------------------------------------------------------- رسم */
+
+  function pname(i) {
+    if (i === 0) return C.state.profile.name || C.t('you');
+    return C.t('rival') + ' · ' + C.t(S.level);
+  }
+  function busy() { return S && !S.done && S.turn === 1; }
+
+  function render() {
+    top.innerHTML = '';
+    if (S.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' },
+        [C.icon('calendar', 14), el('span', { text: C.t('dailyPs') + ' — ' + C.num(S.daily) })]));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('vsHard') }));
+    } else {
+      top.appendChild(C.ui.segmented([
+        { value: 'easy', label: C.t('easy') }, { value: 'medium', label: C.t('medium') }, { value: 'hard', label: C.t('hard') }
+      ], S.level, function (v) {
+        if (v === S.level) return;
+        var go = function () { prefs.level = v; ctx.store.set('prefs', prefs); newGame(v); };
+        if (S.log.length && !S.done) {
+          C.ui.confirm({ title: C.t('newDeal'), body: C.t('resetWarn'), onOk: go, onCancel: function () { render(); } });
+          render();
+          return;
+        }
+        go();
+      }));
+    }
+    paint();
+  }
+
+  function playerBox(box, p, color) {
+    var sc = E.score(S)[p];
+    box.innerHTML = '';
+    box.className = 'ps-player' + (S.turn === p && !S.done ? ' ps-player--on' : '') + (p === 1 && busy() ? ' ps-thinking' : '');
+    box.style.setProperty('--pc', color);
+    box.appendChild(el('div', { class: 'ps-player__dot' }));
+    box.appendChild(el('div', { class: 'ps-player__name', text: pname(p) }));
+    box.appendChild(el('div', { class: 'ps-player__stats' }, [
+      el('span', {}, [el('b', { text: C.num(sc.cards) }), document.createTextNode(' ' + C.t('taken'))]),
+      el('span', {}, [el('b', { text: C.num(sc.clubs) }), document.createTextNode(' ' + GLYPH[0])]),
+      el('span', {}, [el('b', { text: C.num(sc.surs) }), document.createTextNode(' ' + C.t('surs'))])
+    ]));
+  }
+
+  function paint() {
+    if (!S) return;
+    playerBox(rivalRow, 1, 'var(--ps-rival)');
+    playerBox(youRow, 0, 'var(--game)');
+    ctx.setStat('deck', S.deck.length);
+
+    rivalHand.innerHTML = '';
+    S.hands[1].forEach(function () { rivalHand.appendChild(el('div', { class: 'ps-back', 'aria-hidden': 'true' })); });
+
+    var optCards = {};
+    if (pick) pick.opts.forEach(function (o) { o.forEach(function (c) { optCards[c] = 1; }); });
+    tableRow.innerHTML = '';
+    S.table.forEach(function (c, i) {
+      var cls = '';
+      if (pick) {
+        cls = optCards[c] ? (pick.sel.indexOf(c) >= 0 ? 'ps-card--sel' : 'ps-card--opt') : 'ps-card--dim';
+        if (cur === i) cls += ' ps-card--cur';
+      } else if (lastRival && lastRival.indexOf(c) >= 0) cls = 'ps-card--last';
+      var b = cardEl(c, cls);
+      b.disabled = !pick || !optCards[c];
+      b.addEventListener('click', function () { toggleTable(c); });
+      tableRow.appendChild(b);
+    });
+
+    handRow.innerHTML = '';
+    S.hands[0].forEach(function (c, i) {
+      var b = cardEl(c, pick && pick.card === c ? 'ps-card--sel' : '');
+      b.setAttribute('aria-label', C.t('playN') + ' ' + C.num(i + 1) + ': ' + cardLabel(c));
+      b.disabled = !canHumanMove();
+      b.addEventListener('click', function () { tapHand(c); });
+      handRow.appendChild(b);
+    });
+
+    pickBar.innerHTML = '';
+    if (pick) {
+      pickBar.appendChild(el('span', { class: 'ch-dim', text: C.t('pickTake') }));
+      var cancel = el('button', { class: 'ch-btn ch-btn--soft', type: 'button', text: C.t('cancelPick') });
+      cancel.addEventListener('click', cancelPick);
+      pickBar.appendChild(cancel);
+    }
+
+    var msg = note;
+    if (!msg && !S.done) msg = busy() ? C.t('thinking') : C.t('yourTurn');
+    status.textContent = msg;
+  }
+
+  /* ---------------------------------------------------------- حرکت */
+
+  function canHumanMove() { return S && !S.done && S.turn === 0; }
+
+  function tapHand(c) {
+    if (!canHumanMove()) return;
+    if (pick && pick.card === c) { cancelPick(); return; }
+    var opts = E.options(S.table, c);
+    if (opts.length > 1) {
+      pick = { card: c, opts: opts, sel: [] };
+      cur = -1;
+      C.feedback('select');
+      paint();
+      return;
+    }
+    pick = null;
+    doMove(c, opts[0] || null, true);
+  }
+
+  function toggleTable(c) {
+    if (!pick) return;
+    var at = pick.sel.indexOf(c);
+    if (at >= 0) pick.sel.splice(at, 1); else pick.sel.push(c);
+    var hit = null;
+    pick.opts.forEach(function (o) { if (E.sameSet(o, pick.sel)) hit = o; });
+    if (hit) {
+      var card = pick.card;
+      pick = null;
+      doMove(card, hit, true);
+      return;
+    }
+    // انتخابی که دیگر در هیچ راهی جا نمی‌شود پاک می‌شود و از همین کارت از نو شروع می‌شود
+    var fits = pick.opts.some(function (o) { return pick.sel.every(function (x) { return o.indexOf(x) >= 0; }); });
+    if (!fits) pick.sel = [c];
+    C.feedback('tap');
+    paint();
+  }
+
+  function cancelPick() { pick = null; cur = -1; paint(); }
+
+  function doMove(card, set, byHuman) {
+    var info = E.play(S, card, set);
+    if (!info) { C.feedback('bad'); return; }
+    if (byHuman) { C.haptic('tap'); lastRival = null; }
+    else lastRival = info.take.length ? [] : [card];
+    if (info.take.length) C.audio.sfx(info.sur ? 'chain' : 'pop'); else C.audio.sfx('place');
+    note = '';
+    if (!byHuman) note = info.take.length ? C.t('rivalTook', { c: cardLabel(card), n: C.num(info.take.length) }) : C.t('rivalPut', { c: cardLabel(card) });
+    if (info.sur) {
+      note = (note ? note + ' · ' : '') + C.t('sur');
+      if (info.player === 0) C.haptic('success');
+    }
+    if (info.sweep.length) note = (note ? note + ' · ' : '') + C.t('lastSweep');
+    if (info.player === 0 && S.surs[0] >= 3) C.achievements.unlock('ps-surs');
+    save();
+    paint();
+    if (S.done) { finish(); return; }
+    maybeAi();
+  }
+
+  function maybeAi() {
+    stopAi();
+    if (!busy()) return;
+    paint();
+    aiTimer = setTimeout(function () {
+      aiTimer = null;
+      if (!busy()) return;
+      var rnd = S.daily ? C.daily('pasur', S.daily + '|' + S.log.length).rng : Math.random;
+      var m = E.aiMove(S, S.level, rnd);
+      if (m) doMove(m.card, m.set, false);
+    }, 650);
+  }
+  function stopAi() { if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; } }
+
+  function undo() {
+    if (!S || S.done) return;
+    if (!E.undoTo(S, 0)) { C.feedback('bad'); return; }
+    stopAi();
+    pick = null; cur = -1; note = ''; lastRival = null;
+    C.feedback('tap');
+    save();
+    paint();
+    maybeAi();
+  }
+
+  function finish() {
+    stopAi();
+    var sc = E.score(S), a = sc[0].total, b = sc[1].total;
+    var won = a > b, tie = a === b, margin = a - b;
+    prefs.games = (prefs.games || 0) + 1;
+    ctx.store.set('prefs', prefs);
+    var base = { easy: 5, medium: 10, hard: 18 }[S.level] || 10;
+    var coins = Math.max(2, Math.round(won ? base : base * 0.35)) + (S.daily ? 8 : 0);
+    var points = Math.max(3, Math.round(won ? base * 4 : base * 1.2)) + (S.daily ? 25 : 0);
+    if (won) {
+      C.achievements.unlock('ps-win');
+      if (S.level === 'hard') C.achievements.unlock('ps-hard');
+      C.stats.best('pasur', 'margin', margin, false);
+    }
+    if (S.daily) {
+      var firstDaily = C.stats.daily('pasur', S.daily, { label: C.num(a) + ' - ' + C.num(b), win: won, diff: margin });
+      if (!firstDaily) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    var row = function (label, k) { return { label: label, value: C.num(sc[0][k]) + ' - ' + C.num(sc[1][k]) }; };
+    ctx.finish({
+      won: won,
+      title: tie ? C.t('draw') : (won ? C.t('won') : C.t('lost')),
+      timeMs: Date.now() - S.startedAt, coins: coins, points: points,
+      lines: [
+        { label: pname(0) + ' - ' + pname(1), value: C.num(a) + ' - ' + C.num(b) },
+        row(C.t('clubsPts'), 'clubPts'), row(C.t('tenD'), 'ten'), row(C.t('twoC'), 'two'),
+        { label: C.t('acesJacks'), value: C.num(sc[0].aces + sc[0].jacks) + ' - ' + C.num(sc[1].aces + sc[1].jacks) },
+        row(C.t('surs'), 'surPts')
+      ],
+      shareText: 'چوگان · پاسور' + (S.daily ? ('\nروزانه ' + S.daily) : '') + '\n' + C.num(a) + ' - ' + C.num(b),
+      paint: function (g, w, h, col) {
+        g.fillStyle = col.surface2;
+        C.rrect(g, 0, 0, w, h, 18);
+        g.fill();
+        g.fillStyle = col.game;
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.font = '800 ' + Math.round(h * 0.34) + 'px Vazirmatn, system-ui, sans-serif';
+        g.fillText(C.num(a) + ' - ' + C.num(b), w / 2, h / 2);
+      },
+      onAgain: S.daily ? null : function () { newGame(S.level); }
+    });
+  }
+
+  /* --------------------------------------------------------- ذخیره */
+
+  ctx.autosave(function () {
+    if (!S || S.done || !S.log.length) return { inProgress: false };
+    var copy = JSON.parse(JSON.stringify(S));
+    copy.elapsed = Date.now() - S.startedAt;
+    return { s: copy, prefs: prefs };
+  });
+  function save() { ctx.save(); }
+
+  function askNew() {
+    var dd = S ? S.daily : null;
+    var go = function () { newGame(dd ? 'hard' : (S ? S.level : prefs.level), dd); };
+    if (!S || S.done || !S.log.length) { go(); return; }
+    C.ui.confirm({ title: C.t('newDeal'), body: C.t('resetWarn'), onOk: go });
+  }
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          kb('1 – 4', C.t('play')),
+          kb('← →', C.t('move')),
+          kb('Space / Enter', C.t('toggle')),
+          kb('Esc', C.t('cancelKey')),
+          kb('U / Ctrl+Z', C.t('undoMove'))
+        ])
+      ],
+      actions: [
+        { label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('done'), kind: 'primary' }
+      ]
+    });
+  }
+  function kb(k, what) {
+    return el('div', { class: 'ch-item' }, [
+      el('div', { class: 'ch-item__label', text: what }),
+      el('span', { class: 'ch-badge', text: k })
+    ]);
+  }
+
+  function svgCard(x, y, label, red, ring) {
+    return '<g><rect x="' + x + '" y="' + y + '" width="34" height="48" rx="6" fill="var(--c-surface)" stroke="' + (ring ? 'var(--game)' : 'var(--c-line)') + '" stroke-width="' + (ring ? 3 : 1) + '"/>' +
+      '<text x="' + (x + 17) + '" y="' + (y + 31) + '" text-anchor="middle" font-size="15" font-weight="800" fill="' + (red ? 'var(--c-bad)' : 'var(--c-text)') + '" direction="ltr">' + label + '</text></g>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'),
+      art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr">' + svgCard(30, 12, '3' + GLYPH[1], true, true) + svgCard(70, 12, '2' + GLYPH[0], false, true) +
+        svgCard(110, 12, 'K' + GLYPH[3], false) + svgCard(150, 12, '9' + GLYPH[2], true) + svgCard(83, 58, '6' + GLYPH[3], false, true) + '</svg>' },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'),
+      art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr">' + svgCard(30, 12, '4' + GLYPH[0], false, true) + svgCard(70, 12, '8' + GLYPH[1], true, true) +
+        svgCard(110, 12, 'Q' + GLYPH[2], true) + svgCard(150, 12, 'A' + GLYPH[3], false, true) + svgCard(83, 58, 'J' + GLYPH[0], false, true) + '</svg>' },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'),
+      art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr">' + svgCard(50, 30, '10' + GLYPH[1], true) + svgCard(90, 30, '2' + GLYPH[0], false) +
+        svgCard(130, 30, 'A' + GLYPH[3], false) + '<text x="100" y="104" text-anchor="middle" font-size="14" font-weight="800" fill="var(--game)">3 + 2 + 1</text></svg>' }
+  ];
+
+  /* --------------------------------------------------------- ورودی */
+
+  function pickable() {
+    if (!pick) return [];
+    var o = {};
+    pick.opts.forEach(function (s) { s.forEach(function (c) { o[c] = 1; }); });
+    return S.table.map(function (c, i) { return o[c] ? i : -1; }).filter(function (i) { return i >= 0; });
+  }
+
+  window.addEventListener('keydown', function (e) {
+    if (!S || S.done) return;
+    if (document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
+    if (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
+    var k = e.key;
+    if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
+    if (!canHumanMove()) return;
+    if (k === 'Escape' && pick) { cancelPick(); e.preventDefault(); return; }
+    var dg = '1234'.indexOf(k);
+    if (dg < 0) dg = '۱۲۳۴'.indexOf(k);
+    if (dg >= 0) {
+      if (dg < S.hands[0].length) tapHand(S.hands[0][dg]); else C.feedback('bad');
+      e.preventDefault(); return;
+    }
+    if (pick && (k === 'ArrowLeft' || k === 'ArrowRight')) {
+      var list = pickable();
+      if (!list.length) return;
+      var at = list.indexOf(cur);
+      at = at < 0 ? 0 : (at + (k === 'ArrowRight' ? 1 : list.length - 1)) % list.length;
+      cur = list[at];
+      paint(); e.preventDefault(); return;
+    }
+    if (pick && (k === ' ' || k === 'Enter') && cur >= 0) {
+      toggleTable(S.table[cur]);
+      e.preventDefault();
+    }
+  });
+
+  C.onPause(function () { stopAi(); });
+  C.onResume(function () { if (S && !S.done) maybeAi(); });
+
+  /* ---------------------------------------------------------- شروع */
+
+  function restore(v) {
+    S = v;
+    S.startedAt = Date.now() - (v.elapsed || 0);
+    render();
+    maybeAi();
+  }
+
+  var saved = ctx.loadSave();
+  var hasSave = saved && saved.s && saved.s.log && saved.s.log.length && saved.s.hands;
+  if (dailyDate) {
+    if (hasSave && saved.s.daily === dailyDate) restore(saved.s);
+    else newGame('hard', dailyDate);
+    if (C.stats.dailyDone('pasur', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).pasur;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec.label });
+    }
+    ctx.tutorialIfNew(TUT);
+  } else if (hasSave && !saved.s.daily) {
+    if (saved.prefs) prefs = saved.prefs;
+    restore(saved.s);
+  } else {
+    newGame(prefs.level || 'medium');
+    ctx.tutorialIfNew(TUT);
+  }
+})();
+</script>
+</body>
+</html>
