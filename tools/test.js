@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2170;
+const MIN_CHECKS = 2181;
 
 function ok(cond, msg) {
   checks++;
@@ -3703,6 +3703,27 @@ function testChessPuzzles() {
   ok(fs.existsSync(tool) && /lichess_db_puzzle\.csv\.zst/.test(fs.readFileSync(tool, 'utf8')), 'سازنده‌ی فهرست در tools/ هست');
 }
 
+/* ------------------------------------------------- کاشی‌های خانه */
+// هجده بازی یک‌ستونه روی گوشی ۳۹۰ پیکسلی ۲۲۶۰ پیکسل اسکرول بود (#149). پیش‌فرض
+// کاشی دو ستونه است و یک‌ستونه فقط وقتی که کاربر خودش انتخاب کرده.
+function testHomeGrid() {
+  head('کاشی‌های خانه');
+  const menu = fs.readFileSync(path.join(ROOT, 'www/index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8');
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  ok(/var asList = C\.state\.settings\.gameView === 'list';/.test(menu), 'یک‌ستونه فقط با انتخاب صریح gameView === list');
+  ok(/class: 'ch-games' \+ \(asList \? '' : ' ch-games--grid'\)/.test(menu), 'فهرست بازی‌ها در حالت پیش‌فرض کلاس ch-games--grid دارد');
+  ok(/C\.store\.set\('settings', C\.state\.settings\)/.test(menu.slice(menu.indexOf('var asList'))), 'انتخاب نما در تنظیمات ذخیره می‌شود');
+  // قاعده‌ی دو ستون باید بیرون از media query باشد تا روی گوشی هم اعمال شود
+  const topLevel = css.replace(/@media[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, '');
+  ok(/\.ch-games--grid \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/.test(topLevel), 'دو ستون روی پهنای گوشی (بیرون از media query)');
+  ok(/^\s+list: '/m.test(core), 'نماد list در هسته هست');
+  for (const k of ['viewGrid', 'viewList']) {
+    const n = (menu.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length;
+    ok(n === 4, k + ' در هر چهار زبان منو هست (' + n + ')');
+  }
+}
+
 /* -------------------------------------------- کلیدهای ترجمه‌ی تعریف‌نشده */
 // C.t کلید ناشناخته را خودِ کلید برمی‌گرداند، پس پایان مساوی شطرنج «draw» نشان می‌داد
 // و هیچ آزمونی نمی‌دید (#143). هر کلید ثابتی که بازی می‌خواند باید جایی تعریف شده باشد.
@@ -3921,6 +3942,7 @@ testChess();
 testChessBot();
 testChessPuzzles();
 testStringKeys();
+testHomeGrid();
 testTd();
 testVersionStamp();
 testDeployGate();
