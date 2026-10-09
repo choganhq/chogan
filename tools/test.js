@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2217;
+const MIN_CHECKS = 2243;
 
 function ok(cond, msg) {
   checks++;
@@ -3725,6 +3725,110 @@ function testAdiProof() {
   ok(/retention-days: 1/.test(y), 'artifact فقط یک روز می‌ماند');
 }
 
+/* ------------------------------------------------ Google Play API */
+// tools/play-api.sh holds the Play service account key and is the only path from
+// CI to Play (#159). It runs here against a mock Play: the token endpoint checks
+// the JWT signature with the matching public key, the edits API records every
+// call, so the test sees exactly what Play would have received.
+function testPlayApi() {
+  head('Google Play API');
+  const script = path.join(ROOT, 'tools/play-api.sh');
+  const exists = fs.existsSync(script);
+  ok(exists, 'tools/play-api.sh exists');
+  const wf = path.join(ROOT, '.github/workflows/play.yml');
+  ok(fs.existsSync(wf), 'play.yml exists');
+  if (!exists || !fs.existsSync(wf)) return Promise.resolve();
+  const y = fs.readFileSync(wf, 'utf8');
+  const on = (y.match(/\non:\n([\s\S]*?)\n[a-z]/) || [])[1] || '';
+  ok(/^\s+workflow_dispatch:/m.test(on) && !/\b(push|pull_request|schedule|release):/.test(on), 'play.yml: manual dispatch only');
+  ok(/options: \[internal, alpha\]/.test(y) && !/production/.test(y.replace(/^#.*$/mg, '')), 'play.yml: only testing tracks, never production');
+  ok(y.split('\n').filter((l) => /secrets\.PLAY_SERVICE_ACCOUNT_JSON/.test(l)).every((l) => /^\s+PLAY_SERVICE_ACCOUNT_JSON: \$\{\{ secrets\.PLAY_SERVICE_ACCOUNT_JSON \}\}$/.test(l)), 'play.yml: the service account key only reaches steps through env');
+  ok(!/\$\{\{ inputs\.[a-z]+ \}\}/.test(y.split('\n').filter((l) => /^\s+run:/.test(l)).join('\n')), 'play.yml: inputs never interpolated into run lines');
+  ok(/if: always\(\)\n\s+run: rm -f "\$RUNNER_TEMP\/release\.jks"/.test(y), 'play.yml: the keystore is always removed');
+  ok(/c3f70a1af8a45558678d1d9b413415d1b0a4c3208835ce78c1f37c4a3a008839/.test(y), 'play.yml: the bundle signer is checked before upload');
+  const crypto = require('crypto');
+  const http = require('http');
+  const { execFile } = require('child_process');
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const pem = privateKey.export({ type: 'pkcs8', format: 'pem' });
+  const PKG = 'io.github.choganhq.chogan';
+  let calls = [], tokenOk = null, failOn = null, bundleVc = '17';
+  const server = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      const body = Buffer.concat(chunks);
+      const send = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
+      if (req.url === '/token') {
+        const form = new URLSearchParams(body.toString());
+        const parts = (form.get('assertion') || '').split('.');
+        const claims = parts.length === 3 ? JSON.parse(Buffer.from(parts[1], 'base64url').toString()) : {};
+        tokenOk = parts.length === 3 && form.get('grant_type') === 'urn:ietf:params:oauth:grant-type:jwt-bearer' &&
+          crypto.verify('sha256', Buffer.from(parts[0] + '.' + parts[1]), publicKey, Buffer.from(parts[2], 'base64url')) &&
+          claims.iss === 'ci@chogan-play.iam.gserviceaccount.com' && claims.scope === 'https://www.googleapis.com/auth/androidpublisher' &&
+          claims.exp - claims.iat === 600;
+        return tokenOk ? send(200, { access_token: 'tok-123' }) : send(400, { error: 'invalid_grant' });
+      }
+      calls.push({ m: req.method, u: req.url, auth: req.headers.authorization, body: body.toString().slice(0, 200), len: body.length });
+      if (failOn && req.url.indexOf(failOn) >= 0) return send(403, { error: { message: 'The caller does not have permission' } });
+      const base = '/androidpublisher/v3/applications/' + PKG + '/edits';
+      if (req.method === 'POST' && req.url === base) return send(200, { id: 'E1' });
+      if (req.method === 'GET' && req.url === base + '/E1/tracks') return send(200, { tracks: [{ track: 'internal', releases: [] }] });
+      if (req.method === 'DELETE' && req.url === base + '/E1') return send(204, {});
+      if (req.method === 'POST' && req.url === '/upload' + base + '/E1/bundles?uploadType=media') return send(200, { versionCode: Number(bundleVc) });
+      if (req.method === 'PUT' && req.url === base + '/E1/tracks/internal') return send(200, {});
+      if (req.method === 'POST' && req.url === base + '/E1:commit') return send(200, {});
+      send(404, { error: { message: 'unexpected ' + req.method + ' ' + req.url } });
+    });
+  });
+  const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'play-'));
+  const aab = path.join(tmp, 'app.aab');
+  fs.writeFileSync(aab, Buffer.alloc(4096, 7));
+  const run = (args, env) => new Promise((resolve) => {
+    calls = []; tokenOk = null;
+    execFile('bash', [script].concat(args), { env: Object.assign({}, process.env, env) },
+      (err, stdout, stderr) => resolve({ code: err ? (typeof err.code === 'number' ? err.code : -1) : 0, out: stdout + stderr }));
+  });
+  return new Promise((r) => server.listen(0, '127.0.0.1', r)).then(async () => {
+    const origin = 'http://127.0.0.1:' + server.address().port;
+    const sa = JSON.stringify({ client_email: 'ci@chogan-play.iam.gserviceaccount.com', private_key: pem, token_uri: origin + '/token' });
+    const env = { PLAY_SERVICE_ACCOUNT_JSON: sa, PLAY_API: origin };
+
+    let r = await run(['check'], env);
+    ok(r.code === 0 && tokenOk === true, 'check: a JWT signed with the service account key is accepted (' + r.code + ')');
+    ok(calls.length === 3 && calls.every((c) => c.auth === 'Bearer tok-123'), 'check: three calls, all with the token');
+    ok(calls.length === 3 && calls[2].m === 'DELETE', 'check: the edit is deleted, nothing is committed');
+    ok(/track internal/.test(r.out), 'check: the tracks are printed');
+
+    r = await run(['upload', aab, 'internal', '17'], env);
+    const up = calls.find((c) => c.u.indexOf('/upload/') === 0);
+    const put = calls.find((c) => c.m === 'PUT');
+    ok(r.code === 0 && !!up && up.len === 4096, 'upload: the whole bundle is sent (' + (up && up.len) + ' bytes)');
+    ok(!!put && JSON.parse(put.body).releases[0].status === 'draft' && JSON.parse(put.body).releases[0].versionCodes[0] === '17',
+      'upload: the track gets versionCode 17 as a draft by default');
+    ok(calls.length > 0 && calls[calls.length - 1].u.endsWith('/E1:commit'), 'upload: the edit is committed last');
+
+    bundleVc = '16';
+    r = await run(['upload', aab, 'internal', '17'], env);
+    ok(r.code === 1 && !calls.some((c) => c.m === 'PUT'), 'upload: a bundle Play reads as another versionCode stops before the track changes');
+    bundleVc = '17';
+
+    failOn = '/edits';
+    r = await run(['check'], env);
+    ok(r.code === 1 && /403/.test(r.out) && /permission/.test(r.out), 'a refused call exits 1 and shows Play\'s message');
+    failOn = null;
+
+    r = await run(['check'], { PLAY_SERVICE_ACCOUNT_JSON: JSON.stringify({ client_email: 'x@y', private_key: pem.replace(/MII/, 'MIJ'), token_uri: origin + '/token' }), PLAY_API: origin });
+    ok(r.code !== 0 && calls.length === 0, 'a bad key never reaches the edits API (' + r.code + ')');
+    r = await run(['check'], { PLAY_SERVICE_ACCOUNT_JSON: '', PLAY_API: origin });
+    ok(r.code === 2, 'no service account: exit 2 (' + r.code + ')');
+    r = await run(['publish'], env);
+    ok(r.code === 2, 'unknown mode: exit 2');
+    r = await run(['upload', aab, 'internal', 'x'], env);
+    ok(r.code === 2, 'non-numeric versionCode: exit 2');
+  }).finally(() => { server.close(); fs.rmSync(tmp, { recursive: true, force: true }); });
+}
+
 /* ------------------------------------------------ PEPK key export */
 // Play App Signing gets a copy of our own key so Play, GitHub Releases and F-Droid
 // builds share one signature (#157). This workflow feeds the private key to a jar
@@ -4027,7 +4131,7 @@ testUndoKey();
 testShortcuts();
 testMenu();
 
-testSw().then(testVerifyDeploy).then(function () {
+testSw().then(testVerifyDeploy).then(testPlayApi).then(function () {
   head('کامل بودن اجرا');
   ok(checks >= MIN_CHECKS, 'دست‌کم ' + MIN_CHECKS + ' بررسی اجرا شد (' + checks + ' اجرا شد)');
   console.log('\n' + (failures ? ('✗ ' + failures + ' خطا از ' + checks + ' بررسی') : ('همه‌ی ' + checks + ' بررسی سبز')));
