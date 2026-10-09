@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2206;
+const MIN_CHECKS = 2217;
 
 function ok(cond, msg) {
   checks++;
@@ -3725,6 +3725,29 @@ function testAdiProof() {
   ok(/retention-days: 1/.test(y), 'artifact فقط یک روز می‌ماند');
 }
 
+/* ------------------------------------------------ PEPK key export */
+// Play App Signing gets a copy of our own key so Play, GitHub Releases and F-Droid
+// builds share one signature (#157). This workflow feeds the private key to a jar
+// downloaded from Google, so its shape is guarded here.
+function testPepkExport() {
+  head('PEPK key export');
+  const f = path.join(ROOT, '.github/workflows/pepk-export.yml');
+  ok(fs.existsSync(f), 'pepk-export.yml exists');
+  if (!fs.existsSync(f)) return;
+  const y = fs.readFileSync(f, 'utf8');
+  const on = (y.match(/\non:\n([\s\S]*?)\n[a-z]/) || [])[1] || '';
+  ok(/^\s+workflow_dispatch:/m.test(on) && !/\b(push|pull_request|schedule|release):/.test(on), 'manual dispatch only');
+  ok(/PEPK_SHA256: [0-9a-f]{64}\n/.test(y) && /sha256sum -c -/.test(y), 'the PEPK jar is checked against a pinned SHA-256 before it runs');
+  ok(y.indexOf('sha256sum -c -') < y.indexOf('java -jar "$RUNNER_TEMP/pepk.jar"'), 'the checksum runs before PEPK');
+  const keyLines = y.split('\n').filter((l) => /inputs\.encryption_key/.test(l));
+  ok(keyLines.length === 1 && /^\s+ENCRYPTION_KEY: \$\{\{ inputs\.encryption_key \}\}$/.test(keyLines[0]), 'the PEM input reaches the shell only through env');
+  ok(/--rsa-aes-encryption/.test(y) && /--include-cert/.test(y), 'PEPK encrypts to Play\'s key and includes the certificate');
+  ok(/c3f70a1af8a45558678d1d9b413415d1b0a4c3208835ce78c1f37c4a3a008839/.test(y), 'the exported key is checked against the permanent Chogan fingerprint');
+  ok(/if: always\(\)\n\s+run: rm -f "\$RUNNER_TEMP\/release\.jks"/.test(y), 'the keystore is always removed');
+  ok(/permissions:\n\s+contents: read/.test(y) && !/contents: write|gh release/.test(y), 'nothing is published');
+  ok(/retention-days: 1/.test(y), 'the artifact lives one day');
+}
+
 /* ------------------------------------------------ CI and tools in English */
 // The owner wants the working system in English: every name and message GitHub
 // shows, and the scripts CI runs (#154). Only real UI values stay, such as the
@@ -3991,6 +4014,7 @@ testStringKeys();
 testHomeGrid();
 testAdiProof();
 testEnglishCi();
+testPepkExport();
 testTd();
 testVersionStamp();
 testDeployGate();
