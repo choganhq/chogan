@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2100;
+const MIN_CHECKS = 2152;
 
 function ok(cond, msg) {
   checks++;
@@ -3538,6 +3538,126 @@ function testChess() {
   ok(dailyUses >= 4, 'کارت امروز، تقویم و فهرست روز از dailyGames می‌خوانند (' + dailyUses + ')');
 }
 
+/* ------------------------------------------------------- ربات شطرنج */
+// ربات تخته‌ی جدای 0x88 دارد (#143)؛ اگر تولید حرکتش با موتور قانون‌ها فرق کند، صفحه
+// حرکتش را رد می‌کند و بازی بی‌صدا حرکت اول فهرست را می‌زند. پس همان perft ها اینجا هم.
+function testChessBot() {
+  head('ربات شطرنج');
+  const E = loadEngine('chess', 'ChessEngineFactory');
+  const B = loadEngine('chess', 'ChessBotFactory');
+  // loadEngine بی ChessBotFactory به module.exports (موتور قانون‌ها) برمی‌گردد
+  ok(typeof B.think === 'function' && typeof B.perft === 'function', 'ChessBotFactory در موتور شطرنج هست');
+  if (typeof B.think !== 'function') return;
+  const PERFT = [
+    [E.START, [20, 400, 8902, 197281]],
+    ['r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1', [48, 2039, 97862]],
+    ['8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1', [14, 191, 2812, 43238]],
+    ['r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1', [6, 264, 9467]],
+    ['rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8', [44, 1486, 62379]]
+  ];
+  for (const [f, want] of PERFT) {
+    const got = want.map((_, d) => B.perft(f, d + 1));
+    ok(got.join() === want.join(), 'perft ربات ' + f.split(' ')[0].slice(0, 16) + '… ' + got.join(',') + ' (مرجع ' + want.join(',') + ')');
+  }
+
+  const fixed = () => 0.5;   // بدون لرزش، تا نتیجه قطعی باشد
+  const sanOf = (f, r) => {
+    const S = E.parse(f);
+    const m = r && E.legal(S).find((x) => x.from === r.from && x.to === r.to && (x.promo || '') === (r.promo || ''));
+    return m ? { san: E.san(S, m), next: E.make(S, m) } : null;
+  };
+  const m1 = '6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1';
+  for (const lv of ['medium', 'hard']) {
+    const got = sanOf(m1, B.think(m1, [], { level: lv, rand: fixed }));
+    ok(got && got.san === 'Ra8#', 'مات در یک (' + lv + '): ' + (got && got.san));
+  }
+  const m1b = 'r5k1/5ppp/8/8/8/8/5PPP/6K1 b - - 0 1';
+  const gb = sanOf(m1b, B.think(m1b, [], { level: 'medium', rand: fixed }));
+  ok(gb && gb.san === 'Ra1#', 'سیاه هم مات در یک را می‌زند: ' + (gb && gb.san));
+  const m2 = 'r2qkb1r/pp2nppp/3p4/2pNN1B1/2BnP3/3P4/PPP2PPP/R2bK2R w KQkq - 1 1';
+  for (const lv of ['medium', 'hard']) {
+    const r = B.think(m2, [], { level: lv, rand: fixed });
+    const got = sanOf(m2, r);
+    ok(got && got.san === 'Nf6+' && r.score > 29000, 'مات در دو (' + lv + '): ' + (got && got.san) + ' امتیاز ' + r.score);
+  }
+  // وزیرِ زیر حمله‌ی پیاده: هیچ سطحی نباید آن را جا بگذارد
+  const hang = 'rnb1kbnr/pppp1ppp/8/4p3/3Q4/8/PPPPPPPP/RNB1KBNR w KQkq - 0 3';
+  for (const lv of ['easy', 'medium', 'hard']) {
+    for (const j of [0, 1]) {
+      const got = sanOf(hang, B.think(hang, [], { level: lv, rand: () => j }));
+      const q = got && got.next.board.indexOf('Q');
+      const lost = !got || q < 0 || E.legal(got.next).some((m) => m.to === q);
+      ok(!lost, 'سطح ' + lv + ' وزیر را جا نمی‌گذارد: ' + (got && got.san));
+    }
+  }
+
+  // روی چیدمان‌های تصادفی همیشه حرکتی برمی‌گرداند که موتور قانون‌ها قبول دارد
+  const R = rng(143);
+  let positions = 0, bad = 0;
+  for (let game = 0; game < 12; game++) {
+    let S = E.parse(E.START);
+    for (let ply = 0; ply < 90; ply++) {
+      const ms = E.legal(S);
+      if (!ms.length) break;
+      if (ply % 9 === 4) {
+        const f = E.fen(S), r = B.think(f, [], { level: 'medium', maxDepth: 2, timeMs: 200 });
+        positions++;
+        if (!sanOf(f, r)) bad++;
+      }
+      S = E.make(S, ms[Math.floor(R() * ms.length)]);
+    }
+  }
+  ok(positions >= 80 && bad === 0, 'حرکت ربات روی ' + positions + ' چیدمان تصادفی قانونی است (' + bad + ' نادرست)');
+  ok(B.think('7k/5Q2/6K1/8/8/8/8/8 b - - 0 1', []) === null, 'در پات ربات حرکتی نمی‌دهد');
+
+  // سقف زمان هر سطح، با ساعت ساختگی تا کندی ماشین CI نتیجه را عوض نکند
+  for (const lv of ['easy', 'medium', 'hard']) {
+    let t = 0;
+    const r = B.think(E.START, [], { level: lv, now: () => (t += 3) });
+    ok(r && r.ms <= B.LEVELS[lv].timeMs + 50, 'سطح ' + lv + ' زیر سقف ' + B.LEVELS[lv].timeMs + ' میلی‌ثانیه می‌ماند (' + (r && r.ms) + ')');
+  }
+  // ربات تکرار را می‌شناسد: با برتری بزرگ چیدمانی را که دو بار دیده، سومی نمی‌کند
+  const won = '6k1/8/6K1/8/8/8/8/Q7 w - - 0 1';
+  const hist = [won.replace(' w ', ' b '), won, won.replace(' w ', ' b ')].map((x) => x);
+  const r3 = B.think(won, hist, { level: 'hard', rand: fixed, maxDepth: 4 });
+  ok(r3 && r3.score > 500, 'با تاریخچه هم برتری را می‌بیند (' + (r3 && r3.score) + ')');
+
+  // کارگر فقط متن ChessBotFactory را می‌گیرد؛ پس باید بی هیچ متغیر بیرونی کار کند
+  const file = fs.readFileSync(path.join(ROOT, 'www/games/chess/index.html'), 'utf8');
+  const src = file.match(/function ChessBotFactory\(\) \{[\s\S]*?\n\}\n/);
+  ok(!!src, 'متن ChessBotFactory پیدا شد');
+  if (src) {
+    const box = { Math, Date, Int8Array, Int16Array, Int32Array };
+    vm.createContext(box);
+    let alone = null;
+    try { alone = vm.runInContext(src[0] + '\nChessBotFactory().think("' + m1 + '", [], { level: "medium" });', box); } catch (e) { alone = String(e); }
+    ok(alone && alone.from === 56 && alone.to === 0, 'ربات تنها، بیرون از صفحه، کار می‌کند (' + JSON.stringify(alone) + ')');
+  }
+  ok(/ChessBotFactory\.toString\(\)/.test(file) && /new Worker\(URL\.createObjectURL/.test(file), 'فکر کردن در Web Worker است');
+  ok(/var ms = E\.legal\(S\), m = r && ms\.filter/.test(file), 'حرکت ربات از فیلتر legal موتور قانون‌ها رد می‌شود');
+  ok(/if \(isAi\(\) && \(thinking \|\| S\.turn !== G\.human\)\) return;/.test(file), 'وقتی نوبت ربات است لمس تخته کاری نمی‌کند');
+}
+
+/* -------------------------------------------- کلیدهای ترجمه‌ی تعریف‌نشده */
+// C.t کلید ناشناخته را خودِ کلید برمی‌گرداند، پس پایان مساوی شطرنج «draw» نشان می‌داد
+// و هیچ آزمونی نمی‌دید (#143). هر کلید ثابتی که بازی می‌خواند باید جایی تعریف شده باشد.
+function testStringKeys() {
+  head('کلیدهای ترجمه');
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  const games = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games;
+  ok(games.length > 0, 'فهرست بازی‌ها خالی نیست');
+  let total = 0;
+  for (const g of games) {
+    const html = fs.readFileSync(path.join(ROOT, 'www', g.path), 'utf8');
+    const keys = [...new Set([...html.matchAll(/C\.t\('([A-Za-z0-9_]+)'\s*[,)]/g)].map((m) => m[1]))];
+    total += keys.length;
+    const has = (src, k) => new RegExp('[\\s{,]' + k + '\\s*:').test(src);
+    const miss = keys.filter((k) => !has(html, k) && !has(core, k));
+    ok(miss.length === 0, g.id + ': همه‌ی کلیدهای C.t تعریف شده‌اند' + (miss.length ? ' (نیست: ' + miss.join(', ') + ')' : ''));
+  }
+  ok(total > 300, 'کلیدهای خوانده‌شده: ' + total);
+}
+
 /* ---------------------------------------------- ادامه‌ی روزانه‌ی نیمه‌کاره */
 // هسته برای هر روز خانه‌ی ذخیره‌ی جدا دارد، ولی سودوکو، نقطه‌بازی، مین‌روب و دفاع از
 // برج روزانه را همیشه از نو می‌ساختند و پیشرفت همان روز با یک «بازگشت» گم می‌شد (#132).
@@ -3733,6 +3853,8 @@ testBreakout();
 testPasur();
 testMahjong();
 testChess();
+testChessBot();
+testStringKeys();
 testTd();
 testVersionStamp();
 testDeployGate();

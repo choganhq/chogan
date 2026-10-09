@@ -10,7 +10,7 @@
 <style>
   /* تخته شیء فیزیکی است: رنگ خانه‌ها در هر دو تم یکی است و در راست‌چین آینه نمی‌شود */
   :root { --cs-light: #EEDCBC; --cs-dark: #B58A63; --cs-last: rgba(233, 196, 72, .5); --cs-check: rgba(220, 70, 60, .75); }
-  .cs-wrap { width: 100%; max-width: min(96vw, 62vh, 560px); display: flex; flex-direction: column; gap: var(--s-2); }
+  .cs-wrap { width: 100%; max-width: min(96vw, 56vh, 560px); display: flex; flex-direction: column; gap: var(--s-2); }
   .cs-player { display: flex; align-items: center; gap: var(--s-2); min-height: 34px; padding: 4px 10px;
     border-radius: var(--r-md); background: var(--c-surface); box-shadow: var(--sh-1); border: 2px solid transparent; }
   .cs-player--on { border-color: var(--game); }
@@ -33,6 +33,11 @@
   .cs-coord { position: absolute; font-size: 10px; font-weight: 800; line-height: 1; pointer-events: none; color: rgba(60, 40, 20, .55); }
   .cs-coord--f { right: 3px; bottom: 2px; }
   .cs-coord--r { left: 3px; top: 2px; }
+  .cs-top { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; align-items: center; }
+  .cs-top .ch-btn { gap: 4px; }
+  .cs-thinking { animation: cs-blink 900ms infinite; }
+  @keyframes cs-blink { 50% { opacity: .45; } }
+  @media (prefers-reduced-motion: reduce) { .cs-thinking { animation: none; } }
   .cs-status { min-height: 1.6em; font-weight: 800; color: var(--c-text); text-align: center; }
   .cs-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; }
   .cs-moves { direction: ltr; font-size: var(--fs-sm); color: var(--c-text-dim); text-align: left; max-height: 4.4em; overflow-y: auto;
@@ -315,6 +320,547 @@ function ChessEngineFactory() {
   return api;
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = ChessEngineFactory;
+
+/* حریف رایانه‌ای. موتور قانون‌ها بالا برای هر حرکت تخته را کپی می‌کند و برای جست‌وجوی
+   چندلایه کند است، پس ربات تخته‌ی 0x88 خودش را با زدن و برگرداندن درجا دارد. ربات فقط
+   پیشنهاد می‌دهد: صفحه حرکتش را در legal() موتور قانون‌ها پیدا می‌کند و بعد بازی می‌کند.
+   جدول‌ها و وزن‌ها از فرمول‌های خودمان‌اند؛ Stockfish و جدول‌های منتشرشده مجوز دیگری دارند.
+   این تابع با toString() در یک Web Worker هم اجرا می‌شود، پس به هیچ چیز بیرونش تکیه نمی‌کند. */
+function ChessBotFactory() {
+  'use strict';
+  var PAWN = 1, KNIGHT = 2, BISHOP = 3, ROOK = 4, QUEEN = 5, KING = 6;
+  var F_EP = 1, F_CASTLE = 2, F_DOUBLE = 4;
+  var CHAR = { P: 1, N: 2, B: 3, R: 4, Q: 5, K: 6, p: 9, n: 10, b: 11, r: 12, q: 13, k: 14 };
+  var LETTER = ['', 'p', 'n', 'b', 'r', 'q', 'k'];
+  var N_DIRS = [-33, -31, -18, -14, 14, 18, 31, 33];
+  var K_DIRS = [-17, -16, -15, -1, 1, 15, 16, 17];
+  var B_DIRS = [-17, -15, 15, 17];
+  var R_DIRS = [-16, -1, 1, 16];
+  var MAXPLY = 64, INF = 32000, MATE = 30000, MATE_BOUND = 29000;
+
+  var SQ64 = new Int8Array(128);
+  for (var s88 = 0; s88 < 128; s88++) SQ64[s88] = (s88 & 0x88) ? -1 : (s88 >> 4) * 8 + (s88 & 7);
+  function to88(i) { return (i >> 3) * 16 + (i & 7); }
+
+  // کلیدهای زابریست قطعی، تا جدول جابه‌جایی و تشخیص تکرار در هر اجرا یکی باشد
+  var seed = 0x2545F491;
+  function rnd32() {
+    seed = (seed + 0x6D2B79F5) | 0;
+    var t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return (t ^ (t >>> 14)) | 0;
+  }
+  var Z1 = new Int32Array(16 * 128), Z2 = new Int32Array(16 * 128);
+  for (var z = 0; z < Z1.length; z++) { Z1[z] = rnd32(); Z2[z] = rnd32(); }
+  var ZC1 = new Int32Array(16), ZC2 = new Int32Array(16), ZE1 = new Int32Array(8), ZE2 = new Int32Array(8);
+  for (z = 0; z < 16; z++) { ZC1[z] = rnd32(); ZC2[z] = rnd32(); }
+  for (z = 0; z < 8; z++) { ZE1[z] = rnd32(); ZE2[z] = rnd32(); }
+  var ZS1 = rnd32(), ZS2 = rnd32();
+
+  // حق قلعه: ۱ = K، ۲ = Q، ۴ = k، ۸ = q. حرکت از یا به این خانه‌ها حق را می‌برد.
+  var CR_MASK = new Int8Array(128);
+  for (z = 0; z < 128; z++) CR_MASK[z] = 15;
+  CR_MASK[112] = 15 & ~2; CR_MASK[119] = 15 & ~1; CR_MASK[116] = 15 & ~3;
+  CR_MASK[0] = 15 & ~8; CR_MASK[7] = 15 & ~4; CR_MASK[4] = 15 & ~12;
+
+  /* ارزش‌گذاری: ماده و جایگاه، جدا برای میانه و آخر بازی و آمیخته با فاز */
+  var VAL_MG = [0, 100, 320, 330, 500, 950, 0], VAL_EG = [0, 120, 300, 315, 540, 980, 0];
+  var PHASE = [0, 0, 1, 1, 2, 4, 0];
+  var PST_MG = [], PST_EG = [];
+  (function () {
+    for (var t = 0; t <= 6; t++) { PST_MG.push(new Int16Array(64)); PST_EG.push(new Int16Array(64)); }
+    for (var i = 0; i < 64; i++) {
+      // i از دید سفید: سطر ۰ رتبه‌ی ۸ است
+      var row = i >> 3, col = i & 7, rank = 8 - row;
+      var fc = Math.min(col, 7 - col), rc = Math.min(rank - 1, 8 - rank), centre = fc + rc, adv = rank - 2;
+      PST_MG[PAWN][i] = adv * 6 + (fc >= 2 ? [0, 0, 0, 8, 22, 14, 8, 0, 0][rank] : 0) + (fc === 0 && rank >= 4 ? -4 : 0);
+      PST_EG[PAWN][i] = adv * adv * 4 + adv * 6;
+      PST_MG[KNIGHT][i] = centre * 8 - 25;
+      PST_EG[KNIGHT][i] = centre * 6 - 20;
+      PST_MG[BISHOP][i] = centre * 4 - 10 + (rank === 1 ? -10 : 0);
+      PST_EG[BISHOP][i] = centre * 4 - 10;
+      PST_MG[ROOK][i] = (rank === 7 ? 20 : 0) + (fc >= 2 && rank === 1 ? 6 : 0);
+      PST_EG[ROOK][i] = rank === 7 ? 15 : 0;
+      PST_MG[QUEEN][i] = centre * 2 - 5;
+      PST_EG[QUEEN][i] = centre * 5 - 12;
+      PST_MG[KING][i] = rank === 1 ? [20, 30, 10, 0, 0, 10, 30, 20][col] : -(rank - 1) * 15 - 10;
+      PST_EG[KING][i] = centre * 10 - 30;
+    }
+  })();
+  var PASSED_MG = [0, 5, 10, 15, 25, 40, 60], PASSED_EG = [0, 10, 20, 35, 60, 95, 140];
+
+  /* وضعیت */
+  var board = new Int8Array(128), side = 0, castle = 0, ep = -1, half = 0, h1 = 0, h2 = 0;
+  var kingSq = [0, 0], MG = [0, 0], EG = [0, 0], PH = 0;
+  var STACK = 1024 + MAXPLY + 8, sp = 0;
+  var stMove = new Int32Array(STACK), stCap = new Int8Array(STACK), stCastle = new Int8Array(STACK), stEp = new Int16Array(STACK);
+  var stHalf = new Int16Array(STACK), stH1 = new Int32Array(STACK), stH2 = new Int32Array(STACK);
+  var stMg0 = new Int32Array(STACK), stMg1 = new Int32Array(STACK), stEg0 = new Int32Array(STACK), stEg1 = new Int32Array(STACK), stPh = new Int16Array(STACK);
+
+  function put(sq, p) {
+    board[sq] = p;
+    var c = p >> 3, t = p & 7, i = SQ64[sq] ^ (c ? 56 : 0);
+    MG[c] += VAL_MG[t] + PST_MG[t][i]; EG[c] += VAL_EG[t] + PST_EG[t][i]; PH += PHASE[t];
+    h1 ^= Z1[p * 128 + sq]; h2 ^= Z2[p * 128 + sq];
+    if (t === KING) kingSq[c] = sq;
+  }
+  function lift(sq) {
+    var p = board[sq];
+    board[sq] = 0;
+    var c = p >> 3, t = p & 7, i = SQ64[sq] ^ (c ? 56 : 0);
+    MG[c] -= VAL_MG[t] + PST_MG[t][i]; EG[c] -= VAL_EG[t] + PST_EG[t][i]; PH -= PHASE[t];
+    h1 ^= Z1[p * 128 + sq]; h2 ^= Z2[p * 128 + sq];
+    return p;
+  }
+
+  function load(fen) {
+    var parts = fen.trim().split(/\s+/), i = 0;
+    board.fill(0); MG[0] = MG[1] = EG[0] = EG[1] = 0; PH = 0; h1 = h2 = 0;
+    var rows = parts[0];
+    for (var k = 0; k < rows.length; k++) {
+      var ch = rows[k];
+      if (ch === '/') continue;
+      if (ch >= '1' && ch <= '8') { i += +ch; continue; }
+      put(to88(i), CHAR[ch]);
+      i++;
+    }
+    side = parts[1] === 'b' ? 1 : 0;
+    var cs = parts[2] || '-';
+    castle = (cs.indexOf('K') >= 0 ? 1 : 0) | (cs.indexOf('Q') >= 0 ? 2 : 0) | (cs.indexOf('k') >= 0 ? 4 : 0) | (cs.indexOf('q') >= 0 ? 8 : 0);
+    ep = parts[3] && parts[3] !== '-' ? (8 - (+parts[3][1])) * 16 + 'abcdefgh'.indexOf(parts[3][0]) : -1;
+    half = +(parts[4] || 0);
+    h1 ^= ZC1[castle]; h2 ^= ZC2[castle];
+    if (ep >= 0) { h1 ^= ZE1[ep & 7]; h2 ^= ZE2[ep & 7]; }
+    if (side) { h1 ^= ZS1; h2 ^= ZS2; }
+    sp = 0;
+  }
+
+  function attacked(sq, by) {
+    var s, p, d, k, bk = by << 3;
+    if (by === 0) {
+      s = sq + 15; if (!(s & 0x88) && board[s] === PAWN) return true;
+      s = sq + 17; if (!(s & 0x88) && board[s] === PAWN) return true;
+    } else {
+      s = sq - 15; if (!(s & 0x88) && board[s] === (PAWN | 8)) return true;
+      s = sq - 17; if (!(s & 0x88) && board[s] === (PAWN | 8)) return true;
+    }
+    for (k = 0; k < 8; k++) {
+      s = sq + N_DIRS[k]; if (!(s & 0x88) && board[s] === (KNIGHT | bk)) return true;
+      s = sq + K_DIRS[k]; if (!(s & 0x88) && board[s] === (KING | bk)) return true;
+    }
+    for (k = 0; k < 4; k++) {
+      d = B_DIRS[k]; s = sq + d;
+      while (!(s & 0x88)) {
+        p = board[s];
+        if (p) { if (p === (BISHOP | bk) || p === (QUEEN | bk)) return true; break; }
+        s += d;
+      }
+      d = R_DIRS[k]; s = sq + d;
+      while (!(s & 0x88)) {
+        p = board[s];
+        if (p) { if (p === (ROOK | bk) || p === (QUEEN | bk)) return true; break; }
+        s += d;
+      }
+    }
+    return false;
+  }
+  function inCheck(c) { return attacked(kingSq[c], c ^ 1); }
+
+  function mv(from, to, promo, fl) { return from | (to << 7) | (promo << 14) | (fl << 17); }
+
+  // تولید حرکت‌های شبه‌قانونی در list از start؛ فقط‌زدن برای جست‌وجوی آرام (با ارتقا به وزیر)
+  function gen(list, start, capsOnly) {
+    var n = start, me = side, them = me ^ 1, sq, p, t, to, q, k, d;
+    for (sq = 0; sq < 120; sq++) {
+      if (sq & 0x88) { sq += 7; continue; }
+      p = board[sq];
+      if (!p || (p >> 3) !== me) continue;
+      t = p & 7;
+      if (t === PAWN) {
+        var dir = me ? 16 : -16, lastRow = me ? 7 : 0, startRow = me ? 1 : 6;
+        to = sq + dir;
+        if (!board[to]) {
+          if ((to >> 4) === lastRow) {
+            list[n++] = mv(sq, to, QUEEN, 0);
+            if (!capsOnly) { list[n++] = mv(sq, to, KNIGHT, 0); list[n++] = mv(sq, to, ROOK, 0); list[n++] = mv(sq, to, BISHOP, 0); }
+          } else if (!capsOnly) {
+            list[n++] = mv(sq, to, 0, 0);
+            if ((sq >> 4) === startRow && !board[to + dir]) list[n++] = mv(sq, to + dir, 0, F_DOUBLE);
+          }
+        }
+        for (k = -1; k <= 1; k += 2) {
+          to = sq + dir + k;
+          if (to & 0x88) continue;
+          q = board[to];
+          if (q && (q >> 3) === them) {
+            if ((to >> 4) === lastRow) {
+              list[n++] = mv(sq, to, QUEEN, 0);
+              if (!capsOnly) { list[n++] = mv(sq, to, KNIGHT, 0); list[n++] = mv(sq, to, ROOK, 0); list[n++] = mv(sq, to, BISHOP, 0); }
+            } else list[n++] = mv(sq, to, 0, 0);
+          } else if (to === ep) list[n++] = mv(sq, to, 0, F_EP);
+        }
+      } else if (t === KNIGHT || t === KING) {
+        var steps = t === KNIGHT ? N_DIRS : K_DIRS;
+        for (k = 0; k < 8; k++) {
+          to = sq + steps[k];
+          if (to & 0x88) continue;
+          q = board[to];
+          if (!q) { if (!capsOnly) list[n++] = mv(sq, to, 0, 0); }
+          else if ((q >> 3) === them) list[n++] = mv(sq, to, 0, 0);
+        }
+        if (t === KING && !capsOnly) {
+          if (me === 0 && sq === 116) {
+            if ((castle & 1) && !board[117] && !board[118] && board[119] === ROOK && !attacked(116, 1) && !attacked(117, 1) && !attacked(118, 1)) list[n++] = mv(116, 118, 0, F_CASTLE);
+            if ((castle & 2) && !board[115] && !board[114] && !board[113] && board[112] === ROOK && !attacked(116, 1) && !attacked(115, 1) && !attacked(114, 1)) list[n++] = mv(116, 114, 0, F_CASTLE);
+          } else if (me === 1 && sq === 4) {
+            if ((castle & 4) && !board[5] && !board[6] && board[7] === (ROOK | 8) && !attacked(4, 0) && !attacked(5, 0) && !attacked(6, 0)) list[n++] = mv(4, 6, 0, F_CASTLE);
+            if ((castle & 8) && !board[3] && !board[2] && !board[1] && board[0] === (ROOK | 8) && !attacked(4, 0) && !attacked(3, 0) && !attacked(2, 0)) list[n++] = mv(4, 2, 0, F_CASTLE);
+          }
+        }
+      } else {
+        var dirs = t === BISHOP ? B_DIRS : (t === ROOK ? R_DIRS : K_DIRS);
+        for (k = 0; k < dirs.length; k++) {
+          d = dirs[k]; to = sq + d;
+          while (!(to & 0x88)) {
+            q = board[to];
+            if (q) { if ((q >> 3) === them) list[n++] = mv(sq, to, 0, 0); break; }
+            if (!capsOnly) list[n++] = mv(sq, to, 0, 0);
+            to += d;
+          }
+        }
+      }
+    }
+    return n;
+  }
+
+  function save() {
+    var s = sp++;
+    stCastle[s] = castle; stEp[s] = ep; stHalf[s] = half; stH1[s] = h1; stH2[s] = h2;
+    stMg0[s] = MG[0]; stMg1[s] = MG[1]; stEg0[s] = EG[0]; stEg1[s] = EG[1]; stPh[s] = PH;
+    return s;
+  }
+  function restore(s) {
+    castle = stCastle[s]; ep = stEp[s]; half = stHalf[s]; h1 = stH1[s]; h2 = stH2[s];
+    MG[0] = stMg0[s]; MG[1] = stMg1[s]; EG[0] = stEg0[s]; EG[1] = stEg1[s]; PH = stPh[s];
+  }
+
+  function makeMove(m) {
+    var from = m & 127, to = (m >> 7) & 127, promo = (m >> 14) & 7, fl = m >> 17;
+    var s = save();
+    stMove[s] = m;
+    h1 ^= ZC1[castle]; h2 ^= ZC2[castle];
+    if (ep >= 0) { h1 ^= ZE1[ep & 7]; h2 ^= ZE2[ep & 7]; }
+    var p = lift(from), cap = board[to];
+    if (cap) lift(to);
+    if (fl & F_EP) cap = lift(to + (side ? -16 : 16));
+    stCap[s] = cap;
+    put(to, promo ? (promo | (side << 3)) : p);
+    if (fl & F_CASTLE) {
+      if (to > from) put(from + 1, lift(from + 3));
+      else put(from - 1, lift(from - 4));
+    }
+    castle &= CR_MASK[from] & CR_MASK[to];
+    ep = (fl & F_DOUBLE) ? (from + to) >> 1 : -1;
+    half = ((p & 7) === PAWN || cap) ? 0 : half + 1;
+    h1 ^= ZC1[castle]; h2 ^= ZC2[castle];
+    if (ep >= 0) { h1 ^= ZE1[ep & 7]; h2 ^= ZE2[ep & 7]; }
+    side ^= 1; h1 ^= ZS1; h2 ^= ZS2;
+  }
+  function unmakeMove() {
+    var s = sp - 1, m = stMove[s];
+    var from = m & 127, to = (m >> 7) & 127, promo = (m >> 14) & 7, fl = m >> 17;
+    side ^= 1;
+    var p = promo ? (PAWN | (side << 3)) : board[to];
+    board[from] = p;
+    if (fl & F_EP) { board[to] = 0; board[to + (side ? -16 : 16)] = stCap[s]; }
+    else board[to] = stCap[s];
+    if (fl & F_CASTLE) {
+      if (to > from) { board[from + 3] = board[from + 1]; board[from + 1] = 0; }
+      else { board[from - 4] = board[from - 1]; board[from - 1] = 0; }
+    }
+    if ((p & 7) === KING) kingSq[side] = from;
+    restore(s);
+    sp--;
+  }
+  function makeNull() {
+    var s = save();
+    stMove[s] = 0;
+    if (ep >= 0) { h1 ^= ZE1[ep & 7]; h2 ^= ZE2[ep & 7]; }
+    ep = -1; half++;
+    side ^= 1; h1 ^= ZS1; h2 ^= ZS2;
+  }
+  function unmakeNull() { side ^= 1; restore(sp - 1); sp--; }
+
+  function evaluate() {
+    var mg = MG[0] - MG[1], eg = EG[0] - EG[1];
+    // ساختار پیاده و جفت فیل و رخ روی ستون باز، در یک گذر روی تخته
+    var wCnt = [0, 0, 0, 0, 0, 0, 0, 0], bCnt = [0, 0, 0, 0, 0, 0, 0, 0];
+    var bMin = [8, 8, 8, 8, 8, 8, 8, 8], wMax = [-1, -1, -1, -1, -1, -1, -1, -1];
+    var wB = 0, bB = 0, rooks = [], sq, p, f, r, k;
+    for (sq = 0; sq < 120; sq++) {
+      if (sq & 0x88) { sq += 7; continue; }
+      p = board[sq];
+      if (!p) continue;
+      f = sq & 7; r = sq >> 4;
+      if (p === PAWN) { wCnt[f]++; if (r > wMax[f]) wMax[f] = r; }
+      else if (p === (PAWN | 8)) { bCnt[f]++; if (r < bMin[f]) bMin[f] = r; }
+      else if (p === BISHOP) wB++;
+      else if (p === (BISHOP | 8)) bB++;
+      else if ((p & 7) === ROOK) rooks.push(sq, p >> 3);
+    }
+    for (sq = 0; sq < 120; sq++) {
+      if (sq & 0x88) { sq += 7; continue; }
+      p = board[sq];
+      if ((p & 7) !== PAWN) continue;
+      f = sq & 7; r = sq >> 4;
+      var l = f > 0 ? f - 1 : f, h = f < 7 ? f + 1 : f, passed = true, iso = true;
+      if (p === PAWN) {
+        for (k = l; k <= h; k++) { if (bMin[k] < r) passed = false; if (k !== f && wCnt[k]) iso = false; }
+        if (passed) { mg += PASSED_MG[6 - r]; eg += PASSED_EG[6 - r]; }
+        if (iso) { mg -= 10; eg -= 15; }
+      } else {
+        for (k = l; k <= h; k++) { if (wMax[k] > r) passed = false; if (k !== f && bCnt[k]) iso = false; }
+        if (passed) { mg -= PASSED_MG[r - 1]; eg -= PASSED_EG[r - 1]; }
+        if (iso) { mg += 10; eg += 15; }
+      }
+    }
+    for (f = 0; f < 8; f++) {
+      if (wCnt[f] > 1) { mg -= 12 * (wCnt[f] - 1); eg -= 20 * (wCnt[f] - 1); }
+      if (bCnt[f] > 1) { mg += 12 * (bCnt[f] - 1); eg += 20 * (bCnt[f] - 1); }
+    }
+    if (wB >= 2) { mg += 30; eg += 45; }
+    if (bB >= 2) { mg -= 30; eg -= 45; }
+    for (k = 0; k < rooks.length; k += 2) {
+      f = rooks[k] & 7;
+      var own = rooks[k + 1] ? bCnt[f] : wCnt[f], opp = rooks[k + 1] ? wCnt[f] : bCnt[f];
+      var bonus = own ? 0 : (opp ? 10 : 20);
+      mg += rooks[k + 1] ? -bonus : bonus;
+    }
+    var ph = PH > 24 ? 24 : PH;
+    var sc = ((mg * ph + eg * (24 - ph)) / 24) | 0;
+    return (side ? -sc : sc) + 10;
+  }
+
+  /* جست‌وجو */
+  var TT_BITS = 19, TT_SIZE = 1 << TT_BITS, TT_MASK = TT_SIZE - 1;
+  var ttKey = new Int32Array(TT_SIZE), ttMove = new Int32Array(TT_SIZE), ttScore = new Int16Array(TT_SIZE);
+  var ttDepth = new Int8Array(TT_SIZE), ttFlag = new Int8Array(TT_SIZE);
+  var EXACT = 1, LOWER = 2, UPPER = 3;
+  var moves = new Int32Array(MAXPLY * 256), scores = new Int32Array(MAXPLY * 256);
+  var killers = new Int32Array(MAXPLY * 2), history = new Int32Array(16 * 128);
+  var nodes = 0, stop = false, deadline = 0, rootSp = 0, now = function () { return Date.now(); };
+
+  function isRepeat() {
+    for (var i = sp - 2, lim = sp - half; i >= 0 && i >= lim; i -= 2) if (stH1[i] === h1 && stH2[i] === h2) return true;
+    return false;
+  }
+  function hasPieces(c) {
+    for (var sq = 0; sq < 120; sq++) {
+      if (sq & 0x88) { sq += 7; continue; }
+      var p = board[sq];
+      if (p && (p >> 3) === c && (p & 7) !== PAWN && (p & 7) !== KING) return true;
+    }
+    return false;
+  }
+  function tick() { if ((++nodes & 1023) === 0 && now() > deadline) stop = true; }
+
+  function order(base, n, ttm, ply) {
+    for (var i = base; i < n; i++) {
+      var m = moves[i], to = (m >> 7) & 127, cap = board[to], sc = 0;
+      if (m === ttm) sc = 2000000;
+      else if (cap || (m >> 17) & F_EP) sc = 1000000 + VAL_MG[cap & 7 || PAWN] * 10 - (board[m & 127] & 7);
+      else if ((m >> 14) & 7) sc = 900000;
+      else if (m === killers[ply * 2]) sc = 800000;
+      else if (m === killers[ply * 2 + 1]) sc = 790000;
+      else sc = history[board[m & 127] * 128 + to];
+      scores[i] = sc;
+    }
+  }
+  function pick(i, n) {
+    var b = i;
+    for (var j = i + 1; j < n; j++) if (scores[j] > scores[b]) b = j;
+    if (b !== i) {
+      var t = moves[i]; moves[i] = moves[b]; moves[b] = t;
+      t = scores[i]; scores[i] = scores[b]; scores[b] = t;
+    }
+    return moves[i];
+  }
+
+  function qs(alpha, beta, ply) {
+    tick();
+    if (stop) return 0;
+    var stand = evaluate();
+    if (stand >= beta || ply >= MAXPLY - 1) return stand;
+    if (stand > alpha) alpha = stand;
+    var base = ply * 256, n = gen(moves, base, true);
+    order(base, n, 0, ply);
+    for (var i = base; i < n; i++) {
+      var m = pick(i, n), cap = board[(m >> 7) & 127];
+      // زدنی که حتی با بردن مهره به آلفا نمی‌رسد ارزش جست‌وجو ندارد
+      if (!((m >> 14) & 7) && cap && stand + VAL_EG[cap & 7] + 200 < alpha) continue;
+      makeMove(m);
+      if (inCheck(side ^ 1)) { unmakeMove(); continue; }
+      var sc = -qs(-beta, -alpha, ply + 1);
+      unmakeMove();
+      if (stop) return 0;
+      if (sc > alpha) { alpha = sc; if (sc >= beta) return sc; }
+    }
+    return alpha;
+  }
+
+  function search(depth, alpha, beta, ply, canNull) {
+    if (ply && (half >= 100 || isRepeat())) return 0;
+    var chk = inCheck(side);
+    if (chk) depth++;
+    if (depth <= 0) return qs(alpha, beta, ply);
+    tick();
+    if (stop) return 0;
+    if (ply >= MAXPLY - 1) return evaluate();
+    var idx = h1 & TT_MASK, ttm = 0, alpha0 = alpha;
+    if (ttKey[idx] === h2) {
+      ttm = ttMove[idx];
+      if (ply && ttDepth[idx] >= depth) {
+        var ts = ttScore[idx];
+        if (ts > MATE_BOUND) ts -= ply; else if (ts < -MATE_BOUND) ts += ply;
+        var tf = ttFlag[idx];
+        if (tf === EXACT || (tf === LOWER && ts >= beta) || (tf === UPPER && ts <= alpha)) return ts;
+      }
+    }
+    if (canNull && !chk && ply && depth >= 3 && beta < MATE_BOUND && hasPieces(side) && evaluate() >= beta) {
+      makeNull();
+      var nv = -search(depth - 3, -beta, -beta + 1, ply + 1, false);
+      unmakeNull();
+      if (stop) return 0;
+      if (nv >= beta) return beta;
+    }
+    var base = ply * 256, n = gen(moves, base, false);
+    order(base, n, ttm, ply);
+    var best = -INF, bestMove = 0, legalCount = 0;
+    for (var i = base; i < n; i++) {
+      var m = pick(i, n), quiet = !board[(m >> 7) & 127] && !((m >> 17) & F_EP) && !((m >> 14) & 7);
+      makeMove(m);
+      if (inCheck(side ^ 1)) { unmakeMove(); continue; }
+      legalCount++;
+      var sc;
+      if (legalCount === 1) sc = -search(depth - 1, -beta, -alpha, ply + 1, true);
+      else {
+        var red = 0;
+        if (depth >= 3 && legalCount > 3 && quiet && !chk && m !== killers[ply * 2] && m !== killers[ply * 2 + 1]) red = legalCount > 8 && depth >= 5 ? 2 : 1;
+        sc = -search(depth - 1 - red, -alpha - 1, -alpha, ply + 1, true);
+        if (!stop && sc > alpha && (red || sc < beta)) sc = -search(depth - 1, -beta, -alpha, ply + 1, true);
+      }
+      unmakeMove();
+      if (stop) return 0;
+      if (sc > best) {
+        best = sc; bestMove = m;
+        if (sc > alpha) {
+          alpha = sc;
+          if (sc >= beta) {
+            if (quiet) {
+              if (killers[ply * 2] !== m) { killers[ply * 2 + 1] = killers[ply * 2]; killers[ply * 2] = m; }
+              history[board[m & 127] * 128 + ((m >> 7) & 127)] += depth * depth;
+            }
+            break;
+          }
+        }
+      }
+    }
+    if (!legalCount) return chk ? -MATE + ply : 0;
+    var st = best;
+    if (st > MATE_BOUND) st += ply; else if (st < -MATE_BOUND) st -= ply;
+    ttKey[idx] = h2; ttMove[idx] = bestMove; ttScore[idx] = st; ttDepth[idx] = depth;
+    ttFlag[idx] = best >= beta ? LOWER : (best > alpha0 ? EXACT : UPPER);
+    return best;
+  }
+
+  function hashOf(fen) { load(fen); return [h1, h2]; }
+
+  var LEVELS = {
+    easy: { maxDepth: 1, timeMs: 300, noise: 180 },
+    medium: { maxDepth: 3, timeMs: 800, noise: 35 },
+    hard: { maxDepth: 40, timeMs: 1800, noise: 0 }
+  };
+
+  /* بهترین حرکت برای چیدمان fen. history: FEN های پیش از آن، برای پرهیز از تکرار.
+     خروجی با شماره‌ی خانه‌ی موتور قانون‌ها (۰ = a8) و حرف ارتقا به رنگ مهره. */
+  function think(fen, hist, opts) {
+    opts = opts || {};
+    var lv = LEVELS[opts.level] || LEVELS.medium;
+    var maxDepth = opts.maxDepth || lv.maxDepth, timeMs = opts.timeMs || lv.timeMs;
+    var noise = opts.noise != null ? opts.noise : lv.noise, rand = opts.rand || Math.random;
+    var clock = opts.now || now;
+    var hs = (hist || []).map(hashOf);
+    load(fen);
+    // گذشته‌ی بازی زیر پشته می‌نشیند تا isRepeat آن را هم ببیند
+    for (var i = 0; i < hs.length && i < 1024; i++) { stH1[i] = hs[i][0]; stH2[i] = hs[i][1]; }
+    sp = rootSp = Math.min(hs.length, 1024);
+    // بازکردن متنوع: حتی سطح سخت در چند حرکت اول کمی تصادف دارد
+    var plyNo = hs.length;
+    if (!noise && plyNo < 8) noise = 12;
+    var start = clock();
+    nodes = 0; stop = false; deadline = start + timeMs;
+    var savedNow = now; now = clock;
+    killers.fill(0); history.fill(0);
+
+    var root = [], n = gen(moves, 0, false);
+    for (i = 0; i < n; i++) {
+      makeMove(moves[i]);
+      if (!inCheck(side ^ 1)) root.push({ m: moves[i], score: 0, jitter: noise ? Math.round((rand() * 2 - 1) * noise) : 0 });
+      unmakeMove();
+    }
+    if (!root.length) { now = savedNow; return null; }
+    var best = root[0], depthDone = 0;
+    for (var depth = 1; depth <= maxDepth; depth++) {
+      var alpha = -INF, iterBest = null;
+      for (var r = 0; r < root.length; r++) {
+        var e = root[r];
+        makeMove(e.m);
+        var sc;
+        if (noise || r === 0) sc = -search(depth - 1, -INF, INF, 1, true);
+        else {
+          sc = -search(depth - 1, -alpha - 1, -alpha, 1, true);
+          if (!stop && sc > alpha) sc = -search(depth - 1, -INF, -alpha, 1, true);
+        }
+        unmakeMove();
+        if (stop) break;
+        e.score = noise && Math.abs(sc) < MATE_BOUND ? sc + e.jitter : sc;
+        if (!noise && r > 0 && sc <= alpha) e.score = sc - 1;
+        if (!iterBest || e.score > iterBest.score) { iterBest = e; if (sc > alpha) alpha = sc; }
+      }
+      if (iterBest && (!stop || iterBest.score > best.score || depthDone === 0)) best = iterBest;
+      if (stop) break;
+      depthDone = depth;
+      root.sort(function (a, b) { return b.score - a.score; });
+      if (Math.abs(best.score) > MATE_BOUND) break;
+      if (clock() - start > timeMs * 0.55) break;
+    }
+    now = savedNow;
+    var m = best.m, from = m & 127, to = (m >> 7) & 127, promo = (m >> 14) & 7;
+    var color = (board[from] >> 3);
+    return {
+      from: SQ64[from], to: SQ64[to],
+      promo: promo ? (color ? LETTER[promo] : LETTER[promo].toUpperCase()) : '',
+      score: best.score, depth: depthDone || 1, nodes: nodes, ms: clock() - start
+    };
+  }
+
+  function perft(fen, depth) {
+    load(fen);
+    var walk = function (d, ply) {
+      var base = ply * 256, n = gen(moves, base, false), c = 0;
+      for (var i = base; i < n; i++) {
+        makeMove(moves[i]);
+        if (!inCheck(side ^ 1)) c += d === 1 ? 1 : walk(d - 1, ply + 1);
+        unmakeMove();
+      }
+      return c;
+    };
+    return walk(depth, 0);
+  }
+  function evalFen(fen) { load(fen); return evaluate(); }
+
+  return { think: think, perft: perft, evaluate: evalFen, LEVELS: LEVELS };
+}
 /* ==== ENGINE END ==== */
 </script>
 
@@ -339,8 +885,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ChessEngin
         drawAsk: 'هر دو بازیکن با مساوی موافقید؟', autoFlip: 'چرخاندن تخته', promote: 'ارتقای پیاده به',
         newGame: 'بازی تازه', undoMove: 'برگرداندن حرکت', board: 'صفحه‌ی شطرنج', move: 'جابه‌جایی روی تخته',
         pick: 'انتخاب یا حرکت', flipKey: 'چرخاندن تخته', cancelPick: 'لغو انتخاب', moves: 'حرکت‌ها',
-        rules: 'قانون‌های کامل فیده بدون ساعت: قلعه، آن‌پاسان و ارتقای پیاده. مات برنده است؛ پات، تکرار سه‌باره، پنجاه حرکت بدون زدن و حرکت پیاده، و نبودن مهره‌ی کافی مساوی است. دو نفر روی یک گوشی بازی می‌کنید؛ اگر چرخاندن روشن باشد، تخته بعد از هر حرکت به سمت بازیکن بعدی می‌چرخد.',
-        tutTitle1: 'دو نفر، یک تخته', tutText1: 'شطرنج برای دو نفر روی یک گوشی. مهره‌ات را بزن، خانه‌های مجاز نشان داده می‌شوند، بعد خانه‌ی مقصد را بزن یا مهره را بکش.',
+        vsAi: 'با ربات', twoPlayers: 'دو نفره', bot: 'ربات', thinking: 'ربات فکر می‌کند…', yourMove: 'نوبت تو',
+        youWin: 'بردی!', youLose: 'باختی', newMatch: 'بازی تازه', resignMe: 'تسلیم می‌شوی؟', draw: 'مساوی', yourColor: 'رنگ تو',
+        rules: 'قانون‌های کامل فیده بدون ساعت: قلعه، آن‌پاسان و ارتقای پیاده. مات برنده است؛ پات، تکرار سه‌باره، پنجاه حرکت بدون زدن و حرکت پیاده، و نبودن مهره‌ی کافی مساوی است. با ربات در سه سطح بازی کن یا دو نفر روی یک گوشی؛ در بازی دونفره اگر چرخاندن روشن باشد، تخته بعد از هر حرکت به سمت بازیکن بعدی می‌چرخد.',
+        tutTitle1: 'با ربات یا دو نفره', tutText1: 'با ربات بازی کن یا با یک نفر دیگر روی همین گوشی. مهره‌ات را بزن، خانه‌های مجاز نشان داده می‌شوند، بعد خانه‌ی مقصد را بزن یا مهره را بکش.',
         tutTitle2: 'قانون‌های کامل', tutText2: 'قلعه، آن‌پاسان و ارتقای پیاده همه هستند. تخته بعد از هر حرکت به سمت بازیکن بعدی می‌چرخد؛ از دکمه‌ی چرخاندن خاموشش کن.',
         tutTitle3: 'پایان', tutText3: 'مات برنده است. پات، تکرار سه‌باره و پنجاه حرکت بی‌زدن مساوی است. برگرداندن بی‌حد است و می‌شود تسلیم شد یا با توافق مساوی کرد.'
       },
@@ -352,8 +900,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ChessEngin
         drawAsk: 'Do both players agree to a draw?', autoFlip: 'Rotate board', promote: 'Promote the pawn to',
         newGame: 'New game', undoMove: 'Undo move', board: 'Chess board', move: 'Move on the board',
         pick: 'Pick or move', flipKey: 'Rotate the board', cancelPick: 'Cancel selection', moves: 'Moves',
-        rules: 'Full FIDE move rules, no clock: castling, en passant and promotion. Checkmate wins; stalemate, threefold repetition, fifty moves without a capture or pawn move, and insufficient material are draws. Two players share one phone; with rotation on, the board turns to the next player after every move.',
-        tutTitle1: 'Two players, one board', tutText1: 'Chess for two on one phone. Tap a piece to see where it can go, then tap the target square, or drag the piece.',
+        vsAi: 'Versus AI', twoPlayers: 'Two players', bot: 'AI', thinking: 'AI is thinking…', yourMove: 'Your move',
+        youWin: 'You win!', youLose: 'You lost', newMatch: 'New game', resignMe: 'Resign this game?', draw: 'Draw', yourColor: 'Your colour',
+        rules: 'Full FIDE move rules, no clock: castling, en passant and promotion. Checkmate wins; stalemate, threefold repetition, fifty moves without a capture or pawn move, and insufficient material are draws. Play the AI on three levels, or two players on one phone; in a two-player game with rotation on, the board turns to the next player after every move.',
+        tutTitle1: 'Versus AI or a friend', tutText1: 'Play the AI, or a friend on the same phone. Tap a piece to see where it can go, then tap the target square, or drag the piece.',
         tutTitle2: 'All the rules', tutText2: 'Castling, en passant and promotion are all in. The board turns to the next player after each move; switch that off with the rotate button.',
         tutTitle3: 'The end', tutText3: 'Checkmate wins. Stalemate, threefold repetition and fifty moves without a capture are draws. Undo is unlimited, and you can resign or agree a draw.'
       },
@@ -365,8 +915,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ChessEngin
         drawAsk: '双方都同意和棋吗？', autoFlip: '旋转棋盘', promote: '兵升变为',
         newGame: '新一局', undoMove: '撤销一步', board: '国际象棋棋盘', move: '在棋盘上移动',
         pick: '选择或走子', flipKey: '旋转棋盘', cancelPick: '取消选择', moves: '着法',
-        rules: '完整的国际棋联走子规则，不计时：王车易位、吃过路兵和兵升变。将死获胜；逼和、三次重复局面、五十步未吃子未动兵以及子力不足均为和棋。两人共用一部手机；开启旋转后，每走一步棋盘会转向下一位玩家。',
-        tutTitle1: '两人一盘', tutText1: '两人在一部手机上下国际象棋。点一个棋子会显示能走的格子，再点目标格或拖动棋子。',
+        vsAi: '对战电脑', twoPlayers: '双人', bot: '电脑', thinking: '电脑思考中…', yourMove: '轮到你',
+        youWin: '你赢了！', youLose: '你输了', newMatch: '新一局', resignMe: '认输这一局？', draw: '和棋', yourColor: '你的颜色',
+        rules: '完整的国际棋联走子规则，不计时：王车易位、吃过路兵和兵升变。将死获胜；逼和、三次重复局面、五十步未吃子未动兵以及子力不足均为和棋。可以和三个难度的电脑对弈，也可以两人共用一部手机；双人对局开启旋转后，每走一步棋盘会转向下一位玩家。',
+        tutTitle1: '对战电脑或朋友', tutText1: '和电脑下，或和朋友在同一部手机上下。点一个棋子会显示能走的格子，再点目标格或拖动棋子。',
         tutTitle2: '完整规则', tutText2: '王车易位、吃过路兵和兵升变都有。每走一步棋盘会转向下一位玩家；可以用旋转按钮关闭。',
         tutTitle3: '结束', tutText3: '将死获胜。逼和、三次重复和五十步未吃子为和棋。撤销不限次数，也可以认输或协议和棋。'
       },
@@ -378,16 +930,21 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ChessEngin
         drawAsk: 'Sind beide mit Remis einverstanden?', autoFlip: 'Brett drehen', promote: 'Bauer wird zu',
         newGame: 'Neues Spiel', undoMove: 'Zug zurück', board: 'Schachbrett', move: 'Auf dem Brett bewegen',
         pick: 'Wählen oder ziehen', flipKey: 'Brett drehen', cancelPick: 'Auswahl aufheben', moves: 'Züge',
-        rules: 'Vollständige FIDE-Zugregeln ohne Uhr: Rochade, en passant und Umwandlung. Matt gewinnt; Patt, dreifache Wiederholung, fünfzig Züge ohne Schlagen oder Bauernzug und zu wenig Material sind Remis. Ihr spielt zu zweit an einem Handy; mit eingeschalteter Drehung dreht sich das Brett nach jedem Zug zum nächsten Spieler.',
-        tutTitle1: 'Zwei Spieler, ein Brett', tutText1: 'Schach zu zweit an einem Handy. Tippe eine Figur an, um ihre Zielfelder zu sehen, dann tippe das Zielfeld an oder zieh die Figur.',
+        vsAi: 'Gegen KI', twoPlayers: 'Zwei Spieler', bot: 'KI', thinking: 'KI denkt nach …', yourMove: 'Du bist dran',
+        youWin: 'Gewonnen!', youLose: 'Verloren', newMatch: 'Neues Spiel', resignMe: 'Diese Partie aufgeben?', draw: 'Remis', yourColor: 'Deine Farbe',
+        rules: 'Vollständige FIDE-Zugregeln ohne Uhr: Rochade, en passant und Umwandlung. Matt gewinnt; Patt, dreifache Wiederholung, fünfzig Züge ohne Schlagen oder Bauernzug und zu wenig Material sind Remis. Spiel gegen die KI in drei Stufen oder zu zweit an einem Handy; im Spiel zu zweit dreht sich das Brett bei eingeschalteter Drehung nach jedem Zug zum nächsten Spieler.',
+        tutTitle1: 'Gegen KI oder zu zweit', tutText1: 'Spiel gegen die KI oder mit jemandem am selben Handy. Tippe eine Figur an, um ihre Zielfelder zu sehen, dann tippe das Zielfeld an oder zieh die Figur.',
         tutTitle2: 'Alle Regeln', tutText2: 'Rochade, en passant und Umwandlung sind dabei. Das Brett dreht sich nach jedem Zug zum nächsten Spieler; mit dem Dreh-Knopf schaltest du das ab.',
         tutTitle3: 'Das Ende', tutText3: 'Matt gewinnt. Patt, dreifache Wiederholung und fünfzig Züge ohne Schlagen sind Remis. Zurück ist unbegrenzt, und ihr könnt aufgeben oder Remis vereinbaren.'
       }
     }
   });
 
-  var prefs = ctx.store.get('prefs', { flip: true });
+  // پیش‌فرض بازی با ربات است، چون بیشتر وقت‌ها یک نفر تنها شطرنج را باز می‌کند (#143)
+  var PREFS0 = { flip: true, mode: 'ai', level: 'easy', human: 'w' };
+  var prefs = Object.assign({}, PREFS0, ctx.store.get('prefs', {}));
   var G = null, S = null, sel = -1, targets = [], cur = -1, dragFrom = -1;
+  var thinking = false, thinkId = 0, worker = null, localBot = null;
 
   /* ------------------------------------------------------- نقش مهره‌ها */
   // طرح‌های خودمان؛ دسته‌های رایج مهره GPL اند و با MIT جور نمی‌شوند
@@ -408,13 +965,14 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ChessEngin
   }
 
   /* --------------------------------------------------------------- رابط */
+  var topBar = el('div', { class: 'cs-top' });
   var topRow = el('div', { class: 'cs-player' });
   var bottomRow = el('div', { class: 'cs-player' });
   var boardEl = el('div', { class: 'cs-board', role: 'grid', 'aria-label': C.t('board') });
   var status = el('div', { class: 'cs-status', 'aria-live': 'polite' });
   var movesEl = el('div', { class: 'cs-moves', 'aria-label': C.t('moves') });
   var actions = el('div', { class: 'cs-actions' });
-  var wrap = el('div', { class: 'cs-wrap' }, [topRow, boardEl, bottomRow, status, actions, movesEl]);
+  var wrap = el('div', { class: 'cs-wrap' }, [topBar, topRow, boardEl, bottomRow, status, actions, movesEl]);
   ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
   ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
   ctx.button({ icon: 'refresh', label: C.t('newGame'), onClick: askNew });
@@ -429,27 +987,138 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ChessEngin
     squares.push(b);
   }
 
-  function flipped() { return prefs.flip && S && S.turn === 'b' && !(G && G.result); }
+  function isAi() { return G && G.mode === 'ai'; }
+  // با ربات تخته همیشه از سمت تو دیده می‌شود؛ دونفره به نوبت می‌چرخد
+  function flipped() {
+    if (isAi()) return G.human === 'b';
+    return prefs.flip && S && S.turn === 'b' && !(G && G.result);
+  }
   function sqAt(v) { return flipped() ? 63 - v : v; }     // خانه‌ی نمایشی v → خانه‌ی تخته
   function viewOf(i) { return flipped() ? 63 - i : i; }
 
   function sideName(c) { return C.t(c === 'w' ? 'white' : 'black'); }
+  function playerName(c) {
+    if (!isAi()) return sideName(c);
+    if (c === G.human) return (C.state.profile && C.state.profile.name) || C.t('you');
+    return C.t('bot') + ' · ' + C.t(G.level);
+  }
 
   function newGame() {
-    G = { fens: [E.START], sans: [], lastMove: null, result: null, startedAt: Date.now() };
+    cancelThink();
+    G = { fens: [E.START], sans: [], lastMove: null, result: null, startedAt: Date.now(), mode: prefs.mode, level: prefs.level, human: prefs.human };
     S = E.parse(E.START);
     sel = -1; targets = []; cur = -1;
     render();
     save();
+    maybeThink();
+  }
+
+  /* ---------------------------------------------------------- ربات */
+  // فکر کردن در Web Worker است تا صفحه روی گوشی ضعیف هم قفل نشود. کد همان
+  // ChessBotFactory بالاست که با toString() به کارگر می‌رود؛ اگر کارگر ساخته نشد،
+  // همین‌جا با یک مکث کوتاه اجرا می‌شود.
+  function getWorker() {
+    if (worker !== null) return worker;
+    try {
+      var src = ChessBotFactory.toString() + '\nvar B = ChessBotFactory();\n' +
+        'onmessage = function (e) { var d = e.data; postMessage({ id: d.id, r: B.think(d.fen, d.hist, { level: d.level }) }); };';
+      worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+      worker.onmessage = function (e) { botReply(e.data.id, e.data.r); };
+      worker.onerror = function (e) { e.preventDefault(); worker = false; if (thinking) runLocal(thinkId, lastAsk); };
+    } catch (err) { worker = false; }
+    return worker;
+  }
+  var lastAsk = null;
+  function runLocal(id, ask) {
+    setTimeout(function () {
+      if (id !== thinkId) return;
+      if (!localBot) localBot = ChessBotFactory();
+      botReply(id, localBot.think(ask.fen, ask.hist, { level: ask.level }));
+    }, 60);
+  }
+  function maybeThink() {
+    if (!isAi() || G.result || S.turn === G.human || thinking) return;
+    thinking = true;
+    var id = ++thinkId;
+    lastAsk = { id: id, fen: G.fens[G.fens.length - 1], hist: G.fens.slice(0, -1), level: G.level, at: Date.now() };
+    var w = getWorker();
+    if (w) w.postMessage(lastAsk); else runLocal(id, lastAsk);
+    paint();
+  }
+  function cancelThink() { thinking = false; thinkId++; }
+  function botReply(id, r) {
+    if (id !== thinkId || !thinking) return;
+    // حرکت ربات فقط وقتی بازی می‌شود که موتور قانون‌ها هم قبولش داشته باشد
+    var ms = E.legal(S), m = r && ms.filter(function (x) { return x.from === r.from && x.to === r.to && (x.promo || '') === (r.promo || ''); })[0];
+    if (!m) m = ms[0];
+    // پاسخ آنی حس حرکت را از بین می‌برد؛ دست‌کم کمی صبر
+    var wait = Math.max(0, 450 - (Date.now() - lastAsk.at));
+    setTimeout(function () {
+      if (id !== thinkId) return;
+      thinking = false;
+      if (m) commit(m);
+    }, wait);
+  }
+
+  function guard(same, go) {
+    if (same) return;
+    if (G && !G.result && G.sans.length) {
+      C.ui.confirm({ title: C.t('newMatch'), body: C.t('resetWarn'), onOk: go, onCancel: function () { render(); } });
+      render();
+      return;
+    }
+    go();
+  }
+  function setMode(v) {
+    if (G.mode === v) return;
+    if (v === 'ai') { askSetup(); return; }
+    guard(false, function () { prefs.mode = 'two'; ctx.store.set('prefs', prefs); newGame(); });
+  }
+  // سطح و رنگ در یک پنجره‌اند، نه سه ردیف بالای تخته؛ روی گوشی ۳۲۰ پیکسلی سه ردیف
+  // تخته را از صفحه بیرون می‌برد (#143)
+  function askSetup() {
+    var pick = { level: prefs.level, human: prefs.human }, started = false;
+    var busy = G && !G.result && G.sans.length;
+    var body = [
+      el('h3', { text: C.t('difficulty') }),
+      C.ui.segmented(['easy', 'medium', 'hard'].map(function (l) { return { value: l, label: C.t(l) }; }), pick.level, function (v) { pick.level = v; }),
+      el('h3', { style: { 'margin-top': 'var(--s-3)' }, text: C.t('yourColor') }),
+      C.ui.segmented([{ value: 'w', label: C.t('white') }, { value: 'b', label: C.t('black') }], pick.human, function (v) { pick.human = v; })
+    ];
+    if (busy) body.push(el('p', { class: 'ch-dim', style: { 'margin-top': 'var(--s-3)' }, text: C.t('resetWarn') }));
+    C.ui.modal({
+      title: C.t('newMatch'), body: body,
+      // بستن بدون شروع، انتخاب «با ربات» بالای تخته را هم به حالت واقعی برمی‌گرداند
+      onClose: function () { if (!started) render(); },
+      actions: [{ label: C.t('cancel') }, { label: C.t('start'), kind: 'primary', onClick: function () {
+        started = true;
+        prefs.mode = 'ai'; prefs.level = pick.level; prefs.human = pick.human; ctx.store.set('prefs', prefs);
+        newGame();
+      } }]
+    });
+  }
+  function renderTop() {
+    topBar.innerHTML = '';
+    topBar.appendChild(C.ui.segmented([
+      { value: 'ai', label: C.t('vsAi') }, { value: 'two', label: C.t('twoPlayers') }
+    ], G.mode, setMode));
+    if (!isAi()) return;
+    var b = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button' },
+      [el('span', { html: pieceSvg(G.human === 'w' ? 'K' : 'k').replace('<svg ', '<svg width="18" height="18" ') }), el('span', { text: C.t(G.level) })]);
+    b.addEventListener('click', askSetup);
+    topBar.appendChild(b);
   }
 
   function render() {
+    renderTop();
     actions.innerHTML = '';
+    if (!isAi()) {
     var fl = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', 'aria-pressed': prefs.flip ? 'true' : 'false' },
       [C.icon('refresh', 16), el('span', { text: C.t('autoFlip') + (prefs.flip ? ' ✓' : '') })]);
     fl.addEventListener('click', function () { prefs.flip = !prefs.flip; ctx.store.set('prefs', prefs); C.feedback('tap'); render(); });
     actions.appendChild(fl);
-    if (!G.result) {
+    }
+    if (!G.result && !isAi()) {
       var dr = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', text: C.t('offerDraw') });
       dr.addEventListener('click', function () {
         C.ui.confirm({ title: C.t('offerDraw'), body: C.t('drawAsk'), onOk: function () { end({ over: true, winner: null, reason: 'agreed' }); } });
@@ -464,6 +1133,16 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ChessEngin
       actions.appendChild(dr);
       actions.appendChild(rs);
     }
+    if (!G.result && isAi()) {
+      var rs2 = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', text: C.t('resign') });
+      rs2.addEventListener('click', function () {
+        C.ui.confirm({ title: C.t('resign'), body: C.t('resignMe'), onOk: function () {
+          cancelThink();
+          end({ over: true, winner: G.human === 'w' ? 'b' : 'w', reason: 'resigned', loser: G.human });
+        } });
+      });
+      actions.appendChild(rs2);
+    }
     paint();
   }
 
@@ -471,7 +1150,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ChessEngin
     box.innerHTML = '';
     box.className = 'cs-player' + (!G.result && S.turn === side ? ' cs-player--on' : '');
     box.appendChild(el('span', { html: pieceSvg(side === 'w' ? 'K' : 'k').replace('<svg ', '<svg width="22" height="22" ') }));
-    box.appendChild(el('span', { class: 'cs-player__name', text: sideName(side) }));
+    box.appendChild(el('span', { class: 'cs-player__name', text: playerName(side) }));
     // مهره‌هایی که این طرف از حریف گرفته، و برتری مادی
     var start = E.parse(E.START), them = side === 'w' ? 'b' : 'w', caps = el('span', { class: 'cs-player__caps' });
     ['q', 'r', 'b', 'n', 'p'].forEach(function (t) {
@@ -506,7 +1185,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ChessEngin
       q.setAttribute('aria-label', E.sqName(i) + (p ? ' ' + p : ''));
     }
     var st = G.result;
+    status.classList.toggle('cs-thinking', !st && thinking);
     if (st) status.textContent = resultText(st);
+    else if (isAi()) status.textContent = (thinking ? C.t('thinking') : C.t('yourMove')) + (E.inCheck(S) && !thinking ? ' · ' + C.t('check') : '');
     else status.textContent = C.t('toMove', { c: sideName(S.turn) }) + (E.inCheck(S) ? ' · ' + C.t('check') : '');
     var parts = [];
     for (var k = 0; k < G.sans.length; k += 2) parts.push((k / 2 + 1) + '. ' + G.sans[k] + (G.sans[k + 1] ? ' ' + G.sans[k + 1] : ''));
@@ -515,6 +1196,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ChessEngin
   }
 
   function resultText(st) {
+    if (isAi() && (st.reason === 'mate' || st.reason === 'resigned')) {
+      return C.t(st.reason === 'mate' ? 'mate' : 'resign') + ' · ' + C.t(st.winner === G.human ? 'youWin' : 'youLose');
+    }
     if (st.reason === 'mate') return C.t('mate') + ' · ' + C.t(st.winner === 'w' ? 'whiteWins' : 'blackWins');
     if (st.reason === 'resigned') return C.t('resigned', { c: sideName(st.loser) }) + ' · ' + C.t(st.winner === 'w' ? 'whiteWins' : 'blackWins');
     return C.t(st.reason);
@@ -529,6 +1213,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ChessEngin
 
   function tapSquare(i) {
     if (!G || G.result) return;
+    if (isAi() && (thinking || S.turn !== G.human)) return;
     var p = S.board[i];
     if (sel >= 0) {
       var ms = targets.filter(function (m) { return m.to === i; });
@@ -570,24 +1255,45 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ChessEngin
     if (st.check) C.audio.sfx('chain');
     save();
     render();
+    maybeThink();
   }
 
+  var AI_PRIZE = { easy: [6, 20], medium: [10, 40], hard: [16, 70] };
   function end(st) {
     G.result = st;
-    if (st.reason === 'mate') C.achievements.unlock('cs-mate');
+    if (st.reason === 'mate' && (!isAi() || st.winner === G.human)) C.achievements.unlock('cs-mate');
+    if (isAi() && st.winner === G.human && G.level === 'hard') C.achievements.unlock('cs-bot');
     ctx.clearSave();
     render();
     var title = st.winner ? C.t(st.winner === 'w' ? 'whiteWins' : 'blackWins') : C.t('draw');
+    var won = !!st.winner, coins = st.reason === 'mate' ? 8 : 3, points = st.reason === 'mate' ? 30 : 10;
+    if (isAi()) {
+      won = st.winner === G.human;
+      title = won ? C.t('youWin') : (st.winner ? C.t('youLose') : C.t('draw'));
+      coins = won ? AI_PRIZE[G.level][0] : (st.winner ? 1 : 3);
+      points = won ? AI_PRIZE[G.level][1] : (st.winner ? 3 : 10);
+    }
     ctx.finish({
-      won: !!st.winner, title: title, timeMs: Date.now() - G.startedAt, coins: st.reason === 'mate' ? 8 : 3, points: st.reason === 'mate' ? 30 : 10,
+      won: won, title: title, timeMs: Date.now() - G.startedAt, coins: coins, points: points,
       lines: [{ label: resultText(st), value: '' }, { label: C.t('moves'), value: C.num(Math.ceil(G.sans.length / 2)) }],
-      shareText: 'چوگان · شطرنج\n' + G.sans.join(' '),
+      shareText: 'چوگان · شطرنج' + (isAi() ? ' · ' + C.t('bot') + ' ' + C.t(G.level) : '') + '\n' + G.sans.join(' '),
       onAgain: function () { newGame(); }
     });
   }
 
   function undo() {
-    if (!G || G.fens.length < 2) { C.feedback('bad'); return; }
+    // با ربات حرکت خودت و پاسخ ربات با هم برمی‌گردند؛ اگر ربات هنوز فکر می‌کند، فقط حرکت خودت
+    var mine = isAi() ? (G.human === 'w' ? 1 : 2) : 1;
+    if (!G || G.sans.length < mine) { C.feedback('bad'); return; }
+    cancelThink();
+    popMove();
+    while (isAi() && S.turn !== G.human && G.sans.length) popMove();
+    select(-1);
+    C.feedback('tap');
+    save();
+    render();
+  }
+  function popMove() {
     G.fens.pop(); G.sans.pop();
     G.result = null;
     S = E.parse(G.fens[G.fens.length - 1]);
@@ -598,13 +1304,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ChessEngin
       var m = E.legal(P).filter(function (x) { return E.fen(E.make(P, x)) === G.fens[G.fens.length - 1]; })[0];
       if (m) G.lastMove = { from: m.from, to: m.to };
     }
-    select(-1);
-    C.feedback('tap');
-    save();
-    render();
   }
 
   function askNew() {
+    if (isAi()) { askSetup(); return; }
     if (!G || G.result || G.fens.length < 2) { newGame(); return; }
     C.ui.confirm({ title: C.t('newGame'), body: C.t('resetWarn'), onOk: newGame });
   }
@@ -642,7 +1345,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ChessEngin
     var k = e.key;
     if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    if (k === 'f' || k === 'F' || e.code === 'KeyF') { prefs.flip = !prefs.flip; ctx.store.set('prefs', prefs); render(); e.preventDefault(); return; }
+    if ((k === 'f' || k === 'F' || e.code === 'KeyF') && !isAi()) { prefs.flip = !prefs.flip; ctx.store.set('prefs', prefs); render(); e.preventDefault(); return; }
     if (k === 'Escape') { select(-1); paint(); return; }
     var d = { ArrowUp: -8, ArrowDown: 8, ArrowLeft: -1, ArrowRight: 1 }[k];
     if (d !== undefined) {
@@ -694,17 +1397,21 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ChessEngin
   /* ---------------------------------------------------------- ذخیره */
   ctx.autosave(function () {
     if (!G || G.result || G.fens.length < 2) return { inProgress: false };
-    return { g: { fens: G.fens, sans: G.sans, lastMove: G.lastMove, elapsed: Date.now() - G.startedAt }, prefs: prefs };
+    return { g: { fens: G.fens, sans: G.sans, lastMove: G.lastMove, elapsed: Date.now() - G.startedAt, mode: G.mode, level: G.level, human: G.human }, prefs: prefs };
   });
   function save() { ctx.save(); }
 
   var saved = ctx.loadSave();
   var sv = saved && saved.g;
   if (sv && Array.isArray(sv.fens) && sv.fens.length > 1 && sv.sans && sv.sans.length === sv.fens.length - 1) {
-    if (saved.prefs) prefs = saved.prefs;
-    G = { fens: sv.fens, sans: sv.sans, lastMove: sv.lastMove || null, result: null, startedAt: Date.now() - (sv.elapsed || 0) };
+    if (saved.prefs) prefs = Object.assign({}, PREFS0, saved.prefs);
+    // ذخیره‌های پیش از #143 فقط دونفره بودند
+    var mode = sv.mode === 'ai' ? 'ai' : 'two';
+    G = { fens: sv.fens, sans: sv.sans, lastMove: sv.lastMove || null, result: null, startedAt: Date.now() - (sv.elapsed || 0),
+      mode: mode, level: AI_PRIZE[sv.level] ? sv.level : 'easy', human: sv.human === 'b' ? 'b' : 'w' };
     S = E.parse(G.fens[G.fens.length - 1]);
     render();
+    maybeThink();
   } else {
     newGame();
     ctx.tutorialIfNew(TUT);
