@@ -10,6 +10,12 @@
 #       Uploads the bundle, sets <track> to that version code with [status]
 #       (default draft: Play only accepts drafts until the app is first published),
 #       and commits the edit.
+#   tools/play-api.sh listing <metadata dir>
+#       Sends the store listing from fastlane-style metadata (one folder per Play
+#       language: title.txt, short_description.txt, full_description.txt and
+#       images/{icon.png,featureGraphic.png,phoneScreenshots/*.png}). Sets the
+#       default language to en-US, replaces every image type it has files for,
+#       removes listings for languages it has no folder for, and commits.
 #
 # Env: PLAY_SERVICE_ACCOUNT_JSON (the key file's content), PLAY_PACKAGE
 #   (default io.github.choganhq.chogan), PLAY_API (base URL, overridable for tests),
@@ -24,7 +30,7 @@ fail() { echo "play-api: $1" >&2; exit 1; }
 PKG="${PLAY_PACKAGE:-io.github.choganhq.chogan}"
 API="${PLAY_API:-https://androidpublisher.googleapis.com}"
 mode="${1:-}"
-case "$mode" in check|upload) ;; *) cannot "mode must be check or upload, got '${mode}'" ;; esac
+case "$mode" in check|upload|listing) ;; *) cannot "mode must be check, upload or listing, got '${mode}'" ;; esac
 for t in curl openssl python3; do command -v "$t" >/dev/null 2>&1 || cannot "$t is missing"; done
 [[ "$PKG" =~ ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$ ]] || cannot "invalid package name '$PKG'"
 
@@ -79,6 +85,53 @@ for t in d.get("tracks",[]):
     print("track %-12s %s" % (t["track"], " ".join(rel) or "(no releases)"))'
   call DELETE "$BASE/edits/$EDIT" >/dev/null
   echo "Edit $EDIT deleted; nothing changed"
+  exit 0
+fi
+
+if [ "$mode" = listing ]; then
+  dir="${2:-}"
+  [ -d "$dir" ] || { call DELETE "$BASE/edits/$EDIT" >/dev/null; cannot "metadata folder '$dir' missing"; }
+  langs=()
+  for d in "$dir"/*/; do
+    lang=$(basename "$d")
+    [[ "$lang" =~ ^[a-z]{2,3}(-[A-Z]{2})?$ ]] || continue
+    [ -s "$d/title.txt" ] || continue
+    langs+=("$lang")
+    # The text goes through python so quotes and newlines are escaped correctly
+    python3 - "$d" "$lang" > "$WORK/listing.json" <<'PY'
+import json, sys, pathlib
+d = pathlib.Path(sys.argv[1]); read = lambda n: (d / n).read_text(encoding='utf-8').strip()
+t, s, f = read('title.txt'), read('short_description.txt'), read('full_description.txt')
+assert len(t) <= 30 and len(s) <= 80 and len(f) <= 4000, 'text over Play limits'
+print(json.dumps({'language': sys.argv[2], 'title': t, 'shortDescription': s, 'fullDescription': f}, ensure_ascii=False))
+PY
+    call PUT "$BASE/edits/$EDIT/listings/$lang" -H 'Content-Type: application/json; charset=utf-8' --data-binary "@$WORK/listing.json" >/dev/null
+    n=0
+    for type in icon featureGraphic phoneScreenshots; do
+      if [ "$type" = phoneScreenshots ]; then files=("$d"images/phoneScreenshots/*.png); else files=("$d"images/$type.png); fi
+      [ -e "${files[0]}" ] || continue
+      call DELETE "$BASE/edits/$EDIT/listings/$lang/$type" >/dev/null
+      for f in "${files[@]}"; do
+        call POST "/upload$BASE/edits/$EDIT/listings/$lang/$type?uploadType=media" -H 'Content-Type: image/png' --data-binary "@$f" >/dev/null
+        n=$((n + 1))
+      done
+    done
+    echo "Listing $lang: text and $n images"
+  done
+  [ "${#langs[@]}" -gt 0 ] || cannot "no language folders with title.txt in '$dir'"
+  printf '%s\n' "${langs[@]}" | grep -qx 'en-US' || cannot "an en-US listing is required as the default language"
+  call PATCH "$BASE/edits/$EDIT/details" -H 'Content-Type: application/json' \
+    -d '{"defaultLanguage":"en-US","contactEmail":"choganhq@gmail.com","contactWebsite":"https://choganhq.github.io/chogan/"}' >/dev/null
+  # The app was created with en-GB as its default; a listing nobody maintains would drift
+  # Read into a variable first: a failure inside a for-list would be ignored
+  olds=$(call GET "$BASE/edits/$EDIT/listings" | python3 -c 'import json,sys; [print(l["language"]) for l in json.load(sys.stdin).get("listings",[])]')
+  for old in $olds; do
+    printf '%s\n' "${langs[@]}" | grep -qx "$old" && continue
+    call DELETE "$BASE/edits/$EDIT/listings/$old" >/dev/null
+    echo "Removed listing $old"
+  done
+  call POST "$BASE/edits/$EDIT:commit" >/dev/null
+  echo "Committed listing: ${langs[*]}"
   exit 0
 fi
 

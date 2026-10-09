@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2251;
+const MIN_CHECKS = 2275;
 
 function ok(cond, msg) {
   checks++;
@@ -3725,6 +3725,35 @@ function testAdiProof() {
   ok(/retention-days: 1/.test(y), 'artifact فقط یک روز می‌ماند');
 }
 
+/* ------------------------------------------------ Store metadata for Play */
+// The same fastlane metadata feeds F-Droid and Google Play (#163). Play rejects
+// screenshots longer than 2:1 (ours were 1056×2160) and needs a 1024×500 feature
+// graphic, so the files are checked here rather than by an upload that fails.
+function testStoreMetadata() {
+  head('Store metadata for Play');
+  const root = path.join(ROOT, 'fastlane/metadata/android');
+  const pngSize = (f) => { const b = fs.readFileSync(f); return b.toString('hex', 0, 8) === '89504e470d0a1a0a' ? [b.readUInt32BE(16), b.readUInt32BE(20)] : null; };
+  const langs = fs.readdirSync(root).filter((d) => fs.existsSync(path.join(root, d, 'title.txt')));
+  ok(langs.length >= 4 && langs.indexOf('en-US') >= 0, 'store languages found (' + langs.join(', ') + ')');
+  for (const lang of langs) {
+    const read = (n) => fs.readFileSync(path.join(root, lang, n), 'utf8').trim();
+    const [t, s, f] = [read('title.txt'), read('short_description.txt'), read('full_description.txt')];
+    ok([...t].length <= 30 && [...s].length <= 80 && [...f].length <= 4000, lang + ': title ≤ 30, short ≤ 80, full ≤ 4000 (' + [...t].length + '/' + [...s].length + '/' + [...f].length + ')');
+    const shots = path.join(root, lang, 'images', 'phoneScreenshots');
+    const list = fs.existsSync(shots) ? fs.readdirSync(shots).filter((x) => x.endsWith('.png')) : [];
+    ok(list.length >= 2 && list.length <= 8, lang + ': 2–8 phone screenshots (' + list.length + ')');
+    const bad = list.filter((x) => { const z = pngSize(path.join(shots, x)); return !z || Math.min(...z) < 320 || Math.max(...z) > 3840 || Math.max(...z) > 2 * Math.min(...z); });
+    ok(bad.length === 0, lang + ': every screenshot is a PNG within 320–3840px and at most 2:1' + (bad.length ? ' (' + bad.join(', ') + ')' : ''));
+  }
+  const fg = path.join(root, 'en-US/images/featureGraphic.png');
+  const fz = fs.existsSync(fg) && pngSize(fg);
+  ok(!!fz && fz[0] === 1024 && fz[1] === 500, 'en-US feature graphic is 1024×500 (' + (fz ? fz.join('×') : 'missing') + ')');
+  const icon = pngSize(path.join(root, 'en-US/images/icon.png'));
+  ok(!!icon && icon[0] === 512 && icon[1] === 512, 'en-US icon is 512×512');
+  const y = fs.readFileSync(path.join(ROOT, '.github/workflows/play.yml'), 'utf8');
+  ok(/options: \[check, upload, listing\]/.test(y) && /play-api\.sh listing fastlane\/metadata\/android/.test(y), 'play.yml can send the listing from the repo metadata');
+}
+
 /* ------------------------------------------------ Privacy policy page */
 // Play requires a public privacy policy URL (#161). The page says nothing is
 // collected and the Android app has no internet permission; these checks keep
@@ -3806,6 +3835,11 @@ function testPlayApi() {
       if (req.method === 'POST' && req.url === '/upload' + base + '/E1/bundles?uploadType=media') return send(200, { versionCode: Number(bundleVc) });
       if (req.method === 'PUT' && req.url === base + '/E1/tracks/internal') return send(200, {});
       if (req.method === 'POST' && req.url === base + '/E1:commit') return send(200, {});
+      if (req.method === 'PUT' && /\/E1\/listings\/[a-zA-Z-]+$/.test(req.url)) return send(200, JSON.parse(body.toString()));
+      if (req.method === 'DELETE' && /\/E1\/listings\/[a-zA-Z-]+(\/[a-zA-Z]+)?$/.test(req.url)) return send(200, {});
+      if (req.method === 'POST' && /^\/upload.*\/E1\/listings\/[a-zA-Z-]+\/[a-zA-Z]+\?uploadType=media$/.test(req.url)) return send(200, { image: {} });
+      if (req.method === 'PATCH' && req.url === base + '/E1/details') return send(200, JSON.parse(body.toString()));
+      if (req.method === 'GET' && req.url === base + '/E1/listings') return send(200, { listings: [{ language: 'en-GB' }, { language: 'en-US' }, { language: 'fa' }] });
       send(404, { error: { message: 'unexpected ' + req.method + ' ' + req.url } });
     });
   });
@@ -3850,6 +3884,37 @@ function testPlayApi() {
     ok(r.code !== 0 && calls.length === 0, 'a bad key never reaches the edits API (' + r.code + ')');
     r = await run(['check'], { PLAY_SERVICE_ACCOUNT_JSON: '', PLAY_API: origin });
     ok(r.code === 2, 'no service account: exit 2 (' + r.code + ')');
+    // listing from a small fastlane-style tree: en-US with icon, feature graphic and
+    // two screenshots, fa with text and two screenshots
+    const meta = path.join(tmp, 'meta');
+    const png = Buffer.from('89504e470d0a1a0a', 'hex');
+    for (const [lang, title, imgs] of [['en-US', 'Chogan', ['icon.png', 'featureGraphic.png', 'phoneScreenshots/1.png', 'phoneScreenshots/2.png']],
+      ['fa', 'چوگان "بازی"', ['phoneScreenshots/1.png', 'phoneScreenshots/2.png']]]) {
+      fs.mkdirSync(path.join(meta, lang, 'images', 'phoneScreenshots'), { recursive: true });
+      fs.writeFileSync(path.join(meta, lang, 'title.txt'), title + '\n');
+      fs.writeFileSync(path.join(meta, lang, 'short_description.txt'), 'Short\n');
+      fs.writeFileSync(path.join(meta, lang, 'full_description.txt'), 'Line one\n* line two\n');
+      for (const i of imgs) fs.writeFileSync(path.join(meta, lang, 'images', i), png);
+    }
+    r = await run(['listing', meta], env);
+    const puts = calls.filter((c) => c.m === 'PUT' && /\/listings\//.test(c.u));
+    const ups = calls.filter((c) => c.u.indexOf('/upload/') === 0);
+    const fa = puts.find((c) => c.u.endsWith('/listings/fa'));
+    ok(r.code === 0 && puts.length === 2, 'listing: one text update per language (' + r.code + ', ' + puts.length + ')');
+    ok(!!fa && JSON.parse(fa.body).title === 'چوگان "بازی"' && JSON.parse(fa.body).fullDescription === 'Line one\n* line two', 'listing: Persian text, quotes and newlines arrive intact');
+    ok(ups.length === 6 && ups.every((c) => c.len === 8), 'listing: every image uploaded (' + ups.length + ')');
+    ok(calls.some((c) => c.m === 'DELETE' && c.u.endsWith('/listings/en-US/phoneScreenshots')) &&
+      calls.findIndex((c) => c.m === 'DELETE' && c.u.endsWith('/listings/en-US/phoneScreenshots')) < calls.findIndex((c) => c.u.indexOf('/listings/en-US/phoneScreenshots?') > 0),
+      'listing: old screenshots are cleared before the new ones go up');
+    const det = calls.find((c) => c.m === 'PATCH');
+    ok(!!det && JSON.parse(det.body).defaultLanguage === 'en-US', 'listing: default language set to en-US');
+    ok(calls.some((c) => c.m === 'DELETE' && c.u.endsWith('/listings/en-GB')) && !calls.some((c) => c.m === 'DELETE' && /\/listings\/(en-US|fa)$/.test(c.u)),
+      'listing: the stray en-GB listing is removed, ours are kept');
+    ok(calls.length > 0 && calls[calls.length - 1].u.endsWith('/E1:commit'), 'listing: committed last');
+    fs.writeFileSync(path.join(meta, 'fa', 'short_description.txt'), 'x'.repeat(81));
+    r = await run(['listing', meta], env);
+    ok(r.code !== 0 && !calls.some((c) => c.u.endsWith(':commit')), 'listing: text over Play\'s limit stops before commit');
+
     r = await run(['publish'], env);
     ok(r.code === 2, 'unknown mode: exit 2');
     r = await run(['upload', aab, 'internal', 'x'], env);
@@ -3894,7 +3959,7 @@ function testEnglishCi() {
     }
   }
   ok(files.length >= 12, 'files in scope found (' + files.length + ')');
-  const UI_VALUE = /\[ "\$FA" = "چوگان" \]/;
+  const UI_VALUE = /\[ "\$FA" = "چوگان" \]|^  <h1>Chogan<span>چوگان<\/span><\/h1>$/;
   for (const rel of files) {
     const bad = fs.readFileSync(path.join(ROOT, rel), 'utf8').split('\n')
       .filter((l) => /[؀-ۿ]/.test(l) && !UI_VALUE.test(l));
@@ -4148,6 +4213,7 @@ testAdiProof();
 testEnglishCi();
 testPepkExport();
 testPrivacyPage();
+testStoreMetadata();
 testTd();
 testVersionStamp();
 testDeployGate();

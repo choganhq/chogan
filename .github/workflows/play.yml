@@ -2,18 +2,19 @@ name: Google Play
 
 # Talks to Google Play as the service account in PLAY_SERVICE_ACCOUNT_JSON (#159).
 # check: proves access without changing anything. upload: builds the signed release
-# AAB from this commit and puts it on a testing track. Production is not offered
+# AAB from this commit and puts it on a testing track. listing: sends the store text
+# and images from fastlane/metadata/android (#163). Production is not offered
 # here on purpose; that stays a decision in Play Console.
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'check (read only) or upload'
+        description: 'check (read only), upload (AAB to a testing track) or listing (store text and images)'
         required: true
         default: check
         type: choice
-        options: [check, upload]
+        options: [check, upload, listing]
       track:
         description: 'Track for upload'
         required: true
@@ -43,6 +44,12 @@ jobs:
         env:
           PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
         run: bash tools/play-api.sh check
+
+      - name: Send the store listing
+        if: inputs.mode == 'listing'
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: bash tools/play-api.sh listing fastlane/metadata/android
 
       - name: Set up Java
         if: inputs.mode == 'upload'
