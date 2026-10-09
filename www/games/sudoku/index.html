@@ -523,12 +523,25 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngi
     paint();
   }
 
+  // شمارنده هر عدد روی جدول را می‌شمارد، درست یا غلط: قبلاً فقط جای درست شمرده
+  // می‌شد و بازیکنی که هفت «۱» گذاشته بود هنوز «۷ مانده» می‌دید، و خودِ شمارنده
+  // لو می‌داد حدس درست بوده یا نه (#124). دکمه فقط وقتی قفل می‌شود که هر نُه تا
+  // درست نشسته باشند، تا یک عدد غلط راه را نبندد.
+  function padState(grid, solution) {
+    var left = [0, 9, 9, 9, 9, 9, 9, 9, 9, 9], right = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], locked = [];
+    for (var i = 0; i < 81; i++) {
+      if (!grid[i]) continue;
+      left[grid[i]]--;
+      if (grid[i] === solution[i]) right[grid[i]]++;
+    }
+    for (var v = 0; v <= 9; v++) locked[v] = right[v] >= 9;
+    return { left: left, locked: locked };
+  }
+
   function paint() {
     var bad = prefs.showErrors ? E.conflicts(S.grid) : {};
     var selVal = selected >= 0 ? S.grid[selected] : 0;
-    var counts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    // فقط جاگذاری درست شمرده می‌شود، وگرنه یک عدد غلط دکمه‌اش را قفل می‌کرد
-    for (var i = 0; i < 81; i++) if (S.grid[i] && S.grid[i] === S.solution[i]) counts[S.grid[i]]++;
+    var tally = padState(S.grid, S.solution);
 
     for (var c = 0; c < 81; c++) {
       var b = cells[c];
@@ -555,9 +568,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngi
       }
     }
     pads.forEach(function (p) {
-      var left = 9 - counts[p.v];
+      var left = tally.left[p.v];
       p.left.textContent = left > 0 ? C.num(left) : '';
-      p.btn.disabled = left <= 0 && !noteMode;
+      p.btn.disabled = tally.locked[p.v] && !noteMode;
     });
     ctx.setStat('mistakes', S.mistakes);
     hintBtn.disabled = false;

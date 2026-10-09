@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 1914;
+const MIN_CHECKS = 1920;
 
 function ok(cond, msg) {
   checks++;
@@ -94,6 +94,35 @@ function testSudoku() {
     for (let r = 0; r < 9; r++) if (q.slice(r * 9, r * 9 + 9).every((v) => !v)) emptyRow++;
   }
   ok(emptyRow > 0, 'مولد جدولی با ردیف کاملاً خالی هم می‌سازد، پس این حالت واقعی است');
+
+  // شمارنده‌ی زیر دکمه‌های عدد (#124): هر عدد روی جدول شمرده می‌شود، درست یا غلط،
+  // و قفل فقط با نُه جاگذاری درست. تابع واقعی صفحه اجرا می‌شود.
+  const psAt = sdHtml.indexOf('function padState(');
+  let psSrc = '';
+  if (psAt > 0) {
+    let dd = 0;
+    for (let i = sdHtml.indexOf('{', psAt); i < sdHtml.length; i++) {
+      if (sdHtml[i] === '{') dd++;
+      else if (sdHtml[i] === '}' && --dd === 0) { psSrc = sdHtml.slice(psAt, i + 1); break; }
+    }
+  }
+  ok(psSrc.length > 0, 'تابع padState در صفحه‌ی سودوکو هست');
+  const padState = psSrc ? vm.runInNewContext('(' + psSrc + ')') : () => ({ left: [], locked: [] });
+  const sol = E.makePuzzle(rng(31337), 'medium');
+  const grid = sol.puzzle.slice();
+  const givenOnes = grid.filter((v) => v === 1).length;
+  ok(padState(grid, sol.solution).left[1] === 9 - givenOnes, 'شروع: مانده‌ی ۱ = نُه منهای سرنخ‌ها');
+  const wrongAt = grid.findIndex((v, i) => !v && sol.solution[i] !== 1);
+  grid[wrongAt] = 1;
+  ok(padState(grid, sol.solution).left[1] === 8 - givenOnes, '۱ در خانه‌ی غلط هم از مانده کم می‌کند');
+  for (let i = 0; i < 81; i++) if (!grid[i] && sol.solution[i] === 1) grid[i] = 1;
+  const full = padState(grid, sol.solution);
+  ok(full.left[1] === -1, 'نُه ۱ درست به‌علاوه‌ی یک غلط: مانده منفی است و نشان داده نمی‌شود (' + full.left[1] + ')');
+  ok(full.locked[1] === true, 'با نُه ۱ درست دکمه‌ی ۱ قفل می‌شود');
+  grid[wrongAt] = 0;
+  const fake = grid.slice(); const anyRight1 = fake.findIndex((v, i) => v === 1 && !sol.puzzle[i]);
+  fake[anyRight1] = 0; fake[wrongAt] = 1;
+  ok(padState(fake, sol.solution).left[1] === 0 && !padState(fake, sol.solution).locked[1], 'نُه ۱ که یکی‌اش غلط است: مانده صفر ولی دکمه قفل نیست');
   console.log('  ' + checks + ' بررسی، بیشینه‌ی زمان تولید ' + maxMs + 'ms');
 }
 
