@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2152;
+const MIN_CHECKS = 2170;
 
 function ok(cond, msg) {
   checks++;
@@ -3528,10 +3528,12 @@ function testChess() {
   const sans = E.legal(twoKnights).map((m) => E.san(twoKnights, m));
   ok(sans.indexOf('Nbd2') >= 0 && sans.indexOf('Nfd2') >= 0, 'دو اسب به یک خانه: ستون مبدأ در نوشتار می‌آید');
 
-  // شطرنج دونفره روزانه ندارد؛ منو باید آن را از تقویم روزانه بیرون بگذارد (#131)
+  // شطرنج روزانه نداشت (#131)؛ از #144 روزانه‌اش سه معماست. فیلتر منو برای بازی‌های
+  // بی‌روزانه‌ی آینده می‌ماند.
   const gj = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games;
   const chess = gj.find((g) => g.id === 'chess');
-  ok(chess && chess.daily === false, 'شطرنج در games.json روزانه ندارد');
+  ok(chess && chess.daily !== false, 'شطرنج در games.json روزانه دارد (معما)');
+  ok(chess && (chess.files || []).indexOf('games/chess/puzzles.js') >= 0, 'puzzles.js در files شطرنج است تا کارگر سرویس نگهش دارد');
   const menuSrc = fs.readFileSync(path.join(ROOT, 'www/index.html'), 'utf8');
   ok(/function dailyGames\(\) \{ return GAMES\.filter\(function \(g\) \{ return g\.daily !== false; \}\); \}/.test(menuSrc), 'منو بازی‌های بی‌روزانه را جدا می‌کند');
   const dailyUses = (menuSrc.match(/dailyGames\(\)/g) || []).length;
@@ -3636,6 +3638,69 @@ function testChessBot() {
   ok(/ChessBotFactory\.toString\(\)/.test(file) && /new Worker\(URL\.createObjectURL/.test(file), 'فکر کردن در Web Worker است');
   ok(/var ms = E\.legal\(S\), m = r && ms\.filter/.test(file), 'حرکت ربات از فیلتر legal موتور قانون‌ها رد می‌شود');
   ok(/if \(isAi\(\) && \(thinking \|\| S\.turn !== G\.human\)\) return;/.test(file), 'وقتی نوبت ربات است لمس تخته کاری نمی‌کند');
+}
+
+/* ------------------------------------------------------ معمای شطرنج */
+// معماها از پایگاه Lichess می‌آیند (#144). هر کدام با موتور قانون‌های خودمان دوباره بازی
+// می‌شود: اگر یک حرکت جواب در legal() نباشد، صفحه آن معما را بی‌پایان رها می‌کند.
+function testChessPuzzles() {
+  head('معمای شطرنج');
+  const E = loadEngine('chess', 'ChessEngineFactory');
+  const file = path.join(ROOT, 'www/games/chess/puzzles.js');
+  ok(fs.existsSync(file), 'www/games/chess/puzzles.js هست');
+  if (!fs.existsSync(file)) return;
+  const src = fs.readFileSync(file, 'utf8');
+  const box = {};
+  vm.createContext(box);
+  vm.runInContext(src, box);
+  const P = box.CHESS_PUZZLES;
+  ok(P && ['easy', 'medium', 'hard'].every((t) => Array.isArray(P[t]) && P[t].length === 200), 'سه سطح، هر کدام ۲۰۰ معما');
+  if (!P) return;
+  ok(/CC0/.test(src) && /database\.lichess\.org/.test(src) && /tools\/chess-puzzles\.js/.test(src), 'منبع، مجوز CC0 و سازنده در سر فایل آمده');
+  const RANGE = { easy: [800, 1300], medium: [1300, 1700], hard: [1700, 2300] };
+  const uci = (m) => E.sqName(m.from) + E.sqName(m.to) + (m.promo ? m.promo.toLowerCase() : '');
+  const ids = new Set();
+  let total = 0, bad = [], mates = 0;
+  for (const t of Object.keys(RANGE)) {
+    let prev = 0, sorted = true, inRange = true;
+    for (const p of P[t]) {
+      total++;
+      const [id, fen, moves, rating, tag] = p;
+      ids.add(id);
+      if (rating < prev) sorted = false;
+      prev = rating;
+      if (rating < RANGE[t][0] || rating >= RANGE[t][1]) inRange = false;
+      const list = moves.split(' ');
+      // حرکت اول مال حریف است و آخرین حرکت مال بازیکن، پس تعداد زوج است
+      if (list.length < 2 || list.length % 2) { bad.push(id + ' طول'); continue; }
+      let S = E.parse(fen), fine = true;
+      const solver = S.turn === 'w' ? 'b' : 'w';
+      for (let k = 0; k < list.length; k++) {
+        const m = E.legal(S).find((x) => uci(x) === list[k]);
+        if (!m) { fine = false; break; }
+        S = E.make(S, m);
+      }
+      if (!fine) { bad.push(id + ' حرکت'); continue; }
+      const st = E.status([E.fen(S)]);
+      if (tag) {
+        if (!/^m[1-5]$/.test(tag) || +tag[1] !== list.length / 2 || st.reason !== 'mate' || st.winner !== solver) bad.push(id + ' مات');
+        else mates++;
+      }
+    }
+    ok(sorted, t + ': به ترتیب رتبه');
+    ok(inRange, t + ': همه در بازه‌ی ' + RANGE[t].join('–'));
+  }
+  ok(total === 600 && ids.size === 600, 'شناسه‌ها یکتا (' + ids.size + ' از ' + total + ')');
+  ok(bad.length === 0, 'همه‌ی جواب‌ها با موتور قانون‌ها بازی می‌شوند' + (bad.length ? ': ' + bad.slice(0, 5).join('، ') : ''));
+  ok(mates > 50, 'معماهای «مات در n» واقعاً به مات می‌رسند (' + mates + ')');
+
+  const page = fs.readFileSync(path.join(ROOT, 'www/games/chess/index.html'), 'utf8');
+  ok(/<script src="puzzles\.js"><\/script>/.test(page), 'صفحه puzzles.js را بار می‌کند');
+  ok(/var rng = C\.daily\('chess', daily\)\.rng;\s*PZ_TIERS\.forEach/.test(page), 'روزانه از C.daily همان روز، یکی از هر سطح');
+  ok(/C\.stats\.daily\('chess', pz\.daily/.test(page), 'پایان دور روزانه در آمار روزانه ثبت می‌شود');
+  ok(/if \(uciOf\(m\) === pz\.sol\[pz\.step\] \|\| mates\)/.test(page), 'هر حرکتِ مات‌کننده هم درست است، مثل Lichess');
+  const tool = path.join(ROOT, 'tools/chess-puzzles.js');
+  ok(fs.existsSync(tool) && /lichess_db_puzzle\.csv\.zst/.test(fs.readFileSync(tool, 'utf8')), 'سازنده‌ی فهرست در tools/ هست');
 }
 
 /* -------------------------------------------- کلیدهای ترجمه‌ی تعریف‌نشده */
@@ -3854,6 +3919,7 @@ testPasur();
 testMahjong();
 testChess();
 testChessBot();
+testChessPuzzles();
 testStringKeys();
 testTd();
 testVersionStamp();
