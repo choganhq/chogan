@@ -904,7 +904,8 @@
     { id: 'mj-win',      icon: 'gem',     fa: 'جفت‌جور',          en: 'Pair finder',       dfa: 'یک دست ماهجونگ را تمام کردی',         den: 'Clear a mahjong board', zh: '配对高手', dzh: '清空一局麻将', de: 'Paarfinder', dde: 'Räum ein Mahjong-Brett ab' },
     { id: 'mj-turtle',   icon: 'crown',   fa: 'لاک‌پشت',          en: 'Turtle',            dfa: 'چیدمان لاک‌پشت را کامل خالی کردی',      den: 'Clear the turtle layout', zh: '乌龟', dzh: '清空乌龟布局', de: 'Schildkröte', dde: 'Räum die Schildkröte ab' },
     { id: 'mj-clean',    icon: 'sparkle', fa: 'بی‌کمک',           en: 'On your own',       dfa: 'بدون راهنمایی، بُر یا برگرداندن ماهجونگ را بردی', den: 'Clear mahjong without hints, shuffles or undo', zh: '全凭自己', dzh: '不用提示、洗牌或撤销清空麻将', de: 'Ganz allein', dde: 'Räum Mahjong ohne Tipp, Mischen oder Zurück ab' },
-    { id: 'cs-mate',     icon: 'crown',   fa: 'کیش و مات',        en: 'Checkmate',         dfa: 'یک بازی شطرنج با مات تمام شد',         den: 'Finish a game of chess with checkmate', zh: '将死', dzh: '以将死结束一局国际象棋', de: 'Schachmatt', dde: 'Beende eine Partie Schach mit Matt' }
+    { id: 'cs-mate',     icon: 'crown',   fa: 'کیش و مات',        en: 'Checkmate',         dfa: 'یک بازی شطرنج با مات تمام شد',         den: 'Finish a game of chess with checkmate', zh: '将死', dzh: '以将死结束一局国际象棋', de: 'Schachmatt', dde: 'Beende eine Partie Schach mit Matt' },
+    { id: 'cs-bot',      icon: 'trophy',  fa: 'از ربات بردی',      en: 'Beat the machine',  dfa: 'ربات شطرنج را در سطح سخت بردی',        den: 'Beat the chess AI on hard', zh: '战胜电脑', dzh: '在困难难度下战胜国际象棋电脑', de: 'Maschine besiegt', dde: 'Besiege die Schach-KI auf Schwer' }
   ];
 
   var achApi = {
