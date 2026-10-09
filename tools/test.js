@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2192;
+const MIN_CHECKS = 2206;
 
 function ok(cond, msg) {
   checks++;
@@ -3086,7 +3086,7 @@ function testBrowserCheckExits() {
   let r = spawnSync(path.join(bin, 'bash'), [script], {
     encoding: 'utf8', env: { HOME: process.env.HOME || tmp, PATH: bin, PORT: port }
   });
-  ok(r.status === 2 && /کروم/.test(r.stderr || ''),
+  ok(r.status === 2 && /Chrome/.test(r.stderr || ''),
     'بدون کروم: خروج ۲ با دلیل کروم (آمد ' + r.status + '، «' + (r.stderr || '').trim().split('\n').pop() + '»)');
 
   // ۲ و ۳. کروم «هست» ولی فهرست صفحه‌ها ساخته نمی‌شود. به‌جای کروم /bin/true می‌دهیم
@@ -3725,6 +3725,30 @@ function testAdiProof() {
   ok(/retention-days: 1/.test(y), 'artifact فقط یک روز می‌ماند');
 }
 
+/* ------------------------------------------------ CI and tools in English */
+// The owner wants the working system in English: every name and message GitHub
+// shows, and the scripts CI runs (#154). Only real UI values stay, such as the
+// Persian launcher label the APK check compares against.
+function testEnglishCi() {
+  head('CI and tools in English');
+  const files = [];
+  for (const d of ['.github', '.github/workflows', 'tools']) {
+    for (const f of fs.readdirSync(path.join(ROOT, d))) {
+      const rel = d + '/' + f;
+      if (/\.(ya?ml|sh)$/.test(f) || rel === 'tools/chess-puzzles.js') files.push(rel);
+    }
+  }
+  ok(files.length >= 12, 'files in scope found (' + files.length + ')');
+  const UI_VALUE = /\[ "\$FA" = "چوگان" \]/;
+  for (const rel of files) {
+    const bad = fs.readFileSync(path.join(ROOT, rel), 'utf8').split('\n')
+      .filter((l) => /[؀-ۿ]/.test(l) && !UI_VALUE.test(l));
+    ok(bad.length === 0, rel + ': English only' + (bad.length ? ' (' + bad.length + ' lines, first: ' + bad[0].trim().slice(0, 60) + ')' : ''));
+  }
+  const y = fs.readFileSync(path.join(ROOT, '.github/workflows/test.yml'), 'utf8');
+  ok(/\n    name: Game engines and page loads\n/.test(y) && /\n    name: Android debug build\n/.test(y), 'required job names are the English ones the ruleset expects');
+}
+
 /* ------------------------------------------------- کاشی‌های خانه */
 // هجده بازی یک‌ستونه روی گوشی ۳۹۰ پیکسلی ۲۲۶۰ پیکسل اسکرول بود (#149). پیش‌فرض
 // کاشی دو ستونه است و یک‌ستونه فقط وقتی که کاربر خودش انتخاب کرده.
@@ -3966,6 +3990,7 @@ testChessPuzzles();
 testStringKeys();
 testHomeGrid();
 testAdiProof();
+testEnglishCi();
 testTd();
 testVersionStamp();
 testDeployGate();

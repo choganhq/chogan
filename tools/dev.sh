@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# نسخه‌ی وب را روی این لپ‌تاپ با وضعیت تازه و جدا راه می‌اندازد.
+# Runs the web app on this laptop with fresh, isolated state.
 #
-# همه‌ی وضعیت اپ در localStorage مرورگر و کش سرویس‌ورکر است. قبلاً هر بار با یک
-# پروفایل مانده باز می‌شد، پس پیشرفت اجرای قبلی به اجرای بعدی می‌رسید و یک بررسی
-# می‌توانست به خاطر باقی‌مانده‌ها فرق کند، نه به خاطر کد. اینجا هر اجرا پروفایل
-# موقت تازه‌ای می‌گیرد که آخرش پاک می‌شود.
+# All app state lives in the browser's localStorage and the service worker cache.
+# It used to open with a leftover profile, so progress from the last run reached
+# the next one and a check could differ because of leftovers rather than code.
+# Here every run gets a fresh temporary profile that is deleted at the end (#54).
 #
-# داخل www چیزی نوشته نمی‌شود: یک ریشه‌ی موقت با پیوند به فایل‌های www ساخته
-# می‌شود و صفحه‌های کمکی کنارش در _dev/ می‌نشینند. ویرایش www با ریفرش دیده می‌شود.
+# Nothing is written inside www: a temporary root links to the www files and the
+# helper pages sit beside it in _dev/. Edits to www show up on refresh.
 #
-# استفاده:
-#   tools/dev.sh                          سرور و کروم با پروفایل تازه
-#   tools/dev.sh --seed                   همان، با خوشامد ردشده و داده‌ی ساختگی
+# Usage:
+#   tools/dev.sh                          server and Chrome with a fresh profile
+#   tools/dev.sh --seed                   the same, welcome skipped, invented data
 #   tools/dev.sh --seed --lang en --theme dark
-#   tools/dev.sh --no-browser             فقط سرور
-#   tools/dev.sh --selftest               بررسی جدا بودن پروفایل‌ها، بدون پنجره
-#   PORT پیش‌فرض ۸۰۰۰ است؛ --selftest پیش‌فرض ۸۷۳۹ را می‌گیرد.
+#   tools/dev.sh --no-browser             server only
+#   tools/dev.sh --selftest               checks profile isolation, no window
+#   PORT defaults to 8000; --selftest defaults to 8739.
 #
-# فقط شناسه‌ی پردازه‌هایی را می‌کشد که خودش راه انداخته، نه بر اساس نام.
+# Kills only the process IDs it started itself, never by name.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -30,22 +30,22 @@ while [ $# -gt 0 ]; do
     --no-browser) BROWSER=0 ;;
     --selftest) SELFTEST=1 ;;
     -h|--help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "dev.sh: گزینه‌ی ناشناخته: $1" >&2; exit 2 ;;
+    *) echo "dev.sh: unknown option: $1" >&2; exit 2 ;;
   esac
   shift
 done
 if [ "$SELFTEST" = 1 ]; then PORT="${PORT:-8739}"; else PORT="${PORT:-8000}"; fi
-[[ "$APP_LANG" =~ ^(fa|en)$ ]]         || { echo "dev.sh: --lang باید fa یا en باشد" >&2; exit 2; }
-[[ "$THEME" =~ ^(light|dark|auto)$ ]]  || { echo "dev.sh: --theme باید light یا dark یا auto باشد" >&2; exit 2; }
-[[ "$PORT" =~ ^[0-9]+$ ]]              || { echo "dev.sh: PORT باید عدد باشد" >&2; exit 2; }
+[[ "$APP_LANG" =~ ^(fa|en)$ ]]         || { echo "dev.sh: --lang must be fa or en" >&2; exit 2; }
+[[ "$THEME" =~ ^(light|dark|auto)$ ]]  || { echo "dev.sh: --theme must be light, dark or auto" >&2; exit 2; }
+[[ "$PORT" =~ ^[0-9]+$ ]]              || { echo "dev.sh: PORT must be a number" >&2; exit 2; }
 
 WORK=$(mktemp -d)
 ROOT="$WORK/root"
 mkdir -p "$ROOT/_dev"
 for e in $(ls -A www); do ln -s "$PWD/www/$e" "$ROOT/$e"; done
 
-# هر اجرای مرورگر از همین تابع پروفایل می‌گیرد؛ خودآزمایی هم همین را صدا می‌زند
-# تا چیزی که سنجیده می‌شود همان چیزی باشد که واقعاً استفاده می‌شود.
+# Every browser launch gets its profile from this function; the self-test calls it
+# too, so what is tested is exactly what is used.
 new_profile() { mktemp -d "$WORK/profile.XXXXXX"; }
 
 SRV=""; CHR=""
@@ -62,13 +62,13 @@ start_server() {
   python3 -m http.server "$PORT" --bind 127.0.0.1 -d "$ROOT" >"$WORK/server.log" 2>&1 &
   SRV=$!
   sleep 1
-  kill -0 "$SRV" 2>/dev/null || { echo "dev.sh: سرور روی پورت $PORT بالا نیامد (اشغال است؟)" >&2; cat "$WORK/server.log" >&2; exit 2; }
+  kill -0 "$SRV" 2>/dev/null || { echo "dev.sh: server did not start on port $PORT (busy?)" >&2; cat "$WORK/server.log" >&2; exit 2; }
 }
 
 find_chrome() { command -v google-chrome || command -v chromium || command -v chromium-browser || true; }
 
-# داده‌ی ساختگی برای شروع سریع. شناسه‌ی بازی‌ها از games.json خوانده می‌شود تا
-# فهرست بازی‌ها جای دیگری تکرار نشود.
+# Invented data for a quick start. Game ids come from games.json so the game list
+# is not repeated anywhere else.
 cat > "$ROOT/_dev/seed.html" <<'HTML'
 <!doctype html><meta charset="utf-8"><title>seed</title>
 <script>
@@ -86,16 +86,16 @@ fetch('/games.json').then(function (r) { return r.json(); }).then(function (d) {
 HTML
 
 if [ "$SELFTEST" = 1 ]; then
-  # خودآزمایی. کنترل اول لازم است: اگر یک پروفایلِ ثابت هم مقدار را بین دو اجرا نگه
-  # ندارد، کاوشگر نمی‌تواند وضعیت را ببیند و «پاک بودن» پروفایل تازه هیچ معنایی ندارد.
+  # Self-test. The control comes first: if even a fixed profile does not keep a value
+  # across two runs, the probe cannot see state and a "clean" fresh profile means nothing.
   #
-  # جدا بودن سرویس‌ورکر عمداً سنجیده نمی‌شود. کروم بدون سر اینجا حتی روی پروفایل
-  # ثابتِ کنترل هم نتوانست ماندن ثبت یک سرویس‌ورکر را ببیند (شش آزمایش در دو حالت
-  # بدون سر، همه صفر)، پس هر ادعای «سرویس‌ورکری نیست» بی‌معنا سبز می‌شد. آن را
-  # ساختار تضمین می‌کند: ثبت‌ها در پوشه‌ی پروفایل ذخیره می‌شوند و هر اجرا پوشه‌ی تازه
-  # می‌گیرد که بعد پاک می‌شود.
+  # Service worker isolation is deliberately not tested. Headless Chrome here could not
+  # see a registration persist even on the fixed control profile (six trials in two
+  # headless modes, all zero), so any "no service worker" claim would pass vacuously.
+  # The structure guarantees it instead: registrations live in the profile folder,
+  # and every run gets a fresh folder that is deleted afterwards.
   CHROME=$(find_chrome)
-  [ -n "$CHROME" ] || { echo "dev.sh --selftest: نمی‌شود بررسی کرد: کروم پیدا نشد" >&2; exit 2; }
+  [ -n "$CHROME" ] || { echo "dev.sh --selftest: cannot test: Chrome not found" >&2; exit 2; }
   cat > "$ROOT/_dev/probe.html" <<'HTML'
 <!doctype html><meta charset="utf-8"><title>probe</title><body><pre id="out">running</pre>
 <script>
@@ -116,36 +116,36 @@ HTML
   CONTROL=$(new_profile)
   c_write=$(probe "$CONTROL" "write=control")
   c_read=$(probe "$CONTROL" "read=1")
-  echo "کنترل، یک پروفایل در دو اجرا: نوشت «$c_write»، بعد خواند «$c_read»"
+  echo "Control, one profile across two runs: wrote \"$c_write\", then read \"$c_read\""
   [ "$c_write" = "control" ] && [ "$c_read" = "control" ] || {
-    echo "dev.sh --selftest: نمی‌شود بررسی کرد: پروفایل ثابتِ کنترل مقدار را بین دو اجرا نگه نداشت" >&2; exit 2; }
+    echo "dev.sh --selftest: cannot test: the fixed control profile did not keep the value across two runs" >&2; exit 2; }
 
   first=$(probe "$(new_profile)" "write=leftover")
   second=$(probe "$(new_profile)" "read=1")
-  echo "دو اجرای dev.sh، هر کدام پروفایل تازه: اولی نوشت «$first»، دومی خواند «$second»"
-  [ "$first" = "leftover" ] || { echo "dev.sh --selftest: نمی‌شود بررسی کرد: اجرای اول نتوانست بنویسد" >&2; exit 2; }
-  [ "$second" = "<none>" ] || { echo "dev.sh --selftest: خطا: پروفایل تازه وضعیت اجرای قبل را دید («$second»)" >&2; exit 1; }
+  echo "Two dev.sh runs, each with a fresh profile: the first wrote \"$first\", the second read \"$second\""
+  [ "$first" = "leftover" ] || { echo "dev.sh --selftest: cannot test: the first run could not write" >&2; exit 2; }
+  [ "$second" = "<none>" ] || { echo "dev.sh --selftest: failure: a fresh profile saw the previous run's state (\"$second\")" >&2; exit 1; }
 
-  echo "درست: localStorage از یک اجرای dev.sh به اجرای بعد نمی‌رسد."
-  echo "سنجیده نشد: جدا بودن سرویس‌ورکر، که کروم بدون سر اینجا نمی‌تواند ببیند؛ با پروفایل تازه‌ی هر اجرا تضمین می‌شود."
+  echo "OK: localStorage does not carry over from one dev.sh run to the next."
+  echo "Not tested: service worker isolation, which headless Chrome here cannot observe; the fresh profile per run guarantees it."
   exit 0
 fi
 
 start_server
 URL="http://127.0.0.1:$PORT/"
 [ "$SEED" = 1 ] && URL="http://127.0.0.1:$PORT/_dev/seed.html?lang=$APP_LANG&theme=$THEME"
-echo "نسخه‌ی وب: http://127.0.0.1:$PORT/"
+echo "Web app: http://127.0.0.1:$PORT/"
 
 if [ "$BROWSER" = 0 ]; then
-  echo "فقط سرور. Ctrl+C برای پایان."
+  echo "Server only. Ctrl+C to stop."
   wait "$SRV"
   exit $?
 fi
 
 CHROME=$(find_chrome)
-[ -n "$CHROME" ] || { echo "dev.sh: کروم پیدا نشد؛ با --no-browser فقط سرور را راه بینداز" >&2; exit 2; }
+[ -n "$CHROME" ] || { echo "dev.sh: Chrome not found; use --no-browser to run only the server" >&2; exit 2; }
 PROFILE=$(new_profile)
 "$CHROME" --user-data-dir="$PROFILE" --no-first-run --no-default-browser-check "$URL" >/dev/null 2>&1 &
 CHR=$!
-echo "کروم با پروفایل تازه باز شد. با بستن پنجره یا Ctrl+C سرور و پروفایل پاک می‌شوند."
+echo "Chrome opened with a fresh profile. Closing the window or Ctrl+C removes the server and the profile."
 wait "$CHR"

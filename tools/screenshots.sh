@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# گرفتن تصویرهای صفحه برای متادیتای اف‌دروید، با کروم بدون سر.
-# خروجی مستقیم در fastlane/metadata/android/*/images/phoneScreenshots/ می‌نشیند.
-# استفاده: tools/screenshots.sh
+# Takes the F-Droid metadata screenshots with headless Chrome.
+# Output goes straight into fastlane/metadata/android/*/images/phoneScreenshots/.
+# Usage: tools/screenshots.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CHROME="${CHROME:-$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)}"
-if [ -z "$CHROME" ]; then echo "کروم پیدا نشد"; exit 1; fi
+if [ -z "$CHROME" ]; then echo "Chrome not found"; exit 1; fi
 PORT="${PORT:-8770}"
 OUT=$(mktemp -d)
 
-# صفحه‌ی موقت: چند کلید ذخیره‌سازی می‌گذارد تا تصویرها اپِ استفاده‌شده را
-# نشان بدهند نه اپ خالی، بعد به صفحه‌ی هدف می‌رود.
+# Temporary page: sets a few storage keys so the screenshots show a used app,
+# not an empty one, then goes to the target page.
 cat > www/_shot.html <<'HTML'
 <!doctype html><meta charset=utf-8><title>shot</title>
 <script>
@@ -19,7 +19,7 @@ var p = new URLSearchParams(location.search);
 ['tower-defence','sudoku','minesweeper','dots'].forEach(function(g){
   try { localStorage.setItem('chogan.'+g+'.tutSeen','true'); } catch(e){}
 });
-// خوشامدگویی روی همه‌ی تصویرها می‌افتد مگر اینکه صریح بخواهیمش
+// The welcome screen would cover every shot unless asked for explicitly
 try { if (!p.get('welcome')) localStorage.setItem('chogan.app.welcomeSeen','true'); } catch(e){}
 try {
   localStorage.setItem('chogan.app.settings', JSON.stringify({lang:p.get('lang')||'fa',theme:p.get('theme')||'light',sfx:true,music:true,haptics:true}));
@@ -47,8 +47,8 @@ shot() {
   echo "  $4/$1.png"
 }
 
-# هر زبان تصویر خودش را می‌گیرد. تصویر رابط فارسی داخل متادیتای انگلیسی
-# فقط کاربر را گیج می‌کند.
+# Each language gets its own screenshots; a Persian UI inside the English
+# metadata only confuses people.
 TODAY=$(date +%Y-%m-%d)
 for lang in fa en zh; do
   mkdir -p "$OUT/$lang"
@@ -70,4 +70,4 @@ copy_to() {
 copy_to fa fa
 copy_to en-US en
 copy_to zh-CN zh
-echo "تصویرها برای هر زبان جدا ساخته و در متادیتا گذاشته شدند"
+echo "Screenshots taken per language and placed in the metadata"

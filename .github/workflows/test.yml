@@ -1,4 +1,4 @@
-name: تست
+name: Test
 
 on:
   push:
@@ -12,80 +12,80 @@ permissions:
 
 jobs:
   test:
-    name: موتور بازی‌ها و بار شدن صفحه‌ها
+    name: Game engines and page loads
     runs-on: ubuntu-latest
 
     steps:
-      - name: دریافت سورس
+      - name: Check out
         uses: actions/checkout@v7
 
-      - name: نصب نود
+      - name: Set up Node
         uses: actions/setup-node@v7
         with:
           node-version: '24'
 
-      - name: تست موتور بازی‌ها
+      - name: Test game engines
         run: node tools/test.js
 
-      - name: باز کردن همه‌ی صفحه‌ها در مرورگر بدون سر
+      - name: Load every page in headless Chrome
         run: ./tools/browser-check.sh
 
   android:
-    name: بیلد دیباگ اندروید
+    name: Android debug build
     runs-on: ubuntu-latest
 
     steps:
-      - name: دریافت سورس
+      - name: Check out
         uses: actions/checkout@v7
 
-      - name: نصب جاوا
+      - name: Set up Java
         uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
 
-      # نسخه‌ی گردل از همان فایلی خوانده می‌شود که اف‌دروید می‌خواند، وگرنه
-      # CI با یک نسخه سبز می‌شود و اف‌دروید با نسخه‌ی دیگری می‌سازد.
-      - name: خواندن نسخه‌ی گردل از فایل wrapper
+      # The Gradle version comes from the same file F-Droid reads; otherwise CI
+      # goes green on one version while F-Droid builds with another (#42).
+      - name: Read Gradle version from the wrapper
         id: gradleversion
         run: |
           set -euo pipefail
           V=$(sed -n 's|.*/gradle-\([0-9][^-]*\)-bin\.zip.*|\1|p' android/gradle/wrapper/gradle-wrapper.properties)
-          [ -n "$V" ] || { echo "نسخه‌ی گردل از gradle-wrapper.properties خوانده نشد"; exit 1; }
-          echo "نسخه‌ی گردل: $V"
+          [ -n "$V" ] || { echo "Could not read the Gradle version from gradle-wrapper.properties"; exit 1; }
+          echo "Gradle version: $V"
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
-      - name: نصب گریدل
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: ${{ steps.gradleversion.outputs.version }}
 
-      # بیلد دیباگ کلید امضا نمی‌خواهد، پس روی هر PR اجرا می‌شود و ثابت
-      # می‌کند پروژه‌ی اندروید واقعاً بیلد می‌شود، نه فقط روی کاغذ درست است.
-      - name: بیلد
+      # A debug build needs no signing key, so it runs on every PR and proves the
+      # Android project really builds, not only that it looks right on paper.
+      - name: Build
         working-directory: android
         run: gradle --no-daemon assembleDebug
 
-      - name: بررسی محتوای APK
+      - name: Check APK contents
         run: |
           set -euo pipefail
           APK=$(ls android/app/build/outputs/apk/debug/*.apk | head -n 1)
-          echo "خروجی: $APK ($(du -h "$APK" | cut -f1))"
-          # دارایی‌های وب و فهرست افزونه‌ها باید واقعاً داخل بسته باشند
+          echo "Output: $APK ($(du -h "$APK" | cut -f1))"
+          # The web assets and the plugin list must really be inside the package
           unzip -l "$APK" > /tmp/apk.txt
           for f in assets/public/index.html assets/public/games.json \
                    assets/public/lib/chogan.js assets/public/fonts/vazirmatn-variable.woff2 \
                    assets/capacitor.config.json assets/capacitor.plugins.json; do
-            grep -q "$f" /tmp/apk.txt || { echo "در APK نیست: $f"; exit 1; }
+            grep -q "$f" /tmp/apk.txt || { echo "Missing from the APK: $f"; exit 1; }
           done
           for g in tower-defence sudoku minesweeper dots; do
-            grep -q "assets/public/games/$g/index.html" /tmp/apk.txt || { echo "بازی در APK نیست: $g"; exit 1; }
+            grep -q "assets/public/games/$g/index.html" /tmp/apk.txt || { echo "Game missing from the APK: $g"; exit 1; }
           done
-          echo "همه‌ی دارایی‌های لازم داخل APK هستند"
+          echo "All required assets are inside the APK"
 
-      # لیبل لانچر باید با زبان گوشی عوض شود. تست‌های فایلی فقط منابع را
-      # می‌بینند؛ اینجا از خود APK بیلدشده می‌پرسیم که واقعاً هر دو تا آمده‌اند.
-      - name: بررسی نام برنامه در هر دو زبان
+      # The launcher label must follow the phone's language. File tests only see
+      # the resources; here the built APK itself is asked whether both arrived.
+      - name: Check the app name in both languages
         run: |
           set -euo pipefail
           AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -n 1)
@@ -94,35 +94,35 @@ jobs:
           echo "$BADGE" | grep -E "^application(-label|-label-fa)" || true
           DEF=$(echo "$BADGE" | sed -n "s/^application-label:'\(.*\)'$/\1/p")
           FA=$(echo "$BADGE" | sed -n "s/^application-label-fa:'\(.*\)'$/\1/p")
-          [ "$DEF" = "Chogan" ] || { echo "نام پیش‌فرض «$DEF» است نه Chogan"; exit 1; }
-          [ "$FA" = "چوگان" ] || { echo "نام فارسی «$FA» است نه چوگان"; exit 1; }
-          echo "پیش‌فرض: $DEF · فارسی: $FA"
+          [ "$DEF" = "Chogan" ] || { echo "Default name is \"$DEF\", not Chogan"; exit 1; }
+          [ "$FA" = "چوگان" ] || { echo "Persian name is \"$FA\", not the expected one"; exit 1; }
+          echo "Default: $DEF · Persian: $FA"
 
-      - name: بررسی مجوزهای بسته
+      - name: Check package permissions
         run: |
           set -euo pipefail
           AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -n 1)
           APK=$(ls android/app/build/outputs/apk/debug/*.apk | head -n 1)
           DUMP=$("$AAPT" dump permissions "$APK")
           echo "$DUMP"
-          # فقط مجوزهای سیستمی مهم‌اند. اندروایکس برای اپ‌هایی که هدفشان API 33
-          # به بالاست خودش یک مجوز با نام بسته‌ی خودمان تعریف می‌کند
-          # (DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION) که مجوز سیستمی نیست.
+          # Only system permissions matter. For apps targeting API 33+, AndroidX
+          # defines its own permission under our package name
+          # (DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION), which is not a system one.
           SYS=$(echo "$DUMP" | grep -oE "android\.permission\.[A-Z_]+" | sort -u | tr '\n' ' ' | sed 's/ $//')
-          echo "مجوزهای سیستمی: ${SYS:-هیچ}"
+          echo "System permissions: ${SYS:-none}"
           if [ "$SYS" != "android.permission.VIBRATE" ]; then
-            echo "مجموعه‌ی مجوزهای سیستمی آن چیزی نیست که باید باشد"
+            echo "The set of system permissions is not what it should be"
             exit 1
           fi
-          echo "فقط مجوز لرزش، همان‌طور که باید"
+          echo "Only the vibrate permission, as it should be"
 
-  # انتشار وب فقط بعد از سبز شدن تست و بیلد اندروید روی همین کامیت. قبلاً
-  # pages.yml جدا و هم‌زمان با تست‌ها اجرا می‌شد، پس ادغامی که تستش روی main
-  # می‌افتاد باز هم به دست کاربرها می‌رسید. بعد از انتشار، فایل منتشرشده را
-  # برمی‌گردانیم و با همین کامیت و همین اجرا مقایسه می‌کنیم؛ سبز شدن
-  # deploy-pages فقط یعنی آپلود پذیرفته شد، نه اینکه سایت عوض شد.
+  # The web deploys only after the tests and the Android build pass on this same
+  # commit. pages.yml used to run separately, alongside the tests, so a merge
+  # whose tests failed on main still reached users (#52). After the deploy the
+  # served file is read back and compared with this commit and this run; a green
+  # deploy-pages only means the upload was accepted, not that the site changed.
   pages:
-    name: انتشار وب روی گیت‌هاب پیجز
+    name: Deploy web to GitHub Pages
     needs: [test, android]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
@@ -130,7 +130,7 @@ jobs:
       contents: read
       pages: write
       id-token: write
-      # deploy-pages از نسخه‌ی ۴ به بعد این را لازم دارد
+      # deploy-pages needs this from v4 on
       actions: read
     concurrency:
       group: pages
@@ -140,24 +140,24 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: دریافت سورس
+      - name: Check out
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      # هر انتشار اسم کش سرویس‌ورکر را عوض می‌کند و همه‌ی کاربرها پوسته را از نو
-      # می‌گیرند، پس ادغامی که فقط مستند یا اندروید را عوض کرده منتشر نمی‌شود.
-      # تصمیم در tools/web-changed.sh است تا tools/test.js روی یک مخزن آزمایشی
-      # واقعی اجرایش کند؛ درون YAML هیچ تستی به آن نمی‌رسید.
-      - name: آیا چیزی از نسخه‌ی وب عوض شده؟
+      # Every deploy renames the service worker cache and makes every user fetch
+      # the shell again, so a merge that only touched docs or Android is not
+      # deployed. The decision lives in tools/web-changed.sh so tools/test.js can
+      # run it against a real scratch repository; no test could reach it in YAML.
+      - name: Did anything in the web app change?
         id: changed
         env:
           BEFORE: ${{ github.event.before }}
         run: bash tools/web-changed.sh >> "$GITHUB_OUTPUT"
 
-      # روی ریپوی قالب پیجز عمداً فعال نیست. بدون این بررسی، کار با خطای
-      # قرمز می‌افتاد. اینجا فقط با پیام رد می‌شود.
-      - name: بررسی فعال بودن پیجز
+      # Pages is deliberately off on the template repository. Without this check
+      # the job would fail red; here it is skipped with a message.
+      - name: Check that Pages is enabled
         id: pages
         if: steps.changed.outputs.deploy == 'true'
         env:
@@ -167,39 +167,39 @@ jobs:
           if gh api "repos/${GITHUB_REPOSITORY}/pages" >/dev/null 2>&1; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
-            echo "گیت‌هاب پیجز روی این ریپو فعال نیست. انتشار وب رد شد."
-            echo "برای فعال کردن: Settings ← Pages ← Source: GitHub Actions"
+            echo "GitHub Pages is not enabled on this repository. Skipping the web deploy."
+            echo "To enable it: Settings → Pages → Source: GitHub Actions"
             echo "enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: آماده‌سازی پیجز
+      - name: Configure Pages
         if: steps.changed.outputs.deploy == 'true' && steps.pages.outputs.enabled == 'true'
         uses: actions/configure-pages@v6
 
-      # منطق مهر در tools/stamp-version.sh است تا tools/test.js همان چیزی را تست کند
-      # که اینجا اجرا می‌شود. GITHUB_SHA و GITHUB_RUN_ID و GITHUB_RUN_ATTEMPT را
-      # خود اکشنز می‌دهد؛ نام محیط را صریح می‌دهیم تا هیچ‌وقت حدس زده نشود.
-      - name: مهر هویت استقرار روی نسخه‌ی وب
+      # The stamping logic lives in tools/stamp-version.sh so tools/test.js tests
+      # exactly what runs here. Actions provides GITHUB_SHA, GITHUB_RUN_ID and
+      # GITHUB_RUN_ATTEMPT; the environment name is explicit so it is never guessed.
+      - name: Stamp the deploy identity on the web build
         if: steps.changed.outputs.deploy == 'true' && steps.pages.outputs.enabled == 'true'
         env:
           APP_ENV: production
         run: bash tools/stamp-version.sh www/version.js
 
-      - name: بسته‌بندی www
+      - name: Package www
         if: steps.changed.outputs.deploy == 'true' && steps.pages.outputs.enabled == 'true'
         uses: actions/upload-pages-artifact@v5
         with:
           path: www
 
-      - name: انتشار
+      - name: Deploy
         id: deployment
         if: steps.changed.outputs.deploy == 'true' && steps.pages.outputs.enabled == 'true'
         uses: actions/deploy-pages@v5
 
-      # مقایسه با مقدارهای مورد انتظار است، نه با چیزی که همین بیلد درباره‌ی خودش
-      # گفته. پیجز از چند ثانیه تا چند دقیقه طول می‌کشد تا نسخه‌ی تازه را سرو
-      # کند، پس اسکریپت با سقف مشخص دوباره تلاش می‌کند و بعد شکست می‌خورد.
-      - name: بررسی اینکه سایت همین کامیت و همین اجرا را سرو می‌کند
+      # The comparison is against the expected values, not against what this build
+      # says about itself. Pages takes seconds to minutes to serve the new version,
+      # so the script retries up to a fixed limit and then fails.
+      - name: Check that the site serves this commit and this run
         if: steps.changed.outputs.deploy == 'true' && steps.pages.outputs.enabled == 'true'
         run: >-
           bash tools/verify-deploy.sh

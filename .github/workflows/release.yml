@@ -1,4 +1,4 @@
-name: انتشار اندروید
+name: Android release
 
 on:
   push:
@@ -10,46 +10,46 @@ permissions:
 
 jobs:
   test:
-    name: تست پیش از انتشار
+    name: Test before release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
-      - name: تست موتور بازی‌ها
+      - name: Test game engines
         run: node tools/test.js
-      - name: باز کردن همه‌ی صفحه‌ها در مرورگر بدون سر
+      - name: Load every page in headless Chrome
         run: ./tools/browser-check.sh
 
   apk:
-    name: ساخت و انتشار APK امضاشده
+    name: Build and publish signed APK
     runs-on: ubuntu-latest
     needs: test
 
     steps:
-      - name: دریافت سورس
+      - name: Check out
         uses: actions/checkout@v7
 
-      - name: خواندن نسخه و بررسی هم‌خوانی با تگ
+      - name: Read version and match it to the tag
         run: |
           set -euo pipefail
           VERSION=$(sed -n "s/^self\.APP_VERSION *= *'\([^']*\)'.*/\1/p" www/version.js)
           VERSION_CODE=$(sed -n "s/^self\.APP_VERSION_CODE *= *\([0-9]*\).*/\1/p" www/version.js)
           APP_ID=$(python3 -c "import json;print(json.load(open('capacitor.config.json'))['appId'])")
           if [ -z "$VERSION" ] || [ -z "$VERSION_CODE" ]; then
-            echo "نسخه از www/version.js خوانده نشد"; exit 1
+            echo "Could not read the version from www/version.js"; exit 1
           fi
-          # تگ‌هایی که به -test ختم می‌شوند بیلد آزمایشی‌اند: از قید هم‌خوانی نسخه
-          # معافند و خروجی‌شان pre-release منتشر می‌شود تا با انتشار واقعی قاطی نشود.
+          # Tags ending in -test are trial builds: they skip the version match and
+          # publish as a pre-release so they never mix with a real release.
           case "$GITHUB_REF_NAME" in
             *-test)
-              echo "بیلد آزمایشی با تگ ${GITHUB_REF_NAME}"
+              echo "Trial build for tag ${GITHUB_REF_NAME}"
               echo "IS_TEST=1" >> "$GITHUB_ENV"
               ;;
             *)
               if [ "v$VERSION" != "${GITHUB_REF_NAME}" ]; then
-                echo "تگ ${GITHUB_REF_NAME} با نسخه‌ی www/version.js یعنی v$VERSION نمی‌خواند"
+                echo "Tag ${GITHUB_REF_NAME} does not match www/version.js (v$VERSION)"
                 exit 1
               fi
               echo "IS_TEST=0" >> "$GITHUB_ENV"
@@ -59,37 +59,37 @@ jobs:
           echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
           echo "APP_ID=$APP_ID" >> "$GITHUB_ENV"
 
-      - name: نصب جاوا
+      - name: Set up Java
         uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
 
-      # نسخه‌ی گردل از همان فایلی خوانده می‌شود که اف‌دروید می‌خواند، وگرنه
-      # CI با یک نسخه سبز می‌شود و اف‌دروید با نسخه‌ی دیگری می‌سازد.
-      - name: خواندن نسخه‌ی گردل از فایل wrapper
+      # The Gradle version comes from the same file F-Droid reads; otherwise CI
+      # goes green on one version while F-Droid builds with another (#42).
+      - name: Read Gradle version from the wrapper
         id: gradleversion
         run: |
           set -euo pipefail
           V=$(sed -n 's|.*/gradle-\([0-9][^-]*\)-bin\.zip.*|\1|p' android/gradle/wrapper/gradle-wrapper.properties)
-          [ -n "$V" ] || { echo "نسخه‌ی گردل از gradle-wrapper.properties خوانده نشد"; exit 1; }
-          echo "نسخه‌ی گردل: $V"
+          [ -n "$V" ] || { echo "Could not read the Gradle version from gradle-wrapper.properties"; exit 1; }
+          echo "Gradle version: $V"
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
-      - name: نصب گریدل
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: ${{ steps.gradleversion.outputs.version }}
 
-      - name: بازسازی کلید امضا از سکرت
+      - name: Restore the signing key from secrets
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
           if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
-            echo "سکرت ANDROID_KEYSTORE_BASE64 تعریف نشده."
-            echo "چهار سکرت امضا باید در سطح سازمان choganhq با دسترسی به ریپوهای عمومی تعریف شوند:"
-            echo "  base64 -w0 <کی‌استور> | gh secret set ANDROID_KEYSTORE_BASE64 --org choganhq --visibility all"
+            echo "Secret ANDROID_KEYSTORE_BASE64 is not set."
+            echo "The four signing secrets must be set at the choganhq org level, available to public repositories:"
+            echo "  base64 -w0 <keystore> | gh secret set ANDROID_KEYSTORE_BASE64 --org choganhq --visibility all"
             echo "  gh secret set ANDROID_KEYSTORE_PASSWORD --org choganhq --visibility all"
             echo "  gh secret set ANDROID_KEY_ALIAS         --org choganhq --visibility all"
             echo "  gh secret set ANDROID_KEY_PASSWORD      --org choganhq --visibility all"
@@ -97,7 +97,7 @@ jobs:
           fi
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
 
-      - name: بیلد نسخه‌ی ریلیز
+      - name: Build release APK
         working-directory: android
         env:
           ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/release.jks
@@ -106,7 +106,7 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: gradle --no-daemon assembleRelease
 
-      - name: بررسی امضا و نام‌گذاری فایل
+      - name: Check signature and name the file
         run: |
           set -euo pipefail
           SRC=android/app/build/outputs/apk/release/app-release.apk
@@ -121,11 +121,11 @@ jobs:
           sha256sum "$APK" | tee "$APK.sha256"
           echo "APK=$APK" >> "$GITHUB_ENV"
 
-      - name: پاک کردن کلید
+      - name: Remove the key
         if: always()
         run: rm -f "$RUNNER_TEMP/release.jks"
 
-      - name: انتشار در Releases
+      - name: Publish to Releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -135,8 +135,8 @@ jobs:
               --notes "Trial build for checking the workflow. Delete it when you are done:
             gh release delete ${GITHUB_REF_NAME} --cleanup-tag --yes" || true
           else
-            # توضیح انتشار گیت‌هاب انگلیسی است چون مخاطبش جهانی است.
-            # نسخه‌ی فارسی همان فایل برای اف‌دروید سر جایش می‌ماند.
+            # GitHub release notes are English for a global audience; the Persian
+            # changelog stays in place for F-Droid.
             NOTES="fastlane/metadata/android/en-US/changelogs/${VERSION_CODE}.txt"
             if [ -f "$NOTES" ]; then
               gh release create "$GITHUB_REF_NAME" --title "${GITHUB_REF_NAME}" --notes-file "$NOTES" \
