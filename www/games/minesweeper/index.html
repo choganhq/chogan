@@ -947,7 +947,17 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
   /* ----------------------------------------------------------- شروع */
 
   var saved = ctx.loadSave();
-  if (dailyDate) {
+  // هسته برای هر روز خانه‌ی ذخیره‌ی جدا دارد، ولی این بازی روزانه را همیشه از نو
+  // می‌ساخت و پیشرفت نیمه‌کاره‌ی همان روز گم می‌شد (#132). اول ذخیره‌ی همین روز.
+  var resume = saved && saved.s && saved.s.started && !saved.s.done &&
+    (saved.s.daily || null) === (dailyDate || null);
+  if (resume) {
+    if (saved.prefs && !dailyDate) prefs = saved.prefs;
+    S = saved.s;
+    buildBoard();
+    render();
+    startTimer();
+  } else if (dailyDate) {
     var d = C.daily('minesweeper', dailyDate);
     newGame('medium', d.rng, dailyDate);
     // در حالت روزانه خانه‌ی اولین کلیک هم از بذر می‌آید، وگرنه تخته‌ی هر بازیکن
@@ -961,12 +971,6 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
       C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec.label });
     }
     ctx.tutorialIfNew(TUT);
-  } else if (saved && saved.s && saved.s.started && !saved.s.done) {
-    if (saved.prefs) prefs = saved.prefs;
-    S = saved.s;
-    buildBoard();
-    render();
-    startTimer();
   } else {
     newGame(prefs.size || 'small');
     ctx.tutorialIfNew(TUT);
