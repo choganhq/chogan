@@ -26,7 +26,7 @@
   C.strings({
     fa: {
       slogan: 'بازی‌های کوچک، تمام‌شدنی، بدون مزاحمت',
-      allGames: 'بازی‌ها', pickDay: 'یک روز را انتخاب کن',
+      allGames: 'بازی‌ها', viewGrid: 'نمایش دو ستونه', viewList: 'نمایش یک ستونه', pickDay: 'یک روز را انتخاب کن',
       seasonTable: 'جدول فصل', myTier: 'رده‌ی تو',
       toNext: 'تا صعود', keepAbove: 'کف ماندن در رده',
       unlockAsk: 'با {n} سکه باز شود؟', mascot: 'شخصیت', palette: 'پالت منو',
@@ -49,7 +49,7 @@
     },
     en: {
       slogan: 'Small games you can actually finish',
-      allGames: 'Games', pickDay: 'Pick a day',
+      allGames: 'Games', viewGrid: 'Two-column view', viewList: 'One-column view', pickDay: 'Pick a day',
       seasonTable: 'Season table', myTier: 'Your tier',
       toNext: 'to promotion', keepAbove: 'stay above',
       unlockAsk: 'Unlock for {n} coins?', mascot: 'Character', palette: 'Menu palette',
@@ -72,7 +72,7 @@
     },
     zh: {
       slogan: '小而能玩完的游戏，不打扰你',
-      allGames: '游戏', pickDay: '选择一天',
+      allGames: '游戏', viewGrid: '双列显示', viewList: '单列显示', pickDay: '选择一天',
       seasonTable: '赛季榜', myTier: '你的段位',
       toNext: '距晋级', keepAbove: '保级线',
       unlockAsk: '花 {n} 金币解锁？', mascot: '角色', palette: '菜单配色',
@@ -95,7 +95,7 @@
     },
     de: {
       slogan: 'Kleine Spiele, die du wirklich zu Ende spielst',
-      allGames: 'Spiele', pickDay: 'Tag wählen',
+      allGames: 'Spiele', viewGrid: 'Zwei Spalten', viewList: 'Eine Spalte', pickDay: 'Tag wählen',
       seasonTable: 'Saisontabelle', myTier: 'Deine Stufe',
       toNext: 'bis zum Aufstieg', keepAbove: 'zum Halten',
       unlockAsk: 'Für {n} Münzen freischalten?', mascot: 'Figur', palette: 'Menüfarben',
@@ -275,13 +275,22 @@
     ]);
     page.appendChild(hero);
 
-    var sec = el('div', { class: 'ch-section' }, [sectionHead(C.t('allGames'))]);
-    var grid = el('div', { class: 'ch-games' });
+    // پیش‌فرض کاشی‌های دو ستونه است؛ هجده بازی یک‌ستونه روی گوشی سه صفحه اسکرول بود (#149)
+    var asList = C.state.settings.gameView === 'list';
+    var viewBtn = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t(asList ? 'viewGrid' : 'viewList'), title: C.t(asList ? 'viewGrid' : 'viewList'),
+      onclick: function () {
+        C.state.settings.gameView = asList ? 'grid' : 'list';
+        C.store.set('settings', C.state.settings);
+        C.feedback('select');
+        render();
+      } }, [C.icon(asList ? 'grid' : 'list', 20)]);
+    var sec = el('div', { class: 'ch-section' }, [sectionHead(C.t('allGames'), viewBtn)]);
+    var grid = el('div', { class: 'ch-games' + (asList ? '' : ' ch-games--grid') });
     GAMES.forEach(function (g, i) {
       var badges = el('div', { class: 'ch-game__meta' });
       if (C.hasResume(g.id)) badges.appendChild(el('span', { class: 'ch-badge ch-badge--good', text: C.t('continueBadge') }));
       if (isNew(g)) badges.appendChild(el('span', { class: 'ch-badge ch-badge--accent', text: C.t('newBadge') }));
-      var bl = bestLine(g);
+      var bl = asList && bestLine(g);
       if (bl) badges.appendChild(el('span', { class: 'ch-badge', text: bl }));
 
       var card = el('div', {
@@ -292,7 +301,7 @@
         el('div', { class: 'ch-game__icon' }, [el('img', { src: g.icon, alt: '', width: 62, height: 62 })]),
         el('div', { class: 'ch-game__body' }, [
           el('div', { class: 'ch-game__name', text: gname(g) }),
-          el('div', { class: 'ch-game__sum', text: gsum(g) }),
+          asList ? el('div', { class: 'ch-game__sum', text: gsum(g) }) : null,
           badges
         ])
       ]);
