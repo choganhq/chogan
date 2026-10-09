@@ -1,0 +1,115 @@
+name: Export signing key for Play App Signing
+
+# Play gives a new app a Google-generated signing key. Play builds would then be
+# signed differently from GitHub Releases and F-Droid, and nobody could switch
+# sources without uninstalling and losing progress (#157). Play Console's
+# "Export and upload a key from Java keystore" takes our key encrypted with
+# Google's PEPK tool instead. The keystore lives only in the org secrets, so the
+# export runs here. The output is encrypted to Play's public key: only Google can
+# read it. https://support.google.com/googleplay/android-developer/answer/9842756
+
+on:
+  workflow_dispatch:
+    inputs:
+      encryption_key:
+        description: 'encryption_public_key.pem from Play Console (the full PEM text)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  PEPK_URL: https://www.gstatic.com/play-apps-publisher-rapid/signing-tool/prod/pepk.jar
+  # Our private key goes into this jar, so a jar that changed since it was
+  # reviewed must not run. If Google ships a new one, review it and update this.
+  PEPK_SHA256: aaccc0774b240aa5304bdad2a49865e92f229ca73209ecb6eaafe75dc858e24e
+
+jobs:
+  export:
+    name: Export key with PEPK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Download and verify PEPK
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/pepk.jar" "$PEPK_URL"
+          echo "$PEPK_SHA256  $RUNNER_TEMP/pepk.jar" | sha256sum -c -
+
+      # The PEM arrives through env, never through ${{ }} inside the script
+      - name: Write Play's encryption public key
+        env:
+          ENCRYPTION_KEY: ${{ inputs.encryption_key }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$ENCRYPTION_KEY" | tr -d '\r' > "$RUNNER_TEMP/encryption_public_key.pem"
+          grep -q -- '-----BEGIN PUBLIC KEY-----' "$RUNNER_TEMP/encryption_public_key.pem" \
+            && grep -q -- '-----END PUBLIC KEY-----' "$RUNNER_TEMP/encryption_public_key.pem" \
+            || { echo "The input is not a PEM public key"; exit 1; }
+          openssl pkey -pubin -in "$RUNNER_TEMP/encryption_public_key.pem" -noout \
+            || { echo "The PEM public key does not parse"; exit 1; }
+
+      - name: Restore the signing key from secrets
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          [ -n "${ANDROID_KEYSTORE_BASE64:-}" ] || { echo "Secret ANDROID_KEYSTORE_BASE64 is not set"; exit 1; }
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+      # Play must end up with exactly the key that signs our releases
+      - name: Check the key is the permanent Chogan key
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          keytool -list -v -keystore "$RUNNER_TEMP/release.jks" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" \
+            | tr -d ':' | tr 'A-F' 'a-f' > "$RUNNER_TEMP/cert.txt"
+          grep -q 'c3f70a1af8a45558678d1d9b413415d1b0a4c3208835ce78c1f37c4a3a008839' "$RUNNER_TEMP/cert.txt" \
+            || { echo "The keystore key is not the permanent Chogan key"; exit 1; }
+          echo "Key fingerprint matches c3f70a1a…a008839"
+
+      - name: Export with PEPK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          java -jar "$RUNNER_TEMP/pepk.jar" \
+            --keystore="$RUNNER_TEMP/release.jks" \
+            --alias="$ANDROID_KEY_ALIAS" \
+            --keystore-pass="$ANDROID_KEYSTORE_PASSWORD" \
+            --key-pass="$ANDROID_KEY_PASSWORD" \
+            --output=chogan-play-signing-key.zip \
+            --include-cert \
+            --rsa-aes-encryption \
+            --encryption-key-path="$RUNNER_TEMP/encryption_public_key.pem"
+          [ -s chogan-play-signing-key.zip ] || { echo "PEPK wrote no output"; exit 1; }
+          unzip -l chogan-play-signing-key.zip
+          # What Play will install as the app signing key is the certificate in this zip
+          unzip -l chogan-play-signing-key.zip | grep -q ' encryptedPrivateKey$' || { echo "No encryptedPrivateKey in the zip"; exit 1; }
+          FP=$(unzip -p chogan-play-signing-key.zip certificate.pem | openssl x509 -noout -fingerprint -sha256 | sed 's/.*=//; s/://g' | tr 'A-F' 'a-f')
+          [ "$FP" = "c3f70a1af8a45558678d1d9b413415d1b0a4c3208835ce78c1f37c4a3a008839" ] \
+            || { echo "certificate.pem in the zip is $FP, not the Chogan key"; exit 1; }
+          echo "certificate.pem in the zip: $FP"
+          sha256sum chogan-play-signing-key.zip
+
+      - name: Remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks" "$RUNNER_TEMP/cert.txt"
+
+      - name: Upload the encrypted key as artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: play-signing-key
+          path: chogan-play-signing-key.zip
+          retention-days: 1
+          if-no-files-found: error
