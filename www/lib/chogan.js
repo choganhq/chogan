@@ -1588,6 +1588,17 @@
 
   ui.toast = function (o) {
     var host = ui.toastHost();
+    // همان پیام دوباره روی هم چیده نمی‌شود: پیام موجود دوباره زمان می‌گیرد. با چند ضربه‌ی
+    // پشت سر هم ده اعلان یکسان کل صفحه را می‌پوشاند (#139).
+    var key = (o.title || '') + '\u0000' + (o.sub || '');
+    for (var i = 0; i < host.children.length; i++) {
+      var old = host.children[i];
+      if (old._chKey === key && !old.classList.contains('ch-toast--out')) {
+        clearTimeout(old._chTimer);
+        old._chTimer = setTimeout(old._chHide, o.ms || 3200);
+        return old;
+      }
+    }
     var node = el('div', { class: 'ch-toast' }, [
       el('div', { class: 'ch-toast__icon' }, [Chogan.icon(o.icon || 'star', 26)]),
       el('div', { class: 'ch-grow' }, [
@@ -1595,11 +1606,13 @@
         o.sub ? el('div', { class: 'ch-toast__s', text: o.sub }) : null
       ])
     ]);
-    host.appendChild(node);
-    setTimeout(function () {
+    node._chKey = key;
+    node._chHide = function () {
       node.classList.add('ch-toast--out');
       setTimeout(function () { if (node.parentNode) node.parentNode.removeChild(node); }, 260);
-    }, o.ms || 3200);
+    };
+    host.appendChild(node);
+    node._chTimer = setTimeout(node._chHide, o.ms || 3200);
     return node;
   };
 
