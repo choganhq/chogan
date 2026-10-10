@@ -1514,6 +1514,59 @@
     }
   };
 
+  /* ======================================================= playing cards */
+  // Shared by every card game (Pasur, Hokm): a game never draws its own deck (#178).
+  // A card is rank << 2 | suit: rank 0 ace … 9 ten, 10 jack, 11 queen, 12 king;
+  // suit 0 clubs, 1 diamonds, 2 hearts, 3 spades.
+  Chogan.cards = (function () {
+    var GLYPH = ['♣︎', '♦︎', '♥︎', '♠︎'];
+    var RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+    var GOLD = '#D4A72C', SKIN = '#F2D3B1', INK = '#2B2622';
+    // Portraits for jack, queen and king, drawn for Chogan: a plain letter on a face
+    // card read like a misprint (#171). The robe takes the suit's colour through
+    // currentColor; gold and skin are fixed like printed ink.
+    function faceSvg(rank) {
+      var robe = '<path d="M5 44 Q7 30 20 29 Q33 30 35 44Z" fill="currentColor"/>' +
+        '<path d="M14 30 Q20 35 26 30" fill="none" stroke="' + GOLD + '" stroke-width="1.6"/>';
+      var eyes = '<circle cx="17.4" cy="19.5" r=".9" fill="' + INK + '"/><circle cx="22.6" cy="19.5" r=".9" fill="' + INK + '"/>';
+      var s = '<svg viewBox="0 0 40 44" xmlns="http://www.w3.org/2000/svg">';
+      if (rank === 12) {          // king: tall crown, full beard
+        s += robe + '<circle cx="20" cy="20" r="6.8" fill="' + SKIN + '"/>' + eyes +
+          '<path d="M13.4 21 Q20 34 26.6 21 Q20 26 13.4 21Z" fill="#6B4226"/>' +
+          '<path d="M12 14 L13 4 L16.5 10 L20 2 L23.5 10 L27 4 L28 14Z" fill="' + GOLD + '"/>' +
+          '<circle cx="20" cy="8.5" r="1.3" fill="currentColor"/>';
+      } else if (rank === 11) {   // queen: small crown, long hair, necklace
+        s += '<path d="M11.5 22 Q11 10 20 10 Q29 10 28.5 22 L30.5 33 Q20 29 9.5 33Z" fill="#3A2A1A"/>' + robe +
+          '<circle cx="20" cy="20" r="6.4" fill="' + SKIN + '"/>' + eyes +
+          '<path d="M18 23.6 Q20 24.8 22 23.6" fill="none" stroke="#B5524A" stroke-width=".9"/>' +
+          '<path d="M14 13 L15 7 L17.5 10 L20 5 L22.5 10 L25 7 L26 13Z" fill="' + GOLD + '"/>' +
+          '<circle cx="20" cy="33" r="1.6" fill="' + GOLD + '"/>';
+      } else {                    // jack: cap with a feather
+        s += robe + '<circle cx="20" cy="20.5" r="6.4" fill="' + SKIN + '"/>' + eyes +
+          '<path d="M12.6 16 Q13 8 20.5 8 Q28 8.5 28 16Z" fill="currentColor"/>' +
+          '<path d="M26.5 10 Q34 3 34.5 12" fill="none" stroke="' + GOLD + '" stroke-width="1.8" stroke-linecap="round"/>' +
+          '<circle cx="18" cy="37" r="1" fill="' + GOLD + '"/><circle cx="22" cy="37" r="1" fill="' + GOLD + '"/>';
+      }
+      return s + '</svg>';
+    }
+    function rank(c) { return c >> 2; }
+    function suit(c) { return c & 3; }
+    function isRed(c) { return suit(c) === 1 || suit(c) === 2; }
+    function label(c) { return RANKS[rank(c)] + GLYPH[suit(c)]; }
+    // A card face as a button; extra classes carry the game's own states
+    function cardEl(c, extra) {
+      var r = rank(c), kids = [el('span', { class: 'ch-pcard__r', text: RANKS[r] })];
+      if (r >= 10) {
+        kids.push(el('span', { class: 'ch-pcard__mini', text: GLYPH[suit(c)] }));
+        kids.push(el('span', { class: 'ch-pcard__face', html: faceSvg(r) }));
+      } else kids.push(el('span', { class: 'ch-pcard__s', text: GLYPH[suit(c)] }));
+      return el('button', { class: 'ch-pcard' + (isRed(c) ? ' ch-pcard--red' : '') + (extra ? ' ' + extra : ''),
+        type: 'button', 'aria-label': label(c) }, kids);
+    }
+    function back(extra) { return el('div', { class: 'ch-pback' + (extra ? ' ' + extra : ''), 'aria-hidden': 'true' }); }
+    return { GLYPH: GLYPH, RANKS: RANKS, rank: rank, suit: suit, isRed: isRed, label: label, faceSvg: faceSvg, el: cardEl, back: back };
+  })();
+
   Chogan.icon = function (name, size, cls) {
     var d = ICON[name] || ICON.help;
     var s = size || 24;
