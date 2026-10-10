@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2288;
+const MIN_CHECKS = 2299;
 
 function ok(cond, msg) {
   checks++;
@@ -289,6 +289,23 @@ function testNonogram() {
   head('نونوگرام');
   const E = loadEngine('nonogram', 'NonogramEngineFactory');
   const J = (x) => JSON.stringify(x);
+
+  // Solved-board colours (#166): a fixed gradient per puzzle, the same every time
+  ok(typeof E.paletteFor === 'function' && typeof E.cellColour === 'function', 'the engine colours the solved board');
+  if (typeof E.cellColour === 'function') {
+    ok(E.PALETTES.length > 0 && E.PALETTES.every((p) => p.length === 2 && p.every((c) => /^#[0-9A-F]{6}$/.test(c))), 'palettes are pairs of fixed hex colours');
+    const pal = E.PALETTES[0];
+    ok(E.cellColour(15, 0, pal) === pal[0] && E.cellColour(15, 224, pal) === pal[1], 'the gradient runs from the first colour (top left) to the second (bottom right)');
+    const cells = new Array(100).fill(E.BLANK); [3, 17, 42, 88].forEach((i) => { cells[i] = E.FILL; });
+    const marked = cells.slice(); marked[5] = E.MARK;
+    ok(E.paletteFor(cells) === E.paletteFor(cells.slice()) && E.paletteFor(cells) === E.paletteFor(marked), 'the same solution always gets the same colours; crosses do not change them');
+    const seen = new Set();
+    for (let s = 0; s < 40; s++) { const g = new Array(100).fill(E.BLANK); for (let k = 0; k < 30; k++) g[(s * 37 + k * 11) % 100] = E.FILL; seen.add(E.paletteFor(g)); }
+    ok(seen.size >= 3, 'different boards get different palettes (' + seen.size + ' of ' + E.PALETTES.length + ')');
+    const html = fs.readFileSync(path.join(ROOT, 'www/games/nonogram/index.html'), 'utf8');
+    ok(/var pal = S\.done \? E\.paletteFor\(S\.cells\) : null;/.test(html) && /g\.fillStyle = pal \? E\.cellColour\(n, i, pal\) : col\.game;/.test(html), 'the board is coloured only once solved');
+    ok(/var pal = E\.paletteFor\(snap\.cells\);/.test(html) && /g\.fillStyle = E\.cellColour\(n, i, pal\);/.test(html), 'the share card uses the same colours');
+  }
 
   // عددهای یک خط، از روی قانون: طول دسته‌های پر پشت سر هم به ترتیب
   ok(J(E.clueOf([1, 1, 0, 1, 0, 0, 1, 1, 1])) === '[2,1,3]', 'عددهای خط [۲،۱،۳] درست‌اند');
