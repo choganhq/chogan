@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2323;
+const MIN_CHECKS = 2328;
 
 function ok(cond, msg) {
   checks++;
@@ -3296,10 +3296,12 @@ function testPasur() {
   const E = loadEngine('pasur', 'PasurEngineFactory');
   const P = (str) => str.split(' ').map(E.parse);
 
-  // Card art (#171): our own face portraits, a Persian-pattern back and a shuffle
+  // Card art (#171), drawn once in the core and shared by every card game (#178)
   const psPage = fs.readFileSync(path.join(ROOT, 'www/games/pasur/index.html'), 'utf8');
-  const fm = psPage.match(/function faceSvg\(rank\) \{[\s\S]*?\n  \}\n/);
-  ok(!!fm, 'face cards are drawn by faceSvg');
+  const coreJs = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  const coreCss = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8');
+  const fm = coreJs.match(/    function faceSvg\(rank\) \{[\s\S]*?\n    \}\n/);
+  ok(!!fm, 'face cards are drawn by the core faceSvg');
   if (fm) {
     const box = { GOLD: '#D4A72C', SKIN: '#F2D3B1', INK: '#2B2622' };
     vm.createContext(box);
@@ -3308,8 +3310,11 @@ function testPasur() {
     ok(faces.every((s) => /^<svg viewBox="0 0 40 44"[^>]*>[\s\S]*<\/svg>$/.test(s) && /fill="currentColor"/.test(s)), 'jack, queen and king are SVG portraits whose robe takes the suit colour');
     ok(new Set(faces).size === 3, 'the three portraits are different');
   }
-  ok(/if \(r >= 10\) \{\s*kids\.push\(el\('span', \{ class: 'ps-card__mini'/.test(psPage) && /el\('span', \{ class: 'ps-card__face', html: faceSvg\(r\) \}\)/.test(psPage), 'only jack, queen and king get a portrait; number cards keep the large suit');
-  ok(/\.ps-back \{[\s\S]*?url\("data:image\/svg\+xml,[^"]*rotate\(45 10 10\)[^"]*"\)/.test(psPage), 'the card back is the eight-pointed star tile, inline so it works offline');
+  ok(/if \(r >= 10\) \{\s*kids\.push\(el\('span', \{ class: 'ch-pcard__mini'/.test(coreJs) && /el\('span', \{ class: 'ch-pcard__face', html: faceSvg\(r\) \}\)/.test(coreJs), 'only jack, queen and king get a portrait; number cards keep the large suit');
+  ok(/\.ch-pback \{[\s\S]*?url\("data:image\/svg\+xml,[^"]*rotate\(45 10 10\)[^"]*"\)/.test(coreCss), 'the card back is the eight-pointed star tile, inline so it works offline');
+  // a game never carries its own copy of the deck (#178)
+  ok(psPage.indexOf('function faceSvg') < 0 && psPage.indexOf('data:image/svg+xml') < 0 && /return C\.cards\.el\(c, 'ps-card'/.test(psPage) && /C\.cards\.back\(\)/.test(psPage),
+    'Pasur draws its cards with the shared core, not a copy');
   ok(/prefers-reduced-motion: reduce\)'\)\.matches;\s*if \(reduce\) \{ done\(\); return; \}/.test(psPage), 'the shuffle is skipped with reduced motion');
   ok(/function canHumanMove\(\) \{ return S && !S\.done && S\.turn === 0 && !dealing; \}/.test(psPage) && /shuffleAnim\(function \(\) \{ paint\(\); maybeAi\(\); \}\);/.test(psPage), 'nobody moves until the shuffle has finished');
   const N = (arr) => arr.map(E.name).sort().join(' ');
