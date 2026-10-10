@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2299;
+const MIN_CHECKS = 2307;
 
 function ok(cond, msg) {
   checks++;
@@ -303,8 +303,8 @@ function testNonogram() {
     for (let s = 0; s < 40; s++) { const g = new Array(100).fill(E.BLANK); for (let k = 0; k < 30; k++) g[(s * 37 + k * 11) % 100] = E.FILL; seen.add(E.paletteFor(g)); }
     ok(seen.size >= 3, 'different boards get different palettes (' + seen.size + ' of ' + E.PALETTES.length + ')');
     const html = fs.readFileSync(path.join(ROOT, 'www/games/nonogram/index.html'), 'utf8');
-    ok(/var pal = S\.done \? E\.paletteFor\(S\.cells\) : null;/.test(html) && /g\.fillStyle = pal \? E\.cellColour\(n, i, pal\) : col\.game;/.test(html), 'the board is coloured only once solved');
-    ok(/var pal = E\.paletteFor\(snap\.cells\);/.test(html) && /g\.fillStyle = E\.cellColour\(n, i, pal\);/.test(html), 'the share card uses the same colours');
+    ok(/var pal = S\.done \? E\.paletteFor\(S\.cells\) : null;/.test(html) && /g\.fillStyle = pal \? solvedColour\(snapNow, i, pal\) : col\.game;/.test(html), 'the board is coloured only once solved');
+    ok(/var pal = E\.paletteFor\(snap\.cells\);/.test(html) && /g\.fillStyle = solvedColour\(snap, i, pal\);/.test(html), 'the share card uses the same colours');
   }
 
   // عددهای یک خط، از روی قانون: طول دسته‌های پر پشت سر هم به ترتیب
@@ -3742,6 +3742,50 @@ function testAdiProof() {
   ok(/retention-days: 1/.test(y), 'artifact فقط یک روز می‌ماند');
 }
 
+/* ------------------------------------------------ Nonogram picture puzzles */
+// Hand-drawn pictures (#172). A picture the line solver can't finish has either
+// several solutions or needs guessing, and the player could solve it "wrong" and
+// never see the picture; such a picture is redrawn, never shipped.
+function testNonogramPictures() {
+  head('Nonogram picture puzzles');
+  const E = loadEngine('nonogram', 'NonogramEngineFactory');
+  const file = path.join(ROOT, 'www/games/nonogram/pictures.js');
+  ok(fs.existsSync(file), 'www/games/nonogram/pictures.js exists');
+  if (!fs.existsSync(file)) return;
+  const box = {};
+  vm.createContext(box);
+  vm.runInContext(fs.readFileSync(file, 'utf8'), box);
+  const P = box.NONOGRAM_PICTURES || [];
+  ok(P.length >= 30, 'at least 30 pictures (' + P.length + ')');
+  const ids = new Set(P.map((p) => p.id));
+  ok(ids.size === P.length, 'picture ids are unique');
+  const bad = [];
+  for (const p of P) {
+    const n = p.rows.length;
+    if ([10, 15].indexOf(n) < 0 || p.rows.some((r) => r.length !== n)) { bad.push(p.id + ' size'); continue; }
+    if (!['fa', 'en', 'zh', 'de'].every((l) => typeof p.name[l] === 'string' && p.name[l].length)) { bad.push(p.id + ' name'); continue; }
+    const letters = [...new Set(p.rows.join('').replace(/\./g, ''))];
+    if (!letters.length || letters.some((c) => !/^#[0-9A-F]{6}$/i.test(p.col[c] || ''))) { bad.push(p.id + ' colour'); continue; }
+    const grid = [];
+    for (const r of p.rows) for (const ch of r) grid.push(ch === '.' ? E.BLANK : E.FILL);
+    const cl = E.cluesOf(grid, n);
+    if (cl.rows.length !== n || cl.cols.length !== n) { bad.push(p.id + ' clues'); continue; }
+    const res = E.solve(cl.rows, cl.cols);
+    if (!res.solved || res.grid.some((v, i) => v !== grid[i])) bad.push(p.id + ' not unique (' + res.grid.filter((v) => v === -1).length + ' cells open)');
+  }
+  ok(bad.length === 0, 'every picture has one solution the line solver reaches, a name in 4 languages and a colour per letter' + (bad.length ? ': ' + bad.join(', ') : ''));
+  // the check itself must be able to fail: two separated cells in a 10×10 are ambiguous
+  const amb = new Array(100).fill(E.BLANK); amb[0] = E.FILL; amb[11] = E.FILL;
+  const ac = E.cluesOf(amb, 10);
+  ok(!E.solve(ac.rows, ac.cols).solved, 'control: an ambiguous picture is caught by the solver');
+  const page = fs.readFileSync(path.join(ROOT, 'www/games/nonogram/index.html'), 'utf8');
+  ok(/<script src="pictures\.js"><\/script>/.test(page), 'the page loads pictures.js');
+  ok(/function solvedColour\(snap, i, pal\) \{\n    var p = snap\.pic && picById\(snap\.pic\);/.test(page) && /g\.fillStyle = pal \? solvedColour\(snapNow, i, pal\) : col\.game;/.test(page) && /g\.fillStyle = solvedColour\(snap, i, pal\);/.test(page), 'board and share card both paint the picture colours');
+  const gj = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games;
+  const ng = gj.find((g) => g.id === 'nonogram');
+  ok(ng && (ng.files || []).indexOf('games/nonogram/pictures.js') >= 0, 'pictures.js is precached for offline play');
+}
+
 /* ------------------------------------------------ Android image save and share */
 // The WebView ignores <a download> and has no navigator.share, so in the Android
 // app the result card's Save image and Share did nothing (#168). A small Java
@@ -4266,6 +4310,7 @@ testPepkExport();
 testPrivacyPage();
 testStoreMetadata();
 testAndroidShare();
+testNonogramPictures();
 testTd();
 testVersionStamp();
 testDeployGate();
