@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2307;
+const MIN_CHECKS = 2316;
 
 function ok(cond, msg) {
   checks++;
@@ -3417,6 +3417,31 @@ function testMahjong() {
   head('ماهجونگ');
   const E = loadEngine('mahjong', 'MahjongEngineFactory');
   const sizes = { small: 72, medium: 108, turtle: 144 };
+
+  // Tiles are sized to the tiles still on the table and the board zooms (#167)
+  ok(typeof E.bounds === 'function', 'the engine reports the bounds of the remaining tiles');
+  if (typeof E.bounds === 'function') {
+    const T = E.deal('turtle', rng(167));
+    const pos = E.LAYOUTS.turtle;
+    const full = E.bounds(T);
+    ok(full.minX === Math.min(...pos.map((p) => p[0])) && full.maxX === Math.max(...pos.map((p) => p[0])) &&
+      full.maxY === Math.max(...pos.map((p) => p[1])) && full.maxZ === Math.max(...pos.map((p) => p[2])), 'a full turtle spans the whole layout');
+    // remove every tile right of the middle column: the box must shrink to the left half
+    const mid = (full.minX + full.maxX) / 2;
+    pos.forEach((p, i) => { if (p[0] > mid) T.gone[i] = true; });
+    const half = E.bounds(T);
+    ok(half.maxX <= mid && half.minX === full.minX, 'the box shrinks as tiles leave (' + half.maxX + ' ≤ ' + mid + ')');
+    const top = pos.map((p, i) => p[2] === full.maxZ ? i : -1).filter((i) => i >= 0);
+    const T2 = E.deal('turtle', rng(168));
+    top.forEach((i) => { T2.gone[i] = true; });
+    ok(E.bounds(T2).maxZ < full.maxZ, 'removing the top layer lowers the box height');
+    const page = fs.readFileSync(path.join(ROOT, 'www/games/mahjong/index.html'), 'utf8');
+    ok(/var b = E\.bounds\(S\);/.test(page), 'the page sizes tiles from the remaining tiles');
+    ok(/Z\.z = Math\.min\(3, Math\.max\(1, Z\.z\)\);/.test(page) && /Z\.x = bw <= W \? \(W - bw\) \/ 2 : Math\.min\(0, Math\.max\(W - bw, Z\.x\)\);/.test(page), 'zoom stays between 1× and 3× and the board never leaves the view');
+    ok(/if \(eatClick\) \{ e\.stopPropagation\(\); e\.preventDefault\(\);/.test(page), 'a drag or pinch does not also select the tile under the finger');
+    ok(/fitBtn\.addEventListener\('click', fitBoard\)/.test(page), 'a Fit board button returns to the whole board');
+    ok(/var mainH = ctx\.main\.clientHeight/.test(page), 'the board height comes from the main area, not from its own centred position');
+  }
   for (const k of Object.keys(sizes)) {
     const L = E.LAYOUTS[k] || [];
     ok(L.length === sizes[k] && new Set(L.map((p) => p.join(','))).size === L.length, k + ': ' + sizes[k] + ' جای یکتا');
