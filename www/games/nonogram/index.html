@@ -252,8 +252,34 @@ function NonogramEngineFactory() {
     return d.rows.every(Boolean) && d.cols.every(Boolean);
   }
 
+  // Colours for the solved board (#166). Random boards solve to noise, so a
+  // finished board in one flat colour looked like nothing; a diagonal gradient
+  // per puzzle makes it read as a finished piece. Fixed hexes, the same in light
+  // and dark, like a printed picture. The pair is picked from the solution, so a
+  // board (and its daily) always gets the same colours.
+  var PALETTES = [
+    ['#F2994A', '#9B51E0'], ['#2D9CDB', '#27AE60'], ['#EB5757', '#F2C94C'],
+    ['#56CCF2', '#6C5CE7'], ['#E86A92', '#F7B267'], ['#1ABC9C', '#2F80ED']
+  ];
+  function paletteFor(cells) {
+    var h = 7;
+    for (var i = 0; i < cells.length; i++) if (cells[i] === FILL) h = (h * 31 + i) % 1000003;
+    return PALETTES[h % PALETTES.length];
+  }
+  function cellColour(n, i, pal) {
+    var r = (i / n) | 0, c = i % n, t = n > 1 ? (r + c) / (2 * (n - 1)) : 0;
+    var hex = function (s, k) { return parseInt(s.slice(k, k + 2), 16); };
+    var out = '#';
+    for (var k = 1; k <= 5; k += 2) {
+      var v = Math.round(hex(pal[0], k) + (hex(pal[1], k) - hex(pal[0], k)) * t);
+      out += (v < 16 ? '0' : '') + v.toString(16);
+    }
+    return out.toUpperCase();
+  }
+
   var api = {
     BLANK: BLANK, FILL: FILL, MARK: MARK, FILL_MIN: FILL_MIN, FILL_MAX: FILL_MAX,
+    PALETTES: PALETTES, paletteFor: paletteFor, cellColour: cellColour,
     clueOf: clueOf, cluesOf: cluesOf, solveLine: solveLine, solve: solve,
     randomGrid: randomGrid, generate: generate, newState: newState,
     strokeCells: strokeCells, targetFor: targetFor, applyStroke: applyStroke,
@@ -461,12 +487,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = NonogramEn
       g.globalAlpha = 1;
     }
     var pad = Math.max(1, Math.round(s * 0.06));
+    var pal = S.done ? E.paletteFor(S.cells) : null;
     for (var i = 0; i < n * n; i++) {
       var v = S.cells[i];
       if (!v) continue;
       var rx = gx + (i % n) * s, ry = gy + ((i / n) | 0) * s;
       if (v === E.FILL) {
-        g.fillStyle = col.game;
+        g.fillStyle = pal ? E.cellColour(n, i, pal) : col.game;
         C.rrect(g, rx + pad, ry + pad, s - pad * 2, s - pad * 2, Math.max(1, s * 0.12));
         g.fill();
       } else if (v === E.MARK && !S.done) {
@@ -680,9 +707,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = NonogramEn
       g.fillStyle = col.surface2;
       C.rrect(g, ox, oy, side, side, 18);
       g.fill();
-      g.fillStyle = tok('--game') || '#4FA3A5';
+      var pal = E.paletteFor(snap.cells);
       for (var i = 0; i < n * n; i++) {
         if (snap.cells[i] !== E.FILL) continue;
+        g.fillStyle = E.cellColour(n, i, pal);
         C.rrect(g, ox + (i % n) * s + 1.5, oy + ((i / n) | 0) * s + 1.5, s - 3, s - 3, Math.max(2, s * 0.14));
         g.fill();
       }
