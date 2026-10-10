@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>حکم — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  :root { --hk-gold: #D4A72C; --ch-pface: var(--c-surface); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ch-pface: var(--c-surface-3); } }
+  :root[data-theme="dark"] { --ch-pface: var(--c-surface-3); }
+  .hk-wrap { --cw: clamp(40px, 12vw, 60px); width: 100%; max-width: 560px; display: flex; flex-direction: column; align-items: center; gap: var(--s-2); }
+  .hk-top { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; align-items: center; }
+  /* scoreboard: us · trump · them */
+  .hk-score { width: 100%; display: grid; grid-template-columns: 1fr auto 1fr; gap: var(--s-2); align-items: stretch; }
+  .hk-team { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 6px 8px;
+    background: var(--c-surface); border-radius: var(--r-md); box-shadow: var(--sh-1); font-size: var(--fs-xs, 12px); color: var(--c-text-dim); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .hk-team b { font-size: var(--fs-sm); color: var(--c-text); }
+  .hk-team--us { box-shadow: var(--sh-1), inset 0 -3px 0 var(--game); }
+  .hk-trumpbox { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 64px; padding: 4px 10px;
+    border-radius: var(--r-md); background: var(--ch-pface); border: 2px solid var(--hk-gold); color: var(--c-text); }
+  .hk-trumpbox--red { color: var(--c-bad); }
+  .hk-trumpbox__s { font-size: 28px; line-height: 1; }
+  .hk-trumpbox__l { font-size: var(--fs-xs, 12px); color: var(--c-text-dim); font-weight: 700; }
+  /* the table: partner on top, opponents on the sides, the trick in the middle.
+     Seats are physical places, so the table is never mirrored in right-to-left. */
+  .hk-table { direction: ltr; width: 100%; display: grid; grid-template-columns: auto 1fr auto; grid-template-rows: auto auto;
+    grid-template-areas: "top top top" "left trick right"; gap: var(--s-2); align-items: center;
+    background: var(--c-surface-2); border-radius: var(--r-lg); padding: 10px; box-shadow: inset 0 0 0 1px var(--c-line); }
+  .hk-seat { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 52px; }
+  .hk-seat--top { grid-area: top; }
+  .hk-seat--left { grid-area: left; }
+  .hk-seat--right { grid-area: right; }
+  .hk-seat__name { display: flex; align-items: center; gap: 4px; font-weight: 800; font-size: var(--fs-sm); padding: 2px 8px; border-radius: 99px; color: var(--c-text-dim); }
+  .hk-seat--partner .hk-seat__name { color: var(--game); }
+  .hk-seat--on .hk-seat__name { background: var(--game); color: #fff; }
+  .hk-crown { color: var(--hk-gold); display: inline-flex; }
+  .hk-fan { display: flex; }
+  .hk-fan .ch-pback { width: 16px; border-width: 1px; border-radius: 3px; background-size: 6px 6px; }
+  .hk-fan .ch-pback + .ch-pback { margin-left: -10px; }
+  .hk-seat--left .hk-fan, .hk-seat--right .hk-fan { flex-direction: column; }
+  .hk-seat--left .hk-fan .ch-pback + .ch-pback, .hk-seat--right .hk-fan .ch-pback + .ch-pback { margin-left: 0; margin-top: -18px; }
+  .hk-trick { grid-area: trick; position: relative; height: calc(var(--cw) * 1.4 * 2.3); min-width: calc(var(--cw) * 2.6); }
+  .hk-tcard { --pw: var(--cw); position: absolute; }
+  .hk-tcard--b { left: 50%; bottom: 0; transform: translateX(-50%); }
+  .hk-tcard--t { left: 50%; top: 0; transform: translateX(-50%); }
+  .hk-tcard--l { left: 0; top: 50%; transform: translateY(-50%); }
+  .hk-tcard--r { right: 0; top: 50%; transform: translateY(-50%); }
+  .hk-tcard--win { box-shadow: 0 0 0 3px var(--hk-gold), var(--sh-2); z-index: 2; }
+  .hk-tcard[disabled] { opacity: 1; cursor: default; }
+  /* Your hand in up to two rows of seven, no overlap: overlapped, a phone showed only a
+     26px strip of each card and a tap on its middle hit the next one */
+  .hk-hand { direction: ltr; width: 100%; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; padding-top: 12px;
+    min-height: calc((var(--pw, 56px) * 1.4) * 2 + 18px); align-content: flex-start; }
+  .hk-card--ok { transform: translateY(-10px); }
+  .hk-card--no { filter: brightness(.82) saturate(.6); }
+  .hk-card--cur { outline: 2px dashed var(--game); outline-offset: 2px; }
+  .hk-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; }
+  .hk-suits { direction: ltr; display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s-2); margin-top: var(--s-3); }
+  .hk-suit { min-height: 64px; border: 2px solid var(--c-line); border-radius: var(--r-md); background: var(--ch-pface); color: var(--c-text); font-size: 34px; cursor: pointer; }
+  .hk-suit--red { color: var(--c-bad); }
+  .hk-hand-sub { font-weight: 800; font-size: var(--fs-lg); text-align: center; direction: ltr; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+
+<script>
+/* ==== ENGINE START ==== */
+/* Hokm, the Persian trick-taking game, as commonly played in Iran (#151).
+   Four players in two teams; seats 0 (you, bottom), 1 (right), 2 (top, your
+   partner), 3 (left); play passes 0 → 1 → 2 → 3. A card is rank << 2 | suit like
+   the shared deck: rank 0 ace … 12 king, suit 0 clubs, 1 diamonds, 2 hearts,
+   3 spades. Aces are high. */
+function HokmEngineFactory() {
+  'use strict';
+
+  function rank(c) { return c >> 2; }
+  function suit(c) { return c & 3; }
+  // ace high: 2 is 0 … king 11, ace 12
+  function power(c) { return (rank(c) + 12) % 13; }
+  function team(p) { return p & 1; }
+
+  function shuffled(rnd) {
+    var d = [];
+    for (var i = 0; i < 52; i++) d.push(i);
+    for (var k = 51; k > 0; k--) { var j = Math.floor(rnd() * (k + 1)); var t = d[k]; d[k] = d[j]; d[j] = t; }
+    return d;
+  }
+
+  // The first hakem: cards go round one at a time until someone gets an ace
+  function firstHakem(rnd) {
+    var d = shuffled(rnd);
+    for (var i = 0; i < 52; i++) if (rank(d[i]) === 0) return i % 4;
+    return 0;
+  }
+
+  function newMatch(rnd, target) {
+    var S = { target: target || 7, score: [0, 0], hakem: firstHakem(rnd), handNo: 0, phase: 'trump', done: false };
+    newHand(S, rnd);
+    return S;
+  }
+
+  // The hakem sees five cards and names trump before the rest are dealt
+  function newHand(S, rnd) {
+    var d = shuffled(rnd);
+    S.hands = [[], [], [], []];
+    S.hands[S.hakem] = d.slice(0, 5);
+    sortHand(S.hands[S.hakem]);
+    S.rest = d.slice(5);
+    S.trump = -1;
+    S.trick = [];
+    S.lastTrick = null;
+    S.tricks = [0, 0];
+    S.played = [];
+    S.turn = S.hakem;
+    S.phase = 'trump';
+    S.handNo++;
+    S.lastHand = null;
+    return S;
+  }
+
+  function chooseTrump(S, s) {
+    if (S.phase !== 'trump' || s < 0 || s > 3) return false;
+    S.trump = s;
+    var d = S.rest, k = 0, order = [];
+    for (var i = 1; i <= 3; i++) order.push((S.hakem + i) % 4);
+    // the others get five each, then everyone gets four, twice: thirteen each
+    order.forEach(function (p) { for (var n = 0; n < 5; n++) S.hands[p].push(d[k++]); });
+    for (var round = 0; round < 2; round++) {
+      for (var j = 0; j < 4; j++) { var p = (S.hakem + j) % 4; for (var n = 0; n < 4; n++) S.hands[p].push(d[k++]); }
+    }
+    S.rest = [];
+    S.hands.forEach(sortHand);
+    S.phase = 'play';
+    return true;
+  }
+
+  // clubs, diamonds, spades, hearts: black and red alternate, so suits stand apart
+  var SUIT_ORDER = [0, 1, 3, 2];
+  function sortHand(h) {
+    h.sort(function (a, b) { return SUIT_ORDER[suit(a)] - SUIT_ORDER[suit(b)] || power(b) - power(a); });
+  }
+
+  function legal(S, p) {
+    var h = S.hands[p];
+    if (S.phase !== 'play' || S.turn !== p) return [];
+    if (!S.trick.length) return h.slice();
+    var led = suit(S.trick[0].c), same = h.filter(function (c) { return suit(c) === led; });
+    return same.length ? same : h.slice();
+  }
+
+  // the card currently taking the trick
+  function trickBest(trick, trump) {
+    if (!trick.length) return null;
+    var led = suit(trick[0].c), best = trick[0];
+    for (var i = 1; i < trick.length; i++) {
+      var t = trick[i];
+      var tb = suit(best.c) === trump, tt = suit(t.c) === trump;
+      if (tt && !tb) best = t;
+      else if (tt === tb && suit(t.c) === suit(best.c) && power(t.c) > power(best.c)) best = t;
+      else if (!tt && !tb && suit(t.c) === led && suit(best.c) !== led) best = t;
+    }
+    return best;
+  }
+
+  // Plays a card. Returns null if illegal, else what happened: the trick if it
+  // closed, and the hand result if a team reached seven tricks.
+  function play(S, p, c) {
+    if (legal(S, p).indexOf(c) < 0) return null;
+    var h = S.hands[p];
+    h.splice(h.indexOf(c), 1);
+    S.trick.push({ p: p, c: c });
+    S.played.push(c);
+    var out = { p: p, c: c, trickDone: false, hand: null };
+    if (S.trick.length < 4) { S.turn = (p + 1) % 4; return out; }
+    var w = trickBest(S.trick, S.trump).p;
+    S.tricks[team(w)]++;
+    S.lastTrick = { cards: S.trick.slice(), winner: w };
+    S.trick = [];
+    S.turn = w;
+    out.trickDone = true; out.winner = w;
+    var tw = S.tricks[0] >= 7 ? 0 : (S.tricks[1] >= 7 ? 1 : -1);
+    if (tw >= 0) {
+      var lost = S.tricks[1 - tw];
+      var hakemTeam = team(S.hakem);
+      // kot: a 7–0 hand is worth 2, and 3 when the hakem's own team was shut out
+      var pts = lost ? 1 : (hakemTeam !== tw ? 3 : 2);
+      S.score[tw] += pts;
+      var res = { team: tw, points: pts, kot: !lost, hakemKot: !lost && hakemTeam !== tw, tricks: S.tricks.slice(), hakem: S.hakem };
+      // the hakem keeps the seat while his team wins; otherwise it passes on
+      if (hakemTeam !== tw) S.hakem = (S.hakem + 1) % 4;
+      S.lastHand = res;
+      out.hand = res;
+      if (S.score[tw] >= S.target) { S.phase = 'done'; S.done = true; }
+      else S.phase = 'handover';
+    }
+    return out;
+  }
+
+  /* ------------------------------------------------------------ AI */
+  function aiTrump(hand5, level, rnd) {
+    var sc = [0, 0, 0, 0];
+    hand5.forEach(function (c) { sc[suit(c)] += 2 + Math.max(0, power(c) - 8); });
+    if (level === 'easy' && rnd() < 0.4) return suit(hand5[Math.floor(rnd() * hand5.length)]);
+    var best = 0;
+    for (var s = 1; s < 4; s++) if (sc[s] > sc[best]) best = s;
+    return best;
+  }
+
+  // the highest card of a suit not yet played (hard only remembers this)
+  function topLeft(S, s, mine) {
+    for (var pw = 12; pw >= 0; pw--) {
+      var c = ((pw + 1) % 13) << 2 | s;
+      if (S.played.indexOf(c) < 0 && mine.indexOf(c) < 0) return pw;
+    }
+    return -1;
+  }
+
+  function aiPlay(S, p, level, rnd) {
+    var L = legal(S, p);
+    if (!L.length) return null;
+    if (level === 'easy' && rnd() < 0.5) return L[Math.floor(rnd() * L.length)];
+    var hand = S.hands[p], tr = S.trump;
+    var low = function (cs) { return cs.slice().sort(function (a, b) { return power(a) - power(b); })[0]; };
+    var high = function (cs) { return cs.slice().sort(function (a, b) { return power(b) - power(a); })[0]; };
+    var nonTrump = function (cs) { return cs.filter(function (c) { return suit(c) !== tr; }); };
+    if (!S.trick.length) {
+      // lead an ace, or (hard) any card that is the highest left in its suit
+      var winners = nonTrump(L).filter(function (c) {
+        return rank(c) === 0 || (level === 'hard' && power(c) > topLeft(S, suit(c), hand));
+      });
+      if (winners.length) return high(winners);
+      var nt = nonTrump(L);
+      if (!nt.length) return low(L);
+      // the lowest card of the longest side suit
+      var bySuit = [0, 0, 0, 0];
+      nt.forEach(function (c) { bySuit[suit(c)]++; });
+      var longest = nt.map(suit).sort(function (a, b) { return bySuit[b] - bySuit[a]; })[0];
+      return low(nt.filter(function (c) { return suit(c) === longest; }));
+    }
+    var best = trickBest(S.trick, tr);
+    var partnerWins = team(best.p) === team(p);
+    var lastToPlay = S.trick.length === 3;
+    var beats = L.filter(function (c) {
+      var t = S.trick.concat([{ p: p, c: c }]);
+      return trickBest(t, tr).p === p;
+    });
+    var led = suit(S.trick[0].c), following = suit(L[0]) === led && L.every(function (c) { return suit(c) === led; });
+    if (partnerWins && (lastToPlay || level !== 'hard' || power(best.c) > topLeft(S, suit(best.c), hand))) {
+      // the partner has it: give the cheapest card, never a trump when avoidable
+      return following ? low(L) : (low(nonTrump(L)) || low(L));
+    }
+    if (beats.length) {
+      if (lastToPlay) return low(beats);
+      var safe = beats.filter(function (c) { return suit(c) === led && power(c) > topLeft(S, led, hand); });
+      return safe.length ? low(safe) : low(beats);
+    }
+    return following ? low(L) : (low(nonTrump(L)) || low(L));
+  }
+
+  var api = {
+    rank: rank, suit: suit, power: power, team: team, shuffled: shuffled, firstHakem: firstHakem,
+    newMatch: newMatch, newHand: newHand, sortHand: sortHand, chooseTrump: chooseTrump, legal: legal, trickBest: trickBest,
+    play: play, aiTrump: aiTrump, aiPlay: aiPlay
+  };
+  if (typeof self !== 'undefined') self.HokmEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = HokmEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = HokmEngineFactory();
+  var G = C.cards.GLYPH;
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'hokm',
+    name: { fa: 'حکم', en: 'Hokm', zh: '霍克姆', de: 'Hokm' },
+    accent: '#9C3D54',
+    mood: 'menu',
+    strings: {
+      fa: {
+        you: 'تو', partner: 'یار', right: 'راست', left: 'چپ', us: 'ما', them: 'حریف',
+        trump: 'حکم', hakem: 'حاکم', chooseTrump: 'حکم را انتخاب کن', chooseSub: 'تو حاکمی. با این پنج کارت، خال حکم را انتخاب کن.',
+        yourTurn: 'نوبت توست', thinking: 'نوبت {n}…', trumpBy: 'حکم: {s} (حاکم: {n})',
+        handUs: 'این دست مال ما شد', handThem: 'این دست مال حریف شد', kot: 'کُت!', hakemKot: 'کُتِ حاکم!',
+        nextHand: 'دست بعد', matchTo: 'تا {n}', newMatch: 'بازی تازه', dailyHk: 'حکم روزانه', vsHard: 'مقابل حریف سخت',
+        tricks: 'دست', points: 'امتیاز', handN: 'دست {n}', hand: 'دست تو', table: 'وسط میز',
+        mustFollow: 'باید هم‌خال بازی کنی', playKey: 'بازی کارت انتخاب‌شده', moveKey: 'جابه‌جایی بین کارت‌ها', suitKey: 'انتخاب حکم',
+        rules: 'چهار نفر در دو تیم؛ یارت روبه‌رویت می‌نشیند. حاکم با دیدن پنج کارت اول خال حکم را تعیین می‌کند و دست اول را بازی می‌کند. هر کس باید هم‌خال کارت اول بازی کند، اگر ندارد هر کارتی، از جمله حکم. بالاترین حکم، وگرنه بالاترین کارت هم‌خال، دست را می‌برد؛ آس از همه بالاتر است. تیمی که زودتر هفت دست ببرد امتیاز می‌گیرد: یک امتیاز، کُت (هفت به صفر) دو امتیاز، و اگر تیم حاکم کُت شود سه امتیاز. اگر تیم حاکم ببازد، حاکمی به نفر بعد می‌رسد.',
+        tutTitle1: 'دو تیم', tutText1: 'تو و یارت که روبه‌رویت نشسته یک تیمید و دو حریف راست و چپ تیم دیگر. هر دست، هر کس یک کارت بازی می‌کند و بهترین کارت چهار کارت را برای تیمش می‌برد.',
+        tutTitle2: 'حکم', tutText2: 'حاکم با پنج کارت اول، خال حکم را انتخاب می‌کند. باید هم‌خال بازی کنی؛ اگر آن خال را نداری می‌توانی حکم بزنی، و حکم هر کارت دیگری را می‌برد.',
+        tutTitle3: 'هفت دست و کُت', tutText3: 'تیمی که زودتر هفت دست ببرد امتیاز می‌گیرد. هفت به صفر کُت است و دو امتیاز دارد؛ کُت کردن تیم حاکم سه امتیاز.'
+      },
+      en: {
+        you: 'You', partner: 'Partner', right: 'Right', left: 'Left', us: 'Us', them: 'Them',
+        trump: 'Trump', hakem: 'Hakem', chooseTrump: 'Choose trump', chooseSub: 'You are the hakem. From these five cards, choose the trump suit.',
+        yourTurn: 'Your turn', thinking: '{n} to play…', trumpBy: 'Trump: {s} (hakem: {n})',
+        handUs: 'This hand is ours', handThem: 'This hand went to them', kot: 'Kot!', hakemKot: 'Hakem kot!',
+        nextHand: 'Next hand', matchTo: 'To {n}', newMatch: 'New match', dailyHk: 'Daily hokm', vsHard: 'Against the hard AI',
+        tricks: 'Tricks', points: 'Points', handN: 'Hand {n}', hand: 'Your hand', table: 'Table',
+        mustFollow: 'You must follow suit', playKey: 'Play the chosen card', moveKey: 'Move between cards', suitKey: 'Choose trump',
+        rules: 'Four players in two teams; your partner sits opposite. The hakem sees the first five cards, names the trump suit and leads the first trick. Everyone must follow the suit led; with none, any card may be played, trump included. The highest trump, otherwise the highest card of the suit led, takes the trick; aces are high. The first team to take seven tricks scores: one point, two for a kot (seven to nothing), three if the hakem\'s own team is shut out. If the hakem\'s team loses, the next player becomes hakem.',
+        tutTitle1: 'Two teams', tutText1: 'You and your partner across the table are one team, the players on your right and left the other. Each trick, everyone plays one card and the best card takes all four for its team.',
+        tutTitle2: 'Trump', tutText2: 'The hakem picks the trump suit from the first five cards. You must follow suit; without that suit you may play a trump, and a trump beats any other card.',
+        tutTitle3: 'Seven tricks and kot', tutText3: 'The first team to seven tricks scores. Seven to nothing is a kot, worth two points; shutting out the hakem\'s team is worth three.'
+      },
+      zh: {
+        you: '你', partner: '搭档', right: '右家', left: '左家', us: '我方', them: '对方',
+        trump: '王牌', hakem: '庄家', chooseTrump: '选择王牌', chooseSub: '你是庄家。根据这五张牌选择王牌花色。',
+        yourTurn: '轮到你', thinking: '轮到{n}…', trumpBy: '王牌：{s}（庄家：{n}）',
+        handUs: '这一局归我方', handThem: '这一局归对方', kot: '完胜！', hakemKot: '庄家完败！',
+        nextHand: '下一局', matchTo: '先到{n}', newMatch: '新比赛', dailyHk: '每日霍克姆', vsHard: '对战困难电脑',
+        tricks: '墩', points: '分', handN: '第{n}局', hand: '你的手牌', table: '桌面',
+        mustFollow: '必须跟同花色', playKey: '打出所选的牌', moveKey: '在牌之间移动', suitKey: '选择王牌',
+        rules: '四人分两队，搭档坐在对面。庄家看过前五张牌后定王牌并先出。必须跟首张牌的花色；没有时可出任意牌，包括王牌。最大的王牌赢得这一墩，没有王牌时同花色最大的牌获胜；A 最大。先赢七墩的队得分：一分；七比零为完胜，得两分；若庄家方被完胜，得三分。庄家方输掉这一局时，庄家轮到下一位。',
+        tutTitle1: '两队', tutText1: '你和对面的搭档是一队，左右两家是另一队。每墩每人出一张牌，最大的牌为本队赢下四张。',
+        tutTitle2: '王牌', tutText2: '庄家根据前五张牌选择王牌花色。必须跟同花色；没有时可以出王牌，王牌大过其他任何牌。',
+        tutTitle3: '七墩与完胜', tutText3: '先赢七墩的队得分。七比零为完胜，得两分；让庄家方完败得三分。'
+      },
+      de: {
+        you: 'Du', partner: 'Partner', right: 'Rechts', left: 'Links', us: 'Wir', them: 'Gegner',
+        trump: 'Trumpf', hakem: 'Hakem', chooseTrump: 'Trumpf wählen', chooseSub: 'Du bist Hakem. Wähle aus diesen fünf Karten die Trumpffarbe.',
+        yourTurn: 'Du bist dran', thinking: 'Zug: {n} …', trumpBy: 'Trumpf: {s} (Hakem: {n})',
+        handUs: 'Diese Runde geht an uns', handThem: 'Diese Runde geht an die Gegner', kot: 'Kot!', hakemKot: 'Hakem-Kot!',
+        nextHand: 'Nächste Runde', matchTo: 'Bis {n}', newMatch: 'Neues Spiel', dailyHk: 'Tägliches Hokm', vsHard: 'Gegen die starke KI',
+        tricks: 'Stiche', points: 'Punkte', handN: 'Runde {n}', hand: 'Deine Hand', table: 'Tisch',
+        mustFollow: 'Du musst Farbe bekennen', playKey: 'Gewählte Karte spielen', moveKey: 'Zwischen Karten wechseln', suitKey: 'Trumpf wählen',
+        rules: 'Vier Spieler in zwei Teams; dein Partner sitzt dir gegenüber. Der Hakem sieht die ersten fünf Karten, bestimmt Trumpf und spielt aus. Wer kann, muss Farbe bekennen; sonst darf jede Karte gespielt werden, auch Trumpf. Der höchste Trumpf, sonst die höchste Karte der ausgespielten Farbe, gewinnt den Stich; Asse sind hoch. Das Team, das zuerst sieben Stiche hat, bekommt einen Punkt; ein Kot (sieben zu null) zählt zwei, und drei, wenn das Team des Hakem leer ausgeht. Verliert das Team des Hakem, wird der nächste Spieler Hakem.',
+        tutTitle1: 'Zwei Teams', tutText1: 'Du und dein Partner gegenüber seid ein Team, die Spieler rechts und links das andere. Jeder legt pro Stich eine Karte, die beste Karte holt alle vier für ihr Team.',
+        tutTitle2: 'Trumpf', tutText2: 'Der Hakem wählt Trumpf aus den ersten fünf Karten. Du musst Farbe bekennen; hast du die Farbe nicht, darfst du trumpfen, und Trumpf schlägt jede andere Karte.',
+        tutTitle3: 'Sieben Stiche und Kot', tutText3: 'Das Team mit zuerst sieben Stichen punktet. Sieben zu null ist ein Kot und zählt zwei Punkte; geht das Team des Hakem leer aus, sind es drei.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', { level: 'medium', target: 3 });
+  if (['easy', 'medium', 'hard'].indexOf(prefs.level) < 0) prefs.level = 'medium';
+  if ([3, 7].indexOf(prefs.target) < 0) prefs.target = 3;
+
+  var S = null, aiTimer = null, cur = -1, holdTrick = null;
+
+  var top = el('div', { class: 'hk-top' });
+  var board = el('div', { class: 'hk-score' });
+  var seatTop = el('div', { class: 'hk-seat hk-seat--top' });
+  var seatLeft = el('div', { class: 'hk-seat hk-seat--left' });
+  var seatRight = el('div', { class: 'hk-seat hk-seat--right' });
+  var trickBox = el('div', { class: 'hk-trick', role: 'group', 'aria-label': C.t('table') });
+  var table = el('div', { class: 'hk-table' }, [seatTop, seatLeft, trickBox, seatRight]);
+  var handRow = el('div', { class: 'hk-hand', role: 'group', 'aria-label': C.t('hand') });
+  var status = el('div', { class: 'hk-status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'hk-wrap' }, [top, board, table, handRow, status]);
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  var SEAT_NAME = ['you', 'right', 'partner', 'left'];
+  function pname(p) { return p === 0 ? (C.state.profile.name || C.t('you')) : C.t(SEAT_NAME[p]); }
+  function rngFor(tag) { return S && S.daily ? C.daily('hokm', S.daily + '|' + tag).rng : Math.random; }
+
+  /* ------------------------------------------------------------ start */
+  function newMatch(level, target, daily) {
+    stopAi();
+    S = E.newMatch(daily ? C.daily('hokm', daily).rng : Math.random, target);
+    S.level = level; S.daily = daily || null; S.startedAt = Date.now(); S.kots = 0;
+    cur = -1; holdTrick = null;
+    render(); save(); step();
+  }
+  function nextHand() {
+    if (!S || S.phase !== 'handover') return;
+    E.newHand(S, rngFor('h' + S.handNo));
+    cur = -1; holdTrick = null;
+    render(); save(); step();
+  }
+
+  /* ------------------------------------------------------------- flow */
+  // Moves the game on by itself whenever it isn't the player's decision
+  function step() {
+    stopAi();
+    if (!S || S.done) return;
+    if (S.phase === 'trump') {
+      if (S.hakem === 0) { askTrump(); return; }
+      aiTimer = setTimeout(function () {
+        var s = E.aiTrump(S.hands[S.hakem], S.level, rngFor('t' + S.handNo));
+        E.chooseTrump(S, s);
+        C.ui.toast({ title: C.t('trumpBy', { s: G[s], n: pname(S.hakem) }) });
+        render(); save(); step();
+      }, 700);
+      return;
+    }
+    if (S.phase === 'handover') { showHandOver(); return; }
+    if (S.phase === 'play' && S.turn !== 0) {
+      paint();
+      aiTimer = setTimeout(function () {
+        var p = S.turn;
+        var c = E.aiPlay(S, p, S.level, rngFor(S.handNo + '|' + S.played.length));
+        doPlay(p, c);
+      }, holdTrick ? 950 : 600);
+    }
+  }
+  function stopAi() { if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; } }
+
+  function doPlay(p, c) {
+    var r = E.play(S, p, c);
+    if (!r) return;
+    C.audio.sfx('place');
+    if (p === 0) C.haptic('tap');
+    cur = -1;
+    if (r.trickDone) {
+      // the finished trick stays on the table a moment so it can be read
+      holdTrick = S.lastTrick;
+      if (r.hand && r.hand.kot && r.hand.team === 0) { S.kots = (S.kots || 0) + 1; C.achievements.unlock('hk-kot'); }
+    } else holdTrick = null;
+    save();
+    paint();
+    if (r.trickDone) {
+      aiTimer = setTimeout(function () { holdTrick = null; if (S.done) { finish(); return; } paint(); step(); }, 950);
+      return;
+    }
+    step();
+  }
+
+  function askTrump() {
+    paint();
+    var row = el('div', { class: 'hk-suits' });
+    var h = C.ui.modal({ title: C.t('chooseTrump'), body: [el('p', { class: 'ch-dim', text: C.t('chooseSub') }), row] });
+    [0, 1, 3, 2].forEach(function (s) {
+      var b = el('button', { class: 'hk-suit' + (s === 1 || s === 2 ? ' hk-suit--red' : ''), type: 'button', 'aria-label': C.t('trump') + ' ' + G[s], text: G[s] });
+      b.addEventListener('click', function () { h.close(); pickTrump(s); });
+      row.appendChild(b);
+    });
+  }
+  function pickTrump(s) {
+    if (!S || S.phase !== 'trump' || S.hakem !== 0) return;
+    E.chooseTrump(S, s);
+    C.feedback('select');
+    render(); save(); step();
+  }
+
+  function showHandOver() {
+    var r = S.lastHand, us = r.team === 0;
+    var title = us ? C.t('handUs') : C.t('handThem');
+    var sub = (r.hakemKot ? C.t('hakemKot') + ' ' : (r.kot ? C.t('kot') + ' ' : '')) +
+      C.num(r.tricks[0]) + ' - ' + C.num(r.tricks[1]) + ' · +' + C.num(r.points);
+    paint();
+    if (us) C.feedback('good');
+    C.ui.modal({
+      title: title,
+      body: [el('p', { class: 'hk-hand-sub', text: sub }),
+        el('p', { class: 'ch-dim', text: C.t('points') + ': ' + C.t('us') + ' ' + C.num(S.score[0]) + ' - ' + C.num(S.score[1]) + ' ' + C.t('them') })],
+      // the dialog closes before a button's onClick runs, so dealing lives in onClose
+      // only; with both, one tap dealt two hands and opened two trump dialogs
+      actions: [{ label: C.t('nextHand'), kind: 'primary' }],
+      onClose: function () { if (S.phase === 'handover') nextHand(); }
+    });
+  }
+
+  function finish() {
+    stopAi();
+    var won = S.score[0] > S.score[1];
+    prefs.games = (prefs.games || 0) + 1;
+    ctx.store.set('prefs', prefs);
+    var base = { easy: 6, medium: 12, hard: 20 }[S.level] || 12;
+    if (S.target === 7) base = Math.round(base * 1.8);
+    var coins = Math.max(2, Math.round(won ? base : base * 0.35)) + (S.daily ? 8 : 0);
+    var points = Math.max(3, Math.round(won ? base * 4 : base * 1.2)) + (S.daily ? 25 : 0);
+    if (won) { C.achievements.unlock('hk-win'); if (S.level === 'hard') C.achievements.unlock('hk-hard'); }
+    if (S.daily) {
+      var firstDaily = C.stats.daily('hokm', S.daily, { label: C.num(S.score[0]) + ' - ' + C.num(S.score[1]), win: won });
+      if (!firstDaily) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    var a = S.score[0], b = S.score[1];
+    ctx.finish({
+      won: won, title: won ? C.t('won') : C.t('lost'),
+      timeMs: Date.now() - S.startedAt, coins: coins, points: points,
+      lines: [
+        { label: C.t('us') + ' - ' + C.t('them'), value: C.num(a) + ' - ' + C.num(b) },
+        { label: C.t('handN', { n: C.num(S.handNo) }), value: C.t(S.level) }
+      ],
+      shareText: 'چوگان · حکم' + (S.daily ? ('\nروزانه ' + S.daily) : '') + '\n' + C.num(a) + ' - ' + C.num(b),
+      paint: function (g, w, h, col) {
+        g.fillStyle = col.surface2; C.rrect(g, 0, 0, w, h, 18); g.fill();
+        g.fillStyle = col.game; g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.font = '800 ' + Math.round(h * 0.34) + 'px Vazirmatn, system-ui, sans-serif';
+        g.fillText(C.num(a) + ' - ' + C.num(b), w / 2, h / 2);
+      },
+      onAgain: S.daily ? null : function () { newMatch(S.level, S.target); }
+    });
+  }
+
+  /* ----------------------------------------------------------- render */
+  function render() {
+    top.innerHTML = '';
+    if (S.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyHk') + ' — ' + C.num(S.daily) })]));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('vsHard') }));
+    } else {
+      var guard = function (go) {
+        if (S.played.length && !S.done) { C.ui.confirm({ title: C.t('newMatch'), body: C.t('resetWarn'), onOk: go, onCancel: render }); render(); return; }
+        go();
+      };
+      top.appendChild(C.ui.segmented([
+        { value: 'easy', label: C.t('easy') }, { value: 'medium', label: C.t('medium') }, { value: 'hard', label: C.t('hard') }
+      ], S.level, function (v) {
+        if (v === S.level) return;
+        guard(function () { prefs.level = v; ctx.store.set('prefs', prefs); newMatch(v, prefs.target); });
+      }));
+      top.appendChild(C.ui.segmented([3, 7].map(function (n) { return { value: n, label: C.t('matchTo', { n: C.num(n) }) }; }), S.target, function (v) {
+        if (v === S.target) return;
+        guard(function () { prefs.target = v; ctx.store.set('prefs', prefs); newMatch(S.level, v); });
+      }));
+    }
+    paint();
+  }
+
+  function seat(box, p) {
+    box.innerHTML = '';
+    var on = !S.done && S.phase === 'play' && S.turn === p && !holdTrick;
+    box.className = box.className.replace(/ hk-seat--on| hk-seat--partner/g, '') + (on ? ' hk-seat--on' : '') + (p === 2 ? ' hk-seat--partner' : '');
+    var name = el('div', { class: 'hk-seat__name' }, [el('span', { text: pname(p) })]);
+    if (S.hakem === p) name.appendChild(el('span', { class: 'hk-crown', title: C.t('hakem'), 'aria-label': C.t('hakem') }, [C.icon('crown', 14)]));
+    box.appendChild(name);
+    var n = S.hands[p].length + (S.phase === 'trump' && p !== S.hakem ? 13 : (S.phase === 'trump' ? 8 : 0));
+    var fan = el('div', { class: 'hk-fan' });
+    for (var k = 0; k < Math.min(n, 13); k++) fan.appendChild(C.cards.back());
+    box.appendChild(fan);
+  }
+
+  function paint() {
+    if (!S) return;
+    // scoreboard: match points, tricks this hand, trump and hakem
+    board.innerHTML = '';
+    var trumpTxt = S.trump >= 0 ? G[S.trump] : '?';
+    board.appendChild(el('div', { class: 'hk-team hk-team--us' }, [el('b', { text: C.t('us') }),
+      el('span', { text: C.t('points') + ' ' + C.num(S.score[0]) }), el('span', { text: C.t('tricks') + ' ' + C.num(S.tricks[0]) })]));
+    board.appendChild(el('div', { class: 'hk-trumpbox' + (S.trump === 1 || S.trump === 2 ? ' hk-trumpbox--red' : '') }, [
+      el('span', { class: 'hk-trumpbox__s', text: trumpTxt }), el('span', { class: 'hk-trumpbox__l', text: C.t('trump') })]));
+    board.appendChild(el('div', { class: 'hk-team hk-team--them' }, [el('b', { text: C.t('them') }),
+      el('span', { text: C.t('points') + ' ' + C.num(S.score[1]) }), el('span', { text: C.t('tricks') + ' ' + C.num(S.tricks[1]) })]));
+
+    seat(seatTop, 2); seat(seatLeft, 3); seat(seatRight, 1);
+
+    trickBox.innerHTML = '';
+    var shown = holdTrick ? holdTrick.cards : S.trick;
+    var POS = ['b', 'r', 't', 'l'];
+    shown.forEach(function (t) {
+      var b = C.cards.el(t.c, 'hk-tcard hk-tcard--' + POS[t.p] + (holdTrick && holdTrick.winner === t.p ? ' hk-tcard--win' : ''));
+      b.disabled = true;
+      trickBox.appendChild(b);
+    });
+
+    handRow.innerHTML = '';
+    var mine = S.hands[0], legal = S.phase === 'play' && S.turn === 0 && !holdTrick ? E.legal(S, 0) : [];
+    // seven cards to a row, as wide as the row allows, never below the 44px touch target
+    var w = handRow.clientWidth || 360;
+    var cw = Math.max(44, Math.min(64, Math.floor((w - 6 * 4) / 7)));
+    handRow.style.setProperty('--pw', cw + 'px');
+    mine.forEach(function (c, i) {
+      var ok = legal.indexOf(c) >= 0;
+      var b = C.cards.el(c, 'hk-card' + (legal.length && !ok ? ' hk-card--no' : '') + (ok ? ' hk-card--ok' : '') + (i === cur ? ' hk-card--cur' : ''));
+      b.disabled = !ok;
+      b.addEventListener('click', function () { if (ok) doPlay(0, c); });
+      handRow.appendChild(b);
+    });
+
+    var msg = '';
+    if (S.phase === 'trump') msg = S.hakem === 0 ? C.t('chooseTrump') : C.t('thinking', { n: pname(S.hakem) });
+    else if (S.phase === 'play' && !holdTrick) {
+      if (S.turn === 0) msg = C.t('yourTurn') + (S.trick.length && legal.length && legal.length < mine.length ? ' · ' + C.t('mustFollow') : '');
+      else msg = C.t('thinking', { n: pname(S.turn) });
+    }
+    status.textContent = msg;
+  }
+
+  /* --------------------------------------------------------- keyboard */
+  window.addEventListener('keydown', function (e) {
+    if (!S || document.querySelector('.ch-scrim')) return;
+    var k = e.key;
+    if (S.phase === 'trump' && S.hakem === 0 && /^[1-4]$/.test(k)) { pickTrump([0, 1, 3, 2][+k - 1]); e.preventDefault(); return; }
+    if (S.phase !== 'play' || S.turn !== 0 || holdTrick) return;
+    var legal = E.legal(S, 0), mine = S.hands[0];
+    var idx = legal.map(function (c) { return mine.indexOf(c); }).sort(function (a, b) { return a - b; });
+    if (!idx.length) return;
+    if (k === 'ArrowRight' || k === 'ArrowLeft') {
+      var at = idx.indexOf(cur);
+      at = at < 0 ? 0 : (at + (k === 'ArrowRight' ? 1 : idx.length - 1)) % idx.length;
+      cur = idx[at]; paint(); e.preventDefault(); return;
+    }
+    if ((k === ' ' || k === 'Enter') && cur >= 0 && legal.indexOf(mine[cur]) >= 0) { doPlay(0, mine[cur]); e.preventDefault(); }
+  });
+
+  var resizeT = null;
+  window.addEventListener('resize', function () { clearTimeout(resizeT); resizeT = setTimeout(paint, 120); });
+
+  /* ------------------------------------------------------------- help */
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← →', C.t('moveKey')), kb('Space / Enter', C.t('playKey')), kb('1 2 3 4', C.t('suitKey'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function askNew() {
+    if (S && S.daily) { C.feedback('bad'); return; }
+    var go = function () { newMatch(prefs.level, prefs.target); };
+    if (!S || S.done || !S.played.length) { go(); return; }
+    C.ui.confirm({ title: C.t('newMatch'), body: C.t('resetWarn'), onOk: go });
+  }
+  function art(cards) {
+    var s = '<svg viewBox="0 0 200 110" width="100%" direction="ltr">';
+    cards.forEach(function (c) {
+      s += '<g><rect x="' + c[0] + '" y="' + c[1] + '" width="34" height="48" rx="6" fill="var(--c-surface)" stroke="' + (c[3] ? 'var(--game)' : 'var(--c-line)') + '" stroke-width="' + (c[3] ? 3 : 1) + '"/>' +
+        '<text x="' + (c[0] + 17) + '" y="' + (c[1] + 31) + '" text-anchor="middle" font-size="15" font-weight="800" fill="' + (/[♦♥]/.test(c[2]) ? 'var(--c-bad)' : 'var(--c-text)') + '">' + c[2] + '</text></g>';
+    });
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: art([[83, 2, 'K' + G[2]], [30, 31, '9' + G[2]], [136, 31, '4' + G[2]], [83, 60, 'A' + G[2], true]]) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: art([[40, 31, 'A' + G[0]], [83, 31, 'K' + G[0]], [126, 31, '2' + G[3], true]]) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: '<svg viewBox="0 0 200 110" width="100%"><text x="100" y="62" text-anchor="middle" font-size="40" font-weight="800" fill="var(--game)" direction="ltr">7 - 0</text></svg>' }
+  ];
+
+  /* ------------------------------------------------------------- save */
+  ctx.autosave(function () {
+    if (!S || S.done || (!S.played.length && S.handNo <= 1 && S.phase === 'trump')) return { inProgress: false };
+    var copy = JSON.parse(JSON.stringify(S));
+    copy.elapsed = Date.now() - S.startedAt;
+    return { s: copy, prefs: prefs };
+  });
+  function save() { ctx.save(); }
+
+  function restore(v) {
+    S = v; S.startedAt = Date.now() - (v.elapsed || 0);
+    cur = -1; holdTrick = null;
+    render(); step();
+  }
+  var saved = ctx.loadSave();
+  var ok = saved && saved.s && saved.s.hands && saved.s.hands.length === 4 && saved.s.score;
+  if (dailyDate) {
+    if (ok && saved.s.daily === dailyDate) restore(saved.s);
+    else newMatch('hard', 3, dailyDate);
+    if (C.stats.dailyDone('hokm', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).hokm;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec.label });
+    }
+    ctx.tutorialIfNew(TUT);
+  } else if (ok && !saved.s.daily) {
+    if (saved.prefs) prefs = saved.prefs;
+    restore(saved.s);
+  } else {
+    newMatch(prefs.level, prefs.target);
+    ctx.tutorialIfNew(TUT);
+  }
+})();
+</script>
+</body>
+</html>

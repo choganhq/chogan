@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2328;
+const MIN_CHECKS = 2372;
 
 function ok(cond, msg) {
   checks++;
@@ -3789,6 +3789,84 @@ function testAdiProof() {
   ok(/retention-days: 1/.test(y), 'artifact فقط یک روز می‌ماند');
 }
 
+/* ------------------------------------------------------------- Hokm */
+// Persian four-player Hokm (#151). The rules a player feels at once: following
+// suit, which card takes a trick, kot scoring and who becomes hakem.
+function testHokm() {
+  head('Hokm');
+  const hokmFile = path.join(ROOT, 'www/games/hokm/index.html');
+  ok(fs.existsSync(hokmFile), 'www/games/hokm/index.html exists');
+  if (!fs.existsSync(hokmFile)) return;
+  const E = loadEngine('hokm', 'HokmEngineFactory');
+  const R = rng(151);
+  const card = (r, s) => r << 2 | s;              // r: 0 ace … 12 king
+  const S = E.newMatch(R, 7);
+  ok(S.phase === 'trump' && S.hands[S.hakem].length === 5 && S.hands.filter((h) => h.length === 0).length === 3, 'the hakem sees five cards, the others none, before trump');
+  ok(E.chooseTrump(S, 2) && S.hands.every((h) => h.length === 13) && S.phase === 'play' && S.turn === S.hakem, 'after trump everyone holds thirteen and the hakem leads');
+  ok(new Set([].concat(...S.hands)).size === 52, 'the deal uses all fifty-two cards once');
+  ok(!E.chooseTrump(S, 1), 'trump cannot be chosen twice');
+
+  // trick winner: trump beats everything, otherwise the highest of the suit led
+  const T = { trick: [], trump: 0 };
+  ok(E.trickBest([{ p: 0, c: card(5, 1) }, { p: 1, c: card(12, 1) }, { p: 2, c: card(1, 0) }, { p: 3, c: card(0, 1) }], 0).p === 2, 'a low trump beats the ace of the suit led');
+  ok(E.trickBest([{ p: 0, c: card(5, 1) }, { p: 1, c: card(12, 2) }, { p: 2, c: card(0, 1) }, { p: 3, c: card(9, 1) }], 0).p === 2, 'without trumps, the ace of the suit led wins; another suit never does');
+  ok(E.trickBest([{ p: 0, c: card(5, 1) }, { p: 1, c: card(3, 0) }, { p: 2, c: card(9, 0) }, { p: 3, c: card(0, 1) }], 0).p === 2, 'the higher of two trumps wins');
+
+  // follow suit
+  const F = E.newMatch(rng(2), 7); E.chooseTrump(F, 3);
+  F.turn = 0; F.trick = [{ p: 3, c: card(5, 1) }];
+  F.hands[0] = [card(2, 1), card(7, 1), card(0, 0), card(4, 3)];
+  ok(JSON.stringify(E.legal(F, 0).sort()) === JSON.stringify([card(2, 1), card(7, 1)].sort()), 'with the suit led in hand, only those cards are legal');
+  F.hands[0] = [card(0, 0), card(4, 3)];
+  ok(E.legal(F, 0).length === 2, 'without the suit led, any card is legal');
+  ok(E.play(F, 0, card(9, 2)) === null, 'a card not in hand is refused');
+
+  // scoring: seven tricks end the hand; kot and hakem kot
+  const K = E.newMatch(rng(3), 7); E.chooseTrump(K, 0);
+  K.hakem = 1; K.tricks = [6, 0]; K.turn = 0;
+  K.hands = [[card(0, 0)], [card(2, 0)], [card(3, 0)], [card(4, 0)]];
+  E.play(K, 0, card(0, 0)); E.play(K, 1, card(2, 0)); E.play(K, 2, card(3, 0)); const kr = E.play(K, 3, card(4, 0));
+  ok(kr && kr.hand && kr.hand.team === 0 && kr.hand.points === 3 && kr.hand.hakemKot, 'shutting out the hakem\'s team scores three (hakem kot)');
+  ok(K.hakem === 2, 'the hakem passes to the next player when his team loses');
+  const K2 = E.newMatch(rng(4), 7); E.chooseTrump(K2, 0);
+  K2.hakem = 0; K2.tricks = [6, 0]; K2.turn = 0;
+  K2.hands = [[card(0, 0)], [card(2, 0)], [card(3, 0)], [card(4, 0)]];
+  E.play(K2, 0, card(0, 0)); E.play(K2, 1, card(2, 0)); E.play(K2, 2, card(3, 0)); const k2 = E.play(K2, 3, card(4, 0));
+  ok(k2.hand.points === 2 && k2.hand.kot && !k2.hand.hakemKot && K2.hakem === 0, 'the hakem\'s own team winning 7–0 is a kot of two, and the hakem stays');
+  const K3 = E.newMatch(rng(5), 3); E.chooseTrump(K3, 0);
+  K3.hakem = 0; K3.tricks = [6, 4]; K3.score = [2, 0]; K3.turn = 0;
+  K3.hands = [[card(0, 0)], [card(2, 0)], [card(3, 0)], [card(4, 0)]];
+  E.play(K3, 0, card(0, 0)); E.play(K3, 1, card(2, 0)); E.play(K3, 2, card(3, 0)); const k3 = E.play(K3, 3, card(4, 0));
+  ok(k3.hand.points === 1 && K3.done && K3.phase === 'done' && K3.score[0] === 3, 'an ordinary hand is one point, and reaching the target ends the match');
+
+  // the AI only ever plays legal cards, and a stronger level wins more
+  let illegal = 0, plays = 0, hardWins = 0, matches = 0;
+  for (let m = 0; m < 60; m++) {
+    const r = rng(1000 + m), M = E.newMatch(r, 3);
+    let guard = 0;
+    while (!M.done && guard++ < 3000) {
+      if (M.phase === 'trump') { E.chooseTrump(M, E.aiTrump(M.hands[M.hakem], 'medium', r)); continue; }
+      if (M.phase === 'handover') { E.newHand(M, r); continue; }
+      const p = M.turn, c = E.aiPlay(M, p, E.team(p) === 0 ? 'hard' : 'easy', r);
+      plays++;
+      if (E.legal(M, p).indexOf(c) < 0) illegal++;
+      E.play(M, p, c);
+    }
+    matches++;
+    if (M.score[0] > M.score[1]) hardWins++;
+  }
+  ok(plays > 1000 && illegal === 0, 'the AI plays only legal cards (' + plays + ' plays, ' + illegal + ' illegal)');
+  ok(matches === 60 && hardWins >= 40, 'the hard AI team beats the easy one in most matches (' + hardWins + ' of ' + matches + ')');
+  const d1 = E.newMatch(rng(77), 3), d2 = E.newMatch(rng(77), 3);
+  ok(JSON.stringify(d1.hands) === JSON.stringify(d2.hands) && d1.hakem === d2.hakem, 'the same seed deals the same match (daily)');
+
+  const page = fs.readFileSync(path.join(ROOT, 'www/games/hokm/index.html'), 'utf8');
+  ok(/C\.cards\.el\(/.test(page) && /C\.cards\.back\(\)/.test(page) && page.indexOf('function faceSvg') < 0, 'Hokm draws its cards with the shared core');
+  ok(/else newMatch\('hard', 3, dailyDate\);/.test(page), 'the daily is a short match against the hard AI');
+  // one tap on Next hand must deal exactly one hand
+  ok(/function nextHand\(\) \{\s*if \(!S \|\| S\.phase !== 'handover'\) return;/.test(page) && !/onClick: nextHand/.test(page), 'Next hand deals once: only the dialog\'s close deals, and only from the hand-over state');
+}
+
 /* ------------------------------------------------ Nonogram picture puzzles */
 // Hand-drawn pictures (#172). A picture the line solver can't finish has either
 // several solutions or needs guessing, and the player could solve it "wrong" and
@@ -4358,6 +4436,7 @@ testPrivacyPage();
 testStoreMetadata();
 testAndroidShare();
 testNonogramPictures();
+testHokm();
 testTd();
 testVersionStamp();
 testDeployGate();
