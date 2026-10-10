@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2316;
+const MIN_CHECKS = 2323;
 
 function ok(cond, msg) {
   checks++;
@@ -3295,6 +3295,23 @@ function testPasur() {
   head('پاسور');
   const E = loadEngine('pasur', 'PasurEngineFactory');
   const P = (str) => str.split(' ').map(E.parse);
+
+  // Card art (#171): our own face portraits, a Persian-pattern back and a shuffle
+  const psPage = fs.readFileSync(path.join(ROOT, 'www/games/pasur/index.html'), 'utf8');
+  const fm = psPage.match(/function faceSvg\(rank\) \{[\s\S]*?\n  \}\n/);
+  ok(!!fm, 'face cards are drawn by faceSvg');
+  if (fm) {
+    const box = { GOLD: '#D4A72C', SKIN: '#F2D3B1', INK: '#2B2622' };
+    vm.createContext(box);
+    vm.runInContext(fm[0], box);
+    const faces = [10, 11, 12].map((r) => box.faceSvg(r));
+    ok(faces.every((s) => /^<svg viewBox="0 0 40 44"[^>]*>[\s\S]*<\/svg>$/.test(s) && /fill="currentColor"/.test(s)), 'jack, queen and king are SVG portraits whose robe takes the suit colour');
+    ok(new Set(faces).size === 3, 'the three portraits are different');
+  }
+  ok(/if \(r >= 10\) \{\s*kids\.push\(el\('span', \{ class: 'ps-card__mini'/.test(psPage) && /el\('span', \{ class: 'ps-card__face', html: faceSvg\(r\) \}\)/.test(psPage), 'only jack, queen and king get a portrait; number cards keep the large suit');
+  ok(/\.ps-back \{[\s\S]*?url\("data:image\/svg\+xml,[^"]*rotate\(45 10 10\)[^"]*"\)/.test(psPage), 'the card back is the eight-pointed star tile, inline so it works offline');
+  ok(/prefers-reduced-motion: reduce\)'\)\.matches;\s*if \(reduce\) \{ done\(\); return; \}/.test(psPage), 'the shuffle is skipped with reduced motion');
+  ok(/function canHumanMove\(\) \{ return S && !S\.done && S\.turn === 0 && !dealing; \}/.test(psPage) && /shuffleAnim\(function \(\) \{ paint\(\); maybeAi\(\); \}\);/.test(psPage), 'nobody moves until the shuffle has finished');
   const N = (arr) => arr.map(E.name).sort().join(' ');
   const optsOf = (table, card) => E.options(P(table), E.parse(card)).map((o) => N(o)).sort();
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);

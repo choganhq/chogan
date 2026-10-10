@@ -47,11 +47,26 @@
   .ps-card--cur { outline: 2px dashed var(--game); outline-offset: 2px; }
   .ps-card--last { box-shadow: 0 0 0 3px var(--ps-rival); }
   .ps-card--dim { opacity: .45; }
+  /* Card back: gold eight-pointed stars (shamseh) on lapis, after Persian tilework (#171) */
   .ps-back {
-    width: calc(var(--cw) * .62); aspect-ratio: 5 / 7; border-radius: 6px; border: 2px solid var(--ps-face);
-    background: repeating-linear-gradient(45deg, var(--ps-rival) 0 4px, color-mix(in srgb, var(--ps-rival) 70%, #fff) 4px 8px);
-    box-shadow: var(--sh-1);
+    width: calc(var(--cw) * .62); aspect-ratio: 5 / 7; border-radius: 6px; border: 2px solid #D4A72C;
+    background: #1F3A93 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Crect width='20' height='20' fill='%231F3A93'/%3E%3Cg fill='%23D4A72C'%3E%3Crect x='6' y='6' width='8' height='8'/%3E%3Crect x='6' y='6' width='8' height='8' transform='rotate(45 10 10)'/%3E%3C/g%3E%3Ccircle cx='10' cy='10' r='2' fill='%2340C4C4'/%3E%3Cg fill='%2340C4C4'%3E%3Ccircle r='1.6'/%3E%3Ccircle cx='20' r='1.6'/%3E%3Ccircle cy='20' r='1.6'/%3E%3Ccircle cx='20' cy='20' r='1.6'/%3E%3C/g%3E%3C/svg%3E") center / 12px 12px;
+    box-shadow: var(--sh-1), inset 0 0 0 2px #1F3A93;
   }
+  /* Face cards: our own drawn portraits, robe in the suit's colour (#171) */
+  .ps-card__face { position: absolute; left: 6%; right: 6%; bottom: 4%; height: 68%; pointer-events: none; }
+  .ps-card__face svg { width: 100%; height: 100%; display: block; }
+  .ps-card__mini { position: absolute; top: 3px; right: 5px; font-size: calc(var(--cw) * .24); line-height: 1; }
+  .ps-hand .ps-card__mini { font-size: calc(var(--cw) * 1.15 * .24); }
+  /* Shuffle before each deal: two halves riffle back together, under a second */
+  .ps-wrap { position: relative; }
+  .ps-hidden { visibility: hidden; }
+  .ps-shuffle { position: absolute; left: 0; right: 0; display: flex; justify-content: center; align-items: center; pointer-events: none; z-index: 5; }
+  .ps-shuffle .ps-back { position: absolute; width: calc(var(--cw) * .9); }
+  .ps-shuffle .ps-back:nth-child(odd) { animation: ps-riffle-l 900ms var(--ease) both; }
+  .ps-shuffle .ps-back:nth-child(even) { animation: ps-riffle-r 900ms var(--ease) both; }
+  @keyframes ps-riffle-l { 0% { transform: translate(0, 0); } 35% { transform: translate(-44px, 4px) rotate(-8deg); } 70%, 100% { transform: translate(0, var(--dy, 0)); } }
+  @keyframes ps-riffle-r { 0% { transform: translate(0, 0); } 35% { transform: translate(44px, 4px) rotate(8deg); } 70%, 100% { transform: translate(0, var(--dy, 0)); } }
   .ps-hand .ps-card { width: calc(var(--cw) * 1.15); }
   .ps-hand .ps-card__r { font-size: calc(var(--cw) * 1.15 * .3); }
   .ps-hand .ps-card__s { font-size: calc(var(--cw) * 1.15 * .5); }
@@ -475,13 +490,67 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PasurEngin
 
   function cardLabel(c) { return E.RANKS[E.rank(c)] + GLYPH[E.suit(c)]; }
 
+  // Portraits for jack, queen and king, drawn for Chogan: a plain letter on a face
+  // card read like a misprint next to real cards (#171). The robe takes the suit's
+  // colour through currentColor; gold and skin are fixed like printed ink.
+  var GOLD = '#D4A72C', SKIN = '#F2D3B1', INK = '#2B2622';
+  function faceSvg(rank) {
+    var robe = '<path d="M5 44 Q7 30 20 29 Q33 30 35 44Z" fill="currentColor"/>' +
+      '<path d="M14 30 Q20 35 26 30" fill="none" stroke="' + GOLD + '" stroke-width="1.6"/>';
+    var eyes = '<circle cx="17.4" cy="19.5" r=".9" fill="' + INK + '"/><circle cx="22.6" cy="19.5" r=".9" fill="' + INK + '"/>';
+    var s = '<svg viewBox="0 0 40 44" xmlns="http://www.w3.org/2000/svg">';
+    if (rank === 12) {          // king: tall crown, full beard
+      s += robe + '<circle cx="20" cy="20" r="6.8" fill="' + SKIN + '"/>' + eyes +
+        '<path d="M13.4 21 Q20 34 26.6 21 Q20 26 13.4 21Z" fill="#6B4226"/>' +
+        '<path d="M12 14 L13 4 L16.5 10 L20 2 L23.5 10 L27 4 L28 14Z" fill="' + GOLD + '"/>' +
+        '<circle cx="20" cy="8.5" r="1.3" fill="currentColor"/>';
+    } else if (rank === 11) {   // queen: small crown, long hair, necklace
+      s += '<path d="M11.5 22 Q11 10 20 10 Q29 10 28.5 22 L30.5 33 Q20 29 9.5 33Z" fill="#3A2A1A"/>' + robe +
+        '<circle cx="20" cy="20" r="6.4" fill="' + SKIN + '"/>' + eyes +
+        '<path d="M18 23.6 Q20 24.8 22 23.6" fill="none" stroke="#B5524A" stroke-width=".9"/>' +
+        '<path d="M14 13 L15 7 L17.5 10 L20 5 L22.5 10 L25 7 L26 13Z" fill="' + GOLD + '"/>' +
+        '<circle cx="20" cy="33" r="1.6" fill="' + GOLD + '"/>';
+    } else {                    // jack: cap with a feather
+      s += robe + '<circle cx="20" cy="20.5" r="6.4" fill="' + SKIN + '"/>' + eyes +
+        '<path d="M12.6 16 Q13 8 20.5 8 Q28 8.5 28 16Z" fill="currentColor"/>' +
+        '<path d="M26.5 10 Q34 3 34.5 12" fill="none" stroke="' + GOLD + '" stroke-width="1.8" stroke-linecap="round"/>' +
+        '<circle cx="18" cy="37" r="1" fill="' + GOLD + '"/><circle cx="22" cy="37" r="1" fill="' + GOLD + '"/>';
+    }
+    return s + '</svg>';
+  }
+
   function cardEl(c, extra) {
-    var b = el('button', { class: 'ps-card' + (E.isRed(c) ? ' ps-card--red' : '') + (extra ? ' ' + extra : ''),
-      type: 'button', 'aria-label': cardLabel(c) }, [
-      el('span', { class: 'ps-card__r', text: E.RANKS[E.rank(c)] }),
-      el('span', { class: 'ps-card__s', text: GLYPH[E.suit(c)] })
-    ]);
-    return b;
+    var r = E.rank(c), kids = [el('span', { class: 'ps-card__r', text: E.RANKS[r] })];
+    if (r >= 10) {
+      kids.push(el('span', { class: 'ps-card__mini', text: GLYPH[E.suit(c)] }));
+      kids.push(el('span', { class: 'ps-card__face', html: faceSvg(r) }));
+    } else kids.push(el('span', { class: 'ps-card__s', text: GLYPH[E.suit(c)] }));
+    return el('button', { class: 'ps-card' + (E.isRed(c) ? ' ps-card--red' : '') + (extra ? ' ' + extra : ''),
+      type: 'button', 'aria-label': cardLabel(c) }, kids);
+  }
+
+  // A short riffle before the deal, so a new hand feels shuffled, not swapped in
+  var dealing = false;
+  function shuffleAnim(done) {
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) { done(); return; }
+    dealing = true;
+    var box = el('div', { class: 'ps-shuffle', 'aria-hidden': 'true' });
+    box.style.top = tableRow.offsetTop + 'px';
+    box.style.height = tableRow.offsetHeight + 'px';
+    for (var k = 0; k < 8; k++) {
+      var c = el('div', { class: 'ps-back' });
+      c.style.animationDelay = (k * 35) + 'ms';
+      c.style.setProperty('--dy', (-k * 1.5) + 'px');
+      box.appendChild(c);
+    }
+    wrap.appendChild(box);
+    paint();
+    setTimeout(function () {
+      if (box.parentNode) box.parentNode.removeChild(box);
+      dealing = false;
+      done();
+    }, 900 + 8 * 35);
   }
 
   /* ---------------------------------------------------------- ساخت */
@@ -496,7 +565,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PasurEngin
     note = ''; pick = null; cur = -1; lastRival = null;
     render();
     save();
-    maybeAi();
+    shuffleAnim(function () { paint(); maybeAi(); });
   }
 
   /* ---------------------------------------------------------- رسم */
@@ -550,6 +619,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PasurEngin
     playerBox(youRow, 0, 'var(--game)');
     ctx.setStat('deck', S.deck.length);
 
+    // the cards stay hidden while the deck is being shuffled
+    [rivalHand, tableRow, handRow].forEach(function (r) { r.classList.toggle('ps-hidden', dealing); });
     rivalHand.innerHTML = '';
     S.hands[1].forEach(function () { rivalHand.appendChild(el('div', { class: 'ps-back', 'aria-hidden': 'true' })); });
 
@@ -592,7 +663,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PasurEngin
 
   /* ---------------------------------------------------------- حرکت */
 
-  function canHumanMove() { return S && !S.done && S.turn === 0; }
+  function canHumanMove() { return S && !S.done && S.turn === 0 && !dealing; }
 
   function tapHand(c) {
     if (!canHumanMove()) return;
