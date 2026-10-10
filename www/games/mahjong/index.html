@@ -13,13 +13,18 @@
   .mj-wrap { width: 100%; max-width: 980px; display: flex; flex-direction: column; align-items: center; gap: var(--s-3); }
   .mj-top { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; align-items: center; }
   /* تخته در راست‌چین آینه نمی‌شود؛ جای کاشی‌ها بخشی از چیدمان است */
-  .mj-board { position: relative; direction: ltr; touch-action: manipulation; margin: 6px auto; }
+  /* The view clips the board; zoom and pan move the board inside it (#167) */
+  .mj-view { position: relative; overflow: hidden; touch-action: none; margin: 6px auto; border-radius: var(--r-md); }
+  .mj-board { position: relative; direction: ltr; transform-origin: 0 0; }
   .mj-tile {
     position: absolute; padding: 0; border: 0; cursor: pointer; border-radius: 6px;
     background: var(--mj-face); box-shadow: 3px 3px 0 var(--mj-side), 4px 4px 0 var(--mj-edge), 4px 6px 8px rgba(0,0,0,.25);
     transition: transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
   }
   .mj-tile svg { width: 100%; height: 100%; display: block; pointer-events: none; }
+  @media (prefers-reduced-motion: no-preference) {
+    .mj-tile { transition: transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease), left .3s var(--ease), top .3s var(--ease), width .3s var(--ease), height .3s var(--ease); }
+  }
   .mj-tile--sel { transform: translate(-2px, -3px); box-shadow: 0 0 0 3px var(--game), 5px 6px 0 var(--mj-side), 6px 7px 0 var(--mj-edge), 6px 10px 12px rgba(0,0,0,.3); }
   .mj-tile--hint { box-shadow: 0 0 0 3px var(--c-good), 3px 3px 0 var(--mj-side), 4px 4px 0 var(--mj-edge); }
   .mj-tile--cur { outline: 2px dashed var(--game); outline-offset: 3px; }
@@ -153,6 +158,22 @@ function MahjongEngineFactory() {
   }
   function left(S) { return S.gone.filter(function (g) { return !g; }).length; }
 
+  // The box around the tiles still on the table, in half-tile units (#167). The
+  // page sizes tiles to this box, so they grow as pairs come off; sized to the
+  // whole layout, the turtle's tiles stayed tiny on a phone until the end.
+  function bounds(S) {
+    var pos = LAYOUTS[S.layout], b = null;
+    for (var i = 0; i < pos.length; i++) {
+      if (S.gone[i]) continue;
+      var p = pos[i];
+      if (!b) b = { minX: p[0], maxX: p[0], minY: p[1], maxY: p[1], maxZ: p[2] };
+      b.minX = Math.min(b.minX, p[0]); b.maxX = Math.max(b.maxX, p[0]);
+      b.minY = Math.min(b.minY, p[1]); b.maxY = Math.max(b.maxY, p[1]);
+      b.maxZ = Math.max(b.maxZ, p[2]);
+    }
+    return b || { minX: 0, maxX: 0, minY: 0, maxY: 0, maxZ: 0 };
+  }
+
   function remove(S, i, j) {
     if (i === j || S.done || !isFree(S, i) || !isFree(S, j) || !matches(S.faces[i], S.faces[j])) return false;
     S.gone[i] = S.gone[j] = true;
@@ -196,7 +217,7 @@ function MahjongEngineFactory() {
 
   var api = {
     LAYOUTS: LAYOUTS, matches: matches, deal: deal, isFree: isFree, freeTiles: freeTiles, freePairs: freePairs,
-    left: left, remove: remove, undo: undo, reshuffle: reshuffle, freeIn: freeIn
+    left: left, remove: remove, undo: undo, reshuffle: reshuffle, freeIn: freeIn, bounds: bounds
   };
   if (typeof self !== 'undefined') self.MahjongEngine = api;
   return api;
@@ -222,7 +243,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MahjongEng
         small: 'کوچک', medium: 'متوسط', turtle: 'لاک‌پشت', left: 'مانده', pairs: 'جفت آزاد',
         shuffle: 'بُر زدن', shufflesLeft: '{n} بُر مانده', hintKey: 'راهنمایی', undoMove: 'برگرداندن',
         newDeal: 'دست تازه', noPairs: 'جفت آزادی نمانده', noPairsSub: 'بُر بزن یا چند حرکت برگردان.',
-        blocked: 'این کاشی آزاد نیست', dailyMj: 'ماهجونگ روزانه', turtleNote: 'لاک‌پشت روی صفحه‌ی بزرگ یا افقی راحت‌تر است',
+        blocked: 'این کاشی آزاد نیست', dailyMj: 'ماهجونگ روزانه', turtleNote: 'با دو انگشت بزرگ‌نمایی کن و بکش', fit: 'نمای کامل',
         tile: 'کاشی', board: 'تخته‌ی ماهجونگ', move: 'جابه‌جایی بین کاشی‌های آزاد', select: 'انتخاب کاشی',
         rules: 'دو کاشی یکسان را که هر دو آزادند بزن تا برداشته شوند. کاشی آزاد است اگر چیزی رویش نباشد و دست‌کم چپ یا راستش باز باشد. هر گل با هر گل و هر فصل با هر فصل جفت می‌شود. همه‌ی کاشی‌ها را بردار تا ببری. هر دست حل‌شدنی است؛ اگر گیر کردی بُر بزن یا برگردان.',
         tutTitle1: 'جفت آزاد', tutText1: 'دو کاشی یکسان را بزن. هر دو باید آزاد باشند: چیزی رویشان نباشد و چپ یا راستشان باز باشد.',
@@ -233,7 +254,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MahjongEng
         small: 'Small', medium: 'Medium', turtle: 'Turtle', left: 'Left', pairs: 'Free pairs',
         shuffle: 'Shuffle', shufflesLeft: '{n} shuffles left', hintKey: 'Hint', undoMove: 'Undo',
         newDeal: 'New deal', noPairs: 'No free pairs left', noPairsSub: 'Shuffle, or undo a few moves.',
-        blocked: 'That tile isn’t free', dailyMj: 'Daily mahjong', turtleNote: 'The turtle is easier on a large or landscape screen',
+        blocked: 'That tile isn’t free', dailyMj: 'Daily mahjong', turtleNote: 'Pinch to zoom, drag to move', fit: 'Fit board',
         tile: 'Tile', board: 'Mahjong board', move: 'Move between free tiles', select: 'Pick a tile',
         rules: 'Tap two matching tiles that are both free to remove them. A tile is free when nothing lies on it and its left or right side is open. Any flower matches any flower, and any season matches any season. Clear every tile to win. Every deal can be solved; if you get stuck, shuffle or undo.',
         tutTitle1: 'Free pairs', tutText1: 'Tap two matching tiles. Both must be free: nothing on top, and the left or right side open.',
@@ -244,7 +265,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MahjongEng
         small: '小', medium: '中', turtle: '乌龟', left: '剩余', pairs: '可配对',
         shuffle: '洗牌', shufflesLeft: '还能洗 {n} 次', hintKey: '提示', undoMove: '撤销',
         newDeal: '新一局', noPairs: '没有可配对的牌了', noPairsSub: '洗牌，或者撤销几步。',
-        blocked: '这张牌还不能拿', dailyMj: '每日麻将', turtleNote: '乌龟布局在大屏幕或横屏上更好玩',
+        blocked: '这张牌还不能拿', dailyMj: '每日麻将', turtleNote: '双指缩放，单指拖动', fit: '全图',
         tile: '牌', board: '麻将牌桌', move: '在可拿的牌之间移动', select: '选择牌',
         rules: '点两张相同且都可拿的牌即可消除。上面没有牌、并且左边或右边空着的牌才可以拿。任意两张花牌可以配对，任意两张季节牌也可以配对。消除所有牌即获胜。每一局都有解；卡住时可以洗牌或撤销。',
         tutTitle1: '可拿的一对', tutText1: '点两张相同的牌。两张都必须可拿：上面没有牌，左边或右边空着。',
@@ -255,7 +276,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MahjongEng
         small: 'Klein', medium: 'Mittel', turtle: 'Schildkröte', left: 'Übrig', pairs: 'Freie Paare',
         shuffle: 'Mischen', shufflesLeft: 'Noch {n}× mischen', hintKey: 'Tipp', undoMove: 'Zurück',
         newDeal: 'Neues Spiel', noPairs: 'Keine freien Paare mehr', noPairsSub: 'Misch oder nimm ein paar Züge zurück.',
-        blocked: 'Dieser Stein ist nicht frei', dailyMj: 'Tägliches Mahjong', turtleNote: 'Die Schildkröte spielt sich auf großem oder quergestelltem Bildschirm leichter',
+        blocked: 'Dieser Stein ist nicht frei', dailyMj: 'Tägliches Mahjong', turtleNote: 'Mit zwei Fingern zoomen, mit einem verschieben', fit: 'Ganzes Brett',
         tile: 'Stein', board: 'Mahjong-Brett', move: 'Zwischen freien Steinen wechseln', select: 'Stein wählen',
         rules: 'Tippe zwei gleiche Steine an, die beide frei sind, um sie zu entfernen. Ein Stein ist frei, wenn nichts auf ihm liegt und seine linke oder rechte Seite offen ist. Jede Blume passt zu jeder Blume, jede Jahreszeit zu jeder Jahreszeit. Räum alle Steine ab, um zu gewinnen. Jedes Spiel ist lösbar; wenn du feststeckst, misch oder nimm Züge zurück.',
         tutTitle1: 'Freie Paare', tutText1: 'Tippe zwei gleiche Steine an. Beide müssen frei sein: nichts darauf und links oder rechts offen.',
@@ -276,7 +297,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MahjongEng
   var board = el('div', { class: 'mj-board', role: 'group', 'aria-label': C.t('board') });
   var actions = el('div', { class: 'mj-actions' });
   var status = el('div', { class: 'mj-status', 'aria-live': 'polite' });
-  var wrap = el('div', { class: 'mj-wrap' }, [top, board, actions, status]);
+  var view = el('div', { class: 'mj-view' }, [board]);
+  var wrap = el('div', { class: 'mj-wrap' }, [top, view, actions, status]);
 
   ctx.stat('left', C.t('left'));
   ctx.stat('pairs', C.t('pairs'));
@@ -369,6 +391,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MahjongEng
     var rnd = daily ? C.daily('mahjong', daily).rng : Math.random;
     S = E.deal(layout, rnd);
     delete S.solution;
+    Z = { z: 1, x: 0, y: 0 };
     S.daily = daily || null;
     S.startedAt = Date.now();
     sel = -1; hint = null; cur = -1;
@@ -378,50 +401,154 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MahjongEng
   }
 
   function layoutSize() {
-    var pos = E.LAYOUTS[S.layout], maxX = 0, maxY = 0, maxZ = 0;
-    pos.forEach(function (p) { maxX = Math.max(maxX, p[0]); maxY = Math.max(maxY, p[1]); maxZ = Math.max(maxZ, p[2]); });
-    return { cols: maxX / 2 + 1, rows: maxY / 2 + 1, z: maxZ };
+    var b = E.bounds(S);
+    return { cols: (b.maxX - b.minX) / 2 + 1, rows: (b.maxY - b.minY) / 2 + 1, z: b.maxZ, ox: b.minX, oy: b.minY };
   }
 
-  function sizeBoard() {
-    var L = layoutSize();
+  // Tiles as large as the screen allows (#167): the width is the page's, the
+  // height is what is left under the top bar once the buttons and status below
+  // the board are counted, instead of a fixed guess that wasted a third of a phone.
+  function sizeBoard(L) {
     var avail = Math.min(wrap.clientWidth || 360, 980) - 8;
-    // ارتفاع طبقه‌ها با اندازه‌ی کاشی بزرگ می‌شود؛ با ۴ پیکسل ثابت طبقه‌ها روی صفحه‌ی
-    // بزرگ تخت دیده می‌شدند و معلوم نبود کدام کاشی رو است
     depth = 4;
     for (var it = 0; it < 2; it++) {
-      tw = Math.max(18, Math.min(64, Math.floor((avail - L.z * depth - 6) / L.cols)));
+      tw = Math.max(18, Math.min(72, Math.floor((avail - L.z * depth - 6) / L.cols)));
       depth = Math.max(3, Math.round(tw * 0.14));
     }
     th = Math.round(tw * 1.3);
-    // بلندی هم محدود است تا تخته در صفحه‌ی افقی از دید بیرون نزند
-    var availH = Math.max(260, window.innerHeight - 250);
-    if (L.rows * th + L.z * depth > availH) { th = Math.floor((availH - L.z * depth) / L.rows); tw = Math.round(th / 1.3); }
-    board.style.width = (L.cols * tw + L.z * depth + 6) + 'px';
-    board.style.height = (L.rows * th + L.z * depth + 8) + 'px';
+    // The main area is vertically centred, so the board's own position moves with
+    // its size; count the space from the main area instead: its height less the
+    // padding, the rows around the board, the three gaps and the board's margin.
+    var mainH = ctx.main.clientHeight || (window.innerHeight || 640) - 60;
+    var around = top.offsetHeight + actions.offsetHeight + status.offsetHeight;
+    var availH = Math.max(200, mainH - 24 - around - 3 * 12 - 12);
+    if (L.rows * th + L.z * depth + 8 > availH) {
+      th = Math.max(22, Math.floor((availH - L.z * depth - 8) / L.rows));
+      tw = Math.round(th / 1.3);
+      depth = Math.max(3, Math.round(tw * 0.14));
+    }
+    var bh = L.rows * th + L.z * depth + 8;
+    board.style.width = view.style.width = (L.cols * tw + L.z * depth + 6) + 'px';
+    board.style.height = bh + 'px';
+    // The view takes all the height there is, so zooming in shows more than the
+    // strip the whole board needs; at 1x the board sits centred in it
+    view.style.height = Math.max(bh, Math.min(availH, bh * 3)) + 'px';
+  }
+
+  /* ------------------------------------------------- zoom and pan */
+  // A phone fits the turtle's fifteen columns only at about 20px a tile, too small
+  // to tell tiles apart (#167). Pinch zooms around the fingers, one finger pans,
+  // Ctrl+wheel zooms on a desktop, and "Fit board" returns to the whole board.
+  var Z = { z: 1, x: 0, y: 0 }, fitBtn = null;
+  function applyZoom() {
+    var W = view.clientWidth, H = view.clientHeight;
+    Z.z = Math.min(3, Math.max(1, Z.z));
+    var bw = board.offsetWidth * Z.z, bh = board.offsetHeight * Z.z;
+    // an axis the board doesn't fill is centred; one it overfills can't show empty space
+    Z.x = bw <= W ? (W - bw) / 2 : Math.min(0, Math.max(W - bw, Z.x));
+    Z.y = bh <= H ? (H - bh) / 2 : Math.min(0, Math.max(H - bh, Z.y));
+    board.style.transform = 'translate(' + Z.x + 'px,' + Z.y + 'px) scale(' + Z.z + ')';
+    // the button keeps its place when hidden, so the row never reflows mid-gesture
+    if (fitBtn) fitBtn.style.visibility = Z.z <= 1.01 ? 'hidden' : 'visible';
+  }
+  function zoomAt(px, py, nz) {
+    nz = Math.min(3, Math.max(1, nz));
+    Z.x = px - (px - Z.x) * (nz / Z.z);
+    Z.y = py - (py - Z.y) * (nz / Z.z);
+    Z.z = nz;
+    applyZoom();
+  }
+  function fitBoard() { Z = { z: 1, x: 0, y: 0 }; applyZoom(); }
+  // keeps a tile on screen when it is reached from the keyboard while zoomed in
+  function showTile(i) {
+    if (Z.z <= 1 || !nodes[i]) return;
+    var l = parseFloat(nodes[i].style.left) * Z.z + Z.x, t = parseFloat(nodes[i].style.top) * Z.z + Z.y;
+    var W = view.clientWidth, H = view.clientHeight, w = tw * Z.z, hh = th * Z.z;
+    if (l < 0 || l + w > W) Z.x -= l - (W - w) / 2;
+    if (t < 0 || t + hh > H) Z.y -= t - (H - hh) / 2;
+    applyZoom();
+  }
+  var touches = {}, gesture = null, moved = false, eatClick = false;
+  function pts() { return Object.keys(touches).map(function (k) { return touches[k]; }); }
+  function rel(p) { var r = view.getBoundingClientRect(); return { x: p.x - r.left, y: p.y - r.top }; }
+  view.addEventListener('pointerdown', function (e) {
+    touches[e.pointerId] = { x: e.clientX, y: e.clientY };
+    var ps = pts();
+    if (ps.length === 1) { moved = false; gesture = { last: ps[0], start: ps[0] }; }
+    if (ps.length === 2) {
+      var m = rel({ x: (ps[0].x + ps[1].x) / 2, y: (ps[0].y + ps[1].y) / 2 });
+      gesture = { pinch: true, d: Math.hypot(ps[0].x - ps[1].x, ps[0].y - ps[1].y) || 1, z: Z.z, m: m };
+      moved = true;
+    }
+  });
+  window.addEventListener('pointermove', function (e) {
+    if (!touches[e.pointerId] || !gesture) return;
+    touches[e.pointerId] = { x: e.clientX, y: e.clientY };
+    var ps = pts();
+    if (gesture.pinch && ps.length >= 2) {
+      var m = rel({ x: (ps[0].x + ps[1].x) / 2, y: (ps[0].y + ps[1].y) / 2 });
+      Z.x += m.x - gesture.m.x; Z.y += m.y - gesture.m.y; gesture.m = m;
+      zoomAt(m.x, m.y, gesture.z * Math.hypot(ps[0].x - ps[1].x, ps[0].y - ps[1].y) / gesture.d);
+    } else if (!gesture.pinch && ps.length === 1) {
+      var p = ps[0];
+      if (Math.hypot(p.x - gesture.start.x, p.y - gesture.start.y) > 8) moved = true;
+      if (moved && Z.z > 1) { Z.x += p.x - gesture.last.x; Z.y += p.y - gesture.last.y; applyZoom(); }
+      gesture.last = p;
+    }
+  });
+  function endTouch(e) {
+    if (!touches[e.pointerId]) return;
+    delete touches[e.pointerId];
+    if (!pts().length) {
+      // a drag or pinch must not also pick the tile it ended on
+      if (moved) { eatClick = true; setTimeout(function () { eatClick = false; }, 350); }
+      gesture = null;
+    } else if (gesture && gesture.pinch) {
+      gesture = { last: pts()[0], start: pts()[0] };
+    }
+  }
+  window.addEventListener('pointerup', endTouch);
+  window.addEventListener('pointercancel', endTouch);
+  view.addEventListener('click', function (e) {
+    if (eatClick) { e.stopPropagation(); e.preventDefault(); eatClick = false; }
+  }, true);
+  view.addEventListener('wheel', function (e) {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    var p = rel({ x: e.clientX, y: e.clientY });
+    zoomAt(p.x, p.y, Z.z * Math.exp(-e.deltaY * 0.0025));
+  }, { passive: false });
+
+  // Sizes and positions every tile from the current bounds; runs after every change
+  function place() {
+    var L = layoutSize(), pos = E.LAYOUTS[S.layout];
+    sizeBoard(L);
+    nodes.forEach(function (b, i) {
+      var p = pos[i];
+      b.style.width = (tw - 2) + 'px';
+      b.style.height = (th - 2) + 'px';
+      // higher layers sit a little up and left so their height shows
+      b.style.left = ((p[0] - L.ox) / 2 * tw + Math.max(0, L.z - p[2]) * depth) + 'px';
+      b.style.top = ((p[1] - L.oy) / 2 * th + Math.max(0, L.z - p[2]) * depth) + 'px';
+    });
+    applyZoom();
   }
 
   function build() {
     board.innerHTML = '';
     nodes = [];
     var pos = E.LAYOUTS[S.layout];
-    sizeBoard();
-    var L = layoutSize();
     pos.forEach(function (p, i) {
       var b = el('button', { class: 'mj-tile', type: 'button' });
-      b.style.width = (tw - 2) + 'px';
-      b.style.height = (th - 2) + 'px';
-      // طبقه‌ی بالاتر کمی بالا و چپ می‌نشیند تا ارتفاع دیده شود
-      b.style.left = (p[0] / 2 * tw + (L.z - p[2]) * depth) + 'px';
-      b.style.top = (p[1] / 2 * th + (L.z - p[2]) * depth) + 'px';
-      // طبقه‌ی بالاتر رو، و در یک طبقه کاشیِ راست و پایین دیرتر تا سایه‌ها درست بیفتند
+      // higher layer on top, and within a layer the right and lower tile later, so shadows fall right
       b.style.zIndex = String(p[2] * 1000 + p[1] * 10 + p[0]);
-      // هر طبقه کمی روشن‌تر از طبقه‌ی زیرش
+      // each layer a little lighter than the one below
       b.style.background = LAYER_FACE[Math.min(p[2], LAYER_FACE.length - 1)];
       b.addEventListener('click', function () { tap(i); });
       board.appendChild(b);
       nodes.push(b);
     });
+    place();
   }
 
   function render() {
@@ -453,10 +580,16 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MahjongEng
     sb.addEventListener('click', doShuffle);
     actions.appendChild(hb);
     actions.appendChild(sb);
+    // icon only: three labelled buttons don't fit one row on a 390px phone
+    fitBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button', 'aria-label': C.t('fit'), title: C.t('fit') }, [C.icon('expand', 18)]);
+    fitBtn.addEventListener('click', fitBoard);
+    fitBtn.style.visibility = Z.z <= 1.01 ? 'hidden' : 'visible';
+    actions.appendChild(fitBtn);
     paint();
   }
 
   function paint() {
+    place();
     var free = {};
     E.freeTiles(S).forEach(function (i) { free[i] = 1; });
     nodes.forEach(function (b, i) {
@@ -643,6 +776,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MahjongEng
       var at = free.indexOf(cur);
       at = at < 0 ? 0 : (at + (k === 'ArrowRight' ? 1 : free.length - 1)) % free.length;
       cur = free[at];
+      showTile(cur);
       paint(); e.preventDefault(); return;
     }
     if ((k === ' ' || k === 'Enter') && cur >= 0) {
