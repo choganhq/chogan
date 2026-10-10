@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2275;
+const MIN_CHECKS = 2288;
 
 function ok(cond, msg) {
   checks++;
@@ -3725,6 +3725,40 @@ function testAdiProof() {
   ok(/retention-days: 1/.test(y), 'artifact فقط یک روز می‌ماند');
 }
 
+/* ------------------------------------------------ Android image save and share */
+// The WebView ignores <a download> and has no navigator.share, so in the Android
+// app the result card's Save image and Share did nothing (#168). A small Java
+// bridge does both without any new permission; these checks keep it that way.
+function testAndroidShare() {
+  head('Android image save and share');
+  const javaDir = path.join(ROOT, 'android/app/src/main/java/io/github/choganhq/chogan');
+  const bridgeFile = path.join(javaDir, 'ImageBridge.java');
+  ok(fs.existsSync(bridgeFile), 'ImageBridge.java exists');
+  if (!fs.existsSync(bridgeFile)) return;
+  const java = fs.readFileSync(bridgeFile, 'utf8');
+  for (const m of ['canSave', 'saveImage', 'shareImage']) {
+    ok(new RegExp('@JavascriptInterface\\s+public boolean ' + m + '\\(').test(java), 'bridge method ' + m + ' is exposed to JavaScript');
+  }
+  ok(/PNG_MAGIC/.test(java) && /MAX_PNG_BYTES/.test(java), 'the bridge only accepts PNGs of bounded size');
+  ok(/MediaStore\.Images\.Media\.RELATIVE_PATH/.test(java) && /SDK_INT >= Build\.VERSION_CODES\.Q/.test(java), 'saving uses MediaStore and only on Android 10+, where no permission is needed');
+  const main = fs.readFileSync(path.join(javaDir, 'MainActivity.java'), 'utf8');
+  ok(/addJavascriptInterface\(new ImageBridge\(this\), "ChoganAndroid"\)/.test(main), 'MainActivity exposes the bridge as ChoganAndroid');
+  const manifest = fs.readFileSync(path.join(ROOT, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
+  const prov = (manifest.match(/<provider[\s\S]*?<\/provider>/) || [''])[0];
+  ok(/androidx\.core\.content\.FileProvider/.test(prov) && /android:exported="false"/.test(prov) && /android:grantUriPermissions="true"/.test(prov),
+    'the FileProvider is not exported and only grants per share');
+  ok(/android:authorities="\$\{applicationId\}\.share"/.test(prov) && /getPackageName\(\) \+ "\.share"/.test(java), 'provider authority matches what the bridge asks for');
+  const pathsFile = path.join(ROOT, 'android/app/src/main/res/xml/share_paths.xml');
+  const paths = fs.existsSync(pathsFile) ? fs.readFileSync(pathsFile, 'utf8') : '';
+  const entries = paths.match(/<[a-z-]+-path\b[^>]*>/g) || [];
+  ok(entries.length === 1 && /<cache-path name="share" path="share\/"/.test(entries[0]), 'the provider exposes only cache/share/ (' + entries.length + ' path entries)');
+  ok(/new File\(activity\.getCacheDir\(\), "share"\)/.test(java), 'the bridge writes inside that same folder');
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  const sheet = core.slice(core.indexOf('function cardSheet('));
+  ok(sheet.indexOf('global.ChoganAndroid') > 0 && sheet.indexOf('global.ChoganAndroid') < sheet.indexOf('if (file) {'), 'the card sheet prefers the Android bridge over the web paths');
+  ok(/droid\.canSave\(\) && droid\.saveImage\(png\(\)\)/.test(sheet) && /else droid\.shareImage\(png\(\), text\)/.test(sheet), 'below Android 10 Save image falls back to the share sheet');
+}
+
 /* ------------------------------------------------ Store metadata for Play */
 // The same fastlane metadata feeds F-Droid and Google Play (#163). Play rejects
 // screenshots longer than 2:1 (ours were 1056×2160) and needs a 1024×500 feature
@@ -4214,6 +4248,7 @@ testEnglishCi();
 testPepkExport();
 testPrivacyPage();
 testStoreMetadata();
+testAndroidShare();
 testTd();
 testVersionStamp();
 testDeployGate();
