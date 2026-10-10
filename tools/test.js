@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2399;
+const MIN_CHECKS = 2472;
 
 function ok(cond, msg) {
   checks++;
@@ -3368,6 +3368,187 @@ function testCardArt() {
   }
 }
 
+/* --------------------------------------------------------- Block Drop */
+function testBlockDrop() {
+  head('Block Drop');
+  const E = loadEngine('blockdrop', 'BlockDropEngineFactory');
+  const key = (cs) => cs.map((c) => c.join(',')).sort().join(' ');
+
+  // pieces: seven, four cells each, the right number of distinct turns
+  ok(E.NAMES.join('') === 'IJLOSTZ' && E.SHAPES.length === 7, 'seven pieces');
+  ok(E.SHAPES.every((st) => st.length === 4 && st.every((cs) => cs.length === 4 && new Set(cs.map(String)).size === 4)), 'every piece has four cells in each of its four states');
+  const turns = E.SHAPES.map((st) => new Set(st.map(key)).size);
+  ok(JSON.stringify(turns) === '[4,4,4,1,4,4,4]', 'every piece but the square has four different turns (' + turns + ')');
+  // hand-checked states from the published rotation system
+  ok(key(E.cells(0, 1)) === key([[2, 0], [2, 1], [2, 2], [2, 3]]), 'the I piece turned right stands in the third column of its box');
+  ok(key(E.cells(5, 1)) === key([[1, 0], [1, 1], [2, 1], [1, 2]]), 'the T piece turned right points right');
+
+  // seven-bag: each run of seven holds every piece once; same seed, same order
+  const S1 = E.create('sprint', 12345);
+  const seq = [S1.cur.t].concat(E.preview(S1, 6));
+  ok(new Set(seq).size === 7, 'the first seven pieces are all different');
+  const S2 = E.create('sprint', 12345), S3 = E.create('sprint', 999);
+  for (let i = 0; i < 30; i++) { E.hardDrop(S2); }
+  const S2b = E.create('sprint', 12345);
+  for (let i = 0; i < 30; i++) { E.hardDrop(S2b); }
+  ok(JSON.stringify(S2.grid) === JSON.stringify(S2b.grid) && S2.score === S2b.score, 'the same seed plays out identically (the daily is the same for everyone)');
+  ok(JSON.stringify([S1.cur.t].concat(E.preview(S1, 6))) !== JSON.stringify([S3.cur.t].concat(E.preview(S3, 6))), 'a different seed gives a different order');
+  {
+    const S = E.create('sprint', 7), bags = [];
+    // take pieces off the queue in order; preview refills it a bag at a time
+    const all = [S.cur.t];
+    while (all.length < 21) { all.push(S.queue.shift()); E.preview(S, 1); }
+    for (let b = 0; b < 3; b++) bags.push(new Set(all.slice(b * 7, b * 7 + 7)).size);
+    ok(bags.every((n) => n === 7), 'three bags in a row each hold all seven pieces (' + bags + ')');
+  }
+
+  // spawning and moving
+  const fresh = () => { const S = E.create('sprint', 1); return S; };
+  {
+    const S = fresh();
+    ok(S.cur.x === 3 && S.cur.r === 0 && !S.over, 'a piece spawns in the middle, unturned');
+    let n = 0; while (E.move(S, -1)) n++;
+    const minX = Math.min(...E.cells(S.cur.t, 0).map((c) => S.cur.x + c[0]));
+    ok(minX === 0 && E.move(S, -1) === false, 'a piece stops at the left wall (' + n + ' steps)');
+    while (E.move(S, 1)) {}
+    const maxX = Math.max(...E.cells(S.cur.t, 0).map((c) => S.cur.x + c[0]));
+    ok(maxX === E.W - 1, 'and at the right wall');
+  }
+
+  // wall kick, worked out by hand from the I table: flat on the floor, turn right.
+  // The plain turn and the first three kicks all reach below the floor; the fifth,
+  // (+1, +2 up), stands the piece in column x+3, rows 18 to 21.
+  {
+    const S = fresh();
+    S.cur = { t: 0, r: 0, x: 3, y: 20 };
+    ok(!E.collides(S, 0, 0, 3, 20) && E.collides(S, 0, 0, 3, 21), 'setup: the I piece lies on the floor');
+    ok(E.rotate(S, 1) === true, 'the I piece turns on the floor by kicking');
+    ok(S.cur.r === 1 && key(E.cells(0, 1).map((c) => [S.cur.x + c[0], S.cur.y + c[1]])) === key([[6, 18], [6, 19], [6, 20], [6, 21]]), 'it ends in column 6, rows 18 to 21 (' + S.cur.x + ',' + S.cur.y + ')');
+  }
+  {
+    // boxed in on every side: no state fits, so nothing changes
+    const S = fresh();
+    for (let i = 0; i < S.grid.length; i++) S.grid[i] = 1;
+    S.cur = { t: 5, r: 0, x: 3, y: 10 };
+    E.cells(5, 0).forEach((c) => { S.grid[(10 + c[1]) * E.W + 3 + c[0]] = 0; });
+    const before = JSON.stringify(S.cur);
+    ok(E.rotate(S, 1) === false && JSON.stringify(S.cur) === before, 'a turn with no room is refused and the piece stays put');
+    ok(E.rotate(S, -1) === false, 'both ways');
+  }
+
+  // line clears and scoring
+  function wellBoard() {
+    const S = fresh();
+    for (let y = E.H - 4; y < E.H; y++) for (let x = 0; x < E.W; x++) if (x !== 9) S.grid[y * E.W + x] = 2;
+    S.grid[(E.H - 5) * E.W + 0] = 7;   // a marker block above the stack
+    S.cur = { t: 0, r: 1, x: 7, y: 0 }; // vertical I over column 9
+    return S;
+  }
+  {
+    const S = wellBoard();
+    const drop = E.ghostY(S) - S.cur.y;
+    const ev = E.hardDrop(S);
+    ok(ev.cleared === 4 && S.lines === 4, 'a vertical I in the well clears four lines');
+    ok(S.score === 800 + 2 * drop, 'four lines score 800 at level 1, plus 2 per row hard-dropped (' + S.score + ')');
+    ok(S.grid[(E.H - 1) * E.W + 0] === 7 && S.grid.filter((v) => v).length === 1, 'rows above fall into place: the marker block lands on the floor and nothing else is left');
+    ok(S.tetrises === 1 && S.b2b === true, 'a four-line clear is counted and starts back-to-back');
+    // second four-line clear in a row: 1.5x, plus a combo of 1 (50)
+    for (let y = E.H - 4; y < E.H; y++) for (let x = 0; x < E.W; x++) if (x !== 9) S.grid[y * E.W + x] = 2;
+    S.grid[(E.H - 1) * E.W + 9] = 0;
+    S.cur = { t: 0, r: 1, x: 7, y: 0 };
+    const sc = S.score, d2 = E.ghostY(S) - S.cur.y;
+    const ev2 = E.hardDrop(S);
+    ok(ev2.cleared === 4 && ev2.b2b === true && S.score - sc === 1200 + 50 + 2 * d2, 'back-to-back four lines score 1200, plus 50 for the combo (' + (S.score - sc) + ')');
+  }
+  {
+    const S = fresh();
+    for (let x = 0; x < E.W; x++) if (x < 3 || x > 6) S.grid[(E.H - 1) * E.W + x] = 3;
+    S.cur = { t: 0, r: 0, x: 3, y: 0 };
+    const ev = E.hardDrop(S);
+    ok(ev.cleared === 1 && S.lines === 1 && S.b2b === false, 'a flat I fills a gap of four and clears one line');
+  }
+
+  // hold
+  {
+    const S = fresh();
+    const first = S.cur.t, second = E.preview(S, 1)[0];
+    ok(E.hold(S) === true && S.hold === first && S.cur.t === second, 'hold puts the piece aside and brings the next');
+    ok(E.hold(S) === false && S.hold === first, 'only once until a piece locks');
+    E.hardDrop(S);
+    const now = S.cur.t;
+    ok(E.hold(S) === true && S.cur.t === first && S.hold === now, 'after a lock, hold swaps back');
+  }
+
+  // gravity, lock delay and its reset limit
+  ok(Math.abs(E.gravity(1) - 1) < 1e-9 && E.gravity(10) < E.gravity(5) && E.gravity(5) < E.gravity(1), 'gravity starts at one row a second and speeds up with the level');
+  {
+    const S = fresh();
+    const y0 = S.cur.y;
+    E.tick(S, 1.0);
+    ok(S.cur.y === y0 + 1, 'one second at level 1 drops the piece one row');
+    E.tick(S, 0.06, true);
+    ok(S.cur.y === y0 + 2 && S.score === 1, 'soft drop is twenty times faster and scores one per row');
+    S.cur.y = E.ghostY(S);
+    const pieces = S.pieces;
+    E.tick(S, E.LOCK_DELAY * 0.8);
+    ok(S.pieces === pieces, 'a grounded piece waits before locking');
+    E.move(S, S.cur.x > 0 ? -1 : 1);
+    E.tick(S, E.LOCK_DELAY * 0.8);
+    ok(S.pieces === pieces, 'moving it on the ground restarts the wait');
+    for (let i = 0; i < E.MAX_RESETS + 2; i++) { E.move(S, (i % 2) ? 1 : -1); E.tick(S, E.LOCK_DELAY * 0.3); }
+    ok(S.pieces === pieces + 1, 'but not forever: after ' + E.MAX_RESETS + ' resets it locks');
+  }
+
+  // end of round
+  {
+    const S = fresh();
+    S.lines = E.SPRINT_LINES - 1;
+    for (let x = 0; x < E.W; x++) if (x < 3 || x > 6) S.grid[(E.H - 1) * E.W + x] = 3;
+    S.cur = { t: 0, r: 0, x: 3, y: 0 };
+    E.hardDrop(S);
+    ok(S.won === true && S.lines === E.SPRINT_LINES, 'the sprint is won on line 40');
+    ok(E.move(S, 1) === false && E.hardDrop(S) === null, 'nothing moves after the round is over');
+  }
+  {
+    const S = E.create('marathon', 3);
+    ok(E.goal(S) === 100 && E.goal(E.create('sprint', 3)) === 40, 'marathon is 100 lines, sprint 40');
+    S.lines = 19; S.level = 2;   // as after nineteen lines
+    for (let x = 0; x < E.W; x++) if (x < 3 || x > 6) S.grid[(E.H - 1) * E.W + x] = 3;
+    S.cur = { t: 0, r: 0, x: 3, y: 0 };
+    const d = E.ghostY(S) - S.cur.y;
+    E.hardDrop(S);
+    ok(S.level === 3 && S.score === 100 * 2 + 2 * d, 'marathon levels up every ten lines and scores by the level it was at (' + S.level + ', ' + S.score + ')');
+  }
+  {
+    const S = fresh();
+    for (let y = 0; y < E.H; y++) for (let x = 0; x < E.W; x++) if (x !== y % E.W) S.grid[y * E.W + x] = 4;
+    S.cur = { t: 3, r: 0, x: 3, y: 0 };
+    const ev = E.lock(S);
+    ok(S.over === true && ev.over === true, 'a full board ends the round when the next piece has no room');
+  }
+
+  // saving
+  {
+    const S = E.create('marathon', 4242);
+    for (let i = 0; i < 6; i++) { E.move(S, i % 2 ? 1 : -1); E.hardDrop(S); }
+    const R = E.restore(JSON.parse(JSON.stringify(E.serialize(S))));
+    ok(!!R && JSON.stringify(R) === JSON.stringify(S), 'a game survives a save and load unchanged');
+    for (let i = 0; i < 10; i++) { E.hardDrop(S); E.hardDrop(R); }
+    ok(JSON.stringify(R.grid) === JSON.stringify(S.grid) && R.cur.t === S.cur.t, 'and goes on with the same pieces after loading');
+    ok(E.restore({ grid: [1, 2] }) === null && E.restore(null) === null, 'a broken save is refused');
+  }
+
+  // the page
+  const page = fs.readFileSync(path.join(ROOT, 'www/games/blockdrop/index.html'), 'utf8');
+  ok(/id: 'blockdrop'/.test(page) && /C\.daily\('blockdrop', daily\)/.test(page), 'the page uses its id for saves and the daily seed');
+  ok(/\.ch-gamemain \{ touch-action: none/.test(page), 'dragging on the board is not taken as a scroll');
+  ok((page.match(/class: 'bd-btn'/g) || []).length === 1 && /\['hold', C\.t\('holdKey'\)\], \['left'/.test(page), 'the touch pad has hold, left, rotate, right, soft drop and drop');
+  ok(/'bd-sprint'/.test(page) && /'bd-tetris'/.test(page) && /'bd-marathon'/.test(page), 'the page unlocks its three achievements');
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  ok(['bd-sprint', 'bd-tetris', 'bd-marathon'].every((id) => new RegExp("\\{ id: '" + id + "',[^\\n]*dde: '").test(core)), 'the achievements are defined in the core in all four languages');
+  ok(!/Tetris/i.test(page.replace(/tetrises|'bd-tetris'|e\.cleared === 4/g, '')), 'the trademark name is not used in the game');
+}
+
 /* ------------------------------------------------------------- پاسور */
 function testPasur() {
   head('پاسور');
@@ -4506,6 +4687,7 @@ testStoreMetadata();
 testAndroidShare();
 testNonogramPictures();
 testHokm();
+testBlockDrop();
 testTd();
 testVersionStamp();
 testDeployGate();

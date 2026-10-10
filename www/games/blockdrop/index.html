@@ -1,0 +1,859 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>بلوک‌ریز — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* Dragging on the board moves the piece; without this the browser took the same
+     drag as a scroll or a zoom. */
+  .ch-gamemain { touch-action: none; user-select: none; -webkit-user-select: none; }
+  .bd-wrap { width: 100%; height: 100%; display: flex; flex-direction: column; gap: var(--s-2); align-items: center; }
+  .bd-top { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+  .bd-top:empty { display: none; }
+  .bd-canvasbox { flex: 1; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
+  .bd-canvas { display: block; touch-action: none; }
+  .bd-pad { display: flex; gap: var(--s-2); justify-content: center; direction: ltr; flex-wrap: nowrap; padding-bottom: var(--s-1); }
+  .bd-btn {
+    width: 52px; height: 48px; border: 0; border-radius: var(--r-md); background: var(--c-surface-2);
+    color: var(--c-text); display: flex; align-items: center; justify-content: center; cursor: pointer;
+    touch-action: none; box-shadow: var(--sh-1);
+  }
+  .bd-btn:active { background: var(--game-soft); color: var(--game); }
+  @media (max-width: 360px) { .bd-btn { width: 46px; } }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function BlockDropEngineFactory() {
+  'use strict';
+
+  // 10 wide, 20 visible rows plus 2 hidden above where pieces spawn
+  var W = 10, H = 22, HIDDEN = 2;
+  var NAMES = ['I', 'J', 'L', 'O', 'S', 'T', 'Z'];
+  var SPRINT_LINES = 40, MARATHON_LINES = 100;
+  var LOCK_DELAY = 0.5, MAX_RESETS = 15, SOFT_FACTOR = 20;
+
+  // Spawn shapes (y grows down) in the piece's box: 4x4 for I and O, 3x3 for the rest.
+  // Rotating these by the box gives the standard rotation system's four states.
+  var BASE = [
+    [[0, 1], [1, 1], [2, 1], [3, 1]],
+    [[0, 0], [0, 1], [1, 1], [2, 1]],
+    [[2, 0], [0, 1], [1, 1], [2, 1]],
+    [[1, 0], [2, 0], [1, 1], [2, 1]],
+    [[1, 0], [2, 0], [0, 1], [1, 1]],
+    [[1, 0], [0, 1], [1, 1], [2, 1]],
+    [[0, 0], [1, 0], [1, 1], [2, 1]]
+  ];
+  var SHAPES = BASE.map(function (cells, t) {
+    var n = (t === 0 || t === 3) ? 4 : 3, states = [cells];
+    for (var r = 1; r < 4; r++) {
+      states.push(t === 3 ? cells : states[r - 1].map(function (c) { return [n - 1 - c[1], c[0]]; }));
+    }
+    return states;
+  });
+
+  // Wall kicks, written as in the published tables (x right, y UP); applied with y negated.
+  // Key: from-state then to-state, states 0, R=1, 2, L=3.
+  var KICK_JLSTZ = {
+    '01': [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]], '10': [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]],
+    '12': [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]], '21': [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]],
+    '23': [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]], '32': [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]],
+    '30': [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]], '03': [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]]
+  };
+  var KICK_I = {
+    '01': [[0, 0], [-2, 0], [1, 0], [-2, -1], [1, 2]], '10': [[0, 0], [2, 0], [-1, 0], [2, 1], [-1, -2]],
+    '12': [[0, 0], [-1, 0], [2, 0], [-1, 2], [2, -1]], '21': [[0, 0], [1, 0], [-2, 0], [1, -2], [-2, 1]],
+    '23': [[0, 0], [2, 0], [-1, 0], [2, 1], [-1, -2]], '32': [[0, 0], [-2, 0], [1, 0], [-2, -1], [1, 2]],
+    '30': [[0, 0], [1, 0], [-2, 0], [1, -2], [-2, 1]], '03': [[0, 0], [-1, 0], [2, 0], [-1, 2], [2, -1]]
+  };
+  var CLEAR_POINTS = [0, 100, 300, 500, 800];
+
+  // The state carries its own generator so a saved game resumes the same piece order
+  function rand(S) {
+    var a = S.rs = (S.rs + 0x6D2B79F5) | 0;
+    var t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Seven-bag: every run of seven pieces holds each piece once, so no long droughts
+  function refill(S) {
+    while (S.queue.length < 7) {
+      var bag = [0, 1, 2, 3, 4, 5, 6];
+      for (var i = bag.length - 1; i > 0; i--) {
+        var j = Math.floor(rand(S) * (i + 1)), x = bag[i];
+        bag[i] = bag[j]; bag[j] = x;
+      }
+      S.queue = S.queue.concat(bag);
+    }
+  }
+
+  function cells(t, r) { return SHAPES[t][r & 3]; }
+  function cellAt(S, x, y) { return S.grid[y * W + x]; }
+  function collides(S, t, r, x, y) {
+    var cs = cells(t, r);
+    for (var i = 0; i < 4; i++) {
+      var cx = x + cs[i][0], cy = y + cs[i][1];
+      if (cx < 0 || cx >= W || cy >= H) return true;
+      if (cy >= 0 && S.grid[cy * W + cx]) return true;
+    }
+    return false;
+  }
+
+  function gravity(level) {           // seconds per row, the usual guideline curve
+    var l = Math.max(1, Math.min(20, level));
+    return Math.pow(0.8 - (l - 1) * 0.007, l - 1);
+  }
+
+  function create(mode, seed) {
+    var S = {
+      mode: mode === 'marathon' ? 'marathon' : 'sprint',
+      grid: [], queue: [], rs: seed | 0,
+      cur: null, hold: -1, holdUsed: false,
+      score: 0, lines: 0, level: 1, pieces: 0, tetrises: 0, combo: -1, b2b: false,
+      fall: 0, lockT: 0, resets: 0, lowest: 0, time: 0,
+      over: false, won: false
+    };
+    for (var i = 0; i < W * H; i++) S.grid.push(0);
+    refill(S);
+    spawn(S, S.queue.shift());
+    return S;
+  }
+  function goal(S) { return S.mode === 'marathon' ? MARATHON_LINES : SPRINT_LINES; }
+
+  function spawn(S, t) {
+    refill(S);
+    var x = 3, y = 0;
+    S.cur = { t: t, r: 0, x: x, y: y };
+    S.fall = 0; S.lockT = 0; S.resets = 0;
+    if (collides(S, t, 0, x, y)) { S.over = true; return false; }   // block out
+    if (!collides(S, t, 0, x, y + 1)) S.cur.y = y + 1;              // step into view
+    S.lowest = S.cur.y;
+    return true;
+  }
+
+  function grounded(S) { var c = S.cur; return collides(S, c.t, c.r, c.x, c.y + 1); }
+  // A move or turn on the ground restarts the lock timer, but only so often
+  function touched(S) {
+    if (grounded(S) && S.resets < MAX_RESETS) { S.lockT = 0; S.resets++; }
+  }
+
+  function move(S, dx) {
+    if (S.over || S.won) return false;
+    var c = S.cur;
+    if (collides(S, c.t, c.r, c.x + dx, c.y)) return false;
+    c.x += dx;
+    touched(S);
+    return true;
+  }
+
+  function rotate(S, dir) {
+    if (S.over || S.won) return false;
+    var c = S.cur, to = (c.r + (dir < 0 ? 3 : 1)) & 3;
+    if (c.t === 3) return true;     // the square looks the same every way round
+    var kicks = (c.t === 0 ? KICK_I : KICK_JLSTZ)['' + c.r + to];
+    for (var i = 0; i < kicks.length; i++) {
+      var nx = c.x + kicks[i][0], ny = c.y - kicks[i][1];
+      if (!collides(S, c.t, to, nx, ny)) {
+        c.x = nx; c.y = ny; c.r = to;
+        touched(S);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function ghostY(S) {
+    var c = S.cur, y = c.y;
+    while (!collides(S, c.t, c.r, c.x, y + 1)) y++;
+    return y;
+  }
+
+  // Lock the piece, clear lines, score, spawn the next. Returns an event for sound.
+  function lock(S) {
+    var c = S.cur, cs = cells(c.t, c.r), above = true;
+    for (var i = 0; i < 4; i++) {
+      var y = c.y + cs[i][1];
+      if (y >= HIDDEN) above = false;
+      if (y >= 0) S.grid[y * W + c.x + cs[i][0]] = c.t + 1;
+    }
+    S.pieces++;
+    var rows = [];
+    for (var r = 0; r < H; r++) {
+      var full = true;
+      for (var x = 0; x < W; x++) if (!S.grid[r * W + x]) { full = false; break; }
+      if (full) rows.push(r);
+    }
+    rows.forEach(function (row) {
+      S.grid.splice(row * W, W);
+      for (var k = 0; k < W; k++) S.grid.unshift(0);
+    });
+    var n = rows.length, ev = { type: 'lock', cleared: n, rows: rows, b2b: false, combo: 0 };
+    if (n) {
+      var pts = CLEAR_POINTS[n] * S.level;
+      if (n === 4) {
+        if (S.b2b) { pts = Math.floor(pts * 1.5); ev.b2b = true; }
+        S.b2b = true;
+        S.tetrises++;
+      } else S.b2b = false;
+      S.combo++;
+      if (S.combo > 0) { pts += 50 * S.combo * S.level; ev.combo = S.combo; }
+      S.score += pts;
+      S.lines += n;
+      if (S.mode === 'marathon') S.level = 1 + Math.floor(S.lines / 10);
+      ev.points = pts;
+    } else S.combo = -1;
+    S.holdUsed = false;
+    if (S.lines >= goal(S)) { S.won = true; ev.won = true; return ev; }
+    if (above && !n) { S.over = true; ev.over = true; return ev; }   // lock out
+    if (!spawn(S, S.queue.shift())) ev.over = true;
+    return ev;
+  }
+
+  function hardDrop(S) {
+    if (S.over || S.won) return null;
+    var y = ghostY(S), d = y - S.cur.y;
+    S.cur.y = y;
+    S.score += 2 * d;
+    var ev = lock(S);
+    ev.dropped = d;
+    return ev;
+  }
+
+  function hold(S) {
+    if (S.over || S.won || S.holdUsed) return false;
+    var t = S.cur.t;
+    if (S.hold < 0) { S.hold = t; spawn(S, S.queue.shift()); }
+    else { var h = S.hold; S.hold = t; spawn(S, h); }
+    S.holdUsed = true;
+    return true;
+  }
+
+  // Advance time. soft: the soft-drop key or button is down.
+  function tick(S, dt, soft) {
+    var events = [];
+    if (S.over || S.won) return events;
+    S.time += dt * 1000;
+    var g = gravity(S.level);
+    if (soft) g = Math.min(g, g / SOFT_FACTOR);
+    S.fall += dt;
+    var guard = 0;
+    while (S.fall >= g && guard++ < 40) {
+      S.fall -= g;
+      var c = S.cur;
+      if (collides(S, c.t, c.r, c.x, c.y + 1)) { S.fall = 0; break; }
+      c.y++;
+      if (soft) S.score += 1;
+      if (c.y > S.lowest) { S.lowest = c.y; S.resets = 0; S.lockT = 0; }
+    }
+    if (grounded(S)) {
+      S.lockT += dt;
+      if (S.lockT >= LOCK_DELAY) events.push(lock(S));
+    } else S.lockT = 0;
+    return events;
+  }
+
+  function preview(S, n) { refill(S); return S.queue.slice(0, n); }
+  // Plain data: the whole state survives JSON as is
+  function serialize(S) { return JSON.parse(JSON.stringify(S)); }
+  function restore(o) {
+    if (!o || !Array.isArray(o.grid) || o.grid.length !== W * H || !o.cur || !Array.isArray(o.queue)) return null;
+    return serialize(o);
+  }
+
+  var api = {
+    W: W, H: H, HIDDEN: HIDDEN, NAMES: NAMES, SHAPES: SHAPES, SPRINT_LINES: SPRINT_LINES, MARATHON_LINES: MARATHON_LINES,
+    LOCK_DELAY: LOCK_DELAY, MAX_RESETS: MAX_RESETS,
+    create: create, cells: cells, cellAt: cellAt, collides: collides, gravity: gravity, goal: goal,
+    move: move, rotate: rotate, ghostY: ghostY, hardDrop: hardDrop, hold: hold, tick: tick, lock: lock,
+    preview: preview, serialize: serialize, restore: restore
+  };
+  if (typeof self !== 'undefined') self.BlockDropEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = BlockDropEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = BlockDropEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'blockdrop',
+    name: { fa: 'بلوک‌ریز', en: 'Block Drop', zh: '落块', de: 'Blocksturz' },
+    accent: '#4F6BD8',
+    mood: 'dots',
+    strings: {
+      fa: {
+        lines: 'خط', time: 'زمان', level: 'سطح', sprint: 'سرعتی ۴۰', marathon: 'ماراتن ۱۰۰',
+        holdLbl: 'نگه‌دار', nextLbl: 'بعدی', tapStart: 'برای شروع بزن', tapResume: 'مکث — برای ادامه بزن',
+        sprintDone: '۴۰ خط تمام شد', marathonDone: 'ماراتن تمام شد!', toppedOut: 'جا تمام شد', pieces: 'قطعه',
+        dailyBd: 'بلوک‌ریز روزانه', newRound: 'دور تازه',
+        left: 'چپ', right: 'راست', rotate: 'چرخش', rotateBack: 'چرخش برعکس', softDrop: 'پایین آرام', hardDrop: 'انداختن', holdKey: 'نگه داشتن', pauseKey: 'مکث',
+        tutTitle1: 'خط کامل کن', tutText1: 'قطعه‌ها از بالا می‌آیند. هر ردیفی که پر شود پاک می‌شود. اگر قطعه‌ها به بالا برسند دور تمام است.',
+        tutTitle2: 'با انگشت', tutText2: 'برای چرخاندن روی زمین بزن، برای جابه‌جایی بکش، برای انداختن تند به پایین بکش و برای نگه داشتن قطعه تند به بالا. دکمه‌های پایین صفحه هم همین کارها را می‌کنند.',
+        tutTitle3: 'دو جور دور', tutText3: 'سرعتی: ۴۰ خط را هر چه زودتر پاک کن. ماراتن: ۱۰۰ خط، با سرعتی که هر ۱۰ خط بیشتر می‌شود. چهار خط با هم بیشترین امتیاز را دارد.'
+      },
+      en: {
+        lines: 'Lines', time: 'Time', level: 'Level', sprint: 'Sprint 40', marathon: 'Marathon 100',
+        holdLbl: 'Hold', nextLbl: 'Next', tapStart: 'Tap to start', tapResume: 'Paused — tap to continue',
+        sprintDone: '40 lines cleared', marathonDone: 'Marathon complete!', toppedOut: 'Out of room', pieces: 'Pieces',
+        dailyBd: 'Daily Block Drop', newRound: 'New round',
+        left: 'Left', right: 'Right', rotate: 'Rotate', rotateBack: 'Rotate back', softDrop: 'Soft drop', hardDrop: 'Drop', holdKey: 'Hold', pauseKey: 'Pause',
+        tutTitle1: 'Clear lines', tutText1: 'Pieces fall from the top. Every full row disappears. If the pieces reach the top, the round is over.',
+        tutTitle2: 'Touch', tutText2: 'Tap the board to rotate, drag to move, flick down to drop and flick up to hold a piece. The buttons below do the same.',
+        tutTitle3: 'Two kinds of round', tutText3: 'Sprint: clear 40 lines as fast as you can. Marathon: 100 lines, getting faster every 10. Four lines at once score the most.'
+      },
+      zh: {
+        lines: '行', time: '时间', level: '等级', sprint: '竞速 40', marathon: '马拉松 100',
+        holdLbl: '暂存', nextLbl: '下一个', tapStart: '点击开始', tapResume: '已暂停——点击继续',
+        sprintDone: '已消除 40 行', marathonDone: '马拉松完成！', toppedOut: '没有空间了', pieces: '方块数',
+        dailyBd: '每日落块', newRound: '新一局',
+        left: '左移', right: '右移', rotate: '旋转', rotateBack: '反向旋转', softDrop: '慢降', hardDrop: '直落', holdKey: '暂存', pauseKey: '暂停',
+        tutTitle1: '消除整行', tutText1: '方块从上方落下，填满的一行会消失。方块堆到顶部，本局结束。',
+        tutTitle2: '触屏操作', tutText2: '点棋盘旋转，拖动移动，快速下滑直落，快速上滑暂存方块。下方按钮功能相同。',
+        tutTitle3: '两种模式', tutText3: '竞速：尽快消除 40 行。马拉松：100 行，每 10 行加速。一次消四行得分最高。'
+      },
+      de: {
+        lines: 'Reihen', time: 'Zeit', level: 'Stufe', sprint: 'Sprint 40', marathon: 'Marathon 100',
+        holdLbl: 'Halten', nextLbl: 'Nächste', tapStart: 'Tippen zum Starten', tapResume: 'Pause — tippen zum Weiterspielen',
+        sprintDone: '40 Reihen geschafft', marathonDone: 'Marathon geschafft!', toppedOut: 'Kein Platz mehr', pieces: 'Steine',
+        dailyBd: 'Täglicher Blocksturz', newRound: 'Neue Runde',
+        left: 'Links', right: 'Rechts', rotate: 'Drehen', rotateBack: 'Zurückdrehen', softDrop: 'Langsam fallen', hardDrop: 'Fallen lassen', holdKey: 'Halten', pauseKey: 'Pause',
+        tutTitle1: 'Reihen füllen', tutText1: 'Steine fallen von oben. Jede volle Reihe verschwindet. Reichen die Steine bis oben, ist die Runde vorbei.',
+        tutTitle2: 'Mit dem Finger', tutText2: 'Tippe aufs Feld zum Drehen, zieh zum Verschieben, wisch schnell nach unten zum Fallenlassen und nach oben zum Halten. Die Knöpfe unten tun dasselbe.',
+        tutTitle3: 'Zwei Rundenarten', tutText3: 'Sprint: 40 Reihen so schnell wie möglich. Marathon: 100 Reihen, alle 10 schneller. Vier Reihen auf einmal bringen am meisten.'
+      }
+    }
+  });
+
+  var dailyDate = new URLSearchParams(location.search).get('daily');
+  var prefs = ctx.store.get('prefs', { mode: 'sprint' });
+
+  var S = null, raf = null, lastT = 0, over = false, paused = false, startedAt = Date.now();
+  var flashes = [];               // rows just cleared, drawn fading
+  var held = { dir: 0, since: 0, last: 0, soft: false };   // keyboard and button auto-repeat
+  var DAS = 0.17, ARR = 0.05;     // seconds before a held move repeats, and between repeats
+
+  // Field drawn in fixed units: the board is 10x20 cells, the side column holds hold and next
+  var CELL = 24, BW = E.W * CELL, BH = (E.H - E.HIDDEN) * CELL, GAP = 10, SIDE = 4 * 18 + 12, FW = BW + GAP + SIDE, FH = BH;
+
+  var canvas = el('canvas', { class: 'bd-canvas' });
+  var cbox = el('div', { class: 'bd-canvasbox' }, [canvas]);
+  var topRow = el('div', { class: 'bd-top' });
+  var pad = el('div', { class: 'bd-pad' });
+  var wrap = el('div', { class: 'bd-wrap' }, [topRow, cbox, pad]);
+
+  ctx.stat('lines', C.t('lines'));
+  // the second counter is the clock in a sprint and the score in a marathon
+  var scoreLbl = ctx.stat('score', C.t('score')).querySelector('span');
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ colours */
+  // Piece colours are fixed like printed ink so a piece reads the same in both themes
+  var PIECE = ['#4FB6C9', '#4F6BD8', '#E8913A', '#E8C547', '#5DB36B', '#9B6BD1', '#D9534F'];
+  var CO = {};
+  function readColors() {
+    var cs = getComputedStyle(document.documentElement);
+    function v(n, f) { return (cs.getPropertyValue(n) || f).trim() || f; }
+    CO = { field: v('--c-surface-2', '#F3ECE2'), line: v('--c-line', '#E7DACA'), text: v('--c-text', '#2C2620'),
+      dim: v('--c-text-dim', '#7C7063'), surface: v('--c-surface', '#FFFFFF') };
+  }
+  readColors();
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    if (mq.addEventListener) mq.addEventListener('change', function () { setTimeout(function () { readColors(); draw(); }, 60); });
+  }
+
+  /* ------------------------------------------------------------ size */
+  var scale = 1, dpr = 1;
+  function resize() {
+    var boxW = cbox.clientWidth || window.innerWidth;
+    var boxH = cbox.clientHeight || (window.innerHeight - 220);
+    scale = Math.max(0.4, Math.min(boxW / FW, boxH / FH));
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var w = Math.floor(FW * scale), h = Math.floor(FH * scale);
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    draw();
+  }
+  window.addEventListener('resize', resize);
+
+  /* ------------------------------------------------------------ rounds */
+  function seedNow() { return (Math.random() * 4294967296) | 0; }
+
+  function start(mode, daily) {
+    var seed = daily ? (C.daily('blockdrop', daily).rng() * 4294967296) | 0 : seedNow();
+    S = E.create(daily ? 'sprint' : mode, seed);
+    S.daily = daily || null;
+    S.started = false;
+    startedAt = Date.now();
+    over = false; paused = false; flashes = [];
+    if (!daily) { prefs.mode = S.mode; ctx.store.set('prefs', prefs); }
+    afterLoad();
+    save();
+  }
+
+  function resume(restored) {
+    S = restored;
+    S.started = true;
+    over = false; flashes = [];
+    paused = true;               // a resumed round waits for the player's tap
+    startedAt = Date.now() - S.time;
+    afterLoad();
+  }
+
+  function afterLoad() {
+    topRow.innerHTML = '';
+    if (S.daily) {
+      topRow.appendChild(el('span', { class: 'ch-badge ch-badge--accent' },
+        [C.icon('calendar', 14), el('span', { text: C.t('dailyBd') + ' — ' + C.num(S.daily) })]));
+      topRow.appendChild(el('span', { class: 'ch-badge', text: C.t('sprint') }));
+    } else {
+      topRow.appendChild(C.ui.segmented([
+        { value: 'sprint', label: C.t('sprint') }, { value: 'marathon', label: C.t('marathon') }
+      ], S.mode, function (v) {
+        if (v === S.mode) return;
+        var go = function () { start(v, null); };
+        if (S.started && !over && S.pieces > 0) {
+          paused = true;
+          C.ui.confirm({ title: C.t('newRound'), body: C.t('resetWarn'), onOk: go, onCancel: afterLoad });
+          afterLoad();
+          return;
+        }
+        go();
+      }));
+    }
+    hud();
+    draw();
+  }
+
+  function hud() {
+    ctx.setStat('lines', C.num(S.lines) + '/' + C.num(E.goal(S)));
+    scoreLbl.textContent = S.mode === 'sprint' ? C.t('time') : C.t('score');
+    ctx.setStat('score', S.mode === 'sprint' ? C.time(S.time) : C.num(S.score));
+  }
+
+  /* ------------------------------------------------------------ drawing */
+  function block(g, x, y, s, col, alpha) {
+    g.globalAlpha = alpha == null ? 1 : alpha;
+    g.fillStyle = col;
+    C.rrect(g, x + 1, y + 1, s - 2, s - 2, Math.max(2, s * 0.18));
+    g.fill();
+    // a light top edge and a dark bottom edge make each block read as a tile
+    g.fillStyle = 'rgba(255,255,255,.28)';
+    g.fillRect(x + 3, y + 2.5, s - 6, Math.max(1.5, s * 0.12));
+    g.fillStyle = 'rgba(0,0,0,.16)';
+    g.fillRect(x + 3, y + s - 2.5 - Math.max(1.5, s * 0.1), s - 6, Math.max(1.5, s * 0.1));
+    g.globalAlpha = 1;
+  }
+
+  function mini(g, t, cx, cy, s, dim) {
+    if (t < 0) return;
+    var cs = E.cells(t, 0), minX = 9, maxX = -1, minY = 9, maxY = -1;
+    cs.forEach(function (c) { minX = Math.min(minX, c[0]); maxX = Math.max(maxX, c[0]); minY = Math.min(minY, c[1]); maxY = Math.max(maxY, c[1]); });
+    var ox = cx - (maxX - minX + 1) * s / 2, oy = cy - (maxY - minY + 1) * s / 2;
+    cs.forEach(function (c) { block(g, ox + (c[0] - minX) * s, oy + (c[1] - minY) * s, s, PIECE[t], dim ? 0.35 : 1); });
+  }
+
+  function paintField(g, st, withUi) {
+    var vis = E.H - E.HIDDEN;
+    g.fillStyle = CO.field;
+    C.rrect(g, 0, 0, BW, BH, 10);
+    g.fill();
+    g.strokeStyle = CO.line;
+    g.lineWidth = 1;
+    g.beginPath();
+    for (var gx = 1; gx < E.W; gx++) { g.moveTo(gx * CELL + .5, 0); g.lineTo(gx * CELL + .5, BH); }
+    for (var gy = 1; gy < vis; gy++) { g.moveTo(0, gy * CELL + .5); g.lineTo(BW, gy * CELL + .5); }
+    g.stroke();
+    for (var y = E.HIDDEN; y < E.H; y++) {
+      for (var x = 0; x < E.W; x++) {
+        var v = st.grid[y * E.W + x];
+        if (v) block(g, x * CELL, (y - E.HIDDEN) * CELL, CELL, PIECE[v - 1]);
+      }
+    }
+    if (!st.over && !st.won && st.cur) {
+      var c = st.cur, cs = E.cells(c.t, c.r), gyy = E.ghostY(st);
+      // the landing spot: a faint fill and an outline, readable on both themes
+      g.strokeStyle = PIECE[c.t];
+      g.lineWidth = 2;
+      cs.forEach(function (p) {
+        var yy = gyy + p[1] - E.HIDDEN;
+        if (yy < 0) return;
+        block(g, (c.x + p[0]) * CELL, yy * CELL, CELL, PIECE[c.t], 0.18);
+        C.rrect(g, (c.x + p[0]) * CELL + 2, yy * CELL + 2, CELL - 4, CELL - 4, 4);
+        g.stroke();
+      });
+      cs.forEach(function (p) {
+        var yy = c.y + p[1] - E.HIDDEN;
+        if (yy >= 0) block(g, (c.x + p[0]) * CELL, yy * CELL, CELL, PIECE[c.t]);
+      });
+    }
+    if (withUi) {
+      var now = performance.now();
+      flashes = flashes.filter(function (f) { return now - f.at < 260; });
+      flashes.forEach(function (f) {
+        g.globalAlpha = 1 - (now - f.at) / 260;
+        g.fillStyle = '#FFFFFF';
+        f.rows.forEach(function (r) { g.fillRect(0, (r - E.HIDDEN) * CELL, BW, CELL); });
+      });
+      g.globalAlpha = 1;
+    }
+    // side column: hold, then the next three
+    var sx = BW + GAP, s = 16;
+    g.fillStyle = CO.dim;
+    g.textAlign = 'center';
+    g.textBaseline = 'top';
+    g.font = '700 12px Vazirmatn, system-ui, sans-serif';
+    g.fillText(C.t('holdLbl'), sx + SIDE / 2, 2);
+    g.fillStyle = CO.field;
+    C.rrect(g, sx, 20, SIDE, 56, 8); g.fill();
+    mini(g, st.hold, sx + SIDE / 2, 48, s, st.holdUsed);
+    g.fillStyle = CO.dim;
+    g.fillText(C.t('nextLbl'), sx + SIDE / 2, 92);
+    g.fillStyle = CO.field;
+    C.rrect(g, sx, 110, SIDE, 170, 8); g.fill();
+    st.queue.slice(0, 3).forEach(function (t, i) { mini(g, t, sx + SIDE / 2, 140 + i * 52, i ? 14 : s); });
+    if (withUi && !over && (!st.started || paused)) {
+      g.fillStyle = 'rgba(0,0,0,.35)';
+      C.rrect(g, 0, BH / 2 - 26, BW, 52, 0); g.fill();
+      g.fillStyle = '#FFFFFF';
+      g.textBaseline = 'middle';
+      g.font = '700 17px Vazirmatn, system-ui, sans-serif';
+      g.fillText(st.started ? C.t('tapResume') : C.t('tapStart'), BW / 2, BH / 2);
+    }
+  }
+
+  function draw() {
+    if (!S || !canvas.width) return;
+    var g = canvas.getContext('2d');
+    g.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
+    g.clearRect(0, 0, FW, FH);
+    paintField(g, S, true);
+  }
+
+  // Result card: the board at the moment the round ended, drawn from the model
+  function cardPaint(snap) {
+    return function (g, w, h) {
+      var k = Math.min(w / FW, h / FH);
+      g.save();
+      g.translate((w - FW * k) / 2, (h - FH * k) / 2);
+      g.scale(k, k);
+      paintField(g, snap, false);
+      g.restore();
+    };
+  }
+
+  /* ------------------------------------------------------------ actions */
+  function playing() { return S && !over && !paused; }
+  function wake() {
+    if (!S || over) return false;
+    if (!S.started) { S.started = true; startedAt = Date.now(); draw(); return false; }
+    if (paused) { paused = false; lastT = performance.now(); draw(); return false; }
+    return true;
+  }
+  function act(kind) {
+    if (!wake()) return;
+    var ok = false;
+    if (kind === 'left') ok = E.move(S, -1);
+    else if (kind === 'right') ok = E.move(S, 1);
+    else if (kind === 'cw') ok = E.rotate(S, 1);
+    else if (kind === 'ccw') ok = E.rotate(S, -1);
+    else if (kind === 'hold') { ok = E.hold(S); if (ok) C.audio.sfx('tap'); else C.haptic('error'); }
+    else if (kind === 'drop') { var ev = E.hardDrop(S); if (ev) onEvents([ev]); return; }
+    if (ok && kind !== 'hold') C.audio.sfx('tick');
+    if (S.over || S.won) finish();
+    draw();
+  }
+
+  function onEvents(evs) {
+    var changed = false;
+    evs.forEach(function (e) {
+      if (!e || e.type !== 'lock') return;
+      changed = true;
+      if (e.cleared) {
+        flashes.push({ rows: e.rows, at: performance.now() });
+        if (e.cleared === 4) { C.feedback('good'); C.achievements.unlock('bd-tetris'); }
+        else C.audio.sfx('pop');
+      } else C.audio.sfx('tap');
+    });
+    if (changed) { hud(); save(); }
+    if (S.over || S.won) finish();
+  }
+
+  /* ------------------------------------------------------------ loop */
+  function loop(now) {
+    raf = requestAnimationFrame(loop);
+    var dt = Math.min(0.1, (now - lastT) / 1000);
+    lastT = now;
+    if (!S) return;
+    // any window that opens (help, a confirm) holds the round
+    if (S.started && !over && !paused && document.querySelector('.ch-scrim')) { paused = true; save(); }
+    if (S.started && playing()) {
+      if (held.dir) {
+        held.since += dt;
+        if (held.since >= DAS) {
+          held.last += dt;
+          while (held.last >= ARR) { held.last -= ARR; E.move(S, held.dir); }
+        }
+      }
+      var evs = E.tick(S, dt, held.soft);
+      if (evs.length) onEvents(evs);
+      if (S.mode === 'sprint') ctx.setStat('score', C.time(S.time));
+    }
+    draw();
+  }
+
+  /* ------------------------------------------------------------ touch on the board */
+  var tp = null;
+  function cellPx() { return CELL * scale; }
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (!S || over) return;
+    ev.preventDefault();
+    tp = { id: ev.pointerId, x0: ev.clientX, y0: ev.clientY, x: ev.clientX, y: ev.clientY, t0: performance.now(), moved: false, woke: !(S.started && !paused),
+      hist: [{ x: ev.clientX, y: ev.clientY, t: performance.now() }] };
+    if (tp.woke) wake();
+    try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* older WebView */ }
+  });
+  canvas.addEventListener('pointermove', function (ev) {
+    if (!tp || ev.pointerId !== tp.id || !playing() || tp.woke) return;
+    track(tp, ev);
+    var cp = cellPx();
+    // each cell's worth of sideways drag moves the piece one column
+    while (ev.clientX - tp.x >= cp) { tp.x += cp; if (E.move(S, 1)) C.audio.sfx('tick'); tp.moved = true; }
+    while (tp.x - ev.clientX >= cp) { tp.x -= cp; if (E.move(S, -1)) C.audio.sfx('tick'); tp.moved = true; }
+    // a slow drag down is a soft drop, row by row
+    while (ev.clientY - tp.y >= cp) {
+      tp.y += cp; tp.moved = true;
+      var c = S.cur;
+      if (!E.collides(S, c.t, c.r, c.x, c.y + 1)) { c.y++; S.score += 1; }
+    }
+    if (Math.abs(ev.clientX - tp.x0) + Math.abs(ev.clientY - tp.y0) > 10) tp.moved = true;
+    draw();
+  });
+  // Speed is read over the last moments of the gesture: measured from the first touch,
+  // a flick that began with a short pause looked slow and became a soft drop.
+  function track(t, ev) {
+    var now = performance.now();
+    t.hist.push({ x: ev.clientX, y: ev.clientY, t: now });
+    while (t.hist.length > 2 && now - t.hist[0].t > 120) t.hist.shift();
+  }
+  function endTouch(ev) {
+    if (!tp || ev.pointerId !== tp.id) return;
+    var d = tp;
+    tp = null;
+    if (ev.type !== 'pointerup' || d.woke || !playing()) return;
+    track(d, ev);
+    var h0 = d.hist[0], dt = Math.max(1, performance.now() - d.t0);
+    var vy = (ev.clientY - h0.y) / Math.max(1, performance.now() - h0.t);
+    var dy = ev.clientY - d.y0, dx = ev.clientX - d.x0;
+    var fast = Math.abs(vy) > 0.6 && Math.abs(dy) > cellPx() * 2 && Math.abs(dy) > Math.abs(dx) * 1.5;
+    if (fast && dy > 0) { act('drop'); return; }
+    if (fast && dy < 0) { act('hold'); return; }
+    if (!d.moved && dt < 350) {
+      // the left third of the board turns the other way, for players who want both
+      var rect = canvas.getBoundingClientRect();
+      act(ev.clientX - rect.left < BW * scale / 3 ? 'ccw' : 'cw');
+    }
+  }
+  canvas.addEventListener('pointerup', endTouch);
+  canvas.addEventListener('pointercancel', endTouch);
+
+  /* ------------------------------------------------------------ buttons */
+  var GLYPHS = {
+    left: '<path d="M15 5l-7 7 7 7"/>',
+    right: '<path d="M9 5l7 7-7 7"/>',
+    soft: '<path d="M12 5v13M6 12l6 6 6-6"/>',
+    drop: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+    cw: '<path d="M19 12a7 7 0 1 1-2.05-4.95M19 4v4h-4"/>',
+    hold: '<rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 12h6"/>'
+  };
+  function padBtn(kind, label, repeat) {
+    var b = el('button', { class: 'bd-btn', type: 'button', 'aria-label': label, title: label,
+      html: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' + GLYPHS[kind] + '</svg>' });
+    b.addEventListener('pointerdown', function (ev) {
+      ev.preventDefault();
+      if (kind === 'soft') { if (wake()) held.soft = true; return; }
+      if (repeat) { act(kind); held.dir = kind === 'left' ? -1 : 1; held.since = 0; held.last = 0; return; }
+      act(kind);
+    });
+    var up = function () {
+      if (kind === 'soft') held.soft = false;
+      if (repeat) held.dir = 0;
+    };
+    b.addEventListener('pointerup', up);
+    b.addEventListener('pointercancel', up);
+    b.addEventListener('pointerleave', up);
+    // keyboard users reach the pad with Tab; Enter/Space give one step
+    b.addEventListener('click', function (ev) { if (ev.detail === 0) act(kind === 'soft' ? 'drop' : kind); });
+    return b;
+  }
+  [['hold', C.t('holdKey')], ['left', C.t('left'), true], ['cw', C.t('rotate')], ['right', C.t('right'), true],
+   ['soft', C.t('softDrop')], ['drop', C.t('hardDrop')]].forEach(function (d) { pad.appendChild(padBtn(d[0], d[1], d[2])); });
+
+  /* ------------------------------------------------------------ keyboard */
+  var heldKeys = {};
+  window.addEventListener('keydown', function (e) {
+    if (!S || over || document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
+    if (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
+    var k = e.key;
+    // the board is never mirrored, so arrows keep their direction in right-to-left too
+    if (k === 'ArrowLeft' || k === 'ArrowRight') {
+      e.preventDefault();
+      if (e.repeat) return;
+      heldKeys[k] = true;
+      act(k === 'ArrowLeft' ? 'left' : 'right');
+      held.dir = k === 'ArrowLeft' ? -1 : 1; held.since = 0; held.last = 0;
+      return;
+    }
+    if (k === 'ArrowDown') { e.preventDefault(); if (!e.repeat && wake()) held.soft = true; return; }
+    if (e.repeat) return;
+    if (k === 'ArrowUp' || k === 'x' || k === 'X') { act('cw'); e.preventDefault(); return; }
+    if (k === 'z' || k === 'Z' || k === 'Control') { act('ccw'); e.preventDefault(); return; }
+    if (k === ' ') { act('drop'); e.preventDefault(); return; }
+    if (k === 'c' || k === 'C' || k === 'Shift') { act('hold'); e.preventDefault(); return; }
+    if (k === 'p' || k === 'P' || k === 'Escape') {
+      if (!S.started) return;
+      if (paused) wake(); else { paused = true; save(); draw(); }
+      e.preventDefault();
+    }
+  });
+  window.addEventListener('keyup', function (e) {
+    var k = e.key;
+    if (k === 'ArrowLeft' || k === 'ArrowRight') {
+      heldKeys[k] = false;
+      var other = k === 'ArrowLeft' ? 'ArrowRight' : 'ArrowLeft';
+      held.dir = heldKeys[other] ? (other === 'ArrowLeft' ? -1 : 1) : 0;
+    }
+    if (k === 'ArrowDown') held.soft = false;
+  });
+  window.addEventListener('blur', function () { held.dir = 0; held.soft = false; heldKeys = {}; });
+
+  /* ------------------------------------------------------------ end */
+  function finish() {
+    if (over) return;
+    over = true;
+    held.dir = 0; held.soft = false;
+    draw();
+    var snap = E.serialize(S), won = snap.won, sprint = snap.mode === 'sprint';
+    var coins, points;
+    if (sprint) { coins = won ? 6 : 1 + Math.floor(snap.lines / 10); points = won ? 30 : 4 + snap.lines; }
+    else { coins = 1 + Math.floor(snap.lines / 10) + (won ? 6 : 0); points = 5 + snap.lines + (won ? 30 : 0); }
+    if (S.daily) {
+      coins += 8; points += 25;
+      var first = C.stats.daily('blockdrop', S.daily, {
+        label: won ? C.time(snap.time) : C.num(snap.lines) + ' / ' + C.num(E.SPRINT_LINES), win: won
+      });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    if (won && sprint) { C.achievements.unlock('bd-sprint'); C.stats.best('blockdrop', 'sprint', Math.round(snap.time), true); }
+    if (won && !sprint) C.achievements.unlock('bd-marathon');
+    if (!sprint) C.stats.best('blockdrop', 'marathon', snap.score, false);
+    var lines = [{ label: C.t('lines'), value: C.num(snap.lines) + '/' + C.num(E.goal(snap)) }];
+    if (sprint) lines.push({ label: C.t('time'), value: C.time(snap.time) });
+    else { lines.push({ label: C.t('score'), value: C.num(snap.score) }); lines.push({ label: C.t('level'), value: C.num(snap.level) }); }
+    lines.push({ label: C.t('pieces'), value: C.num(snap.pieces) });
+    var daily = S.daily, mode = snap.mode;
+    ctx.finish({
+      won: won,
+      title: won ? (sprint ? C.t('sprintDone') : C.t('marathonDone')) : C.t('toppedOut'),
+      timeMs: Math.round(snap.time), coins: coins, points: points, lines: lines,
+      shareText: 'چوگان · بلوک‌ریز' + (daily ? (' · روزانه ' + daily) : '') + '\n' +
+        (sprint ? ('۴۰ خط' + (won ? ' در ' + C.time(snap.time) : ' · ' + C.num(snap.lines) + ' خط')) : ('ماراتن · ' + C.num(snap.lines) + ' خط · امتیاز ' + C.num(snap.score))),
+      paint: cardPaint(snap),
+      onAgain: function () { start(mode, daily); }
+    });
+  }
+
+  /* ------------------------------------------------------------ save */
+  ctx.autosave(function () {
+    // a round with nothing placed yet is not worth a "continue" badge
+    if (!S || over || S.over || S.won || !S.pieces) return { inProgress: false };
+    return { s: E.serialize(S), daily: S.daily };
+  });
+  function save() { ctx.save(); }
+
+  /* ------------------------------------------------------------ help */
+  function showHelp() {
+    if (S && S.started && !over) { paused = true; save(); }
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('tutText2') }),
+        el('p', { class: 'ch-dim', text: C.t('tutText3') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          kb('← →', C.t('left') + ' / ' + C.t('right')),
+          kb('↑ / X', C.t('rotate')), kb('Z', C.t('rotateBack')),
+          kb('↓', C.t('softDrop')), kb('Space', C.t('hardDrop')),
+          kb('C / Shift', C.t('holdKey')), kb('P / Esc', C.t('pauseKey'))
+        ])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+
+  function artBlocks(list) {
+    return '<svg viewBox="0 0 200 110" width="100%">' + list.map(function (b) {
+      return '<rect x="' + b[0] + '" y="' + b[1] + '" width="18" height="18" rx="3" fill="' + PIECE[b[2]] + '"/>';
+    }).join('') + '</svg>';
+  }
+  var row = []; for (var i = 0; i < 10; i++) if (i !== 6) row.push([10 + i * 18, 82, i % 7]);
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: artBlocks(row.concat([[118, 28, 0], [118, 46, 0], [118, 64, 0], [118, 10, 0]])) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: artBlocks([[82, 30, 5], [100, 30, 5], [118, 30, 5], [100, 12, 5]]) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: artBlocks([[40, 82, 0], [58, 82, 0], [76, 82, 0], [94, 82, 0], [112, 82, 1], [130, 82, 2], [148, 82, 3], [166, 82, 4]]) }
+  ];
+
+  /* ------------------------------------------------------------ lifecycle */
+  C.onPause(function () {
+    if (S && S.started && !over) paused = true;
+    held.dir = 0; held.soft = false;
+    if (S && !over) save();
+    if (raf) { cancelAnimationFrame(raf); raf = null; }
+  });
+  C.onResume(function () {
+    if (!raf) { lastT = performance.now(); raf = requestAnimationFrame(loop); }
+  });
+
+  var saved = ctx.loadSave();
+  var restored = saved && saved.s ? E.restore(saved.s) : null;
+  if (dailyDate) {
+    if (restored && saved.daily === dailyDate) { restored.daily = dailyDate; resume(restored); }
+    else start('sprint', dailyDate);
+    if (C.stats.dailyDone('blockdrop', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).blockdrop;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec.label });
+    }
+  } else if (restored && !saved.daily) {
+    resume(restored);
+  } else {
+    start(prefs.mode === 'marathon' ? 'marathon' : 'sprint', null);
+  }
+  ctx.tutorialIfNew(TUT);
+
+  resize();
+  setTimeout(resize, 30);
+  lastT = performance.now();
+  raf = requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
