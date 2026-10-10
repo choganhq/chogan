@@ -281,7 +281,7 @@
       updateReady: 'نسخه‌ی تازه آماده است', updateNow: 'آپدیت',
       confirm: 'تأیید', done: 'باشه', next: 'بعدی', skip: 'رد کردن',
       start: 'شروع', pause: 'مکث', resumeGame: 'ادامه‌ی بازی', restart: 'شروع دوباره',
-      quit: 'خروج به منو', help: 'راهنما', share: 'اشتراک‌گذاری', copied: 'در حافظه کپی شد',
+      quit: 'خروج به منو', help: 'راهنما', share: 'اشتراک‌گذاری', copied: 'در حافظه کپی شد', imageSaved: 'عکس در گالری ذخیره شد',
       best: 'بهترین', score: 'امتیاز', time: 'زمان', coins: 'سکه',
       newBadge: 'جدید', continueBadge: 'ادامه', todayChallenge: 'چالش روزانه',
       todayChallengeSub: 'هر روز یک پازل تازه، یکسان برای همه',
@@ -321,7 +321,7 @@
       updateReady: 'A new version is ready', updateNow: 'Update',
       confirm: 'Confirm', done: 'OK', next: 'Next', skip: 'Skip',
       start: 'Start', pause: 'Pause', resumeGame: 'Resume', restart: 'Restart',
-      quit: 'Quit to menu', help: 'Help', share: 'Share', copied: 'Copied to clipboard',
+      quit: 'Quit to menu', help: 'Help', share: 'Share', copied: 'Copied to clipboard', imageSaved: 'Saved to your gallery',
       best: 'Best', score: 'Score', time: 'Time', coins: 'Coins',
       newBadge: 'New', continueBadge: 'Resume', todayChallenge: 'Daily challenge',
       todayChallengeSub: 'A fresh puzzle every day, the same for everyone',
@@ -361,7 +361,7 @@
       updateReady: '新版本已就绪', updateNow: '更新',
       confirm: '确定', done: '好', next: '下一步', skip: '跳过',
       start: '开始', pause: '暂停', resumeGame: '继续游戏', restart: '重新开始',
-      quit: '退出到菜单', help: '帮助', share: '分享', copied: '已复制到剪贴板',
+      quit: '退出到菜单', help: '帮助', share: '分享', copied: '已复制到剪贴板', imageSaved: '已保存到相册',
       best: '最佳', score: '分数', time: '时间', coins: '金币',
       newBadge: '新', continueBadge: '继续', todayChallenge: '每日挑战',
       todayChallengeSub: '每天一道新题，所有人都一样',
@@ -401,7 +401,7 @@
       updateReady: 'Eine neue Version ist da', updateNow: 'Aktualisieren',
       confirm: 'Bestätigen', done: 'OK', next: 'Weiter', skip: 'Überspringen',
       start: 'Start', pause: 'Pause', resumeGame: 'Weiter', restart: 'Neu starten',
-      quit: 'Zurück zum Menü', help: 'Hilfe', share: 'Teilen', copied: 'In die Zwischenablage kopiert',
+      quit: 'Zurück zum Menü', help: 'Hilfe', share: 'Teilen', copied: 'In die Zwischenablage kopiert', imageSaved: 'In der Galerie gespeichert',
       best: 'Rekord', score: 'Punkte', time: 'Zeit', coins: 'Münzen',
       newBadge: 'Neu', continueBadge: 'Weiter', todayChallenge: 'Tagesrätsel',
       todayChallengeSub: 'Jeden Tag ein neues Rätsel, für alle dasselbe',
@@ -1336,6 +1336,28 @@
     var img = el('img', { class: 'ch-card__img', src: url, alt: '' });
     var actions = [];
     var nav = global.navigator;
+    // Android app: the WebView ignores <a download> and has no navigator.share, so
+    // both buttons did nothing there (#168). MainActivity exposes a small bridge.
+    var droid = global.ChoganAndroid;
+    if (droid && droid.shareImage) {
+      var png = function () { return cv.toDataURL('image/png').split(',')[1]; };
+      actions.push({
+        label: Chogan.t('share'), kind: 'primary', keepOpen: true, onClick: function () {
+          if (!droid.shareImage(png(), text)) copyText(text);
+        }
+      });
+      actions.push({
+        label: Chogan.t('saveImage'), keepOpen: true, onClick: function () {
+          // Below Android 10 saving needs a storage permission the app doesn't take; share instead
+          if (droid.canSave() && droid.saveImage(png())) Chogan.ui.toast({ icon: 'check', title: Chogan.t('imageSaved') });
+          else droid.shareImage(png(), text);
+        }
+      });
+      if (text) actions.push({ label: Chogan.t('copyText'), keepOpen: true, onClick: function () { copyText(text); } });
+      Chogan.ui.modal({ title: Chogan.t('share'), body: [img], actions: actions, closeButton: true,
+        onClose: function () { if (blob && global.URL && URL.revokeObjectURL) setTimeout(function () { URL.revokeObjectURL(url); }, 400); } });
+      return;
+    }
     if (file) {
       actions.push({
         label: Chogan.t('share'), kind: 'primary', keepOpen: true, onClick: function () {
