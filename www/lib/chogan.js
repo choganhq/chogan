@@ -188,7 +188,8 @@
     theme: 'auto',   // auto | light | dark
     sfx: true,
     music: true,
-    haptics: true
+    haptics: true,
+    cardBack: 'carpet'   // carpet | termeh, shared by every card game (#181)
   };
 
   function randomId() {
@@ -276,6 +277,7 @@
       appName: 'چوگان', home: 'خانه', daily: 'روزانه', league: 'لیگ',
       achievements: 'دستاوردها', profile: 'پروفایل', settings: 'تنظیمات',
       play: 'بازی', resume: 'ادامه', newGame: 'بازی تازه', again: 'دوباره',
+      cardBack: 'پشت کارت', backCarpet: 'قالی', backTermeh: 'ترمه',
       menu: 'منو', back: 'بازگشت', undo: 'برگرداندن', close: 'بستن', cancel: 'انصراف', result: 'نتیجه',
       saveImage: 'ذخیره‌ی عکس', copyText: 'کپی متن',
       updateReady: 'نسخه‌ی تازه آماده است', updateNow: 'آپدیت',
@@ -316,6 +318,7 @@
       appName: 'Chogan', home: 'Home', daily: 'Daily', league: 'League',
       achievements: 'Awards', profile: 'Profile', settings: 'Settings',
       play: 'Play', resume: 'Resume', newGame: 'New game', again: 'Again',
+      cardBack: 'Card back', backCarpet: 'Carpet', backTermeh: 'Termeh',
       menu: 'Menu', back: 'Back', undo: 'Undo', close: 'Close', cancel: 'Cancel', result: 'Result',
       saveImage: 'Save image', copyText: 'Copy text',
       updateReady: 'A new version is ready', updateNow: 'Update',
@@ -356,6 +359,7 @@
       appName: 'Chogan', home: '主页', daily: '每日', league: '联赛',
       achievements: '成就', profile: '个人', settings: '设置',
       play: '开始', resume: '继续', newGame: '新游戏', again: '再来一局',
+      cardBack: '牌背', backCarpet: '波斯地毯', backTermeh: '波斯织锦',
       menu: '菜单', back: '返回', undo: '撤销', close: '关闭', cancel: '取消', result: '结果',
       saveImage: '保存图片', copyText: '复制文字',
       updateReady: '新版本已就绪', updateNow: '更新',
@@ -396,6 +400,7 @@
       appName: 'Chogan', home: 'Start', daily: 'Täglich', league: 'Liga',
       achievements: 'Erfolge', profile: 'Profil', settings: 'Einstellungen',
       play: 'Spielen', resume: 'Weiter', newGame: 'Neues Spiel', again: 'Nochmal',
+      cardBack: 'Kartenrücken', backCarpet: 'Teppich', backTermeh: 'Termeh-Brokat',
       menu: 'Menü', back: 'Zurück', undo: 'Rückgängig', close: 'Schließen', cancel: 'Abbrechen', result: 'Ergebnis',
       saveImage: 'Bild speichern', copyText: 'Text kopieren',
       updateReady: 'Eine neue Version ist da', updateNow: 'Aktualisieren',
@@ -1524,34 +1529,266 @@
   Chogan.cards = (function () {
     var GLYPH = ['♣︎', '♦︎', '♥︎', '♠︎'];
     var RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-    var GOLD = '#D4A72C', SKIN = '#F2D3B1', INK = '#2B2622';
-    // Portraits for jack, queen and king, drawn for Chogan: a plain letter on a face
-    // card read like a misprint (#171). The robe takes the suit's colour through
-    // currentColor; gold and skin are fixed like printed ink.
-    function faceSvg(rank) {
-      var robe = '<path d="M5 44 Q7 30 20 29 Q33 30 35 44Z" fill="currentColor"/>' +
-        '<path d="M14 30 Q20 35 26 30" fill="none" stroke="' + GOLD + '" stroke-width="1.6"/>';
-      var eyes = '<circle cx="17.4" cy="19.5" r=".9" fill="' + INK + '"/><circle cx="22.6" cy="19.5" r=".9" fill="' + INK + '"/>';
-      var s = '<svg viewBox="0 0 40 44" xmlns="http://www.w3.org/2000/svg">';
-      if (rank === 12) {          // king: tall crown, full beard
-        s += robe + '<circle cx="20" cy="20" r="6.8" fill="' + SKIN + '"/>' + eyes +
-          '<path d="M13.4 21 Q20 34 26.6 21 Q20 26 13.4 21Z" fill="#6B4226"/>' +
-          '<path d="M12 14 L13 4 L16.5 10 L20 2 L23.5 10 L27 4 L28 14Z" fill="' + GOLD + '"/>' +
-          '<circle cx="20" cy="8.5" r="1.3" fill="currentColor"/>';
-      } else if (rank === 11) {   // queen: small crown, long hair, necklace
-        s += '<path d="M11.5 22 Q11 10 20 10 Q29 10 28.5 22 L30.5 33 Q20 29 9.5 33Z" fill="#3A2A1A"/>' + robe +
-          '<circle cx="20" cy="20" r="6.4" fill="' + SKIN + '"/>' + eyes +
-          '<path d="M18 23.6 Q20 24.8 22 23.6" fill="none" stroke="#B5524A" stroke-width=".9"/>' +
-          '<path d="M14 13 L15 7 L17.5 10 L20 5 L22.5 10 L25 7 L26 13Z" fill="' + GOLD + '"/>' +
-          '<circle cx="20" cy="33" r="1.6" fill="' + GOLD + '"/>';
-      } else {                    // jack: cap with a feather
-        s += robe + '<circle cx="20" cy="20.5" r="6.4" fill="' + SKIN + '"/>' + eyes +
-          '<path d="M12.6 16 Q13 8 20.5 8 Q28 8.5 28 16Z" fill="currentColor"/>' +
-          '<path d="M26.5 10 Q34 3 34.5 12" fill="none" stroke="' + GOLD + '" stroke-width="1.8" stroke-linecap="round"/>' +
-          '<circle cx="18" cy="37" r="1" fill="' + GOLD + '"/><circle cx="22" cy="37" r="1" fill="' + GOLD + '"/>';
-      }
-      return s + '</svg>';
+    var GOLD = '#D4A72C', GOLD2 = '#A9801A', SKIN = '#F2D3B1', SKIN2 = '#E2B994', INK = '#1E1A17', CURL = '#4A403A',
+      ROSE = '#E8A39A', CREAM = '#F7EBD0', PEARL = '#FBF5E6', RUBY = '#C0392B', EMER = '#2E8B57';
+    function f(n) { return Math.round(n * 100) / 100; }
+    function circ(x, y, r, fill, extra) { return '<circle cx="' + f(x) + '" cy="' + f(y) + '" r="' + f(r) + '" fill="' + fill + '"' + (extra || '') + '/>'; }
+    var BOTEH = 'M0 3 C-2.2 3 -2.6 .4 -1 -1 C0 -2 1.6 -2.4 2 -4 C2.6 -2 2.2 .6 1 2 C.6 2.6 .3 3 0 3Z';
+    function boteh(x, y, k, rot, fill) {
+      return '<path transform="translate(' + f(x) + ' ' + f(y) + ') rotate(' + (rot || 0) + ') scale(' + k + ')" d="' + BOTEH + '" fill="' + fill + '"/>';
     }
+
+    /* Court cards: Shah, Bibi and Sarbaz in a Qajar style, drawn for Chogan (#181).
+       The cartoon faces of #171 read as too plain. The silhouettes (crown, headscarf,
+       tall hat) carry the card at the 44px of a Hokm hand; the detail is for bigger
+       cards. The robe takes the suit's colour through currentColor; gold and skin are
+       fixed like printed ink. No ids anywhere: a face is inlined many times per page. */
+    // A cream ring pass gives the scalloped outline, the solid base fills the gaps;
+    // without the base the cream showed between curls and the beard read as bubbles.
+    function curls(pts, r, base) {
+      var a = '', b = '';
+      pts.forEach(function (p) { a += circ(p[0], p[1], r + .55, CREAM); });
+      pts.forEach(function (p, i) {
+        b += circ(p[0], p[1], r, INK) +
+          '<path d="M' + f(p[0] + r * .55) + ' ' + f(p[1] - r * .1) + ' a' + f(r * .55) + ' ' + f(r * .5) + ' 0 1 ' + (i % 2) + ' ' + f(-r * .9) + ' ' + f(r * .35) +
+          '" fill="none" stroke="' + CURL + '" stroke-width=".38" stroke-linecap="round"/>';
+      });
+      return a + base + b;
+    }
+    function robeTop(x) { return 30 + 14 * Math.pow((x - 20) / 16, 2); }
+    function robePattern(kind) {
+      var s = '', row = 0;
+      for (var y = 33; y < 44; y += 2.6, row++) {
+        for (var x = 6 + (row % 2) * 1.6; x < 35; x += 3.2) {
+          if (y < robeTop(x) + 1.6) continue;
+          if (kind === 'boteh') s += boteh(x, y, .32, row % 2 ? 180 : 0, GOLD);
+          else if (kind === 'flower') s += circ(x, y, .55, GOLD) + circ(x, y, .22, PEARL);
+          else s += circ(x, y, .3, GOLD);
+        }
+      }
+      return s;
+    }
+    function robe(kind) {
+      return '<path d="M4 44 Q5 31 20 30 Q35 31 36 44Z" fill="currentColor"/>' + robePattern(kind) +
+        '<path d="M27 31.2 Q35 33 36 44 H30 Q30 36 27 31.2Z" fill="#000" opacity=".16"/>' +
+        '<path d="M4 44 Q5 31 20 30 Q35 31 36 44" fill="none" stroke="' + GOLD + '" stroke-width="1"/>' +
+        '<path d="M4.6 43.2 H35.4" stroke="' + GOLD + '" stroke-width="1.2"/>' +
+        '<path d="M5 43.2 H35" stroke="' + INK + '" stroke-width=".5" stroke-dasharray=".6 .9" opacity=".55"/>';
+    }
+    var BROW = '<path d="M15.6 16.9 Q17.9 15.6 20 16.8 Q22.1 15.6 24.4 16.9" fill="none" stroke="' + INK + '" stroke-width="1.05" stroke-linecap="round"/>';
+    var EYES = '<path d="M16 19 Q17.4 18 18.8 19 Q17.4 19.8 16 19Z M21.2 19 Q22.6 18 24 19 Q22.6 19.8 21.2 19Z" fill="' + INK + '"/>' +
+      circ(17.6, 18.8, .25, '#fff') + circ(22.8, 18.8, .25, '#fff');
+    var NOSE = '<path d="M20 19.6 Q19.2 21.6 20.3 22" fill="none" stroke="' + SKIN2 + '" stroke-width=".55" stroke-linecap="round"/>';
+    var FACE = '<ellipse cx="20" cy="19.5" rx="5.9" ry="6.8" fill="' + SKIN + '"/>' +
+      '<path d="M23.6 14.4 Q26.6 19 24.4 25 Q26.2 19.6 23.6 14.4Z" fill="' + SKIN2 + '" opacity=".7"/>' + BROW + EYES + NOSE;
+    var ARCH = '<path d="M5 44 V17 Q5 5 20 3.5 Q35 5 35 17 V44Z" fill="' + GOLD + '" opacity=".16"/>' +
+      '<path d="M5 44 V17 Q5 5 20 3.5 Q35 5 35 17 V44" fill="none" stroke="' + GOLD + '" stroke-width=".9"/>' +
+      '<path d="M6.6 44 V17.4 Q6.6 6.6 20 5.2 Q33.4 6.6 33.4 17.4 V44" fill="none" stroke="' + GOLD + '" stroke-width=".3"/>';
+    function beardPts() {
+      var pts = [], row = 0;
+      for (var y = 21.4; y < 38.6; y += 1.55, row++) {
+        var w = y <= 27 ? 5.7 : Math.max(.4, 5.7 * (1 - (y - 27) / 12));
+        for (var x = 20 - w + (row % 2) * .8; x <= 20 + w + .01; x += 1.6) {
+          if (Math.abs(x - 20) < 6 && y < 19.9 + 6 * (1 - Math.pow((x - 20) / 6, 2))) continue;   // keep the chin clear
+          pts.push([x, y]);
+        }
+      }
+      return pts;
+    }
+    function hairPts() {
+      var pts = [];
+      [[12.6, 14.6], [12.1, 17], [11.9, 19.4], [11.8, 21.8], [11.5, 24.2], [11.2, 26.6], [10.9, 29], [10.6, 31.4], [10.3, 33.8],
+       [13.3, 25.4], [13, 27.8], [12.7, 30.2], [12.4, 32.6], [12.2, 35]].forEach(function (p) { pts.push(p, [40 - p[0], p[1]]); });
+      return pts;
+    }
+    function shah() {
+      return '<path d="M8.2 44 V24" stroke="' + GOLD2 + '" stroke-width="1.1"/>' + circ(8.2, 22.6, 1.7, GOLD) + circ(8.2, 22.6, .7, RUBY) +
+        robe('boteh') +
+        '<path d="M18 37 H22 V44 H18Z" fill="' + GOLD + '"/>' + circ(20, 39.2, .7, RUBY) + circ(20, 41.8, .6, EMER) +
+        '<path d="M14.6 30.6 L20 37.4 L25.4 30.6" fill="none" stroke="' + GOLD + '" stroke-width="1.8"/>' +
+        '<path d="M14.6 30.6 L20 37.4 L25.4 30.6" fill="none" stroke="' + PEARL + '" stroke-width=".7" stroke-dasharray=".1 1.3" stroke-linecap="round"/>' +
+        FACE + curls(beardPts(), .82, '<path d="M14.3 19.5 Q13.8 33 20 38.4 Q26.2 33 25.7 19.5 Q24.5 25.5 20 25.5 Q15.5 25.5 14.3 19.5Z" fill="' + INK + '"/>') +
+        '<path d="M16.6 24.4 Q18.4 22.6 20 23.8 Q21.6 22.6 23.4 24.4 Q24.4 23.8 24.6 22.8 Q22 26.2 20 24.8 Q18 26.2 15.4 22.8 Q15.6 23.8 16.6 24.4Z" fill="' + INK + '" stroke="' + CURL + '" stroke-width=".4"/>' +
+        '<path d="M18.6 26.2 Q20 27 21.4 26.2" fill="none" stroke="#B5524A" stroke-width=".7"/>' +
+        '<path d="M13.6 14 L12.6 5 Q20 1.8 27.4 5 L26.4 14Z" fill="' + GOLD + '"/>' +
+        '<path d="M15.2 13 L14.8 6 M18.4 13 L18.2 4.4 M21.6 13 L21.8 4.4 M24.8 13 L25.2 6" stroke="' + GOLD2 + '" stroke-width=".45"/>' +
+        '<rect x="13.4" y="11.6" width="13.2" height="2.4" fill="' + GOLD2 + '"/>' +
+        '<path d="M14 12.8 H26" stroke="' + PEARL + '" stroke-width=".7" stroke-dasharray=".1 1.2" stroke-linecap="round"/>' +
+        circ(20, 8.2, 1.7, RUBY, ' stroke="' + GOLD2 + '" stroke-width=".4"') + circ(16.2, 9, .9, EMER) + circ(23.8, 9, .9, EMER) +
+        '<path d="M20 4.2 Q17.6 1.4 19.4 .4 Q21.6 .8 20.6 3 Q22.8 1.6 23.6 2.4 Q22.4 4 20 4.2Z" fill="' + INK + '"/>' + circ(20, 4.3, .7, GOLD);
+    }
+    function bibi() {
+      return curls(hairPts(), .95, '<path d="M12.6 20 Q11.6 9.5 20 9.5 Q28.4 9.5 27.4 20 L30 36 Q20 32 10 36Z" fill="' + INK + '"/>') +
+        robe('flower') +
+        '<path d="M15.5 31 Q20 33.8 24.5 31 L23 44 H17Z" fill="' + PEARL + '" opacity=".9"/>' +
+        '<path d="M17 33 L17.6 44 M23 33 L22.4 44" stroke="' + GOLD + '" stroke-width=".6"/>' +
+        circ(20, 36, .45, GOLD) + circ(20, 38.4, .45, GOLD) + circ(20, 40.8, .45, GOLD) +
+        FACE + circ(16.4, 22, 1.3, ROSE) + circ(23.6, 22, 1.3, ROSE) +
+        '<path d="M18.4 23.9 Q20 24.9 21.6 23.9 Q20 23.3 18.4 23.9Z" fill="#B5524A"/>' +
+        circ(14.1, 21.8, .7, GOLD) + circ(25.9, 21.8, .7, GOLD) + circ(14.1, 23, .4, RUBY) + circ(25.9, 23, .4, RUBY) +
+        '<path d="M11.4 15.5 Q20 3.6 28.6 15.5 Q20 10.6 11.4 15.5Z" fill="' + GOLD + '"/>' +
+        '<path d="M13 14.6 Q20 9.8 27 14.6" fill="none" stroke="' + GOLD2 + '" stroke-width=".45"/>' +
+        circ(15, 14.6, .45, GOLD) + circ(17.4, 13.6, .45, GOLD) + circ(22.6, 13.6, .45, GOLD) + circ(25, 14.6, .45, GOLD) +
+        circ(20, 9.6, 1.25, RUBY, ' stroke="' + GOLD2 + '" stroke-width=".4"') +
+        '<path d="M14.5 31.6 Q20 35.6 25.5 31.6" fill="none" stroke="' + PEARL + '" stroke-width="1.5" stroke-dasharray=".1 1.5" stroke-linecap="round"/>' +
+        '<path d="M24 41 Q25.5 38 26.4 36" stroke="#2E7D4F" stroke-width=".8"/><path d="M25 39.2 Q27 38.6 27.2 39.8 Q25.8 40.2 25 39.2Z" fill="#2E7D4F"/>' +
+        circ(26.6, 35.4, 1.9, RUBY) + '<path d="M25.6 35 Q26.6 34 27.6 35 Q26.6 36.4 25.6 35Z" fill="#8E1F17"/>';
+    }
+    function sarbaz() {
+      return '<path d="M33.5 44 L33.5 9" stroke="#7A4E2A" stroke-width="1.3"/>' +
+        '<path d="M33.5 4.5 L35.3 10 L31.7 10Z" fill="' + GOLD + '"/><path d="M32 10.6 H35" stroke="' + RUBY + '" stroke-width="1"/>' +
+        robe('dots') +
+        '<path d="M15.6 34 H24.4 M15 36.2 H25 M14.6 38.4 H25.4" stroke="' + GOLD + '" stroke-width=".7"/>' +
+        [[15.4, 34], [24.6, 34], [14.8, 36.2], [25.2, 36.2], [14.4, 38.4], [25.6, 38.4]].map(function (p) { return circ(p[0], p[1], .45, GOLD); }).join('') +
+        '<path d="M5.6 41 H34.4" stroke="' + INK + '" stroke-width="1.4"/><rect x="18.6" y="40" width="2.8" height="2" rx=".4" fill="' + GOLD + '"/>' +
+        '<path d="M9 33 L29 43" stroke="' + GOLD + '" stroke-width="1.6"/>' +
+        '<path d="M7.6 33.4 Q11 30.6 14 31.2 L13 33.6 Q10 33 7.6 33.4Z M32.4 33.4 Q29 30.6 26 31.2 L27 33.6 Q30 33 32.4 33.4Z" fill="' + GOLD + '"/>' +
+        '<path d="M8 33.6 L8.4 35 M9.6 33.3 L9.9 34.7 M11.2 33.1 L11.4 34.5 M32 33.6 L31.6 35 M30.4 33.3 L30.1 34.7 M28.8 33.1 L28.6 34.5" stroke="' + GOLD + '" stroke-width=".4"/>' +
+        FACE +
+        '<path d="M15 22.6 Q17.8 21.2 20 22.8 Q22.2 21.2 25 22.6 Q23.8 21.4 25.6 21 Q22 24.6 20 23.6 Q18 24.6 14.4 21 Q16.2 21.4 15 22.6Z" fill="' + INK + '"/>' +
+        '<path d="M14 14.4 L15 4.4 Q20 2.8 25 4.4 L26 14.4Z" fill="' + INK + '"/>' +
+        '<path d="M15.6 6 Q16.4 7 15.4 8 M18 5 Q18.8 6 17.8 7 M24.4 6 Q23.6 7 24.6 8 M22 5 Q21.2 6 22.2 7 M15.2 11 Q16 12 15 13 M24.8 11 Q24 12 25 13" fill="none" stroke="' + CURL + '" stroke-width=".45"/>' +
+        circ(20, 9.4, 2.3, GOLD) +
+        '<path d="M20 6.6 V12.2 M17.2 9.4 H22.8 M18 7.4 L22 11.4 M22 7.4 L18 11.4" stroke="' + GOLD + '" stroke-width=".5"/>' +
+        circ(20, 9.4, 1.1, RUBY);
+    }
+    var faces = {};
+    // Built once per rank: the king alone is ~20 KB of markup and a hand repaints often
+    function faceSvg(rank) {
+      if (!faces[rank]) {
+        faces[rank] = '<svg viewBox="0 0 40 44" xmlns="http://www.w3.org/2000/svg">' + ARCH +
+          (rank === 12 ? shah() : rank === 11 ? bibi() : sarbaz()) + '</svg>';
+      }
+      return faces[rank];
+    }
+
+    /* Card backs (#181): two Persian patterns, the player picks one and every card game
+       uses it. Each is one framed picture, set once as a CSS background so a deck of
+       backs costs one decode, not one SVG per card. */
+    var NAVY = '#1F3A93', RED = '#8B1E2B', RED2 = '#6E1622', TURQ = '#3CB4C4', IVORY = '#EFE2C4', GREEN = '#2E5E4E', MAROON = '#5A1A2A';
+    var BACKS = ['carpet', 'termeh'];
+    function wrap(inner) { return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 70">' + inner + '</svg>'; }
+    function rosette(x, y, r, petal, heart) {
+      var s = '';
+      for (var i = 0; i < 4; i++) {
+        var a = i * Math.PI / 2, px = f(x + Math.cos(a) * r * .55), py = f(y + Math.sin(a) * r * .55);
+        s += '<ellipse cx="' + px + '" cy="' + py + '" rx="' + f(r * .5) + '" ry="' + f(r * .3) + '" transform="rotate(' + (i * 90) + ' ' + px + ' ' + py + ')" fill="' + petal + '"/>';
+      }
+      return s + circ(x, y, r * .3, heart);
+    }
+    function lozenge(cx, cy, rx, ry) {
+      return 'M' + cx + ' ' + (cy - ry) + ' Q' + f(cx + rx * .58) + ' ' + f(cy - ry * .45) + ' ' + (cx + rx) + ' ' + cy +
+        ' Q' + f(cx + rx * .58) + ' ' + f(cy + ry * .45) + ' ' + cx + ' ' + (cy + ry) +
+        ' Q' + f(cx - rx * .58) + ' ' + f(cy + ry * .45) + ' ' + (cx - rx) + ' ' + cy +
+        ' Q' + f(cx - rx * .58) + ' ' + f(cy - ry * .45) + ' ' + cx + ' ' + (cy - ry) + 'Z';
+    }
+    // scallops along the medallion's edge, the lobed toranj of Persian carpets
+    function lobes(cx, cy, rx, ry, n, r, fill) {
+      var s = '';
+      for (var i = 0; i < n; i++) {
+        var t = i / n * 2 * Math.PI, c = Math.cos(t), sn = Math.sin(t), k = 1 / (Math.abs(c) + Math.abs(sn));
+        s += circ(cx + c * rx * k, cy + sn * ry * k, r, fill);
+      }
+      return s;
+    }
+    function star8(cx, cy, r, fill) {
+      var sq = '<rect x="' + f(cx - r) + '" y="' + f(cy - r) + '" width="' + f(2 * r) + '" height="' + f(2 * r) + '"';
+      return '<g fill="' + fill + '">' + sq + '/>' + sq + ' transform="rotate(45 ' + cx + ' ' + cy + ')"/></g>';
+    }
+    function frameBand(band, motif) {
+      var s = '<rect width="50" height="70" rx="4" fill="' + band + '"/>' +
+        '<rect x="1.2" y="1.2" width="47.6" height="67.6" rx="3.4" fill="none" stroke="' + GOLD + '" stroke-width=".8"/>';
+      for (var x = 5; x <= 45; x += 4) s += motif(x, 3.4) + motif(50 - x, 66.6);
+      for (var y = 7.6; y <= 62.4; y += 4.2) s += motif(3.4, y) + motif(46.6, 70 - y);
+      return s + '<rect x="5.6" y="5.6" width="38.8" height="58.8" rx="1.4" fill="none" stroke="' + GOLD + '" stroke-width=".6"/>';
+    }
+    function carpet() {     // lachak-toranj: lobed centre medallion, quarter medallions in the corners
+      var s = frameBand(NAVY, function (x, y) { return rosette(x, y, 1.9, IVORY, RED); }) +
+        '<rect x="6.2" y="6.2" width="37.6" height="57.6" fill="' + RED + '"/>';
+      for (var y = 10, row = 0; y < 62; y += 5, row++) {
+        for (var x = 10 + (row % 2) * 3.5; x < 41; x += 7) {
+          if (Math.abs((x - 25) / 13) + Math.abs((y - 35) / 19) < 1.05) continue;
+          s += rosette(x, y, 1.6, GOLD, NAVY) +
+            '<path d="M' + f(x + 1.4) + ' ' + f(y + 1) + ' q1.6 1.2 .6 2.4 M' + f(x - 1.4) + ' ' + f(y - 1) + ' q-1.6 -1.2 -.6 -2.4" fill="none" stroke="' + IVORY + '" stroke-width=".35"/>';
+        }
+      }
+      [['M6.2 6.2 H18 A11.8 11.8 0 0 1 6.2 18Z', 10, 10], ['M43.8 6.2 H32 A11.8 11.8 0 0 0 43.8 18Z', 40, 10],
+       ['M6.2 63.8 H18 A11.8 11.8 0 0 0 6.2 52Z', 10, 60], ['M43.8 63.8 H32 A11.8 11.8 0 0 1 43.8 52Z', 40, 60]].forEach(function (c) {
+        s += '<path d="' + c[0] + '" fill="' + NAVY + '" stroke="' + GOLD + '" stroke-width=".7"/>' + rosette(c[1], c[2], 2.6, GOLD, RED);
+      });
+      return wrap(s + '<path d="M25 12.4 L27.4 17 L25 18.6 L22.6 17Z M25 57.6 L27.4 53 L25 51.4 L22.6 53Z" fill="' + GOLD + '"/>' +
+        circ(25, 15.6, .7, RED) + circ(25, 54.4, .7, RED) + lobes(25, 35, 12, 16.6, 28, 1.25, GOLD) +
+        '<path d="' + lozenge(25, 35, 12, 16.6) + '" fill="' + NAVY + '" stroke="' + GOLD + '" stroke-width=".8"/>' +
+        [[25, 22.4], [25, 47.6], [17.4, 35], [32.6, 35]].map(function (p) { return rosette(p[0], p[1], 1.9, IVORY, RED); }).join('') +
+        '<path d="' + lozenge(25, 35, 7.2, 10) + '" fill="' + RED2 + '" stroke="' + GOLD + '" stroke-width=".6"/>' +
+        lobes(25, 35, 7.2, 10, 20, .45, IVORY) + star8(25, 35, 3.6, GOLD) + star8(25, 35, 2.2, NAVY) + rosette(25, 35, 2.4, TURQ, GOLD));
+    }
+    function termeh() {     // rows of three-layer boteh on maroon, alternate rows turned
+      function rich(x, y, k, rot, outer, inner) {
+        return '<g transform="translate(' + f(x) + ' ' + f(y) + ') rotate(' + rot + ') scale(' + k + ')">' +
+          '<path d="' + BOTEH + '" fill="' + outer + '"/>' +
+          '<path transform="translate(.05 .5) scale(.62)" d="' + BOTEH + '" fill="' + MAROON + '"/>' +
+          '<path transform="translate(.1 .8) scale(.38)" d="' + BOTEH + '" fill="' + inner + '"/>' +
+          '<circle cx="0" cy="2.2" r=".28" fill="' + outer + '"/></g>';
+      }
+      var s = frameBand(GREEN, function (x, y) { return circ(x, y, .9, GOLD) + circ(x, y, .4, MAROON); }) +
+        '<rect x="6.2" y="6.2" width="37.6" height="57.6" fill="' + MAROON + '"/>';
+      var zz = 'M7.4 8';
+      for (var x = 7.4; x < 42.6; x += 1.6) zz += ' L' + f(x + .8) + ' ' + (Math.round((x - 7.4) / 1.6) % 2 ? 8 : 9.2);
+      s += '<path d="' + zz + '" fill="none" stroke="' + GOLD + '" stroke-width=".4"/><path d="' + zz + '" transform="rotate(180 25 35)" fill="none" stroke="' + GOLD + '" stroke-width=".4"/>';
+      for (var y = 13, row = 0; y < 60; y += 6.2, row++) {
+        for (x = 11 + (row % 2) * 3.4; x < 41; x += 6.8) {
+          if (Math.pow((x - 25) / 10.4, 2) + Math.pow((y - 35) / 13.4, 2) < 1) continue;
+          s += rich(x, y, .78, (row % 2 ? 180 : 0) + (x < 25 ? -12 : 12), row % 2 ? CREAM : GOLD, row % 2 ? GOLD : CREAM) + circ(x + 3.4, y + 3.1, .35, GOLD);
+        }
+      }
+      return wrap(s + '<ellipse cx="25" cy="35" rx="9" ry="12" fill="' + GREEN + '" stroke="' + GOLD + '" stroke-width="1"/>' +
+        '<ellipse cx="25" cy="35" rx="7.6" ry="10.6" fill="' + MAROON + '" stroke="' + GOLD + '" stroke-width=".5" stroke-dasharray=".1 1.1" stroke-linecap="round"/>' +
+        rich(23.6, 31.4, 1.7, -20, GOLD, CREAM) + rich(26.4, 38.6, 1.7, 160, GOLD, CREAM) + circ(25, 35, .7, CREAM));
+    }
+    function backSvg(name) { return name === 'termeh' ? termeh() : carpet(); }
+    function backName(v) { return BACKS.indexOf(v) >= 0 ? v : BACKS[0]; }
+    // One <style> for every back on the page; the root's data-pback picks which applies,
+    // so switching repaints every back at once without the game re-rendering
+    function applyBack() {
+      if (typeof document === 'undefined') return;
+      if (!document.getElementById('ch-pbacks')) {
+        var css = BACKS.map(function (n, i) {
+          return (i ? '[data-pback="' + n + '"] ' : '') + '.ch-pback{background-image:url("data:image/svg+xml,' + encodeURIComponent(backSvg(n)) + '")}';
+        }).join('\n');
+        document.head.appendChild(el('style', { id: 'ch-pbacks', text: css }));
+      }
+      document.documentElement.setAttribute('data-pback', backName(state.settings.cardBack));
+    }
+    function setBack(v) {
+      if (BACKS.indexOf(v) < 0) return false;
+      state.settings.cardBack = v;
+      saveSettings();
+      applyBack();
+      return true;
+    }
+    function back(extra) { applyBack(); return el('div', { class: 'ch-pback' + (extra ? ' ' + extra : ''), 'aria-hidden': 'true' }); }
+    // A small button showing the current back; a tap moves to the next one (#181)
+    function backPicker() {
+      var mini = el('div', { class: 'ch-pback' });
+      var btn = el('button', { class: 'ch-iconbtn ch-pbackbtn', type: 'button' }, [mini]);
+      var sync = function () {
+        var n = backName(state.settings.cardBack);
+        var label = Chogan.t('cardBack') + ': ' + Chogan.t(n === 'termeh' ? 'backTermeh' : 'backCarpet');
+        btn.setAttribute('aria-label', label);
+        btn.title = label;
+      };
+      btn.addEventListener('click', function () {
+        var n = backName(state.settings.cardBack);
+        setBack(BACKS[(BACKS.indexOf(n) + 1) % BACKS.length]);
+        Chogan.feedback('tap');
+        sync();
+      });
+      applyBack();
+      sync();
+      return btn;
+    }
+
     function rank(c) { return c >> 2; }
     function suit(c) { return c & 3; }
     function isRed(c) { return suit(c) === 1 || suit(c) === 2; }
@@ -1566,8 +1803,8 @@
       return el('button', { class: 'ch-pcard' + (isRed(c) ? ' ch-pcard--red' : '') + (extra ? ' ' + extra : ''),
         type: 'button', 'aria-label': label(c) }, kids);
     }
-    function back(extra) { return el('div', { class: 'ch-pback' + (extra ? ' ' + extra : ''), 'aria-hidden': 'true' }); }
-    return { GLYPH: GLYPH, RANKS: RANKS, rank: rank, suit: suit, isRed: isRed, label: label, faceSvg: faceSvg, el: cardEl, back: back };
+    return { GLYPH: GLYPH, RANKS: RANKS, BACKS: BACKS, rank: rank, suit: suit, isRed: isRed, label: label, faceSvg: faceSvg,
+      backSvg: backSvg, setBack: setBack, applyBack: applyBack, backPicker: backPicker, el: cardEl, back: back };
   })();
 
   Chogan.icon = function (name, size, cls) {
@@ -2248,6 +2485,7 @@
     if (!Chogan.pageTitle) Chogan.pageTitle = function () { return Chogan.t('appName'); };
     Chogan.applyLang();
     Chogan.applyTheme();
+    Chogan.cards.applyBack();
     rollSeason();
     if (o.accent) Chogan.setAccent(o.accent, o.accentSoft);
     document.addEventListener('pointerdown', unlockAudioOnce, { passive: true });

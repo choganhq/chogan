@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2372;
+const MIN_CHECKS = 2399;
 
 function ok(cond, msg) {
   checks++;
@@ -3290,6 +3290,84 @@ function testLocales() {
 
 /* ------------------------------------------------- منو و دستاوردها */
 // تابع واقعی منو را بیرون می‌کشیم و با هسته‌ی ساختگی اجرا می‌کنیم (#85).
+/* ------------------------------------------------- card art and backs */
+// Runs the real Chogan.cards block from the core against a small DOM stand-in (#181)
+function testCardArt() {
+  head('Card art and card backs');
+  const coreJs = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  const coreCss = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8');
+  const m = coreJs.match(/\n  Chogan\.cards = \(function \(\) \{[\s\S]*?\n  \}\)\(\);\n/);
+  ok(!!m, 'the shared deck block is found in the core');
+  if (!m) return;
+  const styles = [];
+  const root = { attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } };
+  const fake = (tag, props, kids) => ({ tag, props: props || {}, kids: kids || [], attrs: {}, setAttribute(k, v) { this.attrs[k] = v; }, addEventListener(t, fn) { this['on' + t] = fn; } });
+  const box = {
+    Chogan: { t: (k) => k, feedback() {} },
+    state: { settings: {} },
+    saves: 0,
+    el: fake,
+    document: {
+      head: { appendChild(n) { styles.push(n); } },
+      documentElement: root,
+      getElementById(id) { return styles.find((n) => n.props.id === id) || null; }
+    },
+    Math, encodeURIComponent
+  };
+  box.saveSettings = () => { box.saves++; };
+  vm.createContext(box);
+  vm.runInContext('var cards = (function(){ var Chogan = this.Chogan; ' + m[0].replace('Chogan.cards =', 'return') + ' }).call(this);', box);
+  const K = box.cards;
+  ok(!!K && typeof K.faceSvg === 'function', 'the deck block runs on its own');
+  if (!K) return;
+
+  const faces = [10, 11, 12].map((r) => K.faceSvg(r));
+  ok(faces.every((s) => /^<svg viewBox="0 0 40 44"[^>]*>[\s\S]*<\/svg>$/.test(s) && /fill="currentColor"/.test(s)), 'jack, queen and king are SVG portraits whose robe takes the suit colour');
+  ok(new Set(faces).size === 3, 'the three portraits are different');
+  // inlined many times per page: an id would collide, an outside reference would break offline
+  ok(faces.every((s) => !/\sid=|href|url\(|https?:/.test(s.replace('http://www.w3.org/2000/svg', ''))), 'portraits carry no id, link or outside reference');
+  const curlsOf = (s) => (s.match(/stroke="#4A403A" stroke-width="\.38"/g) || []).length;
+  ok(curlsOf(faces[2]) >= 40, 'the Shah has a curly beard (' + curlsOf(faces[2]) + ' curls)');
+  ok(curlsOf(faces[1]) >= 20, 'the Bibi has curly hair (' + curlsOf(faces[1]) + ' curls)');
+  ok(/translate\([^)]*\) rotate\([^)]*\) scale\(0?\.32\)/.test(faces[2]) && /stroke-width="\.7"/.test(faces[0]), 'robes are patterned: boteh on the Shah, frogging on the Sarbaz');
+  ok(faces.every((s) => s.length < 24000), 'each portrait stays under 24 KB (largest ' + Math.max(...faces.map((s) => s.length)) + ')');
+  ok(K.faceSvg(12) === faces[2], 'a portrait is built once and reused');
+
+  ok(JSON.stringify(K.BACKS) === '["carpet","termeh"]', 'two card backs: carpet and termeh');
+  const backs = K.BACKS.map((n) => K.backSvg(n));
+  ok(backs.every((s) => /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 50 70">[\s\S]*<\/svg>$/.test(s)), 'each back is one 5:7 SVG picture');
+  ok(backs.every((s) => !/\sid=|href|url\(|https?:/.test(s.replace('http://www.w3.org/2000/svg', ''))), 'backs are self-contained, so they work offline as a data URI');
+  ok(new Set(backs).size === 2 && backs.every((s) => s.length < 64000), 'the backs differ and each stays under 64 KB (' + backs.map((s) => s.length).join(', ') + ')');
+
+  // the setting: default, switch, persist, reject
+  K.applyBack();
+  ok(root.attrs['data-pback'] === 'carpet', 'with no choice saved the back is the carpet');
+  ok(styles.length === 1 && styles[0].props.id === 'ch-pbacks' && (styles[0].props.text.match(/data:image\/svg\+xml,/g) || []).length === 2 && /\[data-pback="termeh"\] \.ch-pback\{/.test(styles[0].props.text),
+    'one style element carries both backs; the root attribute picks one');
+  ok(K.setBack('termeh') === true && box.state.settings.cardBack === 'termeh' && box.saves === 1 && root.attrs['data-pback'] === 'termeh', 'choosing termeh saves it and switches every back on the page');
+  ok(K.setBack('stars') === false && box.state.settings.cardBack === 'termeh' && box.saves === 1, 'an unknown back is refused and nothing is saved');
+  box.state.settings.cardBack = 'stars'; K.applyBack();
+  ok(root.attrs['data-pback'] === 'carpet', 'a corrupt saved value falls back to the carpet');
+  box.state.settings.cardBack = 'carpet';
+  const pick = K.backPicker();
+  ok(pick.tag === 'button' && pick.kids.length === 1 && pick.kids[0].props.class === 'ch-pback' && pick.attrs['aria-label'] === 'cardBack: backCarpet', 'the picker shows the current back and names it');
+  pick.onclick();
+  ok(box.state.settings.cardBack === 'termeh' && pick.attrs['aria-label'] === 'cardBack: backTermeh', 'a tap on the picker moves to the next back');
+  pick.onclick();
+  ok(box.state.settings.cardBack === 'carpet', 'and wraps around');
+  ok(styles.length === 1, 'the backs are injected once, however often they are applied');
+
+  ok(/cardBack: 'carpet'/.test(coreJs.match(/var DEFAULT_SETTINGS = \{[\s\S]*?\};/)[0]), 'the carpet is the default back');
+  ok((coreJs.match(/cardBack: '[^']+', backCarpet: '[^']+', backTermeh: '[^']+',/g) || []).length === 4, 'the picker is named in all four languages');
+  ok(/Chogan\.applyTheme\(\);\s*Chogan\.cards\.applyBack\(\);/.test(coreJs), 'the saved back is applied when a page boots');
+  ok(/\.ch-pback \{[^}]*100% 100% no-repeat/.test(coreCss) && !/\.ch-pback \{[^}]*data:image/.test(coreCss), 'the CSS stretches one picture over the back instead of tiling a pattern');
+  for (const g of ['pasur', 'hokm']) {
+    const page = fs.readFileSync(path.join(ROOT, 'www/games', g, 'index.html'), 'utf8');
+    ok(/top\.appendChild\(C\.cards\.backPicker\(\)\);/.test(page), g + ' offers the back picker at the top of the table');
+    ok(!/\.ch-pback[^{]*\{[^}]*background-size/.test(page), g + ' does not resize the back into a tile');
+  }
+}
+
 /* ------------------------------------------------------------- پاسور */
 function testPasur() {
   head('پاسور');
@@ -3300,18 +3378,8 @@ function testPasur() {
   const psPage = fs.readFileSync(path.join(ROOT, 'www/games/pasur/index.html'), 'utf8');
   const coreJs = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
   const coreCss = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8');
-  const fm = coreJs.match(/    function faceSvg\(rank\) \{[\s\S]*?\n    \}\n/);
-  ok(!!fm, 'face cards are drawn by the core faceSvg');
-  if (fm) {
-    const box = { GOLD: '#D4A72C', SKIN: '#F2D3B1', INK: '#2B2622' };
-    vm.createContext(box);
-    vm.runInContext(fm[0], box);
-    const faces = [10, 11, 12].map((r) => box.faceSvg(r));
-    ok(faces.every((s) => /^<svg viewBox="0 0 40 44"[^>]*>[\s\S]*<\/svg>$/.test(s) && /fill="currentColor"/.test(s)), 'jack, queen and king are SVG portraits whose robe takes the suit colour');
-    ok(new Set(faces).size === 3, 'the three portraits are different');
-  }
+  // the portraits and backs themselves are checked in testCardArt (#181)
   ok(/if \(r >= 10\) \{\s*kids\.push\(el\('span', \{ class: 'ch-pcard__mini'/.test(coreJs) && /el\('span', \{ class: 'ch-pcard__face', html: faceSvg\(r\) \}\)/.test(coreJs), 'only jack, queen and king get a portrait; number cards keep the large suit');
-  ok(/\.ch-pback \{[\s\S]*?url\("data:image\/svg\+xml,[^"]*rotate\(45 10 10\)[^"]*"\)/.test(coreCss), 'the card back is the eight-pointed star tile, inline so it works offline');
   // a game never carries its own copy of the deck (#178)
   ok(psPage.indexOf('function faceSvg') < 0 && psPage.indexOf('data:image/svg+xml') < 0 && /return C\.cards\.el\(c, 'ps-card'/.test(psPage) && /C\.cards\.back\(\)/.test(psPage),
     'Pasur draws its cards with the shared core, not a copy');
@@ -4423,6 +4491,7 @@ testBridges();
 testCodebreaker();
 testBreakout();
 testPasur();
+testCardArt();
 testMahjong();
 testChess();
 testChessBot();
