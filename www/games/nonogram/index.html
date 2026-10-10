@@ -14,12 +14,18 @@
   .ng-boardbox { width: 100%; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
   .ng-canvas { display: block; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   .ng-mode button { min-height: 44px; min-width: 96px; }
+  .ng-pics { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: var(--s-2); margin-top: var(--s-3); }
+  .ng-pic { aspect-ratio: 1; border: 0; border-radius: var(--r-md); background: var(--c-surface-2); color: var(--c-text-dim);
+    font-weight: 800; font-size: var(--fs-sm); cursor: pointer; display: grid; place-items: center; padding: 6px; }
+  .ng-pic--done { background: var(--c-surface); box-shadow: inset 0 0 0 2px var(--c-line); }
+  .ng-pic canvas { width: 100%; height: 100%; image-rendering: pixelated; }
   .ng-hint { font-size: var(--fs-xs); color: var(--c-text-faint); text-align: center; min-height: 1.2em; }
 </style>
 </head>
 <body>
 <script src="../../version.js"></script>
 <script src="../../lib/chogan.js"></script>
+<script src="pictures.js"></script>
 <script>
 /* ==== ENGINE START ==== */
 function NonogramEngineFactory() {
@@ -310,7 +316,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = NonogramEn
         size: 'اندازه', fillMode: 'پر کردن', markMode: 'ضربدر',
         newPuzzle: 'جدول تازه', undoMove: 'برگرداندن', move: 'جابه‌جایی',
         fillKey: 'پر یا پاک کردن خانه', markKey: 'ضربدر زدن یا برداشتن',
-        dailyNono: 'نونوگرام روزانه', solved: 'تصویر کامل شد', longPress: 'نگه داشتن انگشت یا کلیک راست: ضربدر',
+        dailyNono: 'نونوگرام روزانه', pictures: 'تصویر', pickPicture: 'یک تصویر انتخاب کن', picsDone: '{n} از {t} حل شده', nextPicture: 'تصویر بعدی', solved: 'تصویر کامل شد', longPress: 'نگه داشتن انگشت یا کلیک راست: ضربدر',
         tutTitle1: 'عددها', tutText1: 'عددهای کنار هر سطر و بالای هر ستون می‌گویند چند خانه‌ی پرِ پشت سر هم، به ترتیب، در آن خط هست. بین دو دسته دست‌کم یک خانه‌ی خالی است.',
         tutTitle2: 'پر کن، ضربدر بزن', tutText2: 'یک ضربه خانه را پر می‌کند. خانه‌ای را که مطمئنی خالی است ضربدر بزن: با دکمه‌ی ضربدر یا با نگه داشتن انگشت. برای یک ردیف کامل انگشت را بکش.',
         tutTitle3: 'تصویر', tutText3: 'خطی که جور شد عددهایش کم‌رنگ می‌شود. همه که جور شدند تصویر کامل است. هیچ جدولی حدس لازم ندارد؛ همه فقط با منطق حل می‌شوند.'
@@ -319,7 +325,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = NonogramEn
         size: 'Size', fillMode: 'Fill', markMode: 'Cross',
         newPuzzle: 'New puzzle', undoMove: 'Undo', move: 'Move',
         fillKey: 'Fill or clear a cell', markKey: 'Cross or uncross a cell',
-        dailyNono: 'Daily nonogram', solved: 'Picture complete', longPress: 'Long press or right click: cross',
+        dailyNono: 'Daily nonogram', pictures: 'Pictures', pickPicture: 'Pick a picture', picsDone: '{n} of {t} solved', nextPicture: 'Next picture', solved: 'Picture complete', longPress: 'Long press or right click: cross',
         tutTitle1: 'The numbers', tutText1: 'The numbers beside each row and above each column give, in order, the lengths of the runs of filled cells in that line. Runs are separated by at least one empty cell.',
         tutTitle2: 'Fill and cross', tutText2: 'Tap to fill a cell. Cross out a cell you know is empty, with the cross button or a long press. Drag to paint a whole run.',
         tutTitle3: 'The picture', tutText3: 'A line that matches its numbers fades out. When every line matches, the picture is complete. No puzzle needs a guess; each one is solvable by logic alone.'
@@ -328,7 +334,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = NonogramEn
         size: '尺寸', fillMode: '涂色', markMode: '打叉',
         newPuzzle: '新谜题', undoMove: '撤销', move: '移动',
         fillKey: '涂色或清除格子', markKey: '打叉或取消打叉',
-        dailyNono: '每日数织', solved: '图案完成', longPress: '长按或右键：打叉',
+        dailyNono: '每日数织', pictures: '图画', pickPicture: '选一幅图', picsDone: '已完成 {n}/{t}', nextPicture: '下一幅', solved: '图案完成', longPress: '长按或右键：打叉',
         tutTitle1: '数字', tutText1: '每行左侧和每列上方的数字，按顺序表示该行或列中连续涂色格子的长度。相邻两段之间至少隔一个空格。',
         tutTitle2: '涂色与打叉', tutText2: '轻点一格即可涂色。确定为空的格子可以打叉：用打叉按钮或长按。拖动可一次涂满一整段。',
         tutTitle3: '图案', tutText3: '数字全部对上的行或列会变淡。所有行列都对上时，图案就完成了。每道题都无需猜测，只靠推理即可解开。'
@@ -337,7 +343,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = NonogramEn
         size: 'Größe', fillMode: 'Füllen', markMode: 'Kreuz',
         newPuzzle: 'Neues Rätsel', undoMove: 'Rückgängig', move: 'Bewegen',
         fillKey: 'Feld füllen oder leeren', markKey: 'Feld an- oder abkreuzen',
-        dailyNono: 'Tages-Nonogramm', solved: 'Bild fertig', longPress: 'Lange drücken oder Rechtsklick: Kreuz',
+        dailyNono: 'Tages-Nonogramm', pictures: 'Bilder', pickPicture: 'Wähle ein Bild', picsDone: '{n} von {t} gelöst', nextPicture: 'Nächstes Bild', solved: 'Bild fertig', longPress: 'Lange drücken oder Rechtsklick: Kreuz',
         tutTitle1: 'Die Zahlen', tutText1: 'Die Zahlen neben jeder Zeile und über jeder Spalte geben der Reihe nach die Längen der gefüllten Blöcke in dieser Linie an. Zwischen zwei Blöcken liegt mindestens ein leeres Feld.',
         tutTitle2: 'Füllen und kreuzen', tutText2: 'Tippe, um ein Feld zu füllen. Ein Feld, von dem du weißt, dass es leer ist, kreuzt du an: mit der Kreuz-Taste oder lange drücken. Zieh, um einen ganzen Block zu malen.',
         tutTitle3: 'Das Bild', tutText3: 'Eine Linie, die zu ihren Zahlen passt, wird blass. Wenn alle Linien passen, ist das Bild fertig. Kein Rätsel braucht Raten; jedes ist allein durch Logik lösbar.'
@@ -349,6 +355,17 @@ if (typeof module !== 'undefined' && module.exports) module.exports = NonogramEn
   var dailyDate = params.get('daily');
   var prefs = ctx.store.get('prefs', { size: 10 });
   if ([5, 10, 15].indexOf(prefs.size) < 0) prefs.size = 10;
+
+  // Picture puzzles (#172): hand-drawn solutions from pictures.js. Random boards
+  // solve to noise; these solve to a picture, shown in its own colours.
+  var PICS = window.NONOGRAM_PICTURES || [];
+  function picById(id) { return PICS.filter(function (p) { return p.id === id; })[0] || null; }
+  function picGrid(p) {
+    var g = [];
+    p.rows.forEach(function (row) { for (var k = 0; k < row.length; k++) g.push(row[k] === '.' ? E.BLANK : E.FILL); });
+    return g;
+  }
+  function picSolved() { return ctx.store.get('pics', {}); }
 
   var S = null, mode = 'fill', timerId = null;
   var cursor = { r: 0, c: 0, show: false };
@@ -370,11 +387,69 @@ if (typeof module !== 'undefined' && module.exports) module.exports = NonogramEn
 
   /* ------------------------------------------------------------ ساخت */
 
+  function newPicture(id) {
+    var p = picById(id);
+    if (!p) { newGame(prefs.size, null); return; }
+    var n = p.rows.length, cl = E.cluesOf(picGrid(p), n);
+    S = E.newState({ n: n, rows: cl.rows, cols: cl.cols });
+    S.daily = null; S.pic = p.id;
+    S.elapsed = 0;
+    S.done = false;
+    cursor = { r: 0, c: 0, show: false };
+    render();
+    save();
+    startTimer();
+  }
+  // The colour of a solved cell: the picture's own colour, or the random board's gradient
+  function solvedColour(snap, i, pal) {
+    var p = snap.pic && picById(snap.pic);
+    if (p) { var ch = p.rows[(i / snap.n) | 0][i % snap.n]; return p.col[ch] || '#888888'; }
+    return E.cellColour(snap.n, i, pal);
+  }
+  function nextUnsolved(after) {
+    var done = picSolved(), start = Math.max(0, PICS.findIndex(function (p) { return p.id === after; }) + 1);
+    for (var k = 0; k < PICS.length; k++) {
+      var p = PICS[(start + k) % PICS.length];
+      if (!done[p.id]) return p.id;
+    }
+    return PICS[start % PICS.length].id;
+  }
+  function askPicture() {
+    var done = picSolved(), grid = el('div', { class: 'ng-pics' });
+    var count = PICS.filter(function (p) { return done[p.id]; }).length;
+    var h = C.ui.modal({
+      title: C.t('pickPicture'),
+      body: [el('p', { class: 'ch-dim', text: C.t('picsDone', { n: C.num(count), t: C.num(PICS.length) }) }), grid],
+      onClose: function () { render(); },
+      actions: [{ label: C.t('cancel') }]
+    });
+    PICS.forEach(function (p) {
+      var b = el('button', { class: 'ng-pic' + (done[p.id] ? ' ng-pic--done' : ''), type: 'button',
+        'aria-label': done[p.id] ? (p.name[C.state.settings.lang] || p.name.en) : C.num(p.rows.length) + '×' + C.num(p.rows.length) });
+      if (done[p.id]) b.appendChild(picThumb(p));
+      else b.appendChild(el('span', { text: C.num(p.rows.length) + '×' + C.num(p.rows.length) }));
+      b.addEventListener('click', function () {
+        var go = function () { h.close(); prefs.pics = true; ctx.store.set('prefs', prefs); newPicture(p.id); };
+        if (S && S.history.length && !S.done) { C.ui.confirm({ title: C.t('newPuzzle'), body: C.t('resetWarn'), onOk: go }); return; }
+        go();
+      });
+      grid.appendChild(b);
+    });
+  }
+  function picThumb(p) {
+    var n = p.rows.length, cv = el('canvas', { width: n * 4, height: n * 4 }), g = cv.getContext('2d');
+    p.rows.forEach(function (row, r) {
+      for (var c = 0; c < n; c++) if (row[c] !== '.') { g.fillStyle = p.col[row[c]]; g.fillRect(c * 4, r * 4, 4, 4); }
+    });
+    return cv;
+  }
+
   function newGame(n, daily) {
     var rnd = daily ? C.daily('nonogram', daily).rng : Math.random;
     var pz = E.generate(rnd, n);
     S = E.newState(pz);
     S.daily = daily || null;
+    S.pic = null;
     S.elapsed = 0;
     S.done = false;
     cursor = { r: 0, c: 0, show: false };
@@ -488,12 +563,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = NonogramEn
     }
     var pad = Math.max(1, Math.round(s * 0.06));
     var pal = S.done ? E.paletteFor(S.cells) : null;
+    var snapNow = { n: n, pic: S.pic };
     for (var i = 0; i < n * n; i++) {
       var v = S.cells[i];
       if (!v) continue;
       var rx = gx + (i % n) * s, ry = gy + ((i / n) | 0) * s;
       if (v === E.FILL) {
-        g.fillStyle = pal ? E.cellColour(n, i, pal) : col.game;
+        g.fillStyle = pal ? solvedColour(snapNow, i, pal) : col.game;
         C.rrect(g, rx + pad, ry + pad, s - pad * 2, s - pad * 2, Math.max(1, s * 0.12));
         g.fill();
       } else if (v === E.MARK && !S.done) {
@@ -537,10 +613,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = NonogramEn
     } else {
       top.appendChild(C.ui.segmented([5, 10, 15].map(function (n) {
         return { value: n, label: C.num(n) + '×' + C.num(n) };
-      }), S.n, function (v) {
-        if (v === S.n) return;
+      }).concat(PICS.length ? [{ value: 'pic', label: C.t('pictures') }] : []), S.pic ? 'pic' : S.n, function (v) {
+        if (v === 'pic') { askPicture(); return; }
+        if (v === S.n && !S.pic) return;
         var go = function () {
-          prefs.size = v; ctx.store.set('prefs', prefs);
+          prefs.size = v; prefs.pics = false; ctx.store.set('prefs', prefs);
           newGame(v, null);
         };
         if (S.history.length && !S.done) {
@@ -681,19 +758,26 @@ if (typeof module !== 'undefined' && module.exports) module.exports = NonogramEn
       if (!firstDaily) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
     }
     ctx.clearSave();
-    var snap = { n: n, cells: S.cells.slice(), daily: S.daily };
+    var snap = { n: n, cells: S.cells.slice(), daily: S.daily, pic: S.pic || null };
+    var pic = snap.pic && picById(snap.pic);
+    if (pic) {
+      var solvedPics = picSolved();
+      if (!solvedPics[pic.id] || elapsed < solvedPics[pic.id]) solvedPics[pic.id] = elapsed;
+      ctx.store.set('pics', solvedPics);
+    }
+    var picName = pic ? (pic.name[C.state.settings.lang] || pic.name.en) : null;
 
     ctx.finish({
-      won: true, title: C.t('solved'), timeMs: elapsed, coins: coins, points: points,
+      won: true, title: picName || C.t('solved'), timeMs: elapsed, coins: coins, points: points,
       note: isBest ? C.t('best') + '!' : null,
       lines: [
         { label: C.t('time'), value: C.time(elapsed) },
         { label: C.t('size'), value: C.num(n) + '×' + C.num(n) }
       ],
-      shareText: 'چوگان · نونوگرام ' + C.num(n) + '×' + C.num(n) +
+      shareText: 'چوگان · نونوگرام ' + (picName ? picName + ' ' : '') + C.num(n) + '×' + C.num(n) +
         (snap.daily ? ('\nروزانه ' + snap.daily) : '') + '\nزمان ' + C.time(elapsed),
       paint: cardPaint(snap),
-      onAgain: snap.daily ? null : function () { newGame(snap.n, null); }
+      onAgain: snap.daily ? null : (pic ? function () { newPicture(nextUnsolved(pic.id)); } : function () { newGame(snap.n, null); })
     });
   }
 
@@ -710,7 +794,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = NonogramEn
       var pal = E.paletteFor(snap.cells);
       for (var i = 0; i < n * n; i++) {
         if (snap.cells[i] !== E.FILL) continue;
-        g.fillStyle = E.cellColour(n, i, pal);
+        g.fillStyle = solvedColour(snap, i, pal);
         C.rrect(g, ox + (i % n) * s + 1.5, oy + ((i / n) | 0) * s + 1.5, s - 3, s - 3, Math.max(2, s * 0.14));
         g.fill();
       }
@@ -739,7 +823,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = NonogramEn
   ctx.autosave(function () {
     if (!S || S.done || !S.history.length) return { inProgress: false };
     return {
-      s: { n: S.n, rows: S.rows, cols: S.cols, cells: S.cells, history: S.history, elapsed: S.elapsed, daily: S.daily },
+      s: { n: S.n, rows: S.rows, cols: S.cols, cells: S.cells, history: S.history, elapsed: S.elapsed, daily: S.daily, pic: S.pic || null },
       prefs: prefs
     };
   });
@@ -747,7 +831,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = NonogramEn
 
   function askNew() {
     var dd = S ? S.daily : null;
-    function go() { newGame(dd ? 10 : (S ? S.n : prefs.size), dd); }
+    function go() {
+      if (!dd && S && S.pic) { newPicture(nextUnsolved(S.pic)); return; }
+      newGame(dd ? 10 : (S ? S.n : prefs.size), dd);
+    }
     if (!S || S.done || !S.history.length) { go(); return; }
     C.ui.confirm({ title: C.t('newPuzzle'), body: C.t('resetWarn'), onOk: go });
   }
@@ -841,7 +928,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = NonogramEn
   function restore(v) {
     S = {
       n: v.n, rows: v.rows, cols: v.cols, cells: v.cells, history: v.history || [],
-      elapsed: v.elapsed || 0, daily: v.daily || null, done: false
+      elapsed: v.elapsed || 0, daily: v.daily || null, done: false, pic: v.pic && picById(v.pic) ? v.pic : null
     };
     cursor = { r: 0, c: 0, show: false };
     render();
@@ -865,6 +952,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = NonogramEn
   } else if (saved && validSave(saved.s) && !saved.s.daily) {
     if (saved.prefs) prefs = saved.prefs;
     restore(saved.s);
+  } else if (prefs.pics && PICS.length) {
+    newPicture(nextUnsolved(null));
+    ctx.tutorialIfNew(TUT);
   } else {
     newGame(prefs.size, null);
     ctx.tutorialIfNew(TUT);
