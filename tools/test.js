@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 3167;
+const MIN_CHECKS = 3171;
 
 function ok(cond, msg) {
   checks++;
@@ -4004,8 +4004,14 @@ function testMahjongClack() {
   ok(at > 0 && (body.match(/noise\(/g) || []).length === 1 && /\[\[0, 3200, 1500\], \[0\.055,/.test(body), 'the core has a two-knock clack sound');
   ok(/clack: \['clack', 'tap'\]/.test(core), 'feedback knows clack, with a light vibration');
   const tapAt = page.indexOf('  function tap(i) {'), tapBody = page.slice(tapAt, page.indexOf('\n  }\n', tapAt));
-  ok(/spark\(sel, i\);\s+E\.remove\(S, sel, i\);/.test(tapBody) && /C\.feedback\('clack'\);/.test(tapBody) && !/C\.feedback\('place'\)/.test(tapBody), 'a match sparks before the tiles go and clacks');
-  ok(/function spark\(a, b\) \{\n\s+if \(C\.ui\.reduceMotion\(\)\) return;/.test(page) && /setTimeout\(function \(\) \{ fx\.remove\(\); \}, 400\);/.test(page), 'the spark respects reduced motion and removes itself');
+  ok(/strike\(sel, i\);\s+E\.remove\(S, sel, i\);/.test(tapBody) && !/C\.feedback\('place'\)/.test(tapBody), 'a match strikes before the tiles go');
+  const stAt = page.indexOf('  function strike(a, b) {'), stBody = stAt > 0 ? page.slice(stAt, page.indexOf('\n  }\n', stAt)) : '';
+  ok(/if \(C\.ui\.reduceMotion\(\)[^\n]*\{ C\.feedback\('clack'\); return; \}/.test(stBody), 'with reduced motion the pair clacks at once and nothing flies');
+  ok(/setTimeout\(function \(\) \{ fx\.remove\(\); \}, 400\);/.test(page) && /c\.remove\(\); \}, 360\)/.test(stBody), 'the sparks and the flying copies remove themselves');
+  // #272: the two tiles meet in the middle of the view and the clack and sparks come on impact
+  ok(/cx = \(view\.clientWidth \/ 2 - Z\.x\) \/ Z\.z, cy = \(view\.clientHeight \/ 2 - Z\.y\) \/ Z\.z/.test(stBody), 'the pair flies to the middle of the view, zoom included');
+  ok(/\}, FLY_MS\);/.test(stBody) && /C\.feedback\('clack'\);\s+sparkAt\(cx, cy,/.test(stBody), 'the clack and the sparks come when the tiles meet');
+  ok(/c\.style\.zIndex = '99999';/.test(stBody) && /if \(!flies\[0\]\.isConnected\) return;/.test(stBody), 'the copies fly above every tile and a new deal cancels the strike');
   ok(/\.mj-spark \{ position: absolute; z-index: 100000;/.test(page) && /zIndex = String\(p\[2\] \* 1000 \+ p\[1\] \* 10 \+ p\[0\]\)/.test(page), 'the spark draws above every tile layer');
 }
 

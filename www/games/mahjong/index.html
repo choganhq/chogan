@@ -21,6 +21,8 @@
   /* above every tile: tiles stack at layer * 1000 + row * 10 + column */
   .mj-spark { position: absolute; z-index: 100000; pointer-events: none; animation: mj-spark 380ms var(--ease) forwards; }
   .mj-spark svg { display: block; }
+  /* the flying copies of a matched pair (#272): under the sparks, above every tile */
+  .mj-fly { pointer-events: none; transform-origin: 50% 50%; }
   @keyframes mj-spark { from { opacity: 1; transform: scale(.4); } 60% { opacity: 1; } to { opacity: 0; transform: scale(1.25); } }
   .mj-tile {
     position: absolute; padding: 0; border: 0; cursor: pointer; border-radius: 6px;
@@ -770,10 +772,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MahjongEng
     if (hint && hint.indexOf(i) < 0) hint = null;
     if (sel < 0 || sel === i) { sel = sel === i ? -1 : i; C.feedback(sel < 0 ? 'tap' : 'select'); paint(); return; }
     if (E.matches(S.faces[sel], S.faces[i])) {
-      spark(sel, i);
+      strike(sel, i);
       E.remove(S, sel, i);
       sel = -1; hint = null;
-      C.feedback('clack');
       save();
       paint();
       if (S.done) { finish(); return; }
@@ -786,25 +787,61 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MahjongEng
     paint();
   }
 
-  // A matched pair strikes like flint: a small burst of gold sparks where the two tiles
-  // were, gone in a third of a second (#227). Skipped when the system asks for less motion.
-  function spark(a, b) {
-    if (C.ui.reduceMotion()) return;
-    [a, b].forEach(function (k) {
-      var t = nodes[k];
-      if (!t) return;
-      var x = t.offsetLeft + t.offsetWidth / 2, y = t.offsetTop + t.offsetHeight / 2, r = Math.max(14, t.offsetWidth * 0.7);
-      var s = '<svg viewBox="-20 -20 40 40" width="' + (r * 2) + '" height="' + (r * 2) + '"><circle r="5" fill="#FFF6D8"/>';
-      for (var q = 0; q < 8; q++) {
-        var ang = (q * 45 + 22) * Math.PI / 180, l = q % 2 ? 16 : 19;
-        s += '<line x1="' + (Math.cos(ang) * 7).toFixed(1) + '" y1="' + (Math.sin(ang) * 7).toFixed(1) + '" x2="' + (Math.cos(ang) * l).toFixed(1) + '" y2="' + (Math.sin(ang) * l).toFixed(1) +
-          '" stroke="' + (q % 2 ? '#F2C14E' : '#E8913A') + '" stroke-width="2.4" stroke-linecap="round"/>';
-      }
-      var fx = el('div', { class: 'mj-spark', html: s + '</svg>' });
-      fx.style.left = (x - r) + 'px'; fx.style.top = (y - r) + 'px';
-      board.appendChild(fx);
-      setTimeout(function () { fx.remove(); }, 400);
+  // A matched pair strikes like flint (#227): copies of the two tiles fly from their
+  // places to the middle of the view, grow, and knock together there with the clack
+  // and a burst of gold sparks (#272). Sparking each tile where it lay read as
+  // artificial. The pair is already gone from the state, so play never waits on it.
+  var FLY_MS = 300;
+  function strike(a, b) {
+    if (C.ui.reduceMotion() || !nodes[a] || !nodes[b] || !board.animate) { C.feedback('clack'); return; }
+    var ta = nodes[a], tb = nodes[b];
+    // the tile further left comes in from the left, so the two never cross
+    if (ta.offsetLeft > tb.offsetLeft) { var t = ta; ta = tb; tb = t; }
+    var w = ta.offsetWidth, h = ta.offsetHeight;
+    // the middle of what is on screen, in board coordinates, so it works zoomed in too
+    var cx = (view.clientWidth / 2 - Z.x) / Z.z, cy = (view.clientHeight / 2 - Z.y) / Z.z;
+    // big enough to see on the turtle's small tiles, small enough that both fit the view
+    var k = Math.min(Math.max(1.5, 60 / (w * Z.z)), view.clientWidth * 0.8 / (2 * w * Z.z), 2.6);
+    var flies = [[ta, -1], [tb, 1]].map(function (p) {
+      var c = p[0].cloneNode(true);
+      c.className = 'mj-tile mj-fly';
+      c.removeAttribute('aria-label');
+      c.setAttribute('aria-hidden', 'true');
+      c.tabIndex = -1;
+      // the copy keeps the tile's own stacking inline; it has to fly over every tile
+      c.style.zIndex = '99999';
+      c.style.transition = 'none';
+      var dx = cx + p[1] * w * k / 2 - (p[0].offsetLeft + w / 2), dy = cy - (p[0].offsetTop + h / 2);
+      board.appendChild(c);
+      c.animate([
+        { transform: 'translate(0,0) scale(1)' },
+        { transform: 'translate(' + dx + 'px,' + dy + 'px) scale(' + k + ')' }
+      ], { duration: FLY_MS, easing: 'cubic-bezier(.5,0,.9,.6)', fill: 'forwards' });
+      return c;
     });
+    setTimeout(function () {
+      // a new deal during the flight clears the board; the strike then has nowhere to land
+      if (!flies[0].isConnected) return;
+      C.feedback('clack');
+      sparkAt(cx, cy, Math.max(24, w * k * 0.9));
+      flies.forEach(function (c) {
+        c.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 220, delay: 120, fill: 'forwards' });
+        setTimeout(function () { c.remove(); }, 360);
+      });
+    }, FLY_MS);
+  }
+
+  function sparkAt(x, y, r) {
+    var s = '<svg viewBox="-20 -20 40 40" width="' + (r * 2) + '" height="' + (r * 2) + '"><circle r="5" fill="#FFF6D8"/>';
+    for (var q = 0; q < 8; q++) {
+      var ang = (q * 45 + 22) * Math.PI / 180, l = q % 2 ? 16 : 19;
+      s += '<line x1="' + (Math.cos(ang) * 7).toFixed(1) + '" y1="' + (Math.sin(ang) * 7).toFixed(1) + '" x2="' + (Math.cos(ang) * l).toFixed(1) + '" y2="' + (Math.sin(ang) * l).toFixed(1) +
+        '" stroke="' + (q % 2 ? '#F2C14E' : '#E8913A') + '" stroke-width="2.4" stroke-linecap="round"/>';
+    }
+    var fx = el('div', { class: 'mj-spark', html: s + '</svg>' });
+    fx.style.left = (x - r) + 'px'; fx.style.top = (y - r) + 'px';
+    board.appendChild(fx);
+    setTimeout(function () { fx.remove(); }, 400);
   }
 
   function stuck() {
