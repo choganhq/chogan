@@ -1,0 +1,1163 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>راه دررو — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .wo-wrap { width: 100%; max-width: 720px; display: flex; flex-direction: column; align-items: center; gap: var(--s-3); }
+  .wo-top { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; align-items: center; min-height: 28px; }
+  /* The board is a physical grid: it is not mirrored in RTL and every arrow keeps its real direction */
+  .wo-frame {
+    direction: ltr; background: var(--c-surface); border-radius: var(--r-lg); box-shadow: var(--sh-2);
+    overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  /* on short and landscape screens the board keeps a size you can aim at and scrolls */
+  .wo-frame--scroll { overflow: auto; touch-action: pan-x pan-y; overscroll-behavior: contain; }
+  .wo-board { display: block; cursor: pointer; }
+  .wo-cell { fill: var(--c-surface-2); }
+  /* Sizes are in board units, 40 to a cell */
+  .wo-body, .wo-glow { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .wo-body { stroke: var(--game); stroke-width: 13; transition: stroke-dashoffset var(--t-slow) var(--ease), stroke var(--t-fast) var(--ease); }
+  .wo-glow { stroke: transparent; stroke-width: 30; opacity: .45; transition: stroke-dashoffset var(--t-slow) var(--ease); }
+  .wo-head { transition: transform var(--t-slow) var(--ease); }
+  .wo-head path { fill: var(--game); transition: fill var(--t-fast) var(--ease); }
+  .wo-arrow--in { animation: wo-in var(--t-mid) var(--ease-back) backwards; transform-box: fill-box; transform-origin: center; }
+  @keyframes wo-in { from { opacity: 0; transform: scale(.6); } }
+  /* an arrow already tapped while blocked keeps a red head and halo until it leaves */
+  .wo-arrow--struck .wo-head path { fill: var(--c-bad); }
+  .wo-arrow--struck .wo-glow { stroke: var(--c-bad); opacity: .3; }
+  .wo-arrow--bad .wo-body { stroke: var(--c-bad); }
+  .wo-arrow--bad .wo-head path { fill: var(--c-bad); }
+  .wo-arrow--hint .wo-glow { stroke: var(--c-good); }
+  .wo-arrow--chain .wo-body { stroke: var(--c-gold); }
+  .wo-arrow--chain .wo-head path { fill: var(--c-gold); }
+  .wo-arrow--chain .wo-glow { stroke: var(--c-gold); }
+  .wo-cur { fill: none; stroke: var(--game); stroke-width: 3; stroke-dasharray: 7 6; pointer-events: none; }
+  .wo-guide { fill: none; stroke-width: 6; stroke-linecap: round; stroke-dasharray: 1 13; pointer-events: none; }
+  .wo-guide--free { stroke: var(--c-good); }
+  .wo-guide--blocked { stroke: var(--c-bad); }
+  .wo-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; }
+  .wo-actions { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+
+<script>
+/* ==== ENGINE START ==== */
+/* Way Out: every arrow is a path of cells with a head; a tap sends it out of the
+   board head first when the line from its head to the edge holds no cell of
+   another arrow. A cell is y * w + x; directions run clockwise from up.        */
+function WayOutEngineFactory() {
+  'use strict';
+
+  var DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];
+  // 12 x 18 keeps a cell near 25 px on a 360 px phone, so the board never needs zoom
+  var MAX_W = 12, MAX_H = 18, HEARTS = 3, CHAIN_MS = 1000, CHAIN_STEPS = 3;
+
+  function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
+
+  // Cells met walking from the head of arrow a to the edge, holes left out
+  function ray(S, a) {
+    var A = S.arrows[a], x = A.c[0] % S.w, y = (A.c[0] - x) / S.w, out = [];
+    for (;;) {
+      x += DX[A.d]; y += DY[A.d];
+      if (x < 0 || y < 0 || x >= S.w || y >= S.h) return out;
+      if (!S.hole || !S.hole[y * S.w + x]) out.push(y * S.w + x);
+    }
+  }
+
+  function grid(S) {
+    var g = [], i, j;
+    for (i = 0; i < S.w * S.h; i++) g.push(-1);
+    for (i = 0; i < S.arrows.length; i++) {
+      if (S.gone[i]) continue;
+      for (j = 0; j < S.arrows[i].c.length; j++) g[S.arrows[i].c[j]] = i;
+    }
+    return g;
+  }
+
+  function blockerIn(S, g, a) {
+    var r = ray(S, a);
+    for (var i = 0; i < r.length; i++) if (g[r[i]] >= 0 && g[r[i]] !== a) return g[r[i]];
+    return -1;
+  }
+  // the first arrow on the way out, or -1 when the way is clear
+  function blocker(S, a) { return blockerIn(S, grid(S), a); }
+  function isFree(S, a) { return !S.gone[a] && blocker(S, a) < 0; }
+  function freeArrows(S) {
+    var g = grid(S), out = [];
+    for (var i = 0; i < S.arrows.length; i++) if (!S.gone[i] && blockerIn(S, g, i) < 0) out.push(i);
+    return out;
+  }
+  function left(S) {
+    var n = 0;
+    for (var i = 0; i < S.gone.length; i++) if (!S.gone[i]) n++;
+    return n;
+  }
+  function bent(A) {
+    for (var i = 2; i < A.c.length; i++) if (A.c[i] - A.c[i - 1] !== A.c[1] - A.c[0]) return true;
+    return false;
+  }
+
+  // Greedy removal from the current position, lowest free index first. Removing an
+  // arrow never blocks another, so this empties every solvable board in any order.
+  function walk(S) {
+    var gone = S.gone.slice(), order = [];
+    var T = { w: S.w, h: S.h, hole: S.hole, arrows: S.arrows, gone: gone };
+    for (;;) {
+      var g = grid(T), first = -1, n = 0;
+      for (var i = 0; i < S.arrows.length; i++) {
+        if (gone[i]) continue;
+        n++;
+        if (first < 0 && blockerIn(T, g, i) < 0) first = i;
+      }
+      if (!n) return order;
+      if (first < 0) return null;
+      order.push(first);
+      gone[first] = true;
+    }
+  }
+
+  function make(w, h, hole, arrows, level) {
+    var S = { level: level || 1, w: w, h: h, hole: hole || null, arrows: arrows, order: null,
+      gone: [], struck: [], hearts: HEARTS, hint: -1, strikes: 0, hints: 0, cont: false, done: false, over: false };
+    for (var i = 0; i < arrows.length; i++) { S.gone.push(false); S.struck.push(false); }
+    S.order = walk(S);
+    if (!S.order) return null;
+    return S;
+  }
+
+  /* ------------------------------------------------------------ play */
+
+  function tap(S, a) {
+    if (S.done || S.over || !S.arrows[a] || S.gone[a]) return { ignored: true };
+    var by = blocker(S, a);
+    if (by < 0) {
+      S.gone[a] = true;
+      S.struck[a] = false;
+      if (S.hint === a) S.hint = -1;
+      if (!left(S)) S.done = true;
+      return { out: true };
+    }
+    // only the first blocked tap on an arrow costs a heart
+    var cost = !S.struck[a];
+    if (cost) { S.struck[a] = true; S.hearts = Math.max(0, S.hearts - 1); S.strikes++; }
+    if (!S.hearts) S.over = true;
+    return { by: by, cost: cost };
+  }
+
+  function restart(S) {
+    for (var i = 0; i < S.arrows.length; i++) { S.gone[i] = false; S.struck[i] = false; }
+    S.hearts = HEARTS; S.hint = -1; S.strikes = 0; S.done = false; S.over = false;
+  }
+
+  // one free continue per level: a single heart, the board and the marks stay
+  function carryOn(S) {
+    if (!S.over || S.cont) return false;
+    S.cont = true; S.over = false; S.hearts = 1;
+    return true;
+  }
+
+  // The first arrow of the stored order still on the board is always free: every
+  // arrow before it has gone, and its way out only ever crossed those.
+  function useHint(S, P) {
+    if (S.done || S.over || S.hint >= 0 || !(P.hints > 0)) return -1;
+    for (var i = 0; i < S.order.length; i++) {
+      var a = S.order[i];
+      if (S.gone[a]) continue;
+      if (!isFree(S, a)) return -1;
+      S.hint = a; S.hints++; P.hints--;
+      return a;
+    }
+    return -1;
+  }
+
+  // Hint gifts: the first after 4 cleared levels, then every 5; a level number counts once
+  function progress() { return { level: 1, hints: 3, since: 0, gap: 4, last: 0 }; }
+  function levelDone(P, level) {
+    if (level <= P.last) return 0;
+    P.last = level;
+    P.level = Math.max(P.level, level + 1);
+    if (++P.since < P.gap) return 0;
+    P.since = 0; P.gap = Math.min(5, P.gap + 1); P.hints++;
+    return 1;
+  }
+
+  // Exits within a second of each other build a chain; it only changes how the exit looks
+  function chain(K, t) {
+    K.n = K.n && t - K.at <= CHAIN_MS ? K.n + 1 : 1;
+    K.at = t;
+    return K.n < 2 ? -1 : Math.min(K.n - 2, CHAIN_STEPS - 1);
+  }
+
+  // Nearest arrow to a point in cell units: within a quarter cell a free arrow wins
+  // over a blocked one; up to three quarters only when one arrow is that close.
+  function pick(S, px, py) {
+    var g = grid(S), near = {}, x, y;
+    for (y = Math.floor(py - 1); y <= Math.floor(py + 1); y++) {
+      for (x = Math.floor(px - 1); x <= Math.floor(px + 1); x++) {
+        if (x < 0 || y < 0 || x >= S.w || y >= S.h) continue;
+        var a = g[y * S.w + x];
+        if (a < 0) continue;
+        var dx = Math.max(x - px, 0, px - x - 1), dy = Math.max(y - py, 0, py - y - 1);
+        var d = Math.sqrt(dx * dx + dy * dy);
+        if (d <= 0.75 && (near[a] === undefined || d < near[a])) near[a] = d;
+      }
+    }
+    var ids = Object.keys(near).map(Number), best = -1, bestFree = -1;
+    ids.forEach(function (a) {
+      if (near[a] > 0.25) return;
+      if (best < 0 || near[a] < near[best]) best = a;
+      if (blockerIn(S, g, a) < 0 && (bestFree < 0 || near[a] < near[bestFree])) bestFree = a;
+    });
+    if (bestFree >= 0) return bestFree;
+    if (best >= 0) return best;
+    return ids.length === 1 ? ids[0] : -1;
+  }
+
+  /* ------------------------------------------------------- generator */
+
+  // Level n -> board size and generator settings. Steep at first, a new size every
+  // level or two, then a plateau at the cap from about level 30.
+  function plan(level) {
+    var L = Math.max(1, Math.floor(level) || 1);
+    var p = Math.pow((Math.min(L, 50) - 1) / 49, 0.8);
+    var s = 1 - Math.exp(-(L - 1) / 9);
+    var w = 3 + Math.round((MAX_W - 3) * s);
+    var h = Math.min(MAX_H, w + Math.round((MAX_H - MAX_W) * s * s));
+    return {
+      level: L, p: p, w: w, h: h, minLen: L <= 2 ? 2 : 3,
+      shaped: L >= 8 && L % 4 === 0, twisty: L % 3 === 0,
+      // share of arrows free at the start; fewer ways out is harder
+      freeTarget: 0.3 - 0.18 * p,
+      chain: 0.35 + 0.45 * p, reach: p < 0.5 ? 3 : 4, chainMax: Math.round(4 + 6 * p),
+      // how strongly a head prefers the direction with the longest way out
+      lean: 0.8 + 2.2 * p
+    };
+  }
+
+  // Silhouettes for non-rectangular boards: true marks a hole
+  var SHAPES = [
+    function (x, y, w, h) { return Math.min(x, w - 1 - x) + Math.min(y, h - 1 - y) < Math.floor(Math.min(w, h) / 3); },
+    function (x, y, w, h) { var a = Math.floor(w / 4), b = Math.floor(h / 4); return (x < a || x >= w - a) && (y < b || y >= h - b); },
+    function (x, y, w, h) { var a = Math.floor(w / 3), b = Math.floor(h / 3); return x >= a && x < w - a && y >= b && y < h - b; },
+    function (x, y, w, h) { var cx = (w - 1) / 2, cy = (h - 1) / 2; return Math.abs(x - cx) / (cx + 0.5) + Math.abs(y - cy) / (cy + 0.5) > 1.2; },
+    function (x, y, w, h) { var a = Math.floor(w / 3); return x >= a && x < w - a && y >= h - Math.floor(h / 3); },
+    function (x, y, w, h) { var k = Math.floor(w / 4) - Math.floor(Math.abs(y - (h - 1) / 2) / (h / 6)); return Math.min(x, w - 1 - x) < k; },
+    function (x, y, w, h) { var a = Math.floor(w / 3), b = Math.floor(h / 3); return (x < a && y < b) || (x >= w - a && y >= h - b); },
+    function (x, y, w, h) { var u = (2 * x + 1) / w - 1, v = (2 * y + 1) / h - 1; return Math.pow(Math.abs(u), 3) + Math.pow(Math.abs(v), 3) > 0.85; }
+  ];
+
+  function shape(w, h, rnd) {
+    var f = SHAPES[Math.floor(rnd() * SHAPES.length)], fx = rnd() < 0.5, fy = rnd() < 0.5;
+    var hole = [], x, y, k, n = 0, changed = true;
+    for (y = 0; y < h; y++) for (x = 0; x < w; x++) hole.push(f(fx ? w - 1 - x : x, fy ? h - 1 - y : y, w, h) ? 1 : 0);
+    // trim parts thinner than two cells: every playable cell must sit in a playable 2 x 2
+    function open(cx, cy) { return cx >= 0 && cy >= 0 && cx < w && cy < h && !hole[cy * w + cx]; }
+    while (changed) {
+      changed = false;
+      for (k = 0; k < w * h; k++) {
+        if (hole[k]) continue;
+        x = k % w; y = (k - x) / w;
+        var ok = false;
+        for (var oy = -1; oy <= 0 && !ok; oy++) for (var ox = -1; ox <= 0 && !ok; ox++) {
+          ok = open(x + ox, y + oy) && open(x + ox + 1, y + oy) && open(x + ox, y + oy + 1) && open(x + ox + 1, y + oy + 1);
+        }
+        if (!ok) { hole[k] = 1; changed = true; }
+      }
+    }
+    for (k = 0; k < w * h; k++) if (!hole[k]) n++;
+    return n >= w * h * 0.55 ? hole : null;
+  }
+
+  // One attempt at a full board. Arrows are slotted into a removal order as they are
+  // placed: a new arrow goes after every arrow its own way out crosses and before every
+  // arrow whose way out crosses its cells, so the order always empties the board.
+  function build(w, h, hole, P, turn, rnd) {
+    var n = w * h, occ = [], rc = [], play = [], arrows = [], order = [], pos = [], k;
+    var minLen = P.minLen, maxLen = Math.max(minLen + 2, Math.round((w + h) / 2));
+    for (k = 0; k < n; k++) { occ.push(-1); rc.push([]); play.push(!hole || !hole[k]); }
+
+    function line(head, d) {
+      var x = head % w, y = (head - x) / w, out = [];
+      for (;;) {
+        x += DX[d]; y += DY[d];
+        if (x < 0 || y < 0 || x >= w || y >= h) return out;
+        if (play[y * w + x]) out.push(y * w + x);
+      }
+    }
+    function at(x, y) { return x < 0 || y < 0 || x >= w || y >= h ? -1 : y * w + x; }
+    function straight(a) { return !bent(arrows[a]); }
+    // a straight arrow pointing straight out of the edge, like its neighbours would
+    function edgeOut(a, d) { return a >= 0 && arrows[a].d === d && arrows[a].c[0] >= 0 && straight(a) && !line(arrows[a].c[0], d).length; }
+    function runAt(head, d) {
+      var run = 1, x0 = head % w, y0 = (head - x0) / w;
+      [1, 3].forEach(function (q) {
+        var qd = (d + q) % 4;
+        for (var s = 1; ; s++) {
+          var c = at(x0 + DX[qd] * s, y0 + DY[qd] * s);
+          if (c < 0 || occ[c] < 0 || arrows[occ[c]].c[0] !== c || !edgeOut(occ[c], d)) break;
+          run++;
+        }
+      });
+      return run;
+    }
+
+    function place(head, d, len, turnP) {
+      if (!play[head] || occ[head] >= 0) return -1;
+      var own = line(head, d), onLine = {}, seen = {}, i;
+      for (i = 0; i < own.length; i++) onLine[own[i]] = 1;
+      var cells = [head], g = (d + 2) % 4, x = head % w, y = (head - x) / w, turned = false;
+      seen[head] = 1;
+      // the body grows away from the exit; a turn halves the chance of the next one
+      while (cells.length < len) {
+        var side = rnd() < 0.5 ? 1 : 3, tries;
+        if (cells.length === 1) tries = [g];
+        else if (rnd() < (turned ? turnP / 2 : turnP)) tries = [(g + side) % 4, (g + 4 - side) % 4, g];
+        else tries = [g, (g + side) % 4, (g + 4 - side) % 4];
+        var moved = false;
+        for (i = 0; i < tries.length && !moved; i++) {
+          var c = at(x + DX[tries[i]], y + DY[tries[i]]);
+          if (c < 0 || !play[c] || occ[c] >= 0 || seen[c] || onLine[c]) continue;
+          turned = tries[i] !== g; g = tries[i];
+          x += DX[g]; y += DY[g];
+          cells.push(c); seen[c] = 1; moved = true;
+        }
+        if (!moved) break;
+      }
+      if (cells.length < minLen) return -1;
+      var lo = -1, hi = order.length;
+      for (i = 0; i < own.length; i++) if (occ[own[i]] >= 0) lo = Math.max(lo, pos[occ[own[i]]]);
+      for (i = 0; i < cells.length; i++) rc[cells[i]].forEach(function (b) { hi = Math.min(hi, pos[b]); });
+      if (lo >= hi) return -1;
+      var idx = arrows.length;
+      arrows.push({ d: d, c: cells });
+      if (!own.length && !bent(arrows[idx]) && runAt(head, d) >= 3) { arrows.pop(); return -1; }
+      cells.forEach(function (c) { occ[c] = idx; });
+      own.forEach(function (c) { rc[c].push(idx); });
+      order.splice(lo + 1 + Math.floor(rnd() * (hi - lo)), 0, idx);
+      for (i = 0; i < order.length; i++) pos[order[i]] = i;
+      return idx;
+    }
+
+    // a free cell joins the tail of a neighbour when every arrow whose way out crosses
+    // it leaves after that neighbour
+    function extend(c) {
+      var x = c % w, y = (c - x) / w;
+      for (var d = 0; d < 4; d++) {
+        var nb = at(x + DX[d], y + DY[d]);
+        if (nb < 0 || occ[nb] < 0) continue;
+        var a = occ[nb], A = arrows[a];
+        if (A.c[A.c.length - 1] !== nb || A.c.length >= maxLen) continue;
+        if (rc[c].some(function (b) { return b === a || pos[b] < pos[a]; })) continue;
+        A.c.push(c); occ[c] = a;
+        return true;
+      }
+      return false;
+    }
+
+    function dirFor(head) {
+      var x = head % w, y = (head - x) / w, ws = [], sum = 0, d;
+      for (d = 0; d < 4; d++) {
+        var b = at(x - DX[d], y - DY[d]), reach = [y, w - 1 - x, h - 1 - y, x][d];
+        var wt = b >= 0 && play[b] && occ[b] < 0 ? Math.exp(P.lean * reach / Math.max(w, h)) : 0;
+        ws.push(wt); sum += wt;
+      }
+      if (!sum) return -1;
+      var r = rnd() * sum;
+      for (d = 0; d < 4; d++) { r -= ws[d]; if (r < 0 && ws[d]) return d; }
+      return ws[3] ? 3 : (ws[2] ? 2 : (ws[1] ? 1 : 0));
+    }
+    function lenFor() { return minLen + Math.floor(Math.pow(rnd(), 1.6) * (maxLen - minLen + 1)); }
+    function freeCells() { var out = []; for (var c = 0; c < n; c++) if (play[c] && occ[c] < 0) out.push(c); return out; }
+
+    var last = -1, links = 0, budget = n * 4, free = freeCells();
+    while (free.length && budget-- > 0) {
+      var head = -1, d = -1;
+      if (last >= 0 && links < P.chainMax && rnd() < P.chain) {
+        // the next head sits a few cells in front of the last arrow, pointing at it
+        var A = arrows[last], t = A.c[Math.floor(rnd() * A.c.length)], tx = t % w, ty = (t - tx) / w;
+        d = Math.floor(rnd() * 4);
+        var off = 1 + Math.floor(rnd() * P.reach);
+        head = at(tx - DX[d] * off, ty - DY[d] * off);
+        if (head < 0 || occ[head] >= 0 || !play[head]) { head = -1; links = P.chainMax; }
+      }
+      if (head < 0) {
+        head = free[Math.floor(rnd() * free.length)];
+        d = dirFor(head);
+        last = -1; links = 0;
+        if (d < 0) { free = freeCells(); continue; }
+      }
+      var idx = place(head, d, lenFor(), turn);
+      if (idx >= 0) { last = idx; links++; free = freeCells(); }
+      else if (last >= 0) links = P.chainMax;
+    }
+
+    // mop up the gaps until a pass changes nothing
+    for (var pass = 0; pass < 6; pass++) {
+      var gaps = freeCells(), grew = false;
+      gaps.forEach(function (c) {
+        if (occ[c] >= 0) return;
+        if (extend(c)) { grew = true; return; }
+        for (var dd = 0; dd < 4; dd++) if (place(c, (dd + pass) % 4, 3, 0.5) >= 0) { grew = true; return; }
+      });
+      if (!grew) break;
+    }
+
+    // an empty pocket of more than two cells inside the shape is a failed board
+    var mark = {}, gapsLeft = freeCells();
+    for (var gi = 0; gi < gapsLeft.length; gi++) {
+      if (mark[gapsLeft[gi]]) continue;
+      var stack = [gapsLeft[gi]], size = 0;
+      mark[gapsLeft[gi]] = 1;
+      while (stack.length) {
+        var c = stack.pop(), cx = c % w, cy = (c - cx) / w;
+        size++;
+        for (var q = 0; q < 4; q++) {
+          var nc = at(cx + DX[q], cy + DY[q]);
+          if (nc >= 0 && play[nc] && occ[nc] < 0 && !mark[nc]) { mark[nc] = 1; stack.push(nc); }
+        }
+      }
+      if (size > 2) return null;
+    }
+    var area = 0;
+    for (k = 0; k < n; k++) if (play[k]) area++;
+    var need = Math.max(area >= 26 ? 4 : 3, Math.floor(area / (12 - 4 * P.p)));
+    if (arrows.length < need || !arrows.some(bent)) return null;
+    return arrows;
+  }
+
+  // the safety net: a tiny hand-built board that is always fine
+  function fallback(level) {
+    return make(3, 3, null, [{ d: 0, c: [0, 3, 6, 7] }, { d: 2, c: [8, 5, 2] }, { d: 0, c: [1, 4] }], level);
+  }
+
+  function generate(level, rnd) {
+    var P = plan(level), w = P.w, h = P.h, best = null, bestGap = 2, found = 0;
+    if (P.level >= 6) {
+      w = clamp(w + Math.floor(rnd() * 3) - 1, 3, MAX_W);
+      h = clamp(h + Math.floor(rnd() * 3) - 1, 3, MAX_H);
+    }
+    var hole = P.shaped ? shape(w, h, rnd) : null;
+    var turn = P.twisty ? 0.75 : (rnd() < 0.5 ? rnd() * 0.25 : 0.1 + rnd() * 0.2);
+    for (var t = 0; t < 16 && found < 2; t++) {
+      var arrows = build(w, h, hole, P, turn, rnd);
+      if (!arrows) continue;
+      var S = make(w, h, hole, arrows, P.level);
+      if (!S) continue;
+      found++;
+      var gap = Math.abs(freeArrows(S).length / arrows.length - P.freeTarget);
+      if (gap < bestGap) { best = S; bestGap = gap; }
+    }
+    return best || fallback(P.level);
+  }
+
+  // A save is taken back only if it is a sound board whose stored order still empties it
+  function restore(o) {
+    if (!o || typeof o !== 'object') return null;
+    var w = o.w, h = o.h, n = w * h, seen = {}, i, j;
+    if (!(w >= 2 && w <= MAX_W && h >= 2 && h <= MAX_H && w === Math.floor(w) && h === Math.floor(h))) return null;
+    if (o.hole !== null && !(Array.isArray(o.hole) && o.hole.length === n)) return null;
+    if (!Array.isArray(o.arrows) || !o.arrows.length) return null;
+    var m = o.arrows.length;
+    if (!Array.isArray(o.gone) || o.gone.length !== m || !Array.isArray(o.struck) || o.struck.length !== m) return null;
+    for (i = 0; i < m; i++) {
+      var A = o.arrows[i];
+      if (!A || !(A.d >= 0 && A.d <= 3) || !Array.isArray(A.c) || A.c.length < 2) return null;
+      for (j = 0; j < A.c.length; j++) {
+        var c = A.c[j];
+        if (!(c >= 0 && c < n) || c !== Math.floor(c) || seen[c] || (o.hole && o.hole[c])) return null;
+        seen[c] = 1;
+        if (j) {
+          var p = A.c[j - 1], dx = Math.abs(c % w - p % w), dy = Math.abs(Math.floor(c / w) - Math.floor(p / w));
+          if (dx + dy !== 1) return null;
+        }
+      }
+    }
+    var arrows = o.arrows.map(function (a) { return { d: a.d, c: a.c.slice() }; });
+    var S = make(w, h, o.hole ? o.hole.slice() : null, arrows, o.level);
+    if (!S) return null;
+    if (!(o.hearts >= 0 && o.hearts <= HEARTS) || !(o.hint >= -1 && o.hint < m)) return null;
+    for (i = 0; i < m; i++) { S.gone[i] = !!o.gone[i]; S.struck[i] = !!o.struck[i] && !S.gone[i]; }
+    S.hearts = Math.floor(o.hearts);
+    S.hint = o.hint >= 0 && !S.gone[o.hint] ? o.hint : -1;
+    S.strikes = o.strikes || 0; S.hints = o.hints || 0; S.cont = !!o.cont;
+    S.done = !left(S);
+    S.over = !S.done && !S.hearts;
+    return S;
+  }
+
+  var api = {
+    HEARTS: HEARTS, MAX_W: MAX_W, MAX_H: MAX_H, DX: DX, DY: DY,
+    make: make, ray: ray, blocker: blocker, isFree: isFree, freeArrows: freeArrows, left: left, bent: bent,
+    tap: tap, restart: restart, carryOn: carryOn, useHint: useHint, progress: progress, levelDone: levelDone,
+    chain: chain, pick: pick, plan: plan, generate: generate, restore: restore
+  };
+  if (typeof self !== 'undefined') self.WayOutEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = WayOutEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = WayOutEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'wayout',
+    name: { fa: 'راه دررو', en: 'Way Out', zh: '出路', de: 'Ausweg' },
+    accent: '#B34DAF',
+    mood: 'sudoku',
+    strings: {
+      fa: {
+        level: 'مرحله', levelN: 'مرحله‌ی {n}', left: 'مانده', hearts: 'جان', hintKey: 'راهنمایی', hintsLeft: 'راهنمایی مانده',
+        restartLevel: 'شروع دوباره‌ی مرحله', dailyWo: 'راه دررو روزانه',
+        lostHeart: 'راهش بسته است؛ یک جان رفت', blockedAgain: 'هنوز راهش بسته است',
+        hintOn: 'پیکان سبز راهش باز است', hintPending: 'اول پیکان سبز را بیرون بفرست',
+        noHints: 'راهنمایی نمانده', hintSoon: 'هر چند مرحله یک راهنمایی هدیه می‌گیری',
+        outOfHearts: 'جان‌ها تمام شد', outSub: 'مرحله را از نو شروع کن، یا یک بار با یک جان ادامه بده.',
+        outSubLast: 'مرحله را با سه جان از نو شروع کن.', tryAgain: 'از نو', keepGoing: 'یک جان دیگر',
+        levelClear: 'مرحله تمام شد', nextLevel: 'مرحله‌ی بعد', giftHint: 'هدیه: یک راهنمایی',
+        board: 'تخته‌ی راه دررو', move: 'جابه‌جایی بین پیکان‌ها', send: 'بیرون فرستادن',
+        rules: 'روی پیکان بزن تا از سرش از تخته بیرون برود. فقط وقتی می‌رود که جلوی سرش تا لبه‌ی تخته هیچ پیکان دیگری نباشد؛ خانه‌ی خالی و جای خالی تخته مانع نیست. زدن پیکانی که راهش بسته است یک جان می‌گیرد، برای هر پیکان فقط یک بار. هر مرحله سه جان داری. هر تخته حل‌شدنی است و بیرون بردن یک پیکان هیچ‌وقت راه پیکان دیگری را نمی‌بندد. با سه راهنمایی شروع می‌کنی و بعد از مرحله‌ی چهار و از آن به بعد هر پنج مرحله یکی هدیه می‌گیری. اگر انگشت را روی پیکان نگه داری، راهش را نشان می‌دهد.',
+        tutTitle1: 'راه باز', tutText1: 'پیکانی را بزن که جلوی سرش تا لبه خالی است. از سرش بیرون می‌رود و تنه‌اش دنبالش.',
+        tutTitle2: 'راه بسته', tutText2: 'اگر پیکان دیگری سر راه باشد، می‌لرزد و یک جان می‌رود. دوباره زدن همان پیکان دیگر جان نمی‌گیرد.',
+        tutTitle3: 'به ترتیب', tutText3: 'هر تخته حل‌شدنی است. اول آن‌هایی را بیرون ببر که راهشان باز است تا راه بقیه باز شود. انگشت را نگه دار تا راه را ببینی.'
+      },
+      en: {
+        level: 'Level', levelN: 'Level {n}', left: 'Left', hearts: 'Hearts', hintKey: 'Hint', hintsLeft: 'Hints left',
+        restartLevel: 'Restart level', dailyWo: 'Daily Way Out',
+        lostHeart: 'Blocked: one heart lost', blockedAgain: 'Still blocked',
+        hintOn: 'The green arrow has a clear way', hintPending: 'Send the green arrow out first',
+        noHints: 'No hints left', hintSoon: 'A free hint comes every few levels',
+        outOfHearts: 'Out of hearts', outSub: 'Start the level again, or carry on once with one heart.',
+        outSubLast: 'Start the level again with three hearts.', tryAgain: 'Start again', keepGoing: 'One more heart',
+        levelClear: 'Level cleared', nextLevel: 'Next level', giftHint: 'Gift: one hint',
+        board: 'Way Out board', move: 'Move between arrows', send: 'Send it out',
+        rules: 'Tap an arrow to send it off the board, head first. It only goes when the line in front of its head is clear of other arrows all the way to the edge; empty cells and gaps in the board are no obstacle. Tapping an arrow whose way is blocked costs a heart, once per arrow. You have three hearts per level. Every board can be cleared, and taking an arrow out never blocks another. You start with three hints and get one more after level 4 and then every five levels. Hold a finger on an arrow to see its way out.',
+        tutTitle1: 'A clear way', tutText1: 'Tap an arrow whose head has nothing in front of it up to the edge. It leaves head first and the body follows.',
+        tutTitle2: 'Blocked', tutText2: 'If another arrow is in the way, it shakes and you lose a heart. Tapping the same arrow again costs nothing more.',
+        tutTitle3: 'In order', tutText3: 'Every board can be cleared. Take out the arrows with a clear way first to open the way for the rest. Hold a finger down to see the way.'
+      },
+      zh: {
+        level: '关卡', levelN: '第 {n} 关', left: '剩余', hearts: '生命', hintKey: '提示', hintsLeft: '剩余提示',
+        restartLevel: '重玩本关', dailyWo: '每日出路',
+        lostHeart: '被挡住了：失去一颗心', blockedAgain: '还是被挡住',
+        hintOn: '绿色箭头的路是通的', hintPending: '先把绿色箭头移出去',
+        noHints: '没有提示了', hintSoon: '每过几关会送一次提示',
+        outOfHearts: '生命用完了', outSub: '重新开始本关，或者带着一颗心继续一次。',
+        outSubLast: '带着三颗心重新开始本关。', tryAgain: '重新开始', keepGoing: '再给一颗心',
+        levelClear: '过关', nextLevel: '下一关', giftHint: '赠送：一次提示',
+        board: '出路棋盘', move: '在箭头之间移动', send: '移出',
+        rules: '点一个箭头，它会以箭头朝前滑出棋盘。只有当箭头前方直到边缘都没有别的箭头时它才能离开；空格和棋盘上的缺口不算阻挡。点到被挡住的箭头会失去一颗心，每个箭头只扣一次。每关有三颗心。每个棋盘都能清空，移走一个箭头永远不会挡住别的箭头。开始有三次提示，第四关之后送一次，之后每五关再送一次。按住箭头可以看到它的去路。',
+        tutTitle1: '路是通的', tutText1: '点一个前方直到边缘都空着的箭头。它会箭头朝前离开，身子跟在后面。',
+        tutTitle2: '被挡住', tutText2: '如果有别的箭头挡路，它会抖一下，你失去一颗心。再点同一个箭头不会再扣。',
+        tutTitle3: '按顺序', tutText3: '每个棋盘都能清空。先移走路通的箭头，给其余的让出路来。按住可以看到去路。'
+      },
+      de: {
+        level: 'Level', levelN: 'Level {n}', left: 'Übrig', hearts: 'Herzen', hintKey: 'Tipp', hintsLeft: 'Tipps übrig',
+        restartLevel: 'Level neu starten', dailyWo: 'Täglicher Ausweg',
+        lostHeart: 'Versperrt: ein Herz verloren', blockedAgain: 'Immer noch versperrt',
+        hintOn: 'Der grüne Pfeil hat freie Bahn', hintPending: 'Schick erst den grünen Pfeil hinaus',
+        noHints: 'Keine Tipps mehr', hintSoon: 'Alle paar Level gibt es einen Tipp geschenkt',
+        outOfHearts: 'Keine Herzen mehr', outSub: 'Starte das Level neu oder mach einmal mit einem Herzen weiter.',
+        outSubLast: 'Starte das Level mit drei Herzen neu.', tryAgain: 'Neu starten', keepGoing: 'Noch ein Herz',
+        levelClear: 'Level geschafft', nextLevel: 'Nächstes Level', giftHint: 'Geschenk: ein Tipp',
+        board: 'Ausweg-Brett', move: 'Zwischen Pfeilen wechseln', send: 'Hinausschicken',
+        rules: 'Tippe einen Pfeil an, damit er mit der Spitze voran vom Brett gleitet. Er geht nur, wenn vor seiner Spitze bis zum Rand kein anderer Pfeil liegt; leere Felder und Lücken im Brett sind kein Hindernis. Ein Pfeil, dessen Weg versperrt ist, kostet beim Antippen ein Herz, aber nur einmal pro Pfeil. Du hast drei Herzen pro Level. Jedes Brett ist lösbar, und ein Pfeil, der geht, versperrt nie einem anderen den Weg. Du startest mit drei Tipps und bekommst nach Level 4 und danach alle fünf Level einen dazu. Halt den Finger auf einem Pfeil, um seinen Weg zu sehen.',
+        tutTitle1: 'Freie Bahn', tutText1: 'Tippe einen Pfeil an, vor dessen Spitze bis zum Rand nichts liegt. Er geht mit der Spitze voran, der Rest folgt.',
+        tutTitle2: 'Versperrt', tutText2: 'Liegt ein anderer Pfeil im Weg, wackelt er und du verlierst ein Herz. Derselbe Pfeil kostet danach nichts mehr.',
+        tutTitle3: 'Der Reihe nach', tutText3: 'Jedes Brett ist lösbar. Schick zuerst die Pfeile mit freier Bahn hinaus, dann wird der Weg für die übrigen frei. Halt den Finger drauf, um den Weg zu sehen.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  // the daily is one fixed step of the ladder, seeded by the date
+  var DAILY_LEVEL = 20;
+  var U = 40, SVGNS = 'http://www.w3.org/2000/svg';
+  var LOCK_MS = 350, OUT_MS = 380;
+
+  var prog = ctx.store.get('progress', null);
+  if (!prog || !(prog.level >= 1) || !(prog.hints >= 0)) prog = E.progress();
+
+  var S = null, nodes = [], flying = {}, nFlying = 0, lockUntil = 0, cur = -1, gift = 0, startedAt = Date.now(), pausedAt = 0;
+  var combo = { n: 0, at: 0 }, press = null, snap = null;
+
+  var top = el('div', { class: 'wo-top' });
+  var svg = document.createElementNS(SVGNS, 'svg');
+  svg.setAttribute('class', 'wo-board');
+  svg.setAttribute('role', 'group');
+  svg.setAttribute('aria-label', C.t('board'));
+  var frame = el('div', { class: 'wo-frame' }, [svg]);
+  var actions = el('div', { class: 'wo-actions' });
+  var status = el('div', { class: 'wo-status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'wo-wrap' }, [top, frame, actions, status]);
+
+  ctx.stat('left', C.t('left'));
+  ctx.stat('hearts', C.t('hearts'));
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('restartLevel'), onClick: askRestart });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* --------------------------------------------------------- drawing */
+
+  function sv(tag, attrs) {
+    var n = document.createElementNS(SVGNS, tag);
+    for (var k in attrs) if (Object.prototype.hasOwnProperty.call(attrs, k)) n.setAttribute(k, attrs[k]);
+    return n;
+  }
+  function cx(c) { return (c % S.w) * U + U / 2; }
+  function cy(c) { return Math.floor(c / S.w) * U + U / 2; }
+
+  // Cells from the head to the edge of the grid, the distance the arrow travels on top of its own length
+  function reach(a) {
+    var A = S.arrows[a], x = A.c[0] % S.w, y = Math.floor(A.c[0] / S.w);
+    return [y, S.w - 1 - x, S.h - 1 - y, x][A.d];
+  }
+
+  // The path runs tail to head and on past the edge. The visible stretch is a dash
+  // as long as the arrow, so sliding the dash forward makes the body follow the
+  // head round every bend and out along its exit line.
+  function arrowNode(a) {
+    var A = S.arrows[a], d = A.d, dx = E.DX[d], dy = E.DY[d], run = (reach(a) + A.c.length + 1) * U;
+    var pts = [], i;
+    for (i = A.c.length - 1; i >= 0; i--) pts.push(cx(A.c[i]) + ' ' + cy(A.c[i]));
+    var hx = cx(A.c[0]), hy = cy(A.c[0]);
+    pts.push((hx + dx * run) + ' ' + (hy + dy * run));
+    var len = (A.c.length - 1) * U, dash = len + ' ' + (len + run + U);
+    var g = sv('g', { class: 'wo-arrow' });
+    var glow = sv('path', { class: 'wo-glow', d: 'M' + pts.join(' L'), 'stroke-dasharray': dash });
+    var body = sv('path', { class: 'wo-body', d: 'M' + pts.join(' L'), 'stroke-dasharray': dash });
+    // the head is a triangle on the head cell, its tip a little ahead of the centre
+    var px = -dy, py = dx;
+    var tri = 'M' + (hx + dx * 16) + ' ' + (hy + dy * 16) + ' L' + (hx - dx * 7 + px * 13) + ' ' + (hy - dy * 7 + py * 13) +
+      ' L' + (hx - dx * 7 - px * 13) + ' ' + (hy - dy * 7 - py * 13) + ' Z';
+    var head = sv('g', { class: 'wo-head' });
+    head.appendChild(sv('path', { d: tri, 'stroke-linejoin': 'round' }));
+    g.appendChild(glow); g.appendChild(body); g.appendChild(head);
+    g._run = run; g._body = body; g._glow = glow; g._head = head;
+    return g;
+  }
+
+  var tiles = null, layer = null, over = null;
+  function build() {
+    svg.innerHTML = '';
+    svg.setAttribute('viewBox', (-U / 2) + ' ' + (-U / 2) + ' ' + (S.w * U + U) + ' ' + (S.h * U + U));
+    tiles = sv('g', {}); layer = sv('g', {}); over = sv('g', {});
+    for (var c = 0; c < S.w * S.h; c++) {
+      if (S.hole && S.hole[c]) continue;
+      tiles.appendChild(sv('rect', { class: 'wo-cell', x: (c % S.w) * U + 3, y: Math.floor(c / S.w) * U + 3, width: U - 6, height: U - 6, rx: 7 }));
+    }
+    svg.appendChild(tiles); svg.appendChild(layer); svg.appendChild(over);
+    nodes = []; flying = {}; nFlying = 0;
+    var anim = !C.ui.reduceMotion(), k = 0;
+    S.arrows.forEach(function (A, a) {
+      var g = arrowNode(a);
+      if (S.gone[a]) g.style.display = 'none';
+      else if (anim) {
+        // arrows pop in one after another, capped so a big board is ready in under half a second
+        g.classList.add('wo-arrow--in');
+        g.style.animationDelay = Math.min(k++ * 9, 420) + 'ms';
+      }
+      layer.appendChild(g);
+      nodes.push(g);
+    });
+    if (anim) setTimeout(function () { nodes.forEach(function (g) { g.classList.remove('wo-arrow--in'); }); }, 700);
+    fit();
+  }
+
+  // Cells as large as the main area allows. The width is the page's; the height is the
+  // main area less its own padding, the three rows around the board and the three gaps
+  // between the wrap's four rows, all read from the shell so they follow the tokens.
+  // Under FLOOR px a cell is too small to aim at, so the board keeps that size and its
+  // frame scrolls instead of the board being clipped.
+  var FLOOR = 20;
+  function fit() {
+    if (!S) return;
+    var ms = getComputedStyle(ctx.main), gap = parseFloat(getComputedStyle(wrap).rowGap) || 0;
+    var availW = Math.min(wrap.clientWidth || 360, 720);
+    var mainH = (ctx.main.clientHeight || (window.innerHeight || 640) - 60) - parseFloat(ms.paddingTop) - parseFloat(ms.paddingBottom);
+    var around = top.offsetHeight + actions.offsetHeight + status.offsetHeight;
+    var availH = Math.max(96, mainH - around - 3 * gap);
+    var cell = Math.min(56, Math.floor(Math.min(availW / (S.w + 1), availH / (S.h + 1))));
+    var scroll = cell < FLOOR;
+    if (scroll) cell = FLOOR;
+    frame.classList.toggle('wo-frame--scroll', scroll);
+    frame.style.maxWidth = scroll ? availW + 'px' : '';
+    frame.style.maxHeight = scroll ? availH + 'px' : '';
+    svg.style.width = ((S.w + 1) * cell) + 'px';
+    svg.style.height = ((S.h + 1) * cell) + 'px';
+  }
+
+  // in a scrolling frame a hinted or keyboard-picked arrow is brought into sight
+  function showArrow(a) {
+    if (a < 0 || !frame.classList.contains('wo-frame--scroll')) return;
+    var h = S.arrows[a].c[0], cs = parseFloat(svg.style.width) / (S.w + 1);
+    var x = (h % S.w + 1) * cs, y = (Math.floor(h / S.w) + 1) * cs;
+    if (x < frame.scrollLeft || x > frame.scrollLeft + frame.clientWidth) frame.scrollLeft = x - frame.clientWidth / 2;
+    if (y < frame.scrollTop || y > frame.scrollTop + frame.clientHeight) frame.scrollTop = y - frame.clientHeight / 2;
+  }
+
+  function render() {
+    top.innerHTML = '';
+    if (S.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' },
+        [C.icon('calendar', 14), el('span', { text: C.t('dailyWo') + ' — ' + C.num(S.daily) })]));
+    } else {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent', text: C.t('levelN', { n: C.num(S.level) }) }));
+    }
+    actions.innerHTML = '';
+    var hb = el('button', { class: 'ch-btn ch-btn--soft', type: 'button' },
+      [C.icon('bulb', 18), el('span', { text: C.t('hintKey') }), el('span', { class: 'ch-badge', text: C.num(prog.hints) })]);
+    hb.disabled = S.hint >= 0 || S.done || S.over;
+    hb.addEventListener('click', showHint);
+    actions.appendChild(hb);
+    paint();
+    fit();
+  }
+
+  function paint() {
+    nodes.forEach(function (g, a) {
+      if (S.gone[a]) return;
+      g.classList.toggle('wo-arrow--struck', !!S.struck[a]);
+      g.classList.toggle('wo-arrow--hint', S.hint === a);
+    });
+    over.innerHTML = '';
+    if (cur >= 0 && !S.gone[cur]) {
+      var h = S.arrows[cur].c[0];
+      over.appendChild(sv('circle', { class: 'wo-cur', cx: cx(h), cy: cy(h), r: 18 }));
+    }
+    ctx.setStat('left', E.left(S));
+    ctx.setStat('hearts', C.num(S.hearts) + '/' + C.num(E.HEARTS));
+  }
+
+  function say(k) { status.textContent = k ? C.t(k) : ''; }
+
+  // The line a held arrow would take, green when it is clear and red when not
+  function showGuide(a) {
+    over.querySelectorAll('.wo-guide').forEach(function (n) { n.remove(); });
+    if (a < 0 || S.gone[a]) return;
+    var A = S.arrows[a], h = A.c[0], n = reach(a);
+    if (!n) return;
+    var free = E.isFree(S, a);
+    over.appendChild(sv('path', { class: 'wo-guide ' + (free ? 'wo-guide--free' : 'wo-guide--blocked'),
+      d: 'M' + (cx(h) + E.DX[A.d] * U) + ' ' + (cy(h) + E.DY[A.d] * U) + ' L' + (cx(h) + E.DX[A.d] * n * U) + ' ' + (cy(h) + E.DY[A.d] * n * U) }));
+    C.haptic('tap');
+  }
+  function hideGuide() { if (over) over.querySelectorAll('.wo-guide').forEach(function (n) { n.remove(); }); }
+
+  /* ------------------------------------------------------------ moves */
+
+  function slideOut(a, step) {
+    var g = nodes[a];
+    flying[a] = true; nFlying++;
+    if (step >= 0) { g.classList.add('wo-arrow--chain'); g._glow.style.opacity = String(0.2 + step * 0.15); }
+    g.classList.remove('wo-arrow--hint', 'wo-arrow--struck');
+    // on top of the others while it leaves
+    layer.appendChild(g);
+    void g.getBoundingClientRect();
+    var A = S.arrows[a];
+    g._body.style.strokeDashoffset = String(-g._run);
+    g._glow.style.strokeDashoffset = String(-g._run);
+    g._head.style.transform = 'translate(' + (E.DX[A.d] * g._run) + 'px,' + (E.DY[A.d] * g._run) + 'px)';
+    setTimeout(function () {
+      g.style.display = 'none';
+      delete flying[a]; nFlying--;
+    }, C.ui.reduceMotion() ? 0 : OUT_MS);
+  }
+
+  function nearest(from) {
+    var h = S.arrows[from].c[0], x0 = h % S.w, y0 = Math.floor(h / S.w), best = -1, bd = 1e9;
+    S.arrows.forEach(function (A, a) {
+      if (S.gone[a]) return;
+      var x = A.c[0] % S.w, y = Math.floor(A.c[0] / S.w), d = Math.abs(x - x0) + Math.abs(y - y0);
+      if (d < bd) { bd = d; best = a; }
+    });
+    return best;
+  }
+
+  function tapArrow(a) {
+    if (!S || S.done || S.over || a < 0 || flying[a] || Date.now() < lockUntil) return;
+    var r = E.tap(S, a);
+    if (r.ignored) return;
+    if (r.out) {
+      C.feedback('place');
+      slideOut(a, E.chain(combo, Date.now()));
+      if (cur === a) cur = nearest(a);
+      say(null);
+      if (S.done) { levelWon(); return; }
+      save();
+      render();
+      return;
+    }
+    // a blocked tap breaks the chain and holds the board still for a moment
+    combo.n = 0;
+    lockUntil = Date.now() + LOCK_MS;
+    C.feedback('bad');
+    C.ui.shake(nodes[a]);
+    nodes[a].classList.add('wo-arrow--bad');
+    setTimeout(function () { if (nodes[a]) nodes[a].classList.remove('wo-arrow--bad'); }, 520);
+    say(r.cost ? 'lostHeart' : 'blockedAgain');
+    save();
+    render();
+    if (S.over) setTimeout(outOfHearts, 560);
+  }
+
+  function showHint() {
+    if (!S || S.done || S.over || nFlying) return;
+    if (S.hint >= 0) { C.feedback('bad'); say('hintPending'); return; }
+    if (!(prog.hints > 0)) {
+      C.feedback('bad');
+      C.ui.toast({ icon: 'bulb', title: C.t('noHints'), sub: C.t('hintSoon') });
+      return;
+    }
+    var a = E.useHint(S, prog);
+    if (a < 0) { C.feedback('bad'); return; }
+    ctx.store.set('progress', prog);
+    C.feedback('select');
+    say('hintOn');
+    save();
+    render();
+    showArrow(a);
+  }
+
+  function restartLevel() {
+    if (!S) return;
+    E.restart(S);
+    combo = { n: 0, at: 0 }; cur = -1; startedAt = Date.now();
+    say(null);
+    build();
+    render();
+    save();
+  }
+
+  function askRestart() {
+    if (!S || S.done || nFlying || Date.now() < lockUntil) return;
+    if (!touched()) { restartLevel(); return; }
+    C.ui.confirm({ title: C.t('restartLevel'), body: C.t('resetWarn'), onOk: restartLevel });
+  }
+
+  // No ad and no shop: the way back is a fresh start, or once per level a single heart
+  function outOfHearts() {
+    if (!S || !S.over) return;
+    C.audio.sfx('lose');
+    var acts = [];
+    if (!S.cont) {
+      acts.push({ label: C.t('keepGoing'), onClick: function () {
+        if (!E.carryOn(S)) return;
+        C.feedback('select');
+        say(null);
+        save();
+        render();
+      } });
+    }
+    acts.push({ label: C.t('tryAgain'), kind: 'primary', onClick: restartLevel });
+    C.ui.modal({ title: C.t('outOfHearts'), body: [el('p', { class: 'ch-dim', text: C.t(S.cont ? 'outSubLast' : 'outSub') })],
+      actions: acts, dismissable: false });
+  }
+
+  // The logic is done at the tap: the level counts and any hint gift is given now,
+  // the result waits for the last arrow to finish leaving
+  function levelWon() {
+    snap = { w: S.w, h: S.h, hole: S.hole, arrows: S.arrows };
+    gift = S.daily ? 0 : E.levelDone(prog, S.level);
+    ctx.store.set('progress', prog);
+    save();
+    render();
+    setTimeout(finish, C.ui.reduceMotion() ? 0 : OUT_MS + 60);
+  }
+
+  function finish() {
+    var elapsed = Date.now() - startedAt, n = S.arrows.length;
+    var clean = !S.strikes && !S.hints;
+    var base = 4 + Math.round(n / 4);
+    var coins = base + (clean ? 3 : 0), points = base * 4;
+    var note = gift ? C.t('giftHint') : null;
+    C.achievements.unlock('wo-win');
+    if (!S.daily && S.level >= 30) C.achievements.unlock('wo-deep');
+    if (clean && n >= 20) C.achievements.unlock('wo-clean');
+    if (S.daily) {
+      coins += 8; points += 25;
+      // the first daily of each day also brings a hint
+      if (C.stats.daily('wayout', S.daily, { label: C.time(elapsed), ms: elapsed })) {
+        prog.hints++;
+        ctx.store.set('progress', prog);
+        note = C.t('giftHint');
+      } else { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    } else {
+      C.stats.best('wayout', 'level', S.level, false);
+    }
+    ctx.clearSave();
+    var res = ctx.finish({
+      won: true, title: C.t('levelClear'), note: note, timeMs: elapsed, coins: coins, points: points,
+      lines: [
+        S.daily ? { label: C.t('daily'), value: C.num(S.daily) } : { label: C.t('level'), value: C.num(S.level) },
+        { label: C.t('hearts'), value: C.num(S.hearts) + '/' + C.num(E.HEARTS) },
+        { label: C.t('time'), value: C.time(elapsed) },
+        { label: C.t('hintsLeft'), value: C.num(prog.hints) }
+      ],
+      shareText: 'چوگان · راه دررو' + (S.daily ? ('\nروزانه ' + S.daily) : ('\nمرحله‌ی ' + C.num(S.level))) + '\n' + C.time(elapsed),
+      paint: cardPaint(),
+      onAgain: S.daily ? null : function () { newGame(prog.level); }
+    });
+    // the primary button opens the next level, so it says so
+    if (!S.daily && res && res.box) {
+      var pb = res.box.querySelector('.ch-modal__actions .ch-btn--primary');
+      if (pb) pb.textContent = C.t('nextLevel');
+    }
+  }
+
+  // The card shows the level as it started, every arrow in place
+  function cardPaint() {
+    var B = snap;
+    return function (g, w, h, col) {
+      var cs = Math.min(w / (B.w + 1), h / (B.h + 1)), ox = (w - B.w * cs) / 2, oy = (h - B.h * cs) / 2;
+      var mid = function (c) { return [ox + (c % B.w + 0.5) * cs, oy + (Math.floor(c / B.w) + 0.5) * cs]; };
+      g.fillStyle = col.surface2;
+      C.rrect(g, ox - cs / 2, oy - cs / 2, B.w * cs + cs, B.h * cs + cs, 18);
+      g.fill();
+      g.fillStyle = col.surface3;
+      for (var c = 0; c < B.w * B.h; c++) {
+        if (B.hole && B.hole[c]) continue;
+        C.rrect(g, ox + (c % B.w) * cs + cs * 0.08, oy + Math.floor(c / B.w) * cs + cs * 0.08, cs * 0.84, cs * 0.84, cs * 0.18);
+        g.fill();
+      }
+      g.strokeStyle = col.game; g.fillStyle = col.game;
+      g.lineWidth = cs * 0.32; g.lineCap = 'round'; g.lineJoin = 'round';
+      B.arrows.forEach(function (A) {
+        g.beginPath();
+        A.c.forEach(function (k, i) { var p = mid(k); if (i) g.lineTo(p[0], p[1]); else g.moveTo(p[0], p[1]); });
+        g.stroke();
+        var hp = mid(A.c[0]), dx = E.DX[A.d], dy = E.DY[A.d];
+        g.beginPath();
+        g.moveTo(hp[0] + dx * cs * 0.4, hp[1] + dy * cs * 0.4);
+        g.lineTo(hp[0] - dx * cs * 0.18 - dy * cs * 0.33, hp[1] - dy * cs * 0.18 + dx * cs * 0.33);
+        g.lineTo(hp[0] - dx * cs * 0.18 + dy * cs * 0.33, hp[1] - dy * cs * 0.18 - dx * cs * 0.33);
+        g.closePath();
+        g.fill();
+      });
+    };
+  }
+
+  /* ---------------------------------------------------------- saving */
+
+  function touched() { return S.hearts < E.HEARTS || S.hint >= 0 || S.hints > 0 || S.cont || E.left(S) < S.arrows.length; }
+
+  ctx.autosave(function () {
+    if (!S || S.done || !touched()) return { inProgress: false };
+    return { s: JSON.parse(JSON.stringify(S)), daily: S.daily || null, elapsed: (pausedAt || Date.now()) - startedAt };
+  });
+  function save() { ctx.save(); }
+
+  // Level n is the same board for everyone, so an untouched level needs no save
+  function newGame(L, daily) {
+    var rnd = daily ? C.daily('wayout', daily).rng : C.rng((L * 2654435761 + 0x5eed) >>> 0);
+    S = E.generate(L, rnd);
+    S.daily = daily || null;
+    startedAt = Date.now();
+    combo = { n: 0, at: 0 }; cur = -1; gift = 0;
+    say(null);
+    build();
+    render();
+    save();
+  }
+
+  /* ------------------------------------------------------------ help */
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          kb('← ↑ → ↓', C.t('move')),
+          kb('Space / Enter', C.t('send')),
+          kb('H', C.t('hintKey')),
+          kb('R', C.t('restartLevel'))
+        ])
+      ],
+      actions: [
+        { label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('done'), kind: 'primary' }
+      ]
+    });
+  }
+  function kb(k, what) {
+    return el('div', { class: 'ch-item' }, [
+      el('div', { class: 'ch-item__label', text: what }),
+      el('span', { class: 'ch-badge', text: k })
+    ]);
+  }
+
+  // Tutorial art: a strip of cells with arrows drawn the way the board draws them
+  function artCells(n) {
+    var s = '';
+    for (var i = 0; i < n; i++) s += '<rect x="' + (12 + i * 30) + '" y="40" width="26" height="26" rx="5" fill="var(--c-surface-3)"/>';
+    return s;
+  }
+  function artArrow(x0, x1, y, col, head) {
+    return '<path d="M' + x0 + ' ' + y + 'H' + x1 + '" stroke="' + col + '" stroke-width="9" stroke-linecap="round" fill="none"/>' +
+      (head ? '<path d="M' + (x1 + 12) + ' ' + y + 'l-16 -10v20z" fill="' + col + '"/>' : '');
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' + artCells(6) + artArrow(25, 85, 53, 'var(--game)', true) +
+        '<path d="M110 53H178" stroke="var(--c-good)" stroke-width="5" stroke-linecap="round" stroke-dasharray="1 12"/></svg>' },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' + artCells(6) + artArrow(25, 55, 53, 'var(--c-bad)', true) +
+        '<path d="M145 30V80" stroke="var(--game)" stroke-width="9" stroke-linecap="round"/><path d="M145 18l-10 16h20z" fill="var(--game)"/>' +
+        '<path d="M80 53H132" stroke="var(--c-bad)" stroke-width="5" stroke-linecap="round" stroke-dasharray="1 12"/></svg>' },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'),
+      art: '<svg viewBox="0 0 200 110" width="100%">' + artCells(6) +
+        '<path d="M115 53H145" stroke="var(--c-good)" stroke-width="24" stroke-linecap="round" opacity=".45"/>' + artArrow(115, 145, 53, 'var(--game)', true) +
+        artArrow(25, 85, 53, 'var(--game)', true) + '</svg>' }
+  ];
+
+  /* ------------------------------------------------------------ input */
+
+  function cellAt(e) {
+    var m = svg.getScreenCTM();
+    if (!m) return null;
+    var p = svg.createSVGPoint();
+    p.x = e.clientX; p.y = e.clientY;
+    p = p.matrixTransform(m.inverse());
+    return { x: p.x / U, y: p.y / U };
+  }
+
+  svg.addEventListener('pointerdown', function (e) {
+    if (!S || S.done || S.over) return;
+    // only the main mouse button sends an arrow out
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    var p = cellAt(e);
+    if (!p) return;
+    cur = -1;
+    var a = E.pick(S, p.x, p.y);
+    press = { id: e.pointerId, x: e.clientX, y: e.clientY, a: a, moved: false, timer: null };
+    // press and hold shows the way out on touch; a mouse can just look
+    if (a >= 0 && e.pointerType !== 'mouse') press.timer = setTimeout(function () { showGuide(a); }, 420);
+    try { svg.setPointerCapture(e.pointerId); } catch (err) { /* older WebViews */ }
+    paint();
+  });
+  window.addEventListener('pointermove', function (e) {
+    if (!press || press.id !== e.pointerId || press.moved) return;
+    if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > 8) {
+      press.moved = true;
+      clearTimeout(press.timer);
+      hideGuide();
+    }
+  });
+  function endPress(e, fire) {
+    if (!press || press.id !== e.pointerId) return;
+    var p = press;
+    press = null;
+    clearTimeout(p.timer);
+    hideGuide();
+    // releasing a held finger still taps, unless it slid off
+    if (fire && !p.moved) tapArrow(p.a);
+  }
+  window.addEventListener('pointerup', function (e) { endPress(e, true); });
+  // a long press shows the way out, not the browser's menu
+  svg.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  window.addEventListener('pointercancel', function (e) { endPress(e, false); });
+
+  function moveCursor(d) {
+    var live = [];
+    S.arrows.forEach(function (A, a) { if (!S.gone[a]) live.push(a); });
+    if (!live.length) return;
+    if (cur < 0 || S.gone[cur]) {
+      live.sort(function (a, b) { return S.arrows[a].c[0] - S.arrows[b].c[0]; });
+      cur = live[0];
+      paint();
+      showArrow(cur);
+      return;
+    }
+    var h = S.arrows[cur].c[0], x0 = h % S.w, y0 = Math.floor(h / S.w), best = -1, bs = 1e9;
+    live.forEach(function (a) {
+      if (a === cur) return;
+      var q = S.arrows[a].c[0], dx = q % S.w - x0, dy = Math.floor(q / S.w) - y0;
+      var along = dx * E.DX[d] + dy * E.DY[d], across = Math.abs(dx * E.DY[d]) + Math.abs(dy * E.DX[d]);
+      if (along <= 0) return;
+      if (along + 2 * across < bs) { bs = along + 2 * across; best = a; }
+    });
+    if (best >= 0) { cur = best; paint(); showArrow(cur); }
+  }
+
+  window.addEventListener('keydown', function (e) {
+    if (!S || S.done) return;
+    if (document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
+    if (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var k = e.key;
+    if (k === 'h' || k === 'H' || e.code === 'KeyH') { showHint(); e.preventDefault(); return; }
+    if (k === 'r' || k === 'R' || e.code === 'KeyR') { askRestart(); e.preventDefault(); return; }
+    // the board is not mirrored, so the arrow keys are geometric in every language
+    var d = { ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3 }[k];
+    if (d !== undefined) { moveCursor(d); e.preventDefault(); return; }
+    if ((k === ' ' || k === 'Enter') && cur >= 0) { tapArrow(cur); e.preventDefault(); }
+  });
+
+  // time in the background is not time spent on the level
+  C.onPause(function () { if (!pausedAt) pausedAt = Date.now(); });
+  C.onResume(function () {
+    if (pausedAt) startedAt += Date.now() - pausedAt;
+    pausedAt = 0;
+  });
+
+  var resizeT = null;
+  window.addEventListener('resize', function () {
+    clearTimeout(resizeT);
+    resizeT = setTimeout(fit, 120);
+  });
+
+  /* ------------------------------------------------------------ start */
+
+  function restore(v, from) {
+    S = v;
+    S.daily = from.daily || null;
+    startedAt = Date.now() - (from.elapsed || 0);
+    cur = -1;
+    build();
+    render();
+    // a board saved empty goes straight to its result; one saved out of hearts asks again
+    if (S.done) levelWon();
+    else if (S.over) setTimeout(outOfHearts, 300);
+  }
+
+  var saved = ctx.loadSave();
+  // a save that fails its checks is dropped and the level starts fresh
+  var resume = saved && saved.s && (saved.daily || null) === (dailyDate || null) ? E.restore(saved.s) : null;
+  if (resume && !dailyDate && resume.level !== prog.level) resume = null;
+  if (resume) {
+    restore(resume, saved);
+  } else if (dailyDate) {
+    newGame(DAILY_LEVEL, dailyDate);
+    if (C.stats.dailyDone('wayout', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).wayout;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec.label });
+    }
+    ctx.tutorialIfNew(TUT);
+  } else {
+    newGame(prog.level);
+    ctx.tutorialIfNew(TUT);
+  }
+  setTimeout(fit, 30);
+})();
+</script>
+</body>
+</html>

@@ -20,7 +20,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 2541;
+const MIN_CHECKS = 2609;
 
 function ok(cond, msg) {
   checks++;
@@ -3549,6 +3549,252 @@ function testBlockDrop() {
   ok(!/Tetris/i.test(page.replace(/tetrises|'bd-tetris'|e\.cleared === 4/g, '')), 'the trademark name is not used in the game');
 }
 
+/* ----------------------------------------------------------- Way Out */
+function testWayOut() {
+  head('Way Out');
+  const E = loadEngine('wayout', 'WayOutEngineFactory');
+  ok(['make', 'tap', 'restart', 'carryOn', 'useHint', 'levelDone', 'chain', 'pick', 'generate', 'restore'].every((f) => typeof E[f] === 'function'), 'the engine has its API');
+
+  // Boards as text: one row per line, two characters a cell. '..' empty, '##' a hole,
+  // 'a>' the head of arrow a and where it points, 'a1', 'a2', ... its body from the head.
+  const board = (txt) => {
+    const rows = txt.split('\n').map((r) => r.trim().split(/\s+/));
+    const w = rows[0].length, h = rows.length, hole = [], by = {};
+    rows.forEach((row, y) => row.forEach((t, x) => {
+      hole.push(t === '##' ? 1 : 0);
+      if (t === '..' || t === '##') return;
+      const a = by[t[0]] = by[t[0]] || { c: [] };
+      if ('^>v<'.indexOf(t[1]) >= 0) { a.d = '^>v<'.indexOf(t[1]); a.c[0] = y * w + x; } else a.c[+t[1]] = y * w + x;
+    }));
+    const names = Object.keys(by).sort();
+    const S = E.make(w, h, hole.some(Boolean) ? hole : null, names.map((n) => ({ d: by[n].d, c: by[n].c })));
+    return { S, names };
+  };
+  // what one tap did and where the board is now, in the same words every time
+  const act = (B, n) => {
+    const S = B.S, r = E.tap(S, B.names.indexOf(n));
+    const what = r.out ? 'leaves' : (r.ignored ? 'ignored' : 'blocked by ' + B.names[r.by]);
+    const names = (f) => B.names.filter((x, i) => f(i)).join('') || '-';
+    return what + '; hearts ' + S.hearts + '; left ' + names((i) => !S.gone[i]) + '; struck ' + names((i) => S.struck[i]) + '; ' +
+      (S.done ? 'won' : (S.over ? 'over' : 'playing'));
+  };
+  const T = '.. .. .. b^ ..\na1 a> .. b1 ..\n.. .. .. b2 ..';
+  const T4 = '.. .. .. c^ ..\na1 a> .. c1 ..\n.. .. .. c2 ..\nd1 d> .. c3 ..';
+  const cases = [
+    ['a head on the edge pointing out leaves at once', '.. .. ..\n.. a1 a>', [['a', 'leaves; hearts 3; left -; struck -; won']]],
+    ['empty cells on the way never block', '.. .. .. .. ..\na2 a1 a> .. ..', [['a', 'leaves; hearts 3; left -; struck -; won']]],
+    ['a body cell blocks and costs a heart', T, [['a', 'blocked by b; hearts 2; left ab; struck a; playing']]],
+    ['the last cell of another arrow blocks too', '.. .. .. b^ ..\n.. .. .. b1 ..\na1 a> .. b2 ..', [['a', 'blocked by b; hearts 2; left ab; struck a; playing']]],
+    ['so does the head of a free arrow', '.. .. .. .. ..\na1 a> .. b^ ..\n.. .. .. b1 ..\n.. .. .. b2 ..', [['a', 'blocked by b; hearts 2; left ab; struck a; playing']]],
+    ['an arrow leaves once its blocker has gone, with no further cost', T, [
+      ['a', 'blocked by b; hearts 2; left ab; struck a; playing'], ['b', 'leaves; hearts 2; left a; struck a; playing'], ['a', 'leaves; hearts 2; left -; struck -; won']]],
+    ['tapping the same blocked arrow again is free', T, [
+      ['a', 'blocked by b; hearts 2; left ab; struck a; playing'], ['a', 'blocked by b; hearts 2; left ab; struck a; playing'], ['a', 'blocked by b; hearts 2; left ab; struck a; playing']]],
+    ['two blocked arrows cost a heart each', T4, [
+      ['a', 'blocked by c; hearts 2; left acd; struck a; playing'], ['d', 'blocked by c; hearts 1; left acd; struck ad; playing'],
+      ['a', 'blocked by c; hearts 1; left acd; struck ad; playing'], ['c', 'leaves; hearts 1; left ad; struck ad; playing'],
+      ['a', 'leaves; hearts 1; left d; struck d; playing'], ['d', 'leaves; hearts 1; left -; struck -; won']]],
+    ['holes are passed over', 'a1 a> ## ## ..\n.. .. .. .. ..', [['a', 'leaves; hearts 3; left -; struck -; won']]],
+    ['an arrow beyond a hole still blocks', 'a1 a> ## b^ ..\n.. .. .. b1 ..', [['a', 'blocked by b; hearts 2; left ab; struck a; playing']]],
+    ['a bent arrow leaves by the line from its head; its bend blocks others', '.. .. .. .. ..\n.. .. a2 a1 a>\n.. .. a3 .. ..\nb1 b> a4 .. ..', [
+      ['b', 'blocked by a; hearts 2; left ab; struck b; playing'], ['a', 'leaves; hearts 2; left b; struck b; playing'], ['b', 'leaves; hearts 2; left -; struck -; won']]],
+    ['a neighbour is free the moment its blocker is tapped away', T, [
+      ['b', 'leaves; hearts 3; left a; struck -; playing'], ['a', 'leaves; hearts 3; left -; struck -; won']]],
+    ['the third strike ends the attempt and taps are ignored', '.. .. .. d^ ..\na1 a> .. d1 ..\nb1 b> .. d2 ..\nc1 c> .. d3 ..', [
+      ['a', 'blocked by d; hearts 2; left abcd; struck a; playing'], ['b', 'blocked by d; hearts 1; left abcd; struck ab; playing'],
+      ['c', 'blocked by d; hearts 0; left abcd; struck abc; over'], ['d', 'ignored; hearts 0; left abcd; struck abc; over']]]
+  ];
+  for (const [what, txt, steps] of cases) {
+    const B = board(txt);
+    steps.forEach(([n, want], i) => {
+      const got = B.S ? act(B, n) : 'no board';
+      ok(got === want, what + ' (tap ' + (i + 1) + ' ' + n + ': ' + got + ')');
+    });
+  }
+
+  // restart, continue, hints
+  {
+    const B = board(T4), P = E.progress();
+    act(B, 'a');
+    E.useHint(B.S, P);
+    act(B, 'c');
+    E.restart(B.S);
+    ok(act(B, 'a') === 'blocked by c; hearts 2; left acd; struck a; playing' && P.hints === 2 && B.S.hint === -1,
+      'a restart puts every arrow back with three hearts and no marks, and spent hints stay spent');
+    const O = board('.. .. .. d^ ..\na1 a> .. d1 ..\nb1 b> .. d2 ..\nc1 c> .. d3 ..');
+    ['a', 'b', 'c'].forEach((n) => act(O, n));
+    ok(E.carryOn(O.S) && O.S.hearts === 1 && !O.S.over && O.S.struck[0] && E.left(O.S) === 4 && !E.carryOn(O.S),
+      'out of hearts, one free continue gives a single heart and keeps the board and marks');
+    O.S.over = true; O.S.hearts = 0;
+    ok(!E.carryOn(O.S), 'there is only one continue per level');
+  }
+  {
+    const B = board(T4), P = E.progress(), c = B.names.indexOf('c');
+    ok(E.useHint(B.S, P) === c && P.hints === 2, 'a hint names the free arrow and uses one hint');
+    ok(E.useHint(B.S, P) === -1 && P.hints === 2, 'a second hint is refused while the first is pending');
+    act(B, 'c');
+    ok(B.S.hint === -1, 'the pending hint clears when its arrow leaves');
+    const h = E.useHint(B.S, P);
+    ok((h === 0 || h === 2) && P.hints === 1 && E.isFree(B.S, h), 'the next hint names a free arrow (' + h + ')');
+    const Z = board(T);
+    ok(E.useHint(Z.S, { hints: 0 }) === -1, 'no hint without one in stock');
+  }
+  {
+    const P = E.progress(), got = [];
+    for (let lv = 1; lv <= 29; lv++) if (E.levelDone(P, lv)) got.push(lv);
+    ok(got.join() === '4,9,14,19,24,29' && P.hints === 9 && P.level === 30, 'hint gifts come after levels 4, 9, 14, 19, 24, 29 (' + got + '), 9 hints by then');
+    ok(!E.levelDone(P, 29) && !E.levelDone(P, 12) && P.hints === 9, 'a level number counts for gifts only once');
+  }
+  {
+    const K = { n: 0, at: 0 };
+    const steps = [0, 600, 1500, 1900, 3500, 3900].map((t) => E.chain(K, t));
+    ok(steps.join() === '-1,0,1,2,-1,0', 'exits within a second build a chain of three looks (' + steps + ')');
+  }
+
+  // saving
+  {
+    const B = board(T);
+    act(B, 'a');
+    const R = E.restore(JSON.parse(JSON.stringify(B.S)));
+    ok(!!R && R.hearts === 2 && R.struck[0] && !R.struck[1] && E.left(R) === 2 && !R.over && !R.done, 'a save comes back with its hearts, marks and arrows');
+    const Z = JSON.parse(JSON.stringify(B.S)); Z.hearts = 0;
+    const Zr = E.restore(Z);
+    ok(!!Zr && Zr.over, 'a save at no hearts comes back out of hearts');
+    const D = JSON.parse(JSON.stringify(B.S)); D.gone = [true, true];
+    ok(E.restore(D).done, 'a save with every arrow gone comes back won');
+    const bad = JSON.parse(JSON.stringify(B.S)); bad.arrows[1].c[1] = bad.arrows[0].c[0];
+    ok(E.restore(bad) === null && E.restore({ w: 3 }) === null && E.restore(null) === null, 'a broken save is refused');
+  }
+
+  // a forgiving tap: the arrow under the finger, and a free one when two are as close
+  {
+    const B = board(T);
+    ok(E.pick(B.S, 1.5, 1.5) === 0 && E.pick(B.S, 3.5, 0.5) === 1 && E.pick(B.S, 4.6, 2.5) === 1 && E.pick(B.S, 0.5, 2.9) === -1, 'a tap picks the arrow under or next to it');
+    const V = board('.. .. .. .. ..\n.. .. a2 a1 a>\n.. .. a3 .. ..\nb1 b> a4 .. ..');
+    ok(E.pick(V.S, 1.9, 3.5) === 0 && E.pick(V.S, 1.5, 3.5) === 1, 'when two arrows are that close the free one is taken');
+  }
+
+  // the generator, on many levels and seeds
+  {
+    let maxMs = 0, boards = 0, sound = 0, own = 0, emptied = 0, pockets = 0, runs = 0, bentAll = 0, enough = 0, fit = 0, falls = 0, same = 0;
+    let bentShare = 0, shortShare = 0, shapedOk = 0, shapedWant = 0;
+    const freeBy = {}, lenBy = {}, countBy = {};
+    for (let lv = 1; lv <= 60; lv++) {
+      for (let sd = 0; sd < 6; sd++) {
+        const t0 = Date.now();
+        const S = E.generate(lv, rng(lv * 977 + sd));
+        maxMs = Math.max(maxMs, Date.now() - t0);
+        boards++;
+        if (sd < 2 && JSON.stringify(S) === JSON.stringify(E.generate(lv, rng(lv * 977 + sd)))) same++;
+        const n = S.w * S.h, cells = new Map(), min = lv <= 2 ? 2 : 3;
+        let good = true;
+        S.arrows.forEach((A, a) => {
+          if (A.c.length < min) good = false;
+          A.c.forEach((c, i) => {
+            if (cells.has(c) || (S.hole && S.hole[c]) || c < 0 || c >= n) good = false;
+            cells.set(c, a);
+            if (i && Math.abs(c % S.w - A.c[i - 1] % S.w) + Math.abs(Math.floor(c / S.w) - Math.floor(A.c[i - 1] / S.w)) !== 1) good = false;
+          });
+        });
+        if (good) sound++;
+        if (S.arrows.every((A, a) => E.ray(S, a).every((c) => A.c.indexOf(c) < 0))) own++;
+        // any order of free arrows empties the board
+        let all = true;
+        for (let k = 0; k < 3; k++) {
+          const X = E.restore(JSON.parse(JSON.stringify(S))), r = rng(k + lv * 31 + sd);
+          while (E.left(X)) {
+            const f = E.freeArrows(X);
+            if (!f.length) { all = false; break; }
+            E.tap(X, f[Math.floor(r() * f.length)]);
+          }
+        }
+        if (all) emptied++;
+        // empty pockets inside the shape are at most two cells
+        const seen = new Set();
+        let big = 0;
+        for (let c = 0; c < n; c++) {
+          if (seen.has(c) || cells.has(c) || (S.hole && S.hole[c])) continue;
+          let size = 0;
+          const st = [c];
+          seen.add(c);
+          while (st.length) {
+            const k = st.pop(), x = k % S.w, y = Math.floor(k / S.w);
+            size++;
+            [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => {
+              const nx = x + dx, ny = y + dy, nk = ny * S.w + nx;
+              if (nx < 0 || ny < 0 || nx >= S.w || ny >= S.h || seen.has(nk) || cells.has(nk) || (S.hole && S.hole[nk])) return;
+              seen.add(nk); st.push(nk);
+            });
+          }
+          big = Math.max(big, size);
+        }
+        if (big <= 2) pockets++;
+        // no three neighbouring straight arrows side by side pointing straight out of one edge
+        const out = (a) => a !== undefined && !E.bent(S.arrows[a]) && !E.ray(S, a).length;
+        let worst = 0;
+        S.arrows.forEach((A, a) => {
+          if (!out(a)) return;
+          const hx = A.c[0] % S.w, hy = Math.floor(A.c[0] / S.w), px = E.DY[A.d], py = E.DX[A.d];
+          let run = 1;
+          for (let s = 1; ; s++) {
+            const x = hx + px * s, y = hy + py * s, b = x >= 0 && y >= 0 && x < S.w && y < S.h ? cells.get(y * S.w + x) : undefined;
+            if (b === undefined || S.arrows[b].c[0] !== y * S.w + x || S.arrows[b].d !== A.d || !out(b)) break;
+            run++;
+          }
+          worst = Math.max(worst, run);
+        });
+        if (worst < 3) runs++;
+        if (S.arrows.some(E.bent)) bentAll++;
+        const play = n - (S.hole ? S.hole.filter(Boolean).length : 0);
+        if (S.arrows.length >= Math.floor(play / 12)) enough++;
+        if (S.w <= E.MAX_W && S.h <= E.MAX_H) fit++;
+        if (lv > 2 && S.w === 3 && S.h === 3) falls++;
+        if (lv >= 8 && lv % 4 === 0) { shapedWant++; if (S.hole) shapedOk++; }
+        bentShare += S.arrows.filter(E.bent).length / S.arrows.length;
+        shortShare += S.arrows.filter((A) => A.c.length <= 3).length / S.arrows.length;
+        const band = lv <= 5 ? 'start' : (lv <= 30 ? 'middle' : 'late');
+        (freeBy[band] = freeBy[band] || []).push(E.freeArrows(S).length / S.arrows.length);
+        (lenBy[band] = lenBy[band] || []).push(cells.size / S.arrows.length);
+        (countBy[band] = countBy[band] || []).push(S.arrows.length);
+      }
+    }
+    const avg = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+    const fr = ['start', 'middle', 'late'].map((b) => avg(freeBy[b])), ln = ['start', 'middle', 'late'].map((b) => avg(lenBy[b]));
+    const nc = ['start', 'middle', 'late'].map((b) => avg(countBy[b]));
+    ok(same === 120, 'the same level and seed give the same board (' + same + ' of 120)');
+    ok(sound === boards, 'arrows never share a cell, sit on holes or break their path; at least 2 cells, 3 after level 2 (' + sound + ' of ' + boards + ')');
+    ok(own === boards, 'no arrow has its own body on its way out (' + own + ')');
+    ok(emptied === boards, 'removing any free arrow, in any order, always empties the board (' + emptied + ')');
+    ok(pockets === boards, 'no empty pocket of more than two cells (' + pockets + ')');
+    ok(runs === boards, 'no run of three straight arrows side by side pointing out of one edge (' + runs + ')');
+    ok(bentAll === boards && bentShare / boards > 0.55 && bentShare / boards < 0.9, 'every board has a bent arrow, and most arrows are bent (' + (bentShare / boards).toFixed(2) + ')');
+    ok(shortShare / boards > 0.15 && shortShare / boards < 0.45, 'about a quarter of the arrows are short (' + (shortShare / boards).toFixed(2) + ')');
+    ok(enough === boards, 'never fewer arrows than playable cells / 12 (' + enough + ')');
+    ok(fit === boards && falls === 0, 'boards stay within ' + E.MAX_W + ' × ' + E.MAX_H + ' and the fallback board is never needed');
+    ok(shapedOk === shapedWant, 'every fourth level from level 8 has a shaped board (' + shapedOk + ' of ' + shapedWant + ')');
+    ok(fr[0] > fr[1] && fr[1] > fr[2] && fr[2] < 0.25, 'fewer arrows are free at the start as levels rise (' + fr.map((x) => x.toFixed(2)) + ')');
+    ok(ln[0] < ln[1] && ln[2] >= 5, 'arrows grow longer with the board (' + ln.map((x) => x.toFixed(1)) + ')');
+    ok(nc[0] < nc[1] && nc[1] < nc[2], 'boards hold more arrows along the ladder (' + nc.map((x) => x.toFixed(1)) + ')');
+    const p1 = E.plan(1), p5 = E.plan(5), p12 = E.plan(12), p40 = E.plan(40), p400 = E.plan(400);
+    ok(p1.w === 3 && p1.h === 3 && p5.w * p5.h > 30 && p12.w * p12.h > p5.w * p5.h && p40.w === E.MAX_W && p40.h === E.MAX_H && p400.w === E.MAX_W,
+      'the size climbs steeply, then holds at the cap');
+    ok(maxMs < 60, 'a board is built fast enough for a phone (at most ' + maxMs + 'ms here)');
+  }
+
+  // the page
+  const page = fs.readFileSync(path.join(ROOT, 'www/games/wayout/index.html'), 'utf8');
+  ok(/id: 'wayout'/.test(page) && /C\.daily\('wayout', daily\)/.test(page), 'the page uses its id for saves and the daily seed');
+  ok(/if \(!S \|\| S\.done \|\| S\.over \|\| a < 0 \|\| flying\[a\] \|\| Date\.now\(\) < lockUntil\) return;/.test(page),
+    'only the arrow already leaving and the short lock after a strike hold a tap back');
+  ok(/function showHint\(\) \{\n\s+if \(!S \|\| S\.done \|\| S\.over \|\| nFlying\) return;/.test(page) && /function askRestart\(\) \{\n\s+if \(!S \|\| S\.done \|\| nFlying \|\| Date\.now\(\) < lockUntil\) return;/.test(page),
+    'hint and restart wait until no arrow is sliding, and restart until a blocked arrow has shaken');
+  ok(/C\.t\('keepGoing'\)/.test(page) && /C\.t\('tryAgain'\), kind: 'primary', onClick: restartLevel/.test(page) && !/coins\.spend/.test(page),
+    'out of hearts offers a free start again and one free heart, nothing to pay');
+  ok(/'wo-win'/.test(page) && /'wo-deep'/.test(page) && /'wo-clean'/.test(page), 'the page unlocks its three achievements');
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  ok(['wo-win', 'wo-deep', 'wo-clean'].every((id) => new RegExp("\\{ id: '" + id + "',[^\\n]*dde: '").test(core)), 'the achievements are defined in the core in all four languages');
+}
+
 /* ------------------------------------------------------------- پاسور */
 function testPasur() {
   head('پاسور');
@@ -4888,6 +5134,7 @@ testAndroidShare();
 testNonogramPictures();
 testHokm();
 testBlockDrop();
+testWayOut();
 testTd();
 testVersionStamp();
 testDeployGate();
