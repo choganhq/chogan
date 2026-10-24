@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FBF6EF">
+<title>ورق عنکبوتی · چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  :root { --ch-pface: var(--c-surface); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --ch-pface: var(--c-surface-3); }
+  }
+  :root[data-theme="dark"] { --ch-pface: var(--c-surface-3); }
+
+  .sp-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--s-2); align-self: stretch; }
+  .sp-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--s-1) var(--s-2); }
+  .sp-board { position: relative; flex: 1; min-height: 0; width: 100%; direction: ltr; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .sp-slot { position: absolute; left: 0; top: 0; width: var(--cw); aspect-ratio: 5 / 7; box-sizing: border-box; border-radius: 8px; border: 2px dashed var(--c-line); display: grid; place-items: center; color: var(--c-text-faint); }
+  .sp-slot--stock { border-style: solid; cursor: pointer; }
+  .sp-slot--stock .ch-pback { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 8px; }
+  .sp-card { position: absolute; left: 0; top: 0; width: var(--cw); aspect-ratio: 5 / 7; transition: transform var(--sp-move, 180ms) var(--ease); }
+  .sp-card > .ch-pcard { --pw: var(--cw); position: absolute; inset: 0; cursor: pointer; }
+  .sp-card > .ch-pback { position: absolute; inset: 0; width: var(--cw); border-radius: 8px; }
+  .sp-card--down > .ch-pcard, .sp-card:not(.sp-card--down) > .ch-pback { display: none; }
+  .sp-card--still, .sp-card--drag { transition: none; }
+  .sp-card--drag > * { box-shadow: var(--sh-3, var(--sh-2)); }
+  .sp-flip > .ch-pcard { animation: sp-flip 240ms var(--ease); }
+  @keyframes sp-flip { from { transform: scaleX(0); } }
+  .sp-focus { outline: 3px solid var(--game); outline-offset: 2px; border-radius: 8px; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function SpiderEngineFactory() {
+  'use strict';
+
+  // A dealt card is 0..103: rank = c >> 3, so every rank has eight copies, and
+  // the copy number (c & 7) decides the suit of the chosen difficulty.
+  var EIGHT = [3, 2, 1, 0, 3, 2, 1, 0];
+
+  function rank(c) { return c >> 3; }
+  function copy(c) { return c & 7; }
+  function suit(c, suits) {
+    if (suits === 1) return 3;
+    if (suits === 2) return (c & 7) < 4 ? 3 : 2;
+    return EIGHT[c & 7];
+  }
+  function isRed(c, suits) {
+    var s = suit(c, suits);
+    return s === 1 || s === 2;
+  }
+  function top(S, col) {
+    var t = S.cols[col];
+    return t.length ? t[t.length - 1] : -1;
+  }
+
+  function shuffle(rnd) {
+    var d = [], i, j, t;
+    for (i = 0; i < 104; i++) d.push(i);
+    for (i = d.length - 1; i > 0; i--) {
+      j = Math.floor(rnd() * (i + 1));
+      t = d[i]; d[i] = d[j]; d[j] = t;
+    }
+    return d;
+  }
+
+  function deal(rnd, suits) {
+    suits = (suits === 2 || suits === 4) ? suits : 1;
+    var d = shuffle(rnd), S = { suits: suits, cols: [], down: [], stock: [], runs: 0, hist: [], moves: 0, undos: 0, daily: null };
+    var i, col, row, n, k = 0;
+    for (i = 0; i < 10; i++) { S.cols.push([]); S.down.push(0); }
+    // Four columns of six and six of five: five rows of ten, then a row of four.
+    for (row = 0; row < 6; row++) {
+      n = row < 5 ? 10 : 4;
+      for (col = 0; col < n; col++) S.cols[col].push(d[k++]);
+    }
+    for (col = 0; col < 10; col++) S.down[col] = S.cols[col].length - 1;
+    S.stock = d.slice(k);
+    return S;
+  }
+  function dailyDeal(rnd) { return deal(rnd, 2); }
+
+  function clone(S) {
+    return {
+      suits: S.suits, cols: S.cols.map(function (c) { return c.slice(); }), down: S.down.slice(),
+      stock: S.stock.slice(), runs: S.runs, hist: S.hist.slice(), moves: S.moves, undos: S.undos, daily: S.daily
+    };
+  }
+
+  // A run is face up and same-suit, one rank down each step.
+  function isRun(S, col, from) {
+    var t = S.cols[col], i;
+    if (from < S.down[col] || from < 0 || from >= t.length) return false;
+    for (i = from; i < t.length - 1; i++) {
+      if (rank(t[i]) !== rank(t[i + 1]) + 1 || suit(t[i], S.suits) !== suit(t[i + 1], S.suits)) return false;
+    }
+    return true;
+  }
+  function runLength(S, col, from) {
+    return isRun(S, col, from) ? S.cols[col].length - from : 0;
+  }
+
+  function canMove(S, from, n, to) {
+    if (to < 0 || to > 9 || from === to) return false;
+    var t = S.cols[from];
+    if (n < 1 || n > t.length - S.down[from]) return false;
+    var i = t.length - n;
+    if (i < S.down[from] || !isRun(S, from, i)) return false;
+    var dst = S.cols[to];
+    if (!dst.length) return true;
+    return rank(dst[dst.length - 1]) === rank(t[i]) + 1;
+  }
+
+  function complete(S, col) {
+    var t = S.cols[col];
+    if (t.length < 13) return null;
+    var base = t.length - 13, suit0 = suit(t[t.length - 1], S.suits), i, c;
+    for (i = 0; i < 13; i++) {
+      c = t[base + i];
+      if (rank(c) !== 12 - i || suit(c, S.suits) !== suit0) return null;
+    }
+    var wasDown = S.down[col], cards = t.splice(base, 13);
+    S.runs++;
+    if (!t.length) S.down[col] = 0;
+    else if (S.down[col] >= t.length) S.down[col] = t.length - 1;
+    return { col: col, cards: cards, wasDown: wasDown };
+  }
+
+  function move(S, from, n, to) {
+    if (!canMove(S, from, n, to)) return null;
+    var wasFrom = S.down[from], wasTo = S.down[to], flipped = false, i;
+    var t = S.cols[from], cards = t.splice(t.length - n, n);
+    for (i = 0; i < cards.length; i++) S.cols[to].push(cards[i]);
+    if (S.cols[from].length && S.down[from] >= S.cols[from].length) {
+      S.down[from] = S.cols[from].length - 1;
+      flipped = true;
+    }
+    if (!S.cols[from].length) S.down[from] = 0;
+    var run = complete(S, to);
+    S.moves++;
+    var h = { t: 'm', from: from, to: to, n: n, cards: cards, wasFrom: wasFrom, wasTo: wasTo, flipped: flipped, run: run };
+    S.hist.push(h);
+    return h;
+  }
+
+  function canDeal(S) {
+    if (!S.stock.length) return false;
+    for (var i = 0; i < 10; i++) if (!S.cols[i].length) return false;
+    return true;
+  }
+
+  function dealStock(S) {
+    if (!canDeal(S)) return null;
+    var h = { t: 'd', runs: [], cards: [] }, c, col, run, wasDown;
+    for (c = 0; c < 10; c++) {
+      var card = S.stock.pop();
+      S.cols[c].push(card);
+      h.cards.push({ col: c, card: card });
+    }
+    for (col = 0; col < 10; col++) {
+      wasDown = S.down[col];
+      run = complete(S, col);
+      if (run) { run.wasDown = wasDown; h.runs.push(run); }
+    }
+    S.moves++;
+    S.hist.push(h);
+    return h;
+  }
+
+  function undo(S) {
+    var h = S.hist.pop(), i, c, back;
+    if (!h) return null;
+    if (h.t === 'd') {
+      // Restore completed runs first: each one ends with the card this deal gave,
+      // so popping one card per column afterwards puts the stock back as it was.
+      for (i = h.runs.length - 1; i >= 0; i--) {
+        var r = h.runs[i];
+        S.cols[r.col] = S.cols[r.col].concat(r.cards);
+        S.down[r.col] = r.wasDown;
+        S.runs--;
+      }
+      for (c = 9; c >= 0; c--) S.stock.push(S.cols[c].pop());
+      S.undos++;
+      return h;
+    }
+    if (h.run) {
+      // The run came off the destination, so it has to go back before the moved
+      // cards are pulled out of there; otherwise they would land on top of it.
+      S.cols[h.run.col] = S.cols[h.run.col].concat(h.run.cards);
+      S.runs--;
+    }
+    back = S.cols[h.to].splice(S.cols[h.to].length - h.n, h.n);
+    for (i = 0; i < back.length; i++) S.cols[h.from].push(back[i]);
+    S.down[h.from] = h.wasFrom;
+    S.down[h.to] = h.wasTo;
+    S.undos++;
+    return h;
+  }
+
+  // The place a tapped card would rather go: a same-suit neighbour, then any
+  // higher card, then an empty column. A whole column does not hop to an empty one.
+  function autoTarget(S, from, n) {
+    var best = -1, bestScore = -1, t = S.cols[from], first = t[t.length - n], to, dst, sc;
+    for (to = 0; to < 10; to++) {
+      if (to === from || !canMove(S, from, n, to)) continue;
+      dst = S.cols[to];
+      if (!dst.length) {
+        if (n === t.length) continue;
+        sc = 0;
+      } else {
+        sc = suit(dst[dst.length - 1], S.suits) === suit(first, S.suits) ? 2 : 1;
+      }
+      if (sc > bestScore) { bestScore = sc; best = to; }
+    }
+    return best;
+  }
+
+  function hasMoves(S) {
+    if (canDeal(S)) return true;
+    var from, to, t, n, k, i;
+    for (from = 0; from < 10; from++) {
+      t = S.cols[from];
+      n = t.length - S.down[from];
+      for (k = 1; k <= n; k++) {
+        i = t.length - k;
+        if (i < S.down[from] || !isRun(S, from, i)) continue;
+        for (to = 0; to < 10; to++) {
+          if (to !== from && canMove(S, from, k, to)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function won(S) { return S.runs === 8; }
+
+  // Windows scoring: start at 500, one off for every move and undo, 100 for a run.
+  function score(S) { return Math.max(0, 500 - S.moves - S.undos + 100 * S.runs); }
+
+  function validState(v) {
+    if (!v || (v.suits !== 1 && v.suits !== 2 && v.suits !== 4)) return false;
+    if (!Array.isArray(v.cols) || v.cols.length !== 10) return false;
+    if (!Array.isArray(v.down) || v.down.length !== 10) return false;
+    if (!Array.isArray(v.stock) || !Array.isArray(v.hist)) return false;
+    if (typeof v.runs !== 'number' || v.runs < 0 || v.runs > 8) return false;
+    if (typeof v.moves !== 'number' || v.moves < 0) return false;
+    if (typeof v.undos !== 'number' || v.undos < 0) return false;
+    var seen = {}, n = 0, col, i, t, d;
+    function add(c) {
+      if (typeof c !== 'number' || c % 1 !== 0 || c < 0 || c > 103 || seen[c]) return false;
+      seen[c] = 1; n++;
+      return true;
+    }
+    for (col = 0; col < 10; col++) {
+      t = v.cols[col];
+      if (!Array.isArray(t) || t.length > 104) return false;
+      d = v.down[col];
+      if (typeof d !== 'number' || d < 0) return false;
+      if (t.length ? d >= t.length : d !== 0) return false;
+      for (i = 0; i < t.length; i++) if (!add(t[i])) return false;
+    }
+    for (i = 0; i < v.stock.length; i++) if (!add(v.stock[i])) return false;
+    return n === 104 - 13 * v.runs;
+  }
+
+  return {
+    rank: rank, copy: copy, suit: suit, isRed: isRed, top: top, deal: deal, dailyDeal: dailyDeal,
+    clone: clone, isRun: isRun, runLength: runLength, canMove: canMove, move: move,
+    canDeal: canDeal, dealStock: dealStock, undo: undo, autoTarget: autoTarget,
+    hasMoves: hasMoves, won: won, score: score, validState: validState
+  };
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = SpiderEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = SpiderEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'spider',
+    name: { fa: 'ورق عنکبوتی', en: 'Spider', zh: '蜘蛛纸牌', de: 'Spinnensolitaire', es: 'Solitario araña' },
+    accent: '#5B21B6',
+    mood: 'sudoku',
+    cardSpeed: true,
+    strings: {
+      fa: {
+        table: 'میز ورق', moves: 'حرکت', movesN: '{n} حرکت', score: 'امتیاز', dailySp: 'عنکبوت روزانه',
+        newDeal: 'دست تازه', restartDaily: 'از اول همین دست', undoMove: 'برگرداندن حرکت',
+        suits: 'خال', suit1: 'یک خال', suit2: 'دو خال', suit4: 'چهار خال',
+        suitNote: 'از دست بعد اعمال می‌شود. روزانه همیشه دو خال است.',
+        suitWarn: 'با عوض کردن خال، همین دست از نو شروع می‌شود.',
+        stock: 'دسته', dealsLeft: '{n} دست مانده', runs: 'ردیف کامل', runsN: '{n} از ۸', column: 'ستون {n}',
+        emptyBad: 'اول ستون خالی را پر کن',
+        kbSpot: 'رفتن بین ستون‌ها', kbDepth: 'بالا و پایین کارت‌های ستون', kbAuto: 'فرستادن به بهترین جا',
+        kbDeal: 'دادن یک دست کارت', kbNew: 'دست تازه',
+        rules: '۱۰۴ کارت در ده ستون: کارت روی کارتی یک رتبه پایین‌تر می‌نشیند، با هر خال. فقط ردیفی که همه‌اش یک خال و پشت سر هم است با هم جابه‌جا می‌شود. ردیف کامل شاه تا آس از همان خال از میز برداشته می‌شود. پنج بار می‌توانی ده کارت تازه بدهی، اما تا وقتی ستونی خالی است دست دادن ممکن نیست. امتیاز از ۵۰۰ شروع می‌شود: هر حرکت و هر برگرداندن یک کم می‌کند و هر ردیف کامل ۱۰۰ اضافه. با یک، دو یا چهار خال بازی کن. برگرداندن بی‌حد است.',
+        tutTitle1: 'هدف', tutText1: 'هر ردیف کامل شاه تا آس را از یک خال جمع کن و از میز بردار. هشت ردیف یعنی برد.',
+        tutTitle2: 'ستون‌ها', tutText2: 'کارت روی کارتی یک رتبه پایین‌تر می‌نشیند، با هر خال؛ ولی فقط ردیف هم‌خال با هم حرکت می‌کند. ستون خالی هر کارتی را می‌گیرد.',
+        tutTitle3: 'دسته و سختی', tutText3: 'پنج بار ده کارت تازه می‌گیری، اما با ستون خالی نمی‌شود. با یک، دو یا چهار خال بازی کن؛ برگرداندن بی‌حد است.'
+      },
+      en: {
+        table: 'Card table', moves: 'Moves', movesN: '{n} moves', score: 'Score', dailySp: 'Daily Spider',
+        newDeal: 'New deal', restartDaily: 'Restart this deal', undoMove: 'Undo move',
+        suits: 'Suits', suit1: 'One suit', suit2: 'Two suits', suit4: 'Four suits',
+        suitNote: 'Applies from the next deal. The daily is always two suits.',
+        suitWarn: 'Changing suits starts this deal over.',
+        stock: 'Stock', dealsLeft: '{n} deals left', runs: 'Complete runs', runsN: '{n} of 8', column: 'Column {n}',
+        emptyBad: 'Fill the empty column first',
+        kbSpot: 'Move between columns', kbDepth: 'Deeper or higher in a column', kbAuto: 'Send to the best place',
+        kbDeal: 'Deal a row of cards', kbNew: 'New deal',
+        rules: '104 cards in ten columns: a card goes on one a rank higher, any suit. Only a same-suit run in order moves together. A complete king-to-ace run of one suit leaves the table. You can deal ten new cards five times, but never while a column is empty. The score starts at 500: every move and every undo takes one off, and every complete run adds 100. Play with one, two or four suits. Undo as often as you like.',
+        tutTitle1: 'The goal', tutText1: 'Collect each complete run from king down to ace in one suit and take it off the table. Eight runs win the deal.',
+        tutTitle2: 'Columns', tutText2: 'A card goes on one a rank higher, any suit, but only a same-suit run moves together. An empty column takes anything.',
+        tutTitle3: 'Stock and suits', tutText3: 'Deal ten new cards five times, but never while a column is empty. Play one, two or four suits; undo as often as you like.'
+      },
+      zh: {
+        table: '牌桌', moves: '步数', movesN: '{n} 步', score: '分数', dailySp: '每日蜘蛛纸牌',
+        newDeal: '新一局', restartDaily: '重开本局', undoMove: '撤销',
+        suits: '花色', suit1: '一种花色', suit2: '两种花色', suit4: '四种花色',
+        suitNote: '从下一局开始生效。每日挑战固定为两种花色。',
+        suitWarn: '换花色会重开本局。',
+        stock: '牌堆', dealsLeft: '还剩 {n} 轮', runs: '完整牌组', runsN: '{n} / 8', column: '第 {n} 列',
+        emptyBad: '先填满空列',
+        kbSpot: '在各列之间移动', kbDepth: '在列内上下移动', kbAuto: '送到最佳位置',
+        kbDeal: '发一轮牌', kbNew: '新一局',
+        rules: '104张牌分十列：牌放在大一点的牌上，不限花色；只有同花色且连续的牌组能一起移动。完整的同花色K到A会移出桌面。可以发五次、每次十张，但有空列时不能发。分数从500开始：每走一步或撤销一次减1，每完成一组加100。可玩一种、两种或四种花色。撤销次数不限。',
+        tutTitle1: '目标', tutText1: '把每种花色从K到A的完整序列收走，共八组即获胜。',
+        tutTitle2: '各列', tutText2: '牌放在大一点的牌上，不限花色；只有同花色的连续牌组能一起移动。空列可放任何牌。',
+        tutTitle3: '牌堆与花色', tutText3: '可以发五次、每次十张，有空列时不能发。可玩一种、两种或四种花色；撤销不限次数。'
+      },
+      de: {
+        table: 'Kartentisch', moves: 'Züge', movesN: '{n} Züge', score: 'Punkte', dailySp: 'Tägliches Spider',
+        newDeal: 'Neues Spiel', restartDaily: 'Dieses Spiel neu starten', undoMove: 'Zug zurück',
+        suits: 'Farben', suit1: 'Eine Farbe', suit2: 'Zwei Farben', suit4: 'Vier Farben',
+        suitNote: 'Gilt ab dem nächsten Spiel. Das Tagesspiel hat immer zwei Farben.',
+        suitWarn: 'Ein Farbwechsel startet dieses Spiel neu.',
+        stock: 'Stapel', dealsLeft: '{n} Gaben übrig', runs: 'Fertige Folgen', runsN: '{n} von 8', column: 'Spalte {n}',
+        emptyBad: 'Fülle zuerst die leere Spalte',
+        kbSpot: 'Zwischen Spalten wechseln', kbDepth: 'In einer Spalte tiefer oder höher', kbAuto: 'An den besten Platz legen',
+        kbDeal: 'Eine Reihe Karten geben', kbNew: 'Neues Spiel',
+        rules: '104 Karten in zehn Spalten: eine Karte kommt auf eine um eins höhere, egal welcher Farbe. Nur eine Folge gleicher Farbe in Reihenfolge wandert zusammen. Eine vollständige Folge vom König bis zum Ass einer Farbe verlässt den Tisch. Du darfst fünfmal zehn neue Karten geben, aber nie, solange eine Spalte leer ist. Das Punktekonto beginnt bei 500: jeder Zug und jedes Zurücknehmen kostet einen Punkt, jede fertige Folge bringt 100. Spiele mit einer, zwei oder vier Farben. Zurücknehmen so oft du willst.',
+        tutTitle1: 'Das Ziel', tutText1: 'Sammle jede vollständige Folge vom König bis zum Ass einer Farbe und nimm sie vom Tisch. Acht Folgen gewinnen.',
+        tutTitle2: 'Spalten', tutText2: 'Eine Karte kommt auf eine um eins höhere, egal welcher Farbe, aber nur eine Folge gleicher Farbe wandert zusammen. Eine leere Spalte nimmt alles.',
+        tutTitle3: 'Stapel und Farben', tutText3: 'Gib fünfmal zehn neue Karten, nie bei einer leeren Spalte. Spiele mit einer, zwei oder vier Farben; zurücknehmen so oft du willst.'
+      },
+      es: {
+        table: 'Mesa de cartas', moves: 'Movimientos', movesN: '{n} movimientos', score: 'Puntos', dailySp: 'Araña diaria',
+        newDeal: 'Nueva partida', restartDaily: 'Reiniciar esta partida', undoMove: 'Deshacer',
+        suits: 'Palos', suit1: 'Un palo', suit2: 'Dos palos', suit4: 'Cuatro palos',
+        suitNote: 'Se aplica desde la próxima partida. La diaria siempre tiene dos palos.',
+        suitWarn: 'Cambiar de palo reinicia esta partida.',
+        stock: 'Mazo', dealsLeft: '{n} repartos', runs: 'Series completas', runsN: '{n} de 8', column: 'Columna {n}',
+        emptyBad: 'Primero llena la columna vacía',
+        kbSpot: 'Moverse entre columnas', kbDepth: 'Bajar o subir en una columna', kbAuto: 'Enviar al mejor sitio',
+        kbDeal: 'Repartir una fila', kbNew: 'Nueva partida',
+        rules: '104 cartas en diez columnas: una carta va sobre otra un punto más alta, de cualquier palo. Solo se mueve junta una serie del mismo palo y en orden. Una serie completa del rey al as de un palo sale de la mesa. Puedes repartir diez cartas nuevas cinco veces, pero nunca mientras haya una columna vacía. La puntuación empieza en 500: cada movimiento y cada deshacer resta uno, y cada serie completa suma 100. Juega con uno, dos o cuatro palos. Deshaz tantas veces como quieras.',
+        tutTitle1: 'El objetivo', tutText1: 'Retira cada serie completa del rey al as de un palo. Ocho series ganan.',
+        tutTitle2: 'Columnas', tutText2: 'Una carta va sobre otra un punto más alta, de cualquier palo, pero solo se mueve junta una serie del mismo palo. Una columna vacía admite cualquier carta.',
+        tutTitle3: 'Mazo y palos', tutText3: 'Reparte diez cartas nuevas cinco veces, nunca con una columna vacía. Juega con uno, dos o cuatro palos; deshaz sin límite.'
+      }
+    }
+  });
+
+  var dailyDate = new URLSearchParams(location.search).get('daily') || null;
+  var prefs = ctx.store.get('prefs', { suits: 1 });
+  if (prefs.suits !== 2 && prefs.suits !== 4) prefs.suits = 1;
+
+  var S = null, L = null, nodes = {}, press = null, focus = -1, focusIdx = -1, kbOn = false, pausedAt = 0, busy = false;
+  var DRAG = 8;
+
+  var top = el('div', { class: 'sp-top' });
+  var board = el('div', { class: 'sp-board', role: 'application', 'aria-label': C.t('table') });
+  var wrap = el('div', { class: 'sp-wrap' }, [top, board]);
+
+  var slots = { stock: el('div', { class: 'sp-slot sp-slot--stock', 'aria-label': C.t('stock') }) };
+  slots.stock.appendChild(C.cards.back());
+  board.appendChild(slots.stock);
+  for (var si = 0; si < 10; si++) {
+    slots['c' + si] = el('div', { class: 'sp-slot', 'aria-label': C.t('column', { n: C.num(si + 1) }) });
+    board.appendChild(slots['c' + si]);
+  }
+
+  var dailyEl = el('span', { class: 'ch-badge ch-badge--accent' });
+  var suitEl = el('span', { class: 'ch-badge' });
+  var runsEl = el('span', { class: 'ch-badge' });
+  var scoreEl = el('span', { class: 'ch-badge' });
+  var dealEl = el('span', { class: 'ch-badge' });
+  var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+  gear.addEventListener('click', showSettings);
+  top.appendChild(dailyEl);
+  top.appendChild(suitEl);
+  top.appendChild(runsEl);
+  top.appendChild(scoreEl);
+  top.appendChild(dealEl);
+  top.appendChild(C.cards.backPicker());
+  top.appendChild(gear);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newDeal'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ start */
+
+  function start(daily) {
+    busy = false;
+    S = daily ? E.dailyDeal(C.daily('spider', daily).rng) : E.deal(Math.random, prefs.suits);
+    S.daily = daily || null;
+    S.startedAt = Date.now();
+    S.finished = false;
+    build();
+    dealIn();
+  }
+  function resume(v) {
+    S = {
+      suits: v.suits, cols: v.cols, down: v.down, stock: v.stock, runs: v.runs || 0,
+      hist: v.hist || [], moves: v.moves || 0, undos: v.undos || 0, daily: v.daily || null,
+      startedAt: Date.now() - (v.elapsed || 0), finished: false
+    };
+    build();
+    render(true);
+  }
+
+  // One node per card for the whole game: a move only changes a transform, the
+  // browser animates it, and a card is never redrawn from scratch.
+  function build() {
+    Object.keys(nodes).forEach(function (k) { if (nodes[k].parentNode) nodes[k].parentNode.removeChild(nodes[k]); });
+    nodes = {};
+    for (var c = 0; c < 104; c++) {
+      var dc = E.rank(c) * 4 + E.suit(c, S.suits);
+      var n = el('div', { class: 'sp-card sp-card--still sp-card--down', 'aria-label': C.cards.label(dc) },
+        [C.cards.el(dc), C.cards.back()]);
+      n.firstChild.tabIndex = -1;
+      n._c = c;
+      nodes[c] = n;
+      board.appendChild(n);
+    }
+    press = null;
+    focus = -1;
+    focusIdx = -1;
+  }
+
+  function updateTop() {
+    dailyEl.style.display = S.daily ? '' : 'none';
+    dailyEl.textContent = '';
+    if (S.daily) {
+      dailyEl.appendChild(C.icon('calendar', 14));
+      dailyEl.appendChild(el('span', { text: C.t('dailySp') + ' — ' + C.num(S.daily) }));
+    }
+    suitEl.textContent = C.t('suit' + S.suits);
+    runsEl.textContent = C.t('runsN', { n: C.num(S.runs) });
+    scoreEl.textContent = C.t('score') + ' ' + C.num(E.score(S));
+    dealEl.textContent = C.t('dealsLeft', { n: C.num(Math.ceil(S.stock.length / 10)) });
+  }
+
+  /* ----------------------------------------------------------- layout */
+
+  function layout() {
+    var W = board.clientWidth, H = board.clientHeight;
+    if (!W || !H) return null;
+    var gap = Math.max(3, Math.round(Math.min(W, 900) * 0.009));
+    var cw = Math.floor((Math.min(W, 900) - gap * 9) / 10);
+    cw = Math.max(24, Math.min(cw, 92, Math.floor(H / 5.6 / 1.4)));
+    var ch = Math.round(cw * 1.4), bw = cw * 10 + gap * 9;
+    board.style.setProperty('--cw', cw + 'px');
+    board.style.setProperty('--sp-move', C.cards.pace(180) + 'ms');
+    return { W: W, H: H, gap: gap, cw: cw, ch: ch, x0: Math.round(Math.max(0, (W - bw) / 2)),
+      ty: gap, cy: gap * 2 + ch, up: Math.max(14, Math.round(ch * 0.28)), dn: Math.max(5, Math.round(ch * 0.1)) };
+  }
+  function colX(i) { return L.x0 + i * (L.cw + L.gap); }
+  function place(n, x, y) { n.style.transform = 'translate(' + x + 'px, ' + y + 'px)'; }
+
+  function offsets(col) {
+    var t = S.cols[col], d = S.down[col], up = L.up, dn = L.dn;
+    var need = d * dn + Math.max(0, t.length - d - 1) * up;
+    var room = L.H - L.cy - L.ch - 4;
+    if (need > room && need > 0) {
+      var k = room / need;
+      up = Math.max(9, Math.round(up * k));
+      dn = Math.max(3, Math.round(dn * k));
+    }
+    return { up: up, dn: dn };
+  }
+
+  function positions() {
+    var P = {}, i, col, t, d, o, y, j;
+    var sx = colX(9), sy = L.ty;
+    for (i = 0; i < S.stock.length; i++) {
+      P[S.stock[i]] = { x: sx, y: sy, z: 50 + i, down: true, under: i < S.stock.length - 1 };
+    }
+    for (col = 0; col < 10; col++) {
+      t = S.cols[col];
+      d = S.down[col];
+      o = offsets(col);
+      y = L.cy;
+      for (j = 0; j < t.length; j++) {
+        var down = j < d;
+        P[t[j]] = { x: colX(col), y: Math.round(y), z: 200 + j, down: down };
+        y += down ? o.dn : o.up;
+      }
+    }
+    return P;
+  }
+
+  function render(still) {
+    if (!S) return;
+    L = layout();
+    if (!L) return;
+    place(slots.stock, colX(9), L.ty);
+    for (var c = 0; c < 10; c++) place(slots['c' + c], colX(c), L.cy);
+    slots.stock.style.opacity = S.stock.length ? '1' : '0.25';
+    var back = slots.stock.querySelector('.ch-pback');
+    if (back) back.style.visibility = S.stock.length ? '' : 'hidden';
+    var P = positions(), k, n, p, tr;
+    for (k in nodes) {
+      if (!Object.prototype.hasOwnProperty.call(nodes, k)) continue;
+      n = nodes[k];
+      p = P[k];
+      if (!p) { n.style.display = 'none'; continue; }
+      n.style.display = '';
+      tr = 'translate(' + p.x + 'px, ' + p.y + 'px)';
+      var moved = n.style.transform !== tr;
+      n.classList.toggle('sp-card--still', !!(still || !moved));
+      var wasDown = n.classList.contains('sp-card--down');
+      if (p.down) n.classList.add('sp-card--down');
+      else n.classList.remove('sp-card--down');
+      if (!still && wasDown && !p.down && !C.ui.reduceMotion()) {
+        n.classList.remove('sp-flip');
+        void n.offsetWidth;
+        n.classList.add('sp-flip');
+      }
+      n.style.transform = tr;
+      n.style.zIndex = String(p.z);
+      n.style.visibility = p.under ? 'hidden' : '';
+    }
+    updateTop();
+    showFocus();
+  }
+
+  function dealIn() {
+    render(true);
+    if (!L || C.ui.reduceMotion()) return;
+    var from = slots.stock.getBoundingClientRect(), n = 0, row, cnt, col;
+    for (row = 0; row < 6; row++) {
+      cnt = row < 5 ? 10 : 4;
+      for (col = 0; col < cnt; col++) {
+        var c = S.cols[col][row];
+        C.ui.fly(nodes[c], from, { ms: 220, delay: n++ * 16, flip: row === S.down[col] });
+      }
+    }
+    C.audio.sfx('flip');
+  }
+
+  /* ----------------------------------------------------------- actions */
+
+  function cardFrom(e) {
+    var n = e.target && e.target.closest ? e.target.closest('.sp-card') : null;
+    return n && n._c != null && nodes[n._c] === n ? n._c : -1;
+  }
+  function inStock(c) { return S.stock.indexOf(c) >= 0; }
+  function sourceOf(c) {
+    for (var col = 0; col < 10; col++) {
+      var i = S.cols[col].indexOf(c);
+      if (i >= 0) return { col: col, i: i };
+    }
+    return null;
+  }
+  function blocked() {
+    return !S || S.finished || busy || !!document.querySelector('.ch-scrim');
+  }
+  function save() { ctx.save(); }
+
+  function after() {
+    render();
+    save();
+    if (E.won(S)) win();
+  }
+
+  function doMove(from, n, to) {
+    var h = E.move(S, from, n, to);
+    if (!h) { C.feedback('bad'); return false; }
+    if (h.run) C.audio.sfx('pop'); else C.audio.sfx('place');
+    C.haptic('tap');
+    after();
+    return true;
+  }
+
+  function tapAt(col, i) {
+    var n = E.runLength(S, col, i);
+    if (!n) { C.feedback('bad'); return; }
+    var dst = E.autoTarget(S, col, n);
+    if (dst < 0 && n > 1) { n = 1; dst = E.autoTarget(S, col, 1); }
+    if (dst < 0) {
+      C.feedback('bad');
+      C.ui.shake(nodes[E.top(S, col)]);
+      return;
+    }
+    C.feedback('place');
+    doMove(col, n, dst);
+  }
+
+  function dealRow() {
+    if (blocked()) return;
+    if (!E.canDeal(S)) {
+      C.feedback('bad');
+      C.ui.toast({ icon: 'help', title: S.stock.length ? C.t('emptyBad') : C.t('stock') });
+      return;
+    }
+    var ten = S.stock.slice(-10).reverse();
+    var h = E.dealStock(S);
+    if (!h) return;
+    C.audio.sfx('flip');
+    C.haptic('tap');
+    render();
+    if (!C.ui.reduceMotion() && L) {
+      var from = slots.stock.getBoundingClientRect(), k = 0;
+      ten.forEach(function (c) {
+        if (nodes[c]) C.ui.fly(nodes[c], from, { ms: 200, delay: k++ * 18 });
+      });
+    }
+    save();
+  }
+
+  function undo() {
+    if (blocked()) return;
+    var h = E.undo(S);
+    if (!h) return;
+    C.feedback('tap');
+    render();
+    save();
+  }
+
+  function win() {
+    S.finished = true;
+    finish();
+  }
+
+  /* ------------------------------------------------------------ input */
+
+  board.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (blocked()) return;
+    kbOn = false;
+    showFocus();
+    var c = cardFrom(e);
+    if (c < 0) return;
+    if (inStock(c)) {
+      press = { stock: true, id: e.pointerId, x0: e.clientX, y0: e.clientY };
+      try { board.setPointerCapture(e.pointerId); } catch (err) {}
+      e.preventDefault();
+      return;
+    }
+    var src = sourceOf(c);
+    if (!src || src.i < S.down[src.col]) return;
+    var n = E.runLength(S, src.col, src.i);
+    if (!n) return;
+    press = {
+      id: e.pointerId, col: src.col, i: src.i, n: n,
+      cards: S.cols[src.col].slice(src.i), x0: e.clientX, y0: e.clientY, drag: false, base: positions()
+    };
+    try { board.setPointerCapture(e.pointerId); } catch (err) {}
+    e.preventDefault();
+  });
+
+  board.addEventListener('pointermove', function (e) {
+    if (!press || press.id !== e.pointerId || press.stock) return;
+    var dx = e.clientX - press.x0, dy = e.clientY - press.y0;
+    if (!press.drag) {
+      if (Math.abs(dx) + Math.abs(dy) < DRAG) return;
+      press.drag = true;
+      C.feedback('select');
+    }
+    for (var k = 0; k < press.cards.length; k++) {
+      var n = nodes[press.cards[k]];
+      if (!n) continue;
+      n.classList.add('sp-card--drag');
+      n.classList.remove('sp-card--still');
+      n.style.zIndex = String(3000 + k);
+      var b = press.base[press.cards[k]];
+      n.style.transform = 'translate(' + (b.x + dx) + 'px, ' + (b.y + dy) + 'px)';
+    }
+    e.preventDefault();
+  });
+
+  function endPress(e, cancelled) {
+    if (!press || press.id !== e.pointerId) return;
+    var pr = press;
+    press = null;
+    if (pr.stock) {
+      if (Math.abs(e.clientX - pr.x0) + Math.abs(e.clientY - pr.y0) < DRAG) dealRow();
+      return;
+    }
+    for (var k = 0; k < pr.cards.length; k++) {
+      var n = nodes[pr.cards[k]];
+      if (n) n.classList.remove('sp-card--drag');
+    }
+    if (cancelled) { render(); return; }
+    if (!pr.drag) { tapAt(pr.col, pr.i); return; }
+    var r = board.getBoundingClientRect();
+    var x = e.clientX - r.left, y = e.clientY - r.top;
+    var dcol = Math.floor((x - L.x0 + L.gap / 2) / (L.cw + L.gap));
+    if (y >= L.cy - L.ch * 0.5 && dcol >= 0 && dcol <= 9 && E.canMove(S, pr.col, pr.n, dcol)) {
+      doMove(pr.col, pr.n, dcol);
+    } else {
+      C.feedback('bad');
+      render();
+    }
+  }
+  board.addEventListener('pointerup', function (e) { endPress(e, false); });
+  board.addEventListener('pointercancel', function (e) { endPress(e, true); });
+
+  /* --------------------------------------------------------- keyboard */
+
+  function focusCard() {
+    if (!S || focus < 0 || focus > 9) return -1;
+    var t = S.cols[focus];
+    if (!t.length) return -1;
+    var i = Math.min(Math.max(focusIdx < 0 ? t.length - 1 : focusIdx, S.down[focus]), t.length - 1);
+    return t[i];
+  }
+  function showFocus() {
+    for (var k in nodes) if (nodes[k].classList.contains('sp-focus')) nodes[k].classList.remove('sp-focus');
+    if (!kbOn || !S || focus === 10) return;
+    var c = focusCard();
+    if (c >= 0 && nodes[c]) nodes[c].classList.add('sp-focus');
+  }
+
+  document.addEventListener('keydown', function (e) {
+    var a = document.activeElement, tag = (a && a.tagName) || '';
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) || (a && a.isContentEditable)) return;
+    if (document.querySelector('.ch-scrim')) return;
+    if (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
+    if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (C.keyIs(e, 'n')) { e.preventDefault(); askNew(); return; }
+    var k = e.key;
+    if (k === 'ArrowLeft' || k === 'ArrowRight') {
+      e.preventDefault();
+      kbOn = true;
+      focus = focus >= 0 ? (focus + (k === 'ArrowRight' ? 1 : 10)) % 11 : 0;
+      focusIdx = -1;
+      showFocus();
+    } else if (k === 'ArrowUp' || k === 'ArrowDown') {
+      if (!kbOn || focus < 0 || focus > 9) return;
+      e.preventDefault();
+      var t = S.cols[focus];
+      if (!t.length) return;
+      if (focusIdx < 0) focusIdx = t.length - 1;
+      else focusIdx += k === 'ArrowDown' ? 1 : -1;
+      focusIdx = Math.max(S.down[focus], Math.min(t.length - 1, focusIdx));
+      showFocus();
+    } else if (k === 'Enter') {
+      e.preventDefault();
+      if (!kbOn) { kbOn = true; focus = 0; focusIdx = -1; showFocus(); return; }
+      if (focus === 10) { dealRow(); return; }
+      var c = focusCard();
+      if (c < 0) return;
+      var src = sourceOf(c);
+      if (src) tapAt(src.col, src.i);
+    } else if (k === ' ' || k === 'Spacebar') {
+      e.preventDefault();
+      dealRow();
+    } else if (k === 'Escape') {
+      e.preventDefault();
+      kbOn = false;
+      showFocus();
+    }
+  });
+
+  /* ---------------------------------------------------------- dialogs */
+
+  function askNew() {
+    if (!S || document.querySelector('.ch-scrim')) return;
+    if (S.daily) {
+      if (!S.hist.length) start(S.daily);
+      else C.ui.confirm({ title: C.t('restartDaily'), body: C.t('resetWarn'), onOk: function () { start(S.daily); } });
+      return;
+    }
+    if (!S.hist.length) start(null);
+    else C.ui.confirm({ title: C.t('newDeal'), body: C.t('resetWarn'), onOk: function () { start(null); } });
+  }
+
+  function showSettings() {
+    if (!S) return;
+    var seg = C.ui.segmented([
+      { value: 1, label: C.t('suit1') },
+      { value: 2, label: C.t('suit2') },
+      { value: 4, label: C.t('suit4') }
+    ], prefs.suits, function (v) {
+      v = +v;
+      if (v === prefs.suits) return;
+      prefs.suits = v;
+      ctx.store.set('prefs', prefs);
+      C.feedback('tap');
+      m.close();
+      if (S.daily || S.finished) return;
+      if (!S.hist.length) start(null);
+      else C.ui.confirm({ title: C.t('newDeal'), body: C.t('suitWarn'), onOk: function () { start(null); } });
+    });
+    var m = C.ui.modal({
+      title: C.t('settings'),
+      body: [el('div', { class: 'ch-list' }, [
+        el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('suits') }), seg]),
+        el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('suitNote') })]),
+        C.cards.speedRow()
+      ])],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  function kb(key, what) {
+    return el('div', { class: 'ch-item' }, [
+      el('div', { class: 'ch-item__label', text: what }),
+      el('span', { class: 'ch-badge', text: key })
+    ]);
+  }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          kb('← →', C.t('kbSpot')),
+          kb('↑ ↓', C.t('kbDepth')),
+          kb('Enter', C.t('kbAuto')),
+          kb('Space', C.t('kbDeal')),
+          kb('U / Ctrl+Z', C.t('undoMove')),
+          kb('N', C.t('kbNew'))
+        ])
+      ],
+      actions: [
+        { label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('done'), kind: 'primary' }
+      ]
+    });
+  }
+
+  /* ----------------------------------------------------------- finish */
+
+  function paintCard(g, col, dc, x, y, w) {
+    var h = w * 1.4, r = Math.max(3, w * 0.09);
+    g.fillStyle = col.face;
+    g.strokeStyle = col.line;
+    g.lineWidth = Math.max(1, w * 0.035);
+    C.rrect(g, x, y, w, h, r);
+    g.fill();
+    g.stroke();
+    var red = E.isRed(dc, S ? S.suits : 4);
+    var glyph = C.cards.GLYPH[E.suit(dc, S ? S.suits : 4)];
+    g.fillStyle = red ? col.red : col.text;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.font = '800 ' + Math.round(w * 0.32) + 'px ' + col.font;
+    g.fillText(C.cards.rankText(E.rank(dc)), x + w * 0.24, y + h * 0.18);
+    g.font = Math.round(w * 0.34) + 'px ' + col.font;
+    g.fillText(glyph, x + w * 0.24, y + h * 0.34);
+    g.font = Math.round(w * 0.52) + 'px ' + col.font;
+    g.fillText(glyph, x + w * 0.52, y + h * 0.66);
+  }
+  function cardPaint() {
+    return function (g, W, H, col) {
+      var suits = S ? S.suits : 4;
+      var list = suits === 1 ? [3, 3, 3, 3] : suits === 2 ? [3, 2, 3, 2] : [3, 2, 1, 0];
+      var cw = Math.min(W / 5.2, H / 1.5), gap = cw * 0.2;
+      var x0 = (W - (cw * 4 + gap * 3)) / 2, y0 = (H - cw * 1.4) / 2;
+      var font = getComputedStyle(document.body).fontFamily || 'system-ui, sans-serif';
+      var red = getComputedStyle(document.documentElement).getPropertyValue('--c-bad').trim() || '#C8574B';
+      try { g.direction = 'ltr'; } catch (e) { /* older WebViews */ }
+      for (var i = 0; i < 4; i++) {
+        paintCard(g, { face: col.surface2, line: col.line || 'rgba(0,0,0,.15)', text: col.text, red: red, font: font },
+          48 + list[i], x0 + i * (cw + gap), y0, cw);
+      }
+    };
+  }
+
+  function finish() {
+    var ms = Math.max(0, Date.now() - S.startedAt);
+    var clean = S.undos === 0;
+    var coins = 14 + (S.suits === 2 ? 5 : 0) + (S.suits === 4 ? 10 : 0) + (clean ? 3 : 0) + (S.daily ? 8 : 0);
+    var points = 45 + (S.suits === 2 ? 15 : 0) + (S.suits === 4 ? 30 : 0) + (S.daily ? 25 : 0);
+    C.achievements.unlock('sp-win');
+    if (S.suits === 4) C.achievements.unlock('sp-four');
+    if (clean) C.achievements.unlock('sp-clean');
+    C.stats.best('spider', 'timeMs' + S.suits, ms, true);
+    C.stats.best('spider', 'moves' + S.suits, S.moves, true);
+    if (S.daily) {
+      var first = C.stats.daily('spider', S.daily, { label: C.t('movesN', { n: C.num(S.moves) }), win: true });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    ctx.finish({
+      won: true,
+      title: C.t('won'),
+      timeMs: ms,
+      coins: coins,
+      points: points,
+      lines: [
+        { label: C.t('suits'), value: C.t('suit' + S.suits) },
+        { label: C.t('moves'), value: C.num(S.moves) },
+        { label: C.t('score'), value: C.num(E.score(S)) },
+        { label: C.t('time'), value: C.time(ms) }
+      ],
+      shareText: 'چوگان · ' + C.t('suit' + S.suits) + ' · ' + C.t('movesN', { n: C.num(S.moves) }),
+      paint: cardPaint(),
+      onAgain: S.daily ? null : function () { start(null); }
+    });
+  }
+
+  /* ------------------------------------------------------------- save */
+
+  ctx.autosave(function () {
+    if (!S || S.finished || !S.hist.length) return { inProgress: false };
+    return {
+      s: {
+        suits: S.suits, cols: S.cols, down: S.down, stock: S.stock, runs: S.runs,
+        hist: S.hist, moves: S.moves, undos: S.undos, daily: S.daily,
+        elapsed: (pausedAt || Date.now()) - S.startedAt
+      }
+    };
+  });
+  C.onPause(function () { pausedAt = Date.now(); });
+  C.onResume(function () {
+    if (S && pausedAt) { S.startedAt += Date.now() - pausedAt; pausedAt = 0; }
+  });
+
+  /* --------------------------------------------------------- tutorial */
+
+  function svgCard(x, y, label, red, down) {
+    if (down) return '<rect x="' + x + '" y="' + y + '" width="34" height="48" rx="5" fill="#3B1D6E" stroke="#E7DCF7" stroke-width="2"/>';
+    return '<rect x="' + x + '" y="' + y + '" width="34" height="48" rx="5" fill="var(--c-surface)" stroke="var(--c-line)"/>' +
+      '<text x="' + (x + 4) + '" y="' + (y + 15) + '" font-size="13" font-weight="800" fill="' + (red ? 'var(--c-bad)' : 'var(--c-text)') + '">' + label + '</text>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'),
+      art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr">' +
+        svgCard(12, 30, 'K♠︎', false) + svgCard(52, 30, 'Q♠︎', false) + svgCard(92, 30, 'J♠︎', false) + svgCard(132, 30, 'A♠︎', false) + '</svg>' },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'),
+      art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr">' +
+        svgCard(20, 6, '', false, true) + svgCard(20, 16, '', false, true) + svgCard(20, 26, '8♠︎', false) + svgCard(20, 50, '7♥︎', true) +
+        svgCard(86, 30, '7♣︎', false) + svgCard(126, 30, '6♦︎', true) +
+        '<rect x="166" y="30" width="26" height="42" rx="5" fill="none" stroke="var(--game)" stroke-width="2" stroke-dasharray="4 3"/></svg>' },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'),
+      art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr">' +
+        svgCard(24, 6, '', false, true) + svgCard(24, 16, '', false, true) + svgCard(24, 26, '', false, true) + svgCard(24, 36, '', false, true) + svgCard(24, 46, '5♠︎', false) +
+        svgCard(150, 6, '', false, true) + svgCard(150, 16, '', false, true) + svgCard(150, 26, '', false, true) + svgCard(150, 36, '', false, true) + svgCard(150, 46, '5♠︎', false) +
+        '<text x="100" y="60" font-size="18" font-weight="800" text-anchor="middle" fill="var(--game)">10 × 5</text></svg>' }
+  ];
+
+  window.addEventListener('resize', function () { render(true); });
+  if (window.ResizeObserver) new ResizeObserver(function () { render(true); }).observe(board);
+  // the face font arriving can change the board's room; place the cards again then
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { render(true); });
+
+  var saved = ctx.loadSave();
+  var sv = saved && E.validState(saved.s) ? saved.s : null;
+  if (dailyDate) {
+    if (sv && sv.daily === dailyDate) resume(sv);
+    else start(dailyDate);
+    if (C.stats.dailyDone('spider', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).spider;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (sv && !sv.daily) {
+    resume(sv);
+  } else {
+    start(null);
+  }
+  ctx.tutorialIfNew(TUT);
+  requestAnimationFrame(function () { render(true); });
+})();
+</script>
+</body>
+</html>
