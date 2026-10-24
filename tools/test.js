@@ -21,7 +21,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 4926;
+const MIN_CHECKS = 4966;
 
 function ok(cond, msg) {
   checks++;
@@ -9069,6 +9069,169 @@ function testKlondike() {
   ok(Date.now() - t0 < 15000, 'the Klondike tests finish in under 15 s (' + (Date.now() - t0) + ' ms)');
 }
 
+function testXiangqi() {
+  head('Chinese chess');
+  const t0 = Date.now();
+  const E = loadEngine('xiangqi', 'XiangqiEngineFactory');
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/xiangqi/index.html'), 'utf8');
+  const games = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games;
+  const at = (r, f) => r * 9 + f;
+  const blank = () => {
+    const S = { board: new Array(90).fill('.'), u: new Array(90).fill(''), turn: 'r', hist: [], keys: {}, moves: 0, undos: 0, human: 'r', level: 2, mode: 'two', daily: null };
+    S.keys[E.key(S)] = 1;
+    return S;
+  };
+  const put = (S, r, f, p) => { const i = at(r, f); S.board[i] = p; S.u[i] = p + i; return i; };
+
+  // The opening: nine files, ten ranks, Red at the bottom, generals facing
+  const D = E.deal({ level: 2 });
+  ok(E.START.length === 90 && D.board.join('') === E.START && D.turn === 'r', 'the board is nine files by ten ranks, Red to move');
+  ok(E.validState(D) && E.kingOf(D, 'r') === at(9, 4) && E.kingOf(D, 'b') === at(0, 4), 'both generals stand in the middle of their palaces');
+  const ids = D.u.filter(Boolean);
+  ok(ids.length === 32 && new Set(ids).size === 32, 'all thirty-two pieces have their own id');
+  ok(E.legal(D).length === 44, 'Red has forty-four opening moves');
+
+  function perft(S, d) { if (!d) return 1; let n = 0; for (const m of E.legal(S)) { E.make(S, m); n += perft(S, d - 1); E.undo(S); } return n; }
+  const pt = Date.now();
+  const p2 = perft(D, 2), p3 = perft(D, 3);
+  ok(p2 === 1920 && p3 === 79666, 'perft two and three match xiangqi (1920 and 79666)');
+  ok(Date.now() - pt < 12000 && D.board.join('') === E.START && D.hist.length === 0, 'perft leaves the position exactly as it was');
+
+  // The chariot slides, stops at its own piece and never jumps
+  let S = blank(); put(S, 9, 4, 'K'); put(S, 0, 3, 'k');
+  const R = put(S, 4, 4, 'R'); put(S, 3, 4, 'P'); put(S, 2, 4, 'p');
+  let ms = E.movesFrom(S, R);
+  ok(ms.length === 12 && ms.includes(at(5, 4)) && ms.includes(at(4, 0)), 'a chariot roams the open lines');
+  ok(!ms.includes(at(3, 4)) && !ms.includes(at(2, 4)), 'a chariot stops at its own piece and does not take the one behind');
+
+  // The cannon needs exactly one screen to take
+  S = blank(); put(S, 9, 4, 'K'); put(S, 0, 3, 'k');
+  const C = put(S, 4, 4, 'C'); put(S, 3, 4, 'P'); put(S, 2, 4, 'p'); put(S, 1, 4, 'p');
+  ms = E.movesFrom(S, C);
+  ok(ms.includes(at(2, 4)) && !ms.includes(at(1, 4)), 'a cannon takes only the piece just beyond its screen');
+  S.board[at(3, 4)] = '.'; S.u[at(3, 4)] = '';
+  ms = E.movesFrom(S, C);
+  ok(!ms.includes(at(2, 4)), 'with no screen the cannon cannot take the first piece in its path');
+
+  // The horse is blocked by the piece beside its leg
+  S = blank(); put(S, 9, 4, 'K'); put(S, 0, 3, 'k'); put(S, 5, 0, 'N');
+  ms = E.movesFrom(S, at(5, 0));
+  ok(ms.length === 4 && ms.includes(at(6, 2)) && ms.includes(at(7, 1)) && ms.includes(at(4, 2)) && ms.includes(at(3, 1)), 'a horse in the corner has four moves');
+  put(S, 5, 1, 'P');
+  ms = E.movesFrom(S, at(5, 0));
+  ok(ms.length === 2 && !ms.includes(at(6, 2)) && !ms.includes(at(4, 2)), 'a piece beside the horse blocks both moves over that leg');
+  S.board[at(5, 1)] = '.'; S.u[at(5, 1)] = ''; put(S, 4, 0, 'P');
+  ms = E.movesFrom(S, at(5, 0));
+  ok(ms.length === 3 && !ms.includes(at(3, 1)), 'a piece below the horse blocks that leg alone');
+
+  // The elephant never crosses the river and is stopped by a piece in its eye
+  S = blank(); put(S, 9, 4, 'K'); put(S, 0, 3, 'k'); put(S, 5, 4, 'B');
+  ms = E.movesFrom(S, at(5, 4));
+  ok(ms.length === 2 && ms.every((i) => E.rank(i) >= 5), 'an elephant on the river bank has two moves and neither crosses');
+  put(S, 6, 3, 'P');
+  ms = E.movesFrom(S, at(5, 4));
+  ok(ms.length === 1 && !ms.includes(at(7, 2)), 'a piece in the elephant eye blocks that diagonal');
+
+  // Palace pieces stay inside it
+  S = blank(); put(S, 9, 4, 'K'); put(S, 0, 3, 'k');
+  ms = E.movesFrom(S, at(9, 4));
+  ok(ms.length === 3 && ms.every((i) => E.file(i) >= 3 && E.file(i) <= 5), 'the general has three steps from the back of the palace and stays inside');
+  S = blank(); put(S, 9, 4, 'K'); put(S, 0, 3, 'k'); put(S, 8, 4, 'A');
+  ms = E.movesFrom(S, at(8, 4));
+  ok(ms.length === 4 && ms.every((i) => E.rank(i) >= 7 && E.rank(i) <= 9), 'the adviser walks the palace diagonals');
+
+  // Soldiers: forward only at home, sideways after the river
+  S = blank(); put(S, 9, 4, 'K'); put(S, 0, 3, 'k'); put(S, 6, 4, 'P');
+  ms = E.movesFrom(S, at(6, 4));
+  ok(ms.length === 1 && ms[0] === at(5, 4), 'at home a soldier only steps forward');
+  S = blank(); put(S, 9, 4, 'K'); put(S, 0, 3, 'k'); put(S, 4, 4, 'P');
+  ms = E.movesFrom(S, at(4, 4));
+  ok(ms.length === 3 && ms.includes(at(3, 4)) && ms.includes(at(4, 3)) && ms.includes(at(4, 5)), 'across the river a soldier steps sideways too');
+  S = blank(); put(S, 9, 4, 'K'); put(S, 0, 3, 'k'); put(S, 5, 4, 'p');
+  ms = E.movesFrom(S, at(5, 4));
+  ok(ms.length === 3 && ms.includes(at(6, 4)) && ms.includes(at(5, 3)) && ms.includes(at(5, 5)), 'the black soldier crosses the other way');
+
+  // The flying generals: an open file between them is check, and the screen may not step aside
+  S = blank(); put(S, 9, 4, 'K'); put(S, 0, 4, 'k');
+  ok(E.inCheck(S, 'r') && E.inCheck(S, 'b'), 'two generals facing down an open file leave both in check');
+  put(S, 6, 4, 'B');
+  ok(!E.inCheck(S, 'r') && !E.inCheck(S, 'b'), 'one piece between the generals is enough');
+  ok(E.legal(S).filter((m) => m.from === at(6, 4)).length === 0, 'the screen cannot step off the file and expose its general');
+
+  // Mate, and the stalemate that also loses in xiangqi
+  S = blank(); put(S, 9, 4, 'K'); put(S, 0, 3, 'k'); put(S, 1, 3, 'R'); put(S, 1, 4, 'R'); S.turn = 'b';
+  let st = E.status(S);
+  ok(st.over && st.winner === 'r' && st.reason === 'mate', 'checkmate ends the game for Black');
+  S = blank(); put(S, 9, 4, 'K'); put(S, 0, 4, 'k'); put(S, 3, 3, 'R'); put(S, 3, 5, 'R'); put(S, 2, 4, 'P'); S.turn = 'b';
+  ok(!E.inCheck(S, 'b'), 'the cornered general is not in check');
+  st = E.status(S);
+  ok(st.over && st.winner === 'r', 'with no legal move at all Black loses even without check');
+
+  // Threefold repetition is a draw
+  S = blank(); put(S, 9, 4, 'K'); put(S, 0, 3, 'k'); put(S, 4, 5, 'R'); put(S, 4, 2, 'r');
+  S.keys = {}; S.keys[E.key(S)] = 1;
+  const seq = [[at(4, 5), at(5, 5)], [at(4, 2), at(5, 2)], [at(5, 5), at(4, 5)], [at(5, 2), at(4, 2)]];
+  for (let i = 0; i < 8; i++) {
+    const m = E.legal(S).find((x) => x.from === seq[i % 4][0] && x.to === seq[i % 4][1]);
+    if (!m) { ok(false, 'the repetition line is legal'); break; }
+    E.make(S, m);
+  }
+  st = E.status(S);
+  ok(st.over && st.winner === null && st.reason === 'repetition', 'the third time the same position appears the game is drawn');
+
+  // Undo walks back to the opening exactly
+  S = E.deal({});
+  const b0 = S.board.join(''), turn0 = S.turn;
+  for (let i = 0; i < 30; i++) {
+    const ms = E.legal(S);
+    if (!ms.length) break;
+    E.make(S, ms[(i * 7 + 3) % ms.length]);
+  }
+  ok(S.hist.length === 30 && S.moves === 30, 'thirty moves are recorded');
+  while (S.hist.length) E.undo(S);
+  ok(S.board.join('') === b0 && S.turn === turn0 && S.moves === 0 && S.undos === 30 && E.validState(S), 'undo takes all thirty moves back to the opening');
+
+  // The AI is deterministic and only makes legal moves
+  const A1 = E.ai(E.clone(D), 1), A2 = E.ai(E.clone(D), 1);
+  ok(A1 && A1.from === A2.from && A1.to === A2.to && E.legal(D).some((m) => m.from === A1.from && m.to === A1.to), 'the easy AI is deterministic and plays a legal move');
+  const H1 = E.ai(E.clone(D), 3), H2 = E.ai(E.clone(D), 3);
+  ok(H1 && H1.from === H2.from && H1.to === H2.to, 'the hard AI is deterministic too');
+
+  // A corrupt save is refused
+  const V1 = E.clone(D); V1.u[85] = '';
+  ok(!E.validState(V1), 'a piece without its id is refused');
+  const V2 = E.clone(D); V2.board[85] = '.'; V2.u[85] = '';
+  ok(!E.validState(V2), 'a board without a general is refused');
+  const V3 = E.clone(D); V3.board[45] = 'R'; V3.u[45] = 'R45';
+  ok(!E.validState(V3), 'a seventeenth red piece is refused');
+
+  // Page and identity
+  const gm = games.find((g) => g.id === 'xiangqi');
+  ok(!!gm && gm.cat === 'board' && gm.daily !== false, 'games.json lists it under board games, with a daily game');
+  ok(!!gm && html.indexOf("accent: '#7C2D12'") > 0 && gm.color === '#7C2D12', 'games.json and the page share the accent');
+  const icon = fs.readFileSync(path.join(ROOT, 'www/games/xiangqi/icon.svg'), 'utf8');
+  ok(!!gm && new RegExp('<rect width="96" height="96" rx="22" fill="' + gm.soft + '"/>').test(icon), 'the icon starts on the soft tint of games.json');
+  const rgb = (x) => [1, 3, 5].map((i) => parseInt(x.slice(i, i + 2), 16) / 255);
+  const lin = (c) => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  const lab = (x) => {
+    const [R, G, Bl] = rgb(x).map(lin), f = (t) => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
+    const X = (R * 0.4124 + G * 0.3576 + Bl * 0.1805) / 0.95047, Y = R * 0.2126 + G * 0.7152 + Bl * 0.0722, Z = (R * 0.0193 + G * 0.1192 + Bl * 0.9505) / 1.08883;
+    return [116 * f(Y) - 16, 500 * (f(X) - f(Y)), 200 * (f(Y) - f(Z))];
+  };
+  const dE = (a, b) => { const P = lab(a), Q = lab(b); return Math.hypot(P[0] - Q[0], P[1] - Q[1], P[2] - Q[2]); };
+  const lum = (x) => rgb(x).map((c) => c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)).reduce((a, c, i) => a + c * [0.2126, 0.7152, 0.0722][i], 0);
+  const near = games.filter((g) => g.id !== 'xiangqi').map((g) => [g.id, dE(g.color, gm.color)]).sort((x, y) => x[1] - y[1])[0];
+  ok(near[1] >= 15 && 1.05 / (lum(gm.color) + 0.05) >= 4.5, 'the accent differs from every other game by ΔE ≥ 15 (nearest ' + near[0] + ', ' + near[1].toFixed(1) + ') and keeps white text at 4.5:1');
+  ok(/name: \{ fa: 'شطرنج چینی', en: 'Chinese chess', zh: '中国象棋', de: 'Chinesisches Schach', es: 'Ajedrez chino' \}/.test(html), 'the five names match games.json');
+  ok(/newGame\(\{ daily: dailyDate, level: 2, mode: 'ai' \}\)/.test(html) && /C\.stats\.daily\('xiangqi', S\.daily/.test(html), 'the daily game uses the same deterministic AI for everyone');
+  ok(/kb\('U \/ Ctrl\+Z'/.test(html) && /if \(C\.undoKey\(e\)\) \{ undo\(\);/.test(html), 'the undo key is labelled and handled');
+  ok(/E\.validState\(saved\.s\)/.test(html) && /ctx\.autosave\(function/.test(html), 'the game saves and restores a checked state');
+  ok(/class: 'xq-board'/.test(html) && /xq-dot--cap/.test(html) && /xq-piece--sel/.test(html), 'the board is tappable and shows selection, target and capture marks');
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  ok(['xq-win', 'xq-fast', 'xq-clean'].every((id) => new RegExp("\\{ id: '" + id + "',[^\\n]*dde: '[^\\n]*des: '").test(core) && html.indexOf("unlock('" + id + "')") > 0), 'the three Chinese chess awards exist in every language and are unlocked');
+  ok(Date.now() - t0 < 15000, 'the Chinese chess tests finish in under 15 s (' + (Date.now() - t0) + ' ms)');
+}
+
 function testCrazyEights() {
   head('Crazy Eights (#416)');
   const t0 = Date.now();
@@ -10087,6 +10250,7 @@ testSudokuClearNotes();
 testKlondike();
 testSpider();
 testPairs();
+testXiangqi();
 testCrazyEights();
 testCrazyEightsIran();
 testGinRummy();
@@ -10202,3 +10366,5 @@ testSw().then(testVerifyDeploy).then(testPlayApi).then(function () {
   console.log('\n✗ اجرای تست‌ها نیمه‌کاره ماند: ' + ((e && e.stack) || e));
   process.exit(1);
 });
+
+

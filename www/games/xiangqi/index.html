@@ -1,0 +1,1354 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FBF6EF">
+<title>شطرنج چینی — Chogan</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* رنگ‌های بازی: تخته چوبی و مهره‌های سرخ و سیاه، مستقل از تم روشن و تیره */
+  :root {
+    --xq-board: #E9D8B8;
+    --xq-line: #7A5C34;
+    --xq-face: #FBF1DC;
+    --xq-red: #A6231B;
+    --xq-black: #23262B;
+  }
+  html[data-motion="off"] .xq-piece { transition: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .xq-piece { transition: none; }
+  }
+  .xq-wrap { flex: 1; min-height: 0; }
+  .xq-board {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 8 / 9;
+    max-height: 100%;
+    border-radius: var(--r-md);
+    background: var(--xq-board);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .08), var(--sh-1);
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    overflow: hidden;
+  }
+  .xq-board:focus-visible { outline: 3px solid var(--game); outline-offset: 3px; }
+  .xq-lines { position: absolute; display: block; color: var(--xq-line); pointer-events: none; }
+  .xq-lines line { stroke: currentColor; stroke-width: 1.3; vector-effect: non-scaling-stroke; }
+  .xq-lines .xq-edge { stroke-width: 2.2; }
+  .xq-lines .xq-river { fill: var(--xq-line); opacity: .55; font-size: .62px; letter-spacing: .14em; }
+  .xq-piece {
+    position: absolute;
+    width: var(--xq-piece);
+    height: var(--xq-piece);
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--xq-face);
+    box-shadow: 0 1px 0 rgba(0, 0, 0, .14), 0 3px 7px rgba(0, 0, 0, .22);
+    transition: left .18s var(--ease), top .18s var(--ease), box-shadow .15s var(--ease);
+    z-index: 2;
+  }
+  .xq-piece::before {
+    content: "";
+    position: absolute;
+    inset: 7%;
+    border-radius: 50%;
+    border: 1.5px solid currentColor;
+    opacity: .55;
+  }
+  .xq-piece--r { color: var(--xq-red); border: 2px solid var(--xq-red); }
+  .xq-piece--b { color: var(--xq-black); border: 2px solid var(--xq-black); }
+  .xq-glyph {
+    font-size: var(--xq-font);
+    font-weight: 700;
+    line-height: 1;
+    font-family: "Noto Serif SC", "Songti SC", "SimSun", "Noto Sans SC", serif;
+    pointer-events: none;
+  }
+  .xq-piece--sel { box-shadow: 0 0 0 3px var(--game), 0 3px 10px rgba(0, 0, 0, .3); }
+  .xq-gone { opacity: 0; transform: translate(-50%, -50%) scale(.35); transition: opacity .16s, transform .2s; }
+  .xq-dot {
+    position: absolute;
+    width: calc(var(--xq-piece) * .34);
+    height: calc(var(--xq-piece) * .34);
+    border-radius: 50%;
+    background: var(--game);
+    opacity: .55;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 1;
+  }
+  .xq-dot--cap {
+    width: calc(var(--xq-piece) * .92);
+    height: calc(var(--xq-piece) * .92);
+    background: transparent;
+    border: 3px solid var(--c-bad);
+    opacity: .8;
+  }
+  .xq-lastmark {
+    position: absolute;
+    width: calc(var(--xq-piece) * .9);
+    height: calc(var(--xq-piece) * .9);
+    border: 2px dashed var(--c-text-faint);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 1;
+  }
+  .xq-cursor {
+    position: absolute;
+    width: calc(var(--xq-piece) * 1.02);
+    height: calc(var(--xq-piece) * 1.02);
+    border: 3px solid var(--game);
+    border-radius: var(--r-sm);
+    box-sizing: border-box;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 6;
+  }
+  .xq-status {
+    font-size: var(--fs-md);
+    font-weight: 600;
+    color: var(--c-text);
+    min-height: 1.6em;
+    line-height: 1.5;
+  }
+  .xq-status--bad { color: var(--c-bad); }
+  .xq-caps { display: flex; flex-wrap: wrap; gap: 3px; min-height: 24px; }
+  .xq-cap { font-size: 17px; line-height: 1; opacity: .8; }
+  .xq-cap--r { color: var(--xq-red); }
+  .xq-cap--b { color: var(--xq-black); }
+  .xq-moves { display: flex; flex-wrap: wrap; gap: 5px; overflow: auto; max-height: 120px; }
+  .xq-move {
+    font-size: var(--fs-xs);
+    background: var(--c-surface-2);
+    border-radius: var(--r-sm);
+    padding: 2px 7px;
+    color: var(--c-text-dim);
+  }
+  .xq-settings .ch-item__label { font-weight: 600; margin-bottom: 4px; }
+  .xq-note { color: var(--c-text-dim); font-size: var(--fs-sm); margin: 2px 0 10px; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function XiangqiEngineFactory() {
+  'use strict';
+
+  // مهره‌ها: حروف بزرگ برای سرخ (پایین، به سمت بالا) و کوچک برای سیاه.
+  var START = (
+    'rnbakabnr' +
+    '.........' +
+    '.c.....c.' +
+    'p.p.p.p.p' +
+    '.........' +
+    '.........' +
+    'P.P.P.P.P' +
+    '.C.....C.' +
+    '.........' +
+    'RNBAKABNR'
+  );
+
+  var VALUE = { r: 900, n: 400, c: 450, b: 200, a: 200, p: 100, k: 10000 };
+  var MATE = 1000000;
+  var DIRS = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+
+  function isRed(p) { return p >= 'A' && p <= 'Z'; }
+  function sideOf(p) { return isRed(p) ? 'r' : 'b'; }
+  function other(s) { return s === 'r' ? 'b' : 'r'; }
+  function rank(i) { return (i / 9) | 0; }
+  function file(i) { return i % 9; }
+  function onBoard(f, r) { return f >= 0 && f < 9 && r >= 0 && r < 10; }
+
+  function inPalace(side, f, r) {
+    if (f < 3 || f > 5) return false;
+    return side === 'r' ? (r >= 7 && r <= 9) : (r >= 0 && r <= 2);
+  }
+
+  function key(S) { return S.board.join('') + '|' + S.turn; }
+
+  function kingOf(S, side) {
+    var wanted = side === 'r' ? 'K' : 'k';
+    for (var i = 0; i < 90; i++) if (S.board[i] === wanted) return i;
+    return -1;
+  }
+
+  function deal(opts) {
+    opts = opts || {};
+    var board = START.split(''), u = [];
+    for (var i = 0; i < 90; i++) u.push(board[i] === '.' ? '' : board[i] + i);
+    var S = {
+      board: board,
+      u: u,
+      turn: 'r',
+      hist: [],
+      keys: {},
+      moves: 0,
+      undos: 0,
+      human: 'r',
+      level: opts.level || 2,
+      mode: opts.mode || 'ai',
+      daily: opts.daily || null
+    };
+    S.keys[key(S)] = 1;
+    return S;
+  }
+
+  function clone(S) {
+    return {
+      board: S.board.slice(),
+      u: S.u.slice(),
+      turn: S.turn,
+      hist: S.hist.map(function (h) { return { from: h.from, to: h.to, piece: h.piece, cap: h.cap, uFrom: h.uFrom, uTo: h.uTo }; }),
+      keys: Object.assign({}, S.keys),
+      moves: S.moves,
+      undos: S.undos,
+      human: S.human,
+      level: S.level,
+      mode: S.mode,
+      daily: S.daily
+    };
+  }
+
+  // آیا مهرهٔ p در خانهٔ i می‌تواند به خانهٔ to برود (بدون توجه به کیش)؟
+  function movesFrom(S, i) {
+    var p = S.board[i], out = [];
+    if (p === '.') return out;
+    var side = sideOf(p), t = p.toLowerCase();
+    var f = file(i), r = rank(i), ff, rr, q, qp, d, df, dr;
+
+    if (t === 'r' || t === 'c') {
+      for (d = 0; d < 4; d++) {
+        df = DIRS[d][0]; dr = DIRS[d][1];
+        ff = f + df; rr = r + dr;
+        var screen = 0;
+        while (onBoard(ff, rr)) {
+          q = rr * 9 + ff; qp = S.board[q];
+          if (t === 'r') {
+            if (qp === '.') out.push(q);
+            else {
+              if (sideOf(qp) !== side) out.push(q);
+              break;
+            }
+          } else if (screen === 0) {
+            if (qp === '.') out.push(q);
+            else screen = 1;
+          } else if (qp !== '.') {
+            if (sideOf(qp) !== side) out.push(q);
+            break;
+          }
+          ff += df; rr += dr;
+        }
+      }
+      return out;
+    }
+
+    if (t === 'n') {
+      var KN = [[2, 1, 1, 0], [-2, 1, -1, 0], [2, -1, 1, 0], [-2, -1, -1, 0],
+                [1, 2, 0, 1], [-1, 2, 0, 1], [1, -2, 0, -1], [-1, -2, 0, -1]];
+      for (d = 0; d < 8; d++) {
+        ff = f + KN[d][0]; rr = r + KN[d][1];
+        if (!onBoard(ff, rr)) continue;
+        if (S.board[(r + KN[d][3]) * 9 + (f + KN[d][2])] !== '.') continue;
+        qp = S.board[rr * 9 + ff];
+        if (qp === '.' || sideOf(qp) !== side) out.push(rr * 9 + ff);
+      }
+      return out;
+    }
+
+    if (t === 'b') {
+      var BD = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
+      for (d = 0; d < 4; d++) {
+        df = BD[d][0]; dr = BD[d][1];
+        ff = f + df * 2; rr = r + dr * 2;
+        if (!onBoard(ff, rr)) continue;
+        if (side === 'r' ? rr < 5 : rr > 4) continue;      // پیل از رودخانه نمی‌گذرد
+        if (S.board[(r + dr) * 9 + (f + df)] !== '.') continue;
+        qp = S.board[rr * 9 + ff];
+        if (qp === '.' || sideOf(qp) !== side) out.push(rr * 9 + ff);
+      }
+      return out;
+    }
+
+    if (t === 'a') {
+      var AD = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
+      for (d = 0; d < 4; d++) {
+        ff = f + AD[d][0]; rr = r + AD[d][1];
+        if (!onBoard(ff, rr) || !inPalace(side, ff, rr)) continue;
+        qp = S.board[rr * 9 + ff];
+        if (qp === '.' || sideOf(qp) !== side) out.push(rr * 9 + ff);
+      }
+      return out;
+    }
+
+    if (t === 'k') {
+      for (d = 0; d < 4; d++) {
+        ff = f + DIRS[d][0]; rr = r + DIRS[d][1];
+        if (!onBoard(ff, rr) || !inPalace(side, ff, rr)) continue;
+        qp = S.board[rr * 9 + ff];
+        if (qp === '.' || sideOf(qp) !== side) out.push(rr * 9 + ff);
+      }
+      return out;
+    }
+
+    // سرباز
+    dr = side === 'r' ? -1 : 1;
+    rr = r + dr;
+    if (onBoard(f, rr)) {
+      qp = S.board[rr * 9 + f];
+      if (qp === '.' || sideOf(qp) !== side) out.push(rr * 9 + f);
+    }
+    var crossed = side === 'r' ? r <= 4 : r >= 5;
+    if (crossed) {
+      for (d = 0; d < 2; d++) {
+        ff = f + (d === 0 ? -1 : 1);
+        if (!onBoard(ff, r)) continue;
+        qp = S.board[r * 9 + ff];
+        if (qp === '.' || sideOf(qp) !== side) out.push(r * 9 + ff);
+      }
+    }
+    return out;
+  }
+
+  // آیا خانهٔ k با مهره‌ای از طرف مقابل تهدید می‌شود؟ (مهرهٔ k سرخ یا سیاه است)
+  function attacked(S, k) {
+    var side = sideOf(S.board[k]);
+    var f = file(k), r = rank(k), d, df, dr, ff, rr, q, p;
+    for (d = 0; d < 4; d++) {
+      df = DIRS[d][0]; dr = DIRS[d][1];
+      ff = f + df; rr = r + dr;
+      var screen = 0;
+      while (onBoard(ff, rr)) {
+        q = rr * 9 + ff; p = S.board[q];
+        if (p !== '.') {
+          if (sideOf(p) !== side) {
+            var t = p.toLowerCase();
+            if (t === 'r' && screen === 0) return true;
+            if (t === 'k' && screen === 0) return true;
+            if (t === 'c' && screen === 1) return true;
+          }
+          screen++;
+          if (screen > 1) break;
+        }
+        ff += df; rr += dr;
+      }
+    }
+    // اسب
+    var hf, hr, lf, lr;
+    for (hf = f - 2; hf <= f + 2; hf++) {
+      for (hr = r - 2; hr <= r + 2; hr++) {
+        if (!onBoard(hf, hr)) continue;
+        p = S.board[hr * 9 + hf];
+        if (p === '.' || sideOf(p) === side || p.toLowerCase() !== 'n') continue;
+        var df2 = hf - f, dr2 = hr - r;
+        if (Math.abs(df2) === 2 && Math.abs(dr2) === 1) { lf = hf - Math.sign(df2); lr = hr; }
+        else if (Math.abs(df2) === 1 && Math.abs(dr2) === 2) { lf = hf; lr = hr - Math.sign(dr2); }
+        else continue;
+        if (S.board[lr * 9 + lf] === '.') return true;
+      }
+    }
+    // سرباز
+    var pawn = side === 'r' ? 'p' : 'P';   // سرباز حریف
+    // سرباز سیاه به پایین می‌رود: اگر پادشاه سرخ است، سرباز سیاه از بالا می‌آید
+    var fromRank = side === 'r' ? r - 1 : r + 1;
+    if (onBoard(f, fromRank) && S.board[fromRank * 9 + f] === pawn) return true;
+    var crossedNow = side === 'r' ? r <= 4 : r >= 5;
+    if (crossedNow && onBoard(f - 1, r) && S.board[r * 9 + f - 1] === pawn) return true;
+    if (crossedNow && onBoard(f + 1, r) && S.board[r * 9 + f + 1] === pawn) return true;
+    return false;
+  }
+
+  function inCheck(S, side) {
+    var k = kingOf(S, side);
+    if (k < 0) return true;
+    var ek = kingOf(S, other(side));
+    if (ek >= 0 && file(ek) === file(k)) {
+      var clear = true;
+      for (var q = Math.min(k, ek) + 9; q < Math.max(k, ek); q += 9) {
+        if (S.board[q] !== '.') { clear = false; break; }
+      }
+      if (clear) return true;    // شاهان رو‌به‌روی هم
+    }
+    return attacked(S, k);
+  }
+
+  function legal(S) {
+    var out = [], side = S.turn;
+    for (var i = 0; i < 90; i++) {
+      var p = S.board[i];
+      if (p === '.' || sideOf(p) !== side) continue;
+      var ms = movesFrom(S, i);
+      for (var j = 0; j < ms.length; j++) {
+        var to = ms[j], cap = S.board[to], uFrom = S.u[i], uTo = S.u[to];
+        S.board[to] = p; S.board[i] = '.';
+        var bad = inCheck(S, side);
+        S.board[i] = p; S.board[to] = cap;
+        if (!bad) out.push({ from: i, to: to, piece: p, cap: cap, uFrom: uFrom, uTo: uTo });
+      }
+    }
+    return out;
+  }
+
+  function make(S, m) {
+    var h = {
+      from: m.from, to: m.to, piece: S.board[m.from], cap: S.board[m.to],
+      uFrom: S.u[m.from], uTo: S.u[m.to], turn: S.turn
+    };
+    S.board[m.to] = S.board[m.from]; S.board[m.from] = '.';
+    S.u[m.to] = S.u[m.from]; S.u[m.from] = '';
+    S.hist.push(h);
+    S.turn = other(S.turn);
+    S.moves++;
+    var k = key(S);
+    S.keys[k] = (S.keys[k] || 0) + 1;
+    return h;
+  }
+
+  function undo(S) {
+    var h = S.hist.pop();
+    if (!h) return null;
+    var k = key(S);
+    if (S.keys[k]) S.keys[k]--;
+    S.board[h.from] = h.piece; S.board[h.to] = h.cap;
+    S.u[h.from] = h.uFrom; S.u[h.to] = h.uTo;
+    S.turn = h.turn;
+    S.moves--;
+    S.undos++;
+    return h;
+  }
+
+  function status(S) {
+    var ms = legal(S);
+    if (!ms.length) return { over: true, winner: other(S.turn), reason: 'mate' };
+    if ((S.keys[key(S)] || 0) >= 3) return { over: true, winner: null, reason: 'repetition' };
+    return { over: false, check: inCheck(S, S.turn), moves: ms.length };
+  }
+
+  function evaluate(S) {
+    var v = 0;
+    for (var i = 0; i < 90; i++) {
+      var p = S.board[i];
+      if (p === '.') continue;
+      var red = isRed(p), t = p.toLowerCase(), base = VALUE[t] || 0, adv = 0;
+      var f = file(i), r = rank(i);
+      if (t === 'p') {
+        adv = red ? (9 - r) * 6 : r * 6;
+        if (red ? r <= 4 : r >= 5) adv += 20;
+      } else if (t === 'n') {
+        adv = 12 - Math.round(Math.abs(4 - f) * 3 + Math.abs(4.5 - r) * 2);
+      } else if (t === 'c') {
+        adv = 10 - Math.round(Math.abs(4 - f) * 2);
+      }
+      if (red) v += base + adv; else v -= base + adv;
+    }
+    return v;
+  }
+
+  function hash(str) {
+    var h = 2166136261 >>> 0;
+    for (var i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  function apply(S, m) {
+    S.board[m.to] = S.board[m.from];
+    S.board[m.from] = '.';
+    S.turn = other(S.turn);
+  }
+
+  function unapply(S, m, prevTurn) {
+    S.board[m.from] = S.board[m.to];
+    S.board[m.to] = m.cap;
+    S.turn = prevTurn;
+  }
+
+  function order(ms) {
+    return ms.slice().sort(function (a, b) {
+      return (b.cap === '.' ? 0 : VALUE[b.cap.toLowerCase()] || 0) -
+             (a.cap === '.' ? 0 : VALUE[a.cap.toLowerCase()] || 0);
+    });
+  }
+
+  function search(S, depth, alpha, beta) {
+    var ms = legal(S);
+    if (!ms.length) return S.turn === 'r' ? -MATE : MATE;
+    if (depth <= 0) return evaluate(S);
+    var red = S.turn === 'r', best = red ? -Infinity : Infinity, prev = S.turn;
+    ms = order(ms);
+    for (var i = 0; i < ms.length; i++) {
+      var m = ms[i];
+      apply(S, m);
+      var v = search(S, depth - 1, alpha, beta);
+      unapply(S, m, prev);
+      if (red) {
+        if (v > best) best = v;
+        if (best > alpha) alpha = best;
+      } else {
+        if (v < best) best = v;
+        if (best < beta) beta = best;
+      }
+      if (alpha >= beta) break;
+    }
+    return best;
+  }
+
+  function noiseFor(S, m, span) {
+    return hash(key(S) + ':' + m.from + ':' + m.to) % span;
+  }
+
+  // هوش مصنوعی: قطعی بر اساس موقعیت (دست روزانه برای همه یکسان می‌ماند)
+  function ai(S, level) {
+    var ms = legal(S);
+    if (!ms.length) return null;
+    level = level || 2;
+    if (level <= 1) return ms[hash(key(S)) % ms.length];
+    var depth = level >= 3 ? 2 : 1;
+    var best = null, bestVal = Infinity, prev = S.turn;
+    var msOrdered = order(ms);
+    for (var i = 0; i < msOrdered.length; i++) {
+      var m = msOrdered[i];
+      apply(S, m);
+      var v = depth > 1 ? search(S, depth - 1, -MATE, MATE) : evaluate(S);
+      unapply(S, m, prev);
+      v += (noiseFor(S, m, 5) - 2) * (level >= 3 ? 3 : 9);
+      if (v < bestVal) { bestVal = v; best = m; }
+    }
+    return best;
+  }
+
+  function validState(v) {
+    if (!v || !Array.isArray(v.board) || v.board.length !== 90) return false;
+    if (!Array.isArray(v.u) || v.u.length !== 90) return false;
+    if (v.turn !== 'r' && v.turn !== 'b') return false;
+    if (!Array.isArray(v.hist) || !v.keys || typeof v.moves !== 'number' || typeof v.undos !== 'number') return false;
+    var seen = {}, kings = { r: 0, b: 0 }, total = { r: 0, b: 0 };
+    for (var i = 0; i < 90; i++) {
+      var p = v.board[i];
+      if (p === '.') {
+        if (v.u[i] !== '') return false;
+        continue;
+      }
+      if (p.length !== 1 || 'KABNRCPkabnrcp'.indexOf(p) < 0) return false;
+      if (!v.u[i] || seen[v.u[i]]) return false;
+      seen[v.u[i]] = 1;
+      var side = sideOf(p);
+      total[side]++;
+      if (p === 'K' || p === 'k') kings[side]++;
+      if (total[side] > 16) return false;
+    }
+    if (kings.r !== 1 || kings.b !== 1) return false;
+    return true;
+  }
+
+  var api = {
+    rank: rank, file: file, isRed: isRed, sideOf: sideOf, other: other,
+    key: key, kingOf: kingOf, deal: deal, clone: clone, movesFrom: movesFrom,
+    inCheck: inCheck, legal: legal, make: make, undo: undo, status: status,
+    evaluate: evaluate, ai: ai, validState: validState, START: START,
+    VALUE: VALUE, MATE: MATE
+  };
+  if (typeof self !== 'undefined') self.XiangqiEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = XiangqiEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = XiangqiEngineFactory();
+  C.boot({});
+
+  var ctx = C.game({
+    id: 'xiangqi',
+    name: { fa: 'شطرنج چینی', en: 'Chinese chess', zh: '中国象棋', de: 'Chinesisches Schach', es: 'Ajedrez chino' },
+    accent: '#7C2D12',
+    mood: 'menu',
+    strings: {
+      fa: {
+        table: 'صفحهٔ شطرنج چینی', moves: 'حرکت‌ها', movesN: '{n} حرکت', newGame: 'بازی تازه',
+        undoMove: 'برگرداندن حرکت', help: 'راهنما', settings: 'تنظیمات', level: 'سطح',
+        easy: 'آسان', normal: 'معمولی', hard: 'سخت', mode: 'حالت', vsAi: 'با رایانه',
+        twoPlayers: 'دو نفره', yourMove: 'نوبت شماست', aiThinking: 'رایانه فکر می‌کند…',
+        redToMove: 'نوبت سرخ', blackToMove: 'نوبت سیاه', check: 'کیش!',
+        youWin: 'بردید', youLose: 'رایانه برد', redWins: 'سرخ برد', blackWins: 'سیاه برد',
+        draw: 'مساوی', captured: 'مهره‌های گرفته‌شده',
+        rules: 'شطرنج چینی روی صفحهٔ ۹×۱۰ بازی می‌شود که رودخانه آن را به دو نیمه تقسیم می‌کند. شاه و مشاور از کاخ بیرون نمی‌روند، پیل از رودخانه نمی‌گذرد و توپ تنها از روی یک مهره شلیک می‌کند. کیش‌ومات و پات هر دو باخت‌اند.',
+        keyboard: 'صفحه‌کلید', kbNav: 'جابه‌جایی نشانگر', kbPick: 'انتخاب / حرکت',
+        kbCancel: 'لغو انتخاب', kbUndo: 'برگرداندن حرکت', kbNew: 'بازی تازه',
+        tutorial: 'آموزش', done: 'باشه',
+        restartDaily: 'دست روزانه از نو شود؟', resetWarn: 'بازی کنونی از دست می‌رود.',
+        dailyXq: 'دست روزانه',
+        pK: 'شاه', pA: 'مشاور', pB: 'پیل', pN: 'اسب', pR: 'رخ', pC: 'توپ', pP: 'سرباز',
+        tutTitle1: 'صفحه', tutText1: 'صفحهٔ ۹×۱۰ را رودخانه به دو نیمه تقسیم می‌کند. کاخ‌ها با خطوط مورب مشخص شده‌اند و شاه و مشاور هرگز از آن‌ها بیرون نمی‌روند.',
+        tutTitle2: 'مهره‌ها', tutText2: 'اسب را مهرهٔ کنار پایش می‌بندد، پیل از رودخانه نمی‌گذرد و توپ تنها وقتی می‌گیرد که دقیقاً یک مهره میان آن و هدف باشد.',
+        tutTitle3: 'بردن', tutText3: 'کسی که هیچ حرکت قانونی ندارد می‌بازد، حتی بدون کیش. شاهان هرگز نباید بی‌پرده رو‌به‌روی هم بایستند. برگرداندن حرکت بی‌حد است.',
+        settingsNote: 'تغییرها بی‌درنگ اثر می‌کنند؛ بازی تازه با سطح انتخابی آغاز می‌شود.'
+      },
+      en: {
+        table: 'Xiangqi board', moves: 'Moves', movesN: '{n} moves', newGame: 'New game',
+        undoMove: 'Undo', help: 'Help', settings: 'Settings', level: 'Level',
+        easy: 'Easy', normal: 'Normal', hard: 'Hard', mode: 'Mode', vsAi: 'Against the AI',
+        twoPlayers: 'Two players', yourMove: 'Your move', aiThinking: 'The AI is thinking…',
+        redToMove: 'Red to move', blackToMove: 'Black to move', check: 'Check!',
+        youWin: 'You win', youLose: 'The AI wins', redWins: 'Red wins', blackWins: 'Black wins',
+        draw: 'Draw', captured: 'Captured',
+        rules: 'Xiangqi is Chinese chess: two armies on a 9×10 board split by a river. The general and his advisors stay in the palace, elephants never cross the river, and cannons capture only over a screen. Checkmate and stalemate both lose.',
+        keyboard: 'Keyboard', kbNav: 'Move the cursor', kbPick: 'Select / play',
+        kbCancel: 'Cancel selection', kbUndo: 'Undo a move', kbNew: 'New game',
+        tutorial: 'Tutorial', done: 'Done',
+        restartDaily: 'Restart the daily game?', resetWarn: 'The current game will be lost.',
+        dailyXq: 'Daily game',
+        pK: 'general', pA: 'advisor', pB: 'elephant', pN: 'horse', pR: 'chariot', pC: 'cannon', pP: 'pawn',
+        tutTitle1: 'The board', tutText1: 'The 9×10 board is split by the river. The two palaces are marked with diagonals; the general and his advisors may never leave them.',
+        tutTitle2: 'The pieces', tutText2: 'The horse is blocked by the piece beside its leg, the elephant cannot cross the river, and a cannon captures only when exactly one piece stands between it and its target.',
+        tutTitle3: 'Winning', tutText3: 'A player with no legal move loses, even without check. The two generals may never face each other on an open file. Undo is unlimited.',
+        settingsNote: 'Changes apply at once; a new game uses the chosen level.'
+      },
+      zh: {
+        table: '棋盘', moves: '着法', movesN: '{n} 着', newGame: '新对局',
+        undoMove: '悔棋', help: '帮助', settings: '设置', level: '难度',
+        easy: '简单', normal: '普通', hard: '困难', mode: '模式', vsAi: '人机对战',
+        twoPlayers: '双人对战', yourMove: '轮到你走', aiThinking: '电脑思考中…',
+        redToMove: '红方走棋', blackToMove: '黑方走棋', check: '将军！',
+        youWin: '你赢了', youLose: '电脑获胜', redWins: '红方获胜', blackWins: '黑方获胜',
+        draw: '和棋', captured: '已吃子',
+        rules: '中国象棋在 9×10 的棋盘上进行，中间隔着楚河汉界。将帅与士不得离开九宫，象不能过河，炮吃子时必须隔一个棋子。将死和困毙都算负。',
+        keyboard: '键盘', kbNav: '移动光标', kbPick: '选择 / 走子',
+        kbCancel: '取消选择', kbUndo: '悔棋', kbNew: '新对局',
+        tutorial: '教程', done: '好',
+        restartDaily: '重新开始每日对局？', resetWarn: '当前对局将丢失。',
+        dailyXq: '每日对局',
+        pK: '将', pA: '士', pB: '象', pN: '马', pR: '车', pC: '炮', pP: '卒',
+        tutTitle1: '棋盘', tutText1: '9×10 的棋盘被中间的楚河汉界分开。两侧的九宫画有斜线，将帅和士永远不能离开九宫。',
+        tutTitle2: '棋子走法', tutText2: '马被马腿旁的棋子挡住就不能走，象不能过河，炮只有在与目标之间恰隔一个棋子时才能吃子。',
+        tutTitle3: '取胜', tutText3: '没有合法着法的一方判负，即使并未被将军。两位将帅不能在同一直线上照面。悔棋次数不限。',
+        settingsNote: '设置立即生效；新对局按所选难度开始。'
+      },
+      de: {
+        table: 'Xiangqi-Brett', moves: 'Züge', movesN: '{n} Züge', newGame: 'Neues Spiel',
+        undoMove: 'Zug zurücknehmen', help: 'Hilfe', settings: 'Einstellungen', level: 'Stufe',
+        easy: 'Leicht', normal: 'Normal', hard: 'Schwer', mode: 'Modus', vsAi: 'Gegen den Computer',
+        twoPlayers: 'Zwei Spieler', yourMove: 'Du bist am Zug', aiThinking: 'Der Computer denkt nach …',
+        redToMove: 'Rot ist am Zug', blackToMove: 'Schwarz ist am Zug', check: 'Schach!',
+        youWin: 'Du gewinnst', youLose: 'Der Computer gewinnt', redWins: 'Rot gewinnt', blackWins: 'Schwarz gewinnt',
+        draw: 'Unentschieden', captured: 'Geschlagen',
+        rules: 'Xiangqi ist chinesisches Schach: Zwei Heere auf einem 9×10-Brett, getrennt durch einen Fluss. General und Berater bleiben im Palast, Elefanten überqueren den Fluss nie, und Kanonen schlagen nur über eine Figur hinweg. Schachmatt und Patt verlieren beide.',
+        keyboard: 'Tastatur', kbNav: 'Cursor bewegen', kbPick: 'Auswählen / ziehen',
+        kbCancel: 'Auswahl aufheben', kbUndo: 'Zug zurücknehmen', kbNew: 'Neues Spiel',
+        tutorial: 'Anleitung', done: 'Fertig',
+        restartDaily: 'Tägliches Spiel neu starten?', resetWarn: 'Das laufende Spiel geht verloren.',
+        dailyXq: 'Tägliches Spiel',
+        pK: 'General', pA: 'Berater', pB: 'Elefant', pN: 'Pferd', pR: 'Wagen', pC: 'Kanone', pP: 'Soldat',
+        tutTitle1: 'Das Brett', tutText1: 'Das 9×10-Brett wird vom Fluss geteilt. Die Paläste sind mit Diagonalen markiert; General und Berater dürfen sie nie verlassen.',
+        tutTitle2: 'Die Figuren', tutText2: 'Das Pferd wird von der Figur an seinem Bein blockiert, der Elefant überquert den Fluss nie, und eine Kanone schlägt nur über genau eine Figur hinweg.',
+        tutTitle3: 'Gewinnen', tutText3: 'Wer keinen Zug mehr hat, verliert – auch ohne Schach. Die fliegenden Generäle dürfen niemals offen auf einer Linie stehen. Zurücknehmen ist unbegrenzt.',
+        settingsNote: 'Änderungen gelten sofort; ein neues Spiel startet mit der gewählten Stufe.'
+      },
+      es: {
+        table: 'Tablero de xiangqi', moves: 'Movimientos', movesN: '{n} movimientos', newGame: 'Nueva partida',
+        undoMove: 'Deshacer', help: 'Ayuda', settings: 'Ajustes', level: 'Nivel',
+        easy: 'Fácil', normal: 'Normal', hard: 'Difícil', mode: 'Modo', vsAi: 'Contra la máquina',
+        twoPlayers: 'Dos jugadores', yourMove: 'Te toca', aiThinking: 'La máquina está pensando…',
+        redToMove: 'Juegan las rojas', blackToMove: 'Juegan las negras', check: '¡Jaque!',
+        youWin: 'Ganas', youLose: 'Gana la máquina', redWins: 'Ganan las rojas', blackWins: 'Ganan las negras',
+        draw: 'Tablas', captured: 'Capturadas',
+        rules: 'El xiangqi es el ajedrez chino: dos ejércitos en un tablero de 9×10 dividido por un río. El general y los consejeros no salen del palacio, los elefantes nunca cruzan el río y los cañones solo capturan por encima de una pieza. El jaque mate y el ahogado pierden ambos.',
+        keyboard: 'Teclado', kbNav: 'Mover el cursor', kbPick: 'Elegir / mover',
+        kbCancel: 'Cancelar la selección', kbUndo: 'Deshacer un movimiento', kbNew: 'Nueva partida',
+        tutorial: 'Tutorial', done: 'Listo',
+        restartDaily: '¿Reiniciar la partida diaria?', resetWarn: 'La partida actual se perderá.',
+        dailyXq: 'Partida diaria',
+        pK: 'general', pA: 'consejero', pB: 'elefante', pN: 'caballo', pR: 'carro', pC: 'cañón', pP: 'soldado',
+        tutTitle1: 'El tablero', tutText1: 'El tablero de 9×10 está dividido por el río. Los palacios se marcan con diagonales; el general y los consejeros nunca pueden salir de ellos.',
+        tutTitle2: 'Las piezas', tutText2: 'El caballo queda bloqueado por la pieza junto a su pata, el elefante nunca cruza el río y el cañón solo captura cuando hay exactamente una pieza entre él y su objetivo.',
+        tutTitle3: 'Ganar', tutText3: 'Quien no tiene ningún movimiento legal pierde, aunque no esté en jaque. Los dos generales nunca pueden mirarse en una línea abierta. Deshacer es ilimitado.',
+        settingsNote: 'Los cambios se aplican al momento; una partida nueva empieza con el nivel elegido.'
+      }
+    }
+  });
+
+  var dailyDate = new URLSearchParams(location.search).get('daily');
+  var GLYPH = {
+    K: '帥', A: '仕', B: '相', N: '傌', R: '俥', C: '炮', P: '兵',
+    k: '將', a: '士', b: '象', n: '馬', r: '車', c: '砲', p: '卒'
+  };
+
+  var board = el('div', {
+    class: 'xq-board', role: 'application', tabindex: '0',
+    'aria-label': C.t('table')
+  });
+  var lines = el('div', { class: 'xq-lines' });
+  lines.innerHTML = '<svg viewBox="0 0 8 9" width="100%" height="100%" preserveAspectRatio="none" aria-hidden="true">' +
+    '<g>' +
+    '<line x1="0" y1="0" x2="8" y2="0" class="xq-edge"/>' +
+    '<line x1="0" y1="9" x2="8" y2="9" class="xq-edge"/>' +
+    '<line x1="0" y1="0" x2="0" y2="9" class="xq-edge"/>' +
+    '<line x1="8" y1="0" x2="8" y2="9" class="xq-edge"/>' +
+    '<line x1="0" y1="1" x2="8" y2="1"/><line x1="0" y1="2" x2="8" y2="2"/>' +
+    '<line x1="0" y1="3" x2="8" y2="3"/><line x1="0" y1="4" x2="8" y2="4"/>' +
+    '<line x1="0" y1="5" x2="8" y2="5"/><line x1="0" y1="6" x2="8" y2="6"/>' +
+    '<line x1="0" y1="7" x2="8" y2="7"/><line x1="0" y1="8" x2="8" y2="8"/>' +
+    '<line x1="1" y1="0" x2="1" y2="4"/><line x1="2" y1="0" x2="2" y2="4"/>' +
+    '<line x1="3" y1="0" x2="3" y2="4"/><line x1="4" y1="0" x2="4" y2="4"/>' +
+    '<line x1="5" y1="0" x2="5" y2="4"/><line x1="6" y1="0" x2="6" y2="4"/>' +
+    '<line x1="7" y1="0" x2="7" y2="4"/>' +
+    '<line x1="1" y1="5" x2="1" y2="9"/><line x1="2" y1="5" x2="2" y2="9"/>' +
+    '<line x1="3" y1="5" x2="3" y2="9"/><line x1="4" y1="5" x2="4" y2="9"/>' +
+    '<line x1="5" y1="5" x2="5" y2="9"/><line x1="6" y1="5" x2="6" y2="9"/>' +
+    '<line x1="7" y1="5" x2="7" y2="9"/>' +
+    '<line x1="3" y1="0" x2="5" y2="2"/><line x1="5" y1="0" x2="3" y2="2"/>' +
+    '<line x1="3" y1="7" x2="5" y2="9"/><line x1="5" y1="7" x2="3" y2="9"/>' +
+    '</g>' +
+    '<text class="xq-river" x="2" y="4.62" text-anchor="middle">楚河</text>' +
+    '<text class="xq-river" x="6" y="4.62" text-anchor="middle">漢界</text>' +
+    '</svg>';
+  board.appendChild(lines);
+  var piecesLayer = el('div', { class: 'xq-pieces' });
+  var marksLayer = el('div', { class: 'xq-marks' });
+  board.appendChild(piecesLayer);
+  board.appendChild(marksLayer);
+
+  var topRow = el('div', { class: 'xq-top' });
+  var statusEl = el('div', { class: 'xq-status', role: 'status', 'aria-live': 'polite' });
+  var capsEl = el('div', { class: 'xq-caps' });
+  var movesEl = el('div', { class: 'xq-moves' });
+  var side = el('div', { class: 'ch-side' }, [topRow, statusEl, capsEl, movesEl]);
+
+  /* چیدمان: تخته ۹×۱۰ و مهره‌ها روی همان شبکه */
+  var wrap = el('div', { class: 'xq-wrap ch-split', style: '--fit-ar: 8 / 9' }, [
+    el('div', { class: 'ch-fit' }, [board]),
+    side
+  ]);
+
+  var S = null, L = null, nodes = {}, sel = -1, targets = [], cursor = 76, kbOn = false;
+  var thinkTimer = 0, thinkSeq = 0, busy = false, pausedAt = 0, finishing = false;
+  var prefs = ctx.store.get('prefs', null) || { level: 2, mode: 'ai' };
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'gear', label: C.t('settings'), onClick: showSettings });
+  ctx.button({ icon: 'refresh', label: C.t('newGame'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  function layout() {
+    var W = board.clientWidth, H = board.clientHeight;
+    if (!W || !H) return;
+    var cell = Math.min(W / 9.2, H / 10.2);
+    L = {
+      cell: cell,
+      x0: (W - cell * 8) / 2,
+      y0: (H - cell * 9) / 2
+    };
+    board.style.setProperty('--xq-piece', Math.round(cell * 0.9) + 'px');
+    board.style.setProperty('--xq-font', Math.round(cell * 0.52) + 'px');
+    lines.style.left = L.x0 + 'px';
+    lines.style.top = L.y0 + 'px';
+    lines.style.width = (cell * 8) + 'px';
+    lines.style.height = (cell * 9) + 'px';
+    piecesLayer.style.position = 'absolute';
+    piecesLayer.style.inset = '0';
+    marksLayer.style.position = 'absolute';
+    marksLayer.style.inset = '0';
+  }
+
+  function at(i, node) {
+    var f = i % 9, r = (i / 9) | 0;
+    node.style.left = (L.x0 + f * L.cell) + 'px';
+    node.style.top = (L.y0 + r * L.cell) + 'px';
+  }
+
+  function pieceFontSize() { return L ? Math.round(L.cell * 0.52) + 'px' : '20px'; }
+
+  function makePiece(p, uid) {
+    var n = el('div', {
+      class: 'xq-piece ' + (E.isRed(p) ? 'xq-piece--r' : 'xq-piece--b'),
+      'data-uid': uid, 'aria-hidden': 'true'
+    }, [el('span', { class: 'xq-glyph', text: GLYPH[p] })]);
+    n.style.fontSize = pieceFontSize();
+    return n;
+  }
+
+  function renderBoard() {
+    if (!L) return;
+    var seen = {};
+    for (var i = 0; i < 90; i++) {
+      var p = S.board[i];
+      if (p === '.') continue;
+      var uid = S.u[i];
+      seen[uid] = 1;
+      var n = nodes[uid];
+      if (!n) {
+        n = makePiece(p, uid);
+        nodes[uid] = n;
+        piecesLayer.appendChild(n);
+      }
+      n.classList.remove('xq-gone');
+      n.classList.toggle('xq-piece--sel', sel === i);
+      n.style.fontSize = pieceFontSize();
+      n.style.zIndex = str(170 + i);
+      at(i, n);
+    }
+    Object.keys(nodes).forEach(function (uid) {
+      if (seen[uid]) return;
+      var n = nodes[uid];
+      n.classList.add('xq-gone');
+      delete nodes[uid];
+      setTimeout(function () { if (n.parentNode) n.parentNode.removeChild(n); }, 220);
+    });
+  }
+
+  function str(v) { return String(v); }
+
+  function renderMarks() {
+    marksLayer.textContent = '';
+    var i, d, n;
+    if (sel >= 0) {
+      d = el('div', { class: 'xq-lastmark' });
+      at(sel, d);
+      marksLayer.appendChild(d);
+    }
+    for (i = 0; i < targets.length; i++) {
+      d = el('div', { class: 'xq-dot' + (S.board[targets[i]] !== '.' ? ' xq-dot--cap' : '') });
+      at(targets[i], d);
+      marksLayer.appendChild(d);
+    }
+    if (S.hist.length) {
+      var h = S.hist[S.hist.length - 1];
+      d = el('div', { class: 'xq-lastmark' });
+      at(h.from, d);
+      marksLayer.appendChild(d);
+      d = el('div', { class: 'xq-lastmark' });
+      at(h.to, d);
+      marksLayer.appendChild(d);
+    }
+    if (kbOn) {
+      n = el('div', { class: 'xq-cursor' });
+      at(cursor, n);
+      marksLayer.appendChild(n);
+    }
+  }
+
+  function badge(text, accent) {
+    return el('span', { class: 'ch-badge' + (accent ? ' ch-badge--accent' : ''), text: text });
+  }
+
+  function renderTop() {
+    topRow.textContent = '';
+    topRow.appendChild(badge(C.t('mode') + ': ' + C.t(S.mode === 'ai' ? 'vsAi' : 'twoPlayers')));
+    topRow.appendChild(badge(C.t('level') + ': ' + C.t(levelName(S.level))));
+    if (S.daily) topRow.appendChild(badge(C.t('dailyXq') + ' — ' + C.num(S.daily), true));
+    topRow.appendChild(badge(C.t('movesN', { n: C.num(S.hist.length) })));
+  }
+
+  function levelName(v) { return v === 1 ? 'easy' : v === 3 ? 'hard' : 'normal'; }
+
+  function resultText(st) {
+    if (!st.over) return '';
+    if (!st.winner) return C.t('draw');
+    if (S.mode === 'ai') return st.winner === 'r' ? C.t('youWin') : C.t('youLose');
+    return st.winner === 'r' ? C.t('redWins') : C.t('blackWins');
+  }
+
+  function renderStatus(st) {
+    st = st || E.status(S);
+    var txt;
+    if (st.over) txt = resultText(st);
+    else if (busy) txt = C.t('aiThinking');
+    else if (st.check) txt = C.t('check');
+    else if (S.mode === 'ai' && S.turn === 'r') txt = C.t('yourMove');
+    else txt = S.turn === 'r' ? C.t('redToMove') : C.t('blackToMove');
+    statusEl.textContent = txt;
+    statusEl.classList.toggle('xq-status--bad', !!(st.check && !st.over));
+  }
+
+  function renderCaps() {
+    capsEl.textContent = '';
+    for (var i = 0; i < S.hist.length; i++) {
+      var cap = S.hist[i].cap;
+      if (cap === '.') continue;
+      capsEl.appendChild(el('span', {
+        class: 'xq-cap ' + (E.isRed(cap) ? 'xq-cap--r' : 'xq-cap--b'),
+        text: GLYPH[cap], title: C.t('p' + cap.toUpperCase())
+      }));
+    }
+  }
+
+  function renderMoves() {
+    movesEl.textContent = '';
+    var from = Math.max(0, S.hist.length - 10);
+    for (var i = from; i < S.hist.length; i++) {
+      var h = S.hist[i];
+      movesEl.appendChild(el('span', {
+        class: 'xq-move',
+        text: GLYPH[h.piece] + ' ' + (E.file(h.from) + 1) + ',' + (10 - E.rank(h.from)) +
+              ' → ' + (E.file(h.to) + 1) + ',' + (10 - E.rank(h.to))
+      }));
+    }
+  }
+
+  function render(st) {
+    if (!S) return;
+    layout();
+    st = st || E.status(S);
+    renderBoard();
+    renderMarks();
+    renderTop();
+    renderStatus(st);
+    renderCaps();
+    renderMoves();
+    if (st.over && !finishing) finishGame(st);
+  }
+
+  function save() { if (S) ctx.save(); }
+
+  function newGame(opts) {
+    opts = opts || {};
+    cancelThink();
+    finishing = false;
+    S = E.deal({
+      level: opts.level || prefs.level || 2,
+      mode: opts.mode || prefs.mode || 'ai',
+      daily: opts.daily || null
+    });
+    S.startedAt = Date.now();
+    pausedAt = 0;
+    sel = -1; targets = []; cursor = 76; kbOn = false;
+    nodes = {};
+    piecesLayer.textContent = '';
+    render();
+    save();
+  }
+
+  function resume(v) {
+    finishing = false;
+    S = E.clone(v.s);
+    S.startedAt = Date.now() - (v.elapsed || 0);
+    S.finished = false;
+    pausedAt = 0;
+    sel = -1; targets = [];
+    nodes = {};
+    piecesLayer.textContent = '';
+    render();
+  }
+
+  function blocked() {
+    return !S || S.finished || busy || finishing || !!document.querySelector('.ch-scrim');
+  }
+
+  function legalNow() { return S ? E.legal(S) : []; }
+
+  function tap(i) {
+    if (blocked() || !S || S.finished) return;
+    if (S.mode === 'ai' && S.turn !== 'r') return;
+    var p = S.board[i];
+    if (sel >= 0 && targets.indexOf(i) >= 0) {
+      play(sel, i);
+      return;
+    }
+    if (p !== '.' && E.sideOf(p) === S.turn) {
+      var ms = legalNow(), found = false;
+      sel = i; targets = [];
+      for (var k = 0; k < ms.length; k++) if (ms[k].from === i) { targets.push(ms[k].to); found = true; }
+      if (!found) { sel = -1; targets = []; }
+      C.feedback('select');
+    } else {
+      sel = -1; targets = [];
+      C.feedback('tap');
+    }
+    render();
+  }
+
+  function play(from, to) {
+    var ms = legalNow(), m = null;
+    for (var i = 0; i < ms.length; i++) if (ms[i].from === from && ms[i].to === to) { m = ms[i]; break; }
+    if (!m) { C.feedback('bad'); return; }
+    var h = E.make(S, m);
+    C.audio.sfx(h.cap === '.' ? 'place' : 'pop');
+    C.haptic('tap');
+    sel = -1; targets = [];
+    after();
+  }
+
+  function after() {
+    if (!S) return;
+    var st = E.status(S);
+    if (st.over) S.finished = true;
+    render(st);
+    save();
+    if (!st.over && S.mode === 'ai' && S.turn === 'b') scheduleThink();
+  }
+
+  function scheduleThink() {
+    if (!S || S.finished || S.mode !== 'ai') return;
+    if (S.turn !== 'b') return;
+    if (thinkTimer) return;
+    busy = true;
+    thinkSeq++;
+    var seq = thinkSeq;
+    render();
+    thinkTimer = setTimeout(function () {
+      thinkTimer = 0;
+      if (seq !== thinkSeq || !S || S.finished) { busy = false; return; }
+      var m = null;
+      try { m = E.ai(S, S.level); } catch (err) { m = null; }
+      if (!m) {
+        busy = false;
+        var st = E.status(S);
+        if (st.over) { S.finished = true; render(st); }
+        return;
+      }
+      var h = E.make(S, m);
+      busy = false;
+      C.audio.sfx(h.cap === '.' ? 'place' : 'pop');
+      sel = -1; targets = [];
+      var st2 = E.status(S);
+      if (st2.over) S.finished = true;
+      render(st2);
+      save();
+      if (!st2.over) { var st3 = E.status(S); if (st3.check) C.feedback('bad'); }
+    }, 260);
+  }
+
+  function cancelThink() {
+    if (thinkTimer) { clearTimeout(thinkTimer); thinkTimer = 0; }
+    thinkSeq++;
+    busy = false;
+  }
+
+  function undo() {
+    if (!S || S.finished) return;
+    if (document.querySelector('.ch-scrim')) return;
+    cancelThink();
+    finishing = false;
+    if (!S.hist.length) { C.feedback('bad'); return; }
+    var guard = 0;
+    do {
+      E.undo(S);
+      guard++;
+    } while (S.hist.length && S.mode === 'ai' && S.turn !== S.human && guard < 4);
+    sel = -1; targets = [];
+    C.feedback('tap');
+    render();
+    save();
+  }
+
+  function finishGame(st) {
+    finishing = true;
+    S.finished = true;
+    var ms = Date.now() - S.startedAt;
+    var won = st.winner === 'r';
+    var draw = !st.winner;
+    var coins = draw ? 6 : (S.mode === 'ai' ? (won ? 14 : 4) : 8) + (S.level === 3 ? 4 : 0) + (S.daily ? 8 : 0);
+    var points = draw ? 16 : (won ? 50 : 12) + (S.level === 3 ? 20 : 0) + (S.daily ? 25 : 0);
+    var firstDaily = false;
+    if (S.daily) {
+      firstDaily = C.stats.daily('xiangqi', S.daily, {
+        label: C.t('movesN', { n: C.num(S.hist.length) }), win: won
+      });
+      if (!firstDaily) { coins = Math.max(1, Math.round(coins * 0.2)); points = Math.max(1, Math.round(points * 0.2)); }
+    }
+    if (S.mode === 'ai' && won) {
+      C.achievements.unlock('xq-win');
+      if (ms < 5 * 60 * 1000) C.achievements.unlock('xq-fast');
+      if (S.undos === 0) C.achievements.unlock('xq-clean');
+    }
+    if (S.mode === 'ai' || won) {
+      C.stats.best('xiangqi', 'timeMs' + S.level, ms, true);
+      C.stats.best('xiangqi', 'moves' + S.level, S.hist.length, true);
+    }
+    ctx.clearSave();
+    var levelText = C.t(levelName(S.level));
+    var paint = cardPaint();
+    ctx.finish({
+      won: won,
+      title: resultText(st),
+      timeMs: ms,
+      coins: coins,
+      points: points,
+      lines: [
+        { label: C.t('level'), value: levelText },
+        { label: C.t('mode'), value: C.t(S.mode === 'ai' ? 'vsAi' : 'twoPlayers') },
+        { label: C.t('moves'), value: C.num(S.hist.length) },
+        { label: C.t('time'), value: C.time(ms) }
+      ],
+      shareText: 'چوگان · شطرنج چینی — ' + resultText(st) + ' · ' + C.num(S.hist.length) + ' حرکت',
+      paint: paint,
+      onAgain: S.daily ? null : function () { newGame({ level: S.level, mode: S.mode }); }
+    });
+  }
+
+  function cardPaint() {
+    return function (g, W, H, col) {
+      var w = Math.round(W * 0.13), h = Math.round(w * 1.2), gap = Math.round(w * 0.12);
+      var total = w * 2 + gap, x = Math.round((W - total) / 2), y = Math.round(H * 0.2);
+      function one(cx, cy, red, glyph) {
+        g.beginPath(); g.arc(cx, cy, w / 2, 0, Math.PI * 2);
+        g.fillStyle = '#FBF1DC'; g.fill();
+        g.lineWidth = 2; g.strokeStyle = red ? '#A6231B' : '#23262B'; g.stroke();
+        g.fillStyle = red ? '#A6231B' : '#23262B';
+        g.font = '600 ' + Math.round(w * 0.5) + 'px "Noto Serif SC", "Songti SC", serif';
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(glyph, cx, cy + 1);
+      }
+      one(x + w / 2, y + h / 2, true, '帥');
+      one(x + w + gap + w / 2, y + h / 2, false, '將');
+      g.fillStyle = col.text; g.globalAlpha = 0.65;
+      g.font = '500 ' + Math.round(W * 0.045) + 'px sans-serif';
+      g.textAlign = 'center';
+      g.fillText('楚河 · 漢界', W / 2, Math.round(H * 0.62));
+    };
+  }
+
+  function askNew() {
+    if (document.querySelector('.ch-scrim')) return;
+    C.ui.confirm({
+      title: S && S.daily ? C.t('restartDaily') : C.t('newGame'),
+      body: C.t('resetWarn'),
+      onOk: function () {
+        newGame({ daily: S && S.daily ? S.daily : null, level: S ? S.level : prefs.level, mode: S ? S.mode : prefs.mode });
+      }
+    });
+  }
+
+  function savePrefs() {
+    prefs = { level: S ? S.level : prefs.level, mode: S ? S.mode : prefs.mode };
+    ctx.store.set('prefs', prefs);
+  }
+
+  function showSettings() {
+    var body = el('div', { class: 'xq-settings' });
+    body.appendChild(el('div', { class: 'ch-item__label', text: C.t('level') }));
+    body.appendChild(C.ui.segmented([
+      { value: 1, label: C.t('easy') },
+      { value: 2, label: C.t('normal') },
+      { value: 3, label: C.t('hard') }
+    ], S ? S.level : prefs.level, function (v) {
+      if (S) { S.level = v; save(); }
+      prefs.level = v; ctx.store.set('prefs', { level: prefs.level, mode: prefs.mode });
+      render();
+    }));
+    body.appendChild(el('div', { class: 'ch-item__label', text: C.t('mode'), style: 'margin-top:14px' }));
+    body.appendChild(C.ui.segmented([
+      { value: 'ai', label: C.t('vsAi') },
+      { value: 'two', label: C.t('twoPlayers') }
+    ], S && S.mode === 'two' ? 'two' : 'ai', function (v) {
+      cancelThink();
+      if (S) { S.mode = v === 'two' ? 'two' : 'ai'; save(); }
+      prefs.mode = v === 'two' ? 'two' : 'ai';
+      ctx.store.set('prefs', { level: prefs.level, mode: prefs.mode });
+      if (S && S.mode === 'ai' && S.turn === 'b' && !S.finished) scheduleThink();
+      else render();
+    }));
+    body.appendChild(el('p', { class: 'xq-note', text: C.t('settingsNote') }));
+    body.appendChild(C.cards.speedRow());
+    C.ui.modal({ title: C.t('settings'), body: body, actions: [{ label: C.t('done'), kind: 'primary' }] });
+  }
+
+  function kb(k, what) {
+    return el('div', { class: 'ch-item' }, [
+      el('span', { class: 'ch-item__label', text: what }),
+      el('span', { class: 'ch-badge', text: k })
+    ]);
+  }
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          kb('← → ↑ ↓', C.t('kbNav')),
+          kb('Enter', C.t('kbPick')),
+          kb('Escape', C.t('kbCancel')),
+          kb('U / Ctrl+Z', C.t('undoMove')),
+          kb('N', C.t('kbNew'))
+        ])
+      ],
+      actions: [
+        { label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('done'), kind: 'primary' }
+      ]
+    });
+  }
+
+  function point(i) {
+    var f = i % 9, r = (i / 9) | 0;
+    return (f + 1) + ',' + (10 - r);
+  }
+
+  function pickFrom(e) {
+    if (!L) return -1;
+    var rect = board.getBoundingClientRect();
+    var px = e.clientX - rect.left, py = e.clientY - rect.top;
+    var f = Math.round((px - L.x0) / L.cell), r = Math.round((py - L.y0) / L.cell);
+    if (f < 0 || f > 8 || r < 0 || r > 9) return -1;
+    var dx = px - (L.x0 + f * L.cell), dy = py - (L.y0 + r * L.cell);
+    if (Math.sqrt(dx * dx + dy * dy) > L.cell * 0.66) return -1;
+    return r * 9 + f;
+  }
+
+  board.addEventListener('pointerdown', function (e) {
+    if (e.button !== undefined && e.button !== 0) return;
+    kbOn = false;
+    var i = pickFrom(e);
+    if (i < 0) { sel = -1; targets = []; render(); return; }
+    cursor = i;
+    tap(i);
+    e.preventDefault();
+  }, { passive: false });
+
+  board.addEventListener('pointermove', function (e) {
+    if (L) { /* فقط برای لمس؛ تغییر نشانگر لازم نیست */ }
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (!S) return;
+    var tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var k = e.key;
+    if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {
+      kbOn = true;
+      var f = cursor % 9, r = (cursor / 9) | 0;
+      if (k === 'ArrowLeft') f = (f + 8) % 9;
+      else if (k === 'ArrowRight') f = (f + 1) % 9;
+      else if (k === 'ArrowUp') r = (r + 9) % 10;
+      else r = (r + 1) % 10;
+      cursor = r * 9 + f;
+      render();
+      e.preventDefault();
+      return;
+    }
+    if (k === 'Enter' || k === ' ') {
+      kbOn = true;
+      if (sel >= 0 && targets.indexOf(cursor) >= 0) play(sel, cursor);
+      else tap(cursor);
+      render();
+      e.preventDefault();
+      return;
+    }
+    if (k === 'Escape') {
+      e.preventDefault();
+      kbOn = false;
+      sel = -1; targets = [];
+      render();
+      return;
+    }
+    if (C.keyIs(e, 'n')) { askNew(); e.preventDefault(); }
+  });
+
+  C.onPause(function () {
+    cancelThink();
+    pausedAt = Date.now();
+  });
+  C.onResume(function () {
+    if (pausedAt && S) {
+      S.startedAt += Date.now() - pausedAt;
+      pausedAt = 0;
+    }
+    if (S && !S.finished && S.mode === 'ai' && S.turn === 'b') scheduleThink();
+  });
+
+  ctx.autosave(function () {
+    if (!S || S.finished || !S.hist.length) return { inProgress: false };
+    return {
+      s: {
+        board: S.board, u: S.u, turn: S.turn, hist: S.hist, keys: S.keys,
+        moves: S.moves, undos: S.undos, human: S.human,
+        level: S.level, mode: S.mode, daily: S.daily
+      },
+      elapsed: (pausedAt || Date.now()) - S.startedAt
+    };
+  });
+
+  var TUT = [
+    {
+      title: C.t('tutTitle1'), text: C.t('tutText1'),
+      art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr">' +
+        '<rect x="24" y="8" width="152" height="94" rx="8" fill="#E9D8B8"/>' +
+        '<g stroke="#7A5C34" stroke-width="1.4">' +
+        '<line x1="44" y1="16" x2="44" y2="94"/><line x1="62" y1="16" x2="62" y2="94"/>' +
+        '<line x1="80" y1="16" x2="80" y2="94"/><line x1="98" y1="16" x2="98" y2="94"/>' +
+        '<line x1="116" y1="16" x2="116" y2="94"/><line x1="134" y1="16" x2="134" y2="94"/>' +
+        '<line x1="152" y1="16" x2="152" y2="94"/>' +
+        '<line x1="44" y1="16" x2="152" y2="16"/><line x1="44" y1="34" x2="152" y2="34"/>' +
+        '<line x1="44" y1="52" x2="152" y2="52"/><line x1="44" y1="70" x2="152" y2="70"/>' +
+        '<line x1="44" y1="94" x2="152" y2="94"/>' +
+        '</g>' +
+        '<rect x="84" y="48" width="28" height="10" fill="#E9D8B8"/>' +
+        '<text x="98" y="56" text-anchor="middle" font-size="7" fill="#7A5C34">楚河</text>' +
+        '<circle cx="98" cy="25" r="8" fill="#FBF1DC" stroke="#23262B" stroke-width="1.5"/>' +
+        '<circle cx="98" cy="85" r="8" fill="#FBF1DC" stroke="#A6231B" stroke-width="1.5"/>' +
+        '</svg>'
+    },
+    {
+      title: C.t('tutTitle2'), text: C.t('tutText2'),
+      art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr">' +
+        '<circle cx="70" cy="40" r="14" fill="#FBF1DC" stroke="#23262B" stroke-width="2"/>' +
+        '<text x="70" y="45" text-anchor="middle" font-size="13" fill="#23262B">馬</text>' +
+        '<circle cx="70" cy="22" r="9" fill="#FBF1DC" stroke="#A6231B" stroke-width="2"/>' +
+        '<text x="70" y="26" text-anchor="middle" font-size="9" fill="#A6231B">兵</text>' +
+        '<path d="M84 32 L110 18" stroke="#A6231B" stroke-width="2" stroke-dasharray="4 3"/>' +
+        '<text x="132" y="40" text-anchor="middle" font-size="9" fill="#7A5C34">leg</text>' +
+        '<path d="M84 44 L112 32" stroke="#7A5C34" stroke-width="1" stroke-dasharray="2 3"/>' +
+        '</svg>'
+    },
+    {
+      title: C.t('tutTitle3'), text: C.t('tutText3'),
+      art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr">' +
+        '<rect x="24" y="8" width="152" height="94" rx="8" fill="#E9D8B8"/>' +
+        '<circle cx="98" cy="20" r="12" fill="#FBF1DC" stroke="#23262B" stroke-width="2"/>' +
+        '<text x="98" y="25" text-anchor="middle" font-size="12" fill="#23262B">將</text>' +
+        '<circle cx="98" cy="90" r="12" fill="#FBF1DC" stroke="#A6231B" stroke-width="2"/>' +
+        '<text x="98" y="95" text-anchor="middle" font-size="12" fill="#A6231B">帥</text>' +
+        '<line x1="98" y1="34" x2="98" y2="76" stroke="#A6231B" stroke-width="2" stroke-dasharray="5 4"/>' +
+        '</svg>'
+    }
+  ];
+
+  function boot() {
+    var saved = ctx.loadSave();
+    var sv = saved && saved.s && E.validState(saved.s) ? saved.s : null;
+    if (dailyDate) {
+      if (sv && sv.daily === dailyDate) resume(saved);
+      else newGame({ daily: dailyDate, level: 2, mode: 'ai' });
+      if (C.stats.dailyDone('xiangqi', dailyDate)) {
+        var rec = C.stats.dailyOf(dailyDate).xiangqi;
+        C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+      }
+    } else if (sv && !sv.daily) {
+      resume(saved);
+    } else {
+      newGame({ level: prefs.level, mode: prefs.mode });
+    }
+    ctx.tutorialIfNew(TUT);
+    requestAnimationFrame(function () { render(); });
+  }
+
+  window.addEventListener('resize', function () { render(); });
+  if (window.ResizeObserver) {
+    try { new ResizeObserver(function () { render(); }).observe(board); } catch (err) {}
+  }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { render(); });
+
+  boot();
+})();
+</script>
+</body>
+</html>
