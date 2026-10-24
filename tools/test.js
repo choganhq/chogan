@@ -21,7 +21,7 @@ let checks = 0;
 // اجرا نمی‌شد — مثلاً با حذف یک خط testSudoku(); نود و نه بررسی از بین رفت — فقط
 // مجموع کمتر چاپ می‌شد و باز سبز بود. با اضافه کردن بررسی این عدد را بالا ببر؛
 // پایین آوردنش یعنی بررسی‌ای عمداً حذف شده و باید در PR گفته شود.
-const MIN_CHECKS = 4794;
+const MIN_CHECKS = 4850;
 
 function ok(cond, msg) {
   checks++;
@@ -9064,6 +9064,162 @@ function testKlondike() {
   ok(Date.now() - t0 < 15000, 'the Klondike tests finish in under 15 s (' + (Date.now() - t0) + ' ms)');
 }
 
+function testSpider() {
+  head('Spider (#460)');
+  const t0 = Date.now();
+  const E = loadEngine('spider', 'SpiderEngineFactory');
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/spider/index.html'), 'utf8');
+  const games = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games;
+  const rng = (seed) => { let x = seed >>> 0; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; };
+  const card = (r, copy) => r * 8 + copy;     // ranks 0..12 (A..K); the copy 0..7 names the suit
+  const empty = (suits) => ({ suits: suits || 1, cols: [[], [], [], [], [], [], [], [], [], []], down: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], stock: [], runs: 0, hist: [], moves: 0, undos: 0, daily: null });
+
+  // The deal: four columns of six and six of five, only the top card up, 50 in the stock
+  const D1 = E.deal(rng(7), 1), D2 = E.deal(rng(7), 2), D4 = E.deal(rng(7), 4);
+  ok(D1.cols.map((c) => c.length).join() === '6,6,6,6,5,5,5,5,5,5' && D1.down.join() === '5,5,5,5,4,4,4,4,4,4' && D1.stock.length === 50 && E.validState(D1), 'a deal is 6,6,6,6 and six of five, only the top card face up, and 50 in the stock');
+  const all = D1.cols.flat().concat(D1.stock);
+  ok(all.length === 104 && new Set(all).size === 104 && all.every((c) => c >= 0 && c < 104), 'one double deck of 104 different cards');
+  ok(E.validState(D2) && E.validState(D4) && D2.suits === 2 && D4.suits === 4, 'the two and four suit deals are full decks too');
+  const suitCount = (suits) => { const n = [0, 0, 0, 0]; for (const c of all) n[E.suit(c, suits)]++; return n.join(); };
+  ok(suitCount(1) === '0,0,0,104', 'one suit plays every card as a spade');
+  ok(suitCount(2) === '0,0,52,52', 'two suits deal half a deck of hearts and half of spades');
+  ok(suitCount(4) === '26,26,26,26', 'four suits deal 26 of each suit');
+
+  // The tableau: down by one rank in any suit, but only a same-suit run moves together
+  const B = empty(1);
+  B.cols[0] = [card(8, 0)];                       // 9♠
+  B.cols[1] = [card(7, 0)];                       // 8♠
+  ok(E.canMove(B, 1, 1, 0) && !E.canMove(B, 0, 1, 1), 'an eight goes on a nine, and a nine never on an eight');
+  const M = empty(2);
+  M.cols[0] = [card(8, 0)];                       // 9♠
+  M.cols[1] = [card(7, 0), card(6, 4)];           // 8♠, 7♥
+  ok(!E.canMove(M, 1, 2, 0), 'an eight and a seven of different suits do not move together');
+  M.cols[1] = [card(7, 0), card(6, 0)];           // 8♠, 7♠
+  ok(E.canMove(M, 1, 2, 0), 'a same-suit run moves together');
+  const H = empty(1);
+  H.cols[0] = [card(9, 0), card(8, 0)]; H.down[0] = 1;
+  H.cols[1] = [card(9, 0)];
+  ok(!E.canMove(H, 0, 2, 1), 'a face-down card is not part of a movable run');
+
+  // A move turns over the card it uncovers, and undo turns it back
+  const T = empty(1);
+  T.cols[0] = [card(3, 0), card(4, 0)]; T.down[0] = 1;
+  T.cols[1] = [card(5, 0)];                       // 7♠
+  const h = E.move(T, 0, 1, 1);
+  ok(h && h.flipped && T.cols[0].length === 1 && T.down[0] === 0 && T.cols[1].length === 2, 'moving the top card turns the card under it face up');
+  ok(E.move(T, 1, 1, 0) === null, 'a move against the rules is refused and changes nothing');
+  E.undo(T);
+  ok(T.cols[0].length === 2 && T.down[0] === 1 && T.cols[1].length === 1 && T.undos === 1, 'undo puts the card back and turns it face down again');
+
+  // A complete king-to-ace run in one suit is lifted away, and undo puts it back
+  const K = empty(1);
+  for (let r = 12; r >= 0; r--) K.cols[0].push(card(r, 0));
+  const km = E.move(K, 0, 13, 1);
+  ok(km && km.run && K.runs === 1 && K.cols[0].length === 0 && K.cols[1].length === 0, 'a complete king-to-ace run is lifted off the table');
+  E.undo(K);
+  ok(K.runs === 0 && K.cols[0].length === 13 && K.cols[1].length === 0, 'undo puts the whole run back in its column');
+
+  // The ace that completes a run on the table: undo has to split it back off
+  const K2 = empty(1);
+  for (let r = 12; r >= 1; r--) K2.cols[1].push(card(r, 0));
+  K2.cols[0] = [card(0, 0)];
+  const am = E.move(K2, 0, 1, 1);
+  ok(am && am.run && K2.runs === 1 && K2.cols[0].length === 0 && K2.cols[1].length === 0, 'the ace completes a king-to-ace run already on the table');
+  E.undo(K2);
+  ok(K2.runs === 0 && K2.cols[1].length === 12 && K2.cols[0].length === 1 && K2.cols[0][0] === card(0, 0), 'undo splits the ace back off the run');
+
+  // The stock: a card on each column, never while a column is empty
+  const SB = E.deal(rng(22), 1); SB.cols[3] = []; SB.down[3] = 0;
+  ok(!E.canDeal(SB) && E.dealStock(SB) === null, 'the stock cannot be dealt while a column is empty');
+  const S2 = E.deal(rng(21), 1);
+  const hs = E.dealStock(S2);
+  ok(hs && hs.cards.length === 10 && S2.stock.length === 40 && S2.cols.map((c) => c.length).join() === '7,7,7,7,6,6,6,6,6,6' && E.validState(S2), 'one tap deals a card onto each of the ten columns');
+  const S3 = E.deal(rng(31), 1);
+  const snap = JSON.stringify({ c: S3.cols, d: S3.down, s: S3.stock });
+  E.dealStock(S3); E.undo(S3);
+  ok(JSON.stringify({ c: S3.cols, d: S3.down, s: S3.stock }) === snap && S3.undos === 1 && S3.runs === 0 && E.validState(S3), 'undo a deal puts the same ten cards back on the stock');
+
+  // Play a few hundred steps, then undo everything: the deal has to come back exactly
+  const R = E.deal(rng(41), 2), R0 = E.clone(R), pick = rng(5);
+  let steps = 0, guard = 0, opts;
+  while (steps < 120 && guard++ < 2000) {
+    opts = [];
+    for (let from = 0; from < 10; from++) {
+      for (let n = 1; n <= R.cols[from].length - R.down[from]; n++) {
+        for (let to = 0; to < 10; to++) if (to !== from && E.canMove(R, from, n, to)) opts.push([from, n, to]);
+      }
+    }
+    if (!opts.length) { if (!E.dealStock(R)) break; steps++; continue; }
+    const o = opts[Math.floor(pick() * opts.length)];
+    if (!E.move(R, o[0], o[1], o[2])) break;
+    steps++;
+  }
+  while (R.hist.length) E.undo(R);
+  ok(steps > 20 && JSON.stringify(R.cols) === JSON.stringify(R0.cols) && JSON.stringify(R.down) === JSON.stringify(R0.down) && JSON.stringify(R.stock) === JSON.stringify(R0.stock) && R.runs === 0 && E.validState(R), 'undoing every move and deal puts the deal back exactly (' + steps + ' steps)');
+
+  // A tap: a same-suit neighbour first, then an empty column, never a whole column
+  const A = empty(2);
+  A.cols[0] = [card(7, 4)];                       // 8♥
+  A.cols[1] = [card(8, 0)];                       // 9♠
+  A.cols[2] = [card(8, 4)];                       // 9♥
+  ok(E.autoTarget(A, 0, 1) === 2, 'a tapped card goes on the same suit first');
+  A.cols[2] = [];
+  ok(E.autoTarget(A, 0, 1) === 1, 'a card in another suit still beats an empty column');
+  A.cols[1] = [];
+  const A2 = empty(1);
+  A2.cols[0] = [card(0, 0), card(5, 0)];
+  ok(E.autoTarget(A2, 0, 1) === 1, 'with only empty columns it takes the first one');
+  const W = empty(1);
+  W.cols[0] = [card(5, 0)];
+  ok(E.autoTarget(W, 0, 1) === -1, 'a whole column does not hop to an empty one');
+
+  // No stock, no stack, no moves; and what the score means
+  const N = empty(1);
+  [0, 0, 0, 2, 2, 2, 4, 4, 4, 6].forEach((r, i) => { N.cols[i] = [card(r, i % 8)]; });
+  ok(!E.hasMoves(N) && !E.canDeal(N), 'with no stock and nothing to stack on, there are no moves');
+  const SC = empty(1); SC.moves = 7; SC.undos = 3; SC.runs = 2;
+  ok(E.score(SC) === 690, 'the score starts at 500, one off a move and an undo, 100 for a run');
+  SC.moves = 1000;
+  ok(E.score(SC) === 0, 'the score never goes below zero');
+  const WN = empty(1); WN.runs = 8;
+  ok(E.won(WN), 'eight lifted runs win the game');
+  const bad = E.deal(rng(9), 1); bad.stock.push(bad.stock[0]);
+  ok(!E.validState(bad), 'a card that appears twice is not a valid deal');
+  const bad2 = E.deal(rng(9), 1); bad2.cols[0].pop();
+  ok(!E.validState(bad2), 'a missing card is not a valid deal');
+
+  // A daily deal: two suits, and one seed is the same for everyone
+  const d1 = E.dailyDeal(rng(99)), d2 = E.dailyDeal(rng(99));
+  ok(d1.suits === 2 && JSON.stringify({ c: d1.cols, s: d1.stock }) === JSON.stringify({ c: d2.cols, s: d2.stock }), 'the daily deal is two suits, and one seed is one deal');
+
+  // Page: shared cards, the deal through fly, options and the daily behind the gear
+  ok(/C\.cards\.el\(dc\), C\.cards\.back\(\)/.test(html) && /C\.ui\.fly\(nodes\[c\], from, \{ ms: 220, delay: n\+\+ \* 16, flip: row === S\.down\[col\] \}\)/.test(html), 'the cards are Chogan.cards and the deal uses Chogan.ui.fly');
+  ok(/var gear = el\('button'/.test(html) && /function showSettings\(\)/.test(html) && /E\.dailyDeal\(C\.daily\('spider', daily\)\.rng\)/.test(html), 'the suits and the daily deal sit behind the gear, from the day\'s seed');
+  ok(/if \(!L \|\| C\.ui\.reduceMotion\(\)\) return;/.test(html) && /if \(!C\.ui\.reduceMotion\(\) && L\) \{/.test(html), 'no deal animation and no win cascade with reduced motion');
+  ok(/\.sp-board \{ position: relative; flex: 1; min-height: 0; width: 100%; direction: ltr;/.test(html), 'the table is not mirrored in Persian');
+
+  // Identity
+  const gm = games.find((g) => g.id === 'spider');
+  ok(!!gm && gm.cat === 'cards' && gm.daily !== false, 'games.json lists it under card games, with a daily deal');
+  ok(!!gm && /accent: '([^']+)'/.test(html) && html.match(/accent: '([^']+)'/)[1] === gm.color, 'games.json and the page share the accent');
+  const icon = fs.readFileSync(path.join(ROOT, 'www/games/spider/icon.svg'), 'utf8');
+  ok(!!gm && new RegExp('<rect width="96" height="96" rx="22" fill="' + gm.soft + '"/>').test(icon), 'the icon starts on the soft tint of games.json');
+  const rgb = (x) => [1, 3, 5].map((i) => parseInt(x.slice(i, i + 2), 16) / 255);
+  const lin = (c) => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  const lab = (x) => {
+    const [R, G, Bl] = rgb(x).map(lin), f = (t) => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
+    const X = (R * 0.4124 + G * 0.3576 + Bl * 0.1805) / 0.95047, Y = R * 0.2126 + G * 0.7152 + Bl * 0.0722, Z = (R * 0.0193 + G * 0.1192 + Bl * 0.9505) / 1.08883;
+    return [116 * f(Y) - 16, 500 * (f(X) - f(Y)), 200 * (f(Y) - f(Z))];
+  };
+  const dE = (a, b) => { const P = lab(a), Q = lab(b); return Math.hypot(P[0] - Q[0], P[1] - Q[1], P[2] - Q[2]); };
+  const lum = (x) => rgb(x).map((c) => c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)).reduce((a, c, i) => a + c * [0.2126, 0.7152, 0.0722][i], 0);
+  const near = games.filter((g) => g.id !== 'spider').map((g) => [g.id, dE(g.color, gm.color)]).sort((x, y) => x[1] - y[1])[0];
+  ok(near[1] >= 15 && 1.05 / (lum(gm.color) + 0.05) >= 4.5, 'the accent differs from every other game by ΔE ≥ 15 (nearest ' + near[0] + ', ' + near[1].toFixed(1) + ') and keeps white text at 4.5:1');
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  ok(['sp-win', 'sp-four', 'sp-clean'].every((id) => new RegExp("\\{ id: '" + id + "',[^\\n]*dde: '[^\\n]*des: '").test(core) && html.indexOf("unlock('" + id + "')") > 0), 'the three Spider awards exist in every language and are unlocked');
+  ok(Date.now() - t0 < 15000, 'the Spider tests finish in under 15 s (' + (Date.now() - t0) + ' ms)');
+}
+
 function testCrazyEights() {
   head('Crazy Eights (#416)');
   const t0 = Date.now();
@@ -9834,6 +9990,7 @@ testCardSpeed();
 testPersianCardIndex();
 testSudokuClearNotes();
 testKlondike();
+testSpider();
 testCrazyEights();
 testCrazyEightsIran();
 testGinRummy();
