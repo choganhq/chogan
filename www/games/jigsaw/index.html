@@ -2715,6 +2715,24 @@ function JigsawPictures() {
   }, { passive: false });
 
   // Keyboard: ← → pick a piece in the row, Enter lifts it, the arrows aim at a cell, Enter drops
+  // The loose pieces move like the cursor in the frame: up and down by a row, left and
+  // right along the row and stopping at its ends. Up and down did nothing in the column
+  // beside the frame, and left and right ran on into the next row (#556).
+  function trayStep(at, n, cols, dx, dy) {
+    var r = Math.floor(at / cols), c = at % cols, rows = Math.ceil(n / cols);
+    r = Math.max(0, Math.min(rows - 1, r + dy));
+    var inRow = Math.min(cols, n - r * cols);
+    c = Math.max(0, Math.min(inRow - 1, c + dx));
+    return r * cols + c;
+  }
+  // pieces in a row, read from the layout: one long row under the frame, a few beside it
+  function trayCols() {
+    var kids = tray.children, n = kids.length;
+    if (n < 2) return 1;
+    var top = kids[0].offsetTop, c = 1;
+    while (c < n && kids[c].offsetTop === top) c++;
+    return c;
+  }
   function markSel() {
     Object.keys(slots).forEach(function (k) { slots[k].classList.toggle('jg-slot--sel', +k === sel); });
     if (sel >= 0 && slots[sel] && slots[sel].scrollIntoView) slots[sel].scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -2750,9 +2768,8 @@ function JigsawPictures() {
         showAim();
         return;
       }
-      if (!d[0]) return;
       var at = S.tray.indexOf(sel);
-      at = at < 0 ? 0 : (at + d[0] + S.tray.length) % S.tray.length;
+      at = at < 0 ? 0 : trayStep(at, S.tray.length, trayCols(), d[0], d[1]);
       sel = S.tray[at];
       C.feedback('select');
       markSel();
