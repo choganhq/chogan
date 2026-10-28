@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5509;
+const MIN_CHECKS = 5514;
 
 function ok(cond, msg) {
   checks++;
@@ -2915,7 +2915,7 @@ function testFiles() {
   const catLabels = ['all'].concat(cats).map((c) => 'cat' + c.charAt(0).toUpperCase() + c.slice(1));
   const noLabel = catLabels.filter((k) => (menu.match(new RegExp('\\b' + k + ": '[^']+'", 'g')) || []).length !== LOCALE_CODES.length);
   ok(noLabel.length === 0, 'each category has a label in every language' + (noLabel.length ? ' (' + noLabel.join(',') + ')' : ''));
-  ok(/GAMES\.filter\(function \(g\) \{ return g\.cat === c; \}\)/.test(menu) && /settings\.gameCat/.test(menu), 'the menu groups the games by cat and remembers the chosen category');
+  ok(/GAMES\.filter\(function \(g\) \{ return g\.cat === c(?: && peopleFit\(g, people\))?; \}\)/.test(menu) && /settings\.gameCat/.test(menu), 'the menu groups the games by cat and remembers the chosen category');
   // A full render() scrolls to the top, so a chip or a pin tap must not jump the page (#285)
   const chipFn = (menu.match(/C\.ui\.segmented\(\['all'\][\s\S]*?function \(v\) \{([\s\S]*?)\n    \}\);/) || [])[1] || '';
   ok(/drawGames\(\)/.test(chipFn) && !/render\(/.test(chipFn), 'a category chip redraws only the games, not the whole page');
@@ -10178,6 +10178,25 @@ function testGorillasStick() {
   ok(/if \(cancel \|\| !a \|\| a\.power < 6 \|\| !canAim\(\)\) \{ draw\(\); return; \}/.test(html), 'a push let go near the middle is taken back, not thrown');
   const langs = ['ctlStick', 'aimStick', 'stick'].every((k) => (html.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length === 5);
   ok(langs, 'its strings are in all five languages');
+}
+
+function testPeopleFilter() {
+  head('Menu: filter by how many people play on one phone (#561)');
+  const games = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games;
+  const html = fs.readFileSync(path.join(ROOT, 'www/index.html'), 'utf8');
+  ok(games.length > 40 && games.every((g) => Number.isInteger(g.people) && g.people >= 1 && g.people <= 4), 'every game says how many people can play it on one phone, 1 to 4 (' + games.length + ' games)');
+  const by = Object.fromEntries(games.map((g) => [g.id, g.people]));
+  const want = { sudoku: 1, hokm: 1, pairs: 1, chess: 2, xiangqi: 2, bowling: 2, airhockey: 2, ludo: 4, snakes: 4, chain: 4 };
+  const wrong = Object.keys(want).filter((id) => by[id] !== want[id]);
+  ok(!wrong.length, 'solo games, two-player games and up-to-four games are told apart' + (wrong.length ? ': ' + wrong.map((id) => id + '=' + by[id]).join(', ') : ''));
+  const fn = (/^  function peopleFit\(g, p\) \{[\s\S]*?^  \}$/m.exec(html) || [''])[0];
+  ok(!!fn, 'peopleFit found in the menu');
+  if (!fn) return;
+  const sb = {};
+  vm.runInNewContext(fn + ';this.f = peopleFit;', sb);
+  const n = (p) => games.filter((g) => sb.f(g, p)).length;
+  ok(n('all') === games.length && n('1') + n('2') === games.length && n('3') > 0 && n('3') < n('2'), 'one player lists the solo games, two the rest, three and four a few of those (' + ['all', '1', '2', '3'].map(n).join(', ') + ')');
+  ok(/g\.cat === c && peopleFit\(g, people\)/.test(html) && /C\.state\.settings\.gamePeople = v;/.test(html) && /if \(!any\) box\.appendChild/.test(html), 'the filter works with the category chips, is remembered, and says so when nothing fits');
 }
 
 function testInstallBar() {
