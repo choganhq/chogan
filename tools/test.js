@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5446;
+const MIN_CHECKS = 5449;
 
 function ok(cond, msg) {
   checks++;
@@ -10158,6 +10158,28 @@ function testGorillasStick() {
   ok(/if \(cancel \|\| !a \|\| a\.power < 6 \|\| !canAim\(\)\) \{ draw\(\); return; \}/.test(html), 'a push let go near the middle is taken back, not thrown');
   const langs = ['ctlStick', 'aimStick', 'stick'].every((k) => (html.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length === 5);
   ok(langs, 'its strings are in all five languages');
+}
+
+function testGorillasNewCity() {
+  head('Gorillas: a new match draws its own city (#552)');
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/gorillas/index.html'), 'utf8');
+  const fn = (/^  function cityCanvas\(scale, P\) \{[\s\S]*?^  \}$/m.exec(html) || [''])[0];
+  ok(!!fn, 'cityCanvas found in Gorillas');
+  if (!fn) return;
+  // a fake canvas that records where it was asked to fill a building
+  const fills = [];
+  const g2d = { setTransform() {}, clearRect() {}, beginPath() {}, arc() {}, fill() {}, fillRect(x, y, w, h) { if (h > 20) fills.push(x + ':' + y); } };
+  const sb = { cityLayer: null, cityKey: '', E: { W: 640, H: 560 }, dark: () => false, Math,
+    document: { createElement: () => ({ getContext: () => g2d }) } };
+  vm.runInNewContext(fn + ';this.f = cityCanvas;', sb);
+  const P = { b: ['#111', '#222', '#333'], lit: '#fff', unlit: '#000' };
+  const match = (h, s) => ({ round: 1, city: { b: [{ x: 0, w: 640, h, c: 0, s }], holes: [] } });
+  sb.G = { M: match(200, 11) }; sb.f(1, P);
+  const first = fills.slice(); fills.length = 0;
+  sb.G = { M: match(300, 99) }; sb.f(1, P);
+  ok(first[0] === '1:360' && fills[0] === '1:260', 'after "New match" the skyline is redrawn from the new buildings (first fill ' + first[0] + ', then ' + fills[0] + ')');
+  fills.length = 0; sb.f(1, P);
+  ok(fills.length === 0, 'the same city is still drawn only once (cached)');
 }
 
 function testGorillas() {
