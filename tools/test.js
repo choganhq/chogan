@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5449;
+const MIN_CHECKS = 5452;
 
 function ok(cond, msg) {
   checks++;
@@ -9032,6 +9032,26 @@ function testSlidingShimmer() {
   }
   ok(/if \(!C\.ui\.reduceMotion\(\)\) \{\n      var sd = shineDelays\(S\.n\);/.test(src), 'no shimmer with reduced motion');
   ok(/board\.classList\.remove\('sp-shine'\);/.test(src), 'a new tray starts without it');
+}
+
+function testJigsawTrayKeys() {
+  head('Jigsaw: arrow keys in the loose pieces move like in the frame (#556)');
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/jigsaw/index.html'), 'utf8');
+  const fn = (/^  function trayStep\(at, n, cols, dx, dy\) \{[\s\S]*?^  \}$/m.exec(html) || [''])[0];
+  ok(!!fn, 'trayStep found in Jigsaw');
+  if (!fn) return;
+  const sb = {};
+  vm.runInNewContext(fn + ';this.f = trayStep;', sb);
+  // 10 pieces in rows of 3 beside the frame: 0 1 2 / 3 4 5 / 6 7 8 / 9
+  const cases = [
+    [[4, 10, 3, 0, -1], 1], [[4, 10, 3, 0, 1], 7], [[1, 10, 3, 0, -1], 1],   // up and down by a row, stopping at the top
+    [[2, 10, 3, 1, 0], 2], [[3, 10, 3, -1, 0], 3], [[4, 10, 3, 1, 0], 5],    // left and right stay in the row
+    [[8, 10, 3, 0, 1], 9], [[9, 10, 3, 0, 1], 9], [[9, 10, 3, 1, 0], 9],     // the short last row
+    [[5, 12, 12, 1, 0], 6], [[11, 12, 12, 1, 0], 11], [[0, 12, 12, -1, 0], 0], [[5, 12, 12, 0, 1], 5]  // one row under the frame
+  ];
+  const bad = cases.filter(([a, want]) => sb.f(...a) !== want).map(([a, want]) => a.join(',') + ' → ' + sb.f(...a) + ' (want ' + want + ')');
+  ok(!bad.length, 'up/down change the row, left/right only the column (' + cases.length + ' presses)' + (bad.length ? ': ' + bad.join('; ') : ''));
+  ok(/at = at < 0 \? 0 : trayStep\(at, S\.tray\.length, trayCols\(\), d\[0\], d\[1\]\);/.test(html) && !/if \(!d\[0\]\) return;/.test(html), 'the key handler uses it for all four arrows');
 }
 
 function testJigsawGlide() {
