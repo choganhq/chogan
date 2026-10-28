@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5455;
+const MIN_CHECKS = 5464;
 
 function ok(cond, msg) {
   checks++;
@@ -10178,6 +10178,47 @@ function testGorillasStick() {
   ok(/if \(cancel \|\| !a \|\| a\.power < 6 \|\| !canAim\(\)\) \{ draw\(\); return; \}/.test(html), 'a push let go near the middle is taken back, not thrown');
   const langs = ['ctlStick', 'aimStick', 'stick'].every((k) => (html.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length === 5);
   ok(langs, 'its strings are in all five languages');
+}
+
+function testInstallBar() {
+  head('Web menu: an install bar the cross hides for good (#557)');
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  const from = core.indexOf('Chogan.installOffer = function');
+  const to = core.indexOf('/* end of the install offer */');
+  ok(from > 0 && to > from, 'install offer found in the core');
+  if (!(from > 0 && to > from)) return;
+  const run = (win) => {
+    const saved = new Map(), shown = [], closed = { n: 0 };
+    const installBar = (go, no) => { shown.push({ go, no }); };
+    installBar.close = () => { closed.n++; };
+    const Chogan = { store: { get: (k, d) => (saved.has(k) ? saved.get(k) : d), set: (k, v) => saved.set(k, v) }, ui: { installBar } };
+    vm.runInNewContext('(function (Chogan) { ' + core.slice(from, to) + ' })', {})(Chogan);
+    Chogan.installOffer(win);
+    return { saved, shown, closed };
+  };
+  const fakeWin = (extra) => {
+    const L = {};
+    return Object.assign({ L, addEventListener: (t, f) => { (L[t] = L[t] || []).push(f); }, fire: (t, e) => (L[t] || []).forEach((f) => f(e)) }, extra || {});
+  };
+  const app = fakeWin({ Capacitor: {} });
+  run(app);
+  ok(!Object.keys(app.L).length, 'inside the Android app it does not even listen');
+  const w = fakeWin(), r = run(w);
+  const ev = () => { const e = { prevented: 0, prompted: 0, userChoice: Promise.resolve({ outcome: 'accepted' }) }; e.preventDefault = () => { e.prevented++; }; e.prompt = () => { e.prompted++; }; return e; };
+  const e1 = ev();
+  w.fire('beforeinstallprompt', e1);
+  ok(r.shown.length === 1 && e1.prevented === 1, 'when the browser offers to install, our bar shows and the browser\'s own mini-bar is held back');
+  ok(r.shown[0].go() === e1.userChoice && e1.prompted === 1, 'its button opens the browser\'s install question');
+  r.shown[0].no();
+  ok(r.saved.get('installNo') === true, 'the cross is remembered');
+  const e2 = ev();
+  w.fire('beforeinstallprompt', e2);
+  ok(r.shown.length === 1 && e2.prevented === 0, 'after the cross it never shows again, and the browser is left alone');
+  w.fire('appinstalled', {});
+  ok(r.closed.n === 1, 'once installed the bar goes away');
+  ok(/var existing = document\.querySelector\('\.ch-update:not\(\.ch-install\)'\);[\s\S]{0,200}ui\.installBar\.close\(\);/.test(core) && /ui\.installBar = function \(onGo, onNo\) \{\n    if \(document\.querySelector\('\.ch-update'\)\) return null;/.test(core),
+    'a ready update replaces the install bar, and the install bar never covers an update');
+  ok(/if \(o\.sw\) Chogan\.installOffer\(global\);/.test(core), 'only the menu (the page that registers the service worker) offers it');
 }
 
 function testFloatingNav() {
