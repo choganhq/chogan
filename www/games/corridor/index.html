@@ -1,0 +1,848 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>راهرو — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* The board is the game's own, the same in both themes: dark cells, red grooves,
+     wooden walls and pawns */
+  :root { --cr-board: #2B2622; --cr-cell: #3A3530; --cr-groove: #B3262E; --cr-wall: #C68B4A; --cr-wall-dk: #8A5A2B;
+    --cr-p0: #EED9AE; --cr-p1: #7A4526; --cr-ok: #3FA66A; --cr-bad: #D64545; }
+  .cr-wrap > .ch-fit { --fit-ar: 1; }
+  .ch-fit > .cr-box { width: 100%; height: 100%; display: grid; place-items: center; }
+  .cr-canvas { display: block; touch-action: manipulation; cursor: pointer; border-radius: var(--r-md); box-shadow: var(--sh-2); }
+  .cr-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .cr-players { width: 100%; max-width: 520px; display: flex; gap: var(--s-2); }
+  .cr-player { flex: 1; display: flex; align-items: center; gap: var(--s-2); min-width: 0; background: var(--c-surface);
+    border-radius: var(--r-md); padding: 8px 12px; box-shadow: var(--sh-1); border: 2px solid transparent; min-height: 44px;
+    transition: border-color var(--t-mid) var(--ease), transform var(--t-mid) var(--ease); }
+  .cr-player--on { border-color: var(--game); transform: translateY(-2px); box-shadow: var(--sh-2); }
+  .cr-player__dot { width: 18px; height: 18px; border-radius: 50%; flex: 0 0 18px; box-shadow: 0 0 0 1.5px var(--c-text-faint); }
+  .cr-player__name { flex: 1; min-width: 0; font-weight: 700; font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cr-player__walls { font-size: var(--fs-xs); color: var(--c-text-dim); font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .cr-thinking { animation: cr-blink 900ms infinite; }
+  @keyframes cr-blink { 50% { opacity: .55; } }
+  .cr-status { min-height: 2.9em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+  .cr-tools { display: flex; gap: var(--s-2); justify-content: center; flex-wrap: wrap; align-items: center; }
+  /* the wall tools keep their room when hidden: on a phone the side sits above the
+     board, and the board moving down under the finger turned the second tap of a wall
+     into a tap somewhere else */
+  .cr-tools--wall { min-height: 40px; }
+  .cr-tools--off { visibility: hidden; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function CorridorEngineFactory() {
+  'use strict';
+
+  // 9×9 cells, index r * 9 + c. Seat 0 starts in the middle of the bottom row and
+  // makes for the top row; seat 1 the other way round. A wall is two cells long and
+  // lies in the groove under or beside its anchor (r, c), 0..7 each way.
+  var N = 9, WALLS = 10, MAX_PLIES = 300;
+  var START = [8 * N + 4, 4];
+  var FLAGS = { none: [], edge: [4 * N], centre: [4 * N + 4], both: [4 * N, 4 * N + 4] };
+  var DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
+  function rc(i) { return [Math.floor(i / N), i % N]; }
+  function at(r, c) { return r >= 0 && r < N && c >= 0 && c < N ? r * N + c : -1; }
+  function key(a, b) { return a < b ? a + '-' + b : b + '-' + a; }
+
+  // the two cell sides a wall closes
+  function sides(w) {
+    var a = w.r * N + w.c;
+    return w.o === 'h' ? [[a, a + N], [a + 1, a + 1 + N]] : [[a, a + 1], [a + N, a + N + 1]];
+  }
+  function blockedSet(walls) {
+    var s = {};
+    walls.forEach(function (w) { sides(w).forEach(function (p) { s[key(p[0], p[1])] = 1; }); });
+    return s;
+  }
+  // walls may not overlap along a groove or cross at their middle
+  function clashes(walls, w) {
+    for (var i = 0; i < walls.length; i++) {
+      var x = walls[i];
+      if (x.r === w.r && x.c === w.c) return true;                       // same anchor: same wall, or a cross
+      if (x.o === w.o) {
+        if (w.o === 'h' && x.r === w.r && Math.abs(x.c - w.c) === 1) return true;
+        if (w.o === 'v' && x.c === w.c && Math.abs(x.r - w.r) === 1) return true;
+      }
+    }
+    return false;
+  }
+
+  function newGame(flags) {
+    return { pos: START.slice(), walls: [], left: [WALLS, WALLS], turn: 0, winner: -1, plies: 0,
+      flag: FLAGS[flags] ? flags : 'none', flags: (FLAGS[flags] || []).slice() };
+  }
+  function clone(S) {
+    return { pos: S.pos.slice(), walls: S.walls.map(function (w) { return { o: w.o, r: w.r, c: w.c }; }), left: S.left.slice(),
+      turn: S.turn, winner: S.winner, plies: S.plies, flag: S.flag, flags: S.flags.slice() };
+  }
+
+  function open(blk, a, b) { return !blk[key(a, b)]; }
+  function isFlag(S, i) { return S.flags.indexOf(i) >= 0; }
+
+  // A seat wins on the far row, or, in the flag game, on a cell beside a flag (above,
+  // below, left or right, with no wall between them)
+  function isGoal(S, who, i, blk) {
+    var r = Math.floor(i / N);
+    if (who === 0 ? r === 0 : r === N - 1) return true;
+    for (var k = 0; k < S.flags.length; k++) {
+      var f = S.flags[k], d = Math.abs(f - i);
+      var beside = (d === N) || (d === 1 && Math.floor(f / N) === r);
+      if (beside && open(blk, f, i)) return true;
+    }
+    return false;
+  }
+
+  // Steps to the nearest goal, pawns ignored (they move), flag cells closed; with the
+  // way back, so the bot can see which grooves a path runs through
+  function path(S, who, blk) {
+    blk = blk || blockedSet(S.walls);
+    var from = S.pos[who], prev = {}, q = [from], seen = {};
+    seen[from] = 1;
+    for (var h = 0; h < q.length; h++) {
+      var p = q[h];
+      if (isGoal(S, who, p, blk)) {
+        var out = [p];
+        while (out[0] !== from) out.unshift(prev[out[0]]);
+        return out;
+      }
+      var pr = rc(p);
+      for (var d = 0; d < 4; d++) {
+        var n = at(pr[0] + DIRS[d][0], pr[1] + DIRS[d][1]);
+        if (n < 0 || seen[n] || isFlag(S, n) || !open(blk, p, n)) continue;
+        seen[n] = 1; prev[n] = p; q.push(n);
+      }
+    }
+    return null;
+  }
+  function dist(S, who, blk) { var p = path(S, who, blk); return p ? p.length - 1 : Infinity; }
+
+  // Cells the pawn may go to: one step, or over the other pawn when they stand side by
+  // side; with a wall or the edge behind it, to either side of it instead
+  function pawnMoves(S, who) {
+    var blk = blockedSet(S.walls), p = S.pos[who], o = S.pos[1 - who], out = [];
+    var pr = rc(p);
+    for (var d = 0; d < 4; d++) {
+      var q = at(pr[0] + DIRS[d][0], pr[1] + DIRS[d][1]);
+      if (q < 0 || isFlag(S, q) || !open(blk, p, q)) continue;
+      if (q !== o) { out.push(q); continue; }
+      var qr = rc(q), j = at(qr[0] + DIRS[d][0], qr[1] + DIRS[d][1]);
+      if (j >= 0 && !isFlag(S, j) && open(blk, q, j)) { out.push(j); continue; }
+      for (var e = 0; e < 4; e++) {
+        if (DIRS[e][0] === DIRS[d][0] || DIRS[e][1] === DIRS[d][1]) continue;   // only the two sides
+        var s = at(qr[0] + DIRS[e][0], qr[1] + DIRS[e][1]);
+        if (s >= 0 && s !== p && !isFlag(S, s) && open(blk, q, s) && out.indexOf(s) < 0) out.push(s);
+      }
+    }
+    return out;
+  }
+
+  // A wall must fit, the seat must have one left, and no pawn may be shut off from
+  // every goal
+  function wallOk(S, w) {
+    if (!w || (w.o !== 'h' && w.o !== 'v') || w.r < 0 || w.r > N - 2 || w.c < 0 || w.c > N - 2) return false;
+    if (S.left[S.turn] < 1 || clashes(S.walls, w)) return false;
+    var walls = S.walls.concat([w]), blk = blockedSet(walls), T = { pos: S.pos, flags: S.flags, walls: walls };
+    return dist(T, 0, blk) < Infinity && dist(T, 1, blk) < Infinity;
+  }
+
+  function legal(S, m) {
+    if (S.winner >= 0 || !m) return false;
+    if (m.t === 'm') return pawnMoves(S, S.turn).indexOf(m.to) >= 0;
+    if (m.t === 'w') return wallOk(S, m);
+    return false;
+  }
+
+  // Plays a legal move in place; returns false and changes nothing otherwise
+  function play(S, m) {
+    if (!legal(S, m)) return false;
+    var who = S.turn;
+    if (m.t === 'm') {
+      S.pos[who] = m.to;
+      if (isGoal(S, who, m.to, blockedSet(S.walls))) S.winner = who;
+    } else {
+      S.walls.push({ o: m.o, r: m.r, c: m.c });
+      S.left[who]--;
+    }
+    S.plies++;
+    if (S.winner < 0 && S.plies >= MAX_PLIES) S.winner = 2;          // a draw, only if both stall for ever
+    S.turn = 1 - who;
+    return true;
+  }
+
+  /* --------------------------------------------------------------- bot */
+
+  // The grooves a path runs through, as the walls that would close them
+  function wallsOnPath(p) {
+    var out = [];
+    for (var k = 0; k + 1 < p.length; k++) {
+      var a = rc(p[k]), b = rc(p[k + 1]);
+      if (a[1] === b[1]) {                                  // a step up or down: a horizontal wall
+        var r = Math.min(a[0], b[0]);
+        [a[1] - 1, a[1]].forEach(function (c) { out.push({ t: 'w', o: 'h', r: r, c: c }); });
+      } else {                                              // a step sideways: a vertical wall
+        var c2 = Math.min(a[1], b[1]);
+        [a[0] - 1, a[0]].forEach(function (r2) { out.push({ t: 'w', o: 'v', r: r2, c: c2 }); });
+      }
+    }
+    return out;
+  }
+  function candidates(S) {
+    var who = S.turn, out = pawnMoves(S, who).map(function (to) { return { t: 'm', to: to }; });
+    if (S.left[who] > 0) {
+      var p = path(S, 1 - who), seen = {};
+      (p ? wallsOnPath(p.slice(0, 7)) : []).forEach(function (w) {
+        var k = w.o + w.r + ',' + w.c;
+        if (seen[k] || !wallOk(S, w)) return;
+        seen[k] = 1; out.push(w);
+      });
+    }
+    return out;
+  }
+  // From who's side: how much shorter their way is, and walls kept in hand are worth a
+  // little, so the bot does not spend them on nothing
+  function score(S, who) {
+    if (S.winner === who) return 1000;
+    if (S.winner === 1 - who) return -1000;
+    var blk = blockedSet(S.walls), me = dist(S, who, blk), op = dist(S, 1 - who, blk);
+    return (op - me) * 10 + (S.left[who] - S.left[1 - who]) * 3 + (S.turn === who ? 5 : 0);
+  }
+
+  var LEVELS = ['easy', 'medium', 'hard'];
+  function think(S, level, rnd) {
+    var who = S.turn, moves = candidates(S);
+    if (!moves.length) return null;
+    // a step onto a goal is always taken
+    for (var i = 0; i < moves.length; i++) if (moves[i].t === 'm' && isGoal(S, who, moves[i].to, blockedSet(S.walls))) return moves[i];
+    var pick = function (list) { return list[Math.floor(rnd() * list.length)]; };
+    if (level === 'easy') {
+      // mostly walks its shortest way, now and then puts a wall in your way or wanders
+      var p = path(S, who), step = p && p.length > 1 ? p[1] : -1;
+      var walk = moves.filter(function (m) { return m.t === 'm' && m.to === step; });
+      var walls = moves.filter(function (m) { return m.t === 'w'; });
+      var x = rnd();
+      if (walls.length && x < 0.18) return pick(walls);
+      if (walk.length && x < 0.85) return walk[0];
+      return pick(moves.filter(function (m) { return m.t === 'm'; }).concat(walk));
+    }
+    var best = -Infinity, bestMoves = [];
+    moves.forEach(function (m) {
+      var T = clone(S);
+      play(T, m);
+      var v;
+      if (level === 'hard' && T.winner < 0) {
+        // the reply that hurts most
+        var worst = Infinity;
+        candidates(T).forEach(function (r) {
+          var U = clone(T);
+          play(U, r);
+          worst = Math.min(worst, score(U, who));
+        });
+        v = worst === Infinity ? score(T, who) : worst;
+      } else v = score(T, who);
+      if (level === 'medium') v += rnd() * 6;                 // a little uneven, so it is beatable
+      if (v > best + 1e-9) { best = v; bestMoves = [m]; } else if (Math.abs(v - best) <= 1e-9) bestMoves.push(m);
+    });
+    return pick(bestMoves);
+  }
+
+  function valid(S) {
+    if (!S || !Array.isArray(S.pos) || S.pos.length !== 2 || !Array.isArray(S.walls) || !Array.isArray(S.left) || !FLAGS[S.flag]) return false;
+    if (S.pos.some(function (i) { return !(i >= 0 && i < N * N); }) || S.pos[0] === S.pos[1]) return false;
+    if (S.left.some(function (n) { return !(n >= 0 && n <= WALLS); }) || (S.turn !== 0 && S.turn !== 1)) return false;
+    if (S.walls.length !== 2 * WALLS - S.left[0] - S.left[1]) return false;
+    var seen = [];
+    for (var i = 0; i < S.walls.length; i++) {
+      var w = S.walls[i];
+      if ((w.o !== 'h' && w.o !== 'v') || !(w.r >= 0 && w.r <= N - 2 && w.c >= 0 && w.c <= N - 2) || clashes(seen, w)) return false;
+      seen.push(w);
+    }
+    return true;
+  }
+
+  return { N: N, WALLS: WALLS, START: START, FLAGS: FLAGS, LEVELS: LEVELS, rc: rc, at: at, newGame: newGame, clone: clone,
+    pawnMoves: pawnMoves, wallOk: wallOk, legal: legal, play: play, path: path, dist: dist, isGoal: isGoal,
+    blockedSet: blockedSet, clashes: clashes, candidates: candidates, think: think, score: score, valid: valid };
+}
+if (typeof module !== 'undefined') module.exports = CorridorEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = CorridorEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'corridor',
+    name: { fa: 'راهرو', en: 'Corridor', zh: '走廊', de: 'Korridor', es: 'Pasillo' },
+    accent: '#E80450',
+    mood: 'sudoku',
+    strings: {
+      fa: {
+        board: 'صفحه‌ی راهرو', vsBot: 'مقابل ربات', people: 'دو نفره', bot: 'ربات', playerN: 'بازیکن {n}',
+        modePawn: 'مهره', modeWall: 'دیوار · {n}', wallsN: '{n} دیوار', newMatch: 'بازی تازه', begin: 'شروع', undoMove: 'برگرداندن حرکت',
+        resetWarn: 'بازی فعلی تمام می‌شود. ادامه؟', settingsT: 'بازی تازه', flagT: 'پرچم',
+        flagNone: 'بدون پرچم', flagEdge: 'کنار', flagCentre: 'وسط', flagBoth: 'هر دو',
+        yourMove: 'یک خانه‌ی نشان‌دار را بزن، یا روی شیارها دیوار بگذار', turnOf: 'نوبت {n}', thinking: 'ربات فکر می‌کند…',
+        wallHint: 'دوباره همان‌جا را بزن تا دیوار گذاشته شود', wallBad: 'این دیوار جا نمی‌شود یا راه یکی را کامل می‌بندد', noWalls: 'دیواری برایت نمانده',
+        place: 'گذاشتن', rotate: 'چرخاندن', drop: 'رها کردن',
+        dailyCr: 'راهروی روزانه', vsMedium: 'مقابل ربات متوسط', playerWon: '{n} برد', drawn: 'مساوی',
+        movesL: 'حرکت مهره', wallsL: 'دیوار گذاشته‌شده', flagGoal: 'یا به کنار پرچم برس',
+        rules: 'مهره‌ات را به ردیف آن طرف صفحه برسان. در هر نوبت یا مهره را یک خانه به جلو، عقب، چپ یا راست ببر، یا یک دیوار دوخانه‌ای در شیارها بگذار تا راه حریف طولانی‌تر شود. هر کس ده دیوار دارد. دیوارها روی هم یا ضربدری نمی‌افتند، جابه‌جا نمی‌شوند و هیچ‌وقت نباید راه کسی را کامل ببندند. اگر دو مهره کنار هم باشند، می‌شود از روی مهره‌ی حریف پرید؛ اگر پشت آن دیوار یا لبه‌ی صفحه باشد، به یکی از دو طرفش رفت. در بازی پرچم، رسیدن به خانه‌ی بالا، پایین، چپ یا راست پرچم هم برد است، اگر دیواری وسطشان نباشد.',
+        kCursor: 'جابه‌جایی نشانگر یا دیوار', kGo: 'رفتن یا گذاشتن دیوار', kWall: 'حالت مهره یا دیوار', kRotate: 'چرخاندن دیوار', kDrop: 'رها کردن دیوار',
+        tutTitle1: 'به آن طرف برس', tutText1: 'اولین کسی که مهره‌اش به ردیف آن طرف صفحه برسد برنده است.',
+        tutTitle2: 'یا دیوار بگذار', tutText2: 'به جای حرکت، یک دیوار در شیارها بگذار تا راه حریف دورتر شود. یک بار بزن، ببین، دوباره بزن تا گذاشته شود.',
+        tutTitle3: 'هیچ راهی بسته نمی‌شود', tutText3: 'دیوار نباید راه کسی را کامل ببندد. از روی مهره‌ی کناری هم می‌شود پرید.'
+      },
+      en: {
+        board: 'Corridor board', vsBot: 'Against the bot', people: 'Two players', bot: 'Bot', playerN: 'Player {n}',
+        modePawn: 'Pawn', modeWall: 'Wall · {n}', wallsN: '{n} walls', newMatch: 'New game', begin: 'Start', undoMove: 'Undo move',
+        resetWarn: 'This ends the current game. Continue?', settingsT: 'New game', flagT: 'Flag',
+        flagNone: 'No flag', flagEdge: 'Edge', flagCentre: 'Centre', flagBoth: 'Both',
+        yourMove: 'Tap a marked cell, or put a wall in the grooves', turnOf: "{n}'s turn", thinking: 'The bot is thinking…',
+        wallHint: 'Tap the same place again to put the wall down', wallBad: 'This wall does not fit, or shuts someone in', noWalls: 'You have no walls left',
+        place: 'Place', rotate: 'Turn', drop: 'Drop',
+        dailyCr: 'Daily Corridor', vsMedium: 'against the medium bot', playerWon: '{n} wins', drawn: 'Draw',
+        movesL: 'Pawn moves', wallsL: 'Walls placed', flagGoal: 'or reach a cell beside a flag',
+        rules: 'Get your pawn to the far row. On each turn, either move it one cell forward, back, left or right, or put a two-cell wall in the grooves to make the other way longer. Each player has ten walls. Walls cannot overlap or cross, never move once placed, and may never shut anyone off from their goal. When the pawns stand side by side you may jump over the other one; if a wall or the edge is behind it, step to either side of it instead. In the flag game, reaching the cell above, below, left or right of a flag also wins, as long as no wall stands between.',
+        kCursor: 'Move the cursor or the wall', kGo: 'Move there, or place the wall', kWall: 'Pawn or wall', kRotate: 'Turn the wall', kDrop: 'Drop the wall',
+        tutTitle1: 'Reach the other side', tutText1: 'The first pawn to reach the far row wins.',
+        tutTitle2: 'Or place a wall', tutText2: 'Instead of moving, put a wall in the grooves to make the other way longer. Tap once to see it, tap again to place it.',
+        tutTitle3: 'No way is ever shut', tutText3: 'A wall may never cut anyone off completely. You can also jump over a pawn beside you.'
+      },
+      zh: {
+        board: '走廊棋盘', vsBot: '对战电脑', people: '双人', bot: '电脑', playerN: '玩家 {n}',
+        modePawn: '棋子', modeWall: '墙 · {n}', wallsN: '{n} 堵墙', newMatch: '新一局', begin: '开始', undoMove: '悔棋',
+        resetWarn: '将结束当前对局，是否继续？', settingsT: '新一局', flagT: '旗子',
+        flagNone: '无旗', flagEdge: '边上', flagCentre: '中间', flagBoth: '两个',
+        yourMove: '点一个标记的格子，或在槽里放一堵墙', turnOf: '轮到{n}', thinking: '电脑思考中……',
+        wallHint: '在同一处再点一次放下墙', wallBad: '这堵墙放不下，或会完全堵住某人', noWalls: '你没有墙了',
+        place: '放下', rotate: '旋转', drop: '取消',
+        dailyCr: '每日走廊', vsMedium: '对战中等电脑', playerWon: '{n}获胜', drawn: '平局',
+        movesL: '棋子移动', wallsL: '放下的墙', flagGoal: '或走到旗子旁边',
+        rules: '把你的棋子走到对面的底行。每回合要么把棋子向前、后、左、右走一格，要么在槽里放一堵两格长的墙，让对手的路变长。每人有十堵墙。墙不能重叠或交叉，放下后不能移动，也绝不能完全堵死任何人的去路。两枚棋子相邻时，可以跳过对方；如果对方身后是墙或棋盘边缘，就改走到它的左右两侧。在旗子玩法中，走到旗子上下左右相邻的格子（中间没有墙）也算获胜。',
+        kCursor: '移动光标或墙', kGo: '走过去或放下墙', kWall: '棋子或墙', kRotate: '旋转墙', kDrop: '取消墙',
+        tutTitle1: '走到对面', tutText1: '先走到对面底行的棋子获胜。',
+        tutTitle2: '或者放墙', tutText2: '不走棋，改在槽里放一堵墙，让对手的路变长。点一次预览，再点一次放下。',
+        tutTitle3: '永远不能堵死', tutText3: '墙绝不能完全堵死任何人。也可以跳过相邻的棋子。'
+      },
+      de: {
+        board: 'Korridor-Brett', vsBot: 'Gegen den Bot', people: 'Zu zweit', bot: 'Bot', playerN: 'Spieler {n}',
+        modePawn: 'Figur', modeWall: 'Wand · {n}', wallsN: '{n} Wände', newMatch: 'Neue Partie', begin: 'Start', undoMove: 'Zug zurück',
+        resetWarn: 'Die aktuelle Partie endet. Weiter?', settingsT: 'Neue Partie', flagT: 'Fahne',
+        flagNone: 'Ohne Fahne', flagEdge: 'Rand', flagCentre: 'Mitte', flagBoth: 'Beide',
+        yourMove: 'Tippe ein markiertes Feld, oder setze eine Wand in die Rillen', turnOf: 'Am Zug: {n}', thinking: 'Der Bot überlegt …',
+        wallHint: 'Tippe dieselbe Stelle nochmal, um die Wand zu setzen', wallBad: 'Diese Wand passt nicht oder sperrt jemanden ein', noWalls: 'Du hast keine Wände mehr',
+        place: 'Setzen', rotate: 'Drehen', drop: 'Verwerfen',
+        dailyCr: 'Korridor des Tages', vsMedium: 'gegen den mittleren Bot', playerWon: 'Sieg: {n}', drawn: 'Unentschieden',
+        movesL: 'Figurzüge', wallsL: 'Gesetzte Wände', flagGoal: 'oder ein Feld neben einer Fahne',
+        rules: 'Bring deine Figur in die gegenüberliegende Reihe. In jedem Zug ziehst du sie ein Feld vor, zurück, nach links oder rechts, oder du setzt eine zwei Felder lange Wand in die Rillen, damit der Weg des anderen länger wird. Jeder hat zehn Wände. Wände dürfen sich nicht überlappen oder kreuzen, bleiben, wo sie stehen, und dürfen niemanden ganz von seinem Ziel abschneiden. Stehen die Figuren nebeneinander, darfst du über die andere springen; steht dahinter eine Wand oder der Rand, ziehst du stattdessen auf eine ihrer Seiten. Im Fahnenspiel gewinnt auch, wer das Feld über, unter, links oder rechts einer Fahne erreicht, wenn keine Wand dazwischen steht.',
+        kCursor: 'Cursor oder Wand bewegen', kGo: 'Dorthin ziehen oder Wand setzen', kWall: 'Figur oder Wand', kRotate: 'Wand drehen', kDrop: 'Wand verwerfen',
+        tutTitle1: 'Auf die andere Seite', tutText1: 'Wer zuerst die gegenüberliegende Reihe erreicht, gewinnt.',
+        tutTitle2: 'Oder eine Wand setzen', tutText2: 'Statt zu ziehen, setzt du eine Wand in die Rillen und machst den Weg des anderen länger. Einmal tippen zum Ansehen, nochmal zum Setzen.',
+        tutTitle3: 'Kein Weg wird ganz zu', tutText3: 'Eine Wand darf niemanden ganz einsperren. Über eine Figur neben dir darfst du springen.'
+      },
+      es: {
+        board: 'Tablero de Pasillo', vsBot: 'Contra el bot', people: 'Dos jugadores', bot: 'Bot', playerN: 'Jugador {n}',
+        modePawn: 'Ficha', modeWall: 'Muro · {n}', wallsN: '{n} muros', newMatch: 'Nueva partida', begin: 'Empezar', undoMove: 'Deshacer jugada',
+        resetWarn: 'Esto termina la partida actual. ¿Seguir?', settingsT: 'Nueva partida', flagT: 'Bandera',
+        flagNone: 'Sin bandera', flagEdge: 'Borde', flagCentre: 'Centro', flagBoth: 'Las dos',
+        yourMove: 'Toca una casilla marcada, o pon un muro en las ranuras', turnOf: 'Turno de {n}', thinking: 'El bot está pensando…',
+        wallHint: 'Toca otra vez el mismo sitio para poner el muro', wallBad: 'Este muro no cabe o encierra a alguien', noWalls: 'No te quedan muros',
+        place: 'Poner', rotate: 'Girar', drop: 'Quitar',
+        dailyCr: 'Pasillo diario', vsMedium: 'contra el bot medio', playerWon: 'Gana: {n}', drawn: 'Empate',
+        movesL: 'Movimientos de ficha', wallsL: 'Muros puestos', flagGoal: 'o llega junto a una bandera',
+        rules: 'Lleva tu ficha a la fila del otro lado. En cada turno, muévela una casilla adelante, atrás, a la izquierda o a la derecha, o pon un muro de dos casillas en las ranuras para alargar el camino del otro. Cada jugador tiene diez muros. Los muros no se solapan ni se cruzan, no se mueven una vez puestos y nunca pueden dejar a nadie sin camino. Cuando las fichas están juntas puedes saltar la otra; si detrás hay un muro o el borde, pasa a uno de sus lados. En la partida con bandera también gana quien llega a la casilla de arriba, abajo, izquierda o derecha de una bandera, si no hay un muro en medio.',
+        kCursor: 'Mover el cursor o el muro', kGo: 'Ir ahí o poner el muro', kWall: 'Ficha o muro', kRotate: 'Girar el muro', kDrop: 'Quitar el muro',
+        tutTitle1: 'Llega al otro lado', tutText1: 'Gana la primera ficha que llega a la fila del otro lado.',
+        tutTitle2: 'O pon un muro', tutText2: 'En vez de mover, pon un muro en las ranuras para alargar el camino del otro. Toca una vez para verlo y otra para ponerlo.',
+        tutTitle3: 'Nunca se cierra un camino', tutText3: 'Un muro nunca puede encerrar a nadie del todo. También puedes saltar una ficha que tengas al lado.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var FLAG_KEYS = ['none', 'edge', 'centre', 'both'];
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs) prefs = { mode: 'bot', level: 'medium', flag: 'none', p2name: '' };
+  if (prefs.mode !== 'bot' && prefs.mode !== 'people') prefs.mode = 'bot';
+  if (E.LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+  if (FLAG_KEYS.indexOf(prefs.flag) < 0) prefs.flag = 'none';
+
+  // G: the game around the engine's state S. mode 'pawn' or 'wall' is how a tap is read;
+  // preview is the wall shown before it is placed.
+  var G = null, timer = null, mode = 'pawn', preview = null, kbOn = false, cur = E.START[0], msg = '';
+
+  var cv = el('canvas', { class: 'cr-canvas', role: 'img', 'aria-label': C.t('board') });
+  var box = el('div', { class: 'cr-box' }, [cv]);
+  var top = el('div', { class: 'cr-top ch-above' });
+  var players = el('div', { class: 'cr-players ch-above' });
+  var modeRow = el('div', { class: 'cr-tools' });
+  var tools = el('div', { class: 'cr-tools cr-tools--wall cr-tools--off' });
+  var status = el('div', { class: 'cr-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'cr-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, players, modeRow, tools, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ setup */
+
+  function newGame(o) {
+    stop();
+    var daily = o.daily || null;
+    G = { mode: daily ? 'bot' : o.mode, level: daily ? 'medium' : o.level, daily: daily, flag: daily ? 'none' : o.flag,
+      S: null, hist: [], startedAt: Date.now(), done: false, moves: [0, 0] };
+    G.S = E.newGame(G.flag);
+    if (!daily) { prefs.mode = o.mode; prefs.level = o.level; prefs.flag = o.flag; ctx.store.set('prefs', prefs); }
+    mode = 'pawn'; preview = null; msg = ''; cur = G.S.pos[0];
+    render(); save();
+    maybeBot();
+  }
+  function current() { return { mode: G.mode, level: G.level, flag: G.flag }; }
+
+  function isBot(seat) { return G.mode === 'bot' && seat === 1; }
+  function busy() { return !G || G.done || isBot(G.S.turn); }
+  function stop() { if (timer) { clearTimeout(timer); timer = null; } }
+
+  function maybeBot() {
+    if (!G || G.done || !isBot(G.S.turn)) return;
+    renderSide();
+    timer = setTimeout(function () {
+      timer = null;
+      if (!G || G.done || !isBot(G.S.turn)) return;
+      // the daily bot plays from the day's seed, so everyone meets the same opponent
+      var rnd = G.daily ? C.daily('corridor', G.daily + '|' + G.S.plies).rng : Math.random;
+      var m = E.think(G.S, G.level, rnd);
+      if (m) act(m);
+    }, C.ui.reduceMotion() ? 200 : 420);
+  }
+
+  /* ------------------------------------------------------------- moves */
+
+  function act(m) {
+    var before = E.clone(G.S), who = G.S.turn;
+    if (!E.play(G.S, m)) { C.feedback('bad'); return false; }
+    G.hist.push({ S: before, moves: G.moves.slice() });
+    if (G.hist.length > 80) G.hist.shift();
+    if (m.t === 'm') G.moves[who]++;
+    preview = null; msg = ''; mode = 'pawn';
+    C.feedback(isBot(who) ? 'soft' : m.t === 'w' ? 'place' : 'tap');
+    if (G.S.winner >= 0) { G.done = true; render(); finish(); return true; }
+    cur = G.S.pos[G.S.turn];
+    render(); save();
+    maybeBot();
+    return true;
+  }
+
+  // Against the bot one undo takes back its reply and your move together
+  function undo() {
+    if (!G || G.done || !G.hist.length) return;
+    stop();
+    var steps = G.mode === 'bot' ? (isBot(G.S.turn) ? 1 : 2) : 1;
+    if (G.hist.length < steps) steps = G.hist.length;
+    var h;
+    for (var k = 0; k < steps; k++) h = G.hist.pop();
+    G.S = h.S; G.moves = h.moves;
+    preview = null; msg = ''; cur = G.S.pos[G.S.turn];
+    if (G.S.left[G.S.turn] < 1) mode = 'pawn';
+    C.feedback('soft');
+    render(); save();
+    maybeBot();
+  }
+
+  function tryWall(w) {
+    if (G.S.left[G.S.turn] < 1) { msg = C.t('noWalls'); C.feedback('bad'); preview = null; render(); return; }
+    if (preview && preview.o === w.o && preview.r === w.r && preview.c === w.c) {
+      if (E.wallOk(G.S, w)) { act({ t: 'w', o: w.o, r: w.r, c: w.c }); return; }
+      C.feedback('bad'); msg = C.t('wallBad'); render(); return;
+    }
+    preview = w; msg = E.wallOk(G.S, w) ? C.t('wallHint') : C.t('wallBad');
+    C.feedback('select');
+    render();
+  }
+  function placePreview() {
+    if (!preview) return;
+    if (E.wallOk(G.S, preview)) act({ t: 'w', o: preview.o, r: preview.r, c: preview.c });
+    else { C.feedback('bad'); msg = C.t('wallBad'); render(); }
+  }
+  function rotatePreview() {
+    if (!preview) return;
+    preview = { o: preview.o === 'h' ? 'v' : 'h', r: preview.r, c: preview.c };
+    msg = E.wallOk(G.S, preview) ? C.t('wallHint') : C.t('wallBad');
+    render();
+  }
+  function dropPreview() { preview = null; msg = ''; render(); }
+
+  /* ------------------------------------------------------------ result */
+
+  function pname(seat) {
+    if (seat === 0) return G.mode === 'people' ? C.t('playerN', { n: C.num(1) }) : (C.state.profile.name || C.t('you'));
+    return isBot(seat) ? C.t('bot') + ' · ' + C.t(G.level) : (prefs.p2name || C.t('playerN', { n: C.num(2) }));
+  }
+
+  function finish() {
+    stop();
+    var S = G.S, vsBot = G.mode === 'bot', tie = S.winner === 2, won = vsBot ? S.winner === 0 : !tie;
+    var base = vsBot ? ({ easy: 6, medium: 12, hard: 20 }[G.level] || 12) : 8;
+    var coins = Math.max(2, Math.round(won ? base : base * 0.3)) + (G.daily ? 8 : 0);
+    var points = Math.max(3, Math.round(won ? base * 4 : base * 1.2)) + (G.daily ? 25 : 0);
+    if (vsBot && won) {
+      C.achievements.unlock('cor-win');
+      if (G.level === 'hard') C.achievements.unlock('cor-hard');
+      if (G.flag !== 'none') C.achievements.unlock('cor-flag');
+    }
+    if (G.daily) {
+      var first = C.stats.daily('corridor', G.daily, { label: won ? C.t('won') : C.t('lost'), win: won });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    var seat = S.winner === 2 ? -1 : S.winner;
+    setTimeout(function () {
+      ctx.finish({
+        won: vsBot ? won : null,
+        title: tie ? C.t('drawn') : vsBot ? (won ? C.t('won') : C.t('lost')) : C.t('playerWon', { n: pname(seat) }),
+        timeMs: Date.now() - G.startedAt, coins: coins, points: points,
+        lines: [
+          { label: C.t('movesL'), value: C.num(G.moves[0]) + (G.mode === 'people' ? ' / ' + C.num(G.moves[1]) : '') },
+          { label: C.t('wallsL'), value: C.num(E.WALLS - S.left[0]) + ' / ' + C.num(E.WALLS - S.left[1]) }
+        ],
+        shareText: 'چوگان · راهرو' + (G.daily ? ('\nروزانه ' + G.daily) : '') + '\n' + (tie ? C.t('drawn') : pname(seat)),
+        paint: cardPaint(),
+        onAgain: G.daily ? null : function () { newGame(current()); }
+      });
+    }, C.ui.reduceMotion() ? 150 : 600);
+  }
+
+  /* ------------------------------------------------------------- saves */
+
+  ctx.autosave(function () {
+    if (!G || G.done || !G.hist.length) return { inProgress: false };
+    return { g: { mode: G.mode, level: G.level, daily: G.daily, flag: G.flag, S: G.S, moves: G.moves, elapsed: Date.now() - G.startedAt } };
+  });
+  function save() { ctx.save(); }
+  function validSave(sv) {
+    var g = sv && sv.g;
+    return !!(g && (g.mode === 'bot' || g.mode === 'people') && E.LEVELS.indexOf(g.level) >= 0 && FLAG_KEYS.indexOf(g.flag) >= 0 &&
+      E.valid(g.S) && g.S.winner < 0 && g.S.flag === g.flag && Array.isArray(g.moves));
+  }
+  function restore(g) {
+    G = { mode: g.mode, level: g.level, daily: g.daily || null, flag: g.flag, S: g.S, hist: [], moves: g.moves.slice(0, 2),
+      startedAt: Date.now() - (g.elapsed || 0), done: false };
+    G.S.flags = (E.FLAGS[g.flag] || []).slice();
+    mode = 'pawn'; preview = null; msg = ''; cur = G.S.pos[G.S.turn];
+    render();
+    maybeBot();
+  }
+
+  function askNew() {
+    if (G && G.daily) { go({ daily: G.daily }); return; }
+    settings();
+    function go(o) { if (!G || G.done || !G.hist.length) newGame(o); else C.ui.confirm({ title: C.t('newMatch'), body: C.t('resetWarn'), onOk: function () { newGame(o); } }); }
+  }
+  function settings() {
+    var o = G ? current() : { mode: prefs.mode, level: prefs.level, flag: prefs.flag };
+    var body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
+    function rows() {
+      body.innerHTML = '';
+      body.appendChild(C.ui.segmented([{ value: 'bot', label: C.t('vsBot') }, { value: 'people', label: C.t('people') }], o.mode, function (v) { o.mode = v; rows(); }));
+      if (o.mode === 'bot') body.appendChild(C.ui.segmented(E.LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), o.level, function (v) { o.level = v; }));
+      body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('flagT') }));
+      body.appendChild(C.ui.segmented(FLAG_KEYS.map(function (f) { return { value: f, label: C.t('flag' + f.charAt(0).toUpperCase() + f.slice(1)) }; }), o.flag, function (v) { o.flag = v; }));
+      if (G && !G.done && G.hist.length) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('resetWarn') }));
+    }
+    rows();
+    C.ui.modal({
+      title: C.t('settingsT'), closeButton: true, body: [body],
+      actions: [{ label: C.t('cancel') }, { label: C.t('begin'), kind: 'primary', onClick: function () { newGame(o); } }]
+    });
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function colors() {
+    var cs = getComputedStyle(document.documentElement);
+    var v = function (k, f) { return cs.getPropertyValue(k).trim() || f; };
+    return { board: v('--cr-board', '#2B2622'), cell: v('--cr-cell', '#3A3530'), groove: v('--cr-groove', '#B3262E'),
+      wall: v('--cr-wall', '#C68B4A'), wallDk: v('--cr-wall-dk', '#8A5A2B'), p0: v('--cr-p0', '#EED9AE'), p1: v('--cr-p1', '#7A4526'),
+      ok: v('--cr-ok', '#3FA66A'), bad: v('--cr-bad', '#D64545'), accent: v('--game', '#E80450') };
+  }
+  // Shared by drawing and by reading a tap, so a tap lands on what is drawn under it
+  function geo(W) {
+    var pad = W * 0.035, s = (W - 2 * pad) / (E.N + (E.N - 1) * 0.26), g = s * 0.26;
+    return { pad: pad, s: s, g: g, step: s + g };
+  }
+  function cellXY(G2, i) { var p = E.rc(i); return { x: G2.pad + p[1] * G2.step, y: G2.pad + p[0] * G2.step }; }
+  function wallRect(G2, w) {
+    if (w.o === 'h') return { x: G2.pad + w.c * G2.step, y: G2.pad + (w.r + 1) * G2.s + w.r * G2.g, w: 2 * G2.s + G2.g, h: G2.g };
+    return { x: G2.pad + (w.c + 1) * G2.s + w.c * G2.g, y: G2.pad + w.r * G2.step, w: G2.g, h: 2 * G2.s + G2.g };
+  }
+
+  function paintBoard(g, W, o, col) {
+    var Q = geo(W), S = o.S;
+    g.fillStyle = col.groove;
+    C.rrect(g, 0, 0, W, W, W * 0.03); g.fill();
+    // the far rows a little lit in the colour of the pawn that makes for them
+    g.fillStyle = col.board;
+    C.rrect(g, Q.pad * 0.35, Q.pad * 0.35, W - Q.pad * 0.7, W - Q.pad * 0.7, W * 0.025); g.fill();
+    g.fillStyle = col.groove;
+    g.fillRect(Q.pad - Q.g * 0.5, Q.pad - Q.g * 0.5, W - 2 * Q.pad + Q.g, W - 2 * Q.pad + Q.g);
+    for (var i = 0; i < E.N * E.N; i++) {
+      var p = cellXY(Q, i), r = Math.floor(i / E.N);
+      g.fillStyle = col.cell;
+      C.rrect(g, p.x, p.y, Q.s, Q.s, Q.s * 0.14); g.fill();
+      if (r === 0 || r === E.N - 1) {
+        g.globalAlpha = 0.16; g.fillStyle = r === 0 ? col.p0 : col.p1;
+        C.rrect(g, p.x, p.y, Q.s, Q.s, Q.s * 0.14); g.fill(); g.globalAlpha = 1;
+      }
+    }
+    if (o.targets) o.targets.forEach(function (t) {
+      var q = cellXY(Q, t);
+      g.fillStyle = col.accent; g.globalAlpha = 0.85;
+      g.beginPath(); g.arc(q.x + Q.s / 2, q.y + Q.s / 2, Q.s * 0.14, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
+    });
+    S.flags.forEach(function (f) {
+      var q = cellXY(Q, f), x = q.x + Q.s * 0.36, y0 = q.y + Q.s * 0.14, y1 = q.y + Q.s * 0.88;
+      g.fillStyle = '#4A423B'; C.rrect(g, q.x, q.y, Q.s, Q.s, Q.s * 0.14); g.fill();
+      g.strokeStyle = '#E8C27A'; g.lineWidth = Math.max(2, Q.s * 0.07); g.lineCap = 'round';
+      g.beginPath(); g.moveTo(x, y0); g.lineTo(x, y1); g.stroke();
+      g.fillStyle = '#E23B3B';
+      g.beginPath(); g.moveTo(x, y0); g.lineTo(x + Q.s * 0.46, y0 + Q.s * 0.17); g.lineTo(x, y0 + Q.s * 0.34); g.closePath(); g.fill();
+    });
+    function wall(w, fill, edge, alpha) {
+      var R = wallRect(Q, w), m = Q.g * 0.08;
+      g.globalAlpha = alpha;
+      g.fillStyle = fill; C.rrect(g, R.x - m, R.y - m, R.w + 2 * m, R.h + 2 * m, Q.g * 0.4); g.fill();
+      g.strokeStyle = edge; g.lineWidth = Math.max(1, Q.g * 0.14); g.stroke();
+      g.globalAlpha = 1;
+    }
+    S.walls.forEach(function (w) { wall(w, col.wall, col.wallDk, 1); });
+    if (o.preview) wall(o.preview, o.previewOk ? col.ok : col.bad, o.previewOk ? col.ok : col.bad, 0.78);
+    [0, 1].forEach(function (seat) {
+      var q = cellXY(Q, S.pos[seat]), cx = q.x + Q.s / 2, cy = q.y + Q.s / 2, R = Q.s * 0.34;
+      g.fillStyle = 'rgba(0,0,0,.35)'; g.beginPath(); g.arc(cx + R * 0.08, cy + R * 0.14, R, 0, Math.PI * 2); g.fill();
+      var grd = g.createRadialGradient(cx - R * 0.35, cy - R * 0.4, R * 0.1, cx, cy, R);
+      grd.addColorStop(0, seat === 0 ? '#FFF6E2' : '#A56A44'); grd.addColorStop(1, seat === 0 ? col.p0 : col.p1);
+      g.fillStyle = grd; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = 'rgba(0,0,0,.3)'; g.lineWidth = Math.max(1, R * 0.08); g.stroke();
+      if (o.turn === seat && !o.done) { g.strokeStyle = col.accent; g.lineWidth = Math.max(2, R * 0.16); g.beginPath(); g.arc(cx, cy, R * 1.22, 0, Math.PI * 2); g.stroke(); }
+    });
+    if (o.cursor >= 0) {
+      var k = cellXY(Q, o.cursor);
+      g.strokeStyle = '#FFFFFF'; g.lineWidth = Math.max(2, Q.s * 0.06);
+      C.rrect(g, k.x + 1, k.y + 1, Q.s - 2, Q.s - 2, Q.s * 0.14); g.stroke();
+    }
+  }
+
+  function boardSize() {
+    var r = box.getBoundingClientRect();
+    return Math.max(1, Math.floor(Math.min(r.width, r.height || r.width)));
+  }
+  function draw() {
+    if (!G) return;
+    var W = boardSize(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== W * dpr || cv.height !== W * dpr) { cv.width = W * dpr; cv.height = W * dpr; }
+    cv.style.width = W + 'px'; cv.style.height = W + 'px';
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, W);
+    var mine = !busy();
+    paintBoard(g, W, {
+      S: G.S, turn: G.S.turn, done: G.done,
+      targets: mine && mode === 'pawn' && !preview ? E.pawnMoves(G.S, G.S.turn) : null,
+      preview: preview, previewOk: preview ? E.wallOk(G.S, preview) : false,
+      cursor: kbOn && mine && mode === 'pawn' && !preview ? cur : -1
+    }, colors());
+  }
+  function cardPaint() {
+    var o = { S: E.clone(G.S), turn: -1, done: true };
+    return function (g, W, H) {
+      var side = Math.min(W, H);
+      g.translate((W - side) / 2, (H - side) / 2);
+      paintBoard(g, side, o, colors());
+    };
+  }
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (G.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyCr') + ' — ' + C.num(G.daily) })]));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('vsMedium') }));
+      return;
+    }
+    top.appendChild(el('button', { class: 'ch-badge ch-tap', type: 'button', onclick: settings,
+      text: (G.mode === 'bot' ? C.t('vsBot') + ' · ' + C.t(G.level) : C.t('people')) + (G.flag !== 'none' ? ' · ' + C.t('flagT') + ': ' + C.t('flag' + G.flag.charAt(0).toUpperCase() + G.flag.slice(1)) : '') }));
+    var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', settings);
+    top.appendChild(gear);
+  }
+  function renderSide() {
+    players.innerHTML = '';
+    [0, 1].forEach(function (seat) {
+      var b = el('div', { class: 'cr-player' + (G.S.turn === seat && !G.done ? ' cr-player--on' : '') + (isBot(seat) && G.S.turn === 1 && !G.done ? ' cr-thinking' : '') }, [
+        el('div', { class: 'cr-player__dot', style: { background: seat === 0 ? 'var(--cr-p0)' : 'var(--cr-p1)' } }),
+        el('div', { class: 'cr-player__name', text: pname(seat) }),
+        el('div', { class: 'cr-player__walls', text: C.t('wallsN', { n: C.num(G.S.left[seat]) }) })
+      ]);
+      players.appendChild(b);
+    });
+    modeRow.innerHTML = '';
+    var mine = !busy(), left = G.S.left[G.S.turn];
+    var seg = C.ui.segmented([{ value: 'pawn', label: C.t('modePawn') }, { value: 'wall', label: C.t('modeWall', { n: C.num(left) }) }], mode, function (v) {
+      if (v === 'wall' && left < 1) { msg = C.t('noWalls'); C.feedback('bad'); renderSide(); return; }
+      mode = v; preview = null; msg = ''; render();
+    });
+    if (!mine) seg.style.opacity = '.5';
+    modeRow.appendChild(seg);
+    tools.innerHTML = '';
+    tools.classList.toggle('cr-tools--off', !preview || !mine);
+    if (preview) {
+      var ok = E.wallOk(G.S, preview);
+      tools.appendChild(el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', onclick: rotatePreview }, [C.icon('rotate', 16), el('span', { text: C.t('rotate') })]));
+      var put = el('button', { class: 'ch-btn ch-btn--primary ch-btn--sm', type: 'button', onclick: placePreview, text: C.t('place') });
+      put.disabled = !ok;
+      tools.appendChild(put);
+      tools.appendChild(el('button', { class: 'ch-iconbtn ch-iconbtn--plain', type: 'button', 'aria-label': C.t('drop'), title: C.t('drop'), onclick: dropPreview }, [C.icon('close', 18)]));
+    }
+    var line = msg;
+    if (!line) {
+      if (G.done) line = '';
+      else if (isBot(G.S.turn)) line = C.t('thinking');
+      else if (G.mode === 'people') line = C.t('turnOf', { n: pname(G.S.turn) });
+      else line = C.t('yourMove') + (G.flag !== 'none' ? ' · ' + C.t('flagGoal') : '');
+    }
+    status.textContent = line;
+  }
+  function render() { renderTop(); renderSide(); draw(); }
+
+  /* -------------------------------------------------------------- input */
+
+  function readTap(x, y) {
+    var r = cv.getBoundingClientRect(), Q = geo(r.width);
+    var lx = x - r.left - Q.pad, ly = y - r.top - Q.pad;
+    var c = Math.floor(lx / Q.step), rr = Math.floor(ly / Q.step);
+    var inCell = c >= 0 && rr >= 0 && c < E.N && rr < E.N && lx - c * Q.step <= Q.s && ly - rr * Q.step <= Q.s;
+    // the nearest groove crossing, and which groove of it the tap is nearer to
+    var ac = Math.max(0, Math.min(E.N - 2, Math.round((lx - Q.s - Q.g / 2) / Q.step)));
+    var ar = Math.max(0, Math.min(E.N - 2, Math.round((ly - Q.s - Q.g / 2) / Q.step)));
+    var cx = (ac + 1) * Q.s + ac * Q.g + Q.g / 2, cy = (ar + 1) * Q.s + ar * Q.g + Q.g / 2;
+    var o = Math.abs(lx - cx) >= Math.abs(ly - cy) ? 'h' : 'v';
+    return { cell: inCell ? rr * E.N + c : -1, wall: { o: o, r: ar, c: ac } };
+  }
+  cv.addEventListener('pointerdown', function (e) {
+    if (busy()) return;
+    e.preventDefault();
+    kbOn = false;
+    var t = readTap(e.clientX, e.clientY);
+    if (mode === 'pawn' && t.cell >= 0) {
+      if (E.pawnMoves(G.S, G.S.turn).indexOf(t.cell) >= 0) { act({ t: 'm', to: t.cell }); return; }
+      if (preview) { dropPreview(); return; }
+      return;
+    }
+    // in wall mode anywhere, and in pawn mode on a groove, a tap shows a wall
+    if (mode === 'wall' || t.cell < 0) { if (mode !== 'wall' && G.S.left[G.S.turn] > 0) mode = 'wall'; tryWall(t.wall); }
+  });
+
+  window.addEventListener('keydown', function (e) {
+    if (!G || document.querySelector('.ch-scrim')) return;
+    if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
+    if (busy() || e.ctrlKey || e.metaKey || e.altKey) return;
+    var tg = e.target && e.target.tagName;
+    if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT') return;
+    // the board is drawn left to right in every language, so the arrows are geometric (#338)
+    var d = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[e.key];
+    if (C.keyIs(e, 'w')) {
+      e.preventDefault();
+      if (mode === 'pawn' && G.S.left[G.S.turn] < 1) { msg = C.t('noWalls'); renderSide(); return; }
+      mode = mode === 'pawn' ? 'wall' : 'pawn'; preview = null; msg = '';
+      if (mode === 'wall') { var p = E.rc(G.S.pos[G.S.turn]); preview = { o: 'h', r: Math.max(0, Math.min(7, p[0] - (G.S.turn === 0 ? 1 : 0))), c: Math.max(0, Math.min(7, p[1])) }; msg = E.wallOk(G.S, preview) ? '' : C.t('wallBad'); }
+      render(); return;
+    }
+    if (mode === 'wall') {
+      if (!preview) preview = { o: 'h', r: 3, c: 3 };
+      if (d) { e.preventDefault(); preview = { o: preview.o, r: Math.max(0, Math.min(7, preview.r + d[0])), c: Math.max(0, Math.min(7, preview.c + d[1])) }; msg = E.wallOk(G.S, preview) ? '' : C.t('wallBad'); render(); return; }
+      if (C.keyIs(e, 'r')) { e.preventDefault(); rotatePreview(); return; }
+      if (e.key === 'Escape') { e.preventDefault(); mode = 'pawn'; dropPreview(); return; }
+      if (e.key === 'Enter' || e.key === ' ') { if (tg === 'BUTTON') return; e.preventDefault(); placePreview(); return; }
+      return;
+    }
+    if (d) {
+      e.preventDefault();
+      if (!kbOn) { kbOn = true; cur = G.S.pos[G.S.turn]; }
+      var q = E.rc(cur);
+      cur = E.at(Math.max(0, Math.min(8, q[0] + d[0])), Math.max(0, Math.min(8, q[1] + d[1])));
+      draw(); return;
+    }
+    if ((e.key === 'Enter' || e.key === ' ') && kbOn && tg !== 'BUTTON') {
+      e.preventDefault();
+      if (E.pawnMoves(G.S, G.S.turn).indexOf(cur) >= 0) act({ t: 'm', to: cur });
+      else C.feedback('bad');
+    }
+  });
+
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  else window.addEventListener('resize', draw);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [
+          kb('← ↑ → ↓', C.t('kCursor')), kb('Space / Enter', C.t('kGo')), kb('W', C.t('kWall')), kb('R', C.t('kRotate')), kb('Esc', C.t('kDrop')), kb('U / Ctrl+Z', C.t('undoMove'))
+        ])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // 5×5 corner of the board for the tutorial
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 110" width="100%"><rect x="45" y="2" width="110" height="106" rx="8" fill="#B3262E"/>';
+    for (var r = 0; r < 5; r++) for (var c = 0; c < 5; c++) s += '<rect x="' + (50 + c * 20.5) + '" y="' + (6 + r * 20.5) + '" width="17" height="17" rx="3" fill="' + (r === 0 ? '#5C5346' : '#3A3530') + '"/>';
+    var pawn = function (r2, c2, f) { return '<circle cx="' + (58.5 + c2 * 20.5) + '" cy="' + (14.5 + r2 * 20.5) + '" r="6.5" fill="' + f + '" stroke="rgba(0,0,0,.35)"/>'; };
+    if (kind === 1) s += pawn(3, 2, '#EED9AE') + '<path d="M108 75v-55" stroke="#E80450" stroke-width="3" stroke-dasharray="3 4"/>';
+    if (kind === 2) s += pawn(4, 2, '#EED9AE') + pawn(0, 2, '#7A4526') + '<rect x="70" y="40.5" width="38" height="3.5" rx="1.5" fill="#C68B4A"/>';
+    if (kind === 3) s += pawn(2, 2, '#EED9AE') + pawn(1, 2, '#7A4526') + '<path d="M101 50 L101 30" stroke="#E80450" stroke-width="2.5" marker-end="url(#a)"/><defs><marker id="a" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto"><path d="M0 0L6 3L0 6z" fill="#E80450"/></marker></defs>';
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  var saved = ctx.loadSave();
+  if (validSave(saved) && (saved.g.daily || null) === (dailyDate || null)) restore(saved.g);
+  else newGame(dailyDate ? { daily: dailyDate } : { mode: prefs.mode, level: prefs.level, flag: prefs.flag });
+  if (dailyDate && C.stats.dailyDone('corridor', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).corridor;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>

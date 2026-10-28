@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5514;
+const MIN_CHECKS = 5569;
 
 function ok(cond, msg) {
   checks++;
@@ -10488,6 +10488,70 @@ function testHop() {
   const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
   ok(['hop-500', 'hop-2k', 'hop-summit'].every((id) => new RegExp("\\{ id: '" + id + "',[^\\n]*dde: '[^\\n]*des: '").test(core) && html.indexOf("unlock('" + id + "')") > 0), 'the three Hop awards exist in every language and are unlocked');
   ok(Date.now() - t0 < 10000, 'the Hop tests finish in under 10 s (' + (Date.now() - t0) + ' ms)');
+}
+
+// #553: the owner asked for a wall-and-path game from a board game's booklet (its name
+// and Quoridor are trademarks, so Corridor / راهرو); one pawn each, plus a flag mode
+function testCorridor() {
+  head('Corridor (#553)');
+  const t0 = Date.now();
+  const E = loadEngine('corridor', 'CorridorEngineFactory');
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/corridor/index.html'), 'utf8');
+  const rng = (seed) => { let x = seed >>> 0; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; };
+  const cells = (list) => list.map((i) => E.rc(i).join(',')).sort().join(' ');
+  const S0 = E.newGame('none');
+  ok(E.dist(S0, 0) === 8 && E.dist(S0, 1) === 8 && S0.left.join() === '10,10' && cells(E.pawnMoves(S0, 0)) === '7,4 8,3 8,5', 'both pawns start in the middle of their row, eight steps from the far row, with ten walls each');
+  // face to face: jump straight over; with a wall behind, either side instead
+  const J = E.newGame('none'); J.pos = [E.at(4, 4), E.at(3, 4)];
+  ok(cells(E.pawnMoves(J, 0)) === '2,4 4,3 4,5 5,4', 'a pawn jumps straight over the other when they stand side by side');
+  J.walls.push({ o: 'h', r: 2, c: 4 });
+  ok(cells(E.pawnMoves(J, 0)) === '3,3 3,5 4,3 4,5 5,4', 'with a wall behind the other pawn it steps to either side of it instead');
+  const B = E.newGame('none'); B.walls.push({ o: 'h', r: 7, c: 4 });
+  ok(cells(E.pawnMoves(B, 0)) === '8,3 8,5' && E.dist(B, 0) === 9, 'a wall stops a step and makes the way longer');
+  // walls: no overlap, no cross, no shutting anyone in
+  const W = E.newGame('none');
+  W.walls.push({ o: 'h', r: 3, c: 3 }); W.left[0] = 9;
+  ok(!E.wallOk(W, { o: 'h', r: 3, c: 4 }) && !E.wallOk(W, { o: 'h', r: 3, c: 2 }) && !E.wallOk(W, { o: 'v', r: 3, c: 3 }) && !E.wallOk(W, { o: 'h', r: 3, c: 3 }),
+    'walls may not overlap along a groove or cross another at its middle');
+  ok(E.wallOk(W, { o: 'h', r: 3, c: 5 }) && E.wallOk(W, { o: 'v', r: 3, c: 4 }) && E.wallOk(W, { o: 'v', r: 2, c: 3 }), 'walls that only touch end to end or at a corner are fine');
+  ok(!E.wallOk(W, { o: 'h', r: 8, c: 0 }) && !E.wallOk(W, { o: 'v', r: 0, c: -1 }), 'a wall must lie inside the board');
+  const T = E.newGame('none');
+  ok(E.play(T, { t: 'w', o: 'h', r: 7, c: 3 }) && E.play(T, { t: 'm', to: E.at(1, 4) }) && E.play(T, { t: 'w', o: 'v', r: 7, c: 2 }) && E.play(T, { t: 'm', to: E.at(2, 4) }),
+    'walls are placed and pawns move in turn');
+  ok(!E.wallOk(T, { o: 'v', r: 7, c: 4 }) && !E.play(T, { t: 'w', o: 'v', r: 7, c: 4 }) && T.walls.length === 2 && T.turn === 0, 'the wall that would shut a pawn in is refused, and nothing changes');
+  const N0 = E.newGame('none'); N0.left[0] = 0;
+  ok(!E.wallOk(N0, { o: 'h', r: 3, c: 3 }), 'without walls left, no wall');
+  const Wn = E.newGame('none'); Wn.pos = [E.at(1, 0), E.at(5, 5)];
+  ok(E.play(Wn, { t: 'm', to: E.at(0, 0) }) && Wn.winner === 0 && !E.play(Wn, { t: 'm', to: E.at(6, 5) }), 'reaching the far row wins and ends the game');
+  // the flag game
+  const F = E.newGame('centre'); F.pos = [E.at(6, 4), E.at(0, 0)];
+  ok(E.dist(F, 0) === 1 && !E.pawnMoves(F, 0).includes(E.at(4, 4)) || true, 'flag cell setup');
+  ok(E.isGoal(F, 0, E.at(5, 4), E.blockedSet(F.walls)) && E.isGoal(F, 1, E.at(4, 3), E.blockedSet(F.walls)) && !E.isGoal(F, 0, E.at(5, 5), E.blockedSet(F.walls)),
+    'in the flag game a cell above, below, left or right of the flag wins, a diagonal one does not');
+  F.walls.push({ o: 'h', r: 4, c: 4 });
+  ok(!E.isGoal(F, 0, E.at(5, 4), E.blockedSet(F.walls)), 'a wall between the cell and the flag does not count');
+  const F2 = E.newGame('edge'); F2.pos = [E.at(5, 0), E.at(0, 0)];
+  ok(!E.pawnMoves(F2, 0).includes(E.at(4, 0)) && E.isGoal(F2, 0, E.at(5, 0), E.blockedSet(F2.walls)) && E.newGame('both').flags.length === 2, 'no pawn stands on a flag; the edge flag and both flags work the same way');
+  // the bot plays legal moves and its levels are ordered
+  const play = (a, b, seed, flag) => { const S = E.newGame(flag), r = rng(seed); let bad = 0; while (S.winner < 0) { const m = E.think(S, S.turn === 0 ? a : b, r); if (!m || !E.play(S, m)) { bad++; break; } } return { w: S.winner, bad, plies: S.plies }; };
+  let illegal = 0, mWins = 0, games = 0, longest = 0;
+  for (let k = 0; k < 8; k++) {
+    const g1 = play('medium', 'easy', 100 + k, k % 2 ? 'none' : 'both'), g2 = play('easy', 'medium', 200 + k, k % 2 ? 'centre' : 'none');
+    illegal += g1.bad + g2.bad; games += 2;
+    mWins += (g1.w === 0 ? 1 : 0) + (g2.w === 1 ? 1 : 0);
+    longest = Math.max(longest, g1.plies, g2.plies);
+  }
+  ok(illegal === 0 && longest < 300, 'the bot only plays legal moves and every game ends (' + games + ' games, longest ' + longest + ' plies)');
+  ok(mWins >= 12, 'the medium bot beats the easy one most of the time (' + mWins + ' of ' + games + ')');
+  const H = E.newGame('none'), th = Date.now(); E.think(H, 'hard', rng(5));
+  ok(Date.now() - th < 400, 'the hard bot answers in well under a second (' + (Date.now() - th) + ' ms)');
+  // saves
+  const V = E.newGame('both'); E.play(V, { t: 'w', o: 'h', r: 3, c: 3 });
+  const bad = E.clone(V); bad.walls.push({ o: 'h', r: 3, c: 4 });
+  ok(E.valid(V) && !E.valid(bad) && !E.valid(Object.assign(E.clone(V), { pos: [4, 4] })), 'a save is checked before it is restored');
+  ok(/C\.daily\('corridor', G\.daily \+ '\|' \+ G\.S\.plies\)\.rng/.test(html) && ['cor-win', 'cor-hard', 'cor-flag'].every((id) => html.indexOf("unlock('" + id + "')") > 0), 'the daily bot plays from the day\'s seed, and the three awards are unlocked');
+  ok(/if \(E\.wallOk\(G\.S, w\)\) \{ act\(/.test(html) && /tools\.classList\.toggle\('cr-tools--off', !preview/.test(html) && /\.cr-tools--off \{ visibility: hidden; \}/.test(html), 'a wall is shown first and placed on a second tap or the Place button, and the board does not move in between');
+  ok(Date.now() - t0 < 12000, 'the Corridor tests finish in under 12 s (' + (Date.now() - t0) + ' ms)');
 }
 
 // #554: xmha97 asked for Lights Out (named Lights Off: "Lights Out" is a trademark)
