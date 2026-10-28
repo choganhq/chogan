@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5452;
+const MIN_CHECKS = 5455;
 
 function ok(cond, msg) {
   checks++;
@@ -10178,6 +10178,17 @@ function testGorillasStick() {
   ok(/if \(cancel \|\| !a \|\| a\.power < 6 \|\| !canAim\(\)\) \{ draw\(\); return; \}/.test(html), 'a push let go near the middle is taken back, not thrown');
   const langs = ['ctlStick', 'aimStick', 'stick'].every((k) => (html.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length === 5);
   ok(langs, 'its strings are in all five languages');
+}
+
+function testFloatingNav() {
+  head('Menu: a floating, rounded bottom bar (#559)');
+  const css = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8');
+  const base = (/^\.ch-nav \{[\s\S]*?^\}/m.exec(css) || [''])[0];
+  ok(/left: 50%;/.test(base) && /transform: translateX\(-50%\);/.test(base) && /width: min\(calc\(100% - 24px[^;]*\), 480px\);/.test(base) && /border-radius: 24px;/.test(base) && /bottom: calc\(12px \+ var\(--safe-b\)\);/.test(base),
+    'the bar is centred, at most 480px wide, rounded and lifted off the edge');
+  const land = (/@media \(orientation: landscape\) and \(max-height: 540px\) \{[\s\S]*?\n  \.ch-nav \{([\s\S]*?)\n  \}/.exec(css) || [])[1] || '';
+  ok(/left: auto;/.test(land) && /transform: none;/.test(land) && /border-radius: 0;/.test(land) && /bottom: 0;/.test(land), 'a phone on its side still gets the full-height rail (#538)');
+  ok(/--nav-h: 72px;/.test(css), 'the page keeps room for the lifted bar');
 }
 
 function testGorillasNewCity() {
