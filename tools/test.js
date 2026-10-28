@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5464;
+const MIN_CHECKS = 5509;
 
 function ok(cond, msg) {
   checks++;
@@ -10469,6 +10469,49 @@ function testHop() {
   const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
   ok(['hop-500', 'hop-2k', 'hop-summit'].every((id) => new RegExp("\\{ id: '" + id + "',[^\\n]*dde: '[^\\n]*des: '").test(core) && html.indexOf("unlock('" + id + "')") > 0), 'the three Hop awards exist in every language and are unlocked');
   ok(Date.now() - t0 < 10000, 'the Hop tests finish in under 10 s (' + (Date.now() - t0) + ' ms)');
+}
+
+// #554: xmha97 asked for Lights Out (named Lights Off: "Lights Out" is a trademark)
+function testLights() {
+  head('Lights Off (#554)');
+  const t0 = Date.now();
+  const E = loadEngine('lights', 'LightsEngineFactory');
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/lights/index.html'), 'utf8');
+  const rng = (seed) => { let x = seed >>> 0; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; };
+  const zero = (n) => new Array(n * n).fill(0);
+  ok(E.lit(E.press(zero(3), 3, 4)) === 5 && E.lit(E.press(zero(3), 3, 0)) === 3 && E.lit(E.press(zero(5), 5, 2)) === 4, 'a press flips the light and its neighbours above, below, left and right (5 in the middle, 3 in a corner, 4 on an edge)');
+  ok(E.lit(E.press(E.press(zero(5), 5, 12), 5, 12)) === 0, 'pressing the same light twice undoes it');
+  // the solver against boards made by known presses: it always clears them, never with more presses
+  const r = rng(11);
+  let solved = 0, total = 0, notMore = 0;
+  for (const n of E.SIZES) for (let k = 0; k < 40; k++) {
+    const L = zero(n), set = new Set();
+    for (let j = 0; j < 1 + Math.floor(r() * n * n); j++) { const i = Math.floor(r() * n * n); E.press(L, n, i); set.has(i) ? set.delete(i) : set.add(i); }
+    const x = E.solve(L, n), B = L.slice();
+    total++;
+    if (x) { x.forEach((v, i) => { if (v) E.press(B, n, i); }); if (!E.lit(B)) solved++; if (E.lit(x) <= set.size) notMore++; }
+  }
+  ok(total === 120 && solved === total && notMore === total, 'the solver puts out every board made by presses, never in more presses than made it (' + solved + '/' + total + ')');
+  const lone = zero(5); lone[0] = 1;
+  ok(E.solve(lone, 5) === null, 'a 5×5 board that cannot be put out is known as such (a lone corner light)');
+  // 5×5 has four solutions per board: the smallest one is the minimum
+  const P = zero(5); [0, 6, 12, 18, 24].forEach((i) => E.press(P, 5, i));
+  ok(E.lit(E.solve(P, 5)) <= 5, 'on 5×5 the smallest of the solutions is taken');
+  // generated puzzles: solvable, in the size's band, the same for the same seed (the daily)
+  let inBand = 0, gen = 0;
+  for (const n of E.SIZES) for (let k = 0; k < 30; k++) {
+    const G = E.generate(n, r), x = E.solve(G.start, n);
+    gen++;
+    if (x && E.lit(x) === G.min && G.min >= E.BAND[n][0] && G.min <= E.BAND[n][1] && E.lit(G.start) > 0) inBand++;
+  }
+  ok(gen === 90 && inBand === gen, 'every generated puzzle can be put out, and its fewest moves fall in the size\'s band (' + inBand + '/' + gen + ')');
+  const a = E.generate(5, rng(4)), b = E.generate(5, rng(4));
+  ok(a.start.join() === b.start.join() && a.min === b.min, 'the same seed gives the same puzzle, so the daily is the same for everyone');
+  ok(E.stars(9, 9) === 3 && E.stars(14, 9) === 2 && E.stars(15, 9) === 1 && E.stars(99, 9) === 1, 'three stars for the fewest moves, two within half again, and extra moves never lose');
+  ok(E.valid({ n: 5, start: zero(5), cur: zero(5), moves: 0, min: 7 }) && !E.valid({ n: 4, start: zero(4), cur: zero(4), moves: 0, min: 7 }) && !E.valid({ n: 5, start: zero(5), cur: zero(3), moves: 0, min: 7 }), 'a save is checked before it is restored');
+  ok(/C\.daily\('lights', dailyDate\)\.rng/.test(html) && ['lit-perfect', 'lit-big', 'lit-daily'].every((id) => html.indexOf("unlock('" + id + "')") > 0), 'the daily puzzle is seeded by the day, and the three awards are unlocked');
+  ok(/\.lt-board \{[^}]*direction: ltr;/.test(html) && /board\.addEventListener\('keydown'/.test(html), 'the board is left to right in every language, so the arrows are geometric');
+  ok(Date.now() - t0 < 8000, 'the Lights Off tests finish in under 8 s (' + (Date.now() - t0) + ' ms)');
 }
 
 // #544: a player asked for Simon (named Echo in English: "Simon" is a trademark)

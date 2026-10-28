@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>خاموشی — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .lt-wrap > .ch-fit { --fit-ar: 1; }
+  .ch-fit > .lt-box { width: 100%; height: 100%; display: grid; place-items: center; }
+  /* the board is a grid read left to right in every language, so the arrows are
+     geometric and a light keeps its place */
+  .lt-board { width: 100%; aspect-ratio: 1; max-width: 100%; max-height: 100%; direction: ltr; box-sizing: border-box;
+    display: grid; grid-template-columns: repeat(var(--n), 1fr); gap: var(--gap); padding: var(--gap);
+    border-radius: var(--r-lg); background: var(--lt-board); box-shadow: var(--sh-2); touch-action: manipulation; }
+  :root { --lt-board: #2B2622; --lt-off: #4A423B; --lt-on: #FFD45C; --lt-glow: rgba(255, 196, 61, .75); }
+  .lt-cell { border: 0; padding: 0; margin: 0; cursor: pointer; border-radius: 18%; background: var(--lt-off);
+    box-shadow: inset 0 -3px 0 rgba(0, 0, 0, .25); transition: background 140ms var(--ease), box-shadow 140ms var(--ease), transform 90ms var(--ease); }
+  .lt-cell--on { background: var(--lt-on); box-shadow: 0 0 18px var(--lt-glow), inset 0 -3px 0 rgba(160, 100, 0, .35); }
+  .lt-cell:active { transform: scale(.94); }
+  .lt-cell:focus-visible { outline: 3px solid var(--c-accent); outline-offset: 2px; }
+  .lt-board--done .lt-cell { cursor: default; }
+  .lt-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .lt-side { align-items: center; }
+  .lt-side > .ch-btn { align-self: center; width: auto; }
+  .lt-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-variant-numeric: tabular-nums; }
+  @media (prefers-reduced-motion: reduce) { .lt-cell { transition: none; } }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function LightsEngineFactory() {
+  'use strict';
+
+  var SIZES = [3, 5, 7];
+  // the fewest moves a puzzle of each size may need: enough to think about, never a
+  // board that solves in a tap or two
+  var BAND = { 3: [3, 6], 5: [7, 12], 7: [12, 22] };
+
+  // A press flips the light and the ones above, below, left and right of it
+  function press(L, n, i) {
+    var r = Math.floor(i / n), c = i % n;
+    L[i] ^= 1;
+    if (r > 0) L[i - n] ^= 1;
+    if (r < n - 1) L[i + n] ^= 1;
+    if (c > 0) L[i - 1] ^= 1;
+    if (c < n - 1) L[i + 1] ^= 1;
+    return L;
+  }
+  function lit(L) { var k = 0; for (var i = 0; i < L.length; i++) k += L[i]; return k; }
+
+  // The fewest presses that put every light out, by elimination over GF(2). Pressing a
+  // light twice undoes it and the order does not matter, so a solution is a set of
+  // lights; where several sets work (5×5 has four), the smallest is taken. Returns
+  // null if the lights cannot all go out.
+  function solve(L, n) {
+    var N = n * n, rows = [], i, j, k;
+    for (i = 0; i < N; i++) {
+      var row = new Array(N + 1).fill(0), e = press(new Array(N).fill(0), n, i);
+      for (j = 0; j < N; j++) row[j] = e[j];          // press i flips the same cells it is flipped by
+      row[N] = L[i];
+      rows.push(row);
+    }
+    var pivotOf = new Array(N).fill(-1), r = 0;
+    for (var col = 0; col < N && r < N; col++) {
+      var p = -1;
+      for (i = r; i < N; i++) if (rows[i][col]) { p = i; break; }
+      if (p < 0) continue;
+      var t = rows[p]; rows[p] = rows[r]; rows[r] = t;
+      for (i = 0; i < N; i++) if (i !== r && rows[i][col]) for (k = col; k <= N; k++) rows[i][k] ^= rows[r][k];
+      pivotOf[col] = r; r++;
+    }
+    for (i = r; i < N; i++) if (rows[i][N]) return null;
+    var free = [];
+    for (j = 0; j < N; j++) if (pivotOf[j] < 0) free.push(j);
+    var best = null, bestW = Infinity;
+    for (var mask = 0; mask < (1 << free.length); mask++) {
+      var x = new Array(N).fill(0);
+      for (k = 0; k < free.length; k++) x[free[k]] = (mask >> k) & 1;
+      for (j = N - 1; j >= 0; j--) {
+        if (pivotOf[j] < 0) continue;
+        var row2 = rows[pivotOf[j]], v = row2[N];
+        for (k = j + 1; k < N; k++) if (row2[k]) v ^= x[k];
+        x[j] = v;
+      }
+      var w = lit(x);
+      if (w < bestW) { bestW = w; best = x; }
+    }
+    return best;
+  }
+
+  // A puzzle is made by pressing lights on a dark board, so it can always be put out;
+  // it is kept only if its fewest moves fall in the size's band
+  function generate(n, rnd) {
+    var band = BAND[n], N = n * n, last = null;
+    for (var tries = 0; tries < 400; tries++) {
+      var L = new Array(N).fill(0), want = band[0] + Math.floor(rnd() * (band[1] - band[0] + 1)), order = [];
+      for (var i = 0; i < N; i++) order.push(i);
+      for (i = N - 1; i > 0; i--) { var j = Math.floor(rnd() * (i + 1)), t = order[i]; order[i] = order[j]; order[j] = t; }
+      for (i = 0; i < want; i++) press(L, n, order[i]);
+      var x = solve(L, n), min = x ? lit(x) : 0;
+      last = { n: n, start: L, min: min };
+      if (min >= band[0] && min <= band[1] && lit(L) > 0) return last;
+    }
+    return last;
+  }
+
+  // Three stars for the fewest moves, two within half again, one for any finish:
+  // more moves never lose, they only cost stars
+  function stars(moves, min) { return moves <= min ? 3 : moves <= Math.ceil(min * 1.5) ? 2 : 1; }
+
+  function valid(o) {
+    if (!o || SIZES.indexOf(o.n) < 0 || !Array.isArray(o.start) || !Array.isArray(o.cur)) return false;
+    var N = o.n * o.n;
+    return o.start.length === N && o.cur.length === N && o.start.concat(o.cur).every(function (v) { return v === 0 || v === 1; }) &&
+      typeof o.moves === 'number' && o.moves >= 0 && typeof o.min === 'number' && o.min >= 1;
+  }
+
+  return { SIZES: SIZES, BAND: BAND, press: press, lit: lit, solve: solve, generate: generate, stars: stars, valid: valid };
+}
+if (typeof module !== 'undefined') module.exports = LightsEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = LightsEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'lights',
+    name: { fa: 'خاموشی', en: 'Lights Off', zh: '关灯', de: 'Lichter aus', es: 'Apagón' },
+    accent: '#B45309',
+    mood: 'menu',
+    strings: {
+      fa: {
+        board: 'صفحه‌ی چراغ‌ها', cellN: 'چراغ ردیف {r} ستون {c}', on: 'روشن', off: 'خاموش', sizeN: '{n}×{n}', dailyLt: 'خاموشی روزانه',
+        movesOf: 'حرکت: {m} · کمترین: {b}', allOut: 'همه خاموش شد!', movesL: 'حرکت‌ها', fewest: 'کمترین', restart: 'از اول', newPuzzle: 'پازل تازه',
+        perfect: 'با کمترین حرکت ممکن!', kMove: 'جابه‌جایی بین چراغ‌ها', kPress: 'زدن چراغ', kRestart: 'از اول همین پازل', kNew: 'پازل تازه',
+        rules: 'با زدن هر چراغ، خودش و چراغ‌های بالا، پایین، چپ و راستش عوض می‌شوند: روشن‌ها خاموش و خاموش‌ها روشن. هدف خاموش کردن همه‌ی چراغ‌هاست. کمترین تعداد حرکت هر پازل را می‌بینی: اگر با همان تعداد تمامش کنی سه ستاره می‌گیری، تا یک‌ونیم برابرش دو ستاره و بیشتر از آن یک ستاره. با حرکت اضافه نمی‌بازی. زدن دوباره‌ی یک چراغ کار قبلی‌اش را برمی‌گرداند. هر پازل حل‌شدنی است و چالش روزانه برای همه یکی است.',
+        tutTitle1: 'یک ضربه، پنج چراغ', tutText1: 'هر چراغی که بزنی، خودش و چهار همسایه‌اش عوض می‌شوند.',
+        tutTitle2: 'همه را خاموش کن', tutText2: 'وقتی هیچ چراغی روشن نماند، پازل حل شده.',
+        tutTitle3: 'کمترین حرکت', tutText3: 'با کمترین حرکت سه ستاره می‌گیری. حرکت اضافه فقط ستاره کم می‌کند.'
+      },
+      en: {
+        board: 'The lights', cellN: 'Light row {r} column {c}', on: 'on', off: 'off', sizeN: '{n}×{n}', dailyLt: 'Daily Lights Off',
+        movesOf: 'Moves: {m} · Fewest: {b}', allOut: 'All lights out!', movesL: 'Moves', fewest: 'Fewest', restart: 'Restart', newPuzzle: 'New puzzle',
+        perfect: 'In the fewest moves possible!', kMove: 'Move between lights', kPress: 'Press a light', kRestart: 'Restart this puzzle', kNew: 'New puzzle',
+        rules: 'Pressing a light switches it and the lights above, below, left and right of it: the lit ones go out and the dark ones come on. The goal is to put every light out. You see the fewest moves each puzzle needs: finish in that many for three stars, within half as many again for two, and more for one. Extra moves never lose. Pressing a light again undoes it. Every puzzle can be solved, and the daily challenge is the same for everyone.',
+        tutTitle1: 'One press, five lights', tutText1: 'Any light you press switches, along with its four neighbours.',
+        tutTitle2: 'Put them all out', tutText2: 'When no light is left on, the puzzle is solved.',
+        tutTitle3: 'Fewest moves', tutText3: 'The fewest moves earn three stars. Extra moves only cost stars.'
+      },
+      zh: {
+        board: '灯盘', cellN: '第 {r} 行第 {c} 列的灯', on: '亮', off: '灭', sizeN: '{n}×{n}', dailyLt: '每日关灯',
+        movesOf: '步数：{m} · 最少：{b}', allOut: '灯全灭了！', movesL: '步数', fewest: '最少', restart: '重来', newPuzzle: '新题',
+        perfect: '用了最少的步数！', kMove: '在灯之间移动', kPress: '按灯', kRestart: '重来这一题', kNew: '新题',
+        rules: '按一盏灯，它和上下左右的灯都会切换：亮的熄灭，灭的点亮。目标是让所有灯都熄灭。每道题都会显示最少需要几步：用这么多步完成得三星，不超过一倍半得两星，更多得一星。多走不会输。再按一次同一盏灯就能撤回。每道题都有解，每日挑战对所有人相同。',
+        tutTitle1: '一按，五盏灯', tutText1: '按下的灯和它的四个邻居都会切换。',
+        tutTitle2: '全部熄灭', tutText2: '没有亮着的灯时，题目就解开了。',
+        tutTitle3: '最少步数', tutText3: '用最少步数得三星。多走只会少星。'
+      },
+      de: {
+        board: 'Die Lichter', cellN: 'Licht Reihe {r} Spalte {c}', on: 'an', off: 'aus', sizeN: '{n}×{n}', dailyLt: 'Lichter aus des Tages',
+        movesOf: 'Züge: {m} · Wenigste: {b}', allOut: 'Alle Lichter aus!', movesL: 'Züge', fewest: 'Wenigste', restart: 'Neu starten', newPuzzle: 'Neues Rätsel',
+        perfect: 'Mit den wenigsten Zügen!', kMove: 'Zwischen den Lichtern wechseln', kPress: 'Licht drücken', kRestart: 'Dieses Rätsel neu starten', kNew: 'Neues Rätsel',
+        rules: 'Ein Druck schaltet das Licht und die Lichter darüber, darunter, links und rechts um: Leuchtende gehen aus, dunkle an. Ziel ist, alle Lichter zu löschen. Du siehst, wie viele Züge jedes Rätsel mindestens braucht: so viele bringen drei Sterne, bis zum Anderthalbfachen zwei, mehr einen. Zusätzliche Züge verlieren nie. Ein zweiter Druck auf dasselbe Licht macht es rückgängig. Jedes Rätsel ist lösbar, und die Tagesaufgabe ist für alle gleich.',
+        tutTitle1: 'Ein Druck, fünf Lichter', tutText1: 'Das gedrückte Licht schaltet um, mit seinen vier Nachbarn.',
+        tutTitle2: 'Alle aus', tutText2: 'Brennt kein Licht mehr, ist das Rätsel gelöst.',
+        tutTitle3: 'Wenigste Züge', tutText3: 'Die wenigsten Züge bringen drei Sterne. Mehr kostet nur Sterne.'
+      },
+      es: {
+        board: 'Las luces', cellN: 'Luz fila {r} columna {c}', on: 'encendida', off: 'apagada', sizeN: '{n}×{n}', dailyLt: 'Apagón diario',
+        movesOf: 'Movimientos: {m} · Mínimo: {b}', allOut: '¡Todas apagadas!', movesL: 'Movimientos', fewest: 'Mínimo', restart: 'Reiniciar', newPuzzle: 'Puzle nuevo',
+        perfect: '¡Con el mínimo de movimientos!', kMove: 'Moverse entre las luces', kPress: 'Pulsar una luz', kRestart: 'Reiniciar este puzle', kNew: 'Puzle nuevo',
+        rules: 'Al pulsar una luz cambia ella y las de arriba, abajo, izquierda y derecha: las encendidas se apagan y las apagadas se encienden. El objetivo es apagarlas todas. Ves el mínimo de movimientos de cada puzle: con ese número ganas tres estrellas, hasta una vez y media dos, y con más una. Los movimientos de más nunca pierden. Pulsar otra vez la misma luz lo deshace. Todos los puzles tienen solución y el reto diario es igual para todos.',
+        tutTitle1: 'Un toque, cinco luces', tutText1: 'La luz que pulses cambia, junto con sus cuatro vecinas.',
+        tutTitle2: 'Apágalas todas', tutText2: 'Cuando no queda ninguna encendida, el puzle está resuelto.',
+        tutTitle3: 'Mínimo de movimientos', tutText3: 'El mínimo da tres estrellas. Los de más solo cuestan estrellas.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var DAILY_N = 5;
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || E.SIZES.indexOf(prefs.n) < 0) prefs = { n: 5 };
+
+  var S = null, startedAt = 0, ended = false, focusAt = 0;
+
+  var board = el('div', { class: 'lt-board', role: 'group', 'aria-label': C.t('board') });
+  var cells = [];
+  var box = el('div', { class: 'lt-box' }, [board]);
+  var top = el('div', { class: 'lt-top ch-above' });
+  var status = el('div', { class: 'lt-status', role: 'status', 'aria-live': 'polite' });
+  // restart sits under the count rather than in the bar: a fourth bar button cut the
+  // game's name on a phone
+  var again = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', onclick: function () { restart(); } }, [C.icon('rotate', 16), el('span', { text: C.t('restart') })]);
+  var wrap = el('div', { class: 'lt-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side lt-side' }, [top, status, again])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undo'), onClick: undo });
+  if (!dailyDate) ctx.button({ icon: 'refresh', label: C.t('newPuzzle'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- game */
+
+  function newPuzzle(n) {
+    var rnd = dailyDate ? C.daily('lights', dailyDate).rng : Math.random;
+    var P = E.generate(n, rnd);
+    S = { n: n, start: P.start.slice(), cur: P.start.slice(), moves: 0, min: P.min, daily: dailyDate || null, stack: [] };
+    startedAt = Date.now(); ended = false; focusAt = Math.floor(n * n / 2);
+    build();
+    save();
+  }
+  function restart() {
+    if (!S || ended || !S.moves) return;
+    S.cur = S.start.slice(); S.moves = 0; S.stack = [];
+    C.feedback('tap');
+    render(); save();
+  }
+  function askNew() {
+    if (S && S.moves && !ended) C.ui.confirm({ title: C.t('newPuzzle'), body: C.t('resetWarn'), onOk: function () { newPuzzle(prefs.n); } });
+    else newPuzzle(prefs.n);
+  }
+  function setSize(n) {
+    if (n === S.n) return;
+    var go = function () { prefs.n = n; ctx.store.set('prefs', prefs); newPuzzle(n); };
+    if (S.moves && !ended) C.ui.confirm({ title: C.t('newPuzzle'), body: C.t('resetWarn'), onOk: go, onCancel: render });
+    else go();
+  }
+
+  function tap(i) {
+    if (!S || ended) return;
+    E.press(S.cur, S.n, i);
+    S.moves++;
+    S.stack.push(i);
+    focusAt = i;
+    C.feedback('select');
+    if (!E.lit(S.cur)) { render(); save(); win(); return; }
+    render(); save();
+  }
+
+  // Undo takes the last press back; as in Gridlock, the move it cost still counts
+  function undo() {
+    if (!S || ended || !S.stack.length) { C.feedback('bad'); return; }
+    var i = S.stack.pop();
+    E.press(S.cur, S.n, i);
+    focusAt = i;
+    C.feedback('tap');
+    render(); save();
+  }
+
+  function win() {
+    ended = true;
+    var st = E.stars(S.moves, S.min), perfect = st === 3;
+    var base = { 3: [2, 8], 5: [6, 25], 7: [12, 50] }[S.n], k = st === 3 ? 1 : st === 2 ? 0.7 : 0.4;
+    var coins = Math.max(1, Math.round(base[0] * k)), points = Math.max(1, Math.round(base[1] * k));
+    if (perfect && S.n >= 5) C.achievements.unlock('lit-perfect');
+    if (S.n === 7) C.achievements.unlock('lit-big');
+    if (S.daily) {
+      if (!C.stats.daily('lights', S.daily, { label: C.num(S.moves) + ' / ' + C.num(S.min), win: true, stars: st })) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+      if (perfect) C.achievements.unlock('lit-daily');
+    }
+    ctx.clearSave();
+    C.feedback('good');
+    var elapsed = Date.now() - startedAt;
+    setTimeout(function () {
+      ctx.finish({
+        won: true, title: C.t('allOut'), note: perfect ? C.t('perfect') : null, stars: st, timeMs: elapsed, coins: coins, points: points,
+        lines: [
+          S.daily ? { label: C.t('daily'), value: C.num(S.daily) } : { label: C.t('sizeN', { n: C.num(S.n) }), value: '' },
+          { label: C.t('movesL') + ' / ' + C.t('fewest'), value: C.num(S.moves) + ' / ' + C.num(S.min) },
+          { label: C.t('time'), value: C.time(elapsed) }
+        ],
+        shareText: 'چوگان · خاموشی' + (S.daily ? ('\nروزانه ' + S.daily) : ('\n' + S.n + '×' + S.n)) + '\n' + S.moves + ' / ' + S.min + ' ' + '★'.repeat(st),
+        againLabel: S.daily ? null : C.t('newPuzzle'),
+        onAgain: S.daily ? null : function () { newPuzzle(prefs.n); }
+      });
+    }, C.ui.reduceMotion() ? 200 : 650);
+  }
+
+  /* --------------------------------------------------------------- view */
+
+  function build() {
+    board.innerHTML = '';
+    cells = [];
+    board.style.setProperty('--n', S.n);
+    board.style.setProperty('--gap', { 3: '4%', 5: '2.6%', 7: '1.8%' }[S.n]);
+    for (var i = 0; i < S.n * S.n; i++) {
+      (function (k) {
+        var b = el('button', { class: 'lt-cell', type: 'button', tabindex: '-1' });
+        b.addEventListener('click', function () { tap(k); });
+        cells.push(b); board.appendChild(b);
+      })(i);
+    }
+    render();
+  }
+  function render() {
+    for (var i = 0; i < cells.length; i++) {
+      var on = !!S.cur[i];
+      cells[i].classList.toggle('lt-cell--on', on);
+      cells[i].setAttribute('aria-label', C.t('cellN', { r: C.num(Math.floor(i / S.n) + 1), c: C.num(i % S.n + 1) }) + ' · ' + C.t(on ? 'on' : 'off'));
+      cells[i].setAttribute('tabindex', i === focusAt ? '0' : '-1');
+    }
+    board.classList.toggle('lt-board--done', ended);
+    top.innerHTML = '';
+    if (S.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyLt') + ' — ' + C.num(S.daily) })]));
+    else top.appendChild(C.ui.segmented(E.SIZES.map(function (n) { return { value: n, label: C.t('sizeN', { n: C.num(n) }) }; }), S.n, setSize));
+    status.textContent = C.t('movesOf', { m: C.num(S.moves), b: C.num(S.min) });
+    again.disabled = !S.moves || ended;
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  board.addEventListener('keydown', function (e) {
+    var d = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.key];
+    if (!d || !S) return;
+    e.preventDefault();
+    var r = Math.floor(focusAt / S.n), c = focusAt % S.n;
+    r = Math.max(0, Math.min(S.n - 1, r + d[1])); c = Math.max(0, Math.min(S.n - 1, c + d[0]));
+    focusAt = r * S.n + c;
+    render();
+    cells[focusAt].focus();
+  });
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim') || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
+    if (C.keyIs(e, 'r')) { restart(); e.preventDefault(); return; }
+    if (C.keyIs(e, 'n') && !dailyDate) { askNew(); e.preventDefault(); return; }
+    // the first arrow from anywhere on the page lands on the board
+    if (/^Arrow/.test(e.key) && cells.length && !board.contains(document.activeElement)) { cells[focusAt].focus(); e.preventDefault(); }
+  });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    var keys = [kb('← ↑ → ↓', C.t('kMove')), kb('Space / Enter', C.t('kPress')), kb('U / Ctrl+Z', C.t('undo')), kb('R', C.t('kRestart'))];
+    if (!dailyDate) keys.push(kb('N', C.t('kNew')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, keys)
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // 3×3 boards for the tutorial: which lights are on, and which one is marked as pressed
+  function tArt(on, mark) {
+    var s = '<svg viewBox="0 0 200 110" width="100%"><rect width="200" height="110" rx="10" fill="#2B2622"/>';
+    for (var i = 0; i < 9; i++) {
+      var x = 64 + (i % 3) * 25, y = 18 + Math.floor(i / 3) * 25, lit = on.indexOf(i) >= 0;
+      s += '<rect x="' + x + '" y="' + y + '" width="21" height="21" rx="4" fill="' + (lit ? '#FFD45C' : '#4A423B') + '"/>';
+      if (i === mark) s += '<circle cx="' + (x + 10.5) + '" cy="' + (y + 10.5) + '" r="4" fill="#2B2622"/>';
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt([1, 3, 4, 5, 7], 4) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt([], -1) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt([0, 1, 3], 0) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // the board is saved after every press; the daily one has its own slot
+  ctx.autosave(function () {
+    if (!S || ended) return { inProgress: false };
+    return { n: S.n, start: S.start, cur: S.cur, moves: S.moves, min: S.min, daily: S.daily, stack: S.stack, elapsed: Date.now() - startedAt };
+  });
+  function save() { ctx.save(); }
+  var saved = ctx.loadSave();
+  if (saved && E.valid(saved) && (saved.daily || null) === (dailyDate || null) && E.lit(saved.cur) > 0) {
+    var stack = Array.isArray(saved.stack) ? saved.stack.filter(function (i) { return i >= 0 && i < saved.n * saved.n; }) : [];
+    S = { n: saved.n, start: saved.start.slice(), cur: saved.cur.slice(), moves: saved.moves, min: saved.min, daily: saved.daily || null, stack: stack };
+    startedAt = Date.now() - (saved.elapsed || 0); focusAt = Math.floor(S.n * S.n / 2);
+    build();
+  } else newPuzzle(dailyDate ? DAILY_N : prefs.n);
+  if (dailyDate && C.stats.dailyDone('lights', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).lights;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
