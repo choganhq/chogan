@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5791;
+const MIN_CHECKS = 5795;
 
 function ok(cond, msg) {
   checks++;
@@ -11471,6 +11471,27 @@ if (!isMainThread && workerData && workerData.cueGame) {
     Atomics.notify(d.out, 0);
   }
   return;
+}
+
+// #569: Minesweeper's and Sudoku's tutorial pictures typed ۱ ۲ and ۱۰ into their SVG, so
+// every language saw Persian digits there; digits drawn in a picture go through C.num
+function testTutorialDigits() {
+  head('Tutorial pictures draw digits in the app language (#569)');
+  const games = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games;
+  ok(games.length > 0, 'the game list is not empty');
+  const texts = [], bad = [];
+  for (const g of games) {
+    const src = fs.readFileSync(path.join(ROOT, 'www', g.path), 'utf8');
+    for (const m of src.matchAll(/<text\b[^>]*>([^<]*)<\/text>/g)) {
+      texts.push(g.id);
+      if (/[۰-۹]/.test(m[1])) bad.push(g.id + ' «' + m[1] + '»');
+    }
+  }
+  ok(texts.length > 0, 'SVG text in the games was found (' + texts.length + ')');
+  ok(!bad.length, 'no SVG text in a game is a Persian digit literal' + (bad.length ? ' (' + bad.join(', ') + ')' : ''));
+  const ms = fs.readFileSync(path.join(ROOT, 'www/games/minesweeper/index.html'), 'utf8');
+  const sd = fs.readFileSync(path.join(ROOT, 'www/games/sudoku/index.html'), 'utf8');
+  ok(/>' \+ C\.num\(1\) \+ '<\/text>/.test(ms) && />' \+ C\.num\(2\) \+ '<\/text>/.test(ms) && />' \+ C\.num\(10\) \+ '<\/text>/.test(sd), 'the Minesweeper and Sudoku tutorials draw their numbers with C.num');
 }
 
 // Every group runs: the runner finds each `function testX()` in this file and calls it in
