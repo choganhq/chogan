@@ -180,6 +180,7 @@
       if (l === 'zh' || /^zh-(cn|sg|hans)/.test(l)) return 'zh';
       if (/^de\b|^de-/.test(l)) return 'de';
       if (/^es\b|^es-/.test(l)) return 'es';
+      if (/^pl\b|^pl-/.test(l)) return 'pl';
       return 'en';
     } catch (e) { return 'fa'; }
   }
@@ -264,10 +265,10 @@
   var LOCALES = [
     { code: 'fa', label: 'فارسی',    dir: 'rtl', tag: 'fa',      date: 'fa-IR-u-ca-persian' },
     { code: 'en', label: 'English',  dir: 'ltr', tag: 'en',      date: 'en-US' },
-    { code: 'pl', label: 'Polish',  dir: 'ltr', tag: 'pl',      date: 'pl-PL' },
     { code: 'zh', label: '中文', dir: 'ltr', tag: 'zh-Hans', date: 'zh-CN' },
     { code: 'de', label: 'Deutsch',  dir: 'ltr', tag: 'de',      date: 'de-DE' },
-    { code: 'es', label: 'Español',  dir: 'ltr', tag: 'es',      date: 'es-ES' }
+    { code: 'es', label: 'Español',  dir: 'ltr', tag: 'es',      date: 'es-ES' },
+    { code: 'pl', label: 'Polski',   dir: 'ltr', tag: 'pl',      date: 'pl-PL' }
   ];
   function localeOf(code) {
     for (var i = 0; i < LOCALES.length; i++) if (LOCALES[i].code === code) return LOCALES[i];

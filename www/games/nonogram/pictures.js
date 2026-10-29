@@ -3,7 +3,7 @@
    tools/test.js replays every one through the line solver: each must have exactly
    one solution reachable without guessing, or it is redrawn, not shipped. */
 var NONOGRAM_PICTURES = [
-  { id: 'heart', name: {'fa':'قلب','en':'Heart','zh':'爱心','de':'Herz','es':'Corazón'},
+  { id: 'heart', name: {'fa':'قلب','en':'Heart','zh':'爱心','de':'Herz','es':'Corazón','pl':'Serce'},
     col: {'r':'#E5484D'},
     rows: [
       '..........',
@@ -17,7 +17,7 @@ var NONOGRAM_PICTURES = [
       '....rr....',
       '..........'
     ] },
-  { id: 'house', name: {'fa':'خانه','en':'House','zh':'房子','de':'Haus','es':'Casa'},
+  { id: 'house', name: {'fa':'خانه','en':'House','zh':'房子','de':'Haus','es':'Casa','pl':'Dom'},
     col: {'r':'#C2410C','y':'#F2C94C','b':'#2D9CDB','g':'#27AE60'},
     rows: [
       '....rr....',
@@ -31,7 +31,7 @@ var NONOGRAM_PICTURES = [
       '.yyyrryyy.',
       'gggggggggg'
     ] },
-  { id: 'tree', name: {'fa':'درخت','en':'Tree','zh':'树','de':'Baum','es':'Árbol'},
+  { id: 'tree', name: {'fa':'درخت','en':'Tree','zh':'树','de':'Baum','es':'Árbol','pl':'Drzewo'},
     col: {'g':'#2F9E44','b':'#8B5A2B'},
     rows: [
       '....gg....',
@@ -45,7 +45,7 @@ var NONOGRAM_PICTURES = [
       '....bb....',
       '...bbbb...'
     ] },
-  { id: 'cat', name: {'fa':'گربه','en':'Cat','zh':'猫','de':'Katze','es':'Gato'},
+  { id: 'cat', name: {'fa':'گربه','en':'Cat','zh':'猫','de':'Katze','es':'Gato','pl':'Kot'},
     col: {'o':'#F2994A','k':'#333333'},
     rows: [
       'o......o..',
@@ -59,7 +59,7 @@ var NONOGRAM_PICTURES = [
       '..ooooooo.',
       '..oo..oo..'
     ] },
-  { id: 'fish', name: {'fa':'ماهی','en':'Fish','zh':'鱼','de':'Fisch','es':'Pez'},
+  { id: 'fish', name: {'fa':'ماهی','en':'Fish','zh':'鱼','de':'Fisch','es':'Pez','pl':'Ryba'},
     col: {'b':'#2D9CDB','k':'#1B1B1B'},
     rows: [
       '..........',
@@ -73,7 +73,7 @@ var NONOGRAM_PICTURES = [
       '...bbbb...',
       '..........'
     ] },
-  { id: 'cup', name: {'fa':'فنجان','en':'Cup','zh':'杯子','de':'Tasse','es':'Taza'},
+  { id: 'cup', name: {'fa':'فنجان','en':'Cup','zh':'杯子','de':'Tasse','es':'Taza','pl':'Kubek'},
     col: {'w':'#6C5CE7','s':'#9AA5B1'},
     rows: [
       '...s..s...',
@@ -87,7 +87,7 @@ var NONOGRAM_PICTURES = [
       '..wwwwww..',
       '.wwwwwwww.'
     ] },
-  { id: 'key', name: {'fa':'کلید','en':'Key','zh':'钥匙','de':'Schlüssel','es':'Llave'},
+  { id: 'key', name: {'fa':'کلید','en':'Key','zh':'钥匙','de':'Schlüssel','es':'Llave','pl':'Klucz'},
     col: {'y':'#E0A800'},
     rows: [
       '..........',
@@ -101,7 +101,7 @@ var NONOGRAM_PICTURES = [
       '..........',
       '..........'
     ] },
-  { id: 'boat', name: {'fa':'قایق','en':'Boat','zh':'帆船','de':'Boot','es':'Barco'},
+  { id: 'boat', name: {'fa':'قایق','en':'Boat','zh':'帆船','de':'Boot','es':'Barco','pl':'Łódka'},
     col: {'w':'#F2994A','r':'#8B5A2B','b':'#2D9CDB'},
     rows: [
       '....w.....',
@@ -115,7 +115,7 @@ var NONOGRAM_PICTURES = [
       '..rrrrrr..',
       'bbbbbbbbbb'
     ] },
-  { id: 'umbrella', name: {'fa':'چتر','en':'Umbrella','zh':'雨伞','de':'Schirm','es':'Paraguas'},
+  { id: 'umbrella', name: {'fa':'چتر','en':'Umbrella','zh':'雨伞','de':'Schirm','es':'Paraguas','pl':'Parasol'},
     col: {'p':'#E86A92','k':'#444444'},
     rows: [
       '....pp....',
@@ -129,7 +129,7 @@ var NONOGRAM_PICTURES = [
       '....k.k...',
       '.....k....'
     ] },
-  { id: 'star', name: {'fa':'ستاره','en':'Star','zh':'星星','de':'Stern','es':'Estrella'},
+  { id: 'star', name: {'fa':'ستاره','en':'Star','zh':'星星','de':'Stern','es':'Estrella','pl':'Gwiazda'},
     col: {'y':'#F2C94C'},
     rows: [
       '....yy....',
@@ -143,7 +143,7 @@ var NONOGRAM_PICTURES = [
       'yyy....yyy',
       'yy......yy'
     ] },
-  { id: 'moon', name: {'fa':'ماه','en':'Moon','zh':'月亮','de':'Mond','es':'Luna'},
+  { id: 'moon', name: {'fa':'ماه','en':'Moon','zh':'月亮','de':'Mond','es':'Luna','pl':'Księżyc'},
     col: {'y':'#F2C94C'},
     rows: [
       '...yyyy...',
@@ -157,7 +157,7 @@ var NONOGRAM_PICTURES = [
       '..yyy.....',
       '...yyyy...'
     ] },
-  { id: 'mushroom', name: {'fa':'قارچ','en':'Mushroom','zh':'蘑菇','de':'Pilz','es':'Seta'},
+  { id: 'mushroom', name: {'fa':'قارچ','en':'Mushroom','zh':'蘑菇','de':'Pilz','es':'Seta','pl':'Grzyb'},
     col: {'r':'#E5484D','w':'#D2B48C'},
     rows: [
       '...rrrr...',
@@ -171,7 +171,7 @@ var NONOGRAM_PICTURES = [
       '...wwww...',
       '..wwwwww..'
     ] },
-  { id: 'bird', name: {'fa':'پرنده','en':'Bird','zh':'小鸟','de':'Vogel','es':'Pájaro'},
+  { id: 'bird', name: {'fa':'پرنده','en':'Bird','zh':'小鸟','de':'Vogel','es':'Pájaro','pl':'Ptak'},
     col: {'b':'#2D9CDB','o':'#F2994A','k':'#1B1B1B'},
     rows: [
       '..........',
@@ -185,7 +185,7 @@ var NONOGRAM_PICTURES = [
       '....o..o..',
       '...oo.oo..'
     ] },
-  { id: 'anchor', name: {'fa':'لنگر','en':'Anchor','zh':'锚','de':'Anker','es':'Ancla'},
+  { id: 'anchor', name: {'fa':'لنگر','en':'Anchor','zh':'锚','de':'Anker','es':'Ancla','pl':'Kotwica'},
     col: {'n':'#2F4B7C'},
     rows: [
       '...nnnn...',
@@ -199,7 +199,7 @@ var NONOGRAM_PICTURES = [
       'nnnnnnnnnn',
       '..nnnnnn..'
     ] },
-  { id: 'apple', name: {'fa':'سیب','en':'Apple','zh':'苹果','de':'Apfel','es':'Manzana'},
+  { id: 'apple', name: {'fa':'سیب','en':'Apple','zh':'苹果','de':'Apfel','es':'Manzana','pl':'Jabłko'},
     col: {'r':'#E5484D','g':'#2F9E44','b':'#8B5A2B'},
     rows: [
       '.....b.gg.',
@@ -213,7 +213,7 @@ var NONOGRAM_PICTURES = [
       '..rrrrrr..',
       '...rr.rr..'
     ] },
-  { id: 'rocket', name: {'fa':'موشک','en':'Rocket','zh':'火箭','de':'Rakete','es':'Cohete'},
+  { id: 'rocket', name: {'fa':'موشک','en':'Rocket','zh':'火箭','de':'Rakete','es':'Cohete','pl':'Rakieta'},
     col: {'s':'#9AA5B1','b':'#2D9CDB','o':'#F2994A'},
     rows: [
       '....ss....',
@@ -227,7 +227,7 @@ var NONOGRAM_PICTURES = [
       '....oo....',
       '...o..o...'
     ] },
-  { id: 'bell', name: {'fa':'زنگ','en':'Bell','zh':'铃铛','de':'Glocke','es':'Campana'},
+  { id: 'bell', name: {'fa':'زنگ','en':'Bell','zh':'铃铛','de':'Glocke','es':'Campana','pl':'Dzwonek'},
     col: {'y':'#E0A800'},
     rows: [
       '....yy....',
@@ -241,7 +241,7 @@ var NONOGRAM_PICTURES = [
       '..........',
       '....yy....'
     ] },
-  { id: 'leaf', name: {'fa':'برگ','en':'Leaf','zh':'叶子','de':'Blatt','es':'Hoja'},
+  { id: 'leaf', name: {'fa':'برگ','en':'Leaf','zh':'叶子','de':'Blatt','es':'Hoja','pl':'Liść'},
     col: {'g':'#2F9E44'},
     rows: [
       '......gggg',
@@ -255,7 +255,7 @@ var NONOGRAM_PICTURES = [
       'g...gg....',
       'g.........'
     ] },
-  { id: 'smile', name: {'fa':'لبخند','en':'Smile','zh':'笑脸','de':'Lächeln','es':'Sonrisa'},
+  { id: 'smile', name: {'fa':'لبخند','en':'Smile','zh':'笑脸','de':'Lächeln','es':'Sonrisa','pl':'Uśmiech'},
     col: {'y':'#F2C94C','k':'#333333'},
     rows: [
       '...yyyy...',
@@ -269,7 +269,7 @@ var NONOGRAM_PICTURES = [
       '.yyyyyyyy.',
       '...yyyy...'
     ] },
-  { id: 'bottle', name: {'fa':'بطری','en':'Bottle','zh':'瓶子','de':'Flasche','es':'Botella'},
+  { id: 'bottle', name: {'fa':'بطری','en':'Bottle','zh':'瓶子','de':'Flasche','es':'Botella','pl':'Butelka'},
     col: {'g':'#27AE60','b':'#8B5A2B'},
     rows: [
       '....bb....',
@@ -283,7 +283,7 @@ var NONOGRAM_PICTURES = [
       '..gggggg..',
       '...gggg...'
     ] },
-  { id: 'pomegranate', name: {'fa':'انار','en':'Pomegranate','zh':'石榴','de':'Granatapfel','es':'Granada'},
+  { id: 'pomegranate', name: {'fa':'انار','en':'Pomegranate','zh':'石榴','de':'Granatapfel','es':'Granada','pl':'Granat'},
     col: {'r':'#C81E3A','g':'#2F9E44','y':'#F2C94C'},
     rows: [
       '......g.g......',
@@ -302,7 +302,7 @@ var NONOGRAM_PICTURES = [
       '..rrrrrrrrrrr..',
       '....rrrrrrr....'
     ] },
-  { id: 'teapot', name: {'fa':'قوری','en':'Teapot','zh':'茶壶','de':'Teekanne','es':'Tetera'},
+  { id: 'teapot', name: {'fa':'قوری','en':'Teapot','zh':'茶壶','de':'Teekanne','es':'Tetera','pl':'Czajniczek'},
     col: {'b':'#2D6CDF','w':'#F2C94C'},
     rows: [
       '......bbb......',
@@ -321,7 +321,7 @@ var NONOGRAM_PICTURES = [
       '...............',
       '...............'
     ] },
-  { id: 'owl', name: {'fa':'جغد','en':'Owl','zh':'猫头鹰','de':'Eule','es':'Búho'},
+  { id: 'owl', name: {'fa':'جغد','en':'Owl','zh':'猫头鹰','de':'Eule','es':'Búho','pl':'Sowa'},
     col: {'b':'#8B5A2B','w':'#E3C98F','k':'#1B1B1B','o':'#F2994A'},
     rows: [
       '..b.........b..',
@@ -340,7 +340,7 @@ var NONOGRAM_PICTURES = [
       '....oo...oo....',
       '...ooo...ooo...'
     ] },
-  { id: 'butterfly', name: {'fa':'پروانه','en':'Butterfly','zh':'蝴蝶','de':'Schmetterling','es':'Mariposa'},
+  { id: 'butterfly', name: {'fa':'پروانه','en':'Butterfly','zh':'蝴蝶','de':'Schmetterling','es':'Mariposa','pl':'Motyl'},
     col: {'p':'#9B51E0','k':'#333333','y':'#F2C94C'},
     rows: [
       '..k.........k..',
@@ -359,7 +359,7 @@ var NONOGRAM_PICTURES = [
       '..ppp..k..ppp..',
       '.......k.......'
     ] },
-  { id: 'castle', name: {'fa':'قلعه','en':'Castle','zh':'城堡','de':'Burg','es':'Castillo'},
+  { id: 'castle', name: {'fa':'قلعه','en':'Castle','zh':'城堡','de':'Burg','es':'Castillo','pl':'Zamek'},
     col: {'s':'#7D8A97','b':'#8B5A2B','r':'#E5484D'},
     rows: [
       '.r.........r...',
@@ -378,7 +378,7 @@ var NONOGRAM_PICTURES = [
       'ssssbbbbbssss..',
       'sssssssssssss..'
     ] },
-  { id: 'turtle', name: {'fa':'لاک‌پشت','en':'Turtle','zh':'乌龟','de':'Schildkröte','es':'Tortuga'},
+  { id: 'turtle', name: {'fa':'لاک‌پشت','en':'Turtle','zh':'乌龟','de':'Schildkröte','es':'Tortuga','pl':'Żółw'},
     col: {'g':'#2F9E44','d':'#1E6B30','k':'#1B1B1B'},
     rows: [
       '...............',
@@ -397,7 +397,7 @@ var NONOGRAM_PICTURES = [
       '...............',
       '...............'
     ] },
-  { id: 'camel', name: {'fa':'شتر','en':'Camel','zh':'骆驼','de':'Kamel','es':'Camello'},
+  { id: 'camel', name: {'fa':'شتر','en':'Camel','zh':'骆驼','de':'Kamel','es':'Camello','pl':'Wielbłąd'},
     col: {'c':'#C8963E','y':'#F2C94C'},
     rows: [
       'yyy............',
@@ -416,7 +416,7 @@ var NONOGRAM_PICTURES = [
       '...c...c...c...',
       '..cc..cc..cc...'
     ] },
-  { id: 'car', name: {'fa':'ماشین','en':'Car','zh':'汽车','de':'Auto','es':'Coche'},
+  { id: 'car', name: {'fa':'ماشین','en':'Car','zh':'汽车','de':'Auto','es':'Coche','pl':'Samochód'},
     col: {'r':'#E5484D','b':'#56CCF2','k':'#333333'},
     rows: [
       '...............',
@@ -435,7 +435,7 @@ var NONOGRAM_PICTURES = [
       '...............',
       '...............'
     ] },
-  { id: 'lighthouse', name: {'fa':'فانوس دریایی','en':'Lighthouse','zh':'灯塔','de':'Leuchtturm','es':'Faro'},
+  { id: 'lighthouse', name: {'fa':'فانوس دریایی','en':'Lighthouse','zh':'灯塔','de':'Leuchtturm','es':'Faro','pl':'Latarnia morska'},
     col: {'r':'#E5484D','w':'#B8C4CE','y':'#F2C94C','b':'#2D9CDB'},
     rows: [
       '......rrr......',
@@ -454,7 +454,7 @@ var NONOGRAM_PICTURES = [
       'bbbbbbbbbbbbbbb',
       'bbbbbbbbbbbbbbb'
     ] },
-  { id: 'flowerpot', name: {'fa':'گلدان','en':'Flower pot','zh':'花盆','de':'Blumentopf','es':'Maceta'},
+  { id: 'flowerpot', name: {'fa':'گلدان','en':'Flower pot','zh':'花盆','de':'Blumentopf','es':'Maceta','pl':'Doniczka'},
     col: {'p':'#E86A92','y':'#F2C94C','g':'#2F9E44','b':'#C2410C'},
     rows: [
       '....pp...pp....',
