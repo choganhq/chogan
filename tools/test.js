@@ -14,7 +14,7 @@ const { Worker, isMainThread, workerData } = require('worker_threads');
 
 const ROOT = path.join(__dirname, '..');
 // زبان‌های اپ، به همان ترتیب جدول LOCALES در هسته
-const LOCALE_CODES = ['fa', 'en', 'zh', 'de', 'es'];
+const LOCALE_CODES = ['fa', 'en', 'zh', 'de', 'es', 'pl'];
 let failures = 0;
 let checks = 0;
 // A floor for the whole run: if a group lost most of its checks, the total would still
@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5574;
+const MIN_CHECKS = 5791;
 
 function ok(cond, msg) {
   checks++;
@@ -129,7 +129,7 @@ function testSudoku() {
   }
   ok(/var hl = hlMarks\(c, selected, selVal, v, prefs\.highlight\);/.test(sdHtml) && /prefs\.highlight = v; ctx\.store\.set\('prefs', prefs\); paint\(\);/.test(sdHtml),
     'the page paints with the saved choice, and switching saves it and repaints without a restart');
-  ok(['fa', 'en', 'zh', 'de', 'es'].every((l) => new RegExp('\\n      ' + l + ": \\{[\\s\\S]*?highlight: '[^']+', hlPeers: '[^']+', hlDigit: '[^']+'").test(sdHtml)), 'the option is labelled in all five languages');
+  ok(LOCALE_CODES.every((l) => new RegExp('\\n      ' + l + ": \\{[\\s\\S]*?highlight: '[^']+', hlPeers: '[^']+', hlDigit: '[^']+'").test(sdHtml)), 'the option is labelled in every language');
 
   // شمارنده‌ی زیر دکمه‌های عدد (#124): هر عدد روی جدول شمرده می‌شود، درست یا غلط،
   // و قفل فقط با نُه جاگذاری درست. تابع واقعی صفحه اجرا می‌شود.
@@ -231,7 +231,7 @@ function testMines() {
   ok(/cursor = to; paint\(\); cells\[cursor\]\.focus\(\)/.test(msHtml), 'an arrow moves focus along with the cursor');
   // F flagged the cell, but the help called it "Flag mode", so the key looked missing (#332)
   ok(/row\(C\.t\('flagCell'\), 'F'\)/.test(msHtml) && !/row\(C\.t\('flagMode'\), 'F'\)/.test(msHtml), 'the help names F as the key that flags a cell');
-  ok((msHtml.match(/\bflagCell: '[^']+'/g) || []).length === 5, 'that label exists in all five languages');
+  ok((msHtml.match(/\bflagCell: '[^']+'/g) || []).length === LOCALE_CODES.length, 'that label exists in every language');
   // Persian called the minefield «تخته» (a board game's board) and the restart dialog «تخته‌ی تازه» (#340)
   const msFa = (msHtml.match(/strings: \{\s*fa: \{([\s\S]*?)\n      \}/) || [])[1] || '';
   ok(msFa.length > 200, 'the Persian strings of Minesweeper were found');
@@ -260,7 +260,7 @@ function testMines() {
   ok(/hold\.timer = setTimeout\(function \(\) \{ hold\.fired = true; if \(S && !S\.done\) toggleFlag\(hold\.at\); \}, LONG_MS\);\s*keyHold = hold;\s*return;/.test(msHtml) &&
     /addEventListener\('keyup', function \(e\) \{[\s\S]{0,260}if \(h\.fired \|\| !S \|\| S\.done[^\n]*return;\s*if \(flagMode && !S\.revealed\[h\.at\]\) toggleFlag\(h\.at\);\s*else tap\(h\.at\);/.test(msHtml),
     'Space and Enter flag when held and open only when let go early');
-  ok((msHtml.match(/\bholdFlag: '[^']+'/g) || []).length === 5 && /row\(C\.t\('holdFlag'\), 'Space \/ Enter'\)/.test(msHtml), 'the help names it, in all five languages');
+  ok((msHtml.match(/\bholdFlag: '[^']+'/g) || []).length === LOCALE_CODES.length && /row\(C\.t\('holdFlag'\), 'Space \/ Enter'\)/.test(msHtml), 'the help names it, in every language');
 }
 
 /* ------------------------------------------------------- نقطه‌بازی */
@@ -1640,7 +1640,7 @@ function testBackgammon() {
   ok(title('Sara', 1) === '<starts:Sara>', 'با نام پروفایل: «{n} شروع می‌کند»');
   ok(title('', 2) === '<starts:<rival> · <hard>>', 'حریف: سوم‌شخص می‌ماند');
   const str = (lang, key) => { const m = bgHtml.match(new RegExp(key + ": '([^']*)'", 'g')); return m ? m.map((x) => x.split(": '")[1].slice(0, -1)) : []; };
-  ok(JSON.stringify(str('', 'youStart')) === JSON.stringify(['تو شروع می‌کنی', 'You start', '你先走', 'Du fängst an', 'Empiezas tú']), 'youStart reads right in every language');
+  ok(JSON.stringify(str('', 'youStart')) === JSON.stringify(['تو شروع می‌کنی', 'You start', 'Zaczynasz', '你先走', 'Du fängst an', 'Empiezas tú']), 'youStart reads right in every language');
 
   // Rotating the board (#378): the page's own geometry and mapping. Every point's centre, the bar
   // and each tray, carried to the screen and back in each quarter turn, must hit the same target.
@@ -1678,7 +1678,7 @@ function testBackgammon() {
     'the slot takes the turned shape at 90 and 270 degrees, and the turn is kept in prefs');
   ok(/g\.rotate\(upright\);\s*g\.fillText\(txt, 0, 1\);/.test(page) && /function drawDie\(g, x, y, s, v, pc, faded, spin\) \{\s*g\.save\(\); g\.translate\(x, y\); g\.rotate\(upright \+ \(spin \|\| 0\)\);/.test(page),
     'numbers and dice turn back so they stay upright');
-  ok(['fa', 'en', 'zh', 'de', 'es'].every((l) => new RegExp('\\n      ' + l + ": \\{[\\s\\S]*?rotateBoard: '[^']+'").test(bgHtml)), 'the rotate button is labelled in all five languages');
+  ok(LOCALE_CODES.every((l) => new RegExp('\\n      ' + l + ": \\{[\\s\\S]*?rotateBoard: '[^']+'").test(bgHtml)), 'the rotate button is labelled in every language');
 }
 
 /* ------------------------------------------------------------- دوز */
@@ -2934,6 +2934,8 @@ function testFiles() {
   const langCss = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   const langPad = +((langCss.match(/\.ch-seg\.ch-langs button \{[^}]*padding-inline: (\d+)px/) || [])[1] || 99);
   ok(/function langPicker[\s\S]{0,250}classList\.add\([^)]*'ch-langs'/.test(menu) && langPad <= 6, 'the language picker uses narrow buttons so five languages fit one phone row (padding ' + langPad + ')');
+  // A sixth language sat alone on a full-width second row (#542): three even columns on a phone
+  ok(/\.ch-seg\.ch-langs \{[^}]*display: grid;[^}]*grid-template-columns: repeat\(3, 1fr\)/.test(langCss) && LOCALE_CODES.length % 3 === 0, 'the language picker is two even rows of three on a phone (' + LOCALE_CODES.length + ' languages)');
 
   // The show-welcome button was labelled with 'play' and read «بازی» (#295)
   ok(/C\.t\('showWelcome'\) \}\),[\s\S]{0,200}text: C\.t\('showBtn'\)/.test(menu) && (menu.match(/\bshowBtn: '[^']+'/g) || []).length === LOCALE_CODES.length, 'the show-welcome button has its own "Show" label in every language');
@@ -3041,7 +3043,7 @@ function testFiles() {
     ok(man[k] && man[k].fa, 'منیفست ' + k + ' فارسی دارد');
   }
   // An installed app's description follows the device language; Spanish was missing until #256
-  const manLang = { fa: 'fa', zh: 'zh-Hans', de: 'de', es: 'es' };
+  const manLang = { fa: 'fa', zh: 'zh-Hans', de: 'de', es: 'es', pl: 'pl' };
   ok(LOCALE_CODES.filter((c) => c !== 'en').every((c) => man.description_localized[manLang[c]] && man.description_localized[manLang[c]].value), 'the manifest describes the app in every language');
   ok(man.name_localized.fa.value === 'چوگان', 'نام فارسی در منیفست درست است');
   // The installed desktop app showed the browser's own title bar above the app's (#344)
@@ -3513,6 +3515,7 @@ function testLocales() {
     ['zh-TW', 'en'], ['zh-HK', 'en'], ['zh-Hant', 'en'],
     ['de-DE', 'de'], ['de', 'de'], ['de-AT', 'de'], ['de-CH', 'de'],
     ['es-ES', 'es'], ['es', 'es'], ['es-MX', 'es'], ['es-419', 'es'],
+    ['pl-PL', 'pl'], ['pl', 'pl'],
     ['en-GB', 'en'], ['da-DK', 'en'], ['', 'en']
   ];
   ok(cases.length > 0, 'فهرست حالت‌های زبان دستگاه خالی نیست');
@@ -3573,7 +3576,7 @@ function testLocales() {
   for (const f of files) {
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
     const en = dictOf(src, 'en') || {};
-    for (const code of ['de', 'es']) {
+    for (const code of ['de', 'es', 'pl']) {
       const de = dictOf(src, code);
       ok(!!de, f + ': ' + code + ' dictionary exists');
       if (!de) continue;
@@ -3903,7 +3906,7 @@ function testWayOut() {
   ok(['make', 'tap', 'restart', 'carryOn', 'useHint', 'levelDone', 'chain', 'pick', 'generate', 'restore'].every((f) => typeof E[f] === 'function'), 'the engine has its API');
   // People who know the genre as "arrow puzzle" did not recognise Way Out (#326); the name stays, the summary says it
   const woMeta = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games.find((g) => g.id === 'wayout');
-  const woWord = { fa: 'پازل پیکانی', en: 'arrow puzzle', zh: '箭头谜题', de: 'Pfeil-Puzzle', es: 'puzle de flechas' };
+  const woWord = { fa: 'پازل پیکانی', en: 'arrow puzzle', zh: '箭头谜题', de: 'Pfeil-Puzzle', es: 'puzle de flechas', pl: 'łamigłówka ze strzałkami' };
   ok(woMeta && LOCALE_CODES.every((c) => woWord[c]), 'Way Out is listed and every language has a genre word');
   ok(woMeta && LOCALE_CODES.every((c) => woMeta.summary[c].toLowerCase().includes(woWord[c].toLowerCase())), 'its summary names the genre in every language');
   ok(woMeta && woMeta.name.fa === 'راه دررو' && woMeta.name.en === 'Way Out', 'the name stays Way Out / راه دررو');
@@ -5522,8 +5525,8 @@ function testChessFaceToFace() {
   const xq = fs.readFileSync(path.join(ROOT, 'www/games/xiangqi/index.html'), 'utf8');
   ok(/\.xq-face \.xq-piece--b \.xq-glyph \{ display: inline-block; transform: rotate\(180deg\); \}/.test(xq) && /board\.classList\.toggle\('xq-face', S\.mode === 'two' && prefs\.face\);/.test(xq), 'Chinese chess turns Black\'s characters face to face, with two players only');
   ok((xq.match(/face: prefs\.face \}/g) || []).length >= 3 && /face: !!prefs\.face \}/.test(xq), 'Chinese chess remembers the choice wherever it saves its settings');
-  const keys = ['faceToFace'].every((k) => (cs.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length === 5 && (xq.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length === 5);
-  ok(keys, 'the option is named in all five languages in both games');
+  const keys = ['faceToFace'].every((k) => (cs.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length === LOCALE_CODES.length && (xq.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length === LOCALE_CODES.length);
+  ok(keys, 'the option is named in every language in both games');
 }
 
 function testChess() {
@@ -5915,7 +5918,7 @@ function testNonogramPictures() {
     const res = E.solve(cl.rows, cl.cols);
     if (!res.solved || res.grid.some((v, i) => v !== grid[i])) bad.push(p.id + ' not unique (' + res.grid.filter((v) => v === -1).length + ' cells open)');
   }
-  ok(bad.length === 0, 'every picture has one solution the line solver reaches, a name in 4 languages and a colour per letter' + (bad.length ? ': ' + bad.join(', ') : ''));
+  ok(bad.length === 0, 'every picture has one solution the line solver reaches, a name in every language and a colour per letter' + (bad.length ? ': ' + bad.join(', ') : ''));
   // the check itself must be able to fail: two separated cells in a 10×10 are ambiguous
   const amb = new Array(100).fill(E.BLANK); amb[0] = E.FILL; amb[11] = E.FILL;
   const ac = E.cluesOf(amb, 10);
@@ -7029,10 +7032,10 @@ function testJigsaw() {
   }
   ok(JSON.stringify(P.ids.slice().sort()) === JSON.stringify(E.PICS.slice().sort()), 'the engine and the drawings list the same ' + E.PICS.length + ' pictures');
   ok(shapes.size === E.PICS.length && !broke.length && !weak.length, 'every picture draws at least 15 shapes in 4 colours or more, and no two share their shapes (' + shapes.size + ' drawn' + (broke.length ? '; broke: ' + broke.slice(0, 3).join(', ') : '') + (weak.length ? '; ' + weak.slice(0, 3).join(', ') : '') + ')');
-  const langs = ['fa', 'en', 'zh', 'de', 'es'], blocks = langs.map((l) => (html.match(new RegExp('\\n      ' + l + ': \\{([\\s\\S]*?)\\n      \\}')) || [])[1] || '');
+  const langs = LOCALE_CODES, blocks = langs.map((l) => (html.match(new RegExp('\\n      ' + l + ': \\{([\\s\\S]*?)\\n      \\}')) || [])[1] || '');
   const unnamed = [];
   E.PICS.forEach((id) => blocks.forEach((b, i) => { if (!new RegExp('\\bpic_' + id + ": '[^']+'").test(b)) unnamed.push(langs[i] + ':' + id); }));
-  ok(blocks.every((b) => b.length > 500) && !unnamed.length, 'every picture has a name in all five languages (' + E.PICS.length * 5 + ' names' + (unnamed.length ? '; missing ' + unnamed.slice(0, 5).join(', ') : '') + ')');
+  ok(blocks.every((b) => b.length > 500) && !unnamed.length, 'every picture has a name in every language (' + E.PICS.length * LOCALE_CODES.length + ' names' + (unnamed.length ? '; missing ' + unnamed.slice(0, 5).join(', ') : '') + ')');
   ok(!/<img\b|data:image|url\(|new Image\(|\.png|\.jpe?g|\.webp/i.test(html), 'the page loads no image of any kind: no photo, no file, no data URL');
 
   // Page wiring and identity
@@ -8086,7 +8089,7 @@ function testMenu() {
   ok(bestLine({ id: 'dots' }) === '<winsN>(3)', 'نقطه‌بازی همان خط قبلی را نشان می‌دهد');
   // «برد ۱۳» read backwards in Persian: the count now comes first where the language puts it (#352)
   ok(/winsN: '\{n\} برد', solvedN: '\{n\} حل‌شده', clearedN: '\{n\} پاک‌شده'/.test(menu) && /winsN: '\{n\} wins'/.test(menu), 'Persian says «۱۳ برد», «۱۳ حل‌شده», «۱۳ پاک‌شده», and English "13 wins"');
-  ok((menu.match(/\bwinsN: '[^']*\{n\}[^']*'/g) || []).length === 5 && (menu.match(/\bsolvedN: '[^']*\{n\}/g) || []).length === 5 && (menu.match(/\bclearedN: '[^']*\{n\}/g) || []).length === 5, 'every language has the three counts as templates');
+  ok((menu.match(/\bwinsN: '[^']*\{n\}[^']*'/g) || []).length === LOCALE_CODES.length && (menu.match(/\bsolvedN: '[^']*\{n\}/g) || []).length === LOCALE_CODES.length && (menu.match(/\bclearedN: '[^']*\{n\}/g) || []).length === LOCALE_CODES.length, 'every language has the three counts as templates');
   ok(!/C\.t\('(wins|solved|cleared)'\) \+ ' ' \+ C\.num/.test(menu), 'no label is glued to a number in front of it any more');
   ok(bestLine({ id: 'never-played' }) === null, 'بازی بازی‌نشده خطی ندارد');
 
@@ -8821,7 +8824,7 @@ function testCheckersHuevo() {
   ok(hWin >= 3 && hWin > hLoss && slow < 1500, 'hard beats medium (' + hWin + ' wins, ' + hLoss + ' losses in 4), and no move takes 1.5 s (slowest ' + slow + ' ms)');
   // The page: a third choice, always optional, the daily stays classic, and the rules are explained
   ok(/\{ value: 'huevo', label: C\.t\('huevo'\) \}/.test(html) && /if \(S\.rules !== 'huevo'\) top\.appendChild/.test(html) && /var rules = daily \? 'classic' : prefRules\(\)/.test(html), 'the page offers Huevo, hides the capture choice for it, and keeps the daily game classic');
-  ok(['huevo', 'huevoNote', 'qEdge', 'qMust', 'endQueen', 'endCount', 'endTimer', 'endLone'].every((k) => (html.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length === 5), 'its texts are in all five languages');
+  ok(['huevo', 'huevoNote', 'qEdge', 'qMust', 'endQueen', 'endCount', 'endTimer', 'endLone'].every((k) => (html.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length === LOCALE_CODES.length), 'its texts are in every language');
   ok(/HuevosKicker/.test(html), 'the rules text names its designer');
   const ms0 = Date.now() - t0;
   ok(ms0 < 15000, 'the group runs in ' + (ms0 / 1000).toFixed(1) + ' s (limit 15 s)');
@@ -9493,7 +9496,7 @@ function testCrazyEightsIran() {
   // page: the default, the switch, and the daily
   ok(/if \(prefs\.rules !== 'intl'\) prefs\.rules = 'iran';/.test(html) && /rules: daily \? 'iran' : prefs\.rules/.test(html), 'the Iranian rules are the default, and the daily always plays them');
   ok(/C\.t\('rulesSet'\) \}\), seg3\]/.test(html) && /C\.t\(iranNow\(\) \? 'rulesIranText' : 'rules'\)/.test(html), 'the rules are chosen behind the gear, and the help describes the set in play');
-  ok(['rulesSet', 'rulesIran', 'rulesIntl', 'rulesIranText', 'takeN', 'tookN', 'youTook', 'eightAgain', 'skippedN', 'reversed', 'tutTitle2i', 'tutText2i'].every((k) => (html.match(new RegExp('\\b' + k + ": '", 'g')) || []).length === 5), 'every new string is in all five languages');
+  ok(['rulesSet', 'rulesIran', 'rulesIntl', 'rulesIranText', 'takeN', 'tookN', 'youTook', 'eightAgain', 'skippedN', 'reversed', 'tutTitle2i', 'tutText2i'].every((k) => (html.match(new RegExp('\\b' + k + ": '", 'g')) || []).length === LOCALE_CODES.length), 'every new string is in every language');
   ok(Date.now() - t0 < 10000, 'the Haft Khabis tests finish in under 10 s (' + (Date.now() - t0) + ' ms)');
 }
 
@@ -9858,7 +9861,7 @@ function testPersianCardIndex() {
   vm.runInNewContext(core.slice(a0, b0) + ';this.rankText = rankText;', sb);
   const fa = [...Array(13).keys()].map(sb.rankText);
   ok(fa.join(' ') === 'تـ ۲ ۳ ۴ ۵ ۶ ۷ ۸ ۹ ۱۰ سـ بـ شـ', 'Persian: تـ, Persian digits, سـ بـ شـ (' + fa.join(' ') + ')');
-  for (const l of ['en', 'zh', 'de', 'es']) {
+  for (const l of ['en', 'zh', 'de', 'es', 'pl']) {
     state.settings.lang = l;
     ok([...Array(13).keys()].map(sb.rankText).join('') === 'A2345678910JQK', l + ': A, 2–10, J, Q, K as before');
   }
@@ -10176,8 +10179,8 @@ function testGorillasStick() {
   ok(!bad.length, 'a push sets angle and power the way the banana goes (' + cases.length + ' pushes)' + (bad.length ? ': ' + bad.join('; ') : ''));
   ok(/prefs\.control !== 'nums' && prefs\.control !== 'stick'/.test(html) && /\{ value: 'stick', label: C\.t\('ctlStick'\) \}/.test(html), 'the gear offers it and a saved choice of it is kept');
   ok(/if \(cancel \|\| !a \|\| a\.power < 6 \|\| !canAim\(\)\) \{ draw\(\); return; \}/.test(html), 'a push let go near the middle is taken back, not thrown');
-  const langs = ['ctlStick', 'aimStick', 'stick'].every((k) => (html.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length === 5);
-  ok(langs, 'its strings are in all five languages');
+  const langs = ['ctlStick', 'aimStick', 'stick'].every((k) => (html.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length === LOCALE_CODES.length);
+  ok(langs, 'its strings are in every language');
 }
 
 function testPeopleFilter() {
@@ -11058,7 +11061,7 @@ function testXiangqi() {
   const lum = (x) => rgb(x).map((c) => c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)).reduce((a, c, i) => a + c * [0.2126, 0.7152, 0.0722][i], 0);
   const near = games.filter((g) => g.id !== 'xiangqi').map((g) => [g.id, dE(g.color, gm.color)]).sort((x, y) => x[1] - y[1])[0];
   ok(near[1] >= 15 && 1.05 / (lum(gm.color) + 0.05) >= 4.5, 'the accent differs from every other game by ΔE ≥ 15 (nearest ' + near[0] + ', ' + near[1].toFixed(1) + ') and keeps white text at 4.5:1');
-  ok(/name: \{ fa: 'شطرنج چینی', en: 'Chinese chess', zh: '中国象棋', de: 'Chinesisches Schach', es: 'Ajedrez chino' \}/.test(html), 'the five names match games.json');
+  ok(/name: \{ fa: 'شطرنج چینی', en: 'Chinese chess', zh: '中国象棋', de: 'Chinesisches Schach', es: 'Ajedrez chino', pl: 'Szachy chińskie' \}/.test(html), 'the names match games.json in every language');
   ok(/newGame\(\{ daily: dailyDate, level: 2, mode: 'ai' \}\)/.test(html) && /C\.stats\.daily\('xiangqi', S\.daily/.test(html), 'the daily game uses the same deterministic AI for everyone');
   ok(/kb\('U \/ Ctrl\+Z'/.test(html) && /if \(C\.undoKey\(e\)\) \{ undo\(\);/.test(html), 'the undo key is labelled and handled');
   ok(/E\.validState\(saved\.s\)/.test(html) && /ctx\.autosave\(function/.test(html), 'the game saves and restores a checked state');
@@ -11441,7 +11444,7 @@ function testModalFocus() {
   ok(/el\('button', \{ class: 'ch-btn ch-btn--ghost ch-seeboard'[\s\S]*?shown\.close\('board'\)[\s\S]*?Chogan\.t\('seeBoard'\)/.test(fin) && /body\.push\(el\('button'/.test(fin) && /return \(shown = ui\.modal\(/.test(fin),
     'the result window has a See the board button that closes it like X, not like an action');
   const locales = [...core.matchAll(/result: '[^']+', seeBoard: '([^']+)'/g)].map((m) => m[1]);
-  ok(locales.length === 5 && new Set(locales).size === 5, 'See the board is translated in all five languages (' + locales.length + ')');
+  ok(locales.length === LOCALE_CODES.length && new Set(locales).size === LOCALE_CODES.length, 'See the board is translated in every language (' + locales.length + ')');
   ok(/\n    eye: 'M/.test(core), 'the eye icon exists');
   ok(/function hideResultBtn\(\) \{\n[^\n]*resultBtn\.hidden = true;\n[^\n]*afterBar\.remove\(\)/.test(core), 'the bar goes away when a new round starts');
   const relabel = games.filter((g) => /ch-modal__actions \.ch-btn--primary/.test(fs.readFileSync(path.join(ROOT, 'www', g.path), 'utf8'))).map((g) => g.id);

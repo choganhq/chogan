@@ -180,6 +180,7 @@
       if (l === 'zh' || /^zh-(cn|sg|hans)/.test(l)) return 'zh';
       if (/^de\b|^de-/.test(l)) return 'de';
       if (/^es\b|^es-/.test(l)) return 'es';
+      if (/^pl\b|^pl-/.test(l)) return 'pl';
       return 'en';
     } catch (e) { return 'fa'; }
   }
@@ -266,7 +267,8 @@
     { code: 'en', label: 'English',  dir: 'ltr', tag: 'en',      date: 'en-US' },
     { code: 'zh', label: '中文', dir: 'ltr', tag: 'zh-Hans', date: 'zh-CN' },
     { code: 'de', label: 'Deutsch',  dir: 'ltr', tag: 'de',      date: 'de-DE' },
-    { code: 'es', label: 'Español',  dir: 'ltr', tag: 'es',      date: 'es-ES' }
+    { code: 'es', label: 'Español',  dir: 'ltr', tag: 'es',      date: 'es-ES' },
+    { code: 'pl', label: 'Polski',   dir: 'ltr', tag: 'pl',      date: 'pl-PL' }
   ];
   function localeOf(code) {
     for (var i = 0; i < LOCALES.length; i++) if (LOCALES[i].code === code) return LOCALES[i];
@@ -360,6 +362,48 @@
       sun: 'S', mon: 'M', tue: 'T', wed: 'W', thu: 'T', fri: 'F', sat: 'S',
       unlocks: 'Themes and characters', unlockCost: 'Unlock', owned: 'Unlocked', apply: 'Select',
       tutorial: 'How to play', gotIt: 'Got it', stars: 'stars'
+    },
+    pl: {
+      appName: 'Chogan', home: 'Główna', daily: 'Dziennie', league: 'Liga',
+      achievements: 'Osiągnięcia', profile: 'Profil', settings: 'Ustawienia',
+      play: 'Graj', resume: 'Wznów', newGame: 'Nowa gra', again: 'Jeszcze raz',
+      cardBack: 'Rewers karty', backCarpet: 'Dywan', backTermeh: 'Termeh', cardSpeed: 'Prędkość', speedSlow: 'Wolno', speedNormal: 'Normalnie', speedFast: 'Szybko',
+      menu: 'Menu', back: 'Wstecz', undo: 'Cofnij', close: 'Zamknij', cancel: 'Anuluj', result: 'Wynik', seeBoard: 'Zobacz planszę',
+      saveImage: 'Zapisz obraz', copyText: 'Kopiuj tekst',
+      updateReady: 'Nowa wersja jest gotowa', updateNow: 'Aktualizuj',
+      installReady: 'Zainstaluj Chogan jako aplikację', installNow: 'Zainstaluj',
+      confirm: 'Potwierdź', done: 'Gotowe', next: 'Dalej', skip: 'Pomiń',
+      start: 'Start', pause: 'Pauza', resumeGame: 'Wznów', restart: 'Zrestartuj',
+      quit: 'Wyjdź do menu', help: 'Pomoc', share: 'Udostępnij', copied: 'Skopiowano do schowka', imageSaved: 'Zapisano w galerii',
+      best: 'Najlepszy', score: 'Wynik', time: 'Czas', coins: 'Monety',
+      newBadge: 'Nowe', continueBadge: 'Wznów', todayChallenge: 'Wyzwanie dnia',
+      todayChallengeSub: 'Codziennie nowa łamigłówka, taka sama dla wszystkich',
+      won: 'Wygrana', lost: 'Przegrana', finished: 'Ukończono',
+      earned: 'Zdobyte', weeklyPoints: 'Punkty tygodniowe', tier: 'Ranga',
+      promoted: 'Awans', demoted: 'Spadek', stayed: 'Utrzymanie rangi',
+      bronze: 'Brąz', silver: 'Srebro', gold: 'Złoto', diamond: 'Diament', legend: 'Legenda',
+      seasonEnds: 'Koniec sezonu za', days: 'd', hours: 'g', minutes: 'm',
+      rank: 'Miejsce', points: 'Punkty', you: 'Ty',
+      offlineRivals: 'Przeciwnicy offline, generowani na tym urządzeniu',
+      streak: 'Seria', dayStreak: 'dni z rzędu', locked: 'Zablokowane',
+      unlockedAt: 'Odblokowano', totalPlays: 'Rozegrane gry', playTime: 'Czas gry',
+      language: 'Język', theme: 'Motyw', themeAuto: 'Automatyczny', themeLight: 'Jasny', themeDark: 'Ciemny',
+      sfx: 'Efekty dźwiękowe', music: 'Muzyka', haptics: 'Wibracje',
+      resetGame: 'Resetuj dane gry', resetAsk: 'Usunąć wszystkie dane tej gry?',
+      resetWarn: 'Tej operacji nie można cofnąć.', resetDone: 'Usunięto',
+      about: 'O aplikacji', version: 'Wersja', source: 'Kod źródłowy', commitHash: 'commit', license: 'Licencja',
+      aboutText: 'Darmowa, otwartoźródłowa, bez reklam, bez śledzenia, w pełni offline.',
+      name: 'Nazwa', country: 'Kraj', optional: 'opcjonalnie',
+      hint: 'Wskazówka', hints: 'Wskazówki', notEnoughCoins: 'Za mało monet', hintUsed: 'Użyto wskazówki',
+      coinsEarned: 'zdobyte monety', playToEarn: 'Zagraj rundę, aby zdobyć monety',
+      keyboard: 'Klawiatura', difficulty: 'Poziom trudności',
+      fullscreen: 'Pełny ekran', exitFullscreen: 'Zamknij pełny ekran',
+      easy: 'Łatwy', medium: 'Średni', hard: 'Trudny', expert: 'Ekspert',
+      today: 'Dzisiaj', dailyDone: 'Ukończone dzisiaj', dailyOpen: 'Jeszcze niegrane',
+      emptyDaily: 'Brak zapisów z tego dnia', noAchievements: 'Brak osiągnięć',
+      sun: 'N', mon: 'P', tue: 'W', wed: 'Ś', thu: 'C', fri: 'P', sat: 'S',
+      unlocks: 'Motywy i postacie', unlockCost: 'Odblokuj', owned: 'Odblokowane', apply: 'Wybierz',
+      tutorial: 'Jak grać', gotIt: 'Rozumiem', stars: 'gwiazdki'
     },
     zh: {
       appName: 'Chogan', home: '主页', daily: '每日', league: '联赛',
