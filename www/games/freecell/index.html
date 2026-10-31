@@ -232,6 +232,27 @@ function FreecellEngineFactory() {
     return -1;
   }
 
+  // The longest tail of a picked run that can go to a column (#572). A run
+  // picked by its top card was refused whole when only its lower cards fit
+  // there, or when it was longer than the free cells allow, so the move felt
+  // invalid. Free cells and foundations still take exactly what was picked.
+  function fitCount(S, from, n, to) {
+    if (to >= CELL || from >= CELL) return canMove(S, from, n, to) ? n : 0;
+    for (var k = n; k >= 1; k--) if (canMove(S, from, k, to)) return k;
+    return 0;
+  }
+
+  // Where a tap sends a picked run: the whole run anywhere it fits, else its
+  // longest tail onto a filled column, else onto an empty one.
+  function bestMove(S, from, n) {
+    var to = bestTarget(S, from, n), k, i;
+    if (to >= 0) return { to: to, n: n };
+    if (from >= CELL) return null;
+    for (k = n - 1; k >= 1; k--) for (i = 0; i < 8; i++) if (S.cols[i].length && canMove(S, from, k, i)) return { to: i, n: k };
+    for (k = n - 1; k >= 1; k--) for (i = 0; i < 8; i++) if (!S.cols[i].length && canMove(S, from, k, i)) return { to: i, n: k };
+    return null;
+  }
+
   // آیا هنوز حرکتی هست که چیزی را عوض کند
   function hasMoves(S) {
     for (var f = 0; f < 12; f++) {
@@ -285,7 +306,7 @@ function FreecellEngineFactory() {
     validDeal: validDeal, pickDeal: pickDeal, deal: deal, newGame: newGame, clone: clone,
     canStack: canStack, isRun: isRun, runLength: runLength, freeCells: freeCells, emptyCols: emptyCols,
     maxMove: maxMove, canMove: canMove, move: move, undo: undo, userMoves: userMoves,
-    isSafe: isSafe, autoStep: autoStep, autoAll: autoAll, bestTarget: bestTarget,
+    isSafe: isSafe, autoStep: autoStep, autoAll: autoAll, bestTarget: bestTarget, fitCount: fitCount, bestMove: bestMove,
     hasMoves: hasMoves, won: won, validState: validState
   };
   if (typeof self !== 'undefined') self.FreecellEngine = api;
@@ -743,9 +764,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = FreecellEn
 
   function tap(src, n) {
     if (src < CELL && !E.isRun(S.cols[src], S.cols[src].length - n)) { C.feedback('bad'); return; }
-    var to = E.bestTarget(S, src, n);
-    if (to < 0) { C.feedback('bad'); return; }
-    doMove(src, n, to, null);
+    var m = E.bestMove(S, src, n);
+    if (!m) { C.feedback('bad'); return; }
+    doMove(src, m.n, m.to, null);
   }
 
   function doMove(src, n, to, dropPos) {
@@ -824,8 +845,17 @@ if (typeof module !== 'undefined' && module.exports) module.exports = FreecellEn
       drag = null;
       if (cancelled) { draw(); return; }
       var p = pt(e);
-      var to = dropAt(p.x, p.y, d.cards[0]);
-      if (to < 0 || to === d.src || !E.canMove(S, d.src, d.n, to)) {
+      // The column the dragged card mostly covers wins over the one under the
+      // finger: a card held by its edge looked dropped on one column while
+      // the finger was over its neighbour (#572).
+      var to = dropAt(d.x + d.dx + L.cw / 2, d.y + d.dy + L.ch / 2, d.cards[0]);
+      var k = to >= 0 ? E.fitCount(S, d.src, d.n, to) : 0;
+      if (!k) {
+        var alt = dropAt(p.x, p.y, d.cards[0]);
+        var ka = alt >= 0 ? E.fitCount(S, d.src, d.n, alt) : 0;
+        if (ka || to < 0 || to === d.src) { to = alt; k = ka; }
+      }
+      if (!k) {
         if (to >= 0 && to !== d.src) C.feedback('bad');
         var back = positions(), from = {};
         for (var i = 0; i < d.cards.length; i++) from[d.cards[i]] = { x: d.x + d.dx, y: d.y + d.dy + i * L.ov };
@@ -833,7 +863,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = FreecellEn
         startAnim(from);
         return;
       }
-      doMove(d.src, d.n, to, { x: d.x + d.dx, y: d.y + d.dy });
+      doMove(d.src, k, to, { x: d.x + d.dx, y: d.y + d.dy + (d.n - k) * L.ov });
       return;
     }
     if (!cancelled && !blocked()) tap(h.src, h.n);
@@ -899,7 +929,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = FreecellEn
     } else if (k === ' ') {
       if (picked) {
         var to = curTarget();
-        if (to !== picked.src) doMove(picked.src, picked.n, to, null);
+        var kp = E.fitCount(S, picked.src, picked.n, to);
+        if (to !== picked.src) { if (kp) doMove(picked.src, kp, to, null); else C.feedback('bad'); }
         picked = null;
         cur.k = -1;
       } else {

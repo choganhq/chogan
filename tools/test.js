@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5795;
+const MIN_CHECKS = 5803;
 
 function ok(cond, msg) {
   checks++;
@@ -876,6 +876,24 @@ function testFreecell() {
     ok(E.canMove(a.S, 0, lim, a.to), 'به ستون خالی، خانه‌ی آزاد ' + f + '، ستون خالی ' + e + ': ' + lim + ' کارت می‌رود');
     ok(!E.canMove(b.S, 0, lim + 1, b.to), 'به ستون خالی، خانه‌ی آزاد ' + f + '، ستون خالی ' + e + ': ' + (lim + 1) + ' کارت رد می‌شود');
   }
+  // #572: a run picked by its top card was refused whole when only its lower
+  // cards fit the target, or when it was longer than the free cells allow.
+  // Expected counts come from the rules, not from the engine.
+  const p1 = make(['9S 8H 7C', 'KC', '8D', 'KD', 'KH', 'QS', 'QD', 'QC'], ['', 'AC', 'AD', 'AH']);
+  ok(E.fitCount(p1, 0, 3, 2) === 1, 'a 9-8-7 run dropped on the 8 of diamonds moves only the 7 of clubs');
+  ok(E.fitCount(p1, 0, 3, 1) === 0, 'nothing of 9-8-7 fits on a king');
+  ok(E.fitCount(p1, 0, 3, 8) === 0 && E.fitCount(p1, 0, 3, 12) === 0, 'a run dropped on a free cell or a foundation is not cut down to one card');
+  const bm1 = E.bestMove(p1, 0, 3);
+  ok(!!bm1 && bm1.to === 2 && bm1.n === 1, 'tapping the 9 of 9-8-7 sends the 7 to the 8 of diamonds');
+  // three cards to an empty column with no free cell and one empty column: (0+1)*2^0 = 1
+  const p2 = make(['9S 8H 7C', '', 'KC', 'KD', 'KH', 'QS', 'QD', 'QC'], ['JS', 'AC', 'AD', 'AH']);
+  ok(E.fitCount(p2, 0, 3, 1) === 1, 'a run too long for an empty column moves as many cards as the rules allow');
+  const bm2 = E.bestMove(p2, 0, 3);
+  ok(!!bm2 && bm2.to === 1 && bm2.n === 1, 'tapping a run that fits nowhere whole sends its allowed tail to the empty column');
+  ok(E.bestMove(p1, 0, 1).n === 1 && E.bestMove(p1, 0, 1).to === 2, 'a single card still goes where bestTarget sends it');
+  const fcPage = fs.readFileSync(path.join(ROOT, 'www/games/freecell/index.html'), 'utf8');
+  ok(/var to = dropAt\(d\.x \+ d\.dx \+ L\.cw \/ 2, d\.y \+ d\.dy \+ L\.ch \/ 2, d\.cards\[0\]\);/.test(fcPage) && /doMove\(d\.src, k, to,/.test(fcPage),
+    'a drop goes to the column under the dragged card first, then the finger, with the run cut to what fits');
   const s4 = make(['8S 7H 6C', '9D', '8C', 'KC', 'KD', 'KH', 'QS', 'QD'], ['', 'AC', 'AD', 'AH']);
   ok(!E.canMove(s4, 0, 2, 1), 'رشته‌ای که اولش روی مقصد نمی‌نشیند رد می‌شود (۷ دل روی ۹ خشت)');
   ok(E.canMove(s4, 0, 2, 2), 'دو کارت با یک خانه‌ی آزاد روی ۸ گشنیز می‌رود');
@@ -1083,7 +1101,7 @@ function testFreecell() {
   ok(/E\.move\(S, src, n, to\)/.test(ui), 'صفحه حرکت را با E.move ثبت می‌کند');
   ok(/E\.undo\(S\)/.test(ui), 'صفحه برگرداندن را با E.undo انجام می‌دهد');
   ok(/E\.autoAll\(S\)/.test(ui), 'صفحه حرکت خودکار را با E.autoAll انجام می‌دهد');
-  ok(/E\.bestTarget\(S, src, n\)/.test(ui), 'لمس مقصد را از E.bestTarget می‌گیرد');
+  ok(/E\.bestMove\(S, src, n\)/.test(ui), 'a tap takes its target from E.bestMove, which tries bestTarget first');
   ok(!/localStorage/.test(ui), 'صفحه مستقیم به localStorage دست نمی‌زند');
 
   // بوم پهن، تخته‌ی همان‌اندازه (#102): تابع واقعی layout صفحه با پهناهای مختلف
