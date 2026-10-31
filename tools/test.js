@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5822;
+const MIN_CHECKS = 5825;
 
 function ok(cond, msg) {
   checks++;
@@ -7862,6 +7862,21 @@ function testPepkExport() {
   ok(/if: always\(\)\n\s+run: rm -f "\$RUNNER_TEMP\/release\.jks"/.test(y), 'the keystore is always removed');
   ok(/permissions:\n\s+contents: read/.test(y) && !/contents: write|gh release/.test(y), 'nothing is published');
   ok(/retention-days: 1/.test(y), 'the artifact lives one day');
+}
+
+/* ------------------------------------------------ Stray files */
+// Two 4 MB Chrome traces and a screenshot from the Spider lag proofs were
+// committed to the repository root (#472, #532) and sat there unnoticed (#575).
+function testNoStrayFiles() {
+  head('No stray files in the repository');
+  const r = spawnSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8' });
+  const tracked = (r.stdout || '').split('\0').filter(Boolean);
+  ok(r.status === 0 && tracked.length > 100, 'tracked files listed (' + tracked.length + ')');
+  const big = tracked.filter((f) => { try { return fs.statSync(path.join(ROOT, f)).size > 1000000; } catch (e) { return false; } });
+  ok(big.length === 0, 'no tracked file over 1 MB' + (big.length ? ': ' + big.join(', ') : ''));
+  const ROOT_OK = /^(?:[A-Z_]+\.md|LICENSE|\.gitignore|capacitor\.config\.json)$/;
+  const loose = tracked.filter((f) => !f.includes('/') && !ROOT_OK.test(f));
+  ok(loose.length === 0, 'only docs and config at the root' + (loose.length ? ': ' + loose.join(', ') : ''));
 }
 
 /* ------------------------------------------------ Community health files */
