@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5828;
+const MIN_CHECKS = 5830;
 
 function ok(cond, msg) {
   checks++;
@@ -3485,6 +3485,20 @@ function testBrowserCheckExits() {
     ok(r.status === 2 && /games\.json/.test(r.stderr || ''),
       label + ': خروج ۲ با دلیل games.json (آمد ' + r.status + '، «' + (r.stderr || '').trim().split('\n').pop() + '»)');
   }
+
+  // 4. A Chrome that never exits held a CI run for 18 minutes (#581): each load now
+  // has a limit and one retry, and a page that hangs twice fails the run by name.
+  fs.writeFileSync(path.join(mirror, 'www/games.json'), JSON.stringify({ games: [{ id: 'sudoku', path: 'games/sudoku/index.html' }] }));
+  const hang = path.join(tmp, 'hang-chrome');
+  fs.writeFileSync(hang, '#!/bin/sh\nexec sleep 30\n', { mode: 0o755 });
+  const t0 = Date.now();
+  r = spawnSync('bash', [path.join(mirror, 'tools/browser-check.sh'), hang], {
+    encoding: 'utf8', timeout: 25000, env: Object.assign({}, process.env, { PORT: port, CHROME_TIMEOUT: '1' })
+  });
+  const took = Date.now() - t0;
+  ok(r.status === 1 && /Page index\.html did not finish loading within 1s, twice/.test(r.stdout || '') && /games\/sudoku\/index\.html did not finish/.test(r.stdout || ''),
+    'a Chrome that never exits: exit 1 naming each page (got ' + r.status + ', ' + Math.round(took / 1000) + ' s)');
+  ok(took < 20000, 'a hanging Chrome is cut off in seconds, not held (' + Math.round(took / 1000) + ' s)');
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
