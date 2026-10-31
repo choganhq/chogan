@@ -41,13 +41,31 @@ trap 'kill $SRV 2>/dev/null; rm -rf "$TMP"' EXIT
 sleep 1
 kill -0 "$SRV" 2>/dev/null || cannot "Local server did not start on port $PORT"
 
+# A Chrome that never exits held the CI job for 18 minutes with no output (#581), and
+# with no limit it would have held it for GitHub's six hours. Each load gets LIMIT
+# seconds and one retry; a page that hangs twice fails the run by name.
+LIMIT="${CHROME_TIMEOUT:-60}"
+load() {
+  timeout -k 5 "$LIMIT" "$CHROME" --headless --disable-gpu --no-sandbox --enable-logging=stderr --log-level=0 \
+    --virtual-time-budget=6000 --window-size=420,900 \
+    --dump-dom "http://127.0.0.1:$PORT/$1" >"$TMP/dom.html" 2>"$2"
+}
+
 FAIL=0
 CHECKED=0
 for p in $PAGES; do
   ERR="$TMP/$(echo "$p" | tr '/' '_').log"
-  "$CHROME" --headless --disable-gpu --no-sandbox --enable-logging=stderr --log-level=0 \
-    --virtual-time-budget=6000 --window-size=420,900 \
-    --dump-dom "http://127.0.0.1:$PORT/$p" >"$TMP/dom.html" 2>"$ERR"
+  load "$p" "$ERR"; RC=$?
+  if [ "$RC" = 124 ] || [ "$RC" = 137 ]; then
+    echo "Page $p did not finish loading within ${LIMIT}s, trying once more"
+    load "$p" "$ERR"; RC=$?
+  fi
+  if [ "$RC" = 124 ] || [ "$RC" = 137 ]; then
+    echo "Page $p did not finish loading within ${LIMIT}s, twice"
+    FAIL=1
+    CHECKED=$((CHECKED + 1))
+    continue
+  fi
   BAD=$(grep -E "CONSOLE" "$ERR" | grep -viE "MARK-|Download the React|favicon" | grep -iE "uncaught|error|failed|refused|denied" || true)
   SIZE=$(wc -c < "$TMP/dom.html")
   if [ -n "$BAD" ]; then
