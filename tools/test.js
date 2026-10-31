@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5803;
+const MIN_CHECKS = 5822;
 
 function ok(cond, msg) {
   checks++;
@@ -7862,6 +7862,37 @@ function testPepkExport() {
   ok(/if: always\(\)\n\s+run: rm -f "\$RUNNER_TEMP\/release\.jks"/.test(y), 'the keystore is always removed');
   ok(/permissions:\n\s+contents: read/.test(y) && !/contents: write|gh release/.test(y), 'nothing is published');
   ok(/retention-days: 1/.test(y), 'the artifact lives one day');
+}
+
+/* ------------------------------------------------ Community health files */
+// GitHub's community profile listed no code of conduct, security policy,
+// issue or pull request template (#574); CONTRIBUTING still said five
+// languages after Polish made six.
+function testCommunityFiles() {
+  head('Community health files');
+  const read = (rel) => { try { return fs.readFileSync(path.join(ROOT, rel), 'utf8'); } catch (e) { return ''; } };
+  const files = ['CODE_OF_CONDUCT.md', 'SECURITY.md', 'ACCESSIBILITY.md', 'CONTRIBUTING.md', '.github/pull_request_template.md'];
+  for (const rel of files) ok(read(rel).length > 200, rel + ' exists and is not a stub');
+  const coc = read('CODE_OF_CONDUCT.md');
+  ok(/Contributor Covenant/.test(coc) && /version 2\.1/.test(coc) && /choganhq@gmail\.com/.test(coc), 'code of conduct is Contributor Covenant 2.1 with our contact');
+  const sec = read('SECURITY.md');
+  ok(sec.includes('https://github.com/choganhq/chogan/security/advisories/new') && sec.includes('choganhq@gmail.com'), 'security policy names the private report form and the email');
+  const tplDir = path.join(ROOT, '.github/ISSUE_TEMPLATE');
+  const forms = fs.existsSync(tplDir) ? fs.readdirSync(tplDir).filter((f) => /\.ya?ml$/.test(f) && !/^config\./.test(f)) : [];
+  ok(forms.length >= 2, 'issue templates found (' + forms.length + ')');
+  for (const f of forms) {
+    const y = read('.github/ISSUE_TEMPLATE/' + f);
+    ok(/^name: \S/m.test(y) && /^description: \S/m.test(y) && /^body:/m.test(y) && /required: true/.test(y), f + ': a form with a name, a description and a required field');
+  }
+  // Reporters write in Persian, Chinese and more; a template that forbids it
+  // or a closed blank issue would turn them away.
+  ok(/^blank_issues_enabled: true$/m.test(read('.github/ISSUE_TEMPLATE/config.yml')), 'blank issues stay allowed');
+  for (const rel of files.concat(forms.map((f) => '.github/ISSUE_TEMPLATE/' + f), ['.github/ISSUE_TEMPLATE/config.yml'])) {
+    if (rel === 'CONTRIBUTING.md') continue;
+    ok(!/[؀-ۿ]/.test(read(rel).replace(/«\?»/g, '')), rel + ': English only');
+  }
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+  ok(read('CONTRIBUTING.md').includes('all ' + words[LOCALE_CODES.length] + ' languages'), 'CONTRIBUTING names ' + LOCALE_CODES.length + ' languages');
 }
 
 /* ------------------------------------------------ CI and tools in English */
