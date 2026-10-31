@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5825;
+const MIN_CHECKS = 5828;
 
 function ok(cond, msg) {
   checks++;
@@ -10592,7 +10592,13 @@ function testCorridor() {
   ok(E.play(Wn, { t: 'm', to: E.at(0, 0) }) && Wn.winner === 0 && !E.play(Wn, { t: 'm', to: E.at(6, 5) }), 'reaching the far row wins and ends the game');
   // the flag game
   const F = E.newGame('centre'); F.pos = [E.at(6, 4), E.at(0, 0)];
-  ok(E.dist(F, 0) === 1 && !E.pawnMoves(F, 0).includes(E.at(4, 4)) || true, 'flag cell setup');
+  ok(E.dist(F, 0) === 1 && !E.pawnMoves(F, 0).includes(E.at(4, 4)), 'flag cell setup: one step from a cell beside the flag, never onto it');
+  // #579: in the flag game the far row is an ordinary row; only the flags win
+  const Ff = E.newGame('both'); Ff.pos = [E.at(1, 8), E.at(7, 8)];
+  ok(!E.isGoal(Ff, 0, E.at(0, 8), E.blockedSet(Ff.walls)) && !E.isGoal(Ff, 1, E.at(8, 8), E.blockedSet(Ff.walls)), 'in the flag game neither far row is a goal');
+  ok(E.play(Ff, { t: 'm', to: E.at(0, 8) }) && Ff.winner === -1 && Ff.turn === 1, 'stepping onto the far row in the flag game does not end it');
+  const ffEnd = (E.path(Ff, 1) || []).slice(-1)[0];
+  ok([E.at(3, 4), E.at(5, 4), E.at(4, 3), E.at(4, 5), E.at(3, 0), E.at(5, 0), E.at(4, 1)].includes(ffEnd), 'the path in the flag game leads beside a flag, not to the far row (' + ffEnd + ')');
   ok(E.isGoal(F, 0, E.at(5, 4), E.blockedSet(F.walls)) && E.isGoal(F, 1, E.at(4, 3), E.blockedSet(F.walls)) && !E.isGoal(F, 0, E.at(5, 5), E.blockedSet(F.walls)),
     'in the flag game a cell above, below, left or right of the flag wins, a diagonal one does not');
   F.walls.push({ o: 'h', r: 4, c: 4 });
