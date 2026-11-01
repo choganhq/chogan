@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5880;
+const MIN_CHECKS = 5884;
 
 function ok(cond, msg) {
   checks++;
@@ -6445,6 +6445,39 @@ function testLudo() {
 }
 
 /* ------------------------------------------- Snakes and Ladders (#314) */
+// #595: a token seemed to skip a square on every move: move() drew the first square walked
+// and at once, in the same tick, the second. Runs the page's own move() and pathOf() with a
+// fake clock and records how long each square stays on screen.
+function testSnakesWalk() {
+  head('Snakes and Ladders: the token shows every square it walks (#595)');
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/snakes/index.html'), 'utf8');
+  const grab = (name) => { const a = html.indexOf('  function ' + name + '('), b = html.indexOf('\n  }\n', a); return a > 0 && b > a ? html.slice(a, b + 4) : ''; };
+  const src = grab('pathOf') + grab('move');
+  ok(src.includes('function pathOf(') && src.includes('function move('), 'move() and pathOf() found in the page');
+  if (!src.includes('function move(')) return;
+  for (const [roll, steps, jump] of [[4, [11, 12, 13, 14], null], [1, [5], null], [3, [20, 21, 22], { from: 22, to: 40, kind: 'ladder' }]]) {
+    const frames = [];  // [square shown, at ms]
+    let clock = 0, queued = null;
+    const sb = {
+      anim: null, G: { s: { turn: 0 }, roll, done: false }, E: { play: () => ({ state: { turn: 1 }, steps, jump, bounced: false, again: false }) },
+      C: { ui: { reduceMotion: () => false }, feedback() {}, t: (k) => k },
+      centre: (n) => [n, 0], ladderLine: () => ({ len: 2, at: (t) => [1000 + t, 0] }), snakeLine: () => ({ len: 2, at: (t) => [1000 + t, 0] }),
+      later: (fn, ms) => { queued = { fn, at: clock + ms }; },
+      save() {}, startTurn() {}, finish() {}, LONGEST_LADDER: 0, LONGEST_SNAKE: 0,
+    };
+    const shot = () => { if (sb.anim) frames.push([sb.anim.pts[sb.anim.i].x, clock]); };
+    sb.render = shot; sb.draw = shot;
+    vm.createContext(sb);
+    vm.runInContext(src + '\nmove();', sb);
+    // run the fake clock until the walk and its slide are over
+    for (let k = 0; k < 200 && queued && sb.anim; k++) { const q = queued; queued = null; clock = q.at; q.fn(); }
+    const seen = [];
+    frames.forEach(([x, at], i) => { const until = i + 1 < frames.length ? frames[i + 1][1] : clock; if (x < 1000) seen.push([x, until - at]); });
+    const order = seen.map((s) => s[0]).join(), shortest = Math.min(...seen.map((s) => s[1]));
+    ok(seen.length > 0 && order === steps.join() && shortest >= 100, 'a roll of ' + roll + (jump ? ' onto a ladder' : '') + ': every square walked is shown in order for at least 100 ms (' + order + ', shortest ' + shortest + ' ms)');
+  }
+}
+
 function testSnakes() {
   head('Snakes and Ladders');
   const t0 = Date.now();
