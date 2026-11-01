@@ -122,7 +122,15 @@ function AirHockeyEngineFactory() {
       else moveMallet(S.mal[s], s, input ? input[s] : null, HAND, DT);
     }
     var P = S.puck;
-    if (S.wait > 0) { S.wait -= DT; return ev; }
+    // After a goal the puck rests a moment, but a mallet that reaches it ends the rest at
+    // once: while resting it skipped the mallets, so a player swung straight through it and,
+    // when it woke under or behind the mallet, knocked it into their own goal (#592).
+    if (S.wait > 0) {
+      var touch = false;
+      for (var w = 0; w < 2; w++) if (Math.hypot(P.x - S.mal[w].x, P.y - S.mal[w].y) < RP + RM) touch = true;
+      if (!touch) { S.wait -= DT; return ev; }
+      S.wait = 0;
+    }
     var drag = Math.exp(-DRAG * DT);
     P.vx *= drag; P.vy *= drag;
     P.x += P.vx * DT; P.y += P.vy * DT;

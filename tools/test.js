@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5877;
+const MIN_CHECKS = 5880;
 
 function ok(cond, msg) {
   checks++;
@@ -10813,6 +10813,18 @@ function testAirHockey() {
   ok(g0.ev.includes('goal0') && g0.S.score.join() === '1,0' && g1.ev.includes('goal1') && g1.S.score.join() === '0,1', 'a puck through the top mouth is a goal for the bottom player, and the other way round');
   ok(post.ev.includes('wall') && !post.ev.some((e) => e.startsWith('goal')) && post.S.puck.vy > 0, 'beside the mouth the puck bounces off the end board');
   ok(g0.S.puck.y < E.H / 2 && g1.S.puck.y > E.H / 2 && g0.S.puck.vx === 0 && g0.S.puck.vy === 0 && g0.S.wait > 0, 'after a goal the puck waits, still, in the half that let it in');
+  // #592: the resting puck ignored the mallets, so a swing at it passed through, and the puck
+  // woke under the mallet and was knocked backwards, often into the player's own goal.
+  // A player swings up at the puck the moment it reappears in their half.
+  const serve = () => { const S = shoot(E.W / 2 + 40, 600).S; S.mal[0] = { x: S.puck.x, y: S.puck.y + 120, vx: 0, vy: 0 }; return S; };
+  const sv = serve(), wait0 = sv.wait;
+  let svHit = -1, svVy = 0, svBelow = false;
+  for (let i = 0; i < 60 && svHit < 0; i++) { const ev = E.step(sv, [{ x: sv.puck.x, y: sv.mal[0].y - 1400 * E.DT }, hold(sv)[1]], half); if (ev.includes('hit')) { svHit = i; svVy = sv.puck.vy; svBelow = sv.mal[0].y > sv.puck.y; } }
+  ok(wait0 > 0 && svHit >= 0 && svHit * E.DT < wait0 && svVy < -200, 'a swing at the resting puck hits it at once, up the table (hit at ' + (svHit * E.DT).toFixed(2) + ' s of a ' + wait0.toFixed(2) + ' s rest, vy ' + svVy.toFixed(0) + ')');
+  ok(svBelow, 'the swing does not pass through the puck (mallet still below it)');
+  const idle = shoot(E.W / 2 + 40, 600).S, iy = idle.puck.y; let idleSteps = 0;
+  while (idle.wait > 0 && idleSteps < 200) { E.step(idle, hold(idle), half); idleSteps++; }
+  ok(idleSteps > 0 && Math.abs(idleSteps * E.DT - wait0) < 0.05 && idle.puck.y === iy, 'untouched, the puck still rests its full ' + wait0.toFixed(2) + ' s in place');
   const side = fresh(); side.puck = { x: 20, y: 300, vx: -500, vy: 0 }; E.step(side, hold(side), half); E.step(side, hold(side), half);
   ok(side.puck.vx > 0 && side.puck.vx < 500, 'the side boards return the puck a little slower');
 
