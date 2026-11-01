@@ -21,6 +21,8 @@ var p = new URLSearchParams(location.search);
 });
 // The welcome screen would cover every shot unless asked for explicitly
 try { if (!p.get('welcome')) localStorage.setItem('chogan.app.welcomeSeen','true'); } catch(e){}
+// The web install bar (#557) would sit on every menu shot of a store page for the app
+try { localStorage.setItem('chogan.app.installNo','true'); } catch(e){}
 try {
   localStorage.setItem('chogan.app.settings', JSON.stringify({lang:p.get('lang')||'fa',theme:p.get('theme')||'light',sfx:true,music:true,haptics:true}));
   localStorage.setItem('chogan.app.coins','245');
@@ -80,7 +82,10 @@ shot() {
 # metadata only confuses people. 450×900 at 2.4 gives 1080×2160, exactly the
 # 2:1 Google Play allows; 440 wide gave 1056×2160, which Play rejects (#163).
 TODAY=$(date +%Y-%m-%d)
-for lang in fa en zh de es; do
+# LANGS picks some languages, e.g. LANGS=pl for a new store listing without
+# re-shooting (and re-committing) every other one
+LANGS="${LANGS:-fa en zh de es pl}"
+for lang in $LANGS; do
   mkdir -p "$OUT/$lang"
   # the menu, then one game of each kind (cards, table physics, a neon arcade game,
   # board, puzzle, strategy): the first set showed only the four oldest games, and
@@ -96,6 +101,7 @@ for lang in fa en zh de es; do
 done
 
 copy_to() {
+  [ -d "$OUT/$2" ] || return 0
   dir="fastlane/metadata/android/$1/images/phoneScreenshots"
   mkdir -p "$dir"
   rm -f "$dir"/*.png
@@ -106,6 +112,7 @@ copy_to en-US en
 copy_to zh-CN zh
 copy_to de-DE de
 copy_to es-ES es
+copy_to pl-PL pl
 mkdir -p fastlane/metadata/android/en-US/images
 "$CHROME" --headless --disable-gpu --no-sandbox --hide-scrollbars --virtual-time-budget=5000 \
   --window-size=1024,500 --screenshot="fastlane/metadata/android/en-US/images/featureGraphic.png" \
