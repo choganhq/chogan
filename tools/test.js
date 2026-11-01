@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5854;
+const MIN_CHECKS = 5877;
 
 function ok(cond, msg) {
   checks++;
@@ -9920,7 +9920,7 @@ function testCueTurnControl() {
     ok(/else if \(prefs\.aim === 'turn'\) drag = \{ id: e\.pointerId, mode: 'turn'/.test(html) && /drag\.mode = prefs\.aim !== 'turn' && Cue\.pullsBack\(/.test(html),
       g + ': in turn mode a drag never becomes a pull-back shot, even from the white ball');
     // #505: the turn followed a fixed axis, so it ran backwards for some cue directions
-    ok(/aimA \+= Cue\.turnStep\(c\.x, c\.y, drag\.last\.x, drag\.last\.y, p\.x, p\.y, TURN_NEAR \/ G\.s\);\n      drag\.last = p;/.test(html) && /mode: 'turn', a0: aimA, last: p \}/.test(html) && !/TURN_RATE/.test(html),
+    ok(/aimA \+= Cue\.turnStep\(c\.x, c\.y, drag\.last\.x, drag\.last\.y, p\.x, p\.y, TURN_NEAR \/ G\.s\)( \* Cue\.TURN_SPEEDS\[prefs\.turn\])?;\n      drag\.last = p;/.test(html) && /mode: 'turn', a0: aimA, last: p \}/.test(html) && !/TURN_RATE/.test(html),
       g + ': each move of a turn drag turns the cue round the white ball, from where the last move left it');
     ok(LOCALE_CODES.every((l) => { const sec = html.slice(html.indexOf('      ' + l + ': {')); return /aimCtl: '[^']+', ctlPoint: '[^']+', ctlTurn: '[^']+', ctlNote: '[^']+'/.test(sec.slice(0, sec.indexOf('\n      }'))); }), g + ': the control is named in every language');
   }
@@ -9956,6 +9956,48 @@ function testCueFineAim() {
     handlers.pointerup();
     ok(tickFn === null, g + ': letting go stops the repeat');
     ok(/\[gear, powerBar, fineL, fineR\]\)/.test(html), g + ': the two fine-aim buttons sit side by side at the end of the row, the gear away from them');
+  }
+}
+
+// #587: a player found the Turn control too quick and asked for a sensitivity setting.
+// Runs each page's own showSettings with fake UI parts and reads the saved prefs back.
+function testCueTurnSpeed() {
+  head('Pool and Snooker: a turn speed setting behind the gear (#587)');
+  const Cue = require(path.join(ROOT, 'www/lib/cue.js')), TS = Cue.TURN_SPEEDS;
+  ok(!!TS && TS.normal === 1 && TS.medium === 0.5 && TS.slow === 0.25, 'cue.js offers slow (×0.25), medium (×0.5) and normal (×1, the old speed)');
+  for (const g of ['eightball', 'snooker']) {
+    const html = fs.readFileSync(path.join(ROOT, 'www/games', g, 'index.html'), 'utf8');
+    ok(/\(prefs\.aim !== 'turn'\) prefs\.aim = 'point';\n  if \(!Cue\.TURN_SPEEDS\[prefs\.turn\]\) prefs\.turn = 'normal';/.test(html), g + ': a missing or unknown saved speed reads as normal');
+    ok(/TURN_NEAR \/ G\.s\) \* Cue\.TURN_SPEEDS\[prefs\.turn\];/.test(html), g + ': a turn drag is multiplied by the chosen speed');
+    const a = html.indexOf('  function showSettings() {'), b = html.indexOf('\n  }\n', a);
+    ok(a > 0 && b > a, g + ': showSettings found in the page');
+    if (!(a > 0 && b > a)) continue;
+    const segs = [], saved = [];
+    let modal = null;
+    const sb = {
+      Cue, prefs: { aim: 'point', turn: 'normal' },
+      el: (tag, attrs, kids) => ({ tag, attrs, kids }),
+      C: { t: (k) => k, ui: { segmented: (items, value, cb) => { const s = { items, value, cb }; segs.push(s); return s; }, modal: (o) => { modal = o; } } },
+      ctx: { store: { set: (k, v) => saved.push([k, JSON.parse(JSON.stringify(v))]) } },
+    };
+    vm.createContext(sb);
+    vm.runInContext(html.slice(a, b + 4) + '\nshowSettings();', sb);
+    const speed = segs.find((s) => s.items.some((i) => i.value === 'slow')), aim = segs.find((s) => s.items.some((i) => i.value === 'turn'));
+    ok(!!speed && !!aim && !!modal, g + ': the gear shows the aiming choice and a speed choice');
+    if (!(speed && aim && modal)) continue;
+    ok(speed.items.map((i) => i.value).join() === 'slow,medium,normal' && speed.value === 'normal', g + ': the speed choice offers slow, medium, normal with the saved one selected');
+    const row = modal.body[0].kids.find((k) => k.kids && k.kids.includes(speed));
+    ok(!!row && row.hidden === true, g + ': with Point chosen the speed row is hidden, as it only changes Turn');
+    aim.cb('turn');
+    ok(!!row && row.hidden === false && sb.prefs.aim === 'turn', g + ': choosing Turn shows the speed row');
+    speed.cb('slow');
+    const last = saved[saved.length - 1];
+    ok(!!last && last[0] === 'prefs' && last[1].turn === 'slow' && last[1].aim === 'turn', g + ': choosing slow is saved with the game prefs');
+    speed.cb('bogus');
+    ok(sb.prefs.turn === 'normal', g + ': an unknown value saves as normal');
+    aim.cb('point');
+    ok(row.hidden === true, g + ': going back to Point hides it again');
+    ok(LOCALE_CODES.every((l) => { const sec = html.slice(html.indexOf('      ' + l + ': {')); return /turnSpd: '[^']+', turnSlow: '[^']+', turnMed: '[^']+', turnNormal: '[^']+'/.test(sec.slice(0, sec.indexOf('\n      }'))); }), g + ': the setting is named in every language');
   }
 }
 

@@ -322,10 +322,14 @@
   // while held, never faster (#586)
   var FINE_STEP = 0.002;
 
+  // the Turn control's drag is multiplied by one of these, chosen behind the gear; normal
+  // is the speed it always had (#587)
+  var TURN_SPEEDS = { slow: 0.25, medium: 0.5, normal: 1 };
+
   var api = {
     DT: DT, MAX_TICKS: MAX_TICKS, table: table, clone: clone, speedOf: speedOf,
     start: start, tick: tick, simulate: simulate, aim: aim, free: free, clear: clear, nearestPocket: nearestPocket,
-    pullsBack: pullsBack, onStick: onStick, turnStep: turnStep, barPower: barPower, SINK_MS: SINK_MS, sinksOf: sinksOf, sinkAt: sinkAt, FINE_STEP: FINE_STEP
+    pullsBack: pullsBack, onStick: onStick, turnStep: turnStep, barPower: barPower, SINK_MS: SINK_MS, sinksOf: sinksOf, sinkAt: sinkAt, FINE_STEP: FINE_STEP, TURN_SPEEDS: TURN_SPEEDS
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.ChoganCue = api;
