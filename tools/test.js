@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5843;
+const MIN_CHECKS = 5854;
 
 function ok(cond, msg) {
   checks++;
@@ -9923,6 +9923,39 @@ function testCueTurnControl() {
     ok(/aimA \+= Cue\.turnStep\(c\.x, c\.y, drag\.last\.x, drag\.last\.y, p\.x, p\.y, TURN_NEAR \/ G\.s\);\n      drag\.last = p;/.test(html) && /mode: 'turn', a0: aimA, last: p \}/.test(html) && !/TURN_RATE/.test(html),
       g + ': each move of a turn drag turns the cue round the white ball, from where the last move left it');
     ok(LOCALE_CODES.every((l) => { const sec = html.slice(html.indexOf('      ' + l + ': {')); return /aimCtl: '[^']+', ctlPoint: '[^']+', ctlTurn: '[^']+', ctlNote: '[^']+'/.test(sec.slice(0, sec.indexOf('\n      }'))); }), g + ': the control is named in every language');
+  }
+}
+
+// #586: holding a fine-aim button sped up fourfold after a second, which defeats a
+// control meant to be slow, and the two buttons sat at the far ends of the power bar,
+// out of one thumb's reach. Runs each page's own holdTurn with a fake button and timer.
+function testCueFineAim() {
+  head('Pool and Snooker: the fine-aim buttons keep one slow step and sit together (#586)');
+  const Cue = require(path.join(ROOT, 'www/lib/cue.js'));
+  ok(typeof Cue.FINE_STEP === 'number' && Cue.FINE_STEP > 0 && Cue.FINE_STEP <= 0.003, 'cue.js names one small fine step (' + Cue.FINE_STEP + ' rad)');
+  for (const g of ['eightball', 'snooker']) {
+    const html = fs.readFileSync(path.join(ROOT, 'www/games', g, 'index.html'), 'utf8');
+    const a = html.indexOf('  function holdTurn(btn, sign) {'), b = html.indexOf('\n  }\n', a);
+    ok(a > 0 && b > a, g + ': holdTurn found in the page');
+    if (!(a > 0 && b > a)) continue;
+    let tickFn = null;
+    const handlers = {};
+    const btn = { addEventListener: (t, f) => { handlers[t] = f; } };
+    const sb = { Cue, aimA: 0, draws: 0, draw() { sb.draws++; }, humanTurn: () => true,
+      setInterval: (f) => { tickFn = f; return 1; }, clearInterval: () => { tickFn = null; } };
+    vm.createContext(sb);
+    vm.runInContext(html.slice(a, b + 4) + '\nholdTurn(btn, 1);', Object.assign(sb, { btn }));
+    ok(typeof handlers.pointerdown === 'function', g + ': the button listens for a press');
+    if (typeof handlers.pointerdown !== 'function') continue;
+    handlers.pointerdown({ preventDefault() {} });
+    const steps = [sb.aimA];
+    for (let i = 0; i < 60 && tickFn; i++) { const before = sb.aimA; tickFn(); steps.push(sb.aimA - before); }
+    const ticks = steps.length - 1;
+    const worst = Math.max(...steps.map((s) => Math.abs(s - Cue.FINE_STEP)));
+    ok(ticks === 60 && worst < 1e-12, g + ': a press and 60 repeats (3.6 s held) each turn the cue by exactly the fine step (' + ticks + ' repeats, worst off by ' + worst.toExponential(1) + ')');
+    handlers.pointerup();
+    ok(tickFn === null, g + ': letting go stops the repeat');
+    ok(/\[gear, powerBar, fineL, fineR\]\)/.test(html), g + ': the two fine-aim buttons sit side by side at the end of the row, the gear away from them');
   }
 }
 
