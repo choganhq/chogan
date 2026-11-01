@@ -2,7 +2,7 @@
 
 <!-- impeccable:product-schema 1 -->
 
-This record was written on 2026-11-01 without an interview, while the owner was away. Facts taken from the repository or from decisions the owner has already recorded are stated plainly. Anything the agent inferred is marked *(inferred, owner to confirm)*.
+This record was written on 2026-11-01 from the repository and the owner's recorded decisions, and confirmed by the owner the same day.
 
 ## Platform
 
@@ -15,7 +15,7 @@ One `www/` folder ships as a PWA on GitHub Pages and, wrapped in Capacitor, as t
 - Players on a phone who want a short game they can finish in 5 to 15 minutes, offline, with no ads and no tracking. Touch comes first and the keyboard second.
 - Persian speakers first: Persian is the first UI language, and English the second. Chinese, German, Spanish and Polish are also supported. Persian means right-to-left layout.
 - Friends and family playing together on one phone: many games offer two players (or up to four) on the same device. The menu can filter games for this.
-- Open-source and F-Droid users who choose apps for privacy and reproducible builds *(inferred, owner to confirm)*.
+- Open-source and F-Droid users who choose apps for privacy and reproducible builds.
 
 ## Product Purpose
 
@@ -52,7 +52,7 @@ Chogan is one free, open-source app that holds a growing catalogue of small 2D g
 - Game names are the owner's call. For example, «فری‌سل» stays as it is.
 - All art is our own, drawn in code: card faces, card backs (carpet and termeh), jigsaw pictures, and Mahjong flower and season tiles. No stock, third-party or AI-generated art.
 - Each game has its own accent colour, and text on it must reach 4.5:1 contrast in light and dark themes (`Chogan.inkOn`, `--game-text-dark`).
-- Tone: warm and plain *(inferred, owner to confirm)*.
+- Tone: warm and plain.
 
 ## Evidence on Hand
 
