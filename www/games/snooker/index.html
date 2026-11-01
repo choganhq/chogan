@@ -615,7 +615,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SnookerEng
   var fineR = el('button', { class: 'ch-iconbtn sn-fine', type: 'button', 'aria-label': C.t('fineRight') }, [el('span', { class: 'sn-fine__g', text: '↻' })]);
   var gear = el('button', { class: 'ch-iconbtn sn-fine', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
   gear.addEventListener('click', showSettings);
-  var controls = el('div', { class: 'sn-controls' }, [fineL, powerBar, fineR, gear]);
+  var controls = el('div', { class: 'sn-controls' }, [gear, powerBar, fineL, fineR]);
   var wrap = el('div', { class: 'sn-wrap' }, [playersRow, msgEl, tableBox, controls]);
 
   ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
@@ -1227,17 +1227,18 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SnookerEng
   powerBar.addEventListener('pointerup', endPower);
   powerBar.addEventListener('pointercancel', endPower);
 
-  // Fine turn buttons, repeating while held, for the last fraction of a degree
+  // Fine turn buttons, repeating while held, for the last fraction of a degree. The
+  // repeat used to speed up fourfold after a second, which a player found defeated the
+  // point of a fine control (#586): it now keeps the same small step for as long as held.
   function holdTurn(btn, sign) {
     var timer = null;
     var stop = function () { if (timer) { clearInterval(timer); timer = null; } };
     btn.addEventListener('pointerdown', function (e) {
       if (!humanTurn()) return;
       e.preventDefault();
-      aimA += sign * 0.002; draw();
+      aimA += sign * Cue.FINE_STEP; draw();
       stop();
-      var n = 0;
-      timer = setInterval(function () { if (!humanTurn()) { stop(); return; } n++; aimA += sign * (n > 15 ? 0.008 : 0.002); draw(); }, 60);
+      timer = setInterval(function () { if (!humanTurn()) { stop(); return; } aimA += sign * Cue.FINE_STEP; draw(); }, 60);
     });
     ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (t) { btn.addEventListener(t, stop); });
   }

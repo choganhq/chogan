@@ -318,10 +318,14 @@
     return { x: p.x + (pk.x - p.x) * e, y: p.y + (pk.y - p.y) * e, k: 1 - 0.85 * e, a: 1 - e };
   }
 
+  // the fine-aim buttons turn the cue by this many radians a tap, and again every 60 ms
+  // while held, never faster (#586)
+  var FINE_STEP = 0.002;
+
   var api = {
     DT: DT, MAX_TICKS: MAX_TICKS, table: table, clone: clone, speedOf: speedOf,
     start: start, tick: tick, simulate: simulate, aim: aim, free: free, clear: clear, nearestPocket: nearestPocket,
-    pullsBack: pullsBack, onStick: onStick, turnStep: turnStep, barPower: barPower, SINK_MS: SINK_MS, sinksOf: sinksOf, sinkAt: sinkAt
+    pullsBack: pullsBack, onStick: onStick, turnStep: turnStep, barPower: barPower, SINK_MS: SINK_MS, sinksOf: sinksOf, sinkAt: sinkAt, FINE_STEP: FINE_STEP
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.ChoganCue = api;
