@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5830;
+const MIN_CHECKS = 5843;
 
 function ok(cond, msg) {
   checks++;
@@ -6099,7 +6099,7 @@ function testStoreGames() {
   head('Store text lists every game');
   const games = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games;
   ok(games.length > 0, 'games.json lists games');
-  for (const [lang, key] of [['en-US', 'en'], ['fa', 'fa'], ['zh-CN', 'zh'], ['de-DE', 'de'], ['es-ES', 'es']]) {
+  for (const [lang, key] of [['en-US', 'en'], ['fa', 'fa'], ['zh-CN', 'zh'], ['de-DE', 'de'], ['es-ES', 'es'], ['pl-PL', 'pl']]) {
     const text = fs.readFileSync(path.join(ROOT, 'fastlane/metadata/android', lang, 'full_description.txt'), 'utf8');
     const miss = games.filter((g) => text.indexOf('* ' + g.name[key].replace(/\u00ad/g, '') + ' ') < 0).map((g) => g.id);
     ok(!miss.length, lang + ': every game has a line in the store description' + (miss.length ? ' (missing: ' + miss.join(', ') + ')' : ''));
