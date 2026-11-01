@@ -2758,7 +2758,17 @@
     var h = el('h2', { class: 'ch-center' });
     var p = el('p', { class: 'ch-dim ch-center' });
     var dots = el('div', { class: 'ch-tut__dots' });
-    var nextBtn = null;   // بعد از ساخته شدن پنجره از دکمه‌های خودش گرفته می‌شود
+    var nextBtn = null, leftBtn = null;   // بعد از ساخته شدن پنجره از دکمه‌های خودش گرفته می‌شود
+    function done() { m.close(); if (onDone) onDone(); }
+    // The cards only went forward, so a player who tapped Next too soon could not
+    // read the last card again (#598): past the first card the left button goes
+    // back, and a swipe turns the card either way.
+    function go(d) {
+      var k = i + d;
+      if (k < 0) return;
+      if (k >= pages.length) { done(); return; }
+      i = k; render();
+    }
     function render() {
       var pg = pages[i];
       art.innerHTML = pg.art || '';
@@ -2769,19 +2779,32 @@
         dots.appendChild(el('div', { class: 'ch-tut__dot' + (j === i ? ' ch-tut__dot--on' : '') }));
       }
       if (nextBtn) nextBtn.textContent = (i === pages.length - 1) ? Chogan.t('gotIt') : Chogan.t('next');
+      if (leftBtn) leftBtn.textContent = i > 0 ? Chogan.t('back') : Chogan.t('skip');
     }
+    var card = el('div', { class: 'ch-tut' }, [art, h, p, dots]);
+    // a sideways swipe on the card: towards the start of the line goes on, as a
+    // page turns, so in a right-to-left language a swipe to the right goes on
+    var sw = null;
+    card.addEventListener('pointerdown', function (e) { sw = { x: e.clientX, y: e.clientY }; });
+    card.addEventListener('pointerup', function (e) {
+      if (!sw) return;
+      var dx = e.clientX - sw.x, dy = e.clientY - sw.y;
+      sw = null;
+      if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+      var on = Chogan.isRtl() ? dx > 0 : dx < 0;
+      if (on) { if (i < pages.length - 1) go(1); } else go(-1);
+    });
+    card.addEventListener('pointercancel', function () { sw = null; });
     var m = ui.modal({
-      body: [el('div', { class: 'ch-tut' }, [art, h, p, dots])],
+      body: [card],
       actions: [
-        { label: Chogan.t('skip'), keepOpen: true, onClick: function () { m.close(); if (onDone) onDone(); } },
-        { label: Chogan.t('next'), kind: 'primary', keepOpen: true, onClick: function () {
-          if (i < pages.length - 1) { i++; render(); }
-          else { m.close(); if (onDone) onDone(); }
-        } }
+        { label: Chogan.t('skip'), keepOpen: true, onClick: function () { if (i > 0) go(-1); else done(); } },
+        { label: Chogan.t('next'), kind: 'primary', keepOpen: true, onClick: function () { go(1); } }
       ],
       dismissable: false
     });
-    nextBtn = m.box.querySelectorAll('.ch-modal__actions .ch-btn')[1];
+    var btns = m.box.querySelectorAll('.ch-modal__actions .ch-btn');
+    leftBtn = btns[0]; nextBtn = btns[1];
     render();
     return m;
   };

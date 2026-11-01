@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5884;
+const MIN_CHECKS = 5908;
 
 function ok(cond, msg) {
   checks++;
@@ -7201,6 +7201,58 @@ function testFitScreen() {
     ok(/cqw/.test(cw) && /cqh/.test(cw) && top >= 100, id + ': cards size by the game area\'s width and height, up to ' + top + 'px (' + cw + ')');
     ok(new RegExp('\\.' + cls + ' \\{[^}]*max-width: max\\(560px, calc\\(var\\(--cw\\) \\* [\\d.]+\\)\\)').test(h), id + ': the table widens with the cards');
   }
+}
+
+// #598: the how-to-play cards only went forward; a player who tapped Next too soon
+// could not read a card again. Runs the core's own ui.tutorial with fake DOM parts.
+function testTutorialBack() {
+  head('Core: the how-to-play cards go back as well as forward (#598)');
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  const a = core.indexOf('  ui.tutorial = function (pages, onDone) {'), b = core.indexOf('\n  };\n', a);
+  ok(a > 0 && b > a, 'ui.tutorial found in the core');
+  if (!(a > 0 && b > a)) return;
+  const make = () => { const n = { textContent: '', innerHTML: '', kids: [], on: {}, appendChild(k) { n.kids.push(k); }, addEventListener(t, f) { n.on[t] = f; } }; return n; };
+  for (const rtl of [false, true]) {
+    let actions = null, closed = 0, doneN = 0, card = null;
+    const btns = [make(), make()];
+    const sb = {
+      ui: { modal: (o) => { actions = o.actions; card = o.body[0]; return { close: () => { closed++; }, box: { querySelectorAll: () => btns } }; } },
+      el: (tag, attrs, kids) => { const n = make(); n.cls = attrs && attrs.class; (kids || []).forEach((k) => n.kids.push(k)); return n; },
+      Chogan: { t: (k) => k, isRtl: () => rtl },
+    };
+    vm.createContext(sb);
+    vm.runInContext(core.slice(a, b + 5), sb);
+    const pages = [{ title: 'one', text: '1' }, { title: 'two', text: '2' }, { title: 'three', text: '3' }];
+    sb.ui.tutorial(pages, () => { doneN++; });
+    const title = () => card.kids[1].textContent;
+    const left = actions[0], next = actions[1];
+    const where = rtl ? 'right-to-left' : 'left-to-right';
+    ok(title() === 'one' && btns[0].textContent === 'skip' && btns[1].textContent === 'next', where + ': the first card offers Skip and Next');
+    next.onClick(); next.onClick();
+    ok(title() === 'three' && btns[0].textContent === 'back' && btns[1].textContent === 'gotIt', where + ': on the last card the left button reads Back (' + btns[0].textContent + ')');
+    left.onClick();
+    ok(title() === 'two' && closed === 0 && doneN === 0, where + ': Back shows the card before and keeps the cards open');
+    left.onClick();
+    ok(title() === 'one' && btns[0].textContent === 'skip', where + ': back on the first card the left button is Skip again');
+    const swipe = (dx, dy) => { card.on.pointerdown({ clientX: 200, clientY: 300 }); card.on.pointerup({ clientX: 200 + dx, clientY: 300 + (dy || 0) }); };
+    const onward = rtl ? 120 : -120;
+    ok(typeof card.on.pointerdown === 'function' && typeof card.on.pointerup === 'function', where + ': the card listens for swipes');
+    if (typeof card.on.pointerup !== 'function') continue;
+    swipe(onward);
+    ok(title() === 'two', where + ': a swipe ' + (rtl ? 'to the right' : 'to the left') + ' goes on');
+    swipe(-onward);
+    ok(title() === 'one', where + ': the opposite swipe goes back');
+    swipe(-onward);
+    ok(title() === 'one' && closed === 0, where + ': swiping back on the first card does nothing');
+    swipe(onward * 0.2); swipe(onward, 300);
+    ok(title() === 'one', where + ': a short or mostly vertical move is not a swipe');
+    swipe(onward); swipe(onward); swipe(onward);
+    ok(title() === 'three' && closed === 0, where + ': swiping on past the last card does not close it');
+    next.onClick();
+    ok(closed === 1 && doneN === 1, where + ': Got it on the last card closes the cards and marks them seen');
+  }
+  const css = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8');
+  ok(/\.ch-tut \{[^}]*touch-action: pan-y/.test(css), 'the card leaves sideways moves to the page (touch-action: pan-y), so a phone does not cancel the swipe');
 }
 
 function testCoreLabels() {
