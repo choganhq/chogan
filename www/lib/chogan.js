@@ -2851,6 +2851,55 @@
     return run;
   };
 
+  // Android WebViews older than Chrome 105 have no container queries (#610): every size
+  // the layout gives in cq units is dropped there, so a board built of cells (Chess) had
+  // no width and vanished, and the board-beside-the-rows layout never came. Without them
+  // the same sizes are set here in pixels, from the boxes as they are measured.
+  ui.hasContainerQueries = function () {
+    return !!(window.CSS && CSS.supports && CSS.supports('width', '1cqw'));
+  };
+  ui.fitFallback = function (main) {
+    if (ui.hasContainerQueries() || !main) return null;
+    document.documentElement.classList.add('ch-nocq');
+    var busy = false;
+    function px(n) { return Math.max(0, Math.floor(n)) + 'px'; }
+    function run() {
+      if (busy || !main.isConnected) return;
+      busy = true;
+      var cs = getComputedStyle(main);
+      var W = main.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      var H = main.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+      var wide = W >= H * 1.25;                              // the @container game (min-aspect-ratio: 5 / 4) of chogan.css
+      main.classList.toggle('ch-wide', wide);
+      Array.prototype.forEach.call(main.querySelectorAll('.ch-fit'), function (fit) {
+        var ar = parseFloat(getComputedStyle(fit).getPropertyValue('--fit-ar')) || 1;
+        var split = fit.parentNode && fit.parentNode.classList.contains('ch-split') ? fit.parentNode : null;
+        var side = split && split.querySelector(':scope > .ch-side');
+        if (split && wide) {
+          var gap = parseFloat(getComputedStyle(split).columnGap) || 12;
+          var sideW = Math.max(240, Math.min(380, W * 0.28));
+          if (side) side.style.width = px(sideW);
+          fit.style.maxHeight = 'none';
+          fit.style.width = px(Math.min(H * ar, W - sideW - gap));
+        } else {
+          if (side) side.style.width = '';
+          fit.style.width = '';
+          fit.style.maxHeight = px(fit.clientWidth / ar);
+        }
+        var kid = fit.firstElementChild;
+        if (kid) kid.style.width = px(Math.min(fit.clientWidth, fit.clientHeight * ar));
+      });
+      busy = false;
+    }
+    if (window.ResizeObserver) {
+      var ro = new ResizeObserver(function () { run(); });
+      ro.observe(main);
+      Array.prototype.forEach.call(main.querySelectorAll('.ch-fit'), function (f) { ro.observe(f); });
+    } else window.addEventListener('resize', run);
+    run();
+    return run;
+  };
+
   Chogan.ui = ui;
 
   /* ================================================ ناوبری و چرخه‌ی عمر */
@@ -2976,6 +3025,7 @@
         document.body.className = 'ch-noscroll';
         document.body.appendChild(root);
         Chogan.setAccent(cfg.accent, cfg.accentSoft);
+        ui.fitFallback(main);
         return ctx;
       },
 

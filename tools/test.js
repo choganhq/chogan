@@ -10822,6 +10822,30 @@ function testCorridor() {
   ok(Date.now() - t0 < 12000, 'the Corridor tests finish in under 12 s (' + (Date.now() - t0) + ' ms)');
 }
 
+// #610: on Android WebViews before Chrome 105 there are no container queries, and the
+// chess board, sized only in cq units, did not appear at all
+function testNoContainerQueries() {
+  head('Boards without container queries (#610)');
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  const css = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8');
+  const chess = fs.readFileSync(path.join(ROOT, 'www/games/chess/index.html'), 'utf8');
+  ok(/ui\.hasContainerQueries = function \(\) \{\s*return !!\(window\.CSS && CSS\.supports && CSS\.supports\('width', '1cqw'\)\);/.test(core),
+    'the core asks the engine whether it has container queries');
+  ok(/ui\.fitFallback = function \(main\) \{\s*if \(ui\.hasContainerQueries\(\) \|\| !main\) return null;/.test(core) && /Chogan\.setAccent\(cfg\.accent, cfg\.accentSoft\);\s*ui\.fitFallback\(main\);/.test(core),
+    'every game page runs the fallback when it mounts, and it does nothing where container queries work');
+  ok(/kid\.style\.width = px\(Math\.min\(fit\.clientWidth, fit\.clientHeight \* ar\)\)/.test(core) && /var wide = W >= H \* 1\.25;/.test(core),
+    'the fallback gives the board the same size as .ch-fit > * (min of width and height × aspect) and the same 5:4 switch to the wide layout');
+  ok(/\.ch-nocq \.ch-gamemain\.ch-wide \.ch-split \{ flex-direction: row; \}/.test(css) && /\.ch-nocq \.ch-gamemain\.ch-wide \.ch-split > \.ch-side \{/.test(css),
+    'the wide layout has a copy for pages without container queries');
+  // every cq-unit size in the core layout must have its pixel counterpart in the fallback
+  const bare = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const cqRules = (bare.match(/[^{}]*\{[^{}]*\dcq[wh]\b[^{}]*\}/g) || []).map((r) => r.trim().split('{')[0].trim());
+  ok(cqRules.length >= 3 && cqRules.every((sel) => ['.ch-fit', '.ch-fit > *', '.ch-split', '.ch-split > .ch-fit'].includes(sel)),
+    'only the board slot, the board and the split layout use cq units in chogan.css, which the fallback covers (' + cqRules.join(' | ') + ')');
+  ok(/\.cs-top \.ch-seg \{ max-width: 100%; \}/.test(chess) && /\.cs-top \.ch-seg button \{ min-width: 0; padding-inline: 10px; white-space: normal;/.test(chess),
+    'the chess mode switch fits the side column of a phone turned sideways');
+}
+
 // #605: Cqoicebordel asked for Gymkhana (Bridg-It); built as Link Up with our own name and look
 function testLinkUp() {
   head('Link Up (#605)');
