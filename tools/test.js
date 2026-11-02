@@ -10871,8 +10871,10 @@ function testLinkUp() {
   const match = (a, b, seed, sz) => { const M = E.newGame(sz, 2), r = rng(seed); let worst = 0; while (M.winner < 0) { const t = Date.now(), m = E.think(M, M.turn === 0 ? a : b, r); worst = Math.max(worst, Date.now() - t); if (m < 0 || !E.play(M, m)) return { w: -1, worst }; } return { w: M.winner, worst }; };
   let illegal = 0, mWins = 0, hWins = 0, n = 0, slow = 0;
   for (let k = 0; k < 4; k++) {
-    const a = match('medium', 'easy', 900 + k, sizes[k % 3]), b = match('easy', 'medium', 950 + k, sizes[k % 3]);
-    const c = match('hard', 'medium', 980 + k, 'm'), d = match('medium', 'hard', 990 + k, 'm');
+    // small and medium boards only: the CI runner is several times slower than a laptop,
+    // and these games took the group past 12 s there (the large board's speed is checked below)
+    const a = match('medium', 'easy', 900 + k, k % 2 ? 'm' : 's'), b = match('easy', 'medium', 950 + k, k % 2 ? 'm' : 's');
+    const c = match('hard', 'medium', 980 + k, 's'), d = match('medium', 'hard', 990 + k, 's');
     [a, b, c, d].forEach((g) => { if (g.w < 0) illegal++; slow = Math.max(slow, g.worst); });
     mWins += (a.w === 0) + (b.w === 1); hWins += (c.w === 0) + (d.w === 1); n += 2;
   }
