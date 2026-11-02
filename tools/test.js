@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 5908;
+const MIN_CHECKS = 5910;
 
 function ok(cond, msg) {
   checks++;
@@ -10643,12 +10643,16 @@ function testHop() {
   SP.vy = -1; let topS = 0;
   for (let i = 0; i < 300; i++) { E.step(SP, 0); topS = Math.max(topS, SP.y); }
   ok(Math.abs(topS / top - 2.56) < 0.12, 'a spring sends it about 2.6 times as high (' + (topS / top).toFixed(2) + ')');
-  // A crumbling platform breaks under you and does not bounce
+  // A brown platform carries one jump, then breaks; the next fall goes through it (#597)
   const CR = bare([{ x: 180, y: 0, w: 64, kind: 'crumble', vx: 0 }]);
   CR.y = 30; CR.vy = 0;
   let ev = [];
   for (let i = 0; i < 40; i++) ev = ev.concat(E.step(CR, 0));
-  ok(ev.includes('crumble') && !ev.includes('jump') && CR.plats[0].broken && CR.y < 0, 'a crumbling platform breaks under the player, who falls on through');
+  ok(ev.filter((e) => e === 'jump').length === 1 && ev.includes('crumble') && CR.plats[0].broken && CR.vy > 0, 'a brown platform gives one jump and breaks (' + ev.join(',') + ')');
+  ok(CR.floorPlat === null, 'a broken brown platform is not kept as the floor to aim back at');
+  ev = [];
+  for (let i = 0; i < 400 && !CR.over; i++) ev = ev.concat(E.step(CR, 0));
+  ok(!ev.includes('jump') && CR.y < 0, 'falling back onto the broken platform goes straight through (' + Math.round(CR.y) + ')');
   // Jumps go up through platforms; only a fall lands
   const UP = bare([{ x: 180, y: 0, w: 360, kind: 'normal', vx: 0 }, { x: 180, y: 60, w: 64, kind: 'normal', vx: 0 }]);
   UP.vy = 820; ev = [];
