@@ -10046,6 +10046,23 @@ function testCueFineAim() {
 
 // #587: a player found the Turn control too quick and asked for a sensitivity setting.
 // Runs each page's own showSettings with fake UI parts and reads the saved prefs back.
+/* A new player's default aim (#590) */
+function testCueAimDefault() {
+  head('Pool and Snooker: a new player starts on the turn aim (#590)');
+  for (const g of ['eightball', 'snooker']) {
+    const html = fs.readFileSync(path.join(ROOT, 'www/games', g, 'index.html'), 'utf8');
+    const get = html.match(/var prefs = ctx\.store\.get\('prefs', (\{[^\n]*\})\);/);
+    const norm = html.match(/\n(\s*if \(prefs\.aim !== 'turn'\) prefs\.aim = 'point';)/);
+    ok(!!get && !!norm, g + ': the prefs default and its check are found');
+    if (!get || !norm) continue;
+    // the store returns the saved object as it is, or the default when nothing is saved
+    const aimFor = (saved) => new Function('saved', 'var prefs = saved === undefined ? ' + get[1] + ' : saved;' + norm[1] + ' return prefs.aim;')(saved);
+    ok(aimFor(undefined) === 'turn', g + ': with nothing saved the aim is turn (' + aimFor(undefined) + ')');
+    ok(aimFor({ mode: 'ai', aim: 'point' }) === 'point', g + ': a saved point choice stays point');
+    ok(aimFor({ mode: 'ai' }) === 'point', g + ': a save from before the setting existed stays point');
+  }
+}
+
 function testCueTurnSpeed() {
   head('Pool and Snooker: a turn speed setting behind the gear (#587)');
   const Cue = require(path.join(ROOT, 'www/lib/cue.js')), TS = Cue.TURN_SPEEDS;
