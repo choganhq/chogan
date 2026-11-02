@@ -1,0 +1,742 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>پل‌بند — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* The board is the game's own, the same in both themes: a paper board, orange and
+     blue dots, and the links drawn in the colour of their team */
+  :root { --lu-board: #F4EDE0; --lu-edge: #E6DCC9; --lu-o: #D9542B; --lu-o-lt: #F2B79F; --lu-b: #2563A8; --lu-b-lt: #A9C4E4; --lu-ink: #5A4E40; }
+  .lu-wrap > .ch-fit { --fit-ar: 1; }
+  .ch-fit > .lu-box { width: 100%; height: 100%; display: grid; place-items: center; }
+  .lu-canvas { display: block; touch-action: manipulation; cursor: pointer; border-radius: var(--r-md); box-shadow: var(--sh-2); }
+  .lu-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .lu-teams { width: 100%; max-width: 520px; display: flex; gap: var(--s-2); }
+  .lu-team { flex: 1; display: flex; align-items: center; gap: var(--s-2); min-width: 0; background: var(--c-surface);
+    border-radius: var(--r-md); padding: 8px 12px; box-shadow: var(--sh-1); border: 2px solid transparent; min-height: 44px;
+    transition: border-color var(--t-mid) var(--ease), transform var(--t-mid) var(--ease); }
+  .lu-team--on { border-color: var(--game); transform: translateY(-2px); box-shadow: var(--sh-2); }
+  .lu-team__dot { width: 18px; height: 18px; border-radius: 50%; flex: 0 0 18px; }
+  /* the name and its goal stack, so four players' names fit on a phone */
+  .lu-team__text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .lu-team__name { min-width: 0; font-weight: 700; font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lu-team__goal { font-size: var(--fs-xs); color: var(--c-text-dim); font-weight: 700; }
+  .lu-thinking { animation: lu-blink 900ms infinite; }
+  @keyframes lu-blink { 50% { opacity: .55; } }
+  .lu-status { min-height: 2.9em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function LinkUpEngineFactory() {
+  'use strict';
+
+  // A board of n is a grid of (2n+1)×(2n+1) points, index r * M + c with M = 2n+1.
+  // Orange (team 0) owns the dots on even rows and odd columns and links the top row
+  // to the bottom row; blue (team 1) owns odd rows and even columns and links left to
+  // right. Every inner point with r + c even is one crossing: a link there joins two
+  // orange dots one way or two blue dots the other, so whoever takes it shuts the
+  // other team out of it for good. The board can never fill up without a winner.
+  var SIZES = { s: 4, m: 5, l: 6 };
+  var LEVELS = ['easy', 'medium', 'hard'];
+  var geoCache = {};
+
+  function geom(n) {
+    if (geoCache[n]) return geoCache[n];
+    var M = 2 * n + 1, cells = [], at = {};
+    for (var r = 1; r < M - 1; r++) for (var c = 1; c < M - 1; c++) if ((r + c) % 2 === 0) { at[r * M + c] = cells.length; cells.push([r, c]); }
+    // the two dots each team's link at a crossing would join
+    var ends = [[], []];
+    cells.forEach(function (p) {
+      var r = p[0], c = p[1];
+      if (r % 2 === 0) { ends[0].push([r * M + c - 1, r * M + c + 1]); ends[1].push([(r - 1) * M + c, (r + 1) * M + c]); }
+      else { ends[0].push([(r - 1) * M + c, (r + 1) * M + c]); ends[1].push([r * M + c - 1, r * M + c + 1]); }
+    });
+    var dots = [[], []];
+    for (var r2 = 0; r2 < M; r2++) for (var c2 = 0; c2 < M; c2++) {
+      if (r2 % 2 === 0 && c2 % 2 === 1) dots[0].push(r2 * M + c2);
+      if (r2 % 2 === 1 && c2 % 2 === 0) dots[1].push(r2 * M + c2);
+    }
+    // where a team starts and where it must get to
+    var side = function (t, i, far) { var r3 = Math.floor(i / M), c3 = i % M, v = t === 0 ? r3 : c3; return far ? v === M - 1 : v === 0; };
+    var starts = [dots[0].filter(function (i) { return side(0, i, false); }), dots[1].filter(function (i) { return side(1, i, false); })];
+    var goals = [dots[0].filter(function (i) { return side(0, i, true); }), dots[1].filter(function (i) { return side(1, i, true); })];
+    // the crossings around each dot, for walking the board
+    var around = {};
+    [0, 1].forEach(function (t) {
+      ends[t].forEach(function (e, k) {
+        (around[t + ':' + e[0]] = around[t + ':' + e[0]] || []).push([k, e[1]]);
+        (around[t + ':' + e[1]] = around[t + ':' + e[1]] || []).push([k, e[0]]);
+      });
+    });
+    return (geoCache[n] = { n: n, M: M, cells: cells, at: at, ends: ends, dots: dots, starts: starts, goals: goals, around: around });
+  }
+
+  function team(seat) { return seat % 2; }
+
+  function newGame(size, seats) {
+    var n = SIZES[size] || SIZES.m, Q = geom(n);
+    var own = [];
+    for (var i = 0; i < Q.cells.length; i++) own.push(-1);
+    return { size: SIZES[size] ? size : 'm', n: n, seats: seats === 4 ? 4 : 2, own: own, turn: 0, winner: -1, plies: 0, last: -1 };
+  }
+  function clone(S) {
+    return { size: S.size, n: S.n, seats: S.seats, own: S.own.slice(), turn: S.turn, winner: S.winner, plies: S.plies, last: S.last };
+  }
+
+  // The team's crossings that join its start side to its goal side, or null
+  function chain(S, t) {
+    var Q = geom(S.n), prev = {}, q = Q.starts[t].slice(), seen = {};
+    q.forEach(function (d) { seen[d] = 1; prev[d] = -1; });
+    for (var h = 0; h < q.length; h++) {
+      var d = q[h];
+      if (Q.goals[t].indexOf(d) >= 0) {
+        var out = [];
+        while (prev[d] !== -1) { out.push(prev[d][0]); d = prev[d][1]; }
+        return out;
+      }
+      var nb = Q.around[t + ':' + d] || [];
+      for (var k = 0; k < nb.length; k++) {
+        var cell = nb[k][0], to = nb[k][1];
+        if (S.own[cell] !== t || seen[to]) continue;
+        seen[to] = 1; prev[to] = [cell, d]; q.push(to);
+      }
+    }
+    return null;
+  }
+
+  // Links the team still needs at the least: its own crossings cost nothing, free ones
+  // one each, the other team's are closed
+  function need(S, t) {
+    var Q = geom(S.n), dist = {}, dq = [];
+    Q.starts[t].forEach(function (d) { dist[d] = 0; dq.push(d); });
+    while (dq.length) {
+      var d = dq.shift(), nb = Q.around[t + ':' + d] || [];
+      for (var k = 0; k < nb.length; k++) {
+        var cell = nb[k][0], to = nb[k][1], o = S.own[cell];
+        if (o === 1 - t) continue;
+        var w = o === t ? 0 : 1, nd = dist[d] + w;
+        if (dist[to] === undefined || nd < dist[to]) { dist[to] = nd; if (w === 0) dq.unshift(to); else dq.push(to); }
+      }
+    }
+    var best = Infinity;
+    Q.goals[t].forEach(function (g) { if (dist[g] !== undefined && dist[g] < best) best = dist[g]; });
+    return best;
+  }
+
+  function legal(S, cell) { return S.winner < 0 && cell >= 0 && cell < S.own.length && S.own[cell] === -1; }
+
+  // Lays the seat's link on a free crossing in place; returns false and changes nothing otherwise
+  function play(S, cell) {
+    if (!legal(S, cell)) return false;
+    var t = team(S.turn);
+    S.own[cell] = t;
+    S.last = cell;
+    S.plies++;
+    if (chain(S, t)) S.winner = t;
+    S.turn = (S.turn + 1) % S.seats;
+    return true;
+  }
+
+  /* --------------------------------------------------------------- bot */
+
+  // How hard it is for a team to get across, as the resistance of a net of wires: its
+  // own links nearly none, free crossings one each, the other team's none at all. Two
+  // ways across halve it, which a count of links cannot see.
+  function resistance(S, t) {
+    var Q = geom(S.n), dots = Q.dots[t], idx = {}, V = [], fixed = [];
+    dots.forEach(function (d, k) { idx[d] = k; V.push(0.5); fixed.push(0); });
+    Q.starts[t].forEach(function (d) { V[idx[d]] = 1; fixed[idx[d]] = 1; });
+    Q.goals[t].forEach(function (d) { V[idx[d]] = 0; fixed[idx[d]] = 1; });
+    var G = function (o) { return o === t ? 40 : o === -1 ? 1 : 0; };
+    for (var it = 0; it < 120; it++) {
+      var moved = 0;
+      for (var k = 0; k < dots.length; k++) {
+        if (fixed[k]) continue;
+        var nb = Q.around[t + ':' + dots[k]] || [], gs = 0, gv = 0;
+        for (var j = 0; j < nb.length; j++) { var g = G(S.own[nb[j][0]]); gs += g; gv += g * V[idx[nb[j][1]]]; }
+        var nv = gs ? gv / gs : V[k];
+        moved = Math.max(moved, Math.abs(nv - V[k]));
+        V[k] = nv;
+      }
+      if (moved < 1e-4) break;
+    }
+    var I = 0;
+    Q.starts[t].forEach(function (d) {
+      (Q.around[t + ':' + d] || []).forEach(function (e) { I += G(S.own[e[0]]) * (1 - V[idx[e[1]]]); });
+    });
+    return I > 1e-9 ? 1 / I : 1e9;
+  }
+  // From team t's side: positive is good for t
+  function score(S, t) {
+    if (S.winner === t) return 1000;
+    if (S.winner === 1 - t) return -1000;
+    return 10 * Math.log(resistance(S, 1 - t) / resistance(S, t));
+  }
+  function free(S) { var out = []; for (var i = 0; i < S.own.length; i++) if (S.own[i] === -1) out.push(i); return out; }
+
+  function think(S, level, rnd) {
+    if (S.winner >= 0) return -1;
+    var t = team(S.turn), moves = free(S);
+    if (!moves.length) return -1;
+    var pick = function (list) { return list[Math.floor(rnd() * list.length)]; };
+    // a link that wins is always laid, and a crossing the other team would win on is taken
+    var winsWith = function (cell, who) { var T = clone(S); T.own[cell] = who; return !!chain(T, who); };
+    var mine = moves.filter(function (m) { return winsWith(m, t); });
+    if (mine.length) return mine[0];
+    var theirs = moves.filter(function (m) { return winsWith(m, 1 - t); });
+    if (theirs.length && level !== 'easy') return theirs[0];
+    if (level === 'easy') {
+      // mostly builds its own shortest way, now and then lays a link anywhere
+      if (theirs.length && rnd() < 0.5) return theirs[0];
+      var now = need(S, t), better = moves.filter(function (m) { var T = clone(S); T.own[m] = t; return need(T, t) < now; });
+      return better.length && rnd() < 0.7 ? pick(better) : pick(moves);
+    }
+    var rated = moves.map(function (m) { var T = clone(S); T.own[m] = t; return { m: m, v: score(T, t) }; });
+    if (level === 'medium') {
+      rated.forEach(function (x) { x.v += rnd() * 4; });               // a little uneven, so it is beatable
+      rated.sort(function (a, b) { return b.v - a.v; });
+      return rated[0].m;
+    }
+    // hard: the best few links, each against the other team's best answer. A crossing
+    // matters to both sides alike, so the answers looked at are the strongest crossings
+    // already rated, not every free one (that took half a second on a slow CI runner)
+    rated.sort(function (a, b) { return b.v - a.v; });
+    var best = -Infinity, out = rated[0].m, answers = rated.slice(0, 12).map(function (x) { return x.m; });
+    rated.slice(0, 6).forEach(function (x) {
+      var T = clone(S); T.own[x.m] = t;
+      var worst = Infinity;
+      answers.forEach(function (r) { if (r === x.m) return; var U = clone(T); U.own[r] = 1 - t; worst = Math.min(worst, chain(U, 1 - t) ? -1000 : score(U, t)); });
+      var v = worst === Infinity ? x.v : worst;
+      if (v > best + 1e-9) { best = v; out = x.m; }
+    });
+    return out;
+  }
+
+  function valid(S) {
+    if (!S || !SIZES[S.size] || S.n !== SIZES[S.size] || (S.seats !== 2 && S.seats !== 4) || !Array.isArray(S.own)) return false;
+    var Q = geom(S.n);
+    if (S.own.length !== Q.cells.length || S.own.some(function (o) { return o !== -1 && o !== 0 && o !== 1; })) return false;
+    var a = S.own.filter(function (o) { return o === 0; }).length, b = S.own.filter(function (o) { return o === 1; }).length;
+    // orange always lays first, so it has as many links as blue or one more
+    if (!(a === b || a === b + 1) || S.plies !== a + b || !(S.turn >= 0 && S.turn < S.seats) || team(S.turn) !== (a === b ? 0 : 1)) return false;
+    return true;
+  }
+
+  return { SIZES: SIZES, LEVELS: LEVELS, geom: geom, team: team, newGame: newGame, clone: clone, chain: chain, need: need,
+    legal: legal, play: play, resistance: resistance, score: score, free: free, think: think, valid: valid };
+}
+if (typeof module !== 'undefined') module.exports = LinkUpEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = LinkUpEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'linkup',
+    name: { fa: 'پل‌بند', en: 'Link Up', zh: '连桥', de: 'Brückenschlag', es: 'Enlaces', pl: 'Połączenia' },
+    accent: '#245890',
+    mood: 'sudoku',
+    strings: {
+      fa: {
+        board: 'صفحه‌ی پل‌بند', vsBot: 'مقابل ربات', two: 'دو نفره', four: 'چهار نفره', bot: 'ربات', playerN: 'بازیکن {n}',
+        sizeT: 'اندازه', sizeS: 'کوچک', sizeM: 'متوسط', sizeL: 'بزرگ', modeT: 'بازیکن‌ها',
+        newMatch: 'بازی تازه', begin: 'شروع', undoMove: 'برگرداندن حرکت', endWarn: 'بازی فعلی تمام می‌شود. ادامه؟', settingsT: 'بازی تازه',
+        orange: 'نارنجی', blue: 'آبی', goalO: 'بالا ↔ پایین', goalB: 'چپ ↔ راست',
+        yourMove: 'روی یک تقاطع بزن تا پل نارنجی‌ات را بگذاری', turnOf: 'نوبت {n} ({c})', thinking: 'ربات فکر می‌کند…',
+        dailyLu: 'پل‌بند روزانه', vsMedium: 'مقابل ربات متوسط', playerWon: '{n} برد', teamWon: '{a} و {b} بردند',
+        linksL: 'پل‌ها', fourNote: 'هم‌تیمی‌ها روبه‌روی هم می‌نشینند: بازیکن ۱ و ۳ نارنجی، ۲ و ۴ آبی، و نوبت به همین ترتیب می‌چرخد.',
+        rules: 'نارنجی می‌خواهد بالای صفحه را به پایین وصل کند و آبی چپ را به راست. در هر نوبت یک پل می‌گذاری: روی یکی از تقاطع‌ها بزن تا دو نقطه‌ی هم‌رنگت که دو طرف آن تقاطع‌اند به هم وصل شوند. هر تقاطع فقط یک پل می‌گیرد، پس پل تو همان‌جا راه حریف را می‌بندد. اولین کسی که یک راه پیوسته بین دو لبه‌ی رنگ خودش بسازد برنده است؛ بازی هیچ‌وقت مساوی نمی‌شود. در بازی چهارنفره هم‌تیمی‌ها یک رنگ‌اند و نوبتی بازی می‌کنند.',
+        kCursor: 'جابه‌جایی بین تقاطع‌ها', kGo: 'گذاشتن پل',
+        tutTitle1: 'دو لبه را وصل کن', tutText1: 'نارنجی بالا را به پایین وصل می‌کند و آبی چپ را به راست.',
+        tutTitle2: 'یک پل در هر نوبت', tutText2: 'روی یک تقاطع بزن تا دو نقطه‌ی هم‌رنگت به هم وصل شوند.',
+        tutTitle3: 'هر پل راهی را می‌بندد', tutText3: 'پل تو از روی پل حریف رد نمی‌شود؛ هر تقاطع مال کسی است که اول آن را بگیرد.'
+      },
+      en: {
+        board: 'Link Up board', vsBot: 'Against the bot', two: 'Two players', four: 'Four players', bot: 'Bot', playerN: 'Player {n}',
+        sizeT: 'Size', sizeS: 'Small', sizeM: 'Medium', sizeL: 'Large', modeT: 'Players',
+        newMatch: 'New game', begin: 'Start', undoMove: 'Undo move', endWarn: 'This ends the current game. Continue?', settingsT: 'New game',
+        orange: 'orange', blue: 'blue', goalO: 'top ↔ bottom', goalB: 'left ↔ right',
+        yourMove: 'Tap a crossing to lay your orange link', turnOf: "{n}'s turn ({c})", thinking: 'The bot is thinking…',
+        dailyLu: 'Daily Link Up', vsMedium: 'against the medium bot', playerWon: '{n} wins', teamWon: '{a} and {b} win',
+        linksL: 'Links', fourNote: 'Partners sit facing each other: players 1 and 3 are orange, 2 and 4 blue, and the turn goes round in that order.',
+        rules: 'Orange wants to join the top of the board to the bottom, blue the left side to the right. On your turn you lay one link: tap a crossing to join the two dots of your colour on either side of it. Each crossing takes only one link, so yours closes it to the other side for good. The first to make an unbroken path between their two edges wins; there are never draws. In the four-player game partners share a colour and take turns.',
+        kCursor: 'Move between crossings', kGo: 'Lay a link',
+        tutTitle1: 'Join your two edges', tutText1: 'Orange joins the top to the bottom, blue the left to the right.',
+        tutTitle2: 'One link a turn', tutText2: 'Tap a crossing to join two dots of your colour.',
+        tutTitle3: 'Every link blocks', tutText3: 'Links never cross: each crossing belongs to whoever takes it first.'
+      },
+      pl: {
+        board: 'Plansza połączeń', vsBot: 'Przeciwko botowi', two: 'Dwóch graczy', four: 'Czterech graczy', bot: 'Bot', playerN: 'Gracz {n}',
+        sizeT: 'Rozmiar', sizeS: 'Mała', sizeM: 'Średnia', sizeL: 'Duża', modeT: 'Gracze',
+        newMatch: 'Nowa gra', begin: 'Start', undoMove: 'Cofnij ruch', endWarn: 'To zakończy bieżącą grę. Kontynuować?', settingsT: 'Nowa gra',
+        orange: 'pomarańczowi', blue: 'niebiescy', goalO: 'góra ↔ dół', goalB: 'lewo ↔ prawo',
+        yourMove: 'Dotknij skrzyżowania, aby położyć swój pomarańczowy most', turnOf: 'Ruch gracza {n} ({c})', thinking: 'Bot myśli…',
+        dailyLu: 'Codzienne połączenia', vsMedium: 'przeciwko botowi na średnim poziomie', playerWon: '{n} wygrywa', teamWon: '{a} i {b} wygrywają',
+        linksL: 'Mosty', fourNote: 'Partnerzy siedzą naprzeciw siebie: gracze 1 i 3 są pomarańczowi, 2 i 4 niebiescy, a tury idą w tej kolejności.',
+        rules: 'Pomarańczowi chcą połączyć górę planszy z dołem, niebiescy lewą stronę z prawą. W swojej turze kładziesz jeden most: dotknij skrzyżowania, aby połączyć dwie kropki swojego koloru po jego obu stronach. Na każdym skrzyżowaniu mieści się tylko jeden most, więc Twój na zawsze zamyka je dla rywala. Wygrywa ten, kto pierwszy zbuduje nieprzerwaną drogę między swoimi dwiema krawędziami; remisów nie ma. W grze na czterech partnerzy mają ten sam kolor i grają na zmianę.',
+        kCursor: 'Ruch między skrzyżowaniami', kGo: 'Połóż most',
+        tutTitle1: 'Połącz swoje krawędzie', tutText1: 'Pomarańczowi łączą górę z dołem, niebiescy lewo z prawem.',
+        tutTitle2: 'Jeden most na turę', tutText2: 'Dotknij skrzyżowania, aby połączyć dwie kropki swojego koloru.',
+        tutTitle3: 'Każdy most blokuje', tutText3: 'Mosty się nie krzyżują: skrzyżowanie należy do tego, kto zajmie je pierwszy.'
+      },
+      zh: {
+        board: '连桥棋盘', vsBot: '对战电脑', two: '双人', four: '四人', bot: '电脑', playerN: '玩家 {n}',
+        sizeT: '大小', sizeS: '小', sizeM: '中', sizeL: '大', modeT: '玩家',
+        newMatch: '新一局', begin: '开始', undoMove: '悔棋', endWarn: '将结束当前对局，是否继续？', settingsT: '新一局',
+        orange: '橙色', blue: '蓝色', goalO: '上 ↔ 下', goalB: '左 ↔ 右',
+        yourMove: '点一个交叉点，放下你的橙色桥', turnOf: '轮到{n}（{c}）', thinking: '电脑思考中……',
+        dailyLu: '每日连桥', vsMedium: '对战中等电脑', playerWon: '{n}获胜', teamWon: '{a}和{b}获胜',
+        linksL: '桥', fourNote: '队友面对面坐：玩家1和3是橙色，2和4是蓝色，按这个顺序轮流。',
+        rules: '橙色要把棋盘的上边连到下边，蓝色要把左边连到右边。每回合放一座桥：点一个交叉点，把它两侧同色的两个点连起来。每个交叉点只能放一座桥，所以你的桥会永远挡住对方。先在自己两条边之间连出一条不断的路的一方获胜；不会有平局。四人对局中，队友同色，轮流下。',
+        kCursor: '在交叉点之间移动', kGo: '放下桥',
+        tutTitle1: '连起你的两条边', tutText1: '橙色连上下，蓝色连左右。',
+        tutTitle2: '每回合一座桥', tutText2: '点一个交叉点，把两个同色的点连起来。',
+        tutTitle3: '每座桥都会挡路', tutText3: '桥不能交叉：交叉点归先占的一方。'
+      },
+      de: {
+        board: 'Brückenschlag-Brett', vsBot: 'Gegen den Bot', two: 'Zu zweit', four: 'Zu viert', bot: 'Bot', playerN: 'Spieler {n}',
+        sizeT: 'Größe', sizeS: 'Klein', sizeM: 'Mittel', sizeL: 'Groß', modeT: 'Spieler',
+        newMatch: 'Neue Partie', begin: 'Start', undoMove: 'Zug zurück', endWarn: 'Die aktuelle Partie endet. Weiter?', settingsT: 'Neue Partie',
+        orange: 'Orange', blue: 'Blau', goalO: 'oben ↔ unten', goalB: 'links ↔ rechts',
+        yourMove: 'Tippe eine Kreuzung, um deine orange Brücke zu legen', turnOf: 'Am Zug: {n} ({c})', thinking: 'Der Bot überlegt …',
+        dailyLu: 'Brückenschlag des Tages', vsMedium: 'gegen den mittleren Bot', playerWon: 'Sieg: {n}', teamWon: 'Sieg: {a} und {b}',
+        linksL: 'Brücken', fourNote: 'Partner sitzen sich gegenüber: Spieler 1 und 3 sind Orange, 2 und 4 Blau, und der Zug geht in dieser Reihenfolge herum.',
+        rules: 'Orange will den oberen Rand des Bretts mit dem unteren verbinden, Blau den linken mit dem rechten. In deinem Zug legst du eine Brücke: Tippe eine Kreuzung, um die beiden Punkte deiner Farbe links und rechts davon zu verbinden. Jede Kreuzung trägt nur eine Brücke, deine sperrt sie also für immer für die andere Seite. Wer zuerst einen durchgehenden Weg zwischen seinen beiden Rändern baut, gewinnt; ein Unentschieden gibt es nie. Zu viert haben Partner dieselbe Farbe und ziehen abwechselnd.',
+        kCursor: 'Zwischen den Kreuzungen wechseln', kGo: 'Brücke legen',
+        tutTitle1: 'Verbinde deine Ränder', tutText1: 'Orange verbindet oben und unten, Blau links und rechts.',
+        tutTitle2: 'Eine Brücke pro Zug', tutText2: 'Tippe eine Kreuzung, um zwei Punkte deiner Farbe zu verbinden.',
+        tutTitle3: 'Jede Brücke sperrt', tutText3: 'Brücken kreuzen sich nie: Eine Kreuzung gehört dem, der sie zuerst nimmt.'
+      },
+      es: {
+        board: 'Tablero de Enlaces', vsBot: 'Contra el bot', two: 'Dos jugadores', four: 'Cuatro jugadores', bot: 'Bot', playerN: 'Jugador {n}',
+        sizeT: 'Tamaño', sizeS: 'Pequeño', sizeM: 'Mediano', sizeL: 'Grande', modeT: 'Jugadores',
+        newMatch: 'Nueva partida', begin: 'Empezar', undoMove: 'Deshacer jugada', endWarn: 'Esto termina la partida actual. ¿Seguir?', settingsT: 'Nueva partida',
+        orange: 'naranja', blue: 'azul', goalO: 'arriba ↔ abajo', goalB: 'izquierda ↔ derecha',
+        yourMove: 'Toca un cruce para poner tu enlace naranja', turnOf: 'Turno de {n} ({c})', thinking: 'El bot está pensando…',
+        dailyLu: 'Enlaces diario', vsMedium: 'contra el bot medio', playerWon: 'Gana: {n}', teamWon: 'Ganan: {a} y {b}',
+        linksL: 'Enlaces', fourNote: 'Los compañeros se sientan frente a frente: los jugadores 1 y 3 son naranja, 2 y 4 azul, y el turno gira en ese orden.',
+        rules: 'Naranja quiere unir el borde de arriba con el de abajo, y azul el de la izquierda con el de la derecha. En tu turno pones un enlace: toca un cruce para unir los dos puntos de tu color que tiene a cada lado. Cada cruce admite un solo enlace, así que el tuyo se lo cierra al otro para siempre. Gana quien primero hace un camino sin cortes entre sus dos bordes; nunca hay empate. En la partida a cuatro, los compañeros comparten color y juegan por turnos.',
+        kCursor: 'Moverse entre cruces', kGo: 'Poner un enlace',
+        tutTitle1: 'Une tus dos bordes', tutText1: 'Naranja une arriba con abajo, azul la izquierda con la derecha.',
+        tutTitle2: 'Un enlace por turno', tutText2: 'Toca un cruce para unir dos puntos de tu color.',
+        tutTitle3: 'Cada enlace corta', tutText3: 'Los enlaces nunca se cruzan: cada cruce es de quien lo toma primero.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var MODES = ['bot', 'two', 'four'], SIZE_KEYS = ['s', 'm', 'l'];
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs) prefs = { mode: 'bot', level: 'medium', size: 'm' };
+  if (MODES.indexOf(prefs.mode) < 0) prefs.mode = 'bot';
+  if (E.LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+  if (SIZE_KEYS.indexOf(prefs.size) < 0) prefs.size = 'm';
+
+  // G: the game around the engine's state S; cur is the keyboard's crossing
+  var G = null, timer = null, kbOn = false, cur = 0;
+
+  var cv = el('canvas', { class: 'lu-canvas', role: 'img', 'aria-label': C.t('board') });
+  var box = el('div', { class: 'lu-box' }, [cv]);
+  var top = el('div', { class: 'lu-top ch-above' });
+  var teams = el('div', { class: 'lu-teams ch-above' });
+  var status = el('div', { class: 'lu-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'lu-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, teams, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ setup */
+
+  function newGame(o) {
+    stop();
+    var daily = o.daily || null;
+    G = { mode: daily ? 'bot' : o.mode, level: daily ? 'medium' : o.level, size: daily ? 'm' : o.size, daily: daily,
+      S: null, hist: [], startedAt: Date.now(), done: false };
+    G.S = E.newGame(G.size, G.mode === 'four' ? 4 : 2);
+    if (!daily) { prefs.mode = o.mode; prefs.level = o.level; prefs.size = o.size; ctx.store.set('prefs', prefs); }
+    cur = Math.floor(G.S.own.length / 2);
+    render(); save();
+    maybeBot();
+  }
+  function current() { return { mode: G.mode, level: G.level, size: G.size }; }
+
+  function isBot(seat) { return G.mode === 'bot' && seat === 1; }
+  function busy() { return !G || G.done || isBot(G.S.turn); }
+  function stop() { if (timer) { clearTimeout(timer); timer = null; } }
+
+  function maybeBot() {
+    if (!G || G.done || !isBot(G.S.turn)) return;
+    renderSide();
+    timer = setTimeout(function () {
+      timer = null;
+      if (!G || G.done || !isBot(G.S.turn)) return;
+      // the daily bot plays from the day's seed, so everyone meets the same opponent
+      var rnd = G.daily ? C.daily('linkup', G.daily + '|' + G.S.plies).rng : Math.random;
+      var m = E.think(G.S, G.level, rnd);
+      if (m >= 0) act(m);
+    }, C.ui.reduceMotion() ? 200 : 420);
+  }
+
+  /* ------------------------------------------------------------- moves */
+
+  function act(cell) {
+    var before = E.clone(G.S), who = G.S.turn;
+    if (!E.play(G.S, cell)) { C.feedback('bad'); return false; }
+    G.hist.push(before);
+    if (G.hist.length > 120) G.hist.shift();
+    C.feedback(isBot(who) ? 'soft' : 'place');
+    if (G.S.winner >= 0) { G.done = true; render(); finish(); return true; }
+    render(); save();
+    maybeBot();
+    return true;
+  }
+
+  // Against the bot one undo takes back its reply and your link together
+  function undo() {
+    if (!G || G.done || !G.hist.length) return;
+    stop();
+    var steps = G.mode === 'bot' ? (isBot(G.S.turn) ? 1 : 2) : 1;
+    if (G.hist.length < steps) steps = G.hist.length;
+    var h;
+    for (var k = 0; k < steps; k++) h = G.hist.pop();
+    G.S = h;
+    C.feedback('soft');
+    render(); save();
+    maybeBot();
+  }
+
+  /* ------------------------------------------------------------ result */
+
+  function pname(seat) {
+    if (G.mode === 'bot') return seat === 0 ? (C.state.profile.name || C.t('you')) : C.t('bot') + ' · ' + C.t(G.level);
+    return C.t('playerN', { n: C.num(seat + 1) });
+  }
+  function teamName(t) {
+    if (G.mode === 'four') return C.t('teamWon', { a: pname(t), b: pname(t + 2) });
+    return C.t('playerWon', { n: pname(t) });
+  }
+  function colourName(t) { return C.t(t === 0 ? 'orange' : 'blue'); }
+
+  function finish() {
+    stop();
+    var S = G.S, vsBot = G.mode === 'bot', won = vsBot ? S.winner === 0 : true;
+    var base = vsBot ? ({ easy: 6, medium: 12, hard: 20 }[G.level] || 12) : 8;
+    var coins = Math.max(2, Math.round(won ? base : base * 0.3)) + (G.daily ? 8 : 0);
+    var points = Math.max(3, Math.round(won ? base * 4 : base * 1.2)) + (G.daily ? 25 : 0);
+    if (vsBot && won) {
+      C.achievements.unlock('lnk-win');
+      if (G.level === 'hard') C.achievements.unlock('lnk-hard');
+    }
+    if (G.mode === 'four') C.achievements.unlock('lnk-four');
+    if (G.daily) {
+      var first = C.stats.daily('linkup', G.daily, { label: won ? C.t('won') : C.t('lost'), win: won });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    var links = [0, 1].map(function (t) { return S.own.filter(function (o) { return o === t; }).length; });
+    setTimeout(function () {
+      ctx.finish({
+        won: vsBot ? won : null,
+        title: vsBot ? (won ? C.t('won') : C.t('lost')) : teamName(S.winner),
+        timeMs: Date.now() - G.startedAt, coins: coins, points: points,
+        lines: [{ label: C.t('linksL'), value: C.num(links[0]) + ' / ' + C.num(links[1]) }],
+        shareText: 'چوگان · پل‌بند' + (G.daily ? ('\nروزانه ' + G.daily) : '') + '\n' + (vsBot ? (won ? C.t('won') : C.t('lost')) : teamName(S.winner)),
+        paint: cardPaint(),
+        onAgain: G.daily ? null : function () { newGame(current()); }
+      });
+    }, C.ui.reduceMotion() ? 150 : 700);
+  }
+
+  /* ------------------------------------------------------------- saves */
+
+  ctx.autosave(function () {
+    if (!G || G.done || !G.hist.length) return { inProgress: false };
+    return { g: { mode: G.mode, level: G.level, size: G.size, daily: G.daily, S: G.S, elapsed: Date.now() - G.startedAt } };
+  });
+  function save() { ctx.save(); }
+  function validSave(sv) {
+    var g = sv && sv.g;
+    return !!(g && MODES.indexOf(g.mode) >= 0 && E.LEVELS.indexOf(g.level) >= 0 && SIZE_KEYS.indexOf(g.size) >= 0 &&
+      E.valid(g.S) && g.S.winner < 0 && g.S.size === g.size && g.S.seats === (g.mode === 'four' ? 4 : 2));
+  }
+  function restore(g) {
+    G = { mode: g.mode, level: g.level, size: g.size, daily: g.daily || null, S: g.S, hist: [], startedAt: Date.now() - (g.elapsed || 0), done: false };
+    cur = Math.floor(G.S.own.length / 2);
+    render();
+    maybeBot();
+  }
+
+  function askNew() {
+    if (G && G.daily) { go({ daily: G.daily }); return; }
+    settings();
+    function go(o) { if (!G || G.done || !G.hist.length) newGame(o); else C.ui.confirm({ title: C.t('newMatch'), body: C.t('endWarn'), onOk: function () { newGame(o); } }); }
+  }
+  function settings() {
+    var o = G ? current() : { mode: prefs.mode, level: prefs.level, size: prefs.size };
+    var body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
+    function rows() {
+      body.innerHTML = '';
+      body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('modeT') }));
+      body.appendChild(C.ui.segmented([{ value: 'bot', label: C.t('vsBot') }, { value: 'two', label: C.t('two') }, { value: 'four', label: C.t('four') }], o.mode, function (v) { o.mode = v; rows(); }));
+      if (o.mode === 'bot') body.appendChild(C.ui.segmented(E.LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), o.level, function (v) { o.level = v; }));
+      if (o.mode === 'four') body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('fourNote') }));
+      body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('sizeT') }));
+      body.appendChild(C.ui.segmented(SIZE_KEYS.map(function (s) { return { value: s, label: C.t('size' + s.toUpperCase()) }; }), o.size, function (v) { o.size = v; }));
+      if (G && !G.done && G.hist.length) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('endWarn') }));
+    }
+    rows();
+    C.ui.modal({
+      title: C.t('settingsT'), closeButton: true, body: [body],
+      actions: [{ label: C.t('cancel') }, { label: C.t('begin'), kind: 'primary', onClick: function () { newGame(o); } }]
+    });
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function colors() {
+    var cs = getComputedStyle(document.documentElement);
+    var v = function (k, f) { return cs.getPropertyValue(k).trim() || f; };
+    return { board: v('--lu-board', '#F4EDE0'), edge: v('--lu-edge', '#E6DCC9'), o: v('--lu-o', '#D9542B'), oLt: v('--lu-o-lt', '#F2B79F'),
+      b: v('--lu-b', '#2563A8'), bLt: v('--lu-b-lt', '#A9C4E4'), ink: v('--lu-ink', '#5A4E40') };
+  }
+  // Shared by drawing and by reading a tap, so a tap lands on what is drawn under it
+  function geo(W, n) {
+    var M = 2 * n + 1, pad = W * 0.07, u = (W - 2 * pad) / (M - 1);
+    return { pad: pad, u: u, M: M };
+  }
+  function pt(Q, i) { return { x: Q.pad + (i % Q.M) * Q.u, y: Q.pad + Math.floor(i / Q.M) * Q.u }; }
+
+  function paintBoard(g, W, o, col) {
+    var S = o.S, Q = geo(W, S.n), Ge = E.geom(S.n), M = Q.M;
+    g.fillStyle = col.edge; C.rrect(g, 0, 0, W, W, W * 0.03); g.fill();
+    g.fillStyle = col.board; C.rrect(g, W * 0.025, W * 0.025, W * 0.95, W * 0.95, W * 0.025); g.fill();
+    // each team's two edges, as bands just outside its outer dots
+    var band = Q.u * 0.18, inset = Q.pad * 0.45;
+    g.fillStyle = col.o;
+    C.rrect(g, Q.pad, inset - band / 2, W - 2 * Q.pad, band, band / 2); g.fill();
+    C.rrect(g, Q.pad, W - inset - band / 2, W - 2 * Q.pad, band, band / 2); g.fill();
+    g.fillStyle = col.b;
+    C.rrect(g, inset - band / 2, Q.pad, band, W - 2 * Q.pad, band / 2); g.fill();
+    C.rrect(g, W - inset - band / 2, Q.pad, band, W - 2 * Q.pad, band / 2); g.fill();
+    // free crossings, faint, where a link can still go
+    if (o.hints) for (var k = 0; k < Ge.cells.length; k++) {
+      if (S.own[k] !== -1) continue;
+      var p = pt(Q, Ge.cells[k][0] * M + Ge.cells[k][1]);
+      g.fillStyle = col.ink; g.globalAlpha = 0.16;
+      g.beginPath(); g.arc(p.x, p.y, Q.u * 0.07, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
+    }
+    var win = o.win || [];
+    function link(k, t, alpha) {
+      var e = Ge.ends[t][k], a = pt(Q, e[0]), b = pt(Q, e[1]);
+      g.globalAlpha = alpha;
+      g.strokeStyle = t === 0 ? col.o : col.b; g.lineCap = 'round';
+      g.lineWidth = Q.u * (win.indexOf(k) >= 0 ? 0.36 : 0.26);
+      g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+      g.globalAlpha = 1;
+    }
+    for (var c = 0; c < S.own.length; c++) if (S.own[c] >= 0) link(c, S.own[c], 1);
+    if (o.ghost >= 0 && S.own[o.ghost] === -1) link(o.ghost, o.ghostTeam, 0.4);
+    // the dots, over the links' ends
+    [0, 1].forEach(function (t) {
+      Ge.dots[t].forEach(function (d) {
+        var p = pt(Q, d);
+        g.fillStyle = t === 0 ? col.o : col.b;
+        g.beginPath(); g.arc(p.x, p.y, Q.u * 0.2, 0, Math.PI * 2); g.fill();
+        g.fillStyle = t === 0 ? col.oLt : col.bLt;
+        g.beginPath(); g.arc(p.x - Q.u * 0.05, p.y - Q.u * 0.05, Q.u * 0.07, 0, Math.PI * 2); g.fill();
+      });
+    });
+    if (o.last >= 0 && S.own[o.last] >= 0) {
+      var l = pt(Q, Ge.cells[o.last][0] * M + Ge.cells[o.last][1]);
+      g.strokeStyle = '#FFFFFF'; g.lineWidth = Math.max(1.5, Q.u * 0.06);
+      g.beginPath(); g.arc(l.x, l.y, Q.u * 0.1, 0, Math.PI * 2); g.stroke();
+    }
+    if (o.cursor >= 0) {
+      var q = pt(Q, Ge.cells[o.cursor][0] * M + Ge.cells[o.cursor][1]);
+      g.strokeStyle = col.ink; g.lineWidth = Math.max(2, Q.u * 0.07);
+      g.beginPath(); g.arc(q.x, q.y, Q.u * 0.38, 0, Math.PI * 2); g.stroke();
+    }
+  }
+
+  function boardSize() {
+    var r = box.getBoundingClientRect();
+    return Math.max(1, Math.floor(Math.min(r.width, r.height || r.width)));
+  }
+  function draw() {
+    if (!G) return;
+    var W = boardSize(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== W * dpr || cv.height !== W * dpr) { cv.width = W * dpr; cv.height = W * dpr; }
+    cv.style.width = W + 'px'; cv.style.height = W + 'px';
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, W);
+    var mine = !busy();
+    paintBoard(g, W, {
+      S: G.S, hints: mine, last: G.S.last, win: G.done ? (E.chain(G.S, G.S.winner) || []) : [],
+      ghost: kbOn && mine ? cur : -1, ghostTeam: E.team(G.S.turn), cursor: kbOn && mine ? cur : -1
+    }, colors());
+  }
+  function cardPaint() {
+    var o = { S: E.clone(G.S), hints: false, last: -1, win: E.chain(G.S, G.S.winner) || [], ghost: -1, cursor: -1 };
+    return function (g, W, H) {
+      var side = Math.min(W, H);
+      g.translate((W - side) / 2, (H - side) / 2);
+      paintBoard(g, side, o, colors());
+    };
+  }
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (G.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyLu') + ' — ' + C.num(G.daily) })]));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('vsMedium') }));
+      return;
+    }
+    top.appendChild(el('button', { class: 'ch-badge ch-tap', type: 'button', onclick: settings,
+      text: (G.mode === 'bot' ? C.t('vsBot') + ' · ' + C.t(G.level) : C.t(G.mode)) + ' · ' + C.t('sizeT') + ': ' + C.t('size' + G.size.toUpperCase()) }));
+    var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', settings);
+    top.appendChild(gear);
+  }
+  function renderSide() {
+    teams.innerHTML = '';
+    var t = E.team(G.S.turn);
+    [0, 1].forEach(function (k) {
+      var names = G.mode === 'four' ? pname(k) + ' · ' + pname(k + 2) : pname(k);
+      teams.appendChild(el('div', { class: 'lu-team' + (t === k && !G.done ? ' lu-team--on' : '') + (isBot(k) && G.S.turn === 1 && !G.done ? ' lu-thinking' : '') }, [
+        el('div', { class: 'lu-team__dot', style: { background: k === 0 ? 'var(--lu-o)' : 'var(--lu-b)' } }),
+        el('div', { class: 'lu-team__text' }, [
+          el('div', { class: 'lu-team__name', text: names }),
+          el('div', { class: 'lu-team__goal', text: C.t(k === 0 ? 'goalO' : 'goalB') })
+        ])
+      ]));
+    });
+    var line = '';
+    if (!G.done) {
+      if (isBot(G.S.turn)) line = C.t('thinking');
+      else if (G.mode === 'bot') line = C.t('yourMove');
+      else line = C.t('turnOf', { n: pname(G.S.turn), c: colourName(t) });
+    }
+    status.textContent = line;
+  }
+  function render() { renderTop(); renderSide(); draw(); }
+
+  /* -------------------------------------------------------------- input */
+
+  // The free crossing nearest the tap, if it is close enough to mean it
+  function readTap(x, y) {
+    var r = cv.getBoundingClientRect(), Q = geo(r.width, G.S.n), Ge = E.geom(G.S.n);
+    var fx = (x - r.left - Q.pad) / Q.u, fy = (y - r.top - Q.pad) / Q.u, best = -1, bd = Infinity;
+    for (var k = 0; k < Ge.cells.length; k++) {
+      var d = Math.hypot(Ge.cells[k][0] - fy, Ge.cells[k][1] - fx);
+      if (d < bd) { bd = d; best = k; }
+    }
+    return bd <= 0.75 ? best : -1;
+  }
+  cv.addEventListener('pointerdown', function (e) {
+    if (busy()) return;
+    e.preventDefault();
+    kbOn = false;
+    var k = readTap(e.clientX, e.clientY);
+    if (k < 0) return;
+    if (G.S.own[k] !== -1) { C.feedback('bad'); return; }
+    act(k);
+  });
+
+  window.addEventListener('keydown', function (e) {
+    if (!G || document.querySelector('.ch-scrim')) return;
+    if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
+    if (busy() || e.ctrlKey || e.metaKey || e.altKey) return;
+    var tg = e.target && e.target.tagName;
+    if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT') return;
+    // the board is drawn left to right in every language, so the arrows are geometric (#338)
+    var d = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[e.key];
+    var Ge = E.geom(G.S.n);
+    if (d) {
+      e.preventDefault();
+      if (!kbOn) { kbOn = true; draw(); return; }
+      // crossings sit on every other point: sideways two points, up or down one row and
+      // half a step across
+      var p = Ge.cells[cur], r2 = p[0] + d[0], c2 = p[1] + 2 * d[1];
+      if (d[0]) c2 = Ge.at[r2 * Ge.M + p[1] - 1] !== undefined ? p[1] - 1 : p[1] + 1;
+      var k2 = Ge.at[r2 * Ge.M + c2];
+      if (k2 !== undefined) cur = k2;
+      draw(); return;
+    }
+    if ((e.key === 'Enter' || e.key === ' ') && kbOn && tg !== 'BUTTON') {
+      e.preventDefault();
+      if (G.S.own[cur] === -1) act(cur); else C.feedback('bad');
+    }
+  });
+
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  else window.addEventListener('resize', draw);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← ↑ → ↓', C.t('kCursor')), kb('Space / Enter', C.t('kGo')), kb('U / Ctrl+Z', C.t('undoMove'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // a 3×3 corner of the board for the tutorial
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 110" width="100%"><rect x="45" y="2" width="110" height="106" rx="8" fill="#F4EDE0"/>';
+    s += '<rect x="62" y="6" width="76" height="4" rx="2" fill="#D9542B"/><rect x="62" y="100" width="76" height="4" rx="2" fill="#D9542B"/>';
+    s += '<rect x="49" y="19" width="4" height="72" rx="2" fill="#2563A8"/><rect x="147" y="19" width="4" height="72" rx="2" fill="#2563A8"/>';
+    var X = function (c) { return 64 + c * 18; }, Y = function (r) { return 19 + r * 18; };
+    var bar = function (r1, c1, r2, c2, f) { return '<line x1="' + X(c1) + '" y1="' + Y(r1) + '" x2="' + X(c2) + '" y2="' + Y(r2) + '" stroke="' + f + '" stroke-width="5" stroke-linecap="round"/>'; };
+    if (kind === 1) s += bar(0, 1, 2, 1, '#D9542B') + bar(2, 1, 4, 1, '#D9542B') + bar(1, 0, 1, 2, '#2563A8');
+    if (kind === 2) s += bar(2, 1, 2, 3, '#D9542B') + '<circle cx="' + X(2) + '" cy="' + Y(2) + '" r="8" fill="none" stroke="#5A4E40" stroke-width="2"/>';
+    if (kind === 3) s += bar(1, 2, 3, 2, '#2563A8') + bar(2, 1, 2, 3, '#D9542B') + '<path d="M' + (X(2) - 7) + ' ' + (Y(2) - 7) + 'l14 14m0 -14l-14 14" stroke="#5A4E40" stroke-width="2.5"/>';
+    for (var r = 0; r <= 4; r++) for (var c = 0; c <= 4; c++) {
+      if (r % 2 === 0 && c % 2 === 1) s += '<circle cx="' + X(c) + '" cy="' + Y(r) + '" r="4.5" fill="#D9542B"/>';
+      if (r % 2 === 1 && c % 2 === 0) s += '<circle cx="' + X(c) + '" cy="' + Y(r) + '" r="4.5" fill="#2563A8"/>';
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  var saved = ctx.loadSave();
+  if (validSave(saved) && (saved.g.daily || null) === (dailyDate || null)) restore(saved.g);
+  else newGame(dailyDate ? { daily: dailyDate } : { mode: prefs.mode, level: prefs.level, size: prefs.size });
+  if (dailyDate && C.stats.dailyDone('linkup', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).linkup;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>

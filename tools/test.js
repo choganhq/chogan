@@ -10822,6 +10822,82 @@ function testCorridor() {
   ok(Date.now() - t0 < 12000, 'the Corridor tests finish in under 12 s (' + (Date.now() - t0) + ' ms)');
 }
 
+// #605: Cqoicebordel asked for Gymkhana (Bridg-It); built as Link Up with our own name and look
+function testLinkUp() {
+  head('Link Up (#605)');
+  const t0 = Date.now();
+  const E = loadEngine('linkup', 'LinkUpEngineFactory');
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/linkup/index.html'), 'utf8');
+  const rng = (seed) => { let x = seed >>> 0; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; };
+  // the board: every inner point with r + c even is one crossing, shared by both teams
+  const sizes = Object.keys(E.SIZES);
+  ok(sizes.length === 3, 'three board sizes (' + sizes.join(',') + ')');
+  for (const sz of sizes) {
+    const n = E.SIZES[sz], S = E.newGame(sz, 2), Q = E.geom(n);
+    const inner = (2 * n - 1) * (2 * n - 1), want = (inner + 1) / 2;
+    ok(S.own.length === want && Q.cells.every(([r, c]) => (r + c) % 2 === 0 && r > 0 && c > 0 && r < 2 * n && c < 2 * n),
+      sz + ': ' + want + ' crossings, all inside the edges with r + c even');
+    const crossOk = Q.cells.every((_, k) => {
+      const [a0, a1] = Q.ends[0][k], [b0, b1] = Q.ends[1][k];
+      const v0 = Math.abs(a1 - a0) === 2 * Q.M, v1 = Math.abs(b1 - b0) === 2 * Q.M;
+      return v0 !== v1 && (a0 + a1) === (b0 + b1);
+    });
+    ok(crossOk, sz + ': at every crossing the orange and the blue link cross at right angles through the same point');
+    ok(E.need(S, 0) === n && E.need(S, 1) === n, sz + ': on an empty board each side needs ' + n + ' links');
+  }
+  // a straight orange column wins; the crossing it took is closed to blue
+  const S = E.newGame('s', 2), Q = E.geom(4);
+  const col = Q.cells.map((p, k) => [p, k]).filter(([p]) => p[1] === 3 && p[0] % 2 === 1).map(([, k]) => k);
+  ok(col.length === 4, 'orange can go straight down one column in four links');
+  const blue = Q.cells.map((p, k) => [p, k]).filter(([p]) => p[0] === 1 && p[1] % 2 === 1 && p[1] !== 3).map(([, k]) => k);
+  for (let i = 0; i < 4; i++) { E.play(S, col[i]); if (S.winner < 0) E.play(S, blue[i]); }
+  ok(S.winner === 0 && E.chain(S, 0).length === 4 && !E.play(S, blue[3]), 'the column wins for orange, its chain is the four links, and the game is over');
+  const T = E.newGame('s', 2); E.play(T, col[0]);
+  ok(T.own[col[0]] === 0 && !E.legal(T, col[0]) && !E.play(T, col[0]) && T.turn === 1, 'a taken crossing is closed to both teams, and nothing changes');
+  ok(E.need(T, 1) === 4 && E.need(T, 0) === 3, 'one link brings orange a step nearer and leaves blue as it was');
+  // the four-player game: seats 0..3 in turn, partners 0 and 2 orange, 1 and 3 blue
+  const F = E.newGame('m', 4), seen = [];
+  for (let i = 0; i < 6; i++) { seen.push(F.turn + ':' + E.team(F.turn)); E.play(F, E.free(F)[0]); }
+  ok(seen.join(' ') === '0:0 1:1 2:0 3:1 0:0 1:1', 'four players take turns 1, 2, 3, 4, with partners on one colour (' + seen.join(' ') + ')');
+  // there is never a draw: a full board always has exactly one winner
+  let noWin = 0, games = 0;
+  for (let k = 0; k < 150; k++) {
+    const R = E.newGame(sizes[k % 3], k % 2 ? 4 : 2), r = rng(500 + k);
+    while (R.winner < 0) { const f = E.free(R); if (!f.length) { noWin++; break; } E.play(R, f[Math.floor(r() * f.length)]); }
+    games++;
+  }
+  ok(games === 150 && noWin === 0, 'random games always end with a winner before the board runs out (' + games + ' games)');
+  // the bot plays legal links and its levels are ordered
+  const match = (a, b, seed, sz) => { const M = E.newGame(sz, 2), r = rng(seed); let worst = 0; while (M.winner < 0) { const t = Date.now(), m = E.think(M, M.turn === 0 ? a : b, r); worst = Math.max(worst, Date.now() - t); if (m < 0 || !E.play(M, m)) return { w: -1, worst }; } return { w: M.winner, worst }; };
+  let illegal = 0, mWins = 0, hWins = 0, n = 0, slow = 0;
+  for (let k = 0; k < 4; k++) {
+    // small and medium boards only: the CI runner is several times slower than a laptop,
+    // and these games took the group past 12 s there (the large board's speed is checked below)
+    const a = match('medium', 'easy', 900 + k, k % 2 ? 'm' : 's'), b = match('easy', 'medium', 950 + k, k % 2 ? 'm' : 's');
+    const c = match('hard', 'medium', 980 + k, 's'), d = match('medium', 'hard', 990 + k, 's');
+    [a, b, c, d].forEach((g) => { if (g.w < 0) illegal++; slow = Math.max(slow, g.worst); });
+    mWins += (a.w === 0) + (b.w === 1); hWins += (c.w === 0) + (d.w === 1); n += 2;
+  }
+  ok(illegal === 0, 'the bot only lays legal links, at every level (' + (2 * n) + ' games)');
+  ok(mWins >= 7, 'the medium bot beats the easy one most of the time (' + mWins + ' of ' + n + ')');
+  ok(hWins >= 6, 'the hard bot beats the medium one most of the time (' + hWins + ' of ' + n + ')');
+  const L = E.newGame('l', 2), th = Date.now(); E.think(L, 'hard', rng(3));
+  ok(slow < 400 && Date.now() - th < 400, 'the hard bot answers in well under a second, even on the large board (' + slow + ' ms, ' + (Date.now() - th) + ' ms)');
+  // it takes a winning link, and blocks one
+  const W = E.newGame('s', 2); [0, 1, 2].forEach((i) => { W.own[col[i]] = 0; }); W.plies = 6; W.turn = 1;
+  [blue[0], blue[1], blue[2]].forEach((b) => { W.own[b] = 1; });
+  ok(E.think(W, 'medium', rng(1)) === col[3] && E.think(W, 'hard', rng(1)) === col[3], 'blue takes the one crossing orange would win on');
+  W.turn = 0;
+  ok(E.think(W, 'easy', rng(1)) === col[3], 'even the easy bot lays the link that wins');
+  // saves
+  const V = E.newGame('m', 4); E.play(V, 3); E.play(V, 7);
+  ok(E.valid(V) && !E.valid(Object.assign(E.clone(V), { turn: 1 })) && !E.valid(Object.assign(E.clone(V), { own: V.own.slice(1) })) && !E.valid(Object.assign(E.clone(V), { size: 'x' })),
+    'a save is checked before it is restored');
+  ok(/C\.daily\('linkup', G\.daily \+ '\|' \+ G\.S\.plies\)\.rng/.test(html) && ['lnk-win', 'lnk-hard', 'lnk-four'].every((id) => html.indexOf("unlock('" + id + "')") > 0),
+    'the daily bot plays from the day\'s seed, and the three awards are unlocked');
+  ok(Date.now() - t0 < 12000, 'the Link Up tests finish in under 12 s (' + (Date.now() - t0) + ' ms)');
+}
+
 // #554: xmha97 asked for Lights Out (named Lights Off: "Lights Out" is a trademark)
 function testLights() {
   head('Lights Off (#554)');
