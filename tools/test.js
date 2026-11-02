@@ -10870,16 +10870,15 @@ function testLinkUp() {
   // the bot plays legal links and its levels are ordered
   const match = (a, b, seed, sz) => { const M = E.newGame(sz, 2), r = rng(seed); let worst = 0; while (M.winner < 0) { const t = Date.now(), m = E.think(M, M.turn === 0 ? a : b, r); worst = Math.max(worst, Date.now() - t); if (m < 0 || !E.play(M, m)) return { w: -1, worst }; } return { w: M.winner, worst }; };
   let illegal = 0, mWins = 0, hWins = 0, n = 0, slow = 0;
-  // hard games on the small board, which keeps this group quick (the large board's timing is checked below)
-  for (let k = 0; k < 6; k++) {
+  for (let k = 0; k < 4; k++) {
     const a = match('medium', 'easy', 900 + k, sizes[k % 3]), b = match('easy', 'medium', 950 + k, sizes[k % 3]);
-    const c = match('hard', 'medium', 980 + k, 's'), d = match('medium', 'hard', 990 + k, 's');
+    const c = match('hard', 'medium', 980 + k, 'm'), d = match('medium', 'hard', 990 + k, 'm');
     [a, b, c, d].forEach((g) => { if (g.w < 0) illegal++; slow = Math.max(slow, g.worst); });
     mWins += (a.w === 0) + (b.w === 1); hWins += (c.w === 0) + (d.w === 1); n += 2;
   }
   ok(illegal === 0, 'the bot only lays legal links, at every level (' + (2 * n) + ' games)');
-  ok(mWins >= 10, 'the medium bot beats the easy one most of the time (' + mWins + ' of ' + n + ')');
-  ok(hWins >= 8, 'the hard bot beats the medium one most of the time (' + hWins + ' of ' + n + ')');
+  ok(mWins >= 7, 'the medium bot beats the easy one most of the time (' + mWins + ' of ' + n + ')');
+  ok(hWins >= 6, 'the hard bot beats the medium one most of the time (' + hWins + ' of ' + n + ')');
   const L = E.newGame('l', 2), th = Date.now(); E.think(L, 'hard', rng(3));
   ok(slow < 400 && Date.now() - th < 400, 'the hard bot answers in well under a second, even on the large board (' + slow + ' ms, ' + (Date.now() - th) + ' ms)');
   // it takes a winning link, and blocks one

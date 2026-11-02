@@ -205,13 +205,15 @@ function LinkUpEngineFactory() {
       rated.sort(function (a, b) { return b.v - a.v; });
       return rated[0].m;
     }
-    // hard: the best few links, each against the other team's best answer
+    // hard: the best few links, each against the other team's best answer. A crossing
+    // matters to both sides alike, so the answers looked at are the strongest crossings
+    // already rated, not every free one (that took half a second on a slow CI runner)
     rated.sort(function (a, b) { return b.v - a.v; });
-    var best = -Infinity, out = rated[0].m;
+    var best = -Infinity, out = rated[0].m, answers = rated.slice(0, 12).map(function (x) { return x.m; });
     rated.slice(0, 6).forEach(function (x) {
       var T = clone(S); T.own[x.m] = t;
       var worst = Infinity;
-      free(T).forEach(function (r) { var U = clone(T); U.own[r] = 1 - t; worst = Math.min(worst, chain(U, 1 - t) ? -1000 : score(U, t)); });
+      answers.forEach(function (r) { if (r === x.m) return; var U = clone(T); U.own[r] = 1 - t; worst = Math.min(worst, chain(U, 1 - t) ? -1000 : score(U, t)); });
       var v = worst === Infinity ? x.v : worst;
       if (v > best + 1e-9) { best = v; out = x.m; }
     });
