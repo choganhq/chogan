@@ -6128,6 +6128,11 @@ function testReadme() {
   const missFa = games.filter((g) => fa.indexOf(g.name.fa) < 0).map((g) => g.id);
   ok(!missEn.length, 'every game has a row in the English table' + (missEn.length ? ' (missing: ' + missEn.join(', ') + ')' : ''));
   ok(!missFa.length, 'every game has a row in the Persian table' + (missFa.length ? ' (missing: ' + missFa.join(', ') + ')' : ''));
+  // #615: playchogan.com is only a redirect; the web line must still name the real
+  // origin, because that is where a player's progress lives (localStorage is per origin).
+  const webEn = (md.match(/^- \*\*Web:\*\*.*$/m) || [''])[0], webFa = (md.match(/^- \*\*وب:\*\*.*$/m) || [''])[0];
+  ok([webEn, webFa].every((l) => l.includes('(https://playchogan.com)') && l.includes('(https://choganhq.github.io/chogan/)')),
+    'both README web lines link playchogan.com and the real origin');
 }
 
 /* ------------------------------------------------ Menu: pinned and recent (#193) */
