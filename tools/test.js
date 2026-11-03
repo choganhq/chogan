@@ -11118,6 +11118,96 @@ function testTowerUp() {
   ok(Date.now() - t0 < 10000, 'the Tower Up tests finish in under 10 s (' + (Date.now() - t0) + ' ms)');
 }
 
+// #619: the owner asked for dominoes; All Fives by default, Plain behind the gear, against a bot
+function testDominoes() {
+  head('Dominoes (#619)');
+  const t0 = Date.now();
+  const E = loadEngine('dominoes', 'DominoesEngineFactory');
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/dominoes/index.html'), 'utf8');
+  const rng = (seed) => { let x = seed >>> 0; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; };
+  const S = E.set();
+  ok(S.length === 28 && new Set(S.map((t) => t.join('-'))).size === 28, 'a double-six set has 28 different tiles');
+  const H = E.deal(rng(1), null);
+  ok(H.hands[0].length === 7 && H.hands[1].length === 7 && H.yard.length === 14 && E.valid(H), 'a deal gives seven each and leaves fourteen in the boneyard');
+  // the first hand is led by the highest double
+  const top = (h) => Math.max(...h.filter((t) => t[0] === t[1]).map((t) => t[0]), -1);
+  ok(top(H.hands[H.turn]) >= top(H.hands[1 - H.turn]), 'the first hand is led by whoever holds the highest double');
+  // a hand built by hand: 5-5 spinner, then the count and the four ways
+  const B = { hands: [[[5, 5], [0, 5], [5, 6], [3, 5], [6, 6]], [[2, 3], [3, 3], [4, 4], [1, 2], [6, 6]]], yard: [], root: null, arms: { l: [], r: [], u: [], d: [] }, turn: 0, passes: 0, over: false, result: null, log: [] };
+  ok(E.play(B, 0, 'root', true) === 10 && E.count(B) === 10, 'the 5-5 spinner alone counts 10 and scores it');
+  B.turn = 0;
+  ok(E.play(B, 0, 'l', true) === 10 && E.count(B) === 10, '0-5 on its left: the open 0 and the spinner\'s unplayed side (both fives) count 10');
+  ok(E.sides(B).join() === 'l,r', 'until both sides are played, the spinner offers only left and right');
+  B.turn = 0;
+  ok(E.play(B, 0, 'r', true) === 0 && E.count(B) === 6 && E.sides(B).join() === 'l,r,u,d', '5-6 on the right: 0 + 6 = 6 scores nothing, and up and down open');
+  B.turn = 0;
+  ok(E.play(B, 0, 'u', true) === 0 && E.count(B) === 9, '3-5 upwards adds its open 3 (count 9)');
+  B.turn = 0;
+  ok(E.play(B, 0, 'd', true) === -1 && B.hands[0].length === 1, 'a tile that fits no end is refused and stays in the hand');
+  ok(E.play(B, 0, 'r', true) === 15 && E.count(B) === 15, 'a double at an end counts both halves: 6-6 on the 6 makes 0 + 12 + 3 = 15 and scores it');
+  // going out: the other hand's pips, rounded to five
+  ok(B.over && B.result.winner === 0 && B.result.bonus === 34 && E.bonusPts(B, true) === 35, 'playing the last tile ends the hand and scores the other hand, rounded to five');
+  // a blocked hand goes to the lighter hand, for the difference
+  const K = { hands: [[[6, 6]], [[5, 5], [4, 4]]], yard: [], root: [0, 1], arms: { l: [], r: [], u: [], d: [] }, turn: 0, passes: 0, over: false, result: null, log: [] };
+  ok(E.pass(K) && !K.over && E.pass(K) && K.over && K.result.how === 'blocked' && K.result.winner === 0 && K.result.bonus === 6, 'two passes block the hand: the lighter hand wins the difference (18 − 12)');
+  ok(!E.draw(K) && !E.pass(K), 'nothing moves once a hand is over');
+  // drawing: only when nothing fits, until something does
+  const Dr = E.deal(rng(9), 0);
+  Dr.root = [6, 6]; Dr.hands[0] = [[0, 1]]; Dr.yard = [[0, 2], [2, 6]];
+  ok(E.draw(Dr) && Dr.hands[0].length === 2 && !E.draw(Dr), 'a player with no fitting tile draws, and stops once one fits');
+  // the table: no two tiles ever overlap, in any shape of table, nor do the lit targets
+  let states = 0, overlaps = 0, ghosts = 0, badGhosts = 0;
+  for (let k = 0; k < 60; k++) {
+    const r = rng(100 + k), G = E.deal(r, null);
+    while (!G.over) {
+      const L = E.legal(G, G.turn);
+      if (!L.length) { if (!E.draw(G)) E.pass(G); continue; }
+      for (const m of L) for (const mx of [3, 5, 9]) { ghosts++; const Q = E.layout(G, mx, { t: G.hands[G.turn][m.i], side: m.side }); if (!Q.ghost || E.overlaps(Q.tiles.concat([Q.ghost]))) badGhosts++; }
+      const m = E.think(G, 'easy', true, r); E.play(G, m.i, m.side, true);
+      for (const mx of [3, 5, 9]) { states++; if (E.overlaps(E.layout(G, mx).tiles)) overlaps++; }
+    }
+  }
+  ok(states > 1000 && overlaps === 0, 'no two tiles on the table overlap (' + states + ' tables)');
+  ok(ghosts > 1000 && badGhosts === 0, 'every lit target has room on the table (' + ghosts + ' targets)');
+  // whole matches between bots: they always finish, scores add up, and the levels are ordered
+  const match = (a, b, seed, fives, goal) => {
+    const r = rng(seed), sc = [0, 0]; let leader = null, hands = 0, legalAll = true, sum = 0;
+    while (sc[0] < goal && sc[1] < goal && hands < 80) {
+      const G = E.deal(r, leader); let guard = 0;
+      while (!G.over && guard++ < 400) {
+        if (E.legal(G, G.turn).length) { const p = G.turn, m = E.think(G, p === 0 ? a : b, fives, r), got = E.play(G, m.i, m.side, fives); if (got < 0) legalAll = false; else { sc[p] += got; sum += got; if (got % 5) legalAll = false; } }
+        else if (!E.draw(G)) E.pass(G);
+      }
+      if (!G.over) return null;
+      if (G.result.winner >= 0) { const bp = E.bonusPts(G, fives); sc[G.result.winner] += bp; sum += bp; }
+      leader = G.result.winner >= 0 ? G.result.winner : leader; hands++;
+    }
+    return { w: sc[0] >= goal ? 0 : 1, ok: legalAll && sc[0] + sc[1] === sum, hands };
+  };
+  let done = 0, sound = 0, mWins = 0, hWins = 0, n = 0;
+  for (let k = 0; k < 30; k++) {
+    const a = match(k % 2 ? 'medium' : 'easy', k % 2 ? 'easy' : 'medium', 300 + k, true, 100);
+    const b = match(k % 2 ? 'hard' : 'medium', k % 2 ? 'medium' : 'hard', 400 + k, true, 100);
+    [a, b].forEach((x) => { if (x) { done++; if (x.ok) sound++; } });
+    if (a && (a.w === 1) === (k % 2 === 0)) mWins++;
+    if (b && (b.w === 1) === (k % 2 === 0)) hWins++;
+    n++;
+  }
+  ok(done === 60 && sound === 60, 'bot matches always finish, every score is a multiple of five and the totals add up (' + done + ' of 60)');
+  ok(mWins >= 22, 'the medium bot beats the easy one most of the time (' + mWins + ' of ' + n + ')');
+  ok(hWins >= 17, 'the hard bot beats the medium one more often than not (' + hWins + ' of ' + n + ')');
+  const P = match('medium', 'medium', 77, false, 100);
+  ok(P && P.ok, 'a Plain match finishes too, with points only at the end of a hand');
+  // saves
+  const V = E.deal(rng(5), 0); E.play(V, E.legal(V, 0)[0].i, 'root', true);
+  ok(E.valid(V) && !E.valid(Object.assign(E.clone(V), { yard: V.yard.slice(1) })) && !E.valid(Object.assign(E.clone(V), { yard: V.yard.concat([[0, 0]]) })), 'a save is checked before it is restored');
+  ok(/C\.daily\('dominoes', M\.daily \+ '\|' \+ tag\)\.rng/.test(html) && ['dom-win', 'dom-hard', 'dom-big'].every((id) => html.indexOf("unlock('" + id + "')") > 0),
+    'the daily deals come from the day\'s seed, and the three awards are unlocked');
+  // a finished hand is saved with its summary open; a reload must not count it twice
+  ok(/if \(!H\.counted\) \{\s*H\.counted = true;\s*if \(w >= 0\) M\.score\[w\] \+= bonus;/.test(html), 'a hand\'s points are added once, even if the page reloads on its summary');
+  ok(Date.now() - t0 < 12000, 'the Dominoes tests finish in under 12 s (' + (Date.now() - t0) + ' ms)');
+}
+
 // #554: xmha97 asked for Lights Out (named Lights Off: "Lights Out" is a trademark)
 function testLights() {
   head('Lights Off (#554)');
