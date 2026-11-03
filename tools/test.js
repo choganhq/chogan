@@ -10955,6 +10955,68 @@ function testLinkUp() {
   ok(Date.now() - t0 < 12000, 'the Link Up tests finish in under 12 s (' + (Date.now() - t0) + ' ms)');
 }
 
+// #618: the owner asked for a number-removal puzzle; built as Sums ("Cross Sums" is a product name)
+function testSums() {
+  head('Sums (#618)');
+  const t0 = Date.now();
+  const E = loadEngine('sums', 'SumsEngineFactory');
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/sums/index.html'), 'utf8');
+  const rng = (seed) => { let x = seed >>> 0; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; };
+  ok(E.SIZES.join() === '5,6,7', 'three sizes, 5×5 to 7×7 (' + E.SIZES.join(',') + ')');
+  // a hand-made 3×3: the row and column targets come from the answer, and the lines read right
+  const P = { n: 3, d: [3, 5, 2, 4, 1, 6, 7, 2, 8], keep: [1, 0, 0, 1, 0, 1, 0, 1, 1] };
+  Object.assign(P, E.targets(3, P.d, P.keep));
+  ok(P.rows.join() === '3,10,10' && P.cols.join() === '7,2,14', 'targets are the sums of the kept digits (' + P.rows + ' / ' + P.cols + ')');
+  ok(E.line(3, 1).join() === '3,4,5' && E.line(3, 4).join() === '1,4,7', 'a row and a column list their own cells');
+  ok(E.ways(P, new Array(9).fill(0), 0).length === 1, 'the first row adds up to 3 in exactly one way (keep the 3)');
+  // a game is won when every digit that must go is gone, and not before
+  const st = new Array(9).fill(0);
+  ok(!E.solved(P, st), 'an untouched board is not solved');
+  P.keep.forEach((k, i) => { if (!k) st[i] = 2; });
+  ok(E.solved(P, st) && [0, 1, 2, 3, 4, 5].every((k) => E.lineDone(P, st, k)), 'with every extra digit erased the board is solved and every line is done');
+  // generated puzzles: deduction solves them, the search proves exactly one answer, and each
+  // size is as hard as it should be
+  let made = 0, unique = 0, logical = 0, hardEnough = 0, mixed = 0, slow = 0;
+  for (const n of E.SIZES) {
+    for (let k = 0; k < 25; k++) {
+      const t = Date.now(), Q = E.generate(n, rng(1000 * n + k));
+      slow = Math.max(slow, Date.now() - t);
+      made++;
+      const r = E.deduce(Q);
+      if (r.solved && r.st.every((v, i) => (v === 1) === !!Q.keep[i])) logical++;
+      if (r.worst >= E.NEED[n]) hardEnough++;
+      if (E.count(Q, 2) === 1) unique++;
+      let ok2 = true;
+      for (let L = 0; L < 2 * n; L++) { const c = E.line(n, L).filter((i) => Q.keep[i]).length; if (!c || c === n) ok2 = false; }
+      if (ok2) mixed++;
+    }
+  }
+  ok(made === 75, 'seventy-five puzzles were made (' + made + ')');
+  ok(logical === made, 'deduction alone reaches the answer in every one (' + logical + ' of ' + made + ')');
+  ok(unique === made, 'the search finds exactly one answer in every one (' + unique + ' of ' + made + ')');
+  ok(hardEnough === made, 'every puzzle is at least as hard as its size asks (' + hardEnough + ' of ' + made + ')');
+  ok(mixed === made, 'every line keeps at least one digit and loses at least one (' + mixed + ' of ' + made + ')');
+  ok(slow < 300, 'a puzzle is made in well under a second (' + slow + ' ms at worst)');
+  // two puzzles with the same seed are the same: the daily one is the same for everyone
+  const a = E.generate(6, rng(42)), b = E.generate(6, rng(42));
+  ok(a.d.join() === b.d.join() && a.keep.join() === b.keep.join(), 'the same seed gives the same puzzle');
+  // a hint is always a true move, all the way to the end
+  const H = E.generate(6, rng(7)), hs = new Array(36).fill(0);
+  let steps = 0, wrong = 0;
+  for (let h = E.hint(H, hs); h; h = E.hint(H, hs)) { if ((h[1] === 1) !== !!H.keep[h[0]]) wrong++; hs[h[0]] = h[1]; steps++; }
+  ok(steps > 0 && wrong === 0 && hs.every((v) => v), 'hints alone solve a 6×6 and never point the wrong way (' + steps + ' hints)');
+  ok(E.stars(0) === 3 && E.stars(1) === 2 && E.stars(2) === 2 && E.stars(3) === 1 && E.stars(40) === 1, 'stars: three clean, two for one or two mistakes, one for more');
+  // saves: only a state play can reach is restored
+  const V = { n: 6, d: H.d, rows: H.rows, cols: H.cols, keep: H.keep, st: new Array(36).fill(0), mistakes: 1, hints: 0 };
+  const lie = H.keep.indexOf(0);
+  ok(E.valid(V) && !E.valid(Object.assign({}, V, { st: V.st.map((v, i) => (i === lie ? 1 : v)) })) &&
+    !E.valid(Object.assign({}, V, { rows: V.rows.map((v, i) => (i ? v : v + 1)) })) && !E.valid(Object.assign({}, V, { n: 8 })),
+  'a save is checked before it is restored');
+  ok(/C\.daily\('sums', dailyDate\)\.rng/.test(html) && ['sum-clean', 'sum-big', 'sum-daily'].every((id) => html.indexOf("unlock('" + id + "')") > 0),
+    'the daily puzzle is seeded by the day, and the three awards are unlocked');
+  ok(Date.now() - t0 < 12000, 'the Sums tests finish in under 12 s (' + (Date.now() - t0) + ' ms)');
+}
+
 // #554: xmha97 asked for Lights Out (named Lights Off: "Lights Out" is a trademark)
 function testLights() {
   head('Lights Off (#554)');

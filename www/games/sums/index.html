@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>جمع‌ها — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .su-wrap > .ch-fit { --fit-ar: 1; }
+  .ch-fit > .su-box { width: 100%; height: 100%; display: grid; place-items: center; }
+  /* the row targets sit on the side a line starts from, so the board follows the page's
+     direction; the arrows follow it too (see the keydown handler) */
+  .su-board { width: 100%; aspect-ratio: 1; max-width: 100%; max-height: 100%; box-sizing: border-box;
+    display: grid; grid-template-columns: repeat(var(--m), 1fr); grid-template-rows: repeat(var(--m), 1fr); gap: var(--gap);
+    touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+  .su-t { display: grid; place-items: center; border-radius: 22%; background: var(--game-soft, var(--c-surface-2));
+    color: var(--game-text, var(--c-text)); font-weight: 800; font-size: var(--fs); font-variant-numeric: tabular-nums;
+    transition: opacity 200ms var(--ease), background 200ms var(--ease); }
+  .su-t--done { opacity: .45; }
+  .su-t--corner { background: none; }
+  .su-cell { border: 0; padding: 0; margin: 0; cursor: pointer; position: relative; border-radius: 22%;
+    background: var(--c-surface); color: var(--c-text); box-shadow: var(--sh-1);
+    font: inherit; font-weight: 700; font-size: var(--fs); font-variant-numeric: tabular-nums;
+    transition: background 160ms var(--ease), color 160ms var(--ease), transform 90ms var(--ease); }
+  .su-cell:active { transform: scale(.94); }
+  .su-cell:focus-visible { outline: 3px solid var(--c-accent); outline-offset: 2px; z-index: 1; }
+  /* a kept digit gets a ring; an erased one leaves an empty tile behind */
+  .su-cell--kept::after { content: ''; position: absolute; inset: 9%; border-radius: 50%; border: max(2px, .09em) solid var(--game, var(--c-accent)); }
+  .su-cell--gone { background: var(--c-surface-2); color: transparent; box-shadow: none; cursor: default; }
+  .su-cell--miss { color: var(--c-bad); }
+  .su-cell--miss::after { border-color: var(--c-bad); }
+  .su-cell--hint { color: var(--c-good); }
+  .su-board--done .su-cell { cursor: default; }
+  .su-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .su-side { align-items: center; }
+  .ch-side > .su-tools { width: auto; }
+  .su-tools { display: inline-flex; gap: 4px; padding: 4px; border-radius: var(--r-pill); background: var(--c-surface-2); align-self: center; }
+  .su-tool { width: 56px; height: 48px; border: 0; border-radius: var(--r-pill); background: none; color: var(--c-text-dim);
+    display: grid; place-items: center; cursor: pointer; transition: background 140ms var(--ease), color 140ms var(--ease); }
+  .su-tool[aria-pressed="true"] { background: var(--c-surface); color: var(--game-text, var(--c-text)); box-shadow: var(--sh-1); }
+  .su-tool:focus-visible { outline: 3px solid var(--c-accent); outline-offset: 2px; }
+  .su-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-variant-numeric: tabular-nums; }
+  @media (prefers-reduced-motion: reduce) { .su-cell, .su-t, .su-tool { transition: none; } }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function SumsEngineFactory() {
+  'use strict';
+
+  var SIZES = [5, 6, 7];
+  // the hardest line a player must work out somewhere in the puzzle has at least this many
+  // ways to add up, so a bigger board also asks for more thought (see difficulty)
+  var NEED = { 5: 1, 6: 2, 7: 3 };
+
+  // Line k: rows are 0..n-1, columns n..2n-1; the cells of the line in order
+  function line(n, k) {
+    var out = [];
+    for (var j = 0; j < n; j++) out.push(k < n ? k * n + j : j * n + (k - n));
+    return out;
+  }
+  function target(P, k) { return k < P.n ? P.rows[k] : P.cols[k - P.n]; }
+
+  // Every way the line can still add up to its target, as masks over the line's cells,
+  // given what is known: st 1 kept, 2 erased, 0 open
+  function ways(P, st, k) {
+    var idx = line(P.n, k), m = idx.length, t = target(P, k), out = [];
+    for (var mask = 0; mask < (1 << m); mask++) {
+      var s = 0, fits = true;
+      for (var j = 0; j < m; j++) {
+        var on = (mask >> j) & 1, v = st[idx[j]];
+        if ((v === 1 && !on) || (v === 2 && on)) { fits = false; break; }
+        if (on) s += P.d[idx[j]];
+      }
+      if (fits && s === t) out.push(mask);
+    }
+    return out;
+  }
+  // What one line tells about its open cells: kept in every way it can add up, or in none
+  function news(P, st, k) {
+    var idx = line(P.n, k), w = ways(P, st, k), any = 0, every = (1 << P.n) - 1, out = [];
+    w.forEach(function (o) { any |= o; every &= o; });
+    idx.forEach(function (c, j) {
+      if (st[c]) return;
+      if ((every >> j) & 1) out.push([c, 1]);
+      else if (!((any >> j) & 1)) out.push([c, 2]);
+    });
+    return { count: w.length, cells: out };
+  }
+
+  // A player's way through the puzzle: always take the line whose news is easiest to see,
+  // the one with the fewest ways left to add up. Returns the state reached, whether that
+  // solves it, and the most ways any line had when it was needed (the puzzle's difficulty).
+  function deduce(P, st0) {
+    var st = st0 ? st0.slice() : new Array(P.n * P.n).fill(0), worst = 0;
+    for (;;) {
+      var best = null;
+      for (var k = 0; k < 2 * P.n; k++) {
+        var r = news(P, st, k);
+        if (!r.count) return { st: st, solved: false, worst: worst };
+        if (r.cells.length && (!best || r.count < best.count)) best = r;
+      }
+      if (!best) break;
+      best.cells.forEach(function (x) { st[x[0]] = x[1]; });
+      worst = Math.max(worst, best.count);
+    }
+    return { st: st, solved: st.every(function (v) { return v; }), worst: worst };
+  }
+  // The next cell a hint may show from where the player is: one the easiest line decides
+  function hint(P, st) {
+    var best = null;
+    for (var k = 0; k < 2 * P.n; k++) {
+      var r = news(P, st, k);
+      if (r.cells.length && (!best || r.count < best.count)) best = r;
+    }
+    return best ? best.cells[0] : null;
+  }
+
+  // Counts answers by search, row by row, up to cap: the proof of a single answer that
+  // does not lean on the deduction above
+  function count(P, cap) {
+    var n = P.n, empty = new Array(n * n).fill(0), rowWays = [], colSum = new Array(n).fill(0), found = 0;
+    for (var r = 0; r < n; r++) rowWays.push(ways(P, empty, r));
+    (function go(r) {
+      if (r === n) { for (var c = 0; c < n; c++) if (colSum[c] !== P.cols[c]) return; found++; return; }
+      for (var i = 0; i < rowWays[r].length && found < cap; i++) {
+        var m = rowWays[r][i], over = false, c2;
+        for (c2 = 0; c2 < n; c2++) if ((m >> c2) & 1) colSum[c2] += P.d[r * n + c2];
+        for (c2 = 0; c2 < n; c2++) if (colSum[c2] > P.cols[c2]) { over = true; break; }
+        if (!over) go(r + 1);
+        for (c2 = 0; c2 < n; c2++) if ((m >> c2) & 1) colSum[c2] -= P.d[r * n + c2];
+      }
+    })(0);
+    return found;
+  }
+
+  function targets(n, d, keep) {
+    var rows = new Array(n).fill(0), cols = new Array(n).fill(0);
+    for (var i = 0; i < n * n; i++) if (keep[i]) { rows[Math.floor(i / n)] += d[i]; cols[i % n] += d[i]; }
+    return { rows: rows, cols: cols };
+  }
+
+  // Random digits and a random answer, about half kept, every line keeping at least one
+  // digit and erasing at least one. Kept only if deduction alone solves it, so it never
+  // needs a guess and has exactly one answer, and only if it is hard enough for its size.
+  function generate(n, rnd) {
+    var last = null;
+    for (var tries = 0; tries < 4000; tries++) {
+      var N = n * n, d = [], keep = [], i;
+      for (i = 0; i < N; i++) { d.push(1 + Math.floor(rnd() * 9)); keep.push(rnd() < 0.5 ? 1 : 0); }
+      var mixed = true;
+      for (var k = 0; k < 2 * n && mixed; k++) {
+        var s = 0;
+        line(n, k).forEach(function (c) { s += keep[c]; });
+        mixed = s > 0 && s < n;
+      }
+      if (!mixed) continue;
+      var t = targets(n, d, keep), P = { n: n, d: d, rows: t.rows, cols: t.cols, keep: keep };
+      var res = deduce(P);
+      if (!res.solved) continue;
+      last = P;
+      if (res.worst >= NEED[n]) return P;
+    }
+    return last;
+  }
+
+  // A line is finished when every digit it must lose is gone
+  function lineDone(P, st, k) {
+    return line(P.n, k).every(function (c) { return P.keep[c] || st[c] === 2; });
+  }
+  function solved(P, st) {
+    for (var i = 0; i < P.d.length; i++) if (!P.keep[i] && st[i] !== 2) return false;
+    return true;
+  }
+  // three stars with no mistake, two for one or two, one for any finish: a mistake never
+  // ends the puzzle
+  function stars(mistakes) { return mistakes === 0 ? 3 : mistakes <= 2 ? 2 : 1; }
+
+  function valid(o) {
+    if (!o || SIZES.indexOf(o.n) < 0) return false;
+    var N = o.n * o.n;
+    var arr = function (a, len, ok) { return Array.isArray(a) && a.length === len && a.every(ok); };
+    if (!arr(o.d, N, function (v) { return v >= 1 && v <= 9 && v === Math.floor(v); }) || !arr(o.keep, N, function (v) { return v === 0 || v === 1; }) ||
+      !arr(o.st, N, function (v) { return v === 0 || v === 1 || v === 2; }) || !arr(o.rows, o.n, function (v) { return v >= 0; }) || !arr(o.cols, o.n, function (v) { return v >= 0; })) return false;
+    var t = targets(o.n, o.d, o.keep);
+    if (t.rows.join() !== o.rows.join() || t.cols.join() !== o.cols.join()) return false;
+    // a save can only hold what play allows: kept digits are in the answer, erased ones are not
+    for (var i = 0; i < N; i++) if ((o.st[i] === 1 && !o.keep[i]) || (o.st[i] === 2 && o.keep[i])) return false;
+    return typeof o.mistakes === 'number' && o.mistakes >= 0 && typeof o.hints === 'number' && o.hints >= 0;
+  }
+
+  return { SIZES: SIZES, NEED: NEED, line: line, target: target, ways: ways, deduce: deduce, hint: hint, count: count,
+    targets: targets, generate: generate, lineDone: lineDone, solved: solved, stars: stars, valid: valid };
+}
+if (typeof module !== 'undefined') module.exports = SumsEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = SumsEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'sums',
+    name: { fa: 'جمع‌ها', en: 'Sums', zh: '数和', de: 'Summen', es: 'Sumas', pl: 'Sumy' },
+    accent: '#0F766E',
+    mood: 'menu',
+    strings: {
+      fa: {
+        board: 'جدول اعداد', cellN: 'ردیف {r} ستون {c}، عدد {v}', kept: 'نگه داشته', gone: 'پاک شده', rowT: 'جمع ردیف {r}: {v}', colT: 'جمع ستون {c}: {v}',
+        sizeN: '{n}×{n}', dailySu: 'جمع‌های روزانه', eraseT: 'پاک کردن', keepT: 'نگه داشتن', toolsL: 'ابزار',
+        mistakesN: 'اشتباه: {m}', solvedT: 'همه‌ی جمع‌ها درست شد!', mistakesL: 'اشتباه', hintsL: 'راهنمایی', newPuzzle: 'پازل تازه',
+        clean: 'بدون هیچ اشتباهی!', wrongErase: 'این عدد لازم است', wrongKeep: 'این عدد اضافه است', hintCost: 'راهنمایی ({c} سکه)',
+        kMove: 'جابه‌جایی بین خانه‌ها', kUse: 'ابزار انتخاب‌شده', kErase: 'پاک کردن', kKeep: 'نگه داشتن', kTool: 'عوض کردن ابزار', kNew: 'پازل تازه',
+        rules: 'عددهایی را پاک کن تا عددهای باقی‌مانده‌ی هر ردیف و هر ستون با هم برابر جمع کنار همان ردیف یا بالای همان ستون شوند. ابزار پاک‌کن عدد را برمی‌دارد و ابزار حلقه عددی را که مطمئنی لازم است علامت می‌زند؛ لمس طولانی کار ابزار دیگر را می‌کند. هر پازل فقط یک جواب دارد و بدون حدس، فقط با فکر حل می‌شود. اشتباه را نشانت می‌دهیم و همان‌جا درستش می‌کنیم: بازی تمام نمی‌شود، فقط ستاره کم می‌شود. وقتی همه‌ی عددهای اضافه پاک شوند پازل حل شده است.',
+        tutTitle1: 'جمع هر خط', tutText1: 'عددهای باقی‌مانده‌ی هر ردیف و ستون باید با جمع کنارش برابر شوند.',
+        tutTitle2: 'پاک کن یا نگه دار', tutText2: 'با پاک‌کن عدد اضافه را بردار، با حلقه عدد لازم را علامت بزن. لمس طولانی ابزار دیگر است.',
+        tutTitle3: 'بدون حدس', tutText3: 'هر پازل یک جواب دارد. اشتباه فقط ستاره کم می‌کند.'
+      },
+      en: {
+        board: 'The numbers', cellN: 'Row {r} column {c}, {v}', kept: 'kept', gone: 'erased', rowT: 'Row {r} sum: {v}', colT: 'Column {c} sum: {v}',
+        sizeN: '{n}×{n}', dailySu: 'Daily Sums', eraseT: 'Erase', keepT: 'Keep', toolsL: 'Tool',
+        mistakesN: 'Mistakes: {m}', solvedT: 'Every sum adds up!', mistakesL: 'Mistakes', hintsL: 'Hints', newPuzzle: 'New puzzle',
+        clean: 'Without a single mistake!', wrongErase: 'That number is needed', wrongKeep: 'That number has to go', hintCost: 'Hint ({c} coins)',
+        kMove: 'Move between cells', kUse: 'Use the chosen tool', kErase: 'Erase', kKeep: 'Keep', kTool: 'Switch tool', kNew: 'New puzzle',
+        rules: 'Erase numbers until the ones left in each row and each column add up to the sum beside that row or above that column. The eraser takes a number away, and the ring marks one you are sure must stay; a long press does what the other tool does. Every puzzle has exactly one answer and is solved by thinking alone, never by guessing. A mistake is shown and put right on the spot: it never ends the puzzle, it only costs stars. The puzzle is solved when every extra number is gone.',
+        tutTitle1: 'Every line adds up', tutText1: 'The numbers left in each row and column must add up to the sum beside it.',
+        tutTitle2: 'Erase or keep', tutText2: 'Erase the extra numbers, ring the ones that must stay. A long press uses the other tool.',
+        tutTitle3: 'Never a guess', tutText3: 'Every puzzle has one answer. A mistake only costs stars.'
+      },
+      pl: {
+        board: 'Liczby', cellN: 'Rząd {r} kolumna {c}, {v}', kept: 'zostaje', gone: 'wymazana', rowT: 'Suma rzędu {r}: {v}', colT: 'Suma kolumny {c}: {v}',
+        sizeN: '{n}×{n}', dailySu: 'Codzienne Sumy', eraseT: 'Wymaż', keepT: 'Zostaw', toolsL: 'Narzędzie',
+        mistakesN: 'Błędy: {m}', solvedT: 'Wszystkie sumy się zgadzają!', mistakesL: 'Błędy', hintsL: 'Podpowiedzi', newPuzzle: 'Nowa łamigłówka',
+        clean: 'Bez ani jednego błędu!', wrongErase: 'Ta liczba jest potrzebna', wrongKeep: 'Ta liczba musi zniknąć', hintCost: 'Podpowiedź ({c} monet)',
+        kMove: 'Przemieść między polami', kUse: 'Użyj wybranego narzędzia', kErase: 'Wymaż', kKeep: 'Zostaw', kTool: 'Zmień narzędzie', kNew: 'Nowa łamigłówka',
+        rules: 'Wymazuj liczby, aż te, które zostaną w każdym rzędzie i każdej kolumnie, dadzą sumę podaną obok rzędu lub nad kolumną. Gumka usuwa liczbę, a kółko zaznacza tę, która na pewno zostaje; długie naciśnięcie działa jak drugie narzędzie. Każda łamigłówka ma dokładnie jedno rozwiązanie i rozwiązuje się ją samym myśleniem, nigdy zgadywaniem. Błąd jest pokazywany i od razu poprawiany: nigdy nie kończy gry, kosztuje tylko gwiazdki. Łamigłówka jest rozwiązana, gdy znikną wszystkie zbędne liczby.',
+        tutTitle1: 'Każda linia się sumuje', tutText1: 'Liczby, które zostaną w rzędzie i kolumnie, muszą dać sumę obok.',
+        tutTitle2: 'Wymaż albo zostaw', tutText2: 'Wymaż zbędne liczby, zakreśl te, które zostają. Długie naciśnięcie to drugie narzędzie.',
+        tutTitle3: 'Bez zgadywania', tutText3: 'Każda łamigłówka ma jedno rozwiązanie. Błąd kosztuje tylko gwiazdki.'
+      },
+      zh: {
+        board: '数字', cellN: '第 {r} 行第 {c} 列，{v}', kept: '保留', gone: '已擦除', rowT: '第 {r} 行之和：{v}', colT: '第 {c} 列之和：{v}',
+        sizeN: '{n}×{n}', dailySu: '每日数和', eraseT: '擦除', keepT: '保留', toolsL: '工具',
+        mistakesN: '错误：{m}', solvedT: '每个和都对上了！', mistakesL: '错误', hintsL: '提示', newPuzzle: '新题',
+        clean: '一个错误都没有！', wrongErase: '这个数字是需要的', wrongKeep: '这个数字要擦掉', hintCost: '提示（{c} 金币）',
+        kMove: '在格子之间移动', kUse: '使用选中的工具', kErase: '擦除', kKeep: '保留', kTool: '切换工具', kNew: '新题',
+        rules: '擦掉一些数字，让每行每列剩下的数字之和等于该行旁边或该列上方的数。橡皮擦掉数字，圆圈标出你确定要留下的数字；长按使用另一个工具。每道题只有一个答案，只靠推理就能解开，从不需要猜。错误会被指出并当场改正：不会结束游戏，只会少星。所有多余的数字都擦掉时，题目就解开了。',
+        tutTitle1: '每条线的和', tutText1: '每行每列剩下的数字之和必须等于旁边的数。',
+        tutTitle2: '擦除或保留', tutText2: '擦掉多余的数字，圈出要留下的。长按使用另一个工具。',
+        tutTitle3: '从不靠猜', tutText3: '每道题只有一个答案。错误只会少星。'
+      },
+      de: {
+        board: 'Die Zahlen', cellN: 'Reihe {r} Spalte {c}, {v}', kept: 'bleibt', gone: 'gelöscht', rowT: 'Summe Reihe {r}: {v}', colT: 'Summe Spalte {c}: {v}',
+        sizeN: '{n}×{n}', dailySu: 'Summen des Tages', eraseT: 'Löschen', keepT: 'Behalten', toolsL: 'Werkzeug',
+        mistakesN: 'Fehler: {m}', solvedT: 'Alle Summen stimmen!', mistakesL: 'Fehler', hintsL: 'Tipps', newPuzzle: 'Neues Rätsel',
+        clean: 'Ohne einen einzigen Fehler!', wrongErase: 'Diese Zahl wird gebraucht', wrongKeep: 'Diese Zahl muss weg', hintCost: 'Tipp ({c} Münzen)',
+        kMove: 'Zwischen den Feldern wechseln', kUse: 'Gewähltes Werkzeug nutzen', kErase: 'Löschen', kKeep: 'Behalten', kTool: 'Werkzeug wechseln', kNew: 'Neues Rätsel',
+        rules: 'Lösche Zahlen, bis die übrigen in jeder Reihe und Spalte die Summe neben der Reihe oder über der Spalte ergeben. Der Radierer nimmt eine Zahl weg, der Ring markiert eine, die sicher bleibt; langes Drücken macht, was das andere Werkzeug tut. Jedes Rätsel hat genau eine Lösung und ist allein durch Nachdenken lösbar, nie durch Raten. Ein Fehler wird gezeigt und sofort richtiggestellt: Er beendet das Rätsel nie, er kostet nur Sterne. Gelöst ist es, wenn jede überzählige Zahl weg ist.',
+        tutTitle1: 'Jede Linie geht auf', tutText1: 'Die übrigen Zahlen jeder Reihe und Spalte ergeben die Summe daneben.',
+        tutTitle2: 'Löschen oder behalten', tutText2: 'Lösche überzählige Zahlen, umkreise die, die bleiben. Langes Drücken nutzt das andere Werkzeug.',
+        tutTitle3: 'Nie raten', tutText3: 'Jedes Rätsel hat eine Lösung. Ein Fehler kostet nur Sterne.'
+      },
+      es: {
+        board: 'Los números', cellN: 'Fila {r} columna {c}, {v}', kept: 'se queda', gone: 'borrado', rowT: 'Suma fila {r}: {v}', colT: 'Suma columna {c}: {v}',
+        sizeN: '{n}×{n}', dailySu: 'Sumas diarias', eraseT: 'Borrar', keepT: 'Conservar', toolsL: 'Herramienta',
+        mistakesN: 'Errores: {m}', solvedT: '¡Todas las sumas cuadran!', mistakesL: 'Errores', hintsL: 'Pistas', newPuzzle: 'Puzle nuevo',
+        clean: '¡Sin un solo error!', wrongErase: 'Ese número hace falta', wrongKeep: 'Ese número sobra', hintCost: 'Pista ({c} monedas)',
+        kMove: 'Moverse entre casillas', kUse: 'Usar la herramienta elegida', kErase: 'Borrar', kKeep: 'Conservar', kTool: 'Cambiar de herramienta', kNew: 'Puzle nuevo',
+        rules: 'Borra números hasta que los que quedan en cada fila y cada columna sumen el número que hay junto a la fila o sobre la columna. La goma quita un número y el aro marca uno que seguro se queda; una pulsación larga hace lo de la otra herramienta. Cada puzle tiene una sola solución y se resuelve pensando, nunca adivinando. Un error se muestra y se corrige en el acto: nunca termina el puzle, solo cuesta estrellas. El puzle está resuelto cuando no queda ningún número de más.',
+        tutTitle1: 'Cada línea suma', tutText1: 'Los números que quedan en cada fila y columna deben sumar el número de al lado.',
+        tutTitle2: 'Borra o conserva', tutText2: 'Borra los que sobran y rodea los que se quedan. Una pulsación larga usa la otra herramienta.',
+        tutTitle3: 'Nunca adivinar', tutText3: 'Cada puzle tiene una solución. Un error solo cuesta estrellas.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var DAILY_N = 6, HINT_COST = 10, LONG_MS = 420;
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || E.SIZES.indexOf(prefs.n) < 0) prefs = { n: 5 };
+  // the tool is a habit, not part of a puzzle: it is kept across puzzles
+  var tool = prefs.tool === 'keep' ? 'keep' : 'erase';
+
+  var S = null, startedAt = 0, ended = false, focusAt = 0, miss = {}, hinted = {};
+
+  var board = el('div', { class: 'su-board', role: 'group', 'aria-label': C.t('board') });
+  var cells = [], heads = [];
+  var box = el('div', { class: 'su-box' }, [board]);
+  var top = el('div', { class: 'su-top ch-above' });
+  var status = el('div', { class: 'su-status', role: 'status', 'aria-live': 'polite' });
+  var eraseBtn = el('button', { class: 'su-tool', type: 'button', 'aria-label': C.t('eraseT'), title: C.t('eraseT'), onclick: function () { setTool('erase'); } }, [C.icon('eraser', 22)]);
+  var keepBtn = el('button', { class: 'su-tool', type: 'button', 'aria-label': C.t('keepT'), title: C.t('keepT'), onclick: function () { setTool('keep'); } }, [C.icon('pencil', 22)]);
+  var tools = el('div', { class: 'su-tools', role: 'group', 'aria-label': C.t('toolsL') }, [eraseBtn, keepBtn]);
+  var wrap = el('div', { class: 'su-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side su-side' }, [top, status, tools])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'bulb', label: C.t('hintCost', { c: C.num(HINT_COST) }), onClick: hint });
+  if (!dailyDate) ctx.button({ icon: 'refresh', label: C.t('newPuzzle'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- game */
+
+  function newPuzzle(n) {
+    var rnd = dailyDate ? C.daily('sums', dailyDate).rng : Math.random;
+    var P = E.generate(n, rnd);
+    S = { n: n, d: P.d, rows: P.rows, cols: P.cols, keep: P.keep, st: new Array(n * n).fill(0), mistakes: 0, hints: 0, daily: dailyDate || null };
+    startedAt = Date.now(); ended = false; focusAt = 0; miss = {}; hinted = {};
+    build();
+    save();
+  }
+  function askNew() {
+    if (S && !ended && S.st.some(function (v) { return v; })) C.ui.confirm({ title: C.t('newPuzzle'), body: C.t('resetWarn'), onOk: function () { newPuzzle(prefs.n); } });
+    else newPuzzle(prefs.n);
+  }
+  function setSize(n) {
+    if (n === S.n) return;
+    var go = function () { prefs.n = n; ctx.store.set('prefs', prefs); newPuzzle(n); };
+    if (!ended && S.st.some(function (v) { return v; })) C.ui.confirm({ title: C.t('newPuzzle'), body: C.t('resetWarn'), onOk: go, onCancel: render });
+    else go();
+  }
+  function setTool(t) {
+    if (tool === t) return;
+    tool = t; prefs.tool = t; ctx.store.set('prefs', prefs);
+    C.feedback('select');
+    render();
+  }
+
+  // A wrong move is never applied the wrong way round: the cell is shown as it really is,
+  // marked, and the mistake costs a star
+  function act(i, what) {
+    if (!S || ended || S.st[i]) return;
+    focusAt = i;
+    var right = S.keep[i] ? 1 : 2, want = what === 'keep' ? 1 : 2;
+    S.st[i] = right;
+    if (want !== right) {
+      S.mistakes++; miss[i] = 1;
+      C.feedback('bad');
+      C.ui.shake(cells[i]);
+      C.ui.toast({ icon: 'info', title: C.t(right === 1 ? 'wrongErase' : 'wrongKeep') });
+    } else C.feedback(want === 2 ? 'tap' : 'select');
+    settle();
+  }
+  // a line whose extra digits are all gone rings the rest of its digits by itself
+  function settle() {
+    for (var k = 0; k < 2 * S.n; k++) {
+      if (!E.lineDone(S, S.st, k)) continue;
+      E.line(S.n, k).forEach(function (c) { if (!S.st[c]) S.st[c] = 1; });
+    }
+    render(); save();
+    if (E.solved(S, S.st)) win();
+  }
+
+  function hint() {
+    if (!S || ended) return;
+    if (!C.coins.can(HINT_COST)) {
+      C.feedback('bad');
+      C.ui.toast({ icon: 'coin', title: C.t('notEnoughCoins'), sub: C.t('playToEarn') });
+      return;
+    }
+    var h = E.hint(S, S.st);
+    if (!h) return;
+    C.coins.spend(HINT_COST);
+    S.st[h[0]] = h[1]; S.hints++; hinted[h[0]] = 1; focusAt = h[0];
+    C.feedback('coin');
+    C.ui.toast({ icon: 'bulb', title: C.t('hintUsed') });
+    settle();
+  }
+
+  function win() {
+    ended = true;
+    var st = E.stars(S.mistakes), clean = !S.mistakes && !S.hints;
+    var base = { 5: [4, 15], 6: [7, 28], 7: [12, 50] }[S.n], k = st === 3 ? 1 : st === 2 ? 0.7 : 0.4;
+    var coins = Math.max(1, Math.round(base[0] * k)), points = Math.max(1, Math.round(base[1] * k));
+    if (clean && S.n >= 6) C.achievements.unlock('sum-clean');
+    if (S.n === 7) C.achievements.unlock('sum-big');
+    if (S.daily) {
+      if (!C.stats.daily('sums', S.daily, { label: C.t('mistakesN', { m: C.num(S.mistakes) }), win: true, stars: st })) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+      if (!S.mistakes) C.achievements.unlock('sum-daily');
+    }
+    ctx.clearSave();
+    C.feedback('good');
+    var elapsed = Date.now() - startedAt;
+    setTimeout(function () {
+      ctx.finish({
+        won: true, title: C.t('solvedT'), note: clean ? C.t('clean') : null, stars: st, timeMs: elapsed, coins: coins, points: points,
+        lines: [
+          S.daily ? { label: C.t('daily'), value: C.num(S.daily) } : { label: C.t('sizeN', { n: C.num(S.n) }), value: '' },
+          { label: C.t('mistakesL'), value: C.num(S.mistakes) },
+          { label: C.t('hintsL'), value: C.num(S.hints) },
+          { label: C.t('time'), value: C.time(elapsed) }
+        ],
+        shareText: 'چوگان · جمع‌ها' + (S.daily ? ('\nروزانه ' + S.daily) : ('\n' + S.n + '×' + S.n)) + '\n' + '★'.repeat(st),
+        againLabel: S.daily ? null : C.t('newPuzzle'),
+        onAgain: S.daily ? null : function () { newPuzzle(prefs.n); }
+      });
+    }, C.ui.reduceMotion() ? 200 : 650);
+  }
+
+  /* --------------------------------------------------------------- view */
+
+  function build() {
+    board.innerHTML = '';
+    cells = []; heads = [];
+    var n = S.n, m = n + 1;
+    board.style.setProperty('--m', m);
+    board.style.setProperty('--gap', { 5: '2%', 6: '1.6%', 7: '1.3%' }[n]);
+    fitFont();
+    board.appendChild(el('div', { class: 'su-t su-t--corner', 'aria-hidden': 'true' }));
+    for (var c = 0; c < n; c++) { var h = el('div', { class: 'su-t' }); heads[n + c] = h; board.appendChild(h); }
+    for (var r = 0; r < n; r++) {
+      var rh = el('div', { class: 'su-t' }); heads[r] = rh; board.appendChild(rh);
+      for (c = 0; c < n; c++) (function (i) {
+        var b = el('button', { class: 'su-cell', type: 'button', tabindex: '-1' });
+        var timer = null, longFired = false;
+        // a long press does the other tool, as Minesweeper's flags do (#185 kept it touch-only)
+        b.addEventListener('pointerdown', function (e) {
+          longFired = false;
+          if (e.pointerType !== 'mouse') timer = setTimeout(function () { longFired = true; act(i, tool === 'keep' ? 'erase' : 'keep'); }, LONG_MS);
+        });
+        ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (ev) { b.addEventListener(ev, function () { clearTimeout(timer); }); });
+        b.addEventListener('contextmenu', function (e) { e.preventDefault(); clearTimeout(timer); if (!longFired) act(i, tool === 'keep' ? 'erase' : 'keep'); longFired = true; });
+        b.addEventListener('click', function () { if (longFired) { longFired = false; return; } act(i, tool); });
+        b.addEventListener('focus', function () { if (focusAt !== i) { focusAt = i; render(); } });
+        cells[i] = b; board.appendChild(b);
+      })(r * n + c);
+    }
+    render();
+  }
+  // the digits scale with the board; measured rather than set in cq units, which the
+  // Android WebViews before Chrome 105 drop (#611)
+  function fitFont() {
+    if (!S) return;
+    var w = board.getBoundingClientRect().width;
+    if (w) board.style.setProperty('--fs', Math.round(Math.min(w / (S.n + 1) * 0.42, 34)) + 'px');
+  }
+  if (window.ResizeObserver) new ResizeObserver(fitFont).observe(board); else window.addEventListener('resize', fitFont);
+  function render() {
+    var n = S.n;
+    for (var i = 0; i < cells.length; i++) {
+      var s = S.st[i], b = cells[i];
+      b.textContent = C.num(S.d[i]);
+      b.className = 'su-cell' + (s === 1 ? ' su-cell--kept' : s === 2 ? ' su-cell--gone' : '') + (miss[i] && s === 1 ? ' su-cell--miss' : '') + (hinted[i] && s === 1 ? ' su-cell--hint' : '');
+      b.setAttribute('aria-label', C.t('cellN', { r: C.num(Math.floor(i / n) + 1), c: C.num(i % n + 1), v: C.num(S.d[i]) }) + (s ? ' · ' + C.t(s === 1 ? 'kept' : 'gone') : ''));
+      b.setAttribute('tabindex', i === focusAt ? '0' : '-1');
+    }
+    for (var k = 0; k < 2 * n; k++) {
+      heads[k].textContent = C.num(E.target(S, k));
+      heads[k].setAttribute('aria-label', C.t(k < n ? 'rowT' : 'colT', { r: C.num(k + 1), c: C.num(k - n + 1), v: C.num(E.target(S, k)) }));
+      heads[k].classList.toggle('su-t--done', E.lineDone(S, S.st, k));
+    }
+    board.classList.toggle('su-board--done', ended);
+    top.innerHTML = '';
+    if (S.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailySu') + ' — ' + C.num(S.daily) })]));
+    else top.appendChild(C.ui.segmented(E.SIZES.map(function (v) { return { value: v, label: C.t('sizeN', { n: C.num(v) }) }; }), S.n, setSize));
+    status.textContent = C.t('mistakesN', { m: C.num(S.mistakes) });
+    eraseBtn.setAttribute('aria-pressed', tool === 'erase' ? 'true' : 'false');
+    keepBtn.setAttribute('aria-pressed', tool === 'keep' ? 'true' : 'false');
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  board.addEventListener('keydown', function (e) {
+    var d = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.key];
+    if (d && S) {
+      e.preventDefault();
+      // the board is a grid laid out in the page's direction, so in Persian the first
+      // column is on the right and the arrows go the way the eye does (#338)
+      var dx = document.documentElement.dir === 'rtl' ? -d[0] : d[0];
+      var r = Math.floor(focusAt / S.n), c = focusAt % S.n;
+      r = Math.max(0, Math.min(S.n - 1, r + d[1])); c = Math.max(0, Math.min(S.n - 1, c + dx));
+      focusAt = r * S.n + c;
+      render();
+      cells[focusAt].focus();
+      return;
+    }
+    if (e.key === ' ' || e.key === 'Enter') { act(focusAt, tool); e.preventDefault(); }
+  });
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim') || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (C.keyIs(e, 'e') || e.key === 'Delete' || e.key === 'Backspace') { if (S) act(focusAt, 'erase'); e.preventDefault(); return; }
+    if (C.keyIs(e, 'k')) { if (S) act(focusAt, 'keep'); e.preventDefault(); return; }
+    if (C.keyIs(e, 't')) { setTool(tool === 'erase' ? 'keep' : 'erase'); e.preventDefault(); return; }
+    if (C.keyIs(e, 'h')) { hint(); e.preventDefault(); return; }
+    if (C.keyIs(e, 'n') && !dailyDate) { askNew(); e.preventDefault(); return; }
+    // the first arrow from anywhere on the page lands on the board
+    if (/^Arrow/.test(e.key) && cells.length && !board.contains(document.activeElement)) { cells[focusAt].focus(); e.preventDefault(); }
+  });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    var keys = [kb('← ↑ → ↓', C.t('kMove')), kb('Space / Enter', C.t('kUse')), kb('E / Delete', C.t('kErase')), kb('K', C.t('kKeep')), kb('T', C.t('kTool')), kb('H', C.t('hint'))];
+    if (!dailyDate) keys.push(kb('N', C.t('kNew')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, keys)
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // a 3×3 board for the tutorial, read left to right: st per cell 0 open, 1 ringed, 2 erased
+  function tArt(st) {
+    var d = [3, 5, 2, 4, 1, 6, 7, 2, 8], rows = [5, 10, 9], cols = [3, 7, 14];
+    var s = '<svg viewBox="0 0 200 120" width="100%" font-family="sans-serif" font-weight="700" font-size="13" text-anchor="middle">';
+    for (var j = 0; j < 3; j++) {
+      s += '<rect x="' + (78 + j * 28) + '" y="6" width="24" height="24" rx="5" fill="#D5EFEC"/><text x="' + (90 + j * 28) + '" y="23" fill="#134E4A">' + cols[j] + '</text>';
+      s += '<rect x="50" y="' + (34 + j * 28) + '" width="24" height="24" rx="5" fill="#D5EFEC"/><text x="62" y="' + (51 + j * 28) + '" fill="#134E4A">' + rows[j] + '</text>';
+    }
+    for (var i = 0; i < 9; i++) {
+      var x = 78 + (i % 3) * 28, y = 34 + Math.floor(i / 3) * 28;
+      s += '<rect x="' + x + '" y="' + y + '" width="24" height="24" rx="5" fill="' + (st[i] === 2 ? '#EDE6DC' : '#FFFFFF') + '" stroke="#E7DACA"/>';
+      if (st[i] !== 2) s += '<text x="' + (x + 12) + '" y="' + (y + 17) + '" fill="#2B2622">' + d[i] + '</text>';
+      if (st[i] === 1) s += '<circle cx="' + (x + 12) + '" cy="' + (y + 12) + '" r="9.5" fill="none" stroke="#0F766E" stroke-width="2"/>';
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt([0, 0, 0, 0, 0, 0, 0, 0, 0]) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt([1, 2, 2, 1, 0, 0, 0, 2, 0]) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt([1, 2, 2, 1, 2, 1, 2, 1, 1]) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // saved after every move; the daily puzzle has its own slot
+  ctx.autosave(function () {
+    if (!S || ended) return { inProgress: false };
+    return { n: S.n, d: S.d, rows: S.rows, cols: S.cols, keep: S.keep, st: S.st, mistakes: S.mistakes, hints: S.hints, daily: S.daily,
+      miss: Object.keys(miss).map(Number), hinted: Object.keys(hinted).map(Number), elapsed: Date.now() - startedAt };
+  });
+  function save() { ctx.save(); }
+  function marks(a, N) { var o = {}; (Array.isArray(a) ? a : []).forEach(function (i) { if (i >= 0 && i < N) o[i] = 1; }); return o; }
+  var saved = ctx.loadSave();
+  if (saved && E.valid(saved) && (saved.daily || null) === (dailyDate || null) && !E.solved(saved, saved.st)) {
+    S = { n: saved.n, d: saved.d.slice(), rows: saved.rows.slice(), cols: saved.cols.slice(), keep: saved.keep.slice(), st: saved.st.slice(),
+      mistakes: saved.mistakes, hints: saved.hints, daily: saved.daily || null };
+    miss = marks(saved.miss, S.n * S.n); hinted = marks(saved.hinted, S.n * S.n);
+    startedAt = Date.now() - (saved.elapsed || 0);
+    build();
+  } else newPuzzle(dailyDate ? DAILY_N : prefs.n);
+  if (dailyDate && C.stats.dailyDone('sums', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).sums;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
