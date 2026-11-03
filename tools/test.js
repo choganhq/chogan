@@ -11208,6 +11208,93 @@ function testDominoes() {
   ok(Date.now() - t0 < 12000, 'the Dominoes tests finish in under 12 s (' + (Date.now() - t0) + ' ms)');
 }
 
+// #622: Water Sort, pour coloured layers until every tube holds one colour
+function testWaterSort() {
+  head('Water Sort (#622)');
+  const t0 = Date.now();
+  const E = loadEngine('watersort', 'WaterSortEngineFactory');
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/watersort/index.html'), 'utf8');
+  const rng = (seed) => { let x = seed >>> 0; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; };
+  // pour rules: the top run moves, as much as fits, onto the same colour or into an empty tube
+  let T = [[0, 1, 1], [2, 1], [], [0, 2, 2, 2]];
+  ok(E.canPour(T, 0, 1) && E.pour(T, 0, 1) === 2 && T[0].join() === '0' && T[1].join() === '2,1,1,1', 'the top run pours onto the same colour, only as many layers as fit (2 of 2 here)');
+  T = [[0, 1, 1], [2, 1, 1], [], [3, 3, 3, 3]];
+  ok(E.pour(T, 0, 1) === 1 && T[0].join() === '0,1' && T[1].join() === '2,1,1,1', 'a run bigger than the room left pours what fits and leaves the rest');
+  T = [[0, 1], [2], [], [1, 1, 1, 1]];
+  ok(!E.canPour(T, 0, 1) && E.pour(T, 0, 1) === 0 && T[0].join() === '0,1', 'a colour never pours onto a different colour');
+  ok(!E.canPour(T, 0, 3) && !E.canPour(T, 2, 0) && !E.canPour(T, 0, 0), 'nothing pours into a full tube, out of an empty one, or into itself');
+  ok(E.pour(T, 0, 2) === 1 && T[2].join() === '1', 'any colour pours into an empty tube');
+  // win check
+  ok(E.solved([[1, 1, 1, 1], [], [0, 0, 0, 0]]) && !E.solved([[1, 1, 1], [1], [0, 0, 0, 0]]) && !E.solved([[1, 1, 0, 0], [0, 0, 1, 1], []]),
+    'solved means every tube is empty or full of one colour');
+  // the solver: its pours, replayed by the rules, finish the deal
+  const replay = (S, ms) => { const U = E.clone(S); for (const [a, b] of ms) { if (!E.pour(U, a, b)) return false; } return E.solved(U); };
+  const small = [[0, 1, 0, 1], [1, 0, 1, 0], [], []];
+  const sm = E.solve(small);
+  ok(sm && sm.count > 0 && replay(small, sm.moves), 'the solver\'s pours, replayed by the rules, sort a small deal (' + (sm && sm.count) + ' pours)');
+  ok(E.solve([[0, 1, 0, 1], [1, 0, 1, 0]]) === null, 'a deal with no room to pour is known to be unsolvable');
+  // A* is optimal at weight 1: no breadth-first search finds fewer pours on small deals
+  const bfs = (S) => { const seen = new Set([E.key(S)]); let q = [S], d = 0; while (q.length) { const nx = []; for (const U of q) { if (E.solved(U)) return d; for (let a = 0; a < U.length; a++) for (let b = 0; b < U.length; b++) if (E.canPour(U, a, b)) { const V = E.clone(U); E.pour(V, a, b); const k = E.key(V); if (!seen.has(k)) { seen.add(k); nx.push(V); } } } q = nx; d++; } return -1; };
+  const r0 = rng(3);
+  let opt = 0, optN = 0;
+  for (let i = 0; i < 12; i++) {
+    const bag = []; for (let c = 0; c < 3; c++) for (let j = 0; j < 4; j++) bag.push(c);
+    for (let q = bag.length - 1; q > 0; q--) { const z = Math.floor(r0() * (q + 1)); [bag[q], bag[z]] = [bag[z], bag[q]]; }
+    const D = [bag.slice(0, 4), bag.slice(4, 8), bag.slice(8, 12), [], []];
+    const s = E.solve(D), b = bfs(D);
+    optN++;
+    if (s && b >= 0 && s.count === b) opt++;
+  }
+  ok(optN === 12 && opt === optN, 'at weight 1 the solver\'s count is the fewest pours, the same as a full breadth-first search (' + opt + '/' + optN + ')');
+  // generated deals: the right colours and tubes, two empty ones, solvable without the extra tube
+  const r = rng(29);
+  let good = 0, gen = 0;
+  const per = { easy: 30, medium: 30, hard: 20 };
+  for (const lv of E.LEVELS) for (let i = 0; i < per[lv]; i++) {
+    const G = E.generate(lv, r), k = E.COLORS[lv];
+    gen++;
+    if (!G || G.start.length !== k + 2 || G.start.filter((t) => !t.length).length !== 2) continue;
+    const s = E.solve(G.start, { w: E.WEIGHT[lv] });
+    const counts = new Array(k).fill(0); G.start.forEach((t) => t.forEach((c) => counts[c]++));
+    if (s && !s.unknown && s.count === G.min && replay(G.start, s.moves) && counts.every((c) => c === 4) && !G.start.some((t) => E.full(t))) good++;
+  }
+  ok(gen === 80 && good === gen, 'every generated deal has 4 of each colour and two empty tubes, and the solver sorts it without an extra tube in its target count (' + good + '/' + gen + ')');
+  ok(E.COLORS.easy === 5 && E.COLORS.medium === 8 && E.COLORS.hard === 11, 'the levels have 5, 8 and 11 colours');
+  const a = E.generate('medium', rng(4)), b = E.generate('medium', rng(4));
+  ok(JSON.stringify(a.start) === JSON.stringify(b.start) && a.min === b.min, 'the same seed gives the same deal and target, so the daily is the same for everyone');
+  // hints: following them from any reachable state finishes the deal; a dead end is called one
+  const H = E.generate('medium', rng(8)), P = E.clone(H.start);
+  let steps = 0, okHint = true;
+  while (!E.solved(P) && steps < 200) { const h = E.hint(P); if (!h.move || !E.pour(P, h.move[0], h.move[1])) { okHint = false; break; } steps++; }
+  ok(okHint && E.solved(P) && steps <= H.min + 20, 'following the hint from the start sorts the deal (' + steps + ' pours, target ' + H.min + ')');
+  const M = E.clone(H.start), rm = rng(12);
+  for (let i = 0; i < 6; i++) { const ms = E.moves(M).filter(([x, y]) => E.canPour(M, x, y)); if (!ms.length) break; const [x, y] = ms[Math.floor(rm() * ms.length)]; E.pour(M, x, y); }
+  const hm = E.hint(M);
+  ok(hm.stuck || (hm.move && E.canPour(M, hm.move[0], hm.move[1]) && (() => { const V = E.clone(M); E.pour(V, hm.move[0], hm.move[1]); const s = E.solve(V, { w: 4, limit: 120000 }); return s && !s.unknown; })()),
+    'after random pours the hint is a legal pour that still leads to a finish');
+  ok(E.hint([[0, 1, 0, 1], [1, 0, 1, 0]]).stuck === true, 'a hint from a dead end says so instead of pointing anywhere');
+  ok(E.stars(24, 24) === 3 && E.stars(36, 24) === 2 && E.stars(37, 24) === 1 && E.stars(99, 24) === 1, 'three stars within the target, two within half again, and extra pours never lose');
+  // saves
+  const G = E.generate('easy', rng(2));
+  const sv = { level: 'easy', start: G.start, tubes: E.clone(G.start), moves: 0, min: G.min, extra: false };
+  ok(E.valid(sv) && E.valid(Object.assign({}, sv, { extra: true, tubes: E.clone(G.start).concat([[]]) })), 'a save is accepted, with or without the extra tube');
+  ok(!E.valid(Object.assign({}, sv, { level: 'x' })) && !E.valid(Object.assign({}, sv, { tubes: E.clone(G.start).concat([[]]) })) &&
+    !E.valid(Object.assign({}, sv, { tubes: [[0, 0, 0, 0, 0]].concat(E.clone(G.start).slice(1)) })) && !E.valid(Object.assign({}, sv, { tubes: E.clone(G.start).map((t, i) => i ? t : t.map(() => 9)) })) &&
+    !E.valid(Object.assign({}, sv, { min: 0 })) && !E.valid(null), 'a save with a wrong level, tube count, overfull tube, foreign colour or target is refused');
+  // the page
+  ok(/C\.daily\('watersort', dailyDate\)\.rng/.test(html) && /var DAILY_LEVEL = 'medium';/.test(html), 'the daily puzzle is a medium deal seeded by the day');
+  ok(['ws-perfect', 'ws-hard', 'ws-daily'].every((id) => html.indexOf("unlock('" + id + "')") > 0), 'the three awards are unlocked');
+  ok(/var HINT_COST = 10, EXTRA_COST = 20;/.test(html) && /C\.coins\.can\(HINT_COST\)/.test(html) && /C\.coins\.spend\(HINT_COST\)/.test(html) && /C\.coins\.can\(EXTRA_COST\)/.test(html) && /if \(!S \|\| ended \|\| S\.extra\) return;/.test(html),
+    'a hint costs 10 coins and the one extra tube 20');
+  ok(/if \(h\.stuck \|\| h\.unknown\) \{[\s\S]{0,200}?return;\n    \}\n    if \(!h\.move\) return;\n    if \(!C\.coins\.can\(HINT_COST\)\)/.test(html), 'a hint from a dead end costs nothing and suggests undo');
+  ok(/\.ws-board \{[^}]*direction: ltr;/.test(html) && /(?:Digit|Numpad)/.test(html) && /C\.keyIs\(e, 'h'\)/.test(html), 'the tubes are numbered left to right, picked by digit keys on any layout, with H for a hint');
+  ok(/C\.ui\.reduceMotion\(\) \|\| !A\.animate/.test(html) && /prefers-reduced-motion: reduce/.test(html), 'the pour animation gives way to reduced motion');
+  const liquids = (html.match(/\{ c: '#[0-9A-F]{6}', ink: '[ld]', m: '/g) || []).length;
+  const marks = new Set([...html.matchAll(/ink: '[ld]', m: '([^']+)'/g)].map((m) => m[1]));
+  ok(liquids === E.COLORS.hard && marks.size === liquids, 'every colour of the hard level has its own mark for colour-blind players (' + marks.size + '/' + liquids + ')');
+  ok(Date.now() - t0 < 12000, 'the Water Sort tests finish in under 12 s (' + (Date.now() - t0) + ' ms)');
+}
+
 // #554: xmha97 asked for Lights Out (named Lights Off: "Lights Out" is a trademark)
 function testLights() {
   head('Lights Off (#554)');

@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>رنگ‌ریز — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* the glass is the game's own token: a tube must read as clear glass on the light
+     and the dark page alike, which no surface token does */
+  :root { --ws-glass: rgba(255, 255, 255, .7); --ws-edge: rgba(43, 108, 176, .45); --ws-cork: #A9784C; }
+  :root[data-theme="dark"] { --ws-glass: rgba(255, 255, 255, .07); --ws-edge: rgba(170, 200, 235, .45); --ws-cork: #C89A6A; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --ws-glass: rgba(255, 255, 255, .07); --ws-edge: rgba(170, 200, 235, .45); --ws-cork: #C89A6A; }
+  }
+  .ws-wrap > .ch-fit { --fit-ar: 1; }
+  /* tubes are numbered left to right in every language, so the digit keys and the
+     arrows are geometric */
+  .ws-board { display: flex; flex-direction: column; direction: ltr; touch-action: manipulation; max-width: 100%; max-height: 100%; }
+  .ws-row { flex: 1 1 0; display: flex; justify-content: center; min-height: 0; }
+  .ws-cell { position: relative; flex: 0 0 calc(100% / var(--cols)); height: 100%; }
+  .ws-tube { position: absolute; bottom: 0; left: 14.3%; width: 71.4%; height: 84.7%; padding: 0; margin: 0; border: 0;
+    background: none; cursor: pointer; transform-origin: 50% 15%;
+    transition: transform 160ms var(--ease); -webkit-tap-highlight-color: transparent; }
+  .ws-tube:focus-visible { outline: none; }
+  .ws-tube:focus-visible .ws-glass { box-shadow: 0 0 0 3px var(--c-accent); }
+  .ws-tube--up { transform: translateY(-14%); z-index: 2; }
+  .ws-tube--fly { z-index: 3; }
+  .ws-glass { position: absolute; inset: 0; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column-reverse;
+    padding: 0 6% 6%; border: 2px solid var(--ws-edge); border-top-width: 0; border-radius: 0 0 50% 50% / 0 0 14% 14%;
+    background: var(--ws-glass); box-shadow: inset 0 -2px 0 rgba(0, 0, 0, .06); }
+  .ws-tube::before { content: ''; position: absolute; left: -8%; right: -8%; top: 0; height: 2.5%; border-radius: 99px; background: var(--ws-edge); }
+  /* a finished tube gets a cork */
+  .ws-tube--done::after { content: ''; position: absolute; left: 14%; right: 14%; top: -5%; height: 7%; border-radius: 3px 3px 1px 1px; background: var(--ws-cork); }
+  .ws-tube--hint .ws-glass { box-shadow: 0 0 0 3px var(--c-gold); }
+  .ws-layer { flex: 0 0 23.5%; display: grid; place-items: center; }
+  .ws-layer:first-child { border-radius: 0 0 50% 50% / 0 0 40% 40%; }
+  .ws-layer svg { width: 55%; height: 55%; fill: currentColor; }
+  .ws-layer--in { animation: ws-fill 300ms var(--ease) both; transform-origin: 50% 100%; }
+  @keyframes ws-fill { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+  .ws-board--done .ws-tube { cursor: default; }
+  .ws-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .ws-side { align-items: center; }
+  .ws-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-variant-numeric: tabular-nums; }
+  .ws-tools { display: flex; justify-content: center; gap: var(--s-2); flex-wrap: wrap; }
+  .ws-tools .ch-btn b { font-variant-numeric: tabular-nums; }
+  @media (prefers-reduced-motion: reduce) { .ws-tube { transition: none; } .ws-layer--in { animation: none; } }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function WaterSortEngineFactory() {
+  'use strict';
+
+  var CAP = 4;
+  var LEVELS = ['easy', 'medium', 'hard'];
+  // colours per level; every deal also has two empty tubes
+  var COLORS = { easy: 5, medium: 8, hard: 11 };
+  var EMPTY = 2;
+  // the search gives up after this many states
+  var LIMIT = 60000;
+  // the search's weight per level: 1 gives the fewest pours, and hard trades a pour
+  // or two of that for a deal that is ready at once on a slow phone
+  var WEIGHT = { easy: 1, medium: 1, hard: 1.25 };
+
+  function clone(T) { return T.map(function (t) { return t.slice(); }); }
+  function top(t) { return t.length ? t[t.length - 1] : -1; }
+  // how many layers of the top colour sit together at the top of a tube
+  function run(t) {
+    var n = 0, c = top(t);
+    for (var i = t.length - 1; i >= 0 && t[i] === c; i--) n++;
+    return n;
+  }
+  function uniform(t) { return t.length > 0 && run(t) === t.length; }
+  function full(t) { return t.length === CAP && uniform(t); }
+  function canPour(T, a, b) {
+    if (a === b || !T[a] || !T[b] || !T[a].length || T[b].length >= CAP) return false;
+    return !T[b].length || top(T[b]) === top(T[a]);
+  }
+  // Pours the top run of a onto b, as many layers as fit; returns how many moved
+  function pour(T, a, b) {
+    if (!canPour(T, a, b)) return 0;
+    var n = Math.min(run(T[a]), CAP - T[b].length);
+    for (var i = 0; i < n; i++) T[b].push(T[a].pop());
+    return n;
+  }
+  function solved(T) {
+    for (var i = 0; i < T.length; i++) if (T[i].length && !full(T[i])) return false;
+    return true;
+  }
+  function runs(T) {
+    var r = 0;
+    for (var i = 0; i < T.length; i++) for (var j = 0; j < T[i].length; j++) if (!j || T[i][j] !== T[i][j - 1]) r++;
+    return r;
+  }
+  function colours(T) {
+    var s = {};
+    for (var i = 0; i < T.length; i++) for (var j = 0; j < T[i].length; j++) s[T[i][j]] = 1;
+    return Object.keys(s).length;
+  }
+  // The order of the tubes does not change what can be done, so states that differ
+  // only by it are one state to the search
+  function key(T) {
+    var a = [];
+    for (var i = 0; i < T.length; i++) a.push(String.fromCharCode.apply(null, T[i].map(function (c) { return 97 + c; })));
+    return a.sort().join('|');
+  }
+
+  // The pours worth trying from a state. Pouring a tube that is all one colour into an
+  // empty one only swaps two tubes, and all empty tubes are alike, so only the first
+  // empty one is tried. Nothing else is cut, so a search that runs out of pours has
+  // proved the state cannot be finished.
+  function moves(T) {
+    var out = [], firstEmpty = -1, i, j;
+    for (i = 0; i < T.length; i++) if (!T[i].length) { firstEmpty = i; break; }
+    for (i = 0; i < T.length; i++) {
+      var s = T[i];
+      if (!s.length || full(s)) continue;
+      var uni = uniform(s);
+      for (j = 0; j < T.length; j++) {
+        if (j === i) continue;
+        var d = T[j];
+        if (!d.length) { if (j !== firstEmpty || uni) continue; }
+        else if (d.length >= CAP || top(d) !== top(s)) continue;
+        out.push([i, j]);
+      }
+    }
+    return out;
+  }
+
+  // Best-first search over pours. A pour joins at most one pair of runs and a finished
+  // deal has one run per colour, so runs − colours never overstates the pours left:
+  // with weight 1 this is A* and the count is the fewest pours. Returns
+  // { moves, count }, null when the state cannot be finished, or { unknown: true }
+  // when the search ran out of room first.
+  function solve(T, opts) {
+    opts = opts || {};
+    var w = opts.w || 1, limit = opts.limit || LIMIT, k = colours(T), ids = 0, expanded = 0;
+    if (solved(T)) return { moves: [], count: 0 };
+    var heap = [], seen = {};
+    function less(a, b) { return a.f < b.f || (a.f === b.f && (a.h < b.h || (a.h === b.h && a.id < b.id))); }
+    function push(n) {
+      heap.push(n);
+      for (var i = heap.length - 1; i > 0;) {
+        var p = (i - 1) >> 1;
+        if (less(heap[p], heap[i])) break;
+        var t = heap[p]; heap[p] = heap[i]; heap[i] = t; i = p;
+      }
+    }
+    function pop() {
+      var r = heap[0], last = heap.pop();
+      if (heap.length) {
+        heap[0] = last;
+        for (var i = 0; ;) {
+          var l = 2 * i + 1, rr = l + 1, m = i;
+          if (l < heap.length && less(heap[l], heap[m])) m = l;
+          if (rr < heap.length && less(heap[rr], heap[m])) m = rr;
+          if (m === i) break;
+          var t = heap[m]; heap[m] = heap[i]; heap[i] = t; i = m;
+        }
+      }
+      return r;
+    }
+    function node(U, g, prev, mv) {
+      var h = runs(U) - k;
+      return { T: U, g: g, h: h, f: g + w * h, prev: prev, mv: mv, id: ids++ };
+    }
+    var start = node(clone(T), 0, null, null);
+    seen[key(start.T)] = 0;
+    push(start);
+    while (heap.length) {
+      var n = pop();
+      if (seen[key(n.T)] < n.g) continue;
+      if (solved(n.T)) {
+        var path = [];
+        for (var q = n; q.prev; q = q.prev) path.push(q.mv);
+        path.reverse();
+        return { moves: path, count: path.length };
+      }
+      if (++expanded > limit) return { unknown: true };
+      var ms = moves(n.T);
+      for (var i = 0; i < ms.length; i++) {
+        var U = clone(n.T);
+        pour(U, ms[i][0], ms[i][1]);
+        var kk = key(U), g = n.g + 1;
+        if (seen[kk] !== undefined && seen[kk] <= g) continue;
+        seen[kk] = g;
+        push(node(U, g, n, ms[i]));
+      }
+    }
+    return null;
+  }
+
+  // The next pour from where the player is. A near-greedy search is tried after the
+  // careful one, since any way through will do for a hint. Returns { move: [a, b] },
+  // { stuck: true } when nothing can finish the puzzle from here, or { unknown: true }.
+  function hint(T) {
+    if (solved(T)) return { stuck: false, move: null };
+    var s = solve(T, { w: 1.25 });
+    if (s && s.unknown) s = solve(T, { w: 4, limit: 120000 });
+    if (!s) return { stuck: true };
+    if (s.unknown) return { unknown: true };
+    return { move: s.moves[0] };
+  }
+
+  // A deal: 4 layers of each colour shuffled into as many tubes, plus two empty ones.
+  // It is kept only if the search finishes it with those two tubes, so every puzzle can
+  // be solved without the extra tube; no tube may start with three of a colour on top.
+  function generate(level, rnd) {
+    var k = COLORS[level];
+    for (var tries = 0; tries < 200; tries++) {
+      var bag = [], i;
+      for (i = 0; i < k; i++) for (var j = 0; j < CAP; j++) bag.push(i);
+      for (i = bag.length - 1; i > 0; i--) { var r = Math.floor(rnd() * (i + 1)), t = bag[i]; bag[i] = bag[r]; bag[r] = t; }
+      var T = [];
+      for (i = 0; i < k; i++) T.push(bag.slice(i * CAP, i * CAP + CAP));
+      if (T.some(function (x) { return run(x) >= 3; })) continue;
+      for (i = 0; i < EMPTY; i++) T.push([]);
+      var s = solve(T, { w: WEIGHT[level] });
+      if (s && !s.unknown) return { level: level, start: T, min: s.count };
+    }
+    return null;
+  }
+
+  // Three stars within the solver's count, two within half again, one for any finish:
+  // extra pours never lose, they only cost stars
+  function stars(moves, min) { return moves <= min ? 3 : moves <= Math.ceil(min * 1.5) ? 2 : 1; }
+
+  function counts(T, k) {
+    var c = new Array(k).fill(0);
+    for (var i = 0; i < T.length; i++) {
+      if (!Array.isArray(T[i]) || T[i].length > CAP) return null;
+      for (var j = 0; j < T[i].length; j++) {
+        var v = T[i][j];
+        if (typeof v !== 'number' || v !== Math.floor(v) || v < 0 || v >= k) return null;
+        c[v]++;
+      }
+    }
+    return c;
+  }
+  function valid(o) {
+    if (!o || LEVELS.indexOf(o.level) < 0 || !Array.isArray(o.start) || !Array.isArray(o.tubes)) return false;
+    var k = COLORS[o.level];
+    if (o.start.length !== k + EMPTY || o.tubes.length !== k + EMPTY + (o.extra ? 1 : 0)) return false;
+    var a = counts(o.start, k), b = counts(o.tubes, k);
+    if (!a || !b || !a.every(function (x) { return x === CAP; }) || !b.every(function (x) { return x === CAP; })) return false;
+    return typeof o.moves === 'number' && o.moves >= 0 && typeof o.min === 'number' && o.min >= 1;
+  }
+
+  return { CAP: CAP, LEVELS: LEVELS, COLORS: COLORS, EMPTY: EMPTY, WEIGHT: WEIGHT, clone: clone, top: top, run: run, full: full,
+    canPour: canPour, pour: pour, solved: solved, runs: runs, key: key, moves: moves, solve: solve, hint: hint, generate: generate,
+    stars: stars, valid: valid };
+}
+if (typeof module !== 'undefined') module.exports = WaterSortEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = WaterSortEngineFactory();
+  var HINT_COST = 10, EXTRA_COST = 20;
+
+  // Each colour carries its own mark, so the tubes can be sorted without telling the
+  // colours apart; ink is the mark's colour, dark on the light liquids and light on
+  // the deep ones
+  var LIQUID = [
+    { c: '#E53935', ink: 'l', m: '<circle cx="5" cy="5" r="3.3"/>' },
+    { c: '#1E63D6', ink: 'l', m: '<rect x="1.8" y="1.8" width="6.4" height="6.4"/>' },
+    { c: '#FDD835', ink: 'd', m: '<path d="M5 1.2 9.2 8.6H.8z"/>' },
+    { c: '#2E9E48', ink: 'l', m: '<path d="M5 .6 9.4 5 5 9.4.6 5z"/>' },
+    { c: '#8E44AD', ink: 'l', m: '<path d="M5 .5l1.3 3 3.2.3-2.4 2.2.7 3.2L5 7.5 2.2 9.2l.7-3.2L.5 3.8l3.2-.3z"/>' },
+    { c: '#FB8C00', ink: 'd', m: '<path d="M3.8 1h2.4v2.8H9v2.4H6.2V9H3.8V6.2H1V3.8h2.8z"/>' },
+    { c: '#26C6DA', ink: 'd', m: '<circle cx="5" cy="5" r="3" fill="none" stroke="currentColor" stroke-width="1.7"/>' },
+    { c: '#F48FB1', ink: 'd', m: '<path d="M1 2.4h8v2H1zM1 5.6h8v2H1z"/>' },
+    { c: '#8D5A3B', ink: 'l', m: '<path d="M2.2 1 5 3.8 7.8 1 9 2.2 6.2 5 9 7.8 7.8 9 5 6.2 2.2 9 1 7.8 3.8 5 1 2.2z"/>' },
+    { c: '#B2E34A', ink: 'd', m: '<circle cx="2" cy="5" r="1.5"/><circle cx="5" cy="5" r="1.5"/><circle cx="8" cy="5" r="1.5"/>' },
+    { c: '#546E7A', ink: 'l', m: '<path d="M5 9.2 1.3 5.4A2.3 2.3 0 0 1 5 2.6a2.3 2.3 0 0 1 3.7 2.8z"/>' }
+  ];
+  var INK = { l: 'rgba(255, 255, 255, .85)', d: 'rgba(0, 0, 0, .55)' };
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'watersort',
+    name: { fa: 'رنگ‌ریز', en: 'Water Sort', zh: '倒水排序', de: 'Wassersortierung', es: 'Ordena el agua', pl: 'Sortowanie wody' },
+    accent: '#B80CC0',
+    mood: 'menu',
+    strings: {
+      fa: {
+        board: 'لوله‌ها', tubeN: 'لوله‌ی {n}', tubeEmpty: 'خالی', lifted: 'بلند شده', dailyWs: 'رنگ‌ریز روزانه',
+        c0: 'قرمز', c1: 'آبی', c2: 'زرد', c3: 'سبز', c4: 'بنفش', c5: 'نارنجی', c6: 'فیروزه‌ای', c7: 'صورتی', c8: 'قهوه‌ای', c9: 'لیمویی', c10: 'طوسی',
+        movesOf: 'ریختن: {m} · هدف: {b}', sorted: 'همه مرتب شد!', movesL: 'ریختن‌ها', target: 'هدف', newPuzzle: 'پازل تازه',
+        perfect: 'به هدف رسیدی!', extraTube: 'لوله‌ی اضافه', extraAdded: 'یک لوله‌ی خالی اضافه شد', stuck: 'از اینجا راهی نیست',
+        stuckSub: 'چند ریختن را برگردان و دوباره امتحان کن', noHintSub: 'راهی پیدا نشد؛ چند ریختن را برگردان',
+        kPick: 'برداشتن لوله‌ی ۱ تا ۱۰', kMove: 'جابه‌جایی بین لوله‌ها', kPour: 'بلند کردن یا ریختن', kDrop: 'گذاشتن لوله',
+        kHint: 'راهنمایی', kRestart: 'از اول همین پازل', kNew: 'پازل تازه',
+        rules: 'روی یک لوله بزن تا بلند شود، بعد روی لوله‌ی دیگری بزن تا در آن بریزد. رنگ بالایی فقط روی همان رنگ یا در لوله‌ی خالی ریخته می‌شود، هر چند لایه که جا شود. هر رنگ را در لوله‌ی خودش جمع کن. هر رنگ نشانه‌ی خودش را دارد تا بدون تشخیص رنگ هم لوله‌ها از هم جدا شوند. هدف، تعداد ریختن‌هایی است که حل‌کننده‌ی ما لازم داشت: با همان تعداد یا کمتر سه ستاره می‌گیری، تا یک‌ونیم برابرش دو ستاره و بیشتر از آن یک ستاره. با ریختن اضافه نمی‌بازی. برگرداندن رایگان است، ولی ریختنی که برمی‌گردانی شمرده می‌ماند. راهنمایی ({h} سکه) ریختن بعدی را نشان می‌دهد و یک لوله‌ی خالی اضافه در هر پازل {x} سکه است. هر پازل بدون آن هم حل می‌شود و پازل روزانه برای همه یکی است.',
+        tutTitle1: 'بلند کن و بریز', tutText1: 'روی یک لوله بزن، بعد روی جایی که می‌خواهی بریزی. رنگ بالایی روی همان رنگ یا در لوله‌ی خالی می‌رود.',
+        tutTitle2: 'هر لوله یک رنگ', tutText2: 'وقتی هر لوله فقط یک رنگ داشته باشد یا خالی باشد، پازل حل شده.',
+        tutTitle3: 'نشانه‌ها و ستاره‌ها', tutText3: 'هر رنگ نشانه‌ی خودش را دارد. با رسیدن به هدف سه ستاره می‌گیری؛ ریختن اضافه فقط ستاره کم می‌کند.'
+      },
+      en: {
+        board: 'Tubes', tubeN: 'Tube {n}', tubeEmpty: 'empty', lifted: 'lifted', dailyWs: 'Daily Water Sort',
+        c0: 'red', c1: 'blue', c2: 'yellow', c3: 'green', c4: 'purple', c5: 'orange', c6: 'cyan', c7: 'pink', c8: 'brown', c9: 'lime', c10: 'slate',
+        movesOf: 'Pours: {m} · Target: {b}', sorted: 'All sorted!', movesL: 'Pours', target: 'Target', newPuzzle: 'New puzzle',
+        perfect: 'You hit the target!', extraTube: 'Extra tube', extraAdded: 'An empty tube was added', stuck: 'No way through from here',
+        stuckSub: 'Undo a few pours and try again', noHintSub: 'No way was found; undo a few pours',
+        kPick: 'Pick tube 1 to 10', kMove: 'Move between tubes', kPour: 'Lift or pour', kDrop: 'Put the tube down',
+        kHint: 'Hint', kRestart: 'Restart this puzzle', kNew: 'New puzzle',
+        rules: 'Tap a tube to lift it, then tap another to pour into it. The top colour pours only onto the same colour or into an empty tube, as many layers as fit. Gather each colour in a tube of its own. Every colour has its own mark, so the tubes can be told apart without seeing colour. The target is the number of pours our solver needed: finish in that many or fewer for three stars, within half as many again for two, and more for one. Extra pours never lose. Undo is free, but a pour you take back still counts. A hint ({h} coins) shows the next pour, and one extra empty tube costs {x} coins a puzzle. Every puzzle can be solved without it, and the daily puzzle is the same for everyone.',
+        tutTitle1: 'Lift and pour', tutText1: 'Tap a tube, then tap where to pour. The top colour goes onto the same colour or into an empty tube.',
+        tutTitle2: 'One colour a tube', tutText2: 'When every tube holds one colour or nothing, the puzzle is sorted.',
+        tutTitle3: 'Marks and stars', tutText3: 'Each colour has its own mark. Reach the target for three stars; extra pours only cost stars.'
+      },
+      pl: {
+        board: 'Probówki', tubeN: 'Probówka {n}', tubeEmpty: 'pusta', lifted: 'podniesiona', dailyWs: 'Codzienne Sortowanie wody',
+        c0: 'czerwony', c1: 'niebieski', c2: 'żółty', c3: 'zielony', c4: 'fioletowy', c5: 'pomarańczowy', c6: 'turkusowy', c7: 'różowy', c8: 'brązowy', c9: 'limonkowy', c10: 'grafitowy',
+        movesOf: 'Przelania: {m} · Cel: {b}', sorted: 'Wszystko posortowane!', movesL: 'Przelania', target: 'Cel', newPuzzle: 'Nowa łamigłówka',
+        perfect: 'Cel osiągnięty!', extraTube: 'Dodatkowa probówka', extraAdded: 'Dodano pustą probówkę', stuck: 'Stąd nie ma wyjścia',
+        stuckSub: 'Cofnij kilka przelań i spróbuj ponownie', noHintSub: 'Nie znaleziono drogi; cofnij kilka przelań',
+        kPick: 'Wybierz probówkę od 1 do 10', kMove: 'Przemieść między probówkami', kPour: 'Podnieś lub przelej', kDrop: 'Odstaw probówkę',
+        kHint: 'Wskazówka', kRestart: 'Zacznij tę łamigłówkę od nowa', kNew: 'Nowa łamigłówka',
+        rules: 'Dotknij probówki, aby ją podnieść, a potem innej, aby do niej przelać. Górny kolor można przelać tylko na ten sam kolor albo do pustej probówki, tyle warstw, ile się zmieści. Zbierz każdy kolor w osobnej probówce. Każdy kolor ma własny znak, więc probówki da się rozróżnić bez widzenia kolorów. Cel to liczba przelań, której potrzebował nasz solver: ukończenie w tylu lub mniej daje trzy gwiazdki, do półtora raza więcej – dwie, a więcej – jedną. Dodatkowe przelania nigdy nie powodują przegranej. Cofanie jest darmowe, ale cofnięte przelanie nadal się liczy. Wskazówka ({h} monet) pokazuje następne przelanie, a jedna dodatkowa pusta probówka kosztuje {x} monet na łamigłówkę. Każdą łamigłówkę da się rozwiązać bez niej, a codzienna łamigłówka jest taka sama dla wszystkich.',
+        tutTitle1: 'Podnieś i przelej', tutText1: 'Dotknij probówki, a potem miejsca, do którego chcesz przelać. Górny kolor trafia na ten sam kolor albo do pustej probówki.',
+        tutTitle2: 'Jeden kolor w probówce', tutText2: 'Gdy każda probówka ma jeden kolor albo jest pusta, łamigłówka jest rozwiązana.',
+        tutTitle3: 'Znaki i gwiazdki', tutText3: 'Każdy kolor ma własny znak. Osiągnięcie celu daje trzy gwiazdki; dodatkowe przelania kosztują tylko gwiazdki.'
+      },
+      zh: {
+        board: '试管', tubeN: '第 {n} 支试管', tubeEmpty: '空', lifted: '已拿起', dailyWs: '每日倒水排序',
+        c0: '红', c1: '蓝', c2: '黄', c3: '绿', c4: '紫', c5: '橙', c6: '青', c7: '粉', c8: '棕', c9: '黄绿', c10: '石板灰',
+        movesOf: '倒水：{m} · 目标：{b}', sorted: '全部排好了！', movesL: '倒水次数', target: '目标', newPuzzle: '新题',
+        perfect: '达到目标！', extraTube: '加一支试管', extraAdded: '加了一支空试管', stuck: '从这里走不通了',
+        stuckSub: '撤回几步再试', noHintSub: '没找到出路；撤回几步试试',
+        kPick: '选第 1 到 10 支试管', kMove: '在试管之间移动', kPour: '拿起或倒入', kDrop: '放下试管',
+        kHint: '提示', kRestart: '重来这一题', kNew: '新题',
+        rules: '点一支试管把它拿起，再点另一支倒进去。顶上的颜色只能倒在同色上或倒进空试管，能装多少层就倒多少层。把每种颜色归到各自的试管里。每种颜色都有自己的记号，不看颜色也能分清。目标是我们的求解器用的倒水次数：不超过它得三星，不超过一倍半得两星，更多得一星。多倒不会输。撤回免费，但撤回的那一步仍然计数。提示（{h} 金币）告诉你下一步，每道题可花 {x} 金币加一支空试管。每道题不加试管也能解开，每日谜题对所有人相同。',
+        tutTitle1: '拿起再倒', tutText1: '点一支试管，再点要倒入的地方。顶上的颜色会倒在同色上或倒进空试管。',
+        tutTitle2: '一管一色', tutText2: '每支试管只剩一种颜色或空着时，题目就解开了。',
+        tutTitle3: '记号与星星', tutText3: '每种颜色都有自己的记号。达到目标得三星；多倒只会少星。'
+      },
+      de: {
+        board: 'Röhrchen', tubeN: 'Röhrchen {n}', tubeEmpty: 'leer', lifted: 'angehoben', dailyWs: 'Wassersortierung des Tages',
+        c0: 'Rot', c1: 'Blau', c2: 'Gelb', c3: 'Grün', c4: 'Lila', c5: 'Orange', c6: 'Türkis', c7: 'Rosa', c8: 'Braun', c9: 'Limette', c10: 'Schiefer',
+        movesOf: 'Güsse: {m} · Ziel: {b}', sorted: 'Alles sortiert!', movesL: 'Güsse', target: 'Ziel', newPuzzle: 'Neues Rätsel',
+        perfect: 'Ziel erreicht!', extraTube: 'Extra-Röhrchen', extraAdded: 'Ein leeres Röhrchen kam dazu', stuck: 'Von hier geht es nicht weiter',
+        stuckSub: 'Nimm ein paar Güsse zurück und versuch es noch einmal', noHintSub: 'Kein Weg gefunden; nimm ein paar Güsse zurück',
+        kPick: 'Röhrchen 1 bis 10 wählen', kMove: 'Zwischen den Röhrchen wechseln', kPour: 'Anheben oder gießen', kDrop: 'Röhrchen abstellen',
+        kHint: 'Tipp', kRestart: 'Dieses Rätsel neu starten', kNew: 'Neues Rätsel',
+        rules: 'Tippe ein Röhrchen an, um es anzuheben, dann ein anderes, um hineinzugießen. Die oberste Farbe fließt nur auf dieselbe Farbe oder in ein leeres Röhrchen, so viele Schichten, wie passen. Sammle jede Farbe in einem eigenen Röhrchen. Jede Farbe hat ihr eigenes Zeichen, so lassen sich die Röhrchen auch ohne Farbsehen unterscheiden. Das Ziel ist die Zahl der Güsse, die unser Löser brauchte: so viele oder weniger bringen drei Sterne, bis zum Anderthalbfachen zwei, mehr einen. Zusätzliche Güsse verlieren nie. Zurücknehmen ist kostenlos, aber ein zurückgenommener Guss zählt weiter. Ein Tipp ({h} Münzen) zeigt den nächsten Guss, und ein zusätzliches leeres Röhrchen kostet {x} Münzen pro Rätsel. Jedes Rätsel ist auch ohne es lösbar, und das Tagesrätsel ist für alle gleich.',
+        tutTitle1: 'Anheben und gießen', tutText1: 'Tippe ein Röhrchen an, dann das, in das du gießen willst. Die oberste Farbe fließt auf dieselbe Farbe oder in ein leeres Röhrchen.',
+        tutTitle2: 'Eine Farbe je Röhrchen', tutText2: 'Hat jedes Röhrchen nur eine Farbe oder ist leer, ist das Rätsel gelöst.',
+        tutTitle3: 'Zeichen und Sterne', tutText3: 'Jede Farbe hat ihr eigenes Zeichen. Das Ziel bringt drei Sterne; mehr Güsse kosten nur Sterne.'
+      },
+      es: {
+        board: 'Tubos', tubeN: 'Tubo {n}', tubeEmpty: 'vacío', lifted: 'levantado', dailyWs: 'Ordena el agua diario',
+        c0: 'rojo', c1: 'azul', c2: 'amarillo', c3: 'verde', c4: 'morado', c5: 'naranja', c6: 'turquesa', c7: 'rosa', c8: 'marrón', c9: 'lima', c10: 'pizarra',
+        movesOf: 'Vertidos: {m} · Meta: {b}', sorted: '¡Todo ordenado!', movesL: 'Vertidos', target: 'Meta', newPuzzle: 'Puzle nuevo',
+        perfect: '¡Llegaste a la meta!', extraTube: 'Tubo extra', extraAdded: 'Se añadió un tubo vacío', stuck: 'Desde aquí no hay salida',
+        stuckSub: 'Deshaz algunos vertidos y vuelve a intentarlo', noHintSub: 'No se encontró salida; deshaz algunos vertidos',
+        kPick: 'Elegir el tubo del 1 al 10', kMove: 'Moverse entre los tubos', kPour: 'Levantar o verter', kDrop: 'Dejar el tubo',
+        kHint: 'Pista', kRestart: 'Reiniciar este puzle', kNew: 'Puzle nuevo',
+        rules: 'Toca un tubo para levantarlo y luego otro para verter en él. El color de arriba solo cae sobre el mismo color o en un tubo vacío, tantas capas como quepan. Reúne cada color en su propio tubo. Cada color tiene su propia marca, así que los tubos se distinguen sin ver los colores. La meta es el número de vertidos que necesitó nuestro solucionador: con ese número o menos ganas tres estrellas, hasta una vez y media dos, y con más una. Los vertidos de más nunca pierden. Deshacer es gratis, pero un vertido deshecho sigue contando. Una pista ({h} monedas) muestra el siguiente vertido, y un tubo vacío extra cuesta {x} monedas por puzle. Todos los puzles se resuelven sin él y el puzle diario es igual para todos.',
+        tutTitle1: 'Levanta y vierte', tutText1: 'Toca un tubo y luego donde quieras verter. El color de arriba cae sobre el mismo color o en un tubo vacío.',
+        tutTitle2: 'Un color por tubo', tutText2: 'Cuando cada tubo tiene un solo color o está vacío, el puzle está resuelto.',
+        tutTitle3: 'Marcas y estrellas', tutText3: 'Cada color tiene su propia marca. Llegar a la meta da tres estrellas; los vertidos de más solo cuestan estrellas.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var DAILY_LEVEL = 'medium';
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || E.LEVELS.indexOf(prefs.level) < 0) prefs = { level: 'easy' };
+
+  var S = null, startedAt = 0, ended = false, lifted = -1, focusAt = 0, hinted = null, pending = null;
+
+  var board = el('div', { class: 'ws-board', role: 'group', 'aria-label': C.t('board') });
+  var fit = el('div', { class: 'ch-fit' }, [board]);
+  var tubes = [];
+  var top = el('div', { class: 'ws-top ch-above' });
+  var status = el('div', { class: 'ws-status', role: 'status', 'aria-live': 'polite' });
+  // restart, hint and the extra tube sit under the count: a fourth bar button cut the
+  // game's name on a phone (as in Lights Off)
+  var again = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', onclick: function () { restart(); } }, [C.icon('rotate', 16), el('span', { text: C.t('restart') })]);
+  var hintBtn = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', 'aria-label': C.t('hint') + ' · ' + C.num(HINT_COST) + ' ' + C.t('coins'), onclick: function () { hint(); } },
+    [C.icon('bulb', 16), el('span', { text: C.t('hint') }), el('b', { text: C.num(HINT_COST) })]);
+  var extraBtn = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', 'aria-label': C.t('extraTube') + ' · ' + C.num(EXTRA_COST) + ' ' + C.t('coins'), onclick: function () { addTube(); } },
+    [C.icon('plus', 16), el('span', { text: C.t('extraTube') }), el('b', { text: C.num(EXTRA_COST) })]);
+  var tools = el('div', { class: 'ws-tools' }, [again, hintBtn, extraBtn]);
+  var side = el('div', { class: 'ch-side ws-side' }, [top, status, tools]);
+  var wrap = el('div', { class: 'ws-wrap ch-split' }, [fit, side]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undo'), onClick: undo });
+  if (!dailyDate) ctx.button({ icon: 'refresh', label: C.t('newPuzzle'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- game */
+
+  function newPuzzle(level) {
+    var rnd = dailyDate ? C.daily('watersort', dailyDate).rng : Math.random;
+    var P = E.generate(level, rnd);
+    S = { level: level, start: E.clone(P.start), tubes: E.clone(P.start), moves: 0, min: P.min, daily: dailyDate || null, stack: [], extra: false, hints: 0 };
+    startedAt = Date.now(); ended = false; lifted = -1; focusAt = 0; hinted = null;
+    build();
+    save();
+  }
+  function restart() {
+    if (!S || ended || !S.moves) return;
+    S.tubes = E.clone(S.start);
+    if (S.extra) S.tubes.push([]);
+    S.moves = 0; S.stack = []; lifted = -1; hinted = null;
+    C.feedback('tap');
+    render(); save();
+  }
+  function askNew() {
+    if (S && S.moves && !ended) C.ui.confirm({ title: C.t('newPuzzle'), body: C.t('resetWarn'), onOk: function () { newPuzzle(prefs.level); } });
+    else newPuzzle(prefs.level);
+  }
+  function setLevel(level) {
+    if (level === S.level) return;
+    var go = function () { prefs.level = level; ctx.store.set('prefs', prefs); newPuzzle(level); };
+    if (S.moves && !ended) C.ui.confirm({ title: C.t('newPuzzle'), body: C.t('resetWarn'), onOk: go, onCancel: render });
+    else go();
+  }
+
+  function tap(i) {
+    if (!S || ended) return;
+    focusAt = i;
+    if (lifted < 0) {
+      if (!S.tubes[i].length || E.full(S.tubes[i])) { C.feedback('bad'); C.ui.shake(tubes[i]); return; }
+      lifted = i;
+      C.feedback('select');
+      render();
+      return;
+    }
+    if (lifted === i) { lifted = -1; C.feedback('tap'); render(); return; }
+    var a = lifted;
+    if (!E.canPour(S.tubes, a, i)) {
+      // a tap on another tube that cannot take the colour lifts that one instead,
+      // when it has something to pour
+      if (S.tubes[i].length && !E.full(S.tubes[i])) { lifted = i; C.feedback('select'); render(); return; }
+      C.feedback('bad'); C.ui.shake(tubes[i]);
+      return;
+    }
+    pourFrom(a, i);
+  }
+
+  function pourFrom(a, b) {
+    var before = E.clone(S.tubes);
+    var n = E.pour(S.tubes, a, b);
+    S.moves++;
+    S.stack.push([a, b, n]);
+    lifted = -1; hinted = null;
+    C.feedback('place');
+    var done = E.full(S.tubes[b]);
+    var win = E.solved(S.tubes);
+    animatePour(a, b, n, before, function () {
+      if (done && !win) C.audio.sfx('pop');
+    });
+    save();
+    if (win) { ended = true; setTimeout(winRound, C.ui.reduceMotion() ? 150 : 800); }
+  }
+
+  // Undo takes the last pour back for free; as in Lights Off, the pour it cost still counts
+  function undo() {
+    if (!S || ended || !S.stack.length) { C.feedback('bad'); return; }
+    var m = S.stack.pop();
+    for (var i = 0; i < m[2]; i++) S.tubes[m[0]].push(S.tubes[m[1]].pop());
+    lifted = -1; hinted = null; focusAt = m[0];
+    C.feedback('tap');
+    render(); save();
+  }
+
+  function hint() {
+    if (!S || ended) return;
+    var h = E.hint(S.tubes);
+    if (h.stuck || h.unknown) {
+      C.feedback('bad');
+      C.ui.toast({ icon: 'info', title: C.t('stuck'), sub: C.t(h.stuck ? 'stuckSub' : 'noHintSub') });
+      return;
+    }
+    if (!h.move) return;
+    if (!C.coins.can(HINT_COST)) {
+      C.feedback('bad');
+      C.ui.toast({ icon: 'coin', title: C.t('notEnoughCoins'), sub: C.t('playToEarn') });
+      return;
+    }
+    C.coins.spend(HINT_COST);
+    S.hints++;
+    // the hint lifts the tube to pour from and marks where it goes; the pour is the player's
+    lifted = h.move[0]; hinted = h.move[1]; focusAt = h.move[1];
+    C.feedback('coin');
+    render(); save();
+  }
+
+  function addTube() {
+    if (!S || ended || S.extra) return;
+    if (!C.coins.can(EXTRA_COST)) {
+      C.feedback('bad');
+      C.ui.toast({ icon: 'coin', title: C.t('notEnoughCoins'), sub: C.t('playToEarn') });
+      return;
+    }
+    C.coins.spend(EXTRA_COST);
+    S.extra = true;
+    S.tubes.push([]);
+    C.feedback('coin');
+    C.ui.toast({ icon: 'plus', title: C.t('extraAdded') });
+    build(); save();
+  }
+
+  function winRound() {
+    var st = E.stars(S.moves, S.min), perfect = st === 3;
+    var base = { easy: [3, 10], medium: [6, 25], hard: [10, 45] }[S.level], k = st === 3 ? 1 : st === 2 ? 0.7 : 0.4;
+    var coins = Math.max(1, Math.round(base[0] * k)), points = Math.max(1, Math.round(base[1] * k));
+    if (perfect && S.level !== 'easy') C.achievements.unlock('ws-perfect');
+    if (S.level === 'hard' && !S.extra) C.achievements.unlock('ws-hard');
+    if (S.daily) {
+      if (!C.stats.daily('watersort', S.daily, { label: C.num(S.moves) + ' / ' + C.num(S.min), win: true, stars: st })) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+      if (perfect) C.achievements.unlock('ws-daily');
+    }
+    ctx.clearSave();
+    C.feedback('good');
+    var elapsed = Date.now() - startedAt;
+    ctx.finish({
+      won: true, title: C.t('sorted'), note: perfect ? C.t('perfect') : null, stars: st, timeMs: elapsed, coins: coins, points: points,
+      lines: [
+        S.daily ? { label: C.t('daily'), value: C.num(S.daily) } : { label: C.t(S.level), value: '' },
+        { label: C.t('movesL') + ' / ' + C.t('target'), value: C.num(S.moves) + ' / ' + C.num(S.min) },
+        { label: C.t('time'), value: C.time(elapsed) }
+      ],
+      shareText: 'چوگان · رنگ‌ریز' + (S.daily ? ('\nروزانه ' + S.daily) : '') + '\n' + S.moves + ' / ' + S.min + ' ' + '★'.repeat(st),
+      againLabel: S.daily ? null : C.t('newPuzzle'),
+      onAgain: S.daily ? null : function () { newPuzzle(prefs.level); }
+    });
+  }
+
+  /* --------------------------------------------------------------- view */
+
+  function layerNode(c, fresh) {
+    var L = LIQUID[c];
+    var n = el('div', { class: 'ws-layer' + (fresh ? ' ws-layer--in' : '') });
+    n.style.background = L.c;
+    n.style.color = INK[L.ink];
+    n.innerHTML = '<svg viewBox="0 0 10 10" aria-hidden="true">' + L.m + '</svg>';
+    return n;
+  }
+  function fillTube(i, layers, fresh) {
+    var g = tubes[i].firstChild;
+    g.innerHTML = '';
+    for (var j = 0; j < layers.length; j++) g.appendChild(layerNode(layers[j], fresh && j >= layers.length - fresh));
+  }
+  function label(i) {
+    var t = S.tubes[i];
+    var s = C.t('tubeN', { n: C.num(i + 1) }) + ' · ' + (t.length ? t.map(function (c) { return C.t('c' + c); }).join(C.isRtl() ? '، ' : ', ') : C.t('tubeEmpty'));
+    return i === lifted ? s + ' · ' + C.t('lifted') : s;
+  }
+
+  // Tubes keep their nodes between renders: a pour animates the tube node itself, and a
+  // fresh node would drop that animation mid-move
+  function build() {
+    tubes = [];
+    for (var i = 0; i < S.tubes.length; i++) {
+      (function (k) {
+        var b = el('button', { class: 'ws-tube', type: 'button', tabindex: '-1' }, [el('span', { class: 'ws-glass' })]);
+        b.addEventListener('click', function () { tap(k); });
+        tubes.push(b);
+      })(i);
+    }
+    geo.key = '';
+    layout();
+    render();
+  }
+
+  // How many rows the tubes take: the one that gives the biggest tubes in the room the
+  // board really has, beside the other rows in a wide window or above and below them in
+  // a tall one. The board's aspect then goes to the core's slot as --fit-ar.
+  var CW = 1.4, CH = 3.6, geo = { key: '' };
+  function layout() {
+    if (!S || !tubes.length) return;
+    var cs = getComputedStyle(ctx.main);
+    var W = ctx.main.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    var H = ctx.main.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    if (W <= 0 || H <= 0) return;
+    var gap = parseFloat(getComputedStyle(wrap).rowGap) || 12, aw, ah;
+    if (W >= H * 1.25) { aw = W - Math.max(240, Math.min(380, W * 0.28)) - gap; ah = H; }
+    else { aw = W; ah = H - top.offsetHeight - status.offsetHeight - tools.offsetHeight - 3 * gap; }
+    var n = tubes.length, rows = 1, best = 0;
+    for (var r = 1; r <= 4; r++) {
+      var cols = Math.ceil(n / r);
+      if (r > 1 && Math.ceil(n / (r - 1)) === cols) continue;
+      var s = Math.min(aw / (cols * CW), ah / (r * CH));
+      if (s > best * 1.03) { best = s; rows = r; }
+    }
+    var colsN = Math.ceil(n / rows), k = n + ':' + rows;
+    fit.style.setProperty('--fit-ar', (colsN * CW / (rows * CH)).toFixed(4));
+    board.style.aspectRatio = (colsN * CW) + ' / ' + (rows * CH);
+    board.style.setProperty('--cols', colsN);
+    if (k === geo.key) return;
+    geo.key = k; geo.cols = colsN;
+    board.innerHTML = '';
+    for (var at = 0, ri = 0; ri < rows; ri++) {
+      // the first rows take the extra tube, so a short row is the last one
+      var inRow = Math.ceil((n - at) / (rows - ri)), row = el('div', { class: 'ws-row' });
+      for (var j = 0; j < inRow; j++, at++) row.appendChild(el('div', { class: 'ws-cell' }, [tubes[at]]));
+      board.appendChild(row);
+    }
+  }
+  if (window.ResizeObserver) new ResizeObserver(function () { layout(); }).observe(ctx.main);
+  else window.addEventListener('resize', layout);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { layout(); });
+
+  function render(keep) {
+    for (var i = 0; i < tubes.length; i++) {
+      if (!keep || keep.indexOf(i) < 0) fillTube(i, S.tubes[i], 0);
+      var b = tubes[i];
+      b.classList.toggle('ws-tube--up', i === lifted);
+      b.classList.toggle('ws-tube--done', E.full(S.tubes[i]));
+      b.classList.toggle('ws-tube--hint', i === hinted);
+      b.setAttribute('aria-pressed', i === lifted ? 'true' : 'false');
+      b.setAttribute('aria-label', label(i));
+      b.setAttribute('tabindex', i === focusAt ? '0' : '-1');
+    }
+    board.classList.toggle('ws-board--done', ended);
+    top.innerHTML = '';
+    if (S.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyWs') + ' — ' + C.num(S.daily) })]));
+    else top.appendChild(C.ui.segmented(E.LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), S.level, setLevel));
+    status.textContent = C.t('movesOf', { m: C.num(S.moves), b: C.num(S.min) });
+    again.disabled = !S.moves || ended;
+    hintBtn.disabled = ended;
+    extraBtn.disabled = ended || S.extra;
+  }
+
+  // The tube flies over the one it pours into and tilts; the colour leaves it at the
+  // tilt and fills the other tube from there. With reduced motion it simply moves.
+  function animatePour(a, b, n, before, after) {
+    var A = tubes[a], B = tubes[b];
+    if (pending) { clearTimeout(pending); pending = null; }
+    if (C.ui.reduceMotion() || !A.animate) { render(); after(); return; }
+    var ra = A.getBoundingClientRect(), rb = B.getBoundingClientRect();
+    var dir = rb.left >= ra.left ? 1 : -1;
+    var dx = (rb.left + rb.width / 2) - (ra.left + ra.width / 2) - dir * rb.width * 0.35;
+    var dy = (rb.top - ra.width * 0.5) - (ra.top + ra.height * 0.15);
+    var lift = 'translate(0, ' + (-0.14 * ra.height) + 'px) rotate(0deg)';
+    var over = 'translate(' + dx + 'px, ' + dy + 'px) rotate(' + (dir * 72) + 'deg)';
+    // the source keeps its colour until it tilts, the target gets it as it pours
+    render([a, b]);
+    fillTube(a, before[a], 0);
+    fillTube(b, before[b], 0);
+    A.classList.add('ws-tube--fly');
+    var anim = A.animate([
+      { transform: lift, offset: 0 }, { transform: over, offset: 0.35 }, { transform: over, offset: 0.7 }, { transform: 'translate(0, 0) rotate(0deg)', offset: 1 }
+    ], { duration: 680, easing: 'ease-in-out' });
+    pending = setTimeout(function () {
+      pending = null;
+      fillTube(a, S.tubes[a], 0);
+      fillTube(b, S.tubes[b], b < S.tubes.length && S.tubes[b].length >= n ? n : 0);
+      after();
+    }, 680 * 0.35);
+    anim.onfinish = anim.oncancel = function () { A.classList.remove('ws-tube--fly'); };
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  function focusTube(i) {
+    focusAt = Math.max(0, Math.min(tubes.length - 1, i));
+    for (var k = 0; k < tubes.length; k++) tubes[k].setAttribute('tabindex', k === focusAt ? '0' : '-1');
+    tubes[focusAt].focus();
+  }
+  board.addEventListener('keydown', function (e) {
+    if (!S) return;
+    var cols = geo.cols || tubes.length;
+    var d = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -cols, ArrowDown: cols }[e.key];
+    if (!d) return;
+    e.preventDefault();
+    var to = focusAt + d;
+    if (to >= 0 && to < tubes.length) focusTube(to);
+  });
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim') || e.ctrlKey && !C.undoKey(e) || e.metaKey || e.altKey) return;
+    if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
+    if (!S) return;
+    // digits by their key position, so they work on any keyboard layout: 1–9, then 0 for the tenth
+    var m = /^(?:Digit|Numpad)(\d)$/.exec(e.code || '');
+    if (m) { var i = m[1] === '0' ? 9 : +m[1] - 1; if (i < tubes.length) { focusTube(i); tap(i); } e.preventDefault(); return; }
+    if (e.key === 'Escape' && lifted >= 0) { lifted = -1; hinted = null; render(); e.preventDefault(); return; }
+    if (C.keyIs(e, 'h')) { hint(); e.preventDefault(); return; }
+    if (C.keyIs(e, 'r')) { restart(); e.preventDefault(); return; }
+    if (C.keyIs(e, 'n') && !dailyDate) { askNew(); e.preventDefault(); return; }
+    // the first arrow from anywhere on the page lands on the board
+    if (/^Arrow/.test(e.key) && tubes.length && !board.contains(document.activeElement)) { focusTube(focusAt); e.preventDefault(); }
+  });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', dir: 'ltr', text: k })]); }
+  function showHelp() {
+    var keys = [kb('1 … 9, 0', C.t('kPick')), kb('← ↑ → ↓', C.t('kMove')), kb('Space / Enter', C.t('kPour')), kb('Esc', C.t('kDrop')),
+      kb('U / Ctrl+Z', C.t('undo')), kb('H', C.t('kHint')), kb('R', C.t('kRestart'))];
+    if (!dailyDate) keys.push(kb('N', C.t('kNew')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules', { h: C.num(HINT_COST), x: C.num(EXTRA_COST) }) }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, keys)
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // Tutorial tubes: each a list of colours from the bottom; up lifts one, arrow points
+  // from one tube to another, cork marks the finished ones
+  function tArt(list, o) {
+    o = o || {};
+    var s = '<svg viewBox="0 0 200 110" width="100%">', w = 22, gap = 14, x0 = 100 - (list.length * w + (list.length - 1) * gap) / 2;
+    list.forEach(function (t, i) {
+      var x = x0 + i * (w + gap), y = 22 - (o.up === i ? 10 : 0);
+      s += '<path d="M' + x + ' ' + y + 'h' + w + 'v64a11 11 0 0 1-' + w + ' 0z" fill="rgba(127,160,200,.15)" stroke="#2B6CB0" stroke-width="2"/>';
+      t.forEach(function (c, j) {
+        var ly = y + 70 - (j + 1) * 15, L = LIQUID[c];
+        s += '<rect x="' + (x + 2) + '" y="' + ly + '" width="' + (w - 4) + '" height="15" fill="' + L.c + '"/>';
+        s += '<svg x="' + (x + 6) + '" y="' + (ly + 3.5) + '" width="10" height="8" viewBox="0 0 10 10" fill="' + INK[L.ink] + '" color="' + INK[L.ink] + '">' + L.m + '</svg>';
+      });
+      if (o.cork && E.full(t)) s += '<rect x="' + (x + 3) + '" y="' + (y - 6) + '" width="' + (w - 6) + '" height="6" rx="2" fill="#A9784C"/>';
+    });
+    if (o.arrow) {
+      var ax = x0 + o.arrow[0] * (w + gap) + w / 2, bx = x0 + o.arrow[1] * (w + gap) + w / 2;
+      s += '<path d="M' + ax + ' 8Q' + ((ax + bx) / 2) + ' -6 ' + bx + ' 12" fill="none" stroke="#E0A100" stroke-width="3" stroke-linecap="round"/>' +
+        '<path d="M' + (bx - 5) + ' 6l5 7 5-7" fill="none" stroke="#E0A100" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>';
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt([[1, 0, 0], [2, 0], []], { up: 0, arrow: [0, 1] }) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt([[0, 0, 0, 0], [1, 1, 1, 1], [2, 2, 2, 2], []], { cork: true }) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt([[3, 4, 5, 6], [7, 8, 9, 10], [0, 1, 2]]) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // the tubes are saved after every pour; the daily puzzle has its own slot
+  ctx.autosave(function () {
+    if (!S || ended) return { inProgress: false };
+    return { level: S.level, start: S.start, tubes: S.tubes, moves: S.moves, min: S.min, daily: S.daily, stack: S.stack, extra: S.extra, hints: S.hints, elapsed: Date.now() - startedAt };
+  });
+  function save() { ctx.save(); }
+  var saved = ctx.loadSave();
+  if (saved && E.valid(saved) && (saved.daily || null) === (dailyDate || null) && !E.solved(saved.tubes)) {
+    var nT = saved.tubes.length;
+    var stack = Array.isArray(saved.stack) ? saved.stack.filter(function (m) {
+      return Array.isArray(m) && m.length === 3 && m[0] >= 0 && m[0] < nT && m[1] >= 0 && m[1] < nT && m[2] >= 1 && m[2] <= E.CAP;
+    }) : [];
+    S = { level: saved.level, start: E.clone(saved.start), tubes: E.clone(saved.tubes), moves: saved.moves, min: saved.min, daily: saved.daily || null,
+      stack: stack, extra: !!saved.extra, hints: saved.hints || 0 };
+    startedAt = Date.now() - (saved.elapsed || 0);
+    build();
+  } else newPuzzle(dailyDate ? DAILY_LEVEL : prefs.level);
+  if (dailyDate && C.stats.dailyDone('watersort', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).watersort;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
