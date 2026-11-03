@@ -11017,6 +11017,107 @@ function testSums() {
   ok(Date.now() - t0 < 12000, 'the Sums tests finish in under 12 s (' + (Date.now() - t0) + ' ms)');
 }
 
+// #620: a block-stacking game, named Tower Up ("Stack" is a trademark); the cut, the
+// perfect window per mode and the regrow are tested on the engine, and a test player
+// with human timing noise shows each mode reaches its own band of heights
+function testTowerUp() {
+  head('Tower Up (#620)');
+  const t0 = Date.now();
+  const E = loadEngine('towerup', 'TowerUpEngineFactory');
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/towerup/index.html'), 'utf8');
+  const games = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games;
+  const rng = (seed) => { let x = seed >>> 0; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; };
+  // puts the sliding block `off` units from the tower top's centre along its axis
+  const setOff = (S, off) => { const c = S.cur; c.t = (off / c.side + E.RANGE) / c.v; };
+  const fresh = (mode) => E.newGame(rng(5), mode || 'normal');
+
+  // The first block slides along x, starts clear of the tower, and moves
+  const A = fresh();
+  const p0 = E.curPos(A);
+  E.advance(A, 0.3);
+  const p1 = E.curPos(A);
+  ok(A.cur.axis === 'x' && Math.abs(p0.x) === E.RANGE && E.RANGE > E.BASE && p1.x !== p0.x && p1.z === 0, 'the first block slides along x, starting clear of the tower (' + p0.x + ' → ' + p1.x.toFixed(1) + ')');
+
+  // Cut maths: 30 units over the right edge keeps 70, and the 30 that hung over falls
+  const K = fresh(); setOff(K, 30);
+  const k = E.drop(K);
+  ok(k.kind === 'cut' && Math.abs(k.placed.w - 70) < 1e-9 && Math.abs(k.placed.x - 15) < 1e-9 && k.placed.d === 100 && Math.abs(k.cut.w - 30) < 1e-9 && Math.abs(k.cut.x - 65) < 1e-9,
+    'a drop 30 over keeps 70 centred at 15, and the piece from 50 to 80 falls (' + [k.placed.x, k.placed.w, k.cut.x, k.cut.w].map((v) => +v.toFixed(2)).join(', ') + ')');
+  ok(E.height(K) === 1 && K.cur.axis === 'z' && Math.abs(K.cur.w - 70) < 1e-9 && K.cur.d === 100 && K.streak === 0, 'the next block slides along z and is only as big as what was kept');
+  setOff(K, -20);
+  const k2 = E.drop(K);
+  ok(k2.kind === 'cut' && Math.abs(k2.placed.d - 80) < 1e-9 && Math.abs(k2.placed.z + 10) < 1e-9 && Math.abs(k2.cut.z + 60) < 1e-9 && Math.abs(k2.placed.x - 15) < 1e-9, 'an overhang on the near side is cut there too (z ' + k2.placed.z.toFixed(1) + ', cut at ' + k2.cut.z.toFixed(1) + ')');
+
+  // The perfect window per mode: inside it the block snaps exactly on, just outside it is cut
+  let win = 0;
+  for (const m of ['normal', 'hard']) {
+    const tol = E.MODES[m].tol;
+    const P = fresh(m); setOff(P, tol - 0.05); const a = E.drop(P);
+    const Q = fresh(m); setOff(Q, -(tol + 0.3)); const b = E.drop(Q);
+    if (a.kind === 'perfect' && a.placed.x === 0 && a.placed.w === 100 && P.streak === 1 && b.kind === 'cut' && b.placed.w < 100) win++;
+  }
+  ok(win === 2 && E.MODES.hard.tol < E.MODES.normal.tol && E.MODES.hard.v0 > E.MODES.normal.v0, 'a drop within ' + E.MODES.normal.tol + ' (Normal) or ' + E.MODES.hard.tol + ' (Hard) snaps on, just outside it is cut; Hard is faster and tighter');
+  ok(E.speed('normal', 0) < E.speed('normal', 30) && E.speed('normal', 1000) === E.MODES.normal.vmax && E.speed('hard', 1000) === E.MODES.hard.vmax, 'the block speeds up with height, up to a cap');
+
+  // Regrow: from the third perfect in a row each one gives back a little, never past the first size
+  const G = fresh(); setOff(G, 40); E.drop(G);
+  const grew = [];
+  for (let i = 0; i < 12; i++) { setOff(G, 0); grew.push(E.drop(G).grew); }
+  const T = E.top(G);
+  ok(grew[0] === 0 && grew[1] === 0 && grew[2] === E.GROW && G.streak === 12 && G.bestStreak === 12 && G.perfects === 12, 'the first two perfects in a row keep the size, the third grows it by ' + E.GROW + ' (' + grew.slice(0, 4).join(', ') + ')');
+  ok(Math.abs(T.w - E.BASE) < 1e-9 && T.d <= E.BASE && grew.slice(-2).every((g) => g === 0), 'a streak grows the block back to the first size and no further (' + T.w.toFixed(1) + ' × ' + T.d.toFixed(1) + ')');
+  setOff(G, 30); E.drop(G);
+  ok(G.streak === 0 && G.bestStreak === 12, 'a drop that is cut ends the streak and keeps the longest');
+
+  // Missing the tower ends the run; nothing more drops
+  const M = fresh(); setOff(M, 100);
+  const mr = E.drop(M);
+  ok(mr.kind === 'miss' && M.over && E.height(M) === 0 && mr.cut.w === 100 && E.drop(M) === null, 'a drop that misses the tower falls whole and ends the run');
+  const M2 = fresh(); setOff(M2, 60); E.drop(M2); setOff(M2, 0); E.drop(M2); setOff(M2, 40);
+  ok(M2.cur.axis === 'x' && M2.cur.w === 40 && E.drop(M2).kind === 'miss' && M2.over && E.height(M2) === 2, 'a smaller block is missed by its own size (40 off a 40-wide block)');
+
+  // A test player with human timing noise: Normal reaches a band, Hard a lower one
+  const gauss = (r) => Math.sqrt(-2 * Math.log(1 - r())) * Math.cos(2 * Math.PI * r());
+  const play = (mode, seed, sd) => {
+    const S = E.newGame(rng(seed), mode), r = rng(seed * 7 + 1);
+    while (!S.over && E.height(S) < 400) { let dt = E.aimIn(S) + gauss(r) * sd; if (dt < 0.02) dt += 2 * E.RANGE / S.cur.v; E.advance(S, dt); E.drop(S); }
+    return E.height(S);
+  };
+  const median = (a) => { const s = a.slice().sort((x, y) => x - y); return s[s.length >> 1]; };
+  const hN = [], hH = [], sharp = [];
+  for (let i = 1; i <= 40; i++) { hN.push(play('normal', i, 0.04)); hH.push(play('hard', i, 0.04)); }
+  for (let i = 1; i <= 10; i++) sharp.push(play('normal', i, 0.015));
+  ok(hN.length === 40 && median(hN) >= 40 && median(hN) <= 100, 'with 40 ms of timing noise Normal towers reach a median of 40–100 floors (' + median(hN) + ')');
+  ok(hH.length === 40 && median(hH) >= 15 && median(hH) <= 45 && median(hH) < median(hN) * 0.7, 'Hard towers with the same hand stay lower, a median of 15–45 (' + median(hH) + ')');
+  ok(median(sharp) >= 300, 'a sharper hand keeps the block whole by its perfect streaks (median ' + median(sharp) + ')');
+
+  // The daily tower is the same for everyone: the same colours, speeds and sides
+  const D1 = E.newGame(rng(42), 'normal'), D2 = E.newGame(rng(42), 'normal');
+  let same = D1.hue0 === D2.hue0;
+  for (let i = 0; i < 20; i++) { same = same && D1.cur.v === D2.cur.v && D1.cur.side === D2.cur.side; setOff(D1, 0); setOff(D2, 0); E.drop(D1); E.drop(D2); }
+  const D3 = E.newGame(rng(43), 'normal');
+  ok(same && (D3.hue0 !== D1.hue0 || D3.cur.v !== E.newGame(rng(42), 'normal').cur.v), 'the same seed gives the same colours, speeds and sides, so the daily tower is the same for everyone');
+
+  // A saved tower comes back the same and goes on the same way
+  const V = E.newGame(rng(9), 'hard');
+  for (let i = 0; i < 6; i++) { setOff(V, i % 2 ? 2 : 9); E.drop(V); }
+  E.advance(V, 0.37);
+  const snap = JSON.parse(JSON.stringify(E.snapshot(V))), R = E.restore(snap, rng(9));
+  ok(!!R && R.cur.t === V.cur.t && JSON.stringify(E.curPos(R)) === JSON.stringify(E.curPos(V)), 'a restored tower has its sliding block where it was');
+  setOff(V, 1); setOff(R, 1); E.drop(V); E.drop(R);
+  ok(!!R && R.mode === 'hard' && E.height(R) === E.height(V) && R.cur.v === V.cur.v && R.cur.side === V.cur.side && JSON.stringify(E.top(R)) === JSON.stringify(E.top(V)), 'a restored tower carries on exactly as the saved one would');
+  ok(E.restore(Object.assign({}, snap, { mode: 'x' }), rng(9)) === null && E.restore(Object.assign({}, snap, { blocks: [] }), rng(9)) === null && E.restore(Object.assign({}, snap, { cur: Object.assign({}, snap.cur, { axis: 'y' }) }), rng(9)) === null && E.restore(Object.assign({}, snap, { draws: NaN }), rng(9)) === null,
+    'a broken save is refused');
+
+  // Page wiring
+  const gm = games.find((g) => g.id === 'towerup');
+  ok(!!gm && gm.cat === 'skill' && gm.people === 1 && /accent: '([^']+)'/.test(html) && html.match(/accent: '([^']+)'/)[1] === gm.color, 'games.json lists it as a one-player skill game and shares the page accent');
+  ok(/C\.daily\('towerup', dailyDate\)\.rng/.test(html) && /C\.stats\.best\('towerup', m, h\)/.test(html) && ['tw-30', 'tw-perfect', 'tw-daily'].every((id) => html.indexOf("unlock('" + id + "')") > 0),
+    'the daily tower is seeded by the day, the best is kept per mode, and the three awards are unlocked');
+  ok(!/\bStack\b/.test(html) && !/\bStack\b/.test(JSON.stringify(gm)), 'the game is never called Stack (a trademark)');
+  ok(Date.now() - t0 < 10000, 'the Tower Up tests finish in under 10 s (' + (Date.now() - t0) + ' ms)');
+}
+
 // #554: xmha97 asked for Lights Out (named Lights Off: "Lights Out" is a trademark)
 function testLights() {
   head('Lights Off (#554)');
