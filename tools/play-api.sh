@@ -16,6 +16,10 @@
 #       images/{icon.png,featureGraphic.png,phoneScreenshots/*.png}). Sets the
 #       default language to en-US, replaces every image type it has files for,
 #       removes listings for languages it has no folder for, and commits.
+#   tools/play-api.sh promote <from-track> <versionCode> <metadata dir>
+#       Puts a versionCode that is already completed on <from-track> on production,
+#       completed, with release notes from <dir>/<lang>/changelogs/<versionCode>.txt,
+#       and commits. No bundle is uploaded: production gets exactly what was tested.
 #
 # Env: PLAY_SERVICE_ACCOUNT_JSON (the key file's content), PLAY_PACKAGE
 #   (default io.github.choganhq.chogan), PLAY_API (base URL, overridable for tests),
@@ -30,7 +34,7 @@ fail() { echo "play-api: $1" >&2; exit 1; }
 PKG="${PLAY_PACKAGE:-io.github.choganhq.chogan}"
 API="${PLAY_API:-https://androidpublisher.googleapis.com}"
 mode="${1:-}"
-case "$mode" in check|upload|listing) ;; *) cannot "mode must be check, upload or listing, got '${mode}'" ;; esac
+case "$mode" in check|upload|listing|promote) ;; *) cannot "mode must be check, upload, listing or promote, got '${mode}'" ;; esac
 for t in curl openssl python3; do command -v "$t" >/dev/null 2>&1 || cannot "$t is missing"; done
 [[ "$PKG" =~ ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$ ]] || cannot "invalid package name '$PKG'"
 
@@ -132,6 +136,41 @@ PY
   done
   call POST "$BASE/edits/$EDIT:commit" >/dev/null
   echo "Committed listing: ${langs[*]}"
+  exit 0
+fi
+
+if [ "$mode" = promote ]; then
+  from="${2:-}"; vc="${3:-}"; dir="${4:-}"
+  bail() { call DELETE "$BASE/edits/$EDIT" >/dev/null; cannot "$1"; }
+  [[ "$from" =~ ^(internal|alpha|beta)$ ]] || bail "promote only from a testing track, got '$from'"
+  [[ "$vc" =~ ^[0-9]+$ ]] || bail "versionCode must be a number, got '$vc'"
+  [ -d "$dir" ] || bail "metadata folder '$dir' missing"
+  # Production only ever gets a build testers already have: a typo in the version
+  # code must not publish something nobody ran (#613)
+  # Read into a variable first: a refused call inside a pipeline would read as "not on the track"
+  tested=$(call GET "$BASE/edits/$EDIT/tracks/$from")
+  if ! printf '%s' "$tested" | python3 -c '
+import json,sys
+vc=sys.argv[1]
+ok=any(r.get("status")=="completed" and vc in r.get("versionCodes",[]) for r in json.load(sys.stdin).get("releases",[]))
+sys.exit(0 if ok else 1)' "$vc"; then
+    call DELETE "$BASE/edits/$EDIT" >/dev/null
+    fail "versionCode $vc is not a completed release on $from; nothing changed"
+  fi
+  python3 - "$dir" "$vc" > "$WORK/release.json" <<'PY' || bail "could not build the release notes for versionCode $vc"
+import json, sys, pathlib
+d, vc = pathlib.Path(sys.argv[1]), sys.argv[2]
+notes = []
+for f in sorted(d.glob('*/changelogs/%s.txt' % vc)):
+    text = f.read_text(encoding='utf-8').strip()
+    assert len(text) <= 500, '%s is over Play\'s 500 characters' % f
+    notes.append({'language': f.parent.parent.name, 'text': text})
+assert any(n['language'] == 'en-US' for n in notes), 'no en-US changelog for versionCode %s' % vc
+print(json.dumps({'track': 'production', 'releases': [{'versionCodes': [vc], 'status': 'completed', 'releaseNotes': notes}]}, ensure_ascii=False))
+PY
+  call PUT "$BASE/edits/$EDIT/tracks/production" -H 'Content-Type: application/json; charset=utf-8' --data-binary "@$WORK/release.json" >/dev/null
+  call POST "$BASE/edits/$EDIT:commit" >/dev/null
+  echo "Committed: production → versionCode $vc (completed), from $from"
   exit 0
 fi
 
