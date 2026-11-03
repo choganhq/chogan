@@ -6023,7 +6023,7 @@ function testStoreMetadata() {
   const icon = pngSize(path.join(root, 'en-US/images/icon.png'));
   ok(!!icon && icon[0] === 512 && icon[1] === 512, 'en-US icon is 512×512');
   const y = fs.readFileSync(path.join(ROOT, '.github/workflows/play.yml'), 'utf8');
-  ok(/options: \[check, upload, listing\]/.test(y) && /play-api\.sh listing fastlane\/metadata\/android/.test(y), 'play.yml can send the listing from the repo metadata');
+  ok(/options: \[check, upload, listing, promote\]/.test(y) && /play-api\.sh listing fastlane\/metadata\/android/.test(y), 'play.yml can send the listing from the repo metadata');
 }
 
 /* ------------------------------------------------ Tower defence: six maps (#221) */
@@ -7816,7 +7816,11 @@ function testPlayApi() {
   const y = fs.readFileSync(wf, 'utf8');
   const on = (y.match(/\non:\n([\s\S]*?)\n[a-z]/) || [])[1] || '';
   ok(/^\s+workflow_dispatch:/m.test(on) && !/\b(push|pull_request|schedule|release):/.test(on), 'play.yml: manual dispatch only');
-  ok(/options: \[internal, alpha\]/.test(y) && !/production/.test(y.replace(/^#.*$/mg, '')), 'play.yml: only testing tracks, never production');
+  // Production is reached only by promoting a tested version code, never by an upload (#613)
+  const code = y.replace(/^\s*#.*$/mg, '');
+  ok(/options: \[internal, alpha\]/.test(y) && !/production/.test(code.replace(/description: '[^']*'/g, '')), 'play.yml: uploads only reach testing tracks; production is never named as a track');
+  ok(/run: bash tools\/play-api\.sh promote alpha "\$VERSION_CODE" fastlane\/metadata\/android$/m.test(y) && /VERSION_CODE: \$\{\{ inputs\.version_code \}\}/.test(y),
+    'play.yml: promote goes from alpha only, its version code through env');
   ok(y.split('\n').filter((l) => /secrets\.PLAY_SERVICE_ACCOUNT_JSON/.test(l)).every((l) => /^\s+PLAY_SERVICE_ACCOUNT_JSON: \$\{\{ secrets\.PLAY_SERVICE_ACCOUNT_JSON \}\}$/.test(l)), 'play.yml: the service account key only reaches steps through env');
   ok(!/\$\{\{ inputs\.[a-z]+ \}\}/.test(y.split('\n').filter((l) => /^\s+run:/.test(l)).join('\n')), 'play.yml: inputs never interpolated into run lines');
   ok(/if: always\(\)\n\s+run: rm -f "\$RUNNER_TEMP\/release\.jks"/.test(y), 'play.yml: the keystore is always removed');
@@ -7844,7 +7848,7 @@ function testPlayApi() {
           claims.exp - claims.iat === 600;
         return tokenOk ? send(200, { access_token: 'tok-123' }) : send(400, { error: 'invalid_grant' });
       }
-      calls.push({ m: req.method, u: req.url, auth: req.headers.authorization, body: body.toString().slice(0, 200), len: body.length });
+      calls.push({ m: req.method, u: req.url, auth: req.headers.authorization, body: body.toString().slice(0, 2000), len: body.length });
       if (failOn && req.url.indexOf(failOn) >= 0) return send(403, { error: { message: 'The caller does not have permission' } });
       const base = '/androidpublisher/v3/applications/' + PKG + '/edits';
       if (req.method === 'POST' && req.url === base) return send(200, { id: 'E1' });
@@ -7852,6 +7856,8 @@ function testPlayApi() {
       if (req.method === 'DELETE' && req.url === base + '/E1') return send(204, {});
       if (req.method === 'POST' && req.url === '/upload' + base + '/E1/bundles?uploadType=media') return send(200, { versionCode: Number(bundleVc) });
       if (req.method === 'PUT' && req.url === base + '/E1/tracks/internal') return send(200, {});
+      if (req.method === 'GET' && req.url === base + '/E1/tracks/alpha') return send(200, { track: 'alpha', releases: [{ status: 'completed', versionCodes: ['17'] }, { status: 'draft', versionCodes: ['18'] }] });
+      if (req.method === 'PUT' && req.url === base + '/E1/tracks/production') return send(200, {});
       if (req.method === 'POST' && req.url === base + '/E1:commit') return send(200, {});
       if (req.method === 'PUT' && /\/E1\/listings\/[a-zA-Z-]+$/.test(req.url)) return send(200, JSON.parse(body.toString()));
       if (req.method === 'DELETE' && /\/E1\/listings\/[a-zA-Z-]+(\/[a-zA-Z]+)?$/.test(req.url)) return send(200, {});
@@ -7892,6 +7898,28 @@ function testPlayApi() {
     r = await run(['upload', aab, 'internal', '17'], env);
     ok(r.code === 1 && !calls.some((c) => c.m === 'PUT'), 'upload: a bundle Play reads as another versionCode stops before the track changes');
     bundleVc = '17';
+
+    // promote (#613): the tested bundle goes to production with its changelogs as notes
+    const pmeta = path.join(tmp, 'pmeta');
+    for (const [lang, text] of [['en-US', 'New games:\n- Link Up'], ['fa', 'بازی تازه'], ['de-DE', 'Neu']]) {
+      fs.mkdirSync(path.join(pmeta, lang, 'changelogs'), { recursive: true });
+      fs.writeFileSync(path.join(pmeta, lang, 'changelogs', '17.txt'), text + '\n');
+    }
+    fs.writeFileSync(path.join(pmeta, 'en-US', 'changelogs', '16.txt'), 'old\n');
+    r = await run(['promote', 'alpha', '17', pmeta], env);
+    const prod = calls.find((c) => c.m === 'PUT' && /\/tracks\/production$/.test(c.u));
+    let rel = null;
+    try { rel = JSON.parse(prod.body).releases[0]; } catch (e) { /* checked below */ }
+    ok(r.code === 0 && !!rel && rel.status === 'completed' && rel.versionCodes.join() === '17', 'promote: production gets versionCode 17, completed (' + r.code + ')');
+    ok(!!rel && (rel.releaseNotes || []).map((n) => n.language).join() === 'de-DE,en-US,fa' && rel.releaseNotes.some((n) => n.text === 'New games:\n- Link Up'),
+      'promote: every language\'s changelog for that version code is a release note');
+    ok(calls.length > 0 && !calls.some((c) => c.u.indexOf('/upload/') === 0) && calls[calls.length - 1].u.endsWith('/E1:commit'), 'promote: no bundle is uploaded, the edit is committed last');
+    for (const [vc, why] of [['18', 'a draft on alpha'], ['19', 'not on alpha at all']]) {
+      r = await run(['promote', 'alpha', vc, pmeta], env);
+      ok(r.code === 1 && !calls.some((c) => /\/tracks\/production$/.test(c.u) || c.u.endsWith(':commit')), 'promote: ' + why + ' stops before production changes (' + r.code + ')');
+    }
+    r = await run(['promote', 'production', '17', pmeta], env);
+    ok(r.code === 2 && !calls.some((c) => c.u.endsWith(':commit')), 'promote: only from a testing track');
 
     failOn = '/edits';
     r = await run(['check'], env);

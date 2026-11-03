@@ -3,18 +3,19 @@ name: Google Play
 # Talks to Google Play as the service account in PLAY_SERVICE_ACCOUNT_JSON (#159).
 # check: proves access without changing anything. upload: builds the signed release
 # AAB from this commit and puts it on a testing track. listing: sends the store text
-# and images from fastlane/metadata/android (#163). Production is not offered
-# here on purpose; that stays a decision in Play Console.
+# and images from fastlane/metadata/android (#163). promote: puts a version code
+# that is already completed on alpha on production, with its changelogs as release
+# notes (#613); production never gets a fresh build, only one testers ran.
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'check (read only), upload (AAB to a testing track) or listing (store text and images)'
+        description: 'check (read only), upload (AAB to a testing track), listing (store text and images) or promote (alpha to production)'
         required: true
         default: check
         type: choice
-        options: [check, upload, listing]
+        options: [check, upload, listing, promote]
       track:
         description: 'Track for upload'
         required: true
@@ -27,6 +28,11 @@ on:
         default: draft
         type: choice
         options: [draft, completed]
+      version_code:
+        description: 'For promote: the versionCode completed on alpha'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -50,6 +56,13 @@ jobs:
         env:
           PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
         run: bash tools/play-api.sh listing fastlane/metadata/android
+
+      - name: Promote from alpha
+        if: inputs.mode == 'promote'
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          VERSION_CODE: ${{ inputs.version_code }}
+        run: bash tools/play-api.sh promote alpha "$VERSION_CODE" fastlane/metadata/android
 
       - name: Set up Java
         if: inputs.mode == 'upload'
