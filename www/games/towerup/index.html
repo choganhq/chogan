@@ -1,0 +1,610 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>برج‌ساز — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .tw-wrap > .ch-fit { --fit-ar: calc(360 / 600); }
+  .ch-fit > .tw-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+  .tw-canvas { display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; user-select: none; -webkit-user-select: none; cursor: pointer; }
+  .tw-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .tw-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+  .tw-gear .ch-icon { pointer-events: none; }
+  .tw-note { margin-top: var(--s-2); font-size: var(--fs-sm); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function TowerUpEngineFactory() {
+  'use strict';
+
+  // World units: the first block is BASE × BASE and BH tall. A sliding block runs
+  // RANGE either side of the tower top, so it starts clear of the tower.
+  var BASE = 100, BH = 22, RANGE = 130, GROW = 6, REGROW_AFTER = 3;
+  // v: units a second, growing per floor up to vmax; tol: how far off a drop may be
+  // and still snap into place as a perfect one
+  var MODES = {
+    normal: { v0: 115, dv: 2, vmax: 240, tol: 6 },
+    hard: { v0: 165, dv: 3, vmax: 320, tol: 3.5 }
+  };
+  function mode(m) { return MODES[m] ? m : 'normal'; }
+  function speed(m, n) { var M = MODES[mode(m)]; return Math.min(M.vmax, M.v0 + M.dv * n); }
+
+  // The run draws from rnd as it goes; the draws are counted, so a saved run can start
+  // the same generator again, skip as many, and go on the same way (as Hop does)
+  function counted(S, rnd) { S.rnd = function () { S.draws++; return rnd(); }; }
+  function newGame(rnd, m) {
+    var S = { mode: mode(m), blocks: [{ x: 0, z: 0, w: BASE, d: BASE }], cur: null, streak: 0, bestStreak: 0, perfects: 0, over: false, draws: 0, hue0: 0 };
+    counted(S, rnd);
+    S.hue0 = Math.floor(S.rnd() * 360);
+    spawn(S);
+    return S;
+  }
+  function height(S) { return S.blocks.length - 1; }
+  function top(S) { return S.blocks[S.blocks.length - 1]; }
+  // the colour drifts slowly up the tower
+  function hueAt(S, i) { return (S.hue0 + i * 5) % 360; }
+
+  // The next block: along x on even floors and z on odd ones, from a side and at a
+  // speed drawn from the run's generator, so a daily tower is the same for everyone
+  function spawn(S) {
+    var n = height(S), T = top(S);
+    var side = S.rnd() < 0.5 ? -1 : 1, f = 0.92 + S.rnd() * 0.16;
+    S.cur = { axis: n % 2 ? 'z' : 'x', side: side, v: speed(S.mode, n) * f, t: 0, w: T.w, d: T.d };
+  }
+  // where the sliding block is along its axis, from the tower top's centre: a
+  // triangle wave from -RANGE to RANGE and back
+  function offset(c) {
+    var u = (c.v * c.t) % (4 * RANGE);
+    return c.side * (u < 2 * RANGE ? -RANGE + u : 3 * RANGE - u);
+  }
+  function curPos(S) {
+    var T = top(S), c = S.cur, o = offset(c);
+    return { x: T.x + (c.axis === 'x' ? o : 0), z: T.z + (c.axis === 'z' ? o : 0), w: c.w, d: c.d };
+  }
+  function advance(S, dt) { if (!S.over && dt > 0) S.cur.t += dt; }
+
+  // Drops the sliding block. Returns { kind: 'perfect' | 'cut' | 'miss', placed, cut,
+  // grew, streak }: placed is the block now on the tower, cut the piece that falls.
+  function drop(S) {
+    if (S.over) return null;
+    var T = top(S), c = S.cur, p = curPos(S), ax = c.axis;
+    var size = ax === 'x' ? p.w : p.d, tsize = ax === 'x' ? T.w : T.d;
+    var delta = ax === 'x' ? p.x - T.x : p.z - T.z, ad = Math.abs(delta);
+    var res;
+    if (ad <= MODES[S.mode].tol) {
+      S.streak++; S.perfects++;
+      if (S.streak > S.bestStreak) S.bestStreak = S.streak;
+      var placed = { x: T.x, z: T.z, w: p.w, d: p.d }, grew = 0;
+      // a streak earns back a little of what was cut, never more than the first block:
+      // along the block's own axis, or the other one when that side is already whole
+      if (S.streak >= REGROW_AFTER) {
+        var gx = ax === 'x' ? placed.w < BASE : placed.d >= BASE;
+        grew = Math.max(0, Math.min(GROW, BASE - (gx ? placed.w : placed.d)));
+        if (gx) placed.w += grew; else placed.d += grew;
+      }
+      res = { kind: 'perfect', placed: placed, cut: null, grew: grew, streak: S.streak };
+    } else if (ad >= Math.min(size, tsize) - 0.5) {
+      S.over = true; S.streak = 0;
+      return { kind: 'miss', placed: null, cut: p, grew: 0, streak: 0 };
+    } else {
+      S.streak = 0;
+      var s = delta > 0 ? 1 : -1, keep = size - ad;
+      var pc = ax === 'x' ? p.x : p.z, tc = ax === 'x' ? T.x : T.z;
+      // the kept part runs from the moving block's inner edge to the top's outer edge
+      var kc = tc + delta / 2, edge = tc + s * tsize / 2, outer = pc + s * size / 2;
+      var placedC = { x: p.x, z: p.z, w: p.w, d: p.d }, cut = { x: p.x, z: p.z, w: p.w, d: p.d };
+      if (ax === 'x') { placedC.x = kc; placedC.w = keep; cut.x = (edge + outer) / 2; cut.w = ad; }
+      else { placedC.z = kc; placedC.d = keep; cut.z = (edge + outer) / 2; cut.d = ad; }
+      res = { kind: 'cut', placed: placedC, cut: cut, grew: 0, streak: 0 };
+    }
+    S.blocks.push(res.placed);
+    spawn(S);
+    return res;
+  }
+
+  // Seconds from now until the sliding block is next right over the tower top
+  function aimIn(S) {
+    var c = S.cur, R4 = 4 * RANGE, u = (c.v * c.t) % R4, next = u < RANGE ? RANGE : u < 3 * RANGE ? 3 * RANGE : 5 * RANGE;
+    return (next - u) / c.v;
+  }
+
+  var KEEP = ['streak', 'bestStreak', 'perfects', 'draws', 'hue0'];
+  function snapshot(S) {
+    var o = { mode: S.mode, blocks: S.blocks.map(function (b) { return { x: b.x, z: b.z, w: b.w, d: b.d }; }), cur: { axis: S.cur.axis, side: S.cur.side, v: S.cur.v, t: S.cur.t, w: S.cur.w, d: S.cur.d } };
+    KEEP.forEach(function (k) { o[k] = S[k]; });
+    return o;
+  }
+  var num = function (v) { return typeof v === 'number' && isFinite(v); };
+  // rnd: the same generator, fresh; it is advanced past the draws already made
+  function restore(v, rnd) {
+    if (!v || !MODES[v.mode] || !Array.isArray(v.blocks) || v.blocks.length < 2 || v.blocks.length > 5000 || !v.cur) return null;
+    if (KEEP.some(function (k) { return !num(v[k]); }) || v.draws < 0 || v.draws > 20000) return null;
+    var ok = v.blocks.every(function (b) { return b && num(b.x) && num(b.z) && num(b.w) && num(b.d) && b.w > 0 && b.d > 0 && b.w <= BASE && b.d <= BASE; });
+    var c = v.cur;
+    if (!ok || (c.axis !== 'x' && c.axis !== 'z') || (c.side !== 1 && c.side !== -1) || !num(c.v) || c.v <= 0 || !num(c.t) || c.t < 0 || !num(c.w) || !num(c.d)) return null;
+    var S = { mode: v.mode, blocks: v.blocks.map(function (b) { return { x: b.x, z: b.z, w: b.w, d: b.d }; }), cur: { axis: c.axis, side: c.side, v: c.v, t: c.t, w: c.w, d: c.d }, over: false };
+    KEEP.forEach(function (k) { S[k] = v[k]; });
+    for (var i = 0; i < v.draws; i++) rnd();
+    counted(S, rnd);
+    return S;
+  }
+
+  return { BASE: BASE, BH: BH, RANGE: RANGE, GROW: GROW, REGROW_AFTER: REGROW_AFTER, MODES: MODES, speed: speed, newGame: newGame, height: height, top: top, hueAt: hueAt, offset: offset, curPos: curPos, advance: advance, drop: drop, aimIn: aimIn, snapshot: snapshot, restore: restore };
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = TowerUpEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = TowerUpEngineFactory();
+  // the daily tower counts as climbed from this height
+  var DAILY_WIN = 25;
+  // the logical view the canvas is drawn in
+  var VW = 360, VH = 600;
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'towerup',
+    name: { fa: 'برج‌ساز', en: 'Tower Up', zh: '叠高楼', de: 'Turmbau', es: 'Torre arriba', pl: 'Wieżowiec' },
+    accent: '#8458E8',
+    mood: 'dots',
+    strings: {
+      fa: {
+        scene: 'برج و آسمان', tapDrop: 'هر جای صفحه را لمس کن تا بلوک بیفتد.', tapGo: 'برای ادامه صفحه را لمس کن.', heightN: 'ارتفاع {n}', bestN: 'بهترین: {n}', bestToday: 'بهترین امروز: {n}', dailyTw: 'برج روزانه', newRun: 'برج تازه',
+        mNormal: 'معمولی', mHard: 'سخت', modeNote: 'سخت تندتر است و جای فرود بی‌نقص تنگ‌تر. با عوض کردنش برج تازه شروع می‌شود.', perfect: 'بی‌نقص!', missed: 'از دست رفت!', heightL: 'ارتفاع', perfectsL: 'فرودهای بی‌نقص', streakL: 'بلندترین زنجیره', tries: 'تلاش‌ها',
+        kDrop: 'انداختن بلوک', kAgain: 'برج تازه',
+        rules: 'بلوکی بالای برج سُر می‌خورد، یک بار در یک جهت و بار بعد در جهت دیگر. هر جای صفحه را لمس کن یا فاصله را بزن تا بیفتد. هر چه از لبه بیرون بماند بریده می‌شود و می‌افتد، و بلوک بعدی فقط به اندازه‌ی باقی‌مانده است. اگر بلوک را تقریباً درست روی قبلی بیندازی، سر جایش جا می‌افتد: فرود بی‌نقص. بعد از سه فرود بی‌نقص پشت سر هم، هر فرود بی‌نقص دیگر بلوک را کمی بزرگ‌تر می‌کند. اگر بلوک کاملاً از برج بیرون بیفتد، برج تمام است. حالت سخت، پشت چرخ‌دنده، تندتر و سخت‌گیرتر است. برج روزانه برای همه یکسان است: همان رنگ‌ها، همان سرعت‌ها و همان سمت شروع؛ هر چند بار بخواهی امتحان کن، بهترینِ روزت نگه داشته می‌شود.',
+        tutTitle1: 'بینداز', tutText1: 'بلوکی بالای برج سُر می‌خورد. هر جای صفحه را لمس کن تا بیفتد.',
+        tutTitle2: 'برش', tutText2: 'هر چه از لبه بیرون بماند می‌افتد و بلوک بعدی کوچک‌تر می‌شود.',
+        tutTitle3: 'بی‌نقص', tutText3: 'درست روی بلوک پایینی بینداز تا جا بیفتد؛ چند تا پشت سر هم، بلوک را دوباره کمی بزرگ می‌کند.'
+      },
+      en: {
+        scene: 'The tower and the sky', tapDrop: 'Tap anywhere to drop the block.', tapGo: 'Tap to go on.', heightN: 'Height {n}', bestN: 'Best: {n}', bestToday: 'Best today: {n}', dailyTw: 'Daily tower', newRun: 'New tower',
+        mNormal: 'Normal', mHard: 'Hard', modeNote: 'Hard is faster, and the window for a perfect drop is smaller. Changing it starts a new tower.', perfect: 'Perfect!', missed: 'Missed!', heightL: 'Height', perfectsL: 'Perfect drops', streakL: 'Longest streak', tries: 'Tries',
+        kDrop: 'Drop the block', kAgain: 'New tower',
+        rules: 'A block slides over the top of the tower, first along one side, then along the other. Tap anywhere, or press Space, to drop it. Whatever hangs over the edge is cut off and falls, and the next block is only as big as what is left. Drop a block almost exactly on the one below and it snaps into place: a perfect drop. After three perfect drops in a row, each further one makes the block grow back a little. Miss the tower completely and it is finished. Hard, behind the gear, is faster and less forgiving. The daily tower is the same for everyone: the same colours, speeds and starting sides; try it as often as you like, and your best of the day is kept.',
+        tutTitle1: 'Drop', tutText1: 'A block slides over the tower. Tap anywhere to drop it.',
+        tutTitle2: 'Cut', tutText2: 'Whatever hangs over the edge falls off, and the next block is smaller.',
+        tutTitle3: 'Perfect', tutText3: 'Land it right on the block below and it snaps into place; a streak of them makes the block grow back.'
+      },
+      pl: {
+        scene: 'Wieża i niebo', tapDrop: 'Stuknij w dowolnym miejscu, aby upuścić klocek.', tapGo: 'Stuknij, aby przejść dalej.', heightN: 'Wysokość {n}', bestN: 'Najlepszy: {n}', bestToday: 'Najlepszy dziś: {n}', dailyTw: 'Codzienna wieża', newRun: 'Nowa wieża',
+        mNormal: 'Normalny', mHard: 'Trudny', modeNote: 'Tryb trudny jest szybszy, a margines idealnego zrzutu mniejszy. Zmiana zaczyna nową wieżę.', perfect: 'Idealnie!', missed: 'Pudło!', heightL: 'Wysokość', perfectsL: 'Idealne zrzuty', streakL: 'Najdłuższa seria', tries: 'Próby',
+        kDrop: 'Upuść klocek', kAgain: 'Nowa wieża',
+        rules: 'Klocek przesuwa się nad szczytem wieży, raz wzdłuż jednego boku, a potem wzdłuż drugiego. Stuknij w dowolnym miejscu lub naciśnij spację, aby go upuścić. To, co wystaje poza krawędź, zostaje odcięte i spada, a następny klocek ma tylko rozmiar tego, co zostało. Upuść klocek niemal dokładnie na poprzedni, a wskoczy na miejsce: to idealny zrzut. Po trzech idealnych zrzutach z rzędu każdy kolejny sprawia, że klocek trochę odrasta. Jeśli całkiem chybisz wieży, gra się kończy. Tryb trudny, pod ikoną zębatki, jest szybszy i mniej wyrozumiały. Codzienna wieża jest taka sama dla wszystkich: te same kolory, prędkości i strony startu; próbuj, ile chcesz, a Twój najlepszy wynik dnia zostanie zapamiętany.',
+        tutTitle1: 'Upuść', tutText1: 'Klocek przesuwa się nad wieżą. Stuknij w dowolnym miejscu, aby go upuścić.',
+        tutTitle2: 'Cięcie', tutText2: 'To, co wystaje poza krawędź, spada, a następny klocek jest mniejszy.',
+        tutTitle3: 'Idealnie', tutText3: 'Traf dokładnie w klocek poniżej, a wskoczy na miejsce; seria takich zrzutów sprawia, że klocek odrasta.'
+      },
+      zh: {
+        scene: '高楼和天空', tapDrop: '点屏幕任意处放下方块。', tapGo: '点一下继续。', heightN: '高度 {n}', bestN: '最佳：{n}', bestToday: '今日最佳：{n}', dailyTw: '每日高楼', newRun: '新的高楼',
+        mNormal: '普通', mHard: '困难', modeNote: '困难模式更快，完美落下的判定范围更小。切换后会重新开始一座楼。', perfect: '完美！', missed: '没对准！', heightL: '高度', perfectsL: '完美落下', streakL: '最长连击', tries: '尝试次数',
+        kDrop: '放下方块', kAgain: '新的高楼',
+        rules: '方块在楼顶上方来回滑动，一次沿一条边，下一次沿另一条边。点屏幕任意处或按空格键放下它。超出边缘的部分会被切掉并掉落，下一个方块只有剩下的那么大。如果几乎正好落在下面的方块上，它会自动对齐：这就是完美落下。连续三次完美之后，每多一次完美，方块就会长回一点。完全没落在楼上，这座楼就结束了。齿轮里的困难模式更快、更严格。每日高楼对所有人都一样：同样的颜色、速度和起始方向；想试几次都可以，会保留你当天的最佳成绩。',
+        tutTitle1: '放下', tutText1: '方块在楼顶滑动。点屏幕任意处放下它。',
+        tutTitle2: '切掉', tutText2: '超出边缘的部分会掉下去，下一个方块会变小。',
+        tutTitle3: '完美', tutText3: '正好落在下面的方块上就会对齐；连续几次完美，方块会长回来。'
+      },
+      de: {
+        scene: 'Der Turm und der Himmel', tapDrop: 'Tippe irgendwo, um den Block fallen zu lassen.', tapGo: 'Tippe, um weiterzumachen.', heightN: 'Höhe {n}', bestN: 'Bestwert: {n}', bestToday: 'Heute am besten: {n}', dailyTw: 'Turm des Tages', newRun: 'Neuer Turm',
+        mNormal: 'Normal', mHard: 'Schwer', modeNote: 'Schwer ist schneller, und das Fenster für einen perfekten Treffer ist kleiner. Ein Wechsel beginnt einen neuen Turm.', perfect: 'Perfekt!', missed: 'Daneben!', heightL: 'Höhe', perfectsL: 'Perfekte Treffer', streakL: 'Längste Serie', tries: 'Versuche',
+        kDrop: 'Block fallen lassen', kAgain: 'Neuer Turm',
+        rules: 'Ein Block gleitet über der Turmspitze hin und her, einmal entlang der einen Seite, dann entlang der anderen. Tippe irgendwo oder drück die Leertaste, um ihn fallen zu lassen. Was über den Rand ragt, wird abgeschnitten und fällt herunter, und der nächste Block ist nur so groß wie der Rest. Landet ein Block fast genau auf dem darunter, rastet er ein: ein perfekter Treffer. Nach drei perfekten Treffern in Folge wächst der Block mit jedem weiteren ein Stück nach. Verfehlst du den Turm ganz, ist er fertig. Schwer, hinter dem Zahnrad, ist schneller und strenger. Der Turm des Tages ist für alle gleich: dieselben Farben, Geschwindigkeiten und Startseiten; versuch es so oft du willst, dein Tagesbestwert bleibt.',
+        tutTitle1: 'Fallen lassen', tutText1: 'Ein Block gleitet über den Turm. Tippe irgendwo, um ihn fallen zu lassen.',
+        tutTitle2: 'Abschneiden', tutText2: 'Was über den Rand ragt, fällt ab, und der nächste Block ist kleiner.',
+        tutTitle3: 'Perfekt', tutText3: 'Triff genau den Block darunter, dann rastet er ein; eine Serie davon lässt den Block nachwachsen.'
+      },
+      es: {
+        scene: 'La torre y el cielo', tapDrop: 'Toca en cualquier sitio para soltar el bloque.', tapGo: 'Toca para seguir.', heightN: 'Altura {n}', bestN: 'Mejor: {n}', bestToday: 'Mejor de hoy: {n}', dailyTw: 'Torre del día', newRun: 'Torre nueva',
+        mNormal: 'Normal', mHard: 'Difícil', modeNote: 'Difícil va más rápido y el margen para un encaje perfecto es menor. Cambiarlo empieza una torre nueva.', perfect: '¡Perfecto!', missed: '¡Fallaste!', heightL: 'Altura', perfectsL: 'Encajes perfectos', streakL: 'Racha más larga', tries: 'Intentos',
+        kDrop: 'Soltar el bloque', kAgain: 'Torre nueva',
+        rules: 'Un bloque se desliza sobre la cima de la torre, una vez a lo largo de un lado y la siguiente a lo largo del otro. Toca en cualquier sitio o pulsa Espacio para soltarlo. Lo que sobresale del borde se corta y cae, y el siguiente bloque solo mide lo que queda. Si lo sueltas casi justo encima del anterior, encaja solo: un encaje perfecto. Después de tres encajes perfectos seguidos, cada uno más hace que el bloque vuelva a crecer un poco. Si fallas la torre del todo, se acabó. Difícil, tras el engranaje, va más rápido y perdona menos. La torre del día es igual para todos: los mismos colores, velocidades y lados de salida; inténtalo tantas veces como quieras, se guarda tu mejor del día.',
+        tutTitle1: 'Suelta', tutText1: 'Un bloque se desliza sobre la torre. Toca en cualquier sitio para soltarlo.',
+        tutTitle2: 'Corte', tutText2: 'Lo que sobresale del borde cae, y el siguiente bloque es más pequeño.',
+        tutTitle3: 'Perfecto', tutText3: 'Suéltalo justo encima del de abajo y encaja solo; una racha de encajes hace que el bloque vuelva a crecer.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || !E.MODES[prefs.mode]) prefs = { mode: 'normal' };
+  // the daily tower is the same for everyone, so it always plays Normal
+  function runMode() { return dailyDate ? 'normal' : prefs.mode; }
+
+  var S = null, raf = 0, last = 0, paused = false, waiting = false, ended = false, tries = 0, startedAt = 0, seed = 0;
+  // drawing state: the eased camera and colour, falling pieces, the perfect flash
+  var camY = 0, hueShown = null, falls = [], flash = 0, pop = null, spawnAt = 0, settle = 0;
+
+  var cv = el('canvas', { class: 'tw-canvas', role: 'img', 'aria-label': C.t('scene') });
+  var box = el('div', { class: 'tw-box' }, [cv]);
+  var top = el('div', { class: 'tw-top ch-above' });
+  var status = el('div', { class: 'tw-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'tw-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newRun'), onClick: function () { newRun(); } });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- runs */
+
+  // Endless towers get a seed of their own, so a saved one goes on the same way
+  function seeded(sd) {
+    var a = sd >>> 0;
+    return function () { a = (a + 0x6D2B79F5) >>> 0; var t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  function rngFor(sd) { return dailyDate ? C.daily('towerup', dailyDate).rng : seeded(sd); }
+
+  function newRun() {
+    seed = Math.floor(Math.random() * 4294967296);
+    S = E.newGame(rngFor(seed), runMode());
+    tries++;
+    startedAt = Date.now();
+    ended = false; waiting = false; last = 0;
+    camY = 0; hueShown = null; falls = []; flash = 0; pop = null; settle = 0;
+    spawnAt = performance.now();
+    renderTop(); renderStatus();
+    kick();
+  }
+
+  function blocked() { return paused || waiting || document.hidden || !!document.querySelector('.ch-scrim'); }
+  function tick(now) {
+    raf = 0;
+    if (!S) return;
+    var dt = last ? Math.min(0.05, (now - last) / 1000) : 0;
+    last = now;
+    if (!blocked() && !ended) E.advance(S, dt);
+    // the drawing goes on easing while the game waits, so a piece already falling lands
+    animate(blocked() ? 0 : dt);
+    draw();
+    if (!ended || falls.length) raf = requestAnimationFrame(tick);
+  }
+  function kick() { if (!raf) { last = 0; raf = requestAnimationFrame(tick); } }
+
+  function doDrop() {
+    if (!S || ended || S.over) return;
+    if (waiting) { go(); return; }
+    // a double tap must not throw the next block away as it appears
+    if (performance.now() - spawnAt < 120) return;
+    var n = E.height(S), r = E.drop(S);
+    if (!r) return;
+    var y0 = n * E.BH, hue = E.hueAt(S, n + 1);
+    if (r.cut) falls.push({ x: r.cut.x, z: r.cut.z, w: r.cut.w, d: r.cut.d, y: y0, vy: 0, hue: hue, a: 1, spin: r.kind === 'miss' ? 0 : (Math.random() < 0.5 ? -1 : 1), axis: r.kind === 'miss' ? null : (n % 2 ? 'z' : 'x'), dir: r.cut ? Math.sign((n % 2 ? r.cut.z - E.top(S).z : r.cut.x - E.top(S).x) || 1) : 0 });
+    spawnAt = performance.now();
+    if (r.kind === 'perfect') {
+      flash = 1; settle = 1;
+      pop = { t: 1, streak: r.streak };
+      // a rising note for each perfect in a row, then the bright chime from the fourth
+      if (r.streak <= 4) C.audio.sfx('simon' + (r.streak - 1)); else C.feedback('good');
+      C.haptic('success');
+      if (r.streak >= 10) C.achievements.unlock('tw-perfect');
+    } else if (r.kind === 'cut') {
+      settle = 0.6;
+      C.feedback('place');
+    } else {
+      C.feedback('bad');
+      ended = true;
+      ctx.clearSave();
+      setTimeout(finish, C.ui.reduceMotion() ? 250 : 900);
+    }
+    renderStatus();
+    if (E.height(S) >= 30) C.achievements.unlock('tw-30');
+    kick();
+  }
+
+  function animate(dt) {
+    var want = E.height(S) * E.BH;
+    camY += (want - camY) * Math.min(1, dt * 6);
+    if (!isFinite(camY)) camY = want;
+    var h = E.hueAt(S, E.height(S) + 1);
+    if (hueShown === null) hueShown = h; else { var d = ((h - hueShown + 540) % 360) - 180; hueShown = (hueShown + d * Math.min(1, dt * 3) + 360) % 360; }
+    for (var i = falls.length - 1; i >= 0; i--) {
+      var f = falls[i];
+      f.vy += 900 * dt; f.y -= f.vy * dt; f.a -= dt * 0.8;
+      if (f.axis === 'x') f.x += f.dir * 30 * dt; else if (f.axis === 'z') f.z += f.dir * 30 * dt;
+      if (f.a <= 0 || f.y < camY - 700) falls.splice(i, 1);
+    }
+    flash = Math.max(0, flash - dt * 3);
+    settle = Math.max(0, settle - dt * 5);
+    if (pop) { pop.t -= dt * 0.9; if (pop.t <= 0) pop = null; }
+  }
+
+  function finish() {
+    var h = E.height(S), m = S.mode, note = null;
+    var coins = Math.min(30, 1 + Math.floor(h / 6)), points = Math.min(120, 4 + h * 2);
+    if (m === 'hard') { coins = Math.min(36, Math.round(coins * 1.25)); points = Math.min(140, Math.round(points * 1.25)); }
+    if (h >= 30) C.achievements.unlock('tw-30');
+    var lines = [{ label: C.t('heightL'), value: C.num(h) }, { label: C.t('perfectsL'), value: C.num(S.perfects) }];
+    if (dailyDate) {
+      if (h >= DAILY_WIN) C.achievements.unlock('tw-daily');
+      if (!C.stats.daily('towerup', dailyDate, { label: C.t('heightN', { n: C.num(h) }), win: h >= DAILY_WIN, tries: tries })) { coins = Math.max(1, Math.round(coins * 0.2)); points = Math.max(1, Math.round(points * 0.2)); }
+      var db = dailyBest();
+      if (h > db) { ctx.store.set('dailyBest', { date: dailyDate, h: h }); if (db > 0) note = C.t('bestToday', { n: C.num(h) }); }
+      lines.push({ label: C.t('tries'), value: C.num(tries) });
+    } else {
+      if (C.stats.best('towerup', m, h) && h > 0) note = C.t('bestN', { n: C.num(h) });
+      lines.push({ label: C.t('best'), value: C.num(C.stats.getBest('towerup', m) || h) });
+    }
+    ctx.finish({
+      won: dailyDate ? h >= DAILY_WIN : null,
+      title: C.t('missed'),
+      note: note, timeMs: Date.now() - startedAt, coins: coins, points: points,
+      lines: lines,
+      shareText: 'چوگان · برج‌ساز' + (dailyDate ? ('\nروزانه ' + dailyDate) : '') + '\nارتفاع ' + h,
+      paint: function (g, w, hh) { paintShare(g, w, hh); },
+      againLabel: C.t('newRun'),
+      onAgain: function () { newRun(); }
+    });
+  }
+  function dailyBest() { var d = ctx.store.get('dailyBest', null); return d && d.date === dailyDate && typeof d.h === 'number' ? d.h : 0; }
+
+  /* --------------------------------------------------------------- draw */
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  function hsl(h, s, l, a) { return 'hsla(' + Math.round(((h % 360) + 360) % 360) + ',' + s + '%,' + l + '%,' + (a === undefined ? 1 : a) + ')'; }
+
+  // A soft sky that takes on the tower's colour as it rises. At night it stays between
+  // blue and violet: a dark yellow or green sky read as mud in the first draft.
+  function skyFill(g, h, hue, dk) {
+    var sky = g.createLinearGradient(0, 0, 0, h);
+    if (dk) { var n = 250 + 35 * Math.sin(hue * Math.PI / 180); sky.addColorStop(0, hsl(n, 38, 10)); sky.addColorStop(1, hsl(n - 25, 30, 21)); }
+    else { sky.addColorStop(0, hsl(hue + 200, 60, 86)); sky.addColorStop(1, hsl(hue + 160, 55, 96)); }
+    return sky;
+  }
+
+  function size() {
+    // the slot's own size only, read on every draw, so a turned phone gets a new view
+    var r = box.getBoundingClientRect(), h = Math.floor(Math.min(r.height, r.width * VH / VW));
+    h = Math.max(120, h || 0);
+    return { w: Math.round(h * VW / VH), h: h };
+  }
+
+  // Isometric: x runs to the lower right, z to the lower left, y up. The top of the
+  // tower sits a little above the middle of the view.
+  var CS = Math.cos(Math.PI / 6), SN = 0.5, CY = VH * 0.46;
+  function px(x, z) { return VW / 2 + (x - z) * CS; }
+  function py(x, y, z) { return CY + (x + z) * SN - (y - camY); }
+
+  // one box from y0 to y1: the top and the two faces that look at the viewer
+  function box3(g, b, y0, y1, hue, alpha, dk, glow) {
+    var x0 = b.x - b.w / 2, x1 = b.x + b.w / 2, z0 = b.z - b.d / 2, z1 = b.z + b.d / 2;
+    var L = dk ? [58, 44, 34] : [70, 57, 47], S1 = dk ? 45 : 58;
+    g.globalAlpha = alpha;
+    // the face toward +z (lower left)
+    g.fillStyle = hsl(hue, S1 - 6, L[2]);
+    g.beginPath(); g.moveTo(px(x0, z1), py(x0, y1, z1)); g.lineTo(px(x1, z1), py(x1, y1, z1)); g.lineTo(px(x1, z1), py(x1, y0, z1)); g.lineTo(px(x0, z1), py(x0, y0, z1)); g.closePath(); g.fill();
+    // the face toward +x (lower right)
+    g.fillStyle = hsl(hue, S1, L[1]);
+    g.beginPath(); g.moveTo(px(x1, z0), py(x1, y1, z0)); g.lineTo(px(x1, z1), py(x1, y1, z1)); g.lineTo(px(x1, z1), py(x1, y0, z1)); g.lineTo(px(x1, z0), py(x1, y0, z0)); g.closePath(); g.fill();
+    // the top
+    g.fillStyle = hsl(hue, S1, L[0] + (glow ? 14 * glow : 0));
+    g.beginPath(); g.moveTo(px(x0, z0), py(x0, y1, z0)); g.lineTo(px(x1, z0), py(x1, y1, z0)); g.lineTo(px(x1, z1), py(x1, y1, z1)); g.lineTo(px(x0, z1), py(x0, y1, z1)); g.closePath(); g.fill();
+    g.strokeStyle = dk ? 'rgba(255,255,255,.18)' : 'rgba(255,255,255,.45)'; g.lineWidth = 1; g.stroke();
+    g.globalAlpha = 1;
+  }
+
+  function draw() {
+    if (!S) return;
+    var Z = size(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
+    cv.style.width = Z.w + 'px'; cv.style.height = Z.h + 'px';
+    var g = cv.getContext('2d'), k = Z.w / VW, dk = dark(), hue = hueShown === null ? E.hueAt(S, 1) : hueShown;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.fillStyle = skyFill(g, Z.h, hue, dk); g.fillRect(0, 0, Z.w, Z.h);
+    g.save();
+    g.scale(k, k);
+    // clouds (or stars) drift past at a third of the tower's speed
+    g.fillStyle = dk ? 'rgba(255,255,255,.07)' : 'rgba(255,255,255,.7)';
+    var c0 = Math.floor(camY / 3 / 180);
+    for (var c = c0 - 1; c < c0 + 5; c++) {
+      var cyy = VH - (c * 180 - camY / 3) - 60, cx = ((c * 151) % 280 + 280) % 280 + 40;
+      g.beginPath(); g.ellipse(cx, cyy, 40, 11, 0, 0, Math.PI * 2); g.ellipse(cx + 22, cyy - 7, 22, 10, 0, 0, Math.PI * 2); g.fill();
+    }
+    var n = E.height(S), T = E.top(S);
+    // pieces falling behind the tower are drawn before it
+    var behind = function (f) { return f.x + f.z < T.x + T.z; };
+    falls.forEach(function (f) { if (behind(f)) box3(g, f, f.y, f.y + E.BH, f.hue, Math.max(0, f.a), dk); });
+    // the plinth, then the floors that can still be seen
+    box3(g, S.blocks[0], -900, 0, E.hueAt(S, 0), 1, dk);
+    var from = Math.max(1, n - Math.ceil(VH / E.BH) - 6);
+    for (var i = from; i <= n; i++) {
+      var b = S.blocks[i], y0 = (i - 1) * E.BH, sq = i === n ? settle * 3 : 0;
+      box3(g, b, y0, y0 + E.BH - sq, E.hueAt(S, i), 1, dk, i === n ? flash : 0);
+    }
+    // the perfect flash: a ring round the top that grows and fades
+    if (flash > 0 && n > 0) {
+      var t = 1 - flash, grow = 6 + t * 18, yy = n * E.BH;
+      var x0 = T.x - T.w / 2 - grow, x1 = T.x + T.w / 2 + grow, z0 = T.z - T.d / 2 - grow, z1 = T.z + T.d / 2 + grow;
+      g.strokeStyle = 'rgba(255,255,255,' + flash + ')'; g.lineWidth = 2.5;
+      g.beginPath(); g.moveTo(px(x0, z0), py(x0, yy, z0)); g.lineTo(px(x1, z0), py(x1, yy, z0)); g.lineTo(px(x1, z1), py(x1, yy, z1)); g.lineTo(px(x0, z1), py(x0, yy, z1)); g.closePath(); g.stroke();
+    }
+    // the sliding block
+    if (!S.over && !ended) {
+      var p = E.curPos(S);
+      box3(g, p, n * E.BH, (n + 1) * E.BH, E.hueAt(S, n + 1), 1, dk);
+    }
+    falls.forEach(function (f) { if (!behind(f)) box3(g, f, f.y, f.y + E.BH, f.hue, Math.max(0, f.a), dk); });
+    g.restore();
+    // the height, large, at the top of the sky
+    var font = getComputedStyle(document.body).fontFamily || 'sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'top';
+    g.fillStyle = dk ? 'rgba(244,238,228,.92)' : 'rgba(31,26,23,.85)';
+    g.font = '800 ' + Math.round(44 * k) + 'px ' + font;
+    g.fillText(C.num(n), Z.w / 2, 18 * k);
+    if (pop) {
+      g.globalAlpha = Math.max(0, Math.min(1, pop.t * 1.6));
+      g.font = '700 ' + Math.round(17 * k) + 'px ' + font;
+      g.fillText(C.t('perfect') + (pop.streak > 1 ? '  ×' + C.num(pop.streak) : ''), Z.w / 2, (74 + (1 - pop.t) * -10) * k);
+      g.globalAlpha = 1;
+    }
+  }
+
+  // the share card: the tower's last floors on a plain sky
+  function paintShare(g, w, h) {
+    var save = camY;
+    var dk = dark(), hue = E.hueAt(S, E.height(S));
+    g.fillStyle = skyFill(g, h, hue, dk); g.fillRect(0, 0, w, h);
+    g.save();
+    var k = Math.min(w / VW, h / VH);
+    g.translate((w - VW * k) / 2, (h - VH * k) / 2); g.scale(k, k);
+    camY = E.height(S) * E.BH;
+    box3(g, S.blocks[0], -900, 0, E.hueAt(S, 0), 1, dk);
+    for (var i = Math.max(1, S.blocks.length - 30); i < S.blocks.length; i++) box3(g, S.blocks[i], (i - 1) * E.BH, i * E.BH, E.hueAt(S, i), 1, dk);
+    g.restore();
+    camY = save;
+  }
+
+  /* ----------------------------------------------------------------- ui */
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (dailyDate) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyTw') + ' — ' + C.num(dailyDate) })]));
+      var db = dailyBest();
+      if (db) top.appendChild(el('span', { class: 'ch-badge', text: C.t('bestToday', { n: C.num(db) }) }));
+    } else {
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t(prefs.mode === 'hard' ? 'mHard' : 'mNormal') }));
+      var best = C.stats.getBest('towerup', prefs.mode);
+      if (best) top.appendChild(el('span', { class: 'ch-badge', text: C.t('bestN', { n: C.num(best) }) }));
+      var gear = el('button', { class: 'ch-iconbtn tw-gear', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+      gear.addEventListener('click', showSettings);
+      top.appendChild(gear);
+    }
+  }
+  function renderStatus() {
+    status.textContent = waiting ? C.t('tapGo') : S && S.over ? C.t('missed') : C.t('tapDrop') + ' ' + C.t('heightN', { n: C.num(S ? E.height(S) : 0) });
+  }
+  function go() { if (waiting) { waiting = false; spawnAt = performance.now(); renderStatus(); kick(); } }
+
+  // Normal or Hard lives behind the gear, like Hop's controls; a change starts a new tower
+  function showSettings() {
+    var seg = C.ui.segmented([{ value: 'normal', label: C.t('mNormal') }, { value: 'hard', label: C.t('mHard') }], prefs.mode, function (v) {
+      if (v === prefs.mode || !E.MODES[v]) return;
+      prefs.mode = v;
+      ctx.store.set('prefs', prefs);
+      ctx.clearSave();
+      newRun();
+    });
+    C.ui.modal({
+      title: C.t('settings'),
+      body: [el('div', { class: 'ch-list' }, [el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('difficulty') }), seg])]), el('p', { class: 'ch-dim tw-note', text: C.t('modeNote') })],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  // the whole game area drops the block: a thumb need not find the tower
+  wrap.addEventListener('pointerdown', function (e) {
+    if (!S || (e.target.closest && e.target.closest('button'))) return;
+    if (e.button !== undefined && e.button > 0) return;
+    e.preventDefault();
+    C.audio.unlock();
+    doDrop();
+  });
+  wrap.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  wrap.style.touchAction = 'none';
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim') || e.repeat) return;
+    if (e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowDown') {
+      // Enter on a focused button presses that button instead
+      if (e.key === 'Enter' && e.target && e.target.closest && e.target.closest('button')) return;
+      e.preventDefault(); doDrop();
+    } else if (C.keyIs(e, 'r')) { e.preventDefault(); newRun(); }
+  });
+  // a tower waits while the app is away, and comes back waiting for a tap
+  C.onPause(function () { paused = true; if (S && !ended && E.height(S) > 0) waiting = true; ctx.save(); renderStatus(); });
+  C.onResume(function () { paused = false; kick(); });
+  document.addEventListener('visibilitychange', function () { if (document.hidden) { if (S && !ended && E.height(S) > 0) { waiting = true; renderStatus(); } } else kick(); });
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw); } catch (er) { /* old WebViews */ } }
+  // the height is drawn in the app's font, which may arrive after the first frame
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { draw(); });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('Space / Enter / ↓', C.t('kDrop')), kb('R', C.t('kAgain'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // little isometric boxes for the tutorial pictures
+  function tBox(cx, cy, w, d, h, col) {
+    var c = 0.866, s = 0.5;
+    var P = function (x, y, z) { return (cx + (x - z) * c).toFixed(1) + ',' + (cy + (x + z) * s - y).toFixed(1); };
+    var x0 = -w / 2, x1 = w / 2, z0 = -d / 2, z1 = d / 2;
+    return '<polygon points="' + [P(x0, h, z1), P(x1, h, z1), P(x1, 0, z1), P(x0, 0, z1)].join(' ') + '" fill="' + col[2] + '"/>' +
+      '<polygon points="' + [P(x1, h, z0), P(x1, h, z1), P(x1, 0, z1), P(x1, 0, z0)].join(' ') + '" fill="' + col[1] + '"/>' +
+      '<polygon points="' + [P(x0, h, z0), P(x1, h, z0), P(x1, h, z1), P(x0, h, z1)].join(' ') + '" fill="' + col[0] + '"/>';
+  }
+  function tArt(kind) {
+    var A = ['#B9A3F3', '#9677EC', '#7A57D6'], B = ['#F2B8C8', '#E48DA6', '#CC6F8B'], G = ['#A9DCC4', '#7FC4A5', '#5FA788'];
+    var s = '<svg viewBox="0 0 200 120" width="100%" direction="ltr"><rect width="200" height="120" rx="10" fill="#EAE4FB"/>';
+    s += tBox(100, 92, 44, 44, 14, G) + tBox(100, 78, 44, 44, 14, A);
+    if (kind === 1) s += tBox(132, 46, 44, 44, 14, B) + '<path d="M150 26 l14 8 M164 34 l-9 1 M164 34 l-4 -8" stroke="#55507A" stroke-width="2.5" fill="none" stroke-linecap="round"/><circle cx="60" cy="30" r="9" fill="none" stroke="#55507A" stroke-width="2.5"/><circle cx="60" cy="30" r="3" fill="#55507A"/>';
+    if (kind === 2) s += tBox(96, 64, 36, 44, 14, B) + tBox(136, 82, 8, 44, 14, B) + '<path d="M144 70 v18 M140 84 l4 5 4 -5" stroke="#C9545F" stroke-width="2.5" fill="none" stroke-linecap="round"/>';
+    if (kind === 3) s += tBox(100, 64, 44, 44, 14, B) + '<polygon points="100,28 104,38 115,38 106,44 110,55 100,48 90,55 94,44 85,38 96,38" fill="#E4A853"/>';
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // A tower in progress is saved when the app goes away and comes back waiting for a
+  // tap; the daily tower has its own slot (#132)
+  ctx.autosave(function () {
+    if (!S || S.over || ended || E.height(S) < 1) return { inProgress: false };
+    return { s: E.snapshot(S), seed: seed, tries: tries, daily: dailyDate || null, elapsed: Date.now() - startedAt };
+  });
+  function resumeRun(sv) {
+    var R = E.restore(sv.s, rngFor(sv.seed));
+    if (!R || (dailyDate && R.mode !== 'normal') || (!dailyDate && R.mode !== prefs.mode)) return false;
+    S = R; seed = sv.seed; tries = sv.tries || 1; startedAt = Date.now() - (sv.elapsed || 0);
+    ended = false; waiting = true; last = 0; camY = E.height(S) * E.BH; falls = [];
+    renderTop(); renderStatus(); draw(); kick();
+    return true;
+  }
+  var saved = ctx.loadSave();
+  if (dailyDate) {
+    if (!(saved && saved.s && saved.daily === dailyDate && resumeRun(saved))) newRun();
+    if (C.stats.dailyDone('towerup', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).towerup;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (!(saved && saved.s && !saved.daily && resumeRun(saved))) {
+    newRun();
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
