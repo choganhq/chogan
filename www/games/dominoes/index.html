@@ -1,0 +1,821 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>دومینو — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* the table's felt and the tiles' ivory are the game's own colours, the same in both
+     themes, like a real set; the felt only darkens a little at night */
+  :root { --dm-felt: #2F6B57; --dm-felt-2: #285C4A; --dm-ivory: #FBF5E6; --dm-edge: #3A3128; --dm-pip: #231E19; --dm-back: #8A7562; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --dm-felt: #22483C; --dm-felt-2: #1C3D33; } }
+  :root[data-theme="dark"] { --dm-felt: #22483C; --dm-felt-2: #1C3D33; }
+  .dm-wrap { display: flex; flex-direction: column; gap: var(--s-2); flex: 1; min-height: 0; width: 100%; }
+  .dm-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .dm-score { display: flex; align-items: center; gap: var(--s-3); padding: 6px 14px; border-radius: var(--r-pill); background: var(--c-surface-2);
+    font-weight: 800; font-variant-numeric: tabular-nums; }
+  .dm-score__me { color: var(--game-text, var(--c-text)); }
+  .dm-score__goal { color: var(--c-text-dim); font-size: var(--fs-xs); font-weight: 700; }
+  .dm-opp { display: flex; justify-content: center; align-items: center; gap: 4px; min-height: 30px; flex-wrap: wrap; }
+  .dm-back { width: 14px; height: 26px; border-radius: 4px; background: var(--dm-back); box-shadow: inset 0 0 0 1.5px rgba(0, 0, 0, .25); }
+  .dm-yard { margin-inline-start: var(--s-2); }
+  .dm-table { position: relative; flex: 1; min-height: 160px; border-radius: var(--r-lg); overflow: hidden;
+    background: radial-gradient(ellipse at center, var(--dm-felt) 0%, var(--dm-felt-2) 100%); box-shadow: var(--sh-2); }
+  .dm-table canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: manipulation; }
+  .dm-hand { display: flex; justify-content: center; align-items: flex-end; gap: 6px; flex-wrap: wrap; min-height: 80px; }
+  .dm-tile { border: 0; padding: 0; margin: 0; background: none; cursor: pointer; border-radius: 9px; line-height: 0;
+    transition: transform 140ms var(--ease), opacity 140ms var(--ease); }
+  .dm-tile svg { width: 40px; height: 76px; display: block; }
+  .dm-tile[aria-pressed="true"] { transform: translateY(-10px); }
+  .dm-tile[aria-pressed="true"] svg rect.dm-face { stroke: var(--game, var(--c-accent)); stroke-width: 4; }
+  .dm-tile--dead { opacity: .45; cursor: default; }
+  .dm-tile:focus-visible { outline: 3px solid var(--c-accent); outline-offset: 3px; }
+  .dm-bar { display: flex; justify-content: center; align-items: center; gap: var(--s-2); min-height: 44px; }
+  .dm-status { font-weight: 700; color: var(--c-text-dim); text-align: center; min-height: 1.5em; }
+  .dm-status--pts { color: var(--game-text, var(--c-text)); }
+  .dm-thinking .dm-opp { animation: dm-pulse 1s ease-in-out infinite; }
+  @keyframes dm-pulse { 50% { opacity: .55; } }
+  @media (min-width: 700px) { .dm-tile svg { width: 46px; height: 88px; } }
+  /* a phone on its side has no room for rows above and below the table: the score, the
+     hand and the buttons move to a column beside it */
+  .dm-side { display: contents; }
+  .dm-top, .dm-opp { order: 1; }
+  .dm-table { order: 2; }
+  .dm-status, .dm-hand, .dm-bar { order: 3; }
+  @media (orientation: landscape) and (max-height: 520px) {
+    .dm-wrap { flex-direction: row; }
+    .dm-table { order: 0; }
+    .dm-side { order: 1; }
+    .dm-table { min-height: 0; }
+    .dm-side { display: flex; flex-direction: column; justify-content: center; gap: var(--s-2); width: min(46%, 320px); flex: none; overflow-y: auto; }
+    .dm-tile svg { width: 30px; height: 57px; }
+    .dm-hand { min-height: 0; gap: 4px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .dm-tile { transition: none; } .dm-thinking .dm-opp { animation: none; } }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function DominoesEngineFactory() {
+  'use strict';
+
+  // a tile is [a, b] with a <= b; the double-six set has 28
+  function set() { var out = []; for (var a = 0; a <= 6; a++) for (var b = a; b <= 6; b++) out.push([a, b]); return out; }
+  function pips(t) { return t[0] + t[1]; }
+  function isDouble(t) { return t[0] === t[1]; }
+  function handPips(h) { var s = 0; h.forEach(function (t) { s += pips(t); }); return s; }
+  function shuffle(a, rnd) { for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(rnd() * (i + 1)), t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
+
+  // A hand: two hands of seven, the rest in the boneyard. On the board the first tile is
+  // the root; the line grows on its two sides, and if the root is a double it is the
+  // spinner (All Fives) and also opens up and down once both sides have a tile.
+  function deal(rnd, leader) {
+    var tiles = shuffle(set(), rnd);
+    var H = { hands: [tiles.slice(0, 7), tiles.slice(7, 14)], yard: tiles.slice(14), root: null, arms: { l: [], r: [], u: [], d: [] },
+      turn: 0, passes: 0, over: false, result: null, log: [] };
+    if (leader === 0 || leader === 1) H.turn = leader;
+    else {
+      // the first hand of a match: the highest double leads, else the heaviest tile
+      var best = -1;
+      for (var p = 0; p < 2; p++) H.hands[p].forEach(function (t) { var v = (isDouble(t) ? 100 : 0) + pips(t); if (v > best) { best = v; H.turn = p; } });
+    }
+    return H;
+  }
+  function spinner(H) { return H.root && isDouble(H.root); }
+  function sides(H) {
+    if (!H.root) return [];
+    var s = ['l', 'r'];
+    if (spinner(H) && H.arms.l.length && H.arms.r.length) s.push('u', 'd');
+    return s;
+  }
+  // the pip open at one end: the outer half of the arm's last tile, or the root's own half
+  function open(H, side) {
+    var arm = H.arms[side];
+    if (arm.length) return arm[arm.length - 1].out;
+    if (side === 'l') return H.root[0];
+    if (side === 'r') return H.root[1];
+    return H.root[0];
+  }
+  // Moves for one tile: where it can go. Before the first tile, anything goes as the root.
+  function moves(H, t) {
+    if (!H.root) return ['root'];
+    return sides(H).filter(function (s) { var o = open(H, s); return t[0] === o || t[1] === o; });
+  }
+  function legal(H, p) {
+    var out = [];
+    H.hands[p].forEach(function (t, i) { moves(H, t).forEach(function (s) { out.push({ i: i, side: s }); }); });
+    return out;
+  }
+  // The count: the sum of the open ends. An end that is a double counts both halves; the
+  // spinner counts both halves on a side not played yet; up and down count once used.
+  function count(H) {
+    if (!H.root) return 0;
+    var R = H.root, sp = spinner(H), s = 0;
+    if (!H.arms.l.length && !H.arms.r.length) return pips(R);
+    ['l', 'r', 'u', 'd'].forEach(function (side) {
+      var arm = H.arms[side];
+      if (arm.length) { var e = arm[arm.length - 1]; s += e.dbl ? 2 * e.out : e.out; }
+      else if (side === 'l' || side === 'r') s += sp ? 2 * R[0] : (side === 'l' ? R[0] : R[1]);
+    });
+    return s;
+  }
+  function scoreOf(c) { return c > 0 && c % 5 === 0 ? c : 0; }
+
+  // Plays tile i of the player to move on a side. Returns the points it scored in All
+  // Fives, or -1 if the move is not legal (nothing changes then).
+  function play(H, i, side, fives) {
+    if (H.over) return -1;
+    var p = H.turn, t = H.hands[p][i];
+    if (!t || moves(H, t).indexOf(side) < 0) return -1;
+    H.hands[p].splice(i, 1);
+    if (side === 'root') H.root = t.slice();
+    else {
+      var o = open(H, side);
+      H.arms[side].push({ t: t.slice(), out: t[0] === o ? t[1] : t[0], dbl: isDouble(t) });
+    }
+    var got = fives ? scoreOf(count(H)) : 0;
+    H.passes = 0;
+    H.log.push({ p: p, t: t.slice(), side: side, got: got });
+    if (!H.hands[p].length) end(H, p, 'out');
+    else H.turn = 1 - p;
+    return got;
+  }
+  // No tile fits: draw one from the boneyard (call again until a tile fits), or pass when
+  // it is empty. Two passes in a row block the hand.
+  function draw(H) {
+    if (H.over || legal(H, H.turn).length || !H.yard.length) return false;
+    H.hands[H.turn].push(H.yard.pop());
+    return true;
+  }
+  function pass(H) {
+    if (H.over || legal(H, H.turn).length || H.yard.length) return false;
+    H.passes++;
+    H.log.push({ p: H.turn, pass: true });
+    if (H.passes >= 2) {
+      var a = handPips(H.hands[0]), b = handPips(H.hands[1]);
+      end(H, a < b ? 0 : b < a ? 1 : -1, 'blocked');
+    } else H.turn = 1 - H.turn;
+    return true;
+  }
+  function round5(n) { return Math.round(n / 5) * 5; }
+  // The end of a hand: the winner takes the pips left in the other hand (in All Fives
+  // rounded to five; in a blocked hand, the difference)
+  function end(H, w, how) {
+    H.over = true;
+    var bonus = 0;
+    if (w >= 0) {
+      var other = handPips(H.hands[1 - w]), mine = handPips(H.hands[w]);
+      bonus = how === 'blocked' ? other - mine : other;
+    }
+    H.result = { winner: w, how: how, bonus: bonus };
+  }
+  function bonusPts(H, fives) { return H.result && H.result.winner >= 0 ? (fives ? round5(H.result.bonus) : H.result.bonus) : 0; }
+
+  /* ---- the bot ---- */
+  // easy: any tile that fits; medium: the most points now, then the heaviest tile;
+  // hard: also what that leaves the other player to score, and keeping suits it can follow
+  function think(H, level, fives, rnd) {
+    var L = legal(H, H.turn);
+    if (!L.length) return null;
+    if (level === 'easy') return L[Math.floor(rnd() * L.length)];
+    var me = H.turn, best = null, bestV = -Infinity;
+    L.forEach(function (m) {
+      var C2 = clone(H), t = C2.hands[me][m.i], got = play(C2, m.i, m.side, fives);
+      var v = got * 10 + pips(t) * (fives ? 1 : 3) + rnd() * 0.5;
+      if (C2.over) v += 1000;
+      if (level === 'hard') {
+        // the most the other side could score at once from the ends this leaves, with
+        // any tile it might hold (what is not in my hand or on the board)
+        var seen = {}, worst = 0;
+        C2.hands[me].forEach(function (x) { seen[x[0] + '-' + x[1]] = 1; });
+        boardTiles(C2).forEach(function (x) { seen[x[0] + '-' + x[1]] = 1; });
+        if (fives && !C2.over) set().forEach(function (x) {
+          if (seen[x[0] + '-' + x[1]]) return;
+          moves(C2, x).forEach(function (s) {
+            var C3 = clone(C2); C3.hands[C3.turn] = [x]; C3.hands[C3.turn].push([9, 9]);
+            worst = Math.max(worst, play(C3, 0, s, true));
+          });
+        });
+        v -= worst * 2;
+        // keep pips it can still follow: count the different suits left in hand
+        var suits = {}; C2.hands[me].forEach(function (x) { suits[x[0]] = 1; suits[x[1]] = 1; });
+        v += Object.keys(suits).length * 2;
+      }
+      if (v > bestV) { bestV = v; best = m; }
+    });
+    return best;
+  }
+  function boardTiles(H) {
+    var out = H.root ? [H.root] : [];
+    ['l', 'r', 'u', 'd'].forEach(function (s) { H.arms[s].forEach(function (e) { out.push(e.t); }); });
+    return out;
+  }
+  function clone(H) { return JSON.parse(JSON.stringify(H)); }
+
+
+  /* ---- where the tiles lie, in units of half a tile ---- */
+  // The root sits at the middle. Left and right grow sideways and, when they reach the
+  // edge, turn down (right) or up (left) and come back, each in its own half of the table,
+  // so the line never crosses itself or the spinner's up and down arms. A rect is
+  // { x, y, w, h, a, b }: a is the left or top half's pips, b the right or bottom one's.
+  function layout(H, maxX, ghost) {
+    var out = [], ghostRect = null;
+    if (!H.root) {
+      if (ghost) { var g0 = ghost.t, gd = isDouble(g0); ghostRect = gd ? { x: -0.5, y: -1, w: 1, h: 2, a: g0[0], b: g0[1] } : { x: -1, y: -0.5, w: 2, h: 1, a: g0[0], b: g0[1] }; }
+      return { tiles: out, ghost: ghostRect };
+    }
+    var R = H.root, sp = isDouble(R), hw = sp ? 0.5 : 1;
+    out.push(sp ? { x: -0.5, y: -1, w: 1, h: 2, a: R[0], b: R[1] } : { x: -1, y: -0.5, w: 2, h: 1, a: R[0], b: R[1] });
+    var lim = Math.max(3, maxX);
+    function walk(side, list, extra) {
+      var w = side === 'r' ? { x: hw, y: 0, dx: 1, dy: 0, lo: 1, hi: lim, turn: 1, ext: sp ? 1 : 0.5 }
+        : side === 'l' ? { x: -hw, y: 0, dx: -1, dy: 0, lo: -lim, hi: -1, turn: -1, ext: sp ? 1 : 0.5 }
+          : side === 'u' ? { x: 0, y: -1, dx: 0, dy: -1 } : { x: 0, y: 1, dx: 0, dy: 1 };
+      var all = list.concat(extra ? [extra] : []), rects = [];
+      all.forEach(function (e) {
+        var inn = e.t[0] === e.out && e.t[1] === e.out ? e.out : (e.t[0] === e.out ? e.t[1] : e.t[0]);
+        var r;
+        if (w.dy) {
+          // up and down: a tile stands along the arm, a double lies across it
+          var L2 = e.dbl ? 1 : 2, y0 = w.dy > 0 ? w.y : w.y - L2;
+          r = e.dbl ? { x: -1, y: y0, w: 2, h: 1, a: inn, b: inn } : { x: -0.5, y: y0, w: 1, h: 2, a: w.dy > 0 ? inn : e.out, b: w.dy > 0 ? e.out : inn };
+          w.y += w.dy * L2;
+        } else {
+          var len = e.dbl ? 1 : 2, nx = w.x + w.dx * len;
+          if (nx > w.hi || nx < w.lo) {
+            // the turn: one tile standing, then the row comes back the other way
+            // (it starts below a double's lower half, which hangs past the row)
+            var tx = w.dx > 0 ? w.x - 1 : w.x, off = w.ext;
+            r = w.turn > 0 ? { x: tx, y: w.y + off, w: 1, h: 2, a: inn, b: e.out } : { x: tx, y: w.y - off - 2, w: 1, h: 2, a: e.out, b: inn };
+            w.x = w.dx > 0 ? w.x - 1 : w.x + 1; w.y += w.turn * (off + 1.5); w.dx = -w.dx; w.ext = 0.5;
+          } else if (e.dbl) {
+            r = { x: w.dx > 0 ? w.x : w.x - 1, y: w.y - 1, w: 1, h: 2, a: inn, b: inn };
+            w.x = nx; w.ext = 1;
+          } else {
+            r = { x: Math.min(w.x, nx), y: w.y - 0.5, w: 2, h: 1, a: w.dx > 0 ? inn : e.out, b: w.dx > 0 ? e.out : inn };
+            w.x = nx; w.ext = 0.5;
+          }
+        }
+        rects.push(r);
+      });
+      return rects;
+    }
+    ['l', 'r', 'u', 'd'].forEach(function (s) {
+      var ex = null;
+      if (ghost && ghost.side === s) {
+        var o = open(H, s), t = ghost.t;
+        ex = { t: t, out: t[0] === o ? t[1] : t[0], dbl: isDouble(t) };
+      }
+      var rs = walk(s, H.arms[s], ex);
+      if (ex) ghostRect = rs.pop();
+      out = out.concat(rs);
+    });
+    return { tiles: out, ghost: ghostRect };
+  }
+  function overlaps(rs) {
+    for (var i = 0; i < rs.length; i++) for (var j = i + 1; j < rs.length; j++) {
+      var a = rs[i], b = rs[j];
+      if (a.x < b.x + b.w - 1e-9 && b.x < a.x + a.w - 1e-9 && a.y < b.y + b.h - 1e-9 && b.y < a.y + a.h - 1e-9) return true;
+    }
+    return false;
+  }
+
+  function validTile(t) { return Array.isArray(t) && t.length === 2 && t[0] >= 0 && t[0] <= t[1] && t[1] <= 6 && t.every(function (v) { return v === Math.floor(v); }); }
+  // a saved hand holds every tile of the set exactly once, and its ends agree with the root
+  function valid(H) {
+    if (!H || !Array.isArray(H.hands) || H.hands.length !== 2 || !Array.isArray(H.yard) || !H.arms || (H.turn !== 0 && H.turn !== 1)) return false;
+    var all = H.hands[0].concat(H.hands[1], H.yard), seen = {};
+    if (H.root) all.push(H.root);
+    var arms = ['l', 'r', 'u', 'd'];
+    for (var k = 0; k < 4; k++) { if (!Array.isArray(H.arms[arms[k]])) return false; H.arms[arms[k]].forEach(function (e) { all.push(e && e.t); }); }
+    if (all.length !== 28) return false;
+    for (var i = 0; i < all.length; i++) { if (!validTile(all[i])) return false; var key = all[i][0] + '-' + all[i][1]; if (seen[key]) return false; seen[key] = 1; }
+    if (!H.root && arms.some(function (s) { return H.arms[s].length; })) return false;
+    return true;
+  }
+
+  return { set: set, pips: pips, isDouble: isDouble, handPips: handPips, deal: deal, spinner: spinner, sides: sides, open: open, moves: moves,
+    legal: legal, count: count, scoreOf: scoreOf, play: play, draw: draw, pass: pass, round5: round5, bonusPts: bonusPts, think: think,
+    boardTiles: boardTiles, clone: clone, valid: valid, layout: layout, overlaps: overlaps };
+}
+if (typeof module !== 'undefined') module.exports = DominoesEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = DominoesEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'dominoes',
+    name: { fa: 'دومینو', en: 'Dominoes', zh: '多米诺', de: 'Domino', es: 'Dominó', pl: 'Domino' },
+    accent: '#486054',
+    mood: 'menu',
+    strings: {
+      fa: {
+        you: 'تو', bot: 'ربات', goalN: 'تا {n}', yardN: 'بازار: {n}', drawT: 'برداشتن از بازار', passT: 'رد کردن',
+        yourTurn: 'نوبت تو: یک کاشی بگذار', pickEnd: 'کجا بگذارم؟ یکی از جاهای روشن را بزن', botTurn: 'ربات فکر می‌کند…', mustDraw: 'کاشی جور نداری؛ از بازار بردار',
+        mustPass: 'بازار خالی است و کاشی جور نداری؛ رد کن', botDrew: 'ربات {n} کاشی برداشت', botPassed: 'ربات رد کرد', ptsN: '+{n} امتیاز!', botPtsN: 'ربات +{n} گرفت',
+        handWon: 'این دست را بردی', handLost: 'این دست را ربات برد', handTie: 'دست بسته شد، مساوی', outBonus: 'کاشی‌های باقی‌مانده‌ی حریف: +{n}',
+        blockedT: 'دست بسته شد: کسی کاشی جور ندارد', nextHand: 'دست بعدی', matchWon: 'مسابقه را بردی!', matchLost: 'مسابقه را باختی',
+        handsL: 'دست‌ها', scoreL: 'امتیاز', rulesT: 'قانون', fives: 'مضرب پنج', plain: 'ساده', goalT: 'هدف', levelT: 'ربات', settingsT: 'تنظیمات مسابقه',
+        begin: 'شروع', newMatch: 'مسابقه‌ی تازه', dailyDm: 'دومینوی روزانه', vsMedium: 'مقابل ربات متوسط', board: 'میز بازی', tileN: 'کاشی {a} و {b}',
+        endL: 'چپ', endR: 'راست', endU: 'بالا', endD: 'پایین', endsN: 'سرهای باز: {s} · جمع {c}',
+        kPick: 'انتخاب کاشی', kEnd: 'انتخاب سر', kDraw: 'برداشتن یا رد کردن', kNew: 'مسابقه‌ی تازه',
+        rules: 'کاشی‌ها از ۰-۰ تا ۶-۶ هستند و هر کدام هفت کاشی داریم. به نوبت کاشی‌ای می‌گذاری که یک سرش با یکی از سرهای باز روی میز جور باشد. اگر کاشی جور نداری از بازار برمی‌داری تا جور شود، و اگر بازار خالی باشد رد می‌کنی. اولین جفت (مثل ۵-۵) چرخان است و بعد از اینکه دو طرفش پر شد، از بالا و پایین هم باز می‌شود. در قانون مضرب پنج، هر بار جمع سرهای باز مضرب پنج شود همان را امتیاز می‌گیری؛ سر جفت دو بار شمرده می‌شود. هر کس اول کاشی‌هایش تمام شود، امتیاز کاشی‌های حریف (گردشده به پنج) را هم می‌گیرد. در قانون ساده فقط همین امتیاز آخر دست هست. اول کسی که به هدف برسد مسابقه را می‌برد.',
+        tutTitle1: 'سرها را جور کن', tutText1: 'کاشی‌ای بگذار که یک سرش با یکی از سرهای باز میز یکی باشد.',
+        tutTitle2: 'مضرب پنج', tutText2: 'اگر جمع سرهای باز ۵، ۱۰، ۱۵… شود همان‌قدر امتیاز می‌گیری.',
+        tutTitle3: 'دست را تمام کن', tutText3: 'هر کس اول کاشی‌هایش تمام شود، کاشی‌های حریف هم امتیاز اوست.'
+      },
+      en: {
+        you: 'You', bot: 'Bot', goalN: 'to {n}', yardN: 'Boneyard: {n}', drawT: 'Draw a tile', passT: 'Pass',
+        yourTurn: 'Your turn: play a tile', pickEnd: 'Where? Tap one of the lit ends', botTurn: 'The bot is thinking…', mustDraw: 'No tile fits: draw from the boneyard',
+        mustPass: 'The boneyard is empty and no tile fits: pass', botDrew: 'The bot drew {n}', botPassed: 'The bot passed', ptsN: '+{n} points!', botPtsN: 'The bot scored {n}',
+        handWon: 'You won the hand', handLost: 'The bot won the hand', handTie: 'Blocked, and level', outBonus: 'Tiles left in the other hand: +{n}',
+        blockedT: 'Blocked: nobody can play', nextHand: 'Next hand', matchWon: 'You won the match!', matchLost: 'You lost the match',
+        handsL: 'Hands', scoreL: 'Score', rulesT: 'Rules', fives: 'All Fives', plain: 'Plain', goalT: 'Goal', levelT: 'Bot', settingsT: 'Match settings',
+        begin: 'Start', newMatch: 'New match', dailyDm: 'Daily Dominoes', vsMedium: 'Against the medium bot', board: 'The table', tileN: 'Tile {a} and {b}',
+        endL: 'left', endR: 'right', endU: 'up', endD: 'down', endsN: 'Open ends: {s} · count {c}',
+        kPick: 'Choose a tile', kEnd: 'Choose an end', kDraw: 'Draw or pass', kNew: 'New match',
+        rules: 'The tiles run from 0-0 to 6-6, seven each. In turn you play a tile that matches one of the open ends on the table. If none fits you draw from the boneyard until one does, and pass when it is empty. The first double (like 5-5) is the spinner: once both its sides are played it opens up and down too. In All Fives, whenever the open ends add up to a multiple of five you score that many; a double at an end counts both halves. Whoever plays their last tile first also scores the pips in the other hand, rounded to five. In Plain rules only that last score counts. The first to the goal wins the match.',
+        tutTitle1: 'Match the ends', tutText1: 'Play a tile with one half matching an open end on the table.',
+        tutTitle2: 'Multiples of five', tutText2: 'If the open ends add up to 5, 10, 15… you score that many.',
+        tutTitle3: 'Go out first', tutText3: 'Whoever plays their last tile first scores the other hand too.'
+      },
+      pl: {
+        you: 'Ty', bot: 'Bot', goalN: 'do {n}', yardN: 'Pula: {n}', drawT: 'Dobierz kostkę', passT: 'Pas',
+        yourTurn: 'Twój ruch: zagraj kostkę', pickEnd: 'Gdzie? Dotknij jednego z podświetlonych końców', botTurn: 'Bot myśli…', mustDraw: 'Żadna kostka nie pasuje: dobierz z puli',
+        mustPass: 'Pula jest pusta i nic nie pasuje: pas', botDrew: 'Bot dobrał {n}', botPassed: 'Bot spasował', ptsN: '+{n} punktów!', botPtsN: 'Bot zdobył {n}',
+        handWon: 'Wygrywasz rozdanie', handLost: 'Bot wygrywa rozdanie', handTie: 'Zablokowane, remis', outBonus: 'Kostki w drugiej ręce: +{n}',
+        blockedT: 'Zablokowane: nikt nie może zagrać', nextHand: 'Następne rozdanie', matchWon: 'Wygrywasz mecz!', matchLost: 'Przegrywasz mecz',
+        handsL: 'Rozdania', scoreL: 'Wynik', rulesT: 'Zasady', fives: 'Piątki', plain: 'Zwykłe', goalT: 'Cel', levelT: 'Bot', settingsT: 'Ustawienia meczu',
+        begin: 'Start', newMatch: 'Nowy mecz', dailyDm: 'Codzienne Domino', vsMedium: 'Ze średnim botem', board: 'Stół', tileN: 'Kostka {a} i {b}',
+        endL: 'lewo', endR: 'prawo', endU: 'góra', endD: 'dół', endsN: 'Otwarte końce: {s} · suma {c}',
+        kPick: 'Wybierz kostkę', kEnd: 'Wybierz koniec', kDraw: 'Dobierz albo pas', kNew: 'Nowy mecz',
+        rules: 'Kostki mają od 0-0 do 6-6, każdy dostaje siedem. Na zmianę dokładasz kostkę pasującą do jednego z otwartych końców na stole. Gdy nic nie pasuje, dobierasz z puli, aż coś będzie pasować, a gdy pula jest pusta, pasujesz. Pierwszy dublet (np. 5-5) to kręciołek: gdy obie jego strony są zajęte, otwiera się też w górę i w dół. W Piątkach za każdym razem, gdy otwarte końce sumują się do wielokrotności pięciu, dostajesz tyle punktów; dublet na końcu liczy się podwójnie. Kto pierwszy wyłoży ostatnią kostkę, dostaje też oczka z drugiej ręki, zaokrąglone do pięciu. W zwykłych zasadach liczy się tylko ten wynik. Kto pierwszy osiągnie cel, wygrywa mecz.',
+        tutTitle1: 'Dopasuj końce', tutText1: 'Zagraj kostkę, której połówka pasuje do otwartego końca.',
+        tutTitle2: 'Wielokrotności pięciu', tutText2: 'Gdy otwarte końce dają 5, 10, 15…, dostajesz tyle punktów.',
+        tutTitle3: 'Wyjdź pierwszy', tutText3: 'Kto pierwszy wyłoży ostatnią kostkę, dostaje też drugą rękę.'
+      },
+      zh: {
+        you: '你', bot: '电脑', goalN: '到 {n}', yardN: '牌堆：{n}', drawT: '摸一张', passT: '过',
+        yourTurn: '轮到你：出一张牌', pickEnd: '放哪里？点一个亮着的端', botTurn: '电脑思考中…', mustDraw: '没有能接的牌：从牌堆摸牌',
+        mustPass: '牌堆空了也没牌能接：过', botDrew: '电脑摸了 {n} 张', botPassed: '电脑过了', ptsN: '+{n} 分！', botPtsN: '电脑得 {n} 分',
+        handWon: '这一手你赢了', handLost: '这一手电脑赢了', handTie: '死局，平手', outBonus: '对手剩下的牌：+{n}',
+        blockedT: '死局：谁都出不了', nextHand: '下一手', matchWon: '你赢了比赛！', matchLost: '你输了比赛',
+        handsL: '手数', scoreL: '比分', rulesT: '规则', fives: '五的倍数', plain: '普通', goalT: '目标', levelT: '电脑', settingsT: '比赛设置',
+        begin: '开始', newMatch: '新比赛', dailyDm: '每日多米诺', vsMedium: '对战中等电脑', board: '牌桌', tileN: '{a} 和 {b} 的牌',
+        endL: '左', endR: '右', endU: '上', endD: '下', endsN: '开放的端：{s} · 合计 {c}',
+        kPick: '选牌', kEnd: '选端', kDraw: '摸牌或过', kNew: '新比赛',
+        rules: '牌从 0-0 到 6-6，每人七张。轮流出一张与桌上某个开放端相同的牌。没有能接的就从牌堆摸到能接为止，牌堆空了就过。第一张对子（比如 5-5）是转轴：两边都接上之后，上下也能接。在“五的倍数”规则里，每当开放端之和是五的倍数，你就得这么多分；端上的对子算两边。先出完牌的一方还能得到对手手里的点数，取整到五。普通规则只算这一项。先到目标分的一方赢得比赛。',
+        tutTitle1: '接上端', tutText1: '出一张有一半和桌上开放端相同的牌。',
+        tutTitle2: '五的倍数', tutText2: '开放端之和为 5、10、15… 时就得这么多分。',
+        tutTitle3: '先出完', tutText3: '先出完牌的一方还能得到对手手里的点数。'
+      },
+      de: {
+        you: 'Du', bot: 'Bot', goalN: 'bis {n}', yardN: 'Talon: {n}', drawT: 'Stein ziehen', passT: 'Passen',
+        yourTurn: 'Du bist dran: lege einen Stein', pickEnd: 'Wohin? Tippe auf ein leuchtendes Ende', botTurn: 'Der Bot überlegt…', mustDraw: 'Kein Stein passt: zieh aus dem Talon',
+        mustPass: 'Der Talon ist leer und nichts passt: passe', botDrew: 'Der Bot zog {n}', botPassed: 'Der Bot passt', ptsN: '+{n} Punkte!', botPtsN: 'Der Bot holt {n}',
+        handWon: 'Du gewinnst die Runde', handLost: 'Der Bot gewinnt die Runde', handTie: 'Blockiert und gleichauf', outBonus: 'Steine der anderen Hand: +{n}',
+        blockedT: 'Blockiert: niemand kann legen', nextHand: 'Nächste Runde', matchWon: 'Du gewinnst das Match!', matchLost: 'Du verlierst das Match',
+        handsL: 'Runden', scoreL: 'Stand', rulesT: 'Regeln', fives: 'Fünfer', plain: 'Einfach', goalT: 'Ziel', levelT: 'Bot', settingsT: 'Match-Einstellungen',
+        begin: 'Los', newMatch: 'Neues Match', dailyDm: 'Domino des Tages', vsMedium: 'Gegen den mittleren Bot', board: 'Der Tisch', tileN: 'Stein {a} und {b}',
+        endL: 'links', endR: 'rechts', endU: 'oben', endD: 'unten', endsN: 'Offene Enden: {s} · Summe {c}',
+        kPick: 'Stein wählen', kEnd: 'Ende wählen', kDraw: 'Ziehen oder passen', kNew: 'Neues Match',
+        rules: 'Die Steine reichen von 0-0 bis 6-6, jeder bekommt sieben. Abwechselnd legst du einen Stein an ein passendes offenes Ende. Passt keiner, ziehst du aus dem Talon, bis einer passt, und passt, wenn er leer ist. Der erste Pasch (etwa 5-5) ist der Spinner: Sind beide Seiten belegt, öffnet er sich auch nach oben und unten. Bei Fünfer zählt jedes Mal, wenn die offenen Enden zusammen ein Vielfaches von fünf ergeben, diese Summe; ein Pasch am Ende zählt doppelt. Wer zuerst den letzten Stein legt, bekommt auch die Augen der anderen Hand, auf fünf gerundet. Bei einfachen Regeln zählt nur das. Wer zuerst das Ziel erreicht, gewinnt.',
+        tutTitle1: 'Enden anlegen', tutText1: 'Lege einen Stein, dessen Hälfte zu einem offenen Ende passt.',
+        tutTitle2: 'Vielfache von fünf', tutText2: 'Ergeben die offenen Enden 5, 10, 15…, gibt es so viele Punkte.',
+        tutTitle3: 'Zuerst fertig', tutText3: 'Wer zuerst alle Steine legt, bekommt auch die andere Hand.'
+      },
+      es: {
+        you: 'Tú', bot: 'Bot', goalN: 'a {n}', yardN: 'Pozo: {n}', drawT: 'Robar ficha', passT: 'Pasar',
+        yourTurn: 'Tu turno: juega una ficha', pickEnd: '¿Dónde? Toca uno de los extremos iluminados', botTurn: 'El bot piensa…', mustDraw: 'Ninguna ficha encaja: roba del pozo',
+        mustPass: 'El pozo está vacío y nada encaja: pasa', botDrew: 'El bot robó {n}', botPassed: 'El bot pasó', ptsN: '¡+{n} puntos!', botPtsN: 'El bot sumó {n}',
+        handWon: 'Ganas la mano', handLost: 'El bot gana la mano', handTie: 'Cierre e igualdad', outBonus: 'Fichas de la otra mano: +{n}',
+        blockedT: 'Cierre: nadie puede jugar', nextHand: 'Siguiente mano', matchWon: '¡Ganas la partida!', matchLost: 'Pierdes la partida',
+        handsL: 'Manos', scoreL: 'Marcador', rulesT: 'Reglas', fives: 'Múltiplos de cinco', plain: 'Normal', goalT: 'Meta', levelT: 'Bot', settingsT: 'Ajustes de la partida',
+        begin: 'Empezar', newMatch: 'Partida nueva', dailyDm: 'Dominó diario', vsMedium: 'Contra el bot medio', board: 'La mesa', tileN: 'Ficha {a} y {b}',
+        endL: 'izquierda', endR: 'derecha', endU: 'arriba', endD: 'abajo', endsN: 'Extremos abiertos: {s} · suma {c}',
+        kPick: 'Elegir ficha', kEnd: 'Elegir extremo', kDraw: 'Robar o pasar', kNew: 'Partida nueva',
+        rules: 'Las fichas van del 0-0 al 6-6, siete para cada uno. Por turnos juegas una ficha que coincida con uno de los extremos abiertos. Si ninguna encaja robas del pozo hasta que encaje, y pasas si está vacío. El primer doble (como el 5-5) es el giratorio: cuando sus dos lados están jugados, se abre también arriba y abajo. En Múltiplos de cinco, cada vez que los extremos abiertos suman un múltiplo de cinco ganas esa cantidad; un doble en un extremo cuenta sus dos mitades. Quien juega primero su última ficha suma también los puntos de la otra mano, redondeados a cinco. En las reglas normales solo cuenta eso. Quien llega primero a la meta gana la partida.',
+        tutTitle1: 'Haz coincidir', tutText1: 'Juega una ficha con una mitad igual a un extremo abierto.',
+        tutTitle2: 'Múltiplos de cinco', tutText2: 'Si los extremos suman 5, 10, 15… ganas esa cantidad.',
+        tutTitle3: 'Termina primero', tutText3: 'Quien juega primero su última ficha suma también la otra mano.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var LEVELS = ['easy', 'medium', 'hard'], GOALS = [100, 200];
+  var prefs = ctx.store.get('prefs', null) || {};
+  if (LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+  if (GOALS.indexOf(prefs.goal) < 0) prefs.goal = 200;
+  if (prefs.rules !== 'plain') prefs.rules = 'fives';
+
+  // M: the match; M.H the hand in play
+  var M = null, sel = -1, msg = '', msgPts = false, botTimer = null, kbEnd = 0;
+  var botRnd = Math.random;
+
+  var scoreBox = el('div', { class: 'dm-score', 'aria-live': 'polite' });
+  var top = el('div', { class: 'dm-top' });
+  var opp = el('div', { class: 'dm-opp', 'aria-hidden': 'true' });
+  var cv = el('canvas', { role: 'img', 'aria-label': C.t('board') });
+  var table = el('div', { class: 'dm-table' }, [cv]);
+  var hand = el('div', { class: 'dm-hand', role: 'group', 'aria-label': C.t('you') });
+  var status = el('div', { class: 'dm-status', role: 'status', 'aria-live': 'polite' });
+  var drawBtn = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', onclick: function () { drawOrPass(); } });
+  var bar = el('div', { class: 'dm-bar' }, [drawBtn]);
+  // in a tall window the side's rows stack around the table (display: contents); on a
+  // phone on its side they become a column beside it
+  var side = el('div', { class: 'dm-side' }, [top, opp, status, hand, bar]);
+  var wrap = el('div', { class: 'dm-wrap' }, [side, table]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- match */
+
+  function fives() { return M.rules === 'fives'; }
+  function rngFor(tag) { return M.daily ? C.daily('dominoes', M.daily + '|' + tag).rng : Math.random; }
+
+  function newMatch(o) {
+    clearTimeout(botTimer);
+    o = o || {};
+    var daily = o.daily || null;
+    M = { level: daily ? 'medium' : (o.level || prefs.level), goal: daily ? 100 : (o.goal || prefs.goal), rules: daily ? 'fives' : (o.rules || prefs.rules),
+      daily: daily, score: [0, 0], hands: 0, leader: null, best: 0, startedAt: Date.now(), done: false, H: null };
+    if (!daily) { prefs.level = M.level; prefs.goal = M.goal; prefs.rules = M.rules; ctx.store.set('prefs', prefs); }
+    newHand();
+  }
+  function newHand() {
+    M.H = E.deal(rngFor('deal' + M.hands), M.leader);
+    botRnd = rngFor('bot' + M.hands);
+    sel = -1; msg = ''; msgPts = false;
+    render(); save();
+    step();
+  }
+
+  // whose move it is and what happens next
+  function step() {
+    var H = M.H;
+    if (M.done) return;
+    if (H.over) { handOver(); return; }
+    if (H.turn === 1) { wrap.classList.add('dm-thinking'); botTimer = setTimeout(botMove, C.ui.reduceMotion() ? 250 : 750); return; }
+    wrap.classList.remove('dm-thinking');
+    render();
+  }
+
+  function botMove() {
+    var H = M.H, drew = 0;
+    while (!E.legal(H, 1).length && E.draw(H)) drew++;
+    if (!E.legal(H, 1).length) {
+      E.pass(H);
+      say(C.t('botPassed'));
+    } else {
+      var m = E.think(H, M.level, fives(), botRnd);
+      var got = E.play(H, m.i, m.side, fives());
+      M.score[1] += got;
+      C.feedback('clack');
+      say(got ? C.t('botPtsN', { n: C.num(got) }) : drew ? C.t('botDrew', { n: C.num(drew) }) : '');
+    }
+    wrap.classList.remove('dm-thinking');
+    render(); save();
+    if (M.score[1] >= M.goal) { matchOver(); return; }
+    step();
+  }
+
+  function playMine(i, side) {
+    var H = M.H;
+    if (M.done || H.over || H.turn !== 0) return;
+    var got = E.play(H, i, side, fives());
+    if (got < 0) { C.feedback('bad'); return; }
+    sel = -1;
+    M.score[0] += got;
+    if (got) {
+      M.best = Math.max(M.best, got);
+      if (got >= 20) C.achievements.unlock('dom-big');
+      say(C.t('ptsN', { n: C.num(got) }), true);
+      C.feedback('good');
+      C.ui.burst(cv, { count: 14, speed: 200, size: 3 });
+    } else { say(''); C.feedback('clack'); }
+    render(); save();
+    if (M.score[0] >= M.goal) { matchOver(); return; }
+    step();
+  }
+
+  function drawOrPass() {
+    var H = M.H;
+    if (M.done || H.over || H.turn !== 0 || E.legal(H, 0).length) return;
+    if (E.draw(H)) { C.feedback('tap'); say(''); }
+    else if (E.pass(H)) { C.feedback('tap'); say(''); }
+    render(); save();
+    step();
+  }
+
+  function tapTile(i) {
+    var H = M.H;
+    if (M.done || H.over || H.turn !== 0) return;
+    var t = H.hands[0][i], ms = E.moves(H, t);
+    if (!ms.length) { C.feedback('bad'); C.ui.shake(hand.children[i]); return; }
+    // one place: play it; several: lift it and light the ends it fits
+    if (ms.length === 1) { playMine(i, ms[0]); return; }
+    sel = sel === i ? -1 : i; kbEnd = 0;
+    C.feedback('select');
+    render();
+  }
+
+  function handOver() {
+    var H = M.H, r = H.result, w = r.winner, bonus = E.bonusPts(H, fives());
+    // a hand is counted once: a reload while its summary is open must not add it again
+    if (!H.counted) {
+      H.counted = true;
+      if (w >= 0) M.score[w] += bonus;
+      M.hands++;
+      M.leader = w >= 0 ? w : M.leader;
+      save();
+    }
+    render();
+    if (M.score[0] >= M.goal || M.score[1] >= M.goal) { setTimeout(matchOver, 500); return; }
+    var lines = [];
+    if (r.how === 'blocked') lines.push(el('p', { class: 'ch-dim', text: C.t('blockedT') }));
+    if (w >= 0 && bonus) lines.push(el('p', { text: C.t('outBonus', { n: C.num(bonus) }) }));
+    lines.push(el('p', { class: 'ch-dim', text: C.t('you') + ' ' + C.num(M.score[0]) + ' · ' + C.t('bot') + ' ' + C.num(M.score[1]) + ' · ' + C.t('goalN', { n: C.num(M.goal) }) }));
+    setTimeout(function () {
+      C.ui.modal({ title: C.t(w === 0 ? 'handWon' : w === 1 ? 'handLost' : 'handTie'), body: lines, onClose: newHand,
+        actions: [{ label: C.t('nextHand'), kind: 'primary' }] });
+    }, C.ui.reduceMotion() ? 100 : 600);
+  }
+
+  function matchOver() {
+    if (M.done) return;
+    M.done = true;
+    clearTimeout(botTimer);
+    var won = M.score[0] > M.score[1];
+    var k = { easy: 1, medium: 1.6, hard: 2.4 }[M.level] * (M.goal / 200 + 0.5);
+    var coins = won ? Math.round(10 * k) : 2, points = won ? Math.round(30 * k) : 5;
+    if (won) { C.achievements.unlock('dom-win'); if (M.level === 'hard') C.achievements.unlock('dom-hard'); }
+    if (M.daily && !C.stats.daily('dominoes', M.daily, { label: C.num(M.score[0]) + ' – ' + C.num(M.score[1]), win: won })) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    ctx.clearSave();
+    C.feedback(won ? 'win' : 'bad');
+    var elapsed = Date.now() - M.startedAt;
+    ctx.finish({
+      won: won, title: C.t(won ? 'matchWon' : 'matchLost'), timeMs: elapsed, coins: coins, points: points,
+      lines: [
+        M.daily ? { label: C.t('daily'), value: C.num(M.daily) } : { label: C.t('levelT'), value: C.t(M.level) },
+        { label: C.t('scoreL'), value: C.num(M.score[0]) + ' – ' + C.num(M.score[1]) },
+        { label: C.t('handsL'), value: C.num(M.hands) },
+        { label: C.t('time'), value: C.time(elapsed) }
+      ],
+      shareText: 'چوگان · دومینو' + (M.daily ? '\nروزانه ' + M.daily : '') + '\n' + M.score[0] + ' – ' + M.score[1],
+      paint: cardPaint(),
+      againLabel: M.daily ? null : C.t('newMatch'),
+      onAgain: M.daily ? null : function () { newMatch(); }
+    });
+  }
+
+  function say(t, pts) { msg = t; msgPts = !!pts; }
+
+  function askNew() {
+    if (M && M.daily) return;
+    settings();
+  }
+  function settings() {
+    var o = { level: M ? M.level : prefs.level, goal: M ? M.goal : prefs.goal, rules: M ? M.rules : prefs.rules };
+    var body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } }, [
+      el('div', { class: 'ch-xs ch-dim', text: C.t('rulesT') }),
+      C.ui.segmented([{ value: 'fives', label: C.t('fives') }, { value: 'plain', label: C.t('plain') }], o.rules, function (v) { o.rules = v; }),
+      el('div', { class: 'ch-xs ch-dim', text: C.t('goalT') }),
+      C.ui.segmented(GOALS.map(function (g) { return { value: g, label: C.num(g) }; }), o.goal, function (v) { o.goal = v; }),
+      el('div', { class: 'ch-xs ch-dim', text: C.t('levelT') }),
+      C.ui.segmented(LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), o.level, function (v) { o.level = v; })
+    ]);
+    if (M && !M.done && (M.hands || M.H.log.length)) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('resetWarn') }));
+    C.ui.modal({
+      title: C.t('settingsT'), closeButton: true, body: [body],
+      actions: [{ label: C.t('cancel') }, { label: C.t('begin'), kind: 'primary', onClick: function () { newMatch(o); } }]
+    });
+  }
+
+  /* ------------------------------------------------------------- tiles */
+
+  var PIPS = { 0: [], 1: [[1, 1]], 2: [[0, 0], [2, 2]], 3: [[0, 0], [1, 1], [2, 2]], 4: [[0, 0], [2, 0], [0, 2], [2, 2]],
+    5: [[0, 0], [2, 0], [1, 1], [0, 2], [2, 2]], 6: [[0, 0], [0, 1], [0, 2], [2, 0], [2, 1], [2, 2]] };
+  function tileSVG(a, b) {
+    var s = '<svg viewBox="0 0 40 76" aria-hidden="true"><rect class="dm-face" x="2" y="2" width="36" height="72" rx="7" fill="var(--dm-ivory)" stroke="var(--dm-edge)" stroke-width="2"/>' +
+      '<line x1="8" y1="38" x2="32" y2="38" stroke="var(--dm-edge)" stroke-width="2" stroke-linecap="round"/>';
+    [[a, 4], [b, 40]].forEach(function (h) {
+      PIPS[h[0]].forEach(function (p) { s += '<circle cx="' + (10 + p[0] * 10) + '" cy="' + (h[1] + 6 + p[1] * 10) + '" r="3.6" fill="var(--dm-pip)"/>'; });
+    });
+    return s + '</svg>';
+  }
+  // one half of a tile on the table, with its pips, inside the square at x, y of side u
+  function half(g, x, y, u, n, col) {
+    g.fillStyle = col.pip;
+    PIPS[n].forEach(function (p) { g.beginPath(); g.arc(x + u * (0.25 + p[0] * 0.25), y + u * (0.25 + p[1] * 0.25), u * 0.085, 0, Math.PI * 2); g.fill(); });
+  }
+  function tile(g, r, Q, col, ghost) {
+    var x = Q.ox + r.x * Q.u, y = Q.oy + r.y * Q.u, w = r.w * Q.u, h = r.h * Q.u, pad = Q.u * 0.04;
+    if (ghost) {
+      g.fillStyle = col.glow; C.rrect(g, x + pad, y + pad, w - 2 * pad, h - 2 * pad, Q.u * 0.16); g.fill();
+      g.strokeStyle = '#FFFFFF'; g.lineWidth = Math.max(2, Q.u * 0.06); g.setLineDash([Q.u * 0.16, Q.u * 0.12]); g.stroke(); g.setLineDash([]);
+      return;
+    }
+    g.fillStyle = 'rgba(0,0,0,.28)'; C.rrect(g, x + pad + Q.u * 0.05, y + pad + Q.u * 0.08, w - 2 * pad, h - 2 * pad, Q.u * 0.16); g.fill();
+    g.fillStyle = col.ivory; C.rrect(g, x + pad, y + pad, w - 2 * pad, h - 2 * pad, Q.u * 0.16); g.fill();
+    g.strokeStyle = col.edge; g.lineWidth = Math.max(1, Q.u * 0.04); g.stroke();
+    g.beginPath();
+    if (r.w > r.h) { g.moveTo(x + w / 2, y + h * 0.2); g.lineTo(x + w / 2, y + h * 0.8); half(g, x, y, h, r.a, col); half(g, x + w / 2, y, h, r.b, col); }
+    else { g.moveTo(x + w * 0.2, y + h / 2); g.lineTo(x + w * 0.8, y + h / 2); half(g, x, y, w, r.a, col); half(g, x, y + h / 2, w, r.b, col); }
+    g.stroke();
+  }
+
+  function colors() {
+    var cs = getComputedStyle(document.documentElement), v = function (k, f) { return cs.getPropertyValue(k).trim() || f; };
+    return { ivory: v('--dm-ivory', '#FBF5E6'), edge: v('--dm-edge', '#3A3128'), pip: v('--dm-pip', '#231E19'), glow: 'rgba(255, 214, 102, .55)' };
+  }
+  // the table's shape decides how far a line runs before it turns
+  function geom(W, Hh, H, ghosts) {
+    var maxX = Math.max(3, Math.min(12, Math.round(4.4 * W / Hh)));
+    var L = E.layout(H, maxX), all = L.tiles.slice();
+    ghosts.forEach(function (gh) { if (gh.r) all.push(gh.r); });
+    var x0 = -1, x1 = 1, y0 = -1, y1 = 1;
+    all.forEach(function (r) { x0 = Math.min(x0, r.x); x1 = Math.max(x1, r.x + r.w); y0 = Math.min(y0, r.y); y1 = Math.max(y1, r.y + r.h); });
+    var u = Math.min((W - 24) / (x1 - x0), (Hh - 24) / (y1 - y0), W < 500 ? 34 : 44);
+    return { u: u, ox: W / 2 - (x0 + x1) / 2 * u, oy: Hh / 2 - (y0 + y1) / 2 * u, tiles: L.tiles, maxX: maxX };
+  }
+  var lastQ = null, lastGhosts = [];
+  function ghostsFor(W, Hh) {
+    var H = M.H;
+    if (sel < 0 || H.turn !== 0) return [];
+    var t = H.hands[0][sel], maxX = Math.max(3, Math.min(12, Math.round(4.4 * W / Hh)));
+    return E.moves(H, t).map(function (s) { return { side: s, r: E.layout(H, maxX, { t: t, side: s }).ghost }; });
+  }
+  function paint(g, W, Hh, H, ghosts) {
+    var col = colors(), Q = geom(W, Hh, H, ghosts);
+    Q.tiles.forEach(function (r) { tile(g, r, Q, col, false); });
+    ghosts.forEach(function (gh, k) {
+      tile(g, gh.r, Q, col, true);
+      if (k === kbEnd % ghosts.length && kbOn) {
+        g.strokeStyle = '#FFD666'; g.lineWidth = 3;
+        C.rrect(g, Q.ox + gh.r.x * Q.u - 3, Q.oy + gh.r.y * Q.u - 3, gh.r.w * Q.u + 6, gh.r.h * Q.u + 6, Q.u * 0.2); g.stroke();
+      }
+    });
+    return Q;
+  }
+  function draw() {
+    if (!M) return;
+    var rect = table.getBoundingClientRect(), W = Math.max(1, Math.floor(rect.width)), Hh = Math.max(1, Math.floor(rect.height)), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== W * dpr || cv.height !== Hh * dpr) { cv.width = W * dpr; cv.height = Hh * dpr; }
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, Hh);
+    lastGhosts = ghostsFor(W, Hh);
+    lastQ = paint(g, W, Hh, M.H, lastGhosts);
+  }
+  function cardPaint() {
+    var H = E.clone(M.H);
+    return function (g, W, Hh) {
+      g.fillStyle = '#2F6B57'; g.fillRect(0, 0, W, Hh);
+      paint(g, W, Hh, H, []);
+    };
+  }
+  // a tap is read against the view last drawn
+  cv.addEventListener('click', function (e) {
+    if (!lastQ || !lastGhosts.length) return;
+    var b = cv.getBoundingClientRect(), x = e.clientX - b.left, y = e.clientY - b.top, Q = lastQ;
+    for (var k = 0; k < lastGhosts.length; k++) {
+      var r = lastGhosts[k].r, m = Q.u * 0.3;
+      if (x >= Q.ox + r.x * Q.u - m && x <= Q.ox + (r.x + r.w) * Q.u + m && y >= Q.oy + r.y * Q.u - m && y <= Q.oy + (r.y + r.h) * Q.u + m) { playMine(sel, lastGhosts[k].side); return; }
+    }
+  });
+
+  /* --------------------------------------------------------------- view */
+
+  function render() {
+    if (!M) return;
+    var H = M.H, mine = !M.done && !H.over && H.turn === 0;
+    scoreBox.innerHTML = '';
+    scoreBox.appendChild(el('span', { class: 'dm-score__me', text: C.t('you') + ' ' + C.num(M.score[0]) }));
+    scoreBox.appendChild(el('span', { class: 'dm-score__goal', text: C.t('goalN', { n: C.num(M.goal) }) }));
+    scoreBox.appendChild(el('span', { text: C.t('bot') + ' ' + C.num(M.score[1]) }));
+    top.innerHTML = '';
+    if (M.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyDm') + ' — ' + C.num(M.daily) })]));
+    top.appendChild(scoreBox);
+    if (!M.daily) {
+      var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+      gear.addEventListener('click', settings);
+      top.appendChild(gear);
+    }
+    opp.innerHTML = '';
+    for (var i = 0; i < H.hands[1].length; i++) opp.appendChild(el('span', { class: 'dm-back' }));
+    opp.appendChild(el('span', { class: 'ch-badge dm-yard', text: C.t('yardN', { n: C.num(H.yard.length) }) }));
+    hand.innerHTML = '';
+    H.hands[0].forEach(function (t, k) {
+      var fits = mine && E.moves(H, t).length > 0;
+      var b = el('button', { class: 'dm-tile' + (mine && !fits ? ' dm-tile--dead' : ''), type: 'button', 'aria-pressed': k === sel ? 'true' : 'false',
+        'aria-label': C.t('tileN', { a: C.num(t[0]), b: C.num(t[1]) }), html: tileSVG(t[0], t[1]) });
+      b.addEventListener('click', function () { tapTile(k); });
+      hand.appendChild(b);
+    });
+    var stuck = mine && !E.legal(H, 0).length;
+    drawBtn.hidden = !stuck;
+    drawBtn.textContent = H.yard.length ? C.t('drawT') : C.t('passT');
+    var line = msg || (M.done ? '' : H.turn === 1 && !H.over ? C.t('botTurn') : stuck ? C.t(H.yard.length ? 'mustDraw' : 'mustPass') : sel >= 0 ? C.t('pickEnd') : mine ? C.t('yourTurn') : '');
+    status.textContent = line;
+    status.classList.toggle('dm-status--pts', msgPts);
+    if (H.root) {
+      var ends = E.sides(H).map(function (s) { return C.num(E.open(H, s)); }).join(' · ');
+      cv.setAttribute('aria-label', C.t('board') + ' · ' + C.t('endsN', { s: ends, c: C.num(E.count(H)) }));
+    }
+    draw();
+  }
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(table); else window.addEventListener('resize', draw);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+
+  /* -------------------------------------------------------------- input */
+
+  var kbOn = false;
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim') || e.ctrlKey || e.metaKey || e.altKey || !M) return;
+    var H = M.H;
+    // digits pick a tile by its place in the hand, whatever the keyboard layout
+    var d = /^Digit([1-9])$/.exec(e.code);
+    if (d) { var i = +d[1] - 1; if (i < H.hands[0].length) { kbOn = true; tapTile(i); } e.preventDefault(); return; }
+    if (sel >= 0 && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      kbOn = true; kbEnd += e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 + lastGhosts.length : 1; draw(); e.preventDefault(); return;
+    }
+    if (sel >= 0 && (e.key === 'Enter' || e.key === ' ') && lastGhosts.length) { playMine(sel, lastGhosts[kbEnd % lastGhosts.length].side); e.preventDefault(); return; }
+    if (e.key === 'Escape' && sel >= 0) { sel = -1; render(); e.preventDefault(); return; }
+    if (C.keyIs(e, 'd')) { drawOrPass(); e.preventDefault(); return; }
+    if (C.keyIs(e, 'n') && !M.daily) { askNew(); e.preventDefault(); }
+  });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', dir: 'ltr', text: k })]); }
+  function showHelp() {
+    var keys = [kb('1 … 9', C.t('kPick')), kb('← → / Enter', C.t('kEnd')), kb('D', C.t('kDraw'))];
+    if (!dailyDate) keys.push(kb('N', C.t('kNew')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [el('p', { class: 'ch-dim', text: C.t('rules') }), el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }), el('div', { class: 'ch-list' }, keys)],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // a row of tiles for the tutorial: [a, b] pairs laid left to right, the last one lit
+  function tArt(tiles, lit, sum) {
+    var s = '<svg viewBox="0 0 200 110" width="100%"><rect width="200" height="110" rx="10" fill="#2F6B57"/>', x = 100 - tiles.length * 22;
+    tiles.forEach(function (t, k) {
+      s += '<rect x="' + (x + k * 44) + '" y="38" width="42" height="22" rx="4" fill="' + (k === lit ? '#FFE8A3' : '#FBF5E6') + '" stroke="#3A3128"/><line x1="' + (x + k * 44 + 21) + '" y1="42" x2="' + (x + k * 44 + 21) + '" y2="56" stroke="#3A3128"/>';
+      [t[0], t[1]].forEach(function (n, h) {
+        PIPS[n].forEach(function (p) { s += '<circle cx="' + (x + k * 44 + h * 21 + 5 + p[0] * 5.5) + '" cy="' + (43 + p[1] * 6) + '" r="1.8" fill="#231E19"/>'; });
+      });
+    });
+    if (sum) s += '<text x="100" y="92" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="15" fill="#FFE8A3">' + sum + '</text>';
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt([[2, 4], [4, 6], [6, 1]], 2) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt([[5, 3], [3, 4], [4, 0]], 2, C.num(5) + ' + ' + C.num(0) + ' = ' + C.num(5)) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt([[1, 2], [2, 2], [2, 5]], 2) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // saved after every move; the daily match has its own slot
+  ctx.autosave(function () {
+    if (!M || M.done) return { inProgress: false };
+    return { level: M.level, goal: M.goal, rules: M.rules, daily: M.daily, score: M.score, hands: M.hands, leader: M.leader, best: M.best,
+      H: M.H, elapsed: Date.now() - M.startedAt };
+  });
+  function save() { ctx.save(); }
+  var saved = ctx.loadSave();
+  if (saved && saved.H && E.valid(saved.H) && (saved.daily || null) === (dailyDate || null) && LEVELS.indexOf(saved.level) >= 0 && GOALS.indexOf(saved.goal) >= 0 &&
+    Array.isArray(saved.score) && saved.score.length === 2) {
+    M = { level: saved.level, goal: saved.goal, rules: saved.rules === 'plain' ? 'plain' : 'fives', daily: saved.daily || null, score: saved.score.slice(), hands: saved.hands | 0,
+      leader: saved.leader === 0 || saved.leader === 1 ? saved.leader : null, best: saved.best | 0, startedAt: Date.now() - (saved.elapsed || 0), done: false, H: saved.H };
+    botRnd = rngFor('bot' + M.hands + '|' + M.H.log.length);
+    render();
+    if (M.score[0] >= M.goal || M.score[1] >= M.goal) matchOver(); else step();
+  } else newMatch(dailyDate ? { daily: dailyDate } : null);
+  if (dailyDate && C.stats.dailyDone('dominoes', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).dominoes;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
