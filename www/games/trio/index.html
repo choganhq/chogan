@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>سه‌تایی — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* the card colours are the game's own: three that stay apart in light and lightness as
+     well as hue, so a feature can still be told by colour on a white card in any theme */
+  :root { --tr-c0: #E8590C; --tr-c1: #0C8599; --tr-c2: #7048E8; --tr-card: #FFFFFF; --tr-edge: #E7DACA; }
+  .tr-wrap { display: flex; flex-direction: column; gap: var(--s-2); flex: 1; min-height: 0; width: 100%; }
+  .tr-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .tr-status { display: flex; justify-content: center; gap: var(--s-3); font-weight: 700; color: var(--c-text-dim); font-variant-numeric: tabular-nums; min-height: 1.5em; }
+  .tr-status b { color: var(--c-text); }
+  .tr-box { flex: 1; min-height: 120px; display: grid; place-items: center; }
+  /* tables are read left to right in every language: the places are geometric */
+  .tr-board { display: grid; gap: var(--gap, 8px); direction: ltr; touch-action: manipulation; }
+  .tr-card { border: 2px solid var(--tr-edge); border-radius: 12px; background: var(--tr-card); padding: 0; margin: 0; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 6%; box-shadow: var(--sh-1);
+    transition: transform 120ms var(--ease), border-color 120ms var(--ease), box-shadow 120ms var(--ease); }
+  .tr-card svg { height: 70%; width: auto; aspect-ratio: 1 / 2; }
+  .tr-card[aria-pressed="true"] { border-color: var(--game, var(--c-accent)); box-shadow: 0 0 0 3px var(--game, var(--c-accent)); transform: translateY(-3px); }
+  .tr-card--hint { border-color: var(--c-gold); box-shadow: 0 0 0 3px var(--c-gold); }
+  .tr-card--bad { animation: tr-bad 320ms ease; }
+  .tr-card--in { animation: tr-in 260ms var(--ease) both; }
+  .tr-card:focus-visible { outline: 3px solid var(--c-accent); outline-offset: 2px; }
+  @keyframes tr-bad { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+  @keyframes tr-in { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .tr-tools { display: flex; justify-content: center; gap: var(--s-2); flex-wrap: wrap; min-height: 40px; }
+  .tr-tools .ch-btn b { font-variant-numeric: tabular-nums; }
+  @media (prefers-reduced-motion: reduce) { .tr-card { transition: none; } .tr-card--bad, .tr-card--in { animation: none; } }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function TrioEngineFactory() {
+  'use strict';
+
+  // A card is a number 0..80: four features of three values each, as base-3 digits
+  // (colour, shape, count, fill). That is every card once, 81 in all.
+  var GOAL_SHORT = 10;
+  function feat(c, k) { return Math.floor(c / [1, 3, 9, 27][k]) % 3; }
+  // three cards make a trio when every feature is all the same or all different, which
+  // for values 0..2 is exactly when the three add up to a multiple of three
+  function isTrio(a, b, c) {
+    if (a === b || b === c || a === c) return false;
+    for (var k = 0; k < 4; k++) if ((feat(a, k) + feat(b, k) + feat(c, k)) % 3) return false;
+    return true;
+  }
+  // any two cards have exactly one card that completes them
+  function third(a, b) {
+    var c = 0;
+    for (var k = 0; k < 4; k++) c += ((6 - feat(a, k) - feat(b, k)) % 3) * [1, 3, 9, 27][k];
+    return c;
+  }
+  // every trio on the table, as triples of places
+  function trios(table) {
+    var at = {}, out = [];
+    table.forEach(function (c, i) { if (c >= 0) at[c] = i; });
+    for (var i = 0; i < table.length; i++) for (var j = i + 1; j < table.length; j++) {
+      if (table[i] < 0 || table[j] < 0) continue;
+      var k = at[third(table[i], table[j])];
+      if (k > j) out.push([i, j, k]);
+    }
+    return out;
+  }
+  function shuffle(rnd) {
+    var d = [];
+    for (var i = 0; i < 81; i++) d.push(i);
+    for (i = 80; i > 0; i--) { var j = Math.floor(rnd() * (i + 1)), t = d[i]; d[i] = d[j]; d[j] = t; }
+    return d;
+  }
+  // a game: mode 'short' ends at ten trios, 'deck' when the deck is gone and no trio is left
+  function newGame(mode, rnd) {
+    var S = { mode: mode === 'deck' ? 'deck' : 'short', deck: shuffle(rnd), table: [], found: 0, mistakes: 0, hints: 0, over: false, added: 0 };
+    while (S.table.length < 12) S.table.push(S.deck.pop());
+    ensure(S);
+    return S;
+  }
+  // With no trio on the table, three more cards are laid (21 always hold one); with none
+  // left to lay, the deck game is over.
+  function ensure(S) {
+    while (!trios(S.table).length && S.deck.length) { for (var n = 0; n < 3 && S.deck.length; n++) S.table.push(S.deck.pop()); S.added++; }
+    if (!trios(S.table).length && S.mode === 'deck') S.over = true;
+    if (S.mode === 'short' && S.found >= GOAL_SHORT) S.over = true;
+  }
+  // Takes the three cards at these places. A trio leaves the table: on a table of twelve
+  // the gaps are refilled where they were, so nothing else moves; on a larger table it
+  // just shrinks back. Returns true for a trio, false (and counts a mistake) otherwise.
+  function take(S, p) {
+    if (S.over || p.length !== 3) return false;
+    var a = S.table[p[0]], b = S.table[p[1]], c = S.table[p[2]];
+    if (a === undefined || b === undefined || c === undefined || !isTrio(a, b, c)) { S.mistakes++; return false; }
+    S.found++;
+    if (S.table.length <= 12 && S.deck.length >= 3) p.forEach(function (i) { S.table[i] = S.deck.pop(); });
+    else {
+      var keep = S.table.filter(function (_, i) { return p.indexOf(i) < 0; });
+      S.table = keep;
+      while (S.table.length < 12 && S.deck.length) S.table.push(S.deck.pop());
+    }
+    ensure(S);
+    return true;
+  }
+  function hint(S, shown) {
+    var t = trios(S.table);
+    if (!t.length) return -1;
+    // keep pointing into the same trio the earlier hints opened
+    var pick = t.find(function (x) { return shown.every(function (i) { return x.indexOf(i) >= 0; }); }) || t[0];
+    for (var k = 0; k < 3; k++) if (shown.indexOf(pick[k]) < 0) return pick[k];
+    return -1;
+  }
+  function stars(S) { var m = S.mistakes + S.hints; return m === 0 ? 3 : m <= 2 ? 2 : 1; }
+  function valid(S) {
+    if (!S || (S.mode !== 'short' && S.mode !== 'deck') || !Array.isArray(S.deck) || !Array.isArray(S.table)) return false;
+    var all = S.deck.concat(S.table), seen = {};
+    for (var i = 0; i < all.length; i++) { var c = all[i]; if (c !== Math.floor(c) || c < 0 || c > 80 || seen[c]) return false; seen[c] = 1; }
+    return all.length + 3 * S.found <= 81 && S.table.length >= 3 && typeof S.mistakes === 'number' && typeof S.hints === 'number';
+  }
+  return { GOAL_SHORT: GOAL_SHORT, feat: feat, isTrio: isTrio, third: third, trios: trios, shuffle: shuffle, newGame: newGame, ensure: ensure, take: take, hint: hint, stars: stars, valid: valid };
+}
+if (typeof module !== 'undefined') module.exports = TrioEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = TrioEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'trio',
+    name: { fa: 'سه‌تایی', en: 'Trio', zh: '三连组', de: 'Trio', es: 'Trío', pl: 'Trójka' },
+    accent: '#6C00FC',
+    mood: 'menu',
+    strings: {
+      fa: {
+        shortM: 'ده سه‌تایی', deckM: 'کل دسته', dailyTr: 'سه‌تایی روزانه', foundN: 'پیدا شده: {n}', foundOf: 'پیدا شده: {n} از {g}', leftN: 'دسته: {n}',
+        mistakesN: 'اشتباه: {n}', yes: 'سه‌تایی!', no: 'سه‌تایی نیست: همه‌ی ویژگی‌ها باید یکی یا همه متفاوت باشند', more: 'سه‌تایی نبود؛ سه کارت دیگر آمد',
+        doneT: 'تمام شد!', newBest: 'رکورد تازه!', foundL: 'سه‌تایی‌ها', mistakesL: 'اشتباه', hintsL: 'راهنمایی', hintCost: 'راهنمایی ({c} سکه)', newGameT: 'بازی تازه',
+        board: 'کارت‌های روی میز', cardN: 'کارت {i}: {n} {f} {s} {c}', one: 'یک', two: 'دو', three: 'سه',
+        s0: 'دایره', s1: 'مثلث', s2: 'مربع', f0: 'توخالی', f1: 'راه‌راه', f2: 'پر', col0: 'نارنجی', col1: 'فیروزه‌ای', col2: 'بنفش',
+        kMove: 'جابه‌جایی بین کارت‌ها', kPick: 'انتخاب کارت', kClear: 'برداشتن انتخاب', kNew: 'بازی تازه',
+        rules: 'سه کارت پیدا کن که در هر چهار ویژگی، یعنی رنگ، شکل، تعداد و پرشدگی، یا هر سه یکی باشند یا هر سه با هم فرق کنند. مثلاً سه کارت قرمز با یک، دو و سه دایره‌ی پر یک سه‌تایی‌اند، ولی اگر دو کارت قرمز و یکی سبز باشد نه. کارت‌ها را بزن؛ با سومی بررسی می‌شود. سه‌تایی درست از میز برمی‌دارد و جایش کارت تازه می‌آید؛ اگر روی میز هیچ سه‌تایی نباشد خودش سه کارت اضافه می‌کند. در «ده سه‌تایی» ده تا پیدا کن، در «کل دسته» تا ته دسته برو. زمان مهم است و هر انتخاب اشتباه یا راهنمایی یک ستاره کم می‌کند.',
+        tutTitle1: 'همه یکی یا همه فرق', tutText1: 'در هر ویژگی، سه کارت یا یکسان‌اند یا همه متفاوت.',
+        tutTitle2: 'این سه‌تایی نیست', tutText2: 'دو تا یک رنگ و یکی رنگ دیگر: نه یکی‌اند نه همه فرق.',
+        tutTitle3: 'سریع پیدا کن', tutText3: 'ده سه‌تایی یا کل دسته؛ زمانت رکورد می‌شود.'
+      },
+      en: {
+        shortM: 'Ten trios', deckM: 'Whole deck', dailyTr: 'Daily Trio', foundN: 'Found: {n}', foundOf: 'Found: {n} of {g}', leftN: 'Deck: {n}',
+        mistakesN: 'Mistakes: {n}', yes: 'Trio!', no: 'Not a trio: each feature must be all the same or all different', more: 'No trio here, so three more cards came',
+        doneT: 'Done!', newBest: 'New record!', foundL: 'Trios', mistakesL: 'Mistakes', hintsL: 'Hints', hintCost: 'Hint ({c} coins)', newGameT: 'New game',
+        board: 'The cards on the table', cardN: 'Card {i}: {n} {f} {c} {s}', one: 'one', two: 'two', three: 'three',
+        s0: 'circle', s1: 'triangle', s2: 'square', f0: 'empty', f1: 'striped', f2: 'solid', col0: 'orange', col1: 'teal', col2: 'violet',
+        kMove: 'Move between cards', kPick: 'Pick a card', kClear: 'Clear the pick', kNew: 'New game',
+        rules: 'Find three cards that, in each of their four features (colour, shape, number and fill), are either all the same or all different. Three red cards with one, two and three solid circles make a trio; two red and one green do not. Tap the cards; the third one is checked. A trio leaves the table and new cards take its place, and if the table holds no trio three more cards are laid by themselves. In Ten trios find ten, in Whole deck play to the end of the deck. Time counts, and every wrong pick or hint costs a star.',
+        tutTitle1: 'All the same or all different', tutText1: 'In every feature, the three cards are either alike or all different.',
+        tutTitle2: 'Not a trio', tutText2: 'Two of one colour and one of another: neither alike nor all different.',
+        tutTitle3: 'Find them fast', tutText3: 'Ten trios or the whole deck; your time is your record.'
+      },
+      pl: {
+        shortM: 'Dziesięć trójek', deckM: 'Cała talia', dailyTr: 'Codzienna Trójka', foundN: 'Znalezione: {n}', foundOf: 'Znalezione: {n} z {g}', leftN: 'Talia: {n}',
+        mistakesN: 'Błędy: {n}', yes: 'Trójka!', no: 'To nie trójka: każda cecha musi być taka sama albo cała różna', more: 'Brak trójki, więc doszły trzy karty',
+        doneT: 'Gotowe!', newBest: 'Nowy rekord!', foundL: 'Trójki', mistakesL: 'Błędy', hintsL: 'Podpowiedzi', hintCost: 'Podpowiedź ({c} monet)', newGameT: 'Nowa gra',
+        board: 'Karty na stole', cardN: 'Karta {i}: {n} {f} {c} {s}', one: 'jeden', two: 'dwa', three: 'trzy',
+        s0: 'koło', s1: 'trójkąt', s2: 'kwadrat', f0: 'pusty', f1: 'w paski', f2: 'pełny', col0: 'pomarańczowy', col1: 'morski', col2: 'fioletowy',
+        kMove: 'Przemieść między kartami', kPick: 'Wybierz kartę', kClear: 'Wyczyść wybór', kNew: 'Nowa gra',
+        rules: 'Znajdź trzy karty, które w każdej z czterech cech (kolor, kształt, liczba i wypełnienie) są albo wszystkie takie same, albo wszystkie różne. Trzy czerwone karty z jednym, dwoma i trzema pełnymi kołami to trójka; dwie czerwone i jedna zielona już nie. Dotykaj kart; trzecia jest sprawdzana. Trójka znika ze stołu, a na jej miejsce przychodzą nowe karty; gdy na stole nie ma trójki, same dochodzą trzy karty. W Dziesięciu trójkach znajdź dziesięć, w Całej talii graj do końca talii. Liczy się czas, a każdy zły wybór lub podpowiedź kosztuje gwiazdkę.',
+        tutTitle1: 'Wszystkie takie same lub różne', tutText1: 'W każdej cesze trzy karty są albo takie same, albo wszystkie różne.',
+        tutTitle2: 'To nie trójka', tutText2: 'Dwie w jednym kolorze i jedna w innym: ani takie same, ani różne.',
+        tutTitle3: 'Szukaj szybko', tutText3: 'Dziesięć trójek albo cała talia; twój czas to rekord.'
+      },
+      zh: {
+        shortM: '十组', deckM: '整副牌', dailyTr: '每日三连组', foundN: '已找到：{n}', foundOf: '已找到：{n} / {g}', leftN: '牌堆：{n}',
+        mistakesN: '错误：{n}', yes: '三连组！', no: '不是三连组：每个特征必须全相同或全不同', more: '桌上没有三连组，又发了三张',
+        doneT: '完成！', newBest: '新纪录！', foundL: '三连组', mistakesL: '错误', hintsL: '提示', hintCost: '提示（{c} 金币）', newGameT: '新游戏',
+        board: '桌上的牌', cardN: '第 {i} 张：{c}{f}{s} {n} 个', one: '1', two: '2', three: '3',
+        s0: '圆形', s1: '三角形', s2: '方形', f0: '空心', f1: '条纹', f2: '实心', col0: '橙色', col1: '青色', col2: '紫色',
+        kMove: '在牌之间移动', kPick: '选牌', kClear: '取消选择', kNew: '新游戏',
+        rules: '找出三张牌，它们的四个特征（颜色、形状、数量、填充）每一个都要么全相同，要么全不同。三张红色、分别有一个、两个、三个实心圆的牌是一组；两张红色一张绿色就不是。点牌，点第三张时检查。正确的一组会离开桌面并补上新牌；桌上没有三连组时会自动再发三张。“十组”要找十组，“整副牌”要玩到牌堆用完。时间算成绩，每次选错或用提示都少一颗星。',
+        tutTitle1: '全相同或全不同', tutText1: '每个特征上，三张牌要么一样，要么全不一样。',
+        tutTitle2: '这不是三连组', tutText2: '两张一种颜色、一张另一种：既不全相同也不全不同。',
+        tutTitle3: '快速找出', tutText3: '十组或整副牌，你的用时就是纪录。'
+      },
+      de: {
+        shortM: 'Zehn Trios', deckM: 'Ganzes Deck', dailyTr: 'Trio des Tages', foundN: 'Gefunden: {n}', foundOf: 'Gefunden: {n} von {g}', leftN: 'Stapel: {n}',
+        mistakesN: 'Fehler: {n}', yes: 'Trio!', no: 'Kein Trio: jedes Merkmal muss gleich oder ganz verschieden sein', more: 'Kein Trio da, also kamen drei Karten dazu',
+        doneT: 'Geschafft!', newBest: 'Neuer Rekord!', foundL: 'Trios', mistakesL: 'Fehler', hintsL: 'Tipps', hintCost: 'Tipp ({c} Münzen)', newGameT: 'Neues Spiel',
+        board: 'Die Karten auf dem Tisch', cardN: 'Karte {i}: {n} {f} {c} {s}', one: 'ein', two: 'zwei', three: 'drei',
+        s0: 'Kreis', s1: 'Dreieck', s2: 'Quadrat', f0: 'leer', f1: 'gestreift', f2: 'voll', col0: 'orange', col1: 'petrol', col2: 'violett',
+        kMove: 'Zwischen den Karten wechseln', kPick: 'Karte wählen', kClear: 'Auswahl aufheben', kNew: 'Neues Spiel',
+        rules: 'Finde drei Karten, die in jedem ihrer vier Merkmale (Farbe, Form, Anzahl und Füllung) entweder alle gleich oder alle verschieden sind. Drei rote Karten mit einem, zwei und drei vollen Kreisen sind ein Trio; zwei rote und eine grüne nicht. Tippe die Karten an; die dritte wird geprüft. Ein Trio verlässt den Tisch und neue Karten nehmen seinen Platz ein; liegt kein Trio aus, kommen von selbst drei Karten dazu. Bei Zehn Trios findest du zehn, beim Ganzen Deck spielst du bis zum Ende. Die Zeit zählt, und jeder Fehlgriff oder Tipp kostet einen Stern.',
+        tutTitle1: 'Alle gleich oder alle anders', tutText1: 'In jedem Merkmal sind die drei Karten gleich oder alle verschieden.',
+        tutTitle2: 'Kein Trio', tutText2: 'Zwei in einer Farbe, eine in einer anderen: weder gleich noch alle anders.',
+        tutTitle3: 'Schnell finden', tutText3: 'Zehn Trios oder das ganze Deck; deine Zeit ist dein Rekord.'
+      },
+      es: {
+        shortM: 'Diez tríos', deckM: 'Baraja entera', dailyTr: 'Trío diario', foundN: 'Encontrados: {n}', foundOf: 'Encontrados: {n} de {g}', leftN: 'Mazo: {n}',
+        mistakesN: 'Errores: {n}', yes: '¡Trío!', no: 'No es un trío: cada rasgo debe ser igual en todas o distinto en todas', more: 'No había trío, así que llegaron tres cartas más',
+        doneT: '¡Hecho!', newBest: '¡Nuevo récord!', foundL: 'Tríos', mistakesL: 'Errores', hintsL: 'Pistas', hintCost: 'Pista ({c} monedas)', newGameT: 'Partida nueva',
+        board: 'Las cartas de la mesa', cardN: 'Carta {i}: {n} {s} {f} {c}', one: 'un', two: 'dos', three: 'tres',
+        s0: 'círculo', s1: 'triángulo', s2: 'cuadrado', f0: 'vacío', f1: 'rayado', f2: 'lleno', col0: 'naranja', col1: 'verde azulado', col2: 'violeta',
+        kMove: 'Moverse entre cartas', kPick: 'Elegir carta', kClear: 'Quitar la elección', kNew: 'Partida nueva',
+        rules: 'Encuentra tres cartas que, en cada uno de sus cuatro rasgos (color, forma, número y relleno), sean todas iguales o todas distintas. Tres cartas rojas con uno, dos y tres círculos llenos son un trío; dos rojas y una verde no. Toca las cartas; la tercera se comprueba. Un trío sale de la mesa y llegan cartas nuevas a su sitio; si en la mesa no hay ningún trío, se ponen tres cartas más solas. En Diez tríos encuentra diez, en Baraja entera juega hasta acabar el mazo. El tiempo cuenta, y cada elección equivocada o pista cuesta una estrella.',
+        tutTitle1: 'Iguales o todas distintas', tutText1: 'En cada rasgo, las tres cartas son iguales o todas distintas.',
+        tutTitle2: 'Esto no es un trío', tutText2: 'Dos de un color y una de otro: ni iguales ni todas distintas.',
+        tutTitle3: 'Encuéntralos rápido', tutText3: 'Diez tríos o la baraja entera; tu tiempo es tu récord.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var HINT_COST = 10;
+  var prefs = ctx.store.get('prefs', null) || {};
+  if (prefs.mode !== 'deck') prefs.mode = 'short';
+
+  // the clock runs only while the page is in view
+  var S = null, sel = [], hinted = [], cards = [], focusAt = 0, ended = false, elapsed = 0, runningSince = 0, tick = null, flash = '';
+
+  var top = el('div', { class: 'tr-top' });
+  var status = el('div', { class: 'tr-status', role: 'status', 'aria-live': 'polite' });
+  var board = el('div', { class: 'tr-board', role: 'group', 'aria-label': C.t('board') });
+  var box = el('div', { class: 'tr-box' }, [board]);
+  var hintBtn = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', onclick: function () { hint(); } }, [C.icon('bulb', 16), el('span', { text: C.t('hint') + ' ' }), el('b', { text: C.num(HINT_COST) })]);
+  var tools = el('div', { class: 'tr-tools' }, [hintBtn]);
+  var note = el('div', { class: 'tr-status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'tr-wrap' }, [top, status, box, note, tools]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  if (!dailyDate) ctx.button({ icon: 'refresh', label: C.t('newGameT'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- clock */
+
+  function now() { return elapsed + (runningSince ? Date.now() - runningSince : 0); }
+  function run() { if (!runningSince && !ended && !document.hidden) { runningSince = Date.now(); clearInterval(tick); tick = setInterval(renderStatus, 500); } }
+  function halt() { if (runningSince) { elapsed += Date.now() - runningSince; runningSince = 0; } clearInterval(tick); }
+  document.addEventListener('visibilitychange', function () { if (document.hidden) { halt(); save(); } else run(); });
+  window.addEventListener('pagehide', function () { halt(); save(); });
+  window.addEventListener('pageshow', function (e) { if (e.persisted) run(); });
+
+  /* ------------------------------------------------------------- game */
+
+  function newGame(mode) {
+    var rnd = dailyDate ? C.daily('trio', dailyDate).rng : Math.random;
+    S = E.newGame(dailyDate ? 'short' : mode, rnd);
+    S.daily = dailyDate || null;
+    sel = []; hinted = []; ended = false; elapsed = 0; runningSince = 0; focusAt = 0; flash = '';
+    build(true);
+    run();
+    save();
+  }
+  function askNew() {
+    if (S && !ended && S.found) C.ui.confirm({ title: C.t('newGameT'), body: C.t('resetWarn'), onOk: function () { newGame(prefs.mode); } });
+    else newGame(prefs.mode);
+  }
+  function setMode(m) {
+    if (m === S.mode) return;
+    var go = function () { prefs.mode = m; ctx.store.set('prefs', prefs); newGame(m); };
+    if (!ended && S.found) C.ui.confirm({ title: C.t('newGameT'), body: C.t('resetWarn'), onOk: go, onCancel: render });
+    else go();
+  }
+
+  function pick(i) {
+    if (!S || ended || i >= S.table.length) return;
+    focusAt = i;
+    var at = sel.indexOf(i);
+    if (at >= 0) { sel.splice(at, 1); C.feedback('tap'); render(); return; }
+    sel.push(i);
+    C.feedback('select');
+    if (sel.length < 3) { render(); return; }
+    var p = sel.slice(), before = S.table.length, deckBefore = S.deck.length, addedBefore = S.added;
+    sel = [];
+    if (E.take(S, p)) {
+      hinted = [];
+      flash = S.added > addedBefore ? C.t('more') : C.t('yes');
+      C.feedback('good');
+      // the cards that came in, to animate: the same places on a table of twelve, the end otherwise
+      var fresh = before <= 12 && deckBefore >= 3 ? p : [];
+      for (var k = before - (before > 12 ? 3 : 0); k < S.table.length; k++) fresh.push(k);
+      build(false, fresh);
+      if (S.over) { win(); return; }
+    } else {
+      flash = C.t('no');
+      C.feedback('bad');
+      p.forEach(function (k) { var b = cards[k]; if (b) { b.classList.remove('tr-card--bad'); void b.offsetWidth; b.classList.add('tr-card--bad'); } });
+      render();
+    }
+    save();
+  }
+
+  function hint() {
+    if (!S || ended) return;
+    if (!C.coins.can(HINT_COST)) {
+      C.feedback('bad');
+      C.ui.toast({ icon: 'coin', title: C.t('notEnoughCoins'), sub: C.t('playToEarn') });
+      return;
+    }
+    var k = E.hint(S, hinted);
+    if (k < 0) return;
+    C.coins.spend(HINT_COST);
+    S.hints++; hinted.push(k);
+    C.feedback('coin');
+    render(); save();
+  }
+
+  function win() {
+    ended = true;
+    halt();
+    var ms = now(), st = E.stars(S);
+    var base = S.mode === 'deck' ? [20, 60] : [8, 25], k = st === 3 ? 1 : st === 2 ? 0.7 : 0.4;
+    var coins = Math.max(1, Math.round(base[0] * k)), points = Math.max(1, Math.round(base[1] * k));
+    if (S.mode === 'short' && ms < 120000) C.achievements.unlock('tri-fast');
+    if (S.mode === 'deck') C.achievements.unlock('tri-deck');
+    var key = S.daily ? 'daily' : S.mode, record = C.stats.best('trio', key, ms, true), best = C.stats.getBest('trio', key);
+    if (S.daily) {
+      if (!C.stats.daily('trio', S.daily, { label: C.time(ms), win: true, stars: st })) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+      if (!S.mistakes) C.achievements.unlock('tri-daily');
+    }
+    ctx.clearSave();
+    C.feedback('win');
+    setTimeout(function () {
+      ctx.finish({
+        won: true, title: C.t('doneT'), note: record ? C.t('newBest') : null, stars: st, timeMs: ms, coins: coins, points: points,
+        lines: [
+          S.daily ? { label: C.t('daily'), value: C.num(S.daily) } : { label: C.t(S.mode === 'deck' ? 'deckM' : 'shortM'), value: '' },
+          { label: C.t('time'), value: C.time(ms) },
+          { label: C.t('best'), value: C.time(typeof best === 'number' ? best : ms) },
+          { label: C.t('foundL'), value: C.num(S.found) },
+          { label: C.t('mistakesL'), value: C.num(S.mistakes) },
+          { label: C.t('hintsL'), value: C.num(S.hints) }
+        ],
+        shareText: 'چوگان · سه‌تایی' + (S.daily ? '\nروزانه ' + S.daily : '') + '\n' + C.time(ms) + ' ' + '★'.repeat(st),
+        againLabel: S.daily ? null : C.t('newGameT'),
+        onAgain: S.daily ? null : function () { newGame(prefs.mode); }
+      });
+    }, C.ui.reduceMotion() ? 200 : 500);
+  }
+
+  /* --------------------------------------------------------------- view */
+
+  // one card's picture: count shapes of one colour, shape and fill, side by side
+  var SHAPES = ['<circle cx="20" cy="40" r="15"/>', '<path d="M20 22 L37 54 L3 54 Z"/>', '<rect x="5" y="25" width="30" height="30" rx="3"/>'];
+  function shapeSVG(c, id) {
+    var col = 'var(--tr-c' + E.feat(c, 0) + ')', fill = E.feat(c, 3), sh = SHAPES[E.feat(c, 1)];
+    var pat = 'tp' + id;
+    var paint = fill === 2 ? col : fill === 1 ? 'url(#' + pat + ')' : 'none';
+    return '<svg viewBox="0 0 40 80" aria-hidden="true"><defs><pattern id="' + pat + '" width="40" height="5" patternUnits="userSpaceOnUse"><rect width="40" height="2.2" fill="' + col + '"/></pattern></defs>' +
+      '<g fill="' + paint + '" stroke="' + col + '" stroke-width="3" stroke-linejoin="round">' + sh + '</g></svg>';
+  }
+  function cardHTML(c, i) {
+    var n = E.feat(c, 2) + 1, s = '';
+    for (var k = 0; k < n; k++) s += shapeSVG(c, i + '_' + k);
+    return s;
+  }
+  function label(c, i) {
+    return C.t('cardN', { i: C.num(i + 1), n: C.t(['one', 'two', 'three'][E.feat(c, 2)]), f: C.t('f' + E.feat(c, 3)), s: C.t('s' + E.feat(c, 1)), c: C.t('col' + E.feat(c, 0)) });
+  }
+  function build(all, fresh) {
+    board.innerHTML = '';
+    cards = [];
+    S.table.forEach(function (c, i) {
+      var b = el('button', { class: 'tr-card' + (all || (fresh && fresh.indexOf(i) >= 0) ? ' tr-card--in' : ''), type: 'button', tabindex: '-1', html: cardHTML(c, i) });
+      b.addEventListener('click', function () { pick(i); });
+      b.addEventListener('focus', function () { if (focusAt !== i) { focusAt = i; render(); } });
+      cards.push(b); board.appendChild(b);
+    });
+    focusAt = Math.min(focusAt, S.table.length - 1);
+    fit();
+    render();
+  }
+  // the columns that give the biggest cards in the space there is (cards are 3:2)
+  function fit() {
+    if (!S) return;
+    var r = box.getBoundingClientRect(), n = S.table.length, gap = Math.max(6, Math.min(12, r.width / 60)), best = null;
+    for (var cols = 2; cols <= 7; cols++) {
+      var rows = Math.ceil(n / cols), w = (r.width - gap * (cols - 1)) / cols, h = (r.height - gap * (rows - 1)) / rows;
+      var cw = Math.min(w, h * 1.5, 220), ch = cw / 1.5;
+      if (!best || cw > best.cw) best = { cols: cols, cw: cw, ch: ch };
+    }
+    board.style.setProperty('--gap', gap + 'px');
+    board.style.gridTemplateColumns = 'repeat(' + best.cols + ', ' + Math.floor(best.cw) + 'px)';
+    board.style.gridAutoRows = Math.floor(best.ch) + 'px';
+  }
+  if (window.ResizeObserver) new ResizeObserver(fit).observe(box); else window.addEventListener('resize', fit);
+
+  function renderStatus() {
+    if (!S) return;
+    status.innerHTML = '';
+    status.appendChild(el('span', { html: '<b>' + C.time(now()) + '</b>' }));
+    status.appendChild(el('span', { text: S.mode === 'short' ? C.t('foundOf', { n: C.num(S.found), g: C.num(E.GOAL_SHORT) }) : C.t('foundN', { n: C.num(S.found) }) }));
+    if (S.mode === 'deck') status.appendChild(el('span', { text: C.t('leftN', { n: C.num(S.deck.length) }) }));
+    status.appendChild(el('span', { text: C.t('mistakesN', { n: C.num(S.mistakes) }) }));
+  }
+  function render() {
+    cards.forEach(function (b, i) {
+      b.setAttribute('aria-pressed', sel.indexOf(i) >= 0 ? 'true' : 'false');
+      b.classList.toggle('tr-card--hint', hinted.indexOf(i) >= 0 && sel.indexOf(i) < 0);
+      b.setAttribute('aria-label', label(S.table[i], i));
+      b.setAttribute('tabindex', i === focusAt ? '0' : '-1');
+    });
+    top.innerHTML = '';
+    if (S.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyTr') + ' — ' + C.num(S.daily) })]));
+    else top.appendChild(C.ui.segmented([{ value: 'short', label: C.t('shortM') }, { value: 'deck', label: C.t('deckM') }], S.mode, setMode));
+    renderStatus();
+    note.textContent = flash;
+    hintBtn.disabled = ended;
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  board.addEventListener('keydown', function (e) {
+    var d = { ArrowLeft: -1, ArrowRight: 1 }[e.key], cols = (board.style.gridTemplateColumns.match(/repeat\((\d+)/) || [0, 3])[1] | 0;
+    if (e.key === 'ArrowUp') d = -cols; if (e.key === 'ArrowDown') d = cols;
+    if (d) { e.preventDefault(); focusAt = Math.max(0, Math.min(S.table.length - 1, focusAt + d)); render(); cards[focusAt].focus(); return; }
+    if (e.key === ' ' || e.key === 'Enter') { pick(focusAt); e.preventDefault(); }
+  });
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim') || e.ctrlKey || e.metaKey || e.altKey || !S) return;
+    if (e.key === 'Escape' && sel.length) { sel = []; render(); e.preventDefault(); return; }
+    if (C.keyIs(e, 'h')) { hint(); e.preventDefault(); return; }
+    if (C.keyIs(e, 'n') && !dailyDate) { askNew(); e.preventDefault(); return; }
+    if (/^Arrow/.test(e.key) && cards.length && !board.contains(document.activeElement)) { cards[focusAt].focus(); e.preventDefault(); }
+  });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', dir: 'ltr', text: k })]); }
+  function showHelp() {
+    var keys = [kb('← ↑ → ↓', C.t('kMove')), kb('Space / Enter', C.t('kPick')), kb('Esc', C.t('kClear')), kb('H', C.t('hint'))];
+    if (!dailyDate) keys.push(kb('N', C.t('kNew')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [el('p', { class: 'ch-dim', text: C.t('rules') }), el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }), el('div', { class: 'ch-list' }, keys)],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // three cards for the tutorial: [colour, shape, count, fill] each
+  var TCOL = ['#E8590C', '#0C8599', '#7048E8'];
+  function tArt(list, ok) {
+    var s = '<svg viewBox="0 0 200 110" width="100%"><rect width="200" height="110" rx="10" fill="#F4EEE4"/>';
+    list.forEach(function (f, k) {
+      var x = 12 + k * 62;
+      s += '<rect x="' + x + '" y="22" width="54" height="66" rx="7" fill="#FFFFFF" stroke="' + (ok ? '#2F9E44' : '#C8574B') + '" stroke-width="2"/>';
+      for (var j = 0; j <= f[2]; j++) {
+        var cy = 55 + (j - f[2] / 2) * 19, cx = x + 27, col = TCOL[f[0]], paint = f[3] === 2 ? col : f[3] === 1 ? col : 'none', op = f[3] === 1 ? ' fill-opacity=".35"' : '';
+        var g = '<g fill="' + paint + '"' + op + ' stroke="' + col + '" stroke-width="2">';
+        s += g + (f[1] === 0 ? '<circle cx="' + cx + '" cy="' + cy + '" r="7"/>' : f[1] === 1 ? '<path d="M' + cx + ' ' + (cy - 7) + ' L' + (cx + 8) + ' ' + (cy + 7) + ' L' + (cx - 8) + ' ' + (cy + 7) + ' Z"/>' : '<rect x="' + (cx - 7) + '" y="' + (cy - 7) + '" width="14" height="14" rx="2"/>') + '</g>';
+      }
+    });
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt([[0, 0, 0, 2], [0, 0, 1, 2], [0, 0, 2, 2]], true) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt([[0, 1, 0, 0], [0, 1, 0, 0], [1, 1, 0, 0]], false) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt([[0, 2, 0, 0], [1, 1, 1, 1], [2, 0, 2, 2]], true) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  ctx.autosave(function () {
+    if (!S || ended) return { inProgress: false };
+    return { mode: S.mode, deck: S.deck, table: S.table, found: S.found, mistakes: S.mistakes, hints: S.hints, added: S.added, daily: S.daily, elapsed: now() };
+  });
+  function save() { ctx.save(); }
+  var saved = ctx.loadSave();
+  if (saved && E.valid(saved) && (saved.daily || null) === (dailyDate || null)) {
+    S = { mode: saved.mode, deck: saved.deck.slice(), table: saved.table.slice(), found: saved.found | 0, mistakes: saved.mistakes, hints: saved.hints, added: saved.added | 0, over: false, daily: saved.daily || null };
+    E.ensure(S);
+    elapsed = saved.elapsed || 0;
+    build(true);
+    if (S.over) win(); else run();
+  } else newGame(prefs.mode);
+  if (dailyDate && C.stats.dailyDone('trio', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).trio;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
