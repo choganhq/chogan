@@ -8494,8 +8494,8 @@ function testDarkAccentText() {
   }
   ok(!low.length, 'every accent\'s dark-theme text reads at 4.5:1 or more on the lightest dark surface' + (low.length ? ': ' + low.join(', ') : ''));
   // the range only proves txt() ran on the list; it grows with the games (31 at Crazy Eights, #416;
-  // 41 at Air Hockey, #524)
-  ok(!far.length && changed.length >= 20 && changed.length <= 50, 'accents that already read keep their colour; ' + changed.length + ' are lightened' + (far.length ? ' (changed needlessly: ' + far.join(', ') + ')' : ''));
+  // 41 at Air Hockey, #524; 51 at Wrigglers, #621), so it is bounded by the list itself
+  ok(!far.length && changed.length >= 20 && changed.length < games.length, 'accents that already read keep their colour; ' + changed.length + ' are lightened' + (far.length ? ' (changed needlessly: ' + far.join(', ') + ')' : ''));
   const bw = txt('#3C4F9A');
   ok(cr(bw, '#342C22') < 5.5 && lum(bw) > lum('#3C4F9A') && txt('nonsense') === '', 'Bowling\'s blue is lightened only as far as needed (' + bw + ', ' + cr(bw, '#342C22').toFixed(2) + ':1), and a bad colour gives nothing');
   const rules = ['.ch-game__pin--on', '.ch-badge--accent', '.ch-btn--soft', '.ch-iconbtn[aria-pressed="true"]', '.ch-seg button[aria-selected="true"]'];
@@ -11464,7 +11464,7 @@ function testFootball() {
 
   // Page wiring
   const gm = games.find((x) => x.id === 'football');
-  ok(!!gm && gm.cat === 'skill' && gm.people === 2 && gm.added === '2026-11-03' && games[games.length - 1] === gm, 'games.json lists it last, as a skill game for up to two people');
+  ok(!!gm && gm.cat === 'skill' && gm.people === 2 && gm.added === '2026-11-03', 'games.json lists it as a skill game for up to two people');
   ok(!!gm && /accent: '([^']+)'/.test(html) && html.match(/accent: '([^']+)'/)[1] === gm.color, 'games.json and the page share the accent');
   ok(!!gm && LOCALE_CODES.every((l) => typeof gm.name[l] === 'string' && html.indexOf(l + ": '" + gm.name[l] + "'") > 0), 'the names match games.json in every language');
   const icon = fs.readFileSync(path.join(ROOT, 'www/games/football/icon.svg'), 'utf8');
@@ -11490,6 +11490,159 @@ function testFootball() {
   ok(!/[\s{,]again: '/.test(html), 'the page leaves the core\'s "again" label alone');
   const ms = Date.now() - t0;
   ok(ms < 12000, 'the Button Football group runs in under 12 s (' + ms + ' ms)');
+}
+
+// #621: the owner asked for an offline slither-style arena against bots (named
+// Wrigglers / مارها: "Snakes" would be confused with Snakes and Ladders)
+function testWrigglers() {
+  head('Wrigglers (#621)');
+  const t0 = Date.now();
+  const E = loadEngine('wrigglers', 'WrigglersEngineFactory');
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/wrigglers/index.html'), 'utf8');
+  const games = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games;
+  // a hand-made arena: the player and the snakes given, no food unless added
+  const bare = (others) => {
+    const S = E.newGame(7, 'easy');
+    S.snakes = [E.makeSnake(S, 0, 0, 0, E.MIN, false)];
+    (others || []).forEach((o) => S.snakes.push(E.makeSnake(S, o[0], o[1], o[2], o[3], true)));
+    S.food = []; S.baseFood = E.FOOD_N;
+    E.rebuild(S);
+    return S;
+  };
+  const still = { aim: null, turn: 0, boost: false };
+  // bots in a bare arena go straight on: no thinking unless asked
+  const freeze = (S) => S.snakes.forEach((s) => { s.ctl = { aim: s.ang, turn: 0, boost: false }; });
+  const run = (S, n, inp) => { let ev = []; for (let i = 0; i < n; i++) { if (S.snakes.length > 1) S.snakes.slice(1).forEach((b) => { b.ctl.aim = b.ang; }); ev = ev.concat(E.step(S, inp || still)); } return ev; };
+
+  // Movement: a fixed step at the set speed, and the body follows at a fixed spacing
+  const M = bare();
+  const x0 = M.snakes[0].pts[0];
+  run(M, 60);
+  const P = M.snakes[0].pts;
+  let gaps = 0;
+  for (let i = 2; i < P.length; i += 2) if (Math.abs(Math.hypot(P[i] - P[i - 2], P[i + 1] - P[i - 1]) - E.SP) < 0.01) gaps++;
+  ok(Math.abs(P[0] - x0 - E.SPEED) < 0.5 && Math.abs(P[1]) < 1e-9, 'one second of steps moves the head ' + E.SPEED + ' units on (' + (P[0] - x0).toFixed(2) + ')');
+  ok(gaps === P.length / 2 - 1 && P.length / 2 === E.segs(E.MIN), 'every body point follows the one before it at ' + E.SP + ' units (' + gaps + ' of ' + (P.length / 2 - 1) + ')');
+  // Turning toward an aim is limited per step, and keys turn the other way round too
+  const T = bare(); E.step(T, { aim: Math.PI / 2, turn: 0, boost: false });
+  const a1 = T.snakes[0].ang;
+  ok(a1 > 0 && a1 < 0.08, 'an aim turns the head a little each step, not at once (' + a1.toFixed(3) + ' rad)');
+  const T2 = bare(); run(T2, 30, { aim: null, turn: -1, boost: false });
+  ok(T2.snakes[0].ang < -1, 'holding left turns the head anticlockwise on the screen (' + T2.snakes[0].ang.toFixed(2) + ')');
+
+  // Growth: eating food adds its value to the length, and the body gets longer
+  const G = bare();
+  E.addFood(G, 20, 0, 5, 1);
+  const ev = run(G, 10);
+  ok(ev.includes('eat') && Math.abs(G.snakes[0].len - (E.MIN + 5)) < 1e-9 && G.food.length === 0, 'a head that reaches a dot eats it and grows by its value (' + G.snakes[0].len + ')');
+  ok(G.snakes[0].pts.length / 2 === E.segs(E.MIN + 5) && E.segs(E.MIN + 5) > E.segs(E.MIN), 'a longer snake has more body points (' + G.snakes[0].pts.length / 2 + ')');
+  ok(E.segs(1e6) === E.MAXSEG && E.radius(1e6) <= 16, 'a huge snake is capped at ' + E.MAXSEG + ' points and a radius of 16');
+
+  // Head into another body kills; the killer is credited when it is the player's body
+  const H = bare([[22, 50, Math.PI / 2, 40]]);
+  freeze(H);
+  // the bot lies across the player's path just ahead of it, its head at (22, 50)
+  H.snakes[1].pts = []; for (let i = 0; i < E.segs(40); i++) H.snakes[1].pts.push(22, 50 - i * E.SP);
+  H.snakes[1].ang = Math.PI / 2; E.rebuild(H);
+  let hev = []; for (let i = 0; i < 40 && !H.over; i++) { H.snakes[1].ctl.aim = Math.PI / 2; hev = hev.concat(E.step(H, still)); }
+  ok(H.over && hev.includes('die') && !H.snakes[0].alive, 'the player\'s head running into a bot\'s body ends the run');
+  ok(H.food.length >= 3 && H.food.every((f) => f.k === 1), 'the crashed player\'s body turns into food (' + H.food.length + ' dots)');
+  // a bot that runs its head into the player's body dies, turns into food and counts
+  // (close enough that it cannot dodge in the steps it has: a bot turns a little a step)
+  const K = bare([[40, -22, Math.PI / 2, 20]]);
+  freeze(K);
+  K.snakes[0].pts = []; for (let i = 0; i < E.segs(60); i++) K.snakes[0].pts.push(60 - i * E.SP, 0);
+  K.snakes[0].len = 60; E.rebuild(K);
+  let kev = []; for (let i = 0; i < 40 && K.snakes[1].alive; i++) kev = kev.concat(E.step(K, { aim: 0, turn: 0, boost: false }));
+  const deadBot = K.snakes[1];
+  ok(!deadBot.alive && kev.includes('kill') && kev.includes('botdie') && K.kills === 1 && K.snakes[0].alive && !K.over, 'a bot running its head into the player\'s body crashes and counts as the player\'s catch');
+  const dropped = K.food.filter((f) => f.k === 1).reduce((s, f) => s + f.v, 0);
+  ok(dropped >= 20 * 0.7 && dropped <= 20, 'its body turns into food worth most of its length (' + dropped.toFixed(1) + ' of 20)');
+  // Own body never kills: a tight circle for ten seconds crosses the snake's own body
+  const O = bare(); O.snakes[0].len = 120; run(O, 1);
+  run(O, 600, { aim: null, turn: 1, boost: false });
+  ok(O.snakes[0].alive && !O.over, 'a long snake turning in circles over its own body lives on');
+
+  // Boost: faster, costs length, drops small food behind, and never takes it below the minimum
+  const B = bare(); B.snakes[0].len = 40; E.step(B, still);
+  const bx = B.snakes[0].pts[0];
+  run(B, 60, { aim: null, turn: 0, boost: true });
+  const lost = 40 - B.snakes[0].len, boostFood = B.food.filter((f) => f.k === 2);
+  ok(Math.abs(B.snakes[0].pts[0] - bx - E.BOOST) < 1 && Math.abs(lost - E.BOOST_COST) < 0.05, 'a second of boost goes ' + E.BOOST + ' units and costs ' + E.BOOST_COST + ' length (' + (B.snakes[0].pts[0] - bx).toFixed(1) + ', ' + lost.toFixed(2) + ')');
+  ok(boostFood.length >= 2 && boostFood.reduce((s, f) => s + f.v, 0) < lost, 'boost leaves small dots behind worth less than it cost (' + boostFood.length + ')');
+  const BM = bare(); BM.snakes[0].len = E.MINB + 0.5; run(BM, 120, { aim: null, turn: 0, boost: true });
+  ok(BM.snakes[0].len >= E.MIN && !BM.snakes[0].boost, 'boost stops near the minimum length and never goes below ' + E.MIN + ' (' + BM.snakes[0].len.toFixed(2) + ')');
+  const BS = bare(); BS.snakes[0].len = E.MIN; E.step(BS, { aim: null, turn: 0, boost: true });
+  ok(!BS.snakes[0].boost && BS.snakes[0].len === E.MIN, 'a snake at the minimum length cannot boost');
+
+  // The wall: heading straight out kills at the edge, not before
+  const W = bare(); W.snakes[0].pts = W.snakes[0].pts.map((v, i) => i % 2 ? v : v + E.R - 200); E.rebuild(W);
+  let steps = 0; while (!W.over && steps < 400) { E.step(W, still); steps++; }
+  const reach = W.snakes[0].pts[0] + E.radius(W.snakes[0].len);
+  ok(W.over && reach > E.R && reach < E.R + 4, 'running into the wall ends the run right at the edge (' + reach.toFixed(1) + ' of ' + E.R + ')');
+
+  // Bots over a long run: a legal state on every step and the same count throughout
+  let bad = 0, counts = 0, botDeaths = 0, ticks = 0;
+  for (const lv of ['easy', 'medium', 'hard']) {
+    const S = E.newGame(1234, lv), n = E.LEVELS[lv].bots;
+    for (let i = 0; i < 2400; i++) {
+      const e = E.step(S, { aim: null, turn: Math.sin(i / 40), boost: i % 300 < 30 });
+      botDeaths += e.filter((x) => x === 'botdie').length; ticks++;
+      if (S.snakes.length !== n + 1) counts++;
+      if (i % 20) continue;
+      let total = 0;
+      for (const s of S.snakes) {
+        if (!s.alive) continue;
+        total += s.pts.length / 2;
+        if (!(s.len >= E.MIN) || s.pts.length / 2 !== E.segs(s.len) || !s.pts.every(Number.isFinite) || Math.hypot(s.pts[0], s.pts[1]) > E.R + 1) bad++;
+      }
+      if (total > E.MAXTOT || S.food.length > E.FOOD_CAP || !S.food.every((f) => Number.isFinite(f.x) && f.v > 0)) bad++;
+    }
+    if (S.snakes.slice(1).filter((s) => s.alive).length < n - 4) counts++;
+  }
+  ok(ticks === 7200 && bad === 0, 'over 2,400 steps a level, every snake keeps a legal body, length and place, and food stays within its cap (' + bad + ' faults)');
+  ok(counts === 0 && botDeaths > 10, 'dead bots come back, so each level keeps its bot count (' + botDeaths + ' bot crashes)');
+  const hard = E.newGame(99, 'hard'), easy = E.newGame(99, 'easy');
+  ok(E.LEVELS.hard.bots > E.LEVELS.medium.bots && E.LEVELS.medium.bots > E.LEVELS.easy.bots && hard.snakes.length === E.LEVELS.hard.bots + 1 && easy.snakes.length === E.LEVELS.easy.bots + 1 && E.LEVELS.hard.hunt && !E.LEVELS.easy.hunt,
+    'harder levels have more bots, and only the hard ones hunt the player');
+  // Bots dodge: alone in an arena, medium bots crash less than half as often as the
+  // same bots that never look ahead (a second engine with dodging switched off)
+  const life = (EE) => { let d = 0; for (let sd = 1; sd <= 3; sd++) { const S = EE.newGame(sd * 31, 'medium'); S.snakes[0].alive = false; S.over = true; for (let i = 0; i < 1800; i++) d += EE.step(S, still).filter((x) => x === 'botdie').length / EE.LEVELS.medium.bots; } return d; };
+  const blind = loadEngine('wrigglers', 'WrigglersEngineFactory');
+  blind.LEVELS.medium.react = 0;
+  const lifeD = life(E), lifeB = life(blind);
+  ok(lifeB > 0 && lifeD < lifeB * 0.5, 'dodging bots crash less than half as often as blind ones (' + lifeD.toFixed(2) + ' vs ' + lifeB.toFixed(2) + ' crashes a bot in 90 s)');
+
+  // Determinism: one seed and one input, one arena; and the daily arena is the same for everyone
+  const play = (seed) => { const S = E.newGame(seed, 'medium'); for (let i = 0; i < 900; i++) E.step(S, { aim: null, turn: Math.cos(i / 70), boost: i % 200 < 20 }); return JSON.stringify(E.snapshot(S)); };
+  const d1 = play(4242), d2 = play(4242), d3 = play(4243);
+  ok(d1 === d2 && d1 !== d3, 'the same seed and the same steering give the same arena; another seed another');
+  ok(/var seed = dailyDate \? C\.daily\('wrigglers', dailyDate\)\.seed : /.test(html) && /return dailyDate \? 'medium' : prefs\.level;/.test(html), 'the daily arena is seeded by the day and always plays Medium');
+  // A saved run comes back the same, and a broken save is refused
+  const SV = E.newGame(5, 'hard'); for (let i = 0; i < 300; i++) E.step(SV, { aim: 1, turn: 0, boost: false });
+  const snap = JSON.parse(JSON.stringify(E.snapshot(SV))), RS = E.restore(snap);
+  ok(!!RS && RS.level === 'hard' && RS.snakes.length === SV.snakes.length && RS.food.length === SV.food.length && Math.abs(RS.snakes[0].len - SV.snakes[0].len) < 0.06, 'a saved arena comes back with its snakes and food');
+  ok(E.restore(Object.assign({}, snap, { level: 'x' })) === null && E.restore(Object.assign({}, snap, { snakes: snap.snakes.slice(1) })) === null && E.restore(Object.assign({}, snap, { snakes: [Object.assign({}, snap.snakes[0], { pts: [1, 2, 3] })].concat(snap.snakes.slice(1)) })) === null, 'a broken save is refused');
+
+  // Step time: 1,000 steps of the hard arena, with its bots grown, stay well inside a frame
+  const PT = E.newGame(77, 'hard');
+  PT.snakes.slice(1).forEach((s) => { s.len = 400; });
+  for (let i = 0; i < 120; i++) E.step(PT, { aim: null, turn: 0.4, boost: false });
+  const tp = Date.now();
+  for (let i = 0; i < 1000; i++) E.step(PT, { aim: null, turn: 0.4, boost: false });
+  const per = (Date.now() - tp) / 1000;
+  ok(per < 1.5, '1,000 hard steps with long bots take ' + per.toFixed(3) + ' ms a step, under 1.5 ms');
+
+  // Page wiring
+  const gm = games.find((g) => g.id === 'wrigglers');
+  ok(!!gm && gm.cat === 'skill' && gm.people === 1 && gm.daily !== false && html.match(/accent: '([^']+)'/)[1] === gm.color, 'games.json lists it as a one-player skill game with a daily arena, sharing the page accent');
+  ok(/C\.stats\.best\('wrigglers', lv, n\)/.test(html) && /C\.stats\.getBest\('wrigglers', S\.level\)/.test(html), 'the best length is kept for each level');
+  ok(/ctx\.autosave\(function \(\) \{\n    if \(!S \|\| S\.over \|\| ended/.test(html) && /window\.addEventListener\('pageshow', function \(e\) \{ if \(e\.persisted\)/.test(html) && /document\.querySelector\('\.ch-scrim'\)/.test(html), 'a run pauses when the app is hidden, a dialog is open or the page comes back from the cache');
+  ok(/if \(cv\.width !== W \|\| cv\.height !== H\)/.test(html) && /document\.fonts\.ready\.then/.test(html) && !/shadowBlur/.test(html), 'the canvas checks both sides, redraws when the font arrives, and draws without blur');
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  ok(['wg-200', 'wg-five', 'wg-daily'].every((id) => new RegExp("\\{ id: '" + id + "',[^\\n]*dde: '[^\\n]*des: '[^\\n]*dpl: '").test(core) && html.indexOf("unlock('" + id + "')") > 0), 'the three Wrigglers awards exist in every language and are unlocked');
+  ok(!/slither/i.test(html) && !/slither/i.test(JSON.stringify(gm)), 'the game is never called Slither');
+  ok(Date.now() - t0 < 12000, 'the Wrigglers tests finish in under 12 s (' + (Date.now() - t0) + ' ms)');
 }
 
 // #554: xmha97 asked for Lights Out (named Lights Off: "Lights Out" is a trademark)
