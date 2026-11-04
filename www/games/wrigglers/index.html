@@ -1,0 +1,961 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>مارها — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* The arena is larger than any screen, so the view takes all the room the top row
+     leaves, in any shape: no aspect ratio to keep, and it is re-read on every draw */
+  .wg-wrap { width: 100%; height: 100%; display: flex; flex-direction: column; gap: var(--s-2); min-height: 0; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .wg-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; flex: none; }
+  .wg-box { position: relative; flex: 1 1 0; min-height: 0; min-width: 0; width: 100%; border-radius: var(--r-lg); overflow: hidden; background: #0B0E1A; direction: ltr; }
+  .wg-canvas { position: absolute; inset: 0; display: block; touch-action: none; }
+  /* boost sits under the right thumb in every language: the canvas is drawn left to right */
+  .wg-boost {
+    position: absolute; right: 14px; bottom: 14px; width: 68px; height: 68px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.35); background: rgba(255,255,255,.1); color: #fff;
+    display: flex; align-items: center; justify-content: center; touch-action: none; cursor: pointer; padding: 0;
+  }
+  .wg-boost.is-on { background: var(--game); border-color: #fff; }
+  .wg-boost .ch-icon { pointer-events: none; }
+  .wg-gear .ch-icon { pointer-events: none; }
+  .wg-note { margin-top: var(--s-2); font-size: var(--fs-sm); }
+  /* on a phone on its side the top row would take a third of the height: it floats
+     over the top of the arena instead, between the length and the edge */
+  @media (max-height: 520px) {
+    .wg-wrap { position: relative; }
+    .wg-top { position: absolute; top: 8px; right: 12px; z-index: 1; }
+  }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function WrigglersEngineFactory() {
+  'use strict';
+  // a local name for Math: the hot loops below look it up millions of times
+  var M = Math;
+
+  // The arena is a circle of radius R around (0, 0), y down like the screen. The
+  // simulation runs in fixed steps, so a seed and the same input give the same arena
+  // on every device, and the daily arena starts the same for everyone.
+  var DT = 1 / 60, R = 1500, SP = 6, MIN = 10, MINB = 12, MAXSEG = 240;
+  var SPEED = 150, BOOST = 290, TURN = 3.8, BOOST_COST = 3.2, DROP_EVERY = 1.25;
+  var FOOD_N = 420, FOOD_CAP = 1500, FOOD_LIFE = 60 * 40, RESPAWN = 90;
+  // eight bot colours; the player's own colour is drawn by the page
+  var COLOURS = 8;
+  // how many bots and how well they play: how often they look around, how far ahead
+  // they see bodies, how far they smell food, how often they bother dodging, and
+  // whether they go for the player's head
+  var LEVELS = {
+    easy: { bots: 6, think: 10, look: 50, sense: 180, react: 0.55, hunt: false, startMax: 30 },
+    medium: { bots: 10, think: 6, look: 90, sense: 280, react: 0.9, hunt: false, startMax: 45 },
+    hard: { bots: 14, think: 4, look: 130, sense: 380, react: 1, hunt: true, startMax: 70 }
+  };
+  // a cap on body points for all snakes together: the grid is sized for it
+  var MAXTOT = 4096;
+
+  // The spatial grid: 48-unit cells over the arena. Bodies and food are put in it once
+  // a step as linked lists in typed arrays, so a head only looks at the 3×3 cells
+  // around it instead of every segment in the arena.
+  var CELL = 48, HEADROOM = 30, GN = M.ceil(2 * (R + CELL) / CELL);
+  var bHead = new Int32Array(GN * GN), bNext = new Int32Array(MAXTOT), bSnake = new Int16Array(MAXTOT);
+  var bX = new Float32Array(MAXTOT), bY = new Float32Array(MAXTOT), bR = new Float32Array(MAXTOT), bHd = new Uint8Array(MAXTOT);
+  var fHead = new Int32Array(GN * GN), fNext = new Int32Array(FOOD_CAP);
+  bHead.fill(-1); fHead.fill(-1);
+  var gridOf = null;
+
+  function cellX(x) { var c = M.floor((x + R + CELL) / CELL); return c < 0 ? 0 : c >= GN ? GN - 1 : c; }
+
+  // the same small generator as the core, with its state kept in the game so a save
+  // goes on exactly where it stopped
+  function rnd(S) {
+    var a = S.rs = (S.rs + 0x6D2B79F5) >>> 0;
+    var t = M.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + M.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  function segs(len) { return M.min(MAXSEG, M.round(4 + len * 0.6)); }
+  function radius(len) { return 7 + M.min(9, M.sqrt(len) * 0.5); }
+  function wrap(a) { while (a > M.PI) a -= 2 * M.PI; while (a <= -M.PI) a += 2 * M.PI; return a; }
+
+  function makeSnake(S, x, y, ang, len, bot) {
+    var n = segs(len), pts = [];
+    for (var i = 0; i < n; i++) pts.push(x - M.cos(ang) * SP * i, y - M.sin(ang) * SP * i);
+    return {
+      id: S.nextId++, bot: bot, pts: pts, ang: ang, len: len, boost: false, alive: true,
+      col: bot ? M.floor(rnd(S) * COLOURS) : -1, wander: ang, kills: 0, drop: 0, wait: 0,
+      ctl: { aim: ang, turn: 0, boost: false }
+    };
+  }
+
+  function addFood(S, x, y, v, k) {
+    if (S.food.length >= FOOD_CAP) return null;
+    var f = { x: x, y: y, v: v, k: k, c: M.floor(rnd(S) * COLOURS), t: k ? FOOD_LIFE : 0 };
+    S.food.push(f);
+    if (!k) S.baseFood++;
+    return f;
+  }
+  function spawnPellet(S) {
+    var r = (R - 30) * M.sqrt(rnd(S)), a = rnd(S) * 2 * M.PI;
+    addFood(S, M.cos(a) * r, M.sin(a) * r, 1 + M.floor(rnd(S) * 3) * 0.5, 0);
+  }
+
+  // A bot comes in well away from the player and from other heads, so nobody is
+  // killed by a snake appearing in front of them
+  function spawnBot(S) {
+    var P = LEVELS[S.level], pl = S.snakes[0], x = 0, y = 0;
+    for (var tries = 0; tries < 30; tries++) {
+      var r = (R - 250) * M.sqrt(rnd(S)), a = rnd(S) * 2 * M.PI;
+      x = M.cos(a) * r; y = M.sin(a) * r;
+      var okp = !pl || !pl.alive || M.hypot(x - pl.pts[0], y - pl.pts[1]) >= 520;
+      for (var i = 1; okp && i < S.snakes.length; i++) {
+        var o = S.snakes[i];
+        if (o && o.alive && M.hypot(x - o.pts[0], y - o.pts[1]) < 220) okp = false;
+      }
+      if (okp) break;
+    }
+    var len = MIN + rnd(S) * (P.startMax - MIN);
+    return makeSnake(S, x, y, rnd(S) * 2 * M.PI - M.PI, len, true);
+  }
+
+  function newGame(seed, level) {
+    var lv = LEVELS[level] ? level : 'medium';
+    var S = { v: 1, rs: seed >>> 0, level: lv, t: 0, snakes: [], food: [], nextId: 0, over: false, peak: MIN, kills: 0, baseFood: 0 };
+    S.snakes.push(makeSnake(S, 0, 0, -M.PI / 2, MIN, false));
+    for (var i = 0; i < FOOD_N; i++) spawnPellet(S);
+    for (var b = 0; b < LEVELS[lv].bots; b++) S.snakes.push(spawnBot(S));
+    buildBodies(S);
+    return S;
+  }
+
+  /* ---------------------------------------------------------------- grids */
+
+  function buildBodies(S) {
+    bHead.fill(-1);
+    var n = 0;
+    for (var s = 0; s < S.snakes.length; s++) {
+      var sn = S.snakes[s];
+      if (!sn.alive) continue;
+      var p = sn.pts, r = radius(sn.len);
+      for (var i = 0; i < p.length && n < MAXTOT; i += 2) {
+        var c = cellX(p[i + 1]) * GN + cellX(p[i]);
+        bX[n] = p[i]; bY[n] = p[i + 1]; bR[n] = r; bSnake[n] = s; bHd[n] = i < 6 ? 1 : 0;
+        bNext[n] = bHead[c]; bHead[c] = n; n++;
+      }
+    }
+    gridOf = S;
+  }
+  function buildFood(S) {
+    fHead.fill(-1);
+    for (var i = 0; i < S.food.length; i++) {
+      var f = S.food[i], c = cellX(f.y) * GN + cellX(f.x);
+      fNext[i] = fHead[c]; fHead[c] = i;
+    }
+  }
+
+  // Is there another snake's body within `clear` of (x, y)? Own body never counts.
+  // A head gets a wider berth, since it moves: most bot crashes in the first draft
+  // were two heads meeting over the same food.
+  function bodyNear(x, y, clear, self) {
+    var cx = cellX(x), cy = cellX(y), span = M.ceil((clear + HEADROOM) / CELL);
+    for (var gy = M.max(0, cy - span); gy <= M.min(GN - 1, cy + span); gy++) {
+      for (var gx = M.max(0, cx - span); gx <= M.min(GN - 1, cx + span); gx++) {
+        for (var j = bHead[gy * GN + gx]; j >= 0; j = bNext[j]) {
+          if (bSnake[j] === self) continue;
+          var dx = bX[j] - x, dy = bY[j] - y, lim = clear + bR[j] + (bHd[j] ? HEADROOM : 0);
+          if (dx * dx + dy * dy < lim * lim) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /* ----------------------------------------------------------------- bots */
+
+  function danger(S, x, y, r, self) {
+    if (M.hypot(x, y) > R - r - 24) return true;
+    return bodyNear(x, y, r + 6, self);
+  }
+
+  function think(S, si) {
+    var s = S.snakes[si], P = LEVELS[S.level], ctl = s.ctl;
+    var hx = s.pts[0], hy = s.pts[1], r = radius(s.len);
+    ctl.boost = false;
+    // a drifting heading when nothing better turns up
+    s.wander = wrap(s.wander + (rnd(S) - 0.5) * 0.9);
+    var aim = s.wander;
+    // the best food nearby, by value over distance
+    var best = -1, bs = 0, sense = P.sense, cx = cellX(hx), cy = cellX(hy), span = M.ceil(sense / CELL);
+    for (var gy = M.max(0, cy - span); gy <= M.min(GN - 1, cy + span); gy++) {
+      for (var gx = M.max(0, cx - span); gx <= M.min(GN - 1, cx + span); gx++) {
+        for (var j = fHead[gy * GN + gx]; j >= 0; j = fNext[j]) {
+          var f = S.food[j], dx = f.x - hx, dy = f.y - hy, d = M.sqrt(dx * dx + dy * dy);
+          if (d > sense) continue;
+          // food behind the head is worth less: turning round costs time
+          var behind = (dx * M.cos(s.ang) + dy * M.sin(s.ang)) < 0 ? 0.4 : 1;
+          var sc = f.v * behind / (d + 30);
+          if (sc > bs) { bs = sc; best = j; }
+        }
+      }
+    }
+    if (best >= 0) { aim = M.atan2(S.food[best].y - hy, S.food[best].x - hx); s.wander = aim; }
+    // hard bots go for the player: aim just ahead of its head to cut it off
+    var pl = S.snakes[0];
+    if (P.hunt && pl.alive && s.len > 18) {
+      var px = pl.pts[0], py = pl.pts[1], pd = M.hypot(px - hx, py - hy);
+      if (pd < 420) {
+        var lead = 50 + pd * 0.45;
+        aim = M.atan2(py + M.sin(pl.ang) * lead - hy, px + M.cos(pl.ang) * lead - hx);
+        if (pd < 260 && s.len > 30 && rnd(S) < 0.5) ctl.boost = true;
+      }
+    }
+    // near the wall: head back in
+    if (M.hypot(hx, hy) > R - 140 - P.look) {
+      var inward = M.atan2(-hy, -hx);
+      if (M.abs(wrap(aim - inward)) > 1.2) aim = wrap(inward + M.sign(wrap(aim - inward)) * 1.0);
+    }
+    // dodging: look ahead along the aim; if it runs into a body or the wall, take the
+    // nearest clear heading, or the one that stays clear longest
+    if (rnd(S) < P.react) {
+      var tryA = [0, -0.45, 0.45, -0.9, 0.9, -1.4, 1.4, -2.0, 2.0], look = P.look + r * 2, pick = null, far = -1, farA = aim;
+      for (var k = 0; k < tryA.length; k++) {
+        var a = wrap(aim + tryA[k]), clearTo = 0;
+        for (var st = 1; st <= 3; st++) {
+          var dd = look * st / 3;
+          if (danger(S, hx + M.cos(a) * dd, hy + M.sin(a) * dd, r, si)) break;
+          clearTo = st;
+        }
+        if (clearTo === 3) { pick = a; break; }
+        if (clearTo > far) { far = clearTo; farA = a; }
+      }
+      aim = pick === null ? farA : pick;
+      if (pick === null) ctl.boost = false;
+    }
+    ctl.aim = aim;
+  }
+
+  /* ----------------------------------------------------------------- step */
+
+  function kill(S, si, ev) {
+    var s = S.snakes[si];
+    s.alive = false; s.boost = false;
+    // the body turns into food, most of its length, along where it lay
+    var p = s.pts, n = M.ceil(p.length / 4), v = M.max(1, s.len * 0.75 / n);
+    for (var i = 0; i < p.length; i += 4) addFood(S, p[i] + (rnd(S) - 0.5) * 10, p[i + 1] + (rnd(S) - 0.5) * 10, v, 1);
+    if (si === 0) { S.over = true; ev.push('die'); }
+    else { s.wait = RESPAWN; ev.push('botdie'); }
+  }
+
+  function move(S, s, inp) {
+    var trn = TURN * (1 - M.min(0.35, s.len / 1500)) * DT;
+    if (inp && typeof inp.aim === 'number' && isFinite(inp.aim)) {
+      var d = wrap(inp.aim - s.ang);
+      s.ang = wrap(s.ang + M.max(-trn, M.min(trn, d)));
+    } else if (inp && inp.turn) {
+      s.ang = wrap(s.ang + M.max(-1, M.min(1, inp.turn)) * trn);
+    }
+    s.boost = !!(inp && inp.boost) && s.len >= MINB;
+    var p = s.pts, step = (s.boost ? BOOST : SPEED) * DT;
+    p[0] += M.cos(s.ang) * step; p[1] += M.sin(s.ang) * step;
+    // each point follows the one before it at a fixed spacing, like a rope
+    for (var i = 2; i < p.length; i += 2) {
+      var dx = p[i - 2] - p[i], dy = p[i - 1] - p[i + 1], d = M.sqrt(dx * dx + dy * dy);
+      if (d > SP) { var k = (d - SP) / d; p[i] += dx * k; p[i + 1] += dy * k; }
+    }
+    if (s.boost) {
+      var cost = M.min(BOOST_COST * DT, s.len - MIN);
+      s.len -= cost; s.drop += cost;
+      if (s.drop >= DROP_EVERY) { s.drop -= DROP_EVERY; addFood(S, p[p.length - 2], p[p.length - 1], 1, 2); }
+    }
+    fit(s);
+  }
+  // the number of body points follows the length: new points come in at the tail
+  function fit(s) {
+    var p = s.pts, n = segs(s.len);
+    while (p.length / 2 < n) p.push(p[p.length - 2], p[p.length - 1]);
+    if (p.length / 2 > n) p.length = n * 2;
+  }
+
+  // One fixed step. input steers the player: { aim: angle } (from a drag or the mouse),
+  // or { turn: -1..1 } (keys), plus { boost }. Returns events for sounds.
+  function step(S, input) {
+    var ev = [], P = LEVELS[S.level], sn = S.snakes, i;
+    S.t++;
+    buildFood(S);
+    if (gridOf !== S) buildBodies(S);
+    for (i = 1; i < sn.length; i++) if (sn[i].alive && (S.t + sn[i].id) % P.think === 0) think(S, i);
+    for (i = 0; i < sn.length; i++) if (sn[i].alive) move(S, sn[i], i === 0 ? input : sn[i].ctl);
+    // eating: a head swallows food within its radius and a little more
+    var eaten = false;
+    for (i = 0; i < sn.length; i++) {
+      var s = sn[i];
+      if (!s.alive) continue;
+      var hx = s.pts[0], hy = s.pts[1], reach = radius(s.len) + 9, cx = cellX(hx), cy = cellX(hy);
+      for (var gy = M.max(0, cy - 1); gy <= M.min(GN - 1, cy + 1); gy++) {
+        for (var gx = M.max(0, cx - 1); gx <= M.min(GN - 1, cx + 1); gx++) {
+          for (var j = fHead[gy * GN + gx]; j >= 0; j = fNext[j]) {
+            var f = S.food[j];
+            if (f.v <= 0) continue;
+            var dx = f.x - hx, dy = f.y - hy;
+            if (dx * dx + dy * dy < reach * reach) {
+              s.len += f.v; f.v = 0; eaten = true;
+              if (i === 0) ev.push('eat');
+            }
+          }
+        }
+      }
+      fit(s);
+    }
+    // food that was eaten or has faded goes; plain food grows back somewhere else
+    var keep = [];
+    for (i = 0; i < S.food.length; i++) {
+      var g = S.food[i];
+      if (g.k && --g.t <= 0) g.v = 0;
+      if (g.v > 0) keep.push(g); else if (!g.k) S.baseFood--;
+    }
+    if (eaten || keep.length !== S.food.length) S.food = keep;
+    while (S.baseFood < FOOD_N && S.food.length < FOOD_CAP) spawnPellet(S);
+    // collisions: the wall, and a head against any other snake's body
+    buildBodies(S);
+    var dead = [];
+    for (i = 0; i < sn.length; i++) {
+      var a = sn[i];
+      if (!a.alive) continue;
+      var ra = radius(a.len), ax = a.pts[0], ay = a.pts[1];
+      if (M.hypot(ax, ay) + ra > R) { dead.push([i, -1]); continue; }
+      var hit = -1, acx = cellX(ax), acy = cellX(ay);
+      for (var yy = M.max(0, acy - 1); yy <= M.min(GN - 1, acy + 1) && hit < 0; yy++) {
+        for (var xx = M.max(0, acx - 1); xx <= M.min(GN - 1, acx + 1) && hit < 0; xx++) {
+          for (var q = bHead[yy * GN + xx]; q >= 0; q = bNext[q]) {
+            if (bSnake[q] === i) continue;
+            var ex = bX[q] - ax, ey = bY[q] - ay, lim = (ra + bR[q]) * 0.8;
+            if (ex * ex + ey * ey < lim * lim) { hit = bSnake[q]; break; }
+          }
+        }
+      }
+      if (hit >= 0) dead.push([i, hit]);
+    }
+    for (i = 0; i < dead.length; i++) {
+      var who = dead[i][0], by = dead[i][1];
+      if (!sn[who].alive) continue;
+      kill(S, who, ev);
+      // a bot that ran into the player's body is the player's catch
+      if (by === 0 && who !== 0) { S.kills++; sn[0].kills++; ev.push('kill'); }
+    }
+    if (dead.length) buildBodies(S);
+    // dead bots come back after a moment, somewhere away from the player
+    for (i = 1; i < sn.length; i++) if (!sn[i].alive && --sn[i].wait <= 0) sn[i] = spawnBot(S);
+    if (sn[0].alive && sn[0].len > S.peak) S.peak = sn[0].len;
+    return ev;
+  }
+
+  function score(S) { return M.floor(S.peak); }
+
+  /* ----------------------------------------------------------- save/load */
+
+  function r1(v) { return M.round(v * 10) / 10; }
+  function snapshot(S) {
+    return {
+      v: 1, rs: S.rs, level: S.level, t: S.t, over: S.over, nextId: S.nextId, peak: r1(S.peak), kills: S.kills, baseFood: S.baseFood,
+      snakes: S.snakes.map(function (s) {
+        return { id: s.id, bot: s.bot, pts: s.pts.map(r1), ang: r1(s.ang * 100) / 100, len: r1(s.len), alive: s.alive, col: s.col, wander: r1(s.wander), kills: s.kills, drop: r1(s.drop), wait: s.wait, ctl: { aim: r1(s.ctl.aim), turn: 0, boost: !!s.ctl.boost } };
+      }),
+      food: S.food.map(function (f) { return [r1(f.x), r1(f.y), r1(f.v), f.k, f.c, f.t]; })
+    };
+  }
+  function num(v) { return typeof v === 'number' && isFinite(v); }
+  function restore(o) {
+    if (!o || o.v !== 1 || !LEVELS[o.level] || !num(o.rs) || !num(o.peak) || !Array.isArray(o.snakes) || !Array.isArray(o.food)) return null;
+    if (o.snakes.length !== 1 + LEVELS[o.level].bots || o.snakes[0].bot || o.food.length > FOOD_CAP) return null;
+    var S = { v: 1, rs: o.rs >>> 0, level: o.level, t: o.t | 0, snakes: [], food: [], nextId: o.nextId | 0, over: !!o.over, peak: o.peak, kills: o.kills | 0, baseFood: 0 };
+    for (var i = 0; i < o.snakes.length; i++) {
+      var s = o.snakes[i];
+      if (!s || !Array.isArray(s.pts) || s.pts.length < 4 || s.pts.length % 2 || !s.pts.every(num) || !num(s.ang) || !num(s.len) || s.len < MIN) return null;
+      var c = s.ctl || {};
+      S.snakes.push({ id: s.id | 0, bot: !!s.bot, pts: s.pts.slice(), ang: s.ang, len: s.len, boost: false, alive: !!s.alive, col: s.col | 0, wander: num(s.wander) ? s.wander : s.ang, kills: s.kills | 0, drop: num(s.drop) ? s.drop : 0, wait: s.wait | 0, ctl: { aim: num(c.aim) ? c.aim : s.ang, turn: 0, boost: !!c.boost } });
+      fit(S.snakes[i]);
+    }
+    for (var k = 0; k < o.food.length; k++) {
+      var f = o.food[k];
+      if (!Array.isArray(f) || !num(f[0]) || !num(f[1]) || !num(f[2])) return null;
+      S.food.push({ x: f[0], y: f[1], v: f[2], k: f[3] | 0, c: f[4] | 0, t: f[5] | 0 });
+      if (!(f[3] | 0)) S.baseFood++;
+    }
+    buildBodies(S);
+    return S;
+  }
+
+  var api = {
+    DT: DT, R: R, SP: SP, MIN: MIN, MINB: MINB, MAXSEG: MAXSEG, SPEED: SPEED, BOOST: BOOST, BOOST_COST: BOOST_COST, FOOD_N: FOOD_N, FOOD_CAP: FOOD_CAP, MAXTOT: MAXTOT,
+    LEVELS: LEVELS, COLOURS: COLOURS,
+    newGame: newGame, step: step, score: score, segs: segs, radius: radius, makeSnake: makeSnake, addFood: addFood, kill: kill,
+    rebuild: buildBodies, snapshot: snapshot, restore: restore
+  };
+  if (typeof self !== 'undefined') self.WrigglersEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = WrigglersEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = WrigglersEngineFactory();
+  var LEVELS = ['easy', 'medium', 'hard'];
+  // the daily arena counts as won from this length
+  var DAILY_WIN = 120;
+  // the arena is dark in both themes: glowing food reads best on a night floor
+  var PLAYER = '#FF4FB8';
+  var BOTC = ['#4FD1FF', '#7CFF6B', '#FFD24F', '#FF8A3D', '#B98CFF', '#4FFFC8', '#FF6B6B', '#9EC1FF'];
+  var FOODC = ['#FF5C7A', '#FFB84D', '#FFE74D', '#7CFF6B', '#4FFFC8', '#4FD1FF', '#9E8CFF', '#FF7AF0'];
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'wrigglers',
+    name: { fa: 'مارها', en: 'Wrigglers', zh: '扭扭蛇', de: 'Schlängler', es: 'Serpenteo', pl: 'Węże' },
+    accent: '#C84000',
+    mood: 'dots',
+    strings: {
+      fa: {
+        tries: 'دفعه‌ها', arena: 'میدان مارها از بالا', lenL: 'طول', lenN: 'طول {n}', bestN: 'بهترین {n}', bestToday: 'بهترین امروز {n}', boost: 'شتاب',
+        kills: 'ربات‌هایی که به تو خوردند', tapGo: 'بزن تا ادامه بدهی', dailyWg: 'میدان روزانه', newRun: 'دور تازه', crashed: 'برخورد کردی',
+        levelNote: 'سطح، تعداد ربات‌ها و زرنگی‌شان در شکار را عوض می‌کند. عوض کردنش دور تازه‌ای شروع می‌کند.',
+        rules: 'مارت را در میدان هدایت کن و نقطه‌های درخشان را بخور تا دراز شوی. اگر سرت به بدن مار دیگری یا به دیواره‌ی قرمز بخورد، دور تمام می‌شود؛ بدن خودت هیچ‌وقت آسیبی نمی‌زند. ماری که به بدن تو بخورد می‌میرد و بدنش غذا می‌شود. شتاب تندت می‌کند ولی از طولت کم می‌کند و پشت سرت دانه می‌ریزد. بهترین طول هر سطح جدا نگه داشته می‌شود. میدان روزانه برای همه یکی است.',
+        kSteer: 'چرخیدن به چپ و راست', kBoost: 'شتاب (نگه دار)', kAgain: 'دور تازه',
+        tutTitle1: 'بخور و دراز شو', tutText1: 'مارت را به سمت نقطه‌های درخشان ببر. هر چه بخوری درازتر می‌شوی.',
+        tutTitle2: 'هدایت', tutText2: 'انگشتت را هر جای صفحه بگذار و به سمتی بکش که می‌خواهی بروی. دکمه‌ی شتاب تندت می‌کند ولی کمی کوتاهت می‌کند.',
+        tutTitle3: 'مراقب سرت باش', tutText3: 'اگر سرت به مار دیگری یا دیواره بخورد، تمام است. ولی ماری که به بدن تو بخورد، خودش می‌میرد و غذا می‌شود.'
+      },
+      en: {
+        tries: 'Tries', arena: 'Arena of wrigglers seen from above', lenL: 'Length', lenN: 'Length {n}', bestN: 'Best {n}', bestToday: 'Today\'s best {n}', boost: 'Boost',
+        kills: 'Bots that crashed into you', tapGo: 'Tap to go on', dailyWg: 'Daily arena', newRun: 'New run', crashed: 'You crashed',
+        levelNote: 'The level sets how many bots there are and how well they hunt. Changing it starts a new run.',
+        rules: 'Steer your wriggler round the arena and eat the glowing dots to grow. If your head touches another wriggler\'s body or the red wall, the run is over; your own body never hurts you. A wriggler that runs into your body crashes, and its body turns into food. Boost makes you faster but costs length and leaves small dots behind you. The best length is kept for each level. The daily arena is the same for everyone.',
+        kSteer: 'Turn left and right', kBoost: 'Boost (hold)', kAgain: 'New run',
+        tutTitle1: 'Eat and grow', tutText1: 'Steer towards the glowing dots. Every one you eat makes you longer.',
+        tutTitle2: 'Steering', tutText2: 'Put a finger anywhere and drag the way you want to go. Boost makes you faster but a little shorter.',
+        tutTitle3: 'Mind your head', tutText3: 'If your head hits another wriggler or the wall, it\'s over. But a wriggler that hits your body crashes and turns into food.'
+      },
+      pl: {
+        tries: 'Próby', arena: 'Arena węży widziana z góry', lenL: 'Długość', lenN: 'Długość {n}', bestN: 'Rekord {n}', bestToday: 'Dzisiejszy rekord {n}', boost: 'Przyspieszenie',
+        kills: 'Boty, które wpadły na Ciebie', tapGo: 'Dotknij, aby kontynuować', dailyWg: 'Codzienna arena', newRun: 'Nowa runda', crashed: 'Zderzenie',
+        levelNote: 'Poziom określa liczbę botów i to, jak sprytnie polują. Zmiana rozpoczyna nową rundę.',
+        rules: 'Kieruj swoim wężem po arenie i zjadaj świecące kropki, aby rosnąć. Jeśli Twoja głowa dotknie ciała innego węża lub czerwonej ściany, runda się kończy; własne ciało nigdy Ci nie szkodzi. Wąż, który wpadnie na Twoje ciało, rozbija się, a jego ciało zamienia się w jedzenie. Przyspieszenie sprawia, że jesteś szybszy, ale kosztuje długość i zostawia za Tobą małe kropki. Rekord długości jest zapisywany osobno dla każdego poziomu. Codzienna arena jest taka sama dla wszystkich.',
+        kSteer: 'Skręt w lewo i w prawo', kBoost: 'Przyspieszenie (przytrzymaj)', kAgain: 'Nowa runda',
+        tutTitle1: 'Jedz i rośnij', tutText1: 'Kieruj się do świecących kropek. Każda zjedzona sprawia, że jesteś dłuższy.',
+        tutTitle2: 'Sterowanie', tutText2: 'Połóż palec w dowolnym miejscu i przeciągnij w stronę, w którą chcesz płynąć. Przyspieszenie daje szybkość, ale trochę Cię skraca.',
+        tutTitle3: 'Uważaj na głowę', tutText3: 'Jeśli Twoja głowa uderzy w innego węża lub w ścianę, to koniec. Ale wąż, który uderzy w Twoje ciało, rozbija się i zamienia w jedzenie.'
+      },
+      zh: {
+        tries: '尝试次数', arena: '俯视的扭扭蛇竞技场', lenL: '长度', lenN: '长度 {n}', bestN: '最佳 {n}', bestToday: '今日最佳 {n}', boost: '加速',
+        kills: '撞上你的电脑蛇', tapGo: '点击继续', dailyWg: '每日竞技场', newRun: '新一局', crashed: '你撞上了',
+        levelNote: '难度决定电脑蛇的数量和它们的狩猎能力。更改难度会开始新一局。',
+        rules: '在竞技场里操控你的蛇，吃掉发光的小点来变长。如果你的头碰到别的蛇的身体或红色围墙，这一局就结束了；你自己的身体永远不会伤到你。撞上你身体的蛇会撞毁，它的身体会变成食物。加速让你更快，但会消耗长度，并在身后留下小点。每个难度的最佳长度分别保存。每日竞技场对所有人都一样。',
+        kSteer: '向左、向右转', kBoost: '加速（按住）', kAgain: '新一局',
+        tutTitle1: '吃了就长', tutText1: '朝发光的小点游去。每吃一个就变长一点。',
+        tutTitle2: '操控', tutText2: '手指放在屏幕任意位置，朝想去的方向拖动。加速更快，但会让你变短一点。',
+        tutTitle3: '小心你的头', tutText3: '头撞到别的蛇或围墙就结束了。但撞上你身体的蛇会撞毁，变成食物。'
+      },
+      de: {
+        tries: 'Versuche', arena: 'Arena der Schlängler von oben', lenL: 'Länge', lenN: 'Länge {n}', bestN: 'Bestwert {n}', bestToday: 'Bester heute {n}', boost: 'Turbo',
+        kills: 'Bots, die in dich krachten', tapGo: 'Tippe zum Weiterspielen', dailyWg: 'Tagesarena', newRun: 'Neue Runde', crashed: 'Zusammengestoßen',
+        levelNote: 'Die Stufe bestimmt, wie viele Bots es gibt und wie gut sie jagen. Eine Änderung startet eine neue Runde.',
+        rules: 'Steuere deinen Schlängler durch die Arena und friss die leuchtenden Punkte, um zu wachsen. Berührt dein Kopf den Körper eines anderen Schlänglers oder die rote Wand, ist die Runde vorbei; dein eigener Körper schadet dir nie. Ein Schlängler, der in deinen Körper fährt, verunglückt, und sein Körper wird zu Futter. Der Turbo macht dich schneller, kostet aber Länge und lässt kleine Punkte hinter dir. Der Bestwert wird für jede Stufe getrennt gespeichert. Die Tagesarena ist für alle gleich.',
+        kSteer: 'Nach links und rechts drehen', kBoost: 'Turbo (halten)', kAgain: 'Neue Runde',
+        tutTitle1: 'Fressen und wachsen', tutText1: 'Steuere auf die leuchtenden Punkte zu. Jeder macht dich länger.',
+        tutTitle2: 'Steuern', tutText2: 'Leg einen Finger irgendwo hin und zieh in die Richtung, in die du willst. Turbo macht schneller, aber etwas kürzer.',
+        tutTitle3: 'Achte auf den Kopf', tutText3: 'Stößt dein Kopf an einen anderen Schlängler oder die Wand, ist es vorbei. Fährt aber einer in deinen Körper, verunglückt er und wird zu Futter.'
+      },
+      es: {
+        tries: 'Intentos', arena: 'Arena de serpientes vista desde arriba', lenL: 'Longitud', lenN: 'Longitud {n}', bestN: 'Récord {n}', bestToday: 'Récord de hoy {n}', boost: 'Turbo',
+        kills: 'Bots que chocaron contigo', tapGo: 'Toca para seguir', dailyWg: 'Arena diaria', newRun: 'Nueva partida', crashed: 'Has chocado',
+        levelNote: 'El nivel fija cuántos bots hay y lo bien que cazan. Cambiarlo empieza una partida nueva.',
+        rules: 'Guía a tu serpiente por la arena y come los puntos brillantes para crecer. Si tu cabeza toca el cuerpo de otra serpiente o el muro rojo, la partida termina; tu propio cuerpo nunca te hace daño. Una serpiente que choca con tu cuerpo se estrella y su cuerpo se convierte en comida. El turbo te hace más rápido, pero cuesta longitud y deja pequeños puntos detrás. La mejor longitud se guarda por nivel. La arena diaria es igual para todos.',
+        kSteer: 'Girar a izquierda y derecha', kBoost: 'Turbo (mantener)', kAgain: 'Nueva partida',
+        tutTitle1: 'Come y crece', tutText1: 'Dirígete a los puntos brillantes. Cada uno que comes te alarga.',
+        tutTitle2: 'Dirección', tutText2: 'Pon un dedo en cualquier sitio y arrastra hacia donde quieras ir. El turbo te acelera, pero te acorta un poco.',
+        tutTitle3: 'Cuida la cabeza', tutText3: 'Si tu cabeza choca con otra serpiente o con el muro, se acaba. Pero la que choca con tu cuerpo se estrella y se vuelve comida.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || LEVELS.indexOf(prefs.level) < 0) prefs = { level: 'medium' };
+  // the daily arena is the same for everyone, so it always plays Medium
+  function runLevel() { return dailyDate ? 'medium' : prefs.level; }
+
+  var S = null, raf = 0, last = 0, acc = 0, paused = false, waiting = false, ended = false, tries = 0, startedAt = 0;
+  var cam = { x: 0, y: 0 }, viewU = 600, lastEat = 0, awarded = {}, alpha = 1;
+  // the body points of the step before, so a frame between two steps is drawn in between
+  var prev = new WeakMap();
+
+  var cv = el('canvas', { class: 'wg-canvas', role: 'img', 'aria-label': C.t('arena') });
+  var boostBtn = el('button', { class: 'wg-boost', type: 'button', 'aria-label': C.t('boost'), title: C.t('boost') }, [C.icon('bolt', 30)]);
+  var box = el('div', { class: 'wg-box' }, [cv, boostBtn]);
+  var top = el('div', { class: 'wg-top' });
+  var wrap = el('div', { class: 'wg-wrap' }, [top, box]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newRun'), onClick: function () { newRun(); } });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- runs */
+
+  function newRun() {
+    var seed = dailyDate ? C.daily('wrigglers', dailyDate).seed : Math.floor(Math.random() * 4294967296);
+    S = E.newGame(seed, runLevel());
+    tries++;
+    startedAt = Date.now();
+    ended = false; waiting = false; acc = 0; last = 0; awarded = {};
+    prev = new WeakMap();
+    cam.x = S.snakes[0].pts[0]; cam.y = S.snakes[0].pts[1]; viewU = target();
+    renderTop();
+    kick();
+  }
+
+  function blocked() { return paused || waiting || document.hidden || !!document.querySelector('.ch-scrim'); }
+  function remember() {
+    for (var i = 0; i < S.snakes.length; i++) {
+      var s = S.snakes[i];
+      if (!s.alive) continue;
+      var p = s.pts, b = prev.get(s);
+      if (!b || b.a.length < p.length) { b = { a: new Float32Array(E.MAXSEG * 2 + 4), n: 0 }; prev.set(s, b); }
+      for (var j = 0; j < p.length; j++) b.a[j] = p[j];
+      b.n = p.length;
+    }
+  }
+  function tick(now) {
+    raf = 0;
+    if (!S) return;
+    var stop = blocked();
+    if (!last || stop) last = now;
+    acc += Math.min(0.1, (now - last) / 1000);
+    last = now;
+    if (stop) acc = 0;
+    var ev = [], inp = input();
+    while (acc >= E.DT) {
+      acc -= E.DT;
+      remember();
+      var e = E.step(S, inp);
+      if (e.length) ev = ev.concat(e);
+    }
+    alpha = stop ? 1 : acc / E.DT;
+    if (ev.length) events(ev);
+    awards();
+    draw();
+    if (S.over && !ended) { ended = true; ctx.clearSave(); setTimeout(finish, C.ui.reduceMotion() ? 250 : 1100); }
+    // nothing moves behind a dialog or while the app is away: stop asking for frames
+    if (!document.hidden && !paused) raf = requestAnimationFrame(tick);
+  }
+  function kick() { if (!raf) { last = 0; raf = requestAnimationFrame(tick); } }
+
+  function events(ev) {
+    var now = performance.now();
+    if (ev.indexOf('eat') >= 0 && now - lastEat > 140) { lastEat = now; C.audio.sfx('tap'); }
+    if (ev.indexOf('kill') >= 0) C.feedback('good');
+    if (ev.indexOf('die') >= 0) C.feedback('bad');
+  }
+  function awards() {
+    if (!awarded.len && E.score(S) >= 200) { awarded.len = true; C.achievements.unlock('wg-200'); }
+    if (!awarded.kills && S.kills >= 5) { awarded.kills = true; C.achievements.unlock('wg-five'); }
+  }
+
+  function finish() {
+    var n = E.score(S), lv = S.level, note = null;
+    var mul = { easy: 0.8, medium: 1, hard: 1.25 }[lv];
+    var coins = Math.max(1, Math.round(Math.min(30, 2 + Math.floor(n / 25)) * mul)), points = Math.max(1, Math.round(Math.min(120, 5 + Math.floor(n / 6)) * mul));
+    if (n >= 200) C.achievements.unlock('wg-200');
+    if (S.kills >= 5) C.achievements.unlock('wg-five');
+    var lines = [{ label: C.t('lenL'), value: C.num(n) }, { label: C.t('kills'), value: C.num(S.kills) }];
+    if (dailyDate) {
+      if (n >= DAILY_WIN) C.achievements.unlock('wg-daily');
+      if (!C.stats.daily('wrigglers', dailyDate, { label: C.t('lenN', { n: C.num(n) }), win: n >= DAILY_WIN, tries: tries })) { coins = Math.max(1, Math.round(coins * 0.2)); points = Math.max(1, Math.round(points * 0.2)); }
+      var db = dailyBest();
+      if (n > db) { ctx.store.set('dailyBest', { date: dailyDate, n: n }); if (db > 0) note = C.t('bestToday', { n: C.num(n) }); }
+      lines.push({ label: C.t('tries'), value: C.num(tries) });
+    } else {
+      if (C.stats.best('wrigglers', lv, n) && n > E.MIN) note = C.t('bestN', { n: C.num(n) });
+      lines.push({ label: C.t('best'), value: C.num(C.stats.getBest('wrigglers', lv) || n) });
+    }
+    var body = S.snakes[0].pts.slice();
+    ctx.finish({
+      won: dailyDate ? n >= DAILY_WIN : null,
+      title: C.t('crashed'),
+      note: note, timeMs: Date.now() - startedAt, coins: coins, points: points,
+      lines: lines,
+      shareText: 'چوگان · مارها' + (dailyDate ? ('\nروزانه ' + dailyDate) : '') + '\nطول ' + n,
+      paint: function (g, w, h) { paintShare(g, w, h, body); },
+      againLabel: C.t('newRun'),
+      onAgain: function () { newRun(); }
+    });
+  }
+  function dailyBest() { var d = ctx.store.get('dailyBest', null); return d && d.date === dailyDate && typeof d.n === 'number' ? d.n : 0; }
+
+  /* -------------------------------------------------------------- input */
+
+  // Touch: the direction from where the finger went down (a ring shows it); any other
+  // finger held down boosts. Mouse: the snake heads for the pointer, a held button
+  // boosts. Keys turn left and right; Space, ↑ or W boost.
+  var steer = { id: null, x0: 0, y0: 0, x: 0, y: 0, aim: null }, extra = {}, keys = { l: false, r: false, b: false };
+  var mouse = null, mouseDown = false, btnDown = false;
+
+  function boosting() { return keys.b || btnDown || mouseDown || Object.keys(extra).length > 0; }
+  function input() {
+    var turn = (keys.r ? 1 : 0) - (keys.l ? 1 : 0), b = boosting();
+    if (turn) return { aim: null, turn: turn, boost: b };
+    if (steer.aim !== null) return { aim: steer.aim, turn: 0, boost: b };
+    if (mouse && S && S.snakes[0].alive) {
+      var Z = box.getBoundingClientRect(), k = scale(Z.width, Z.height), h = headAt();
+      var hx = Z.width / 2 + (h.x - cam.x) * k, hy = Z.height / 2 + (h.y - cam.y) * k;
+      var dx = mouse.x - hx, dy = mouse.y - hy;
+      if (dx * dx + dy * dy > 100) return { aim: Math.atan2(dy, dx), turn: 0, boost: b };
+    }
+    return { aim: null, turn: 0, boost: b };
+  }
+  function local(e) { var r = box.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+  function go() { if (waiting) { waiting = false; last = 0; kick(); } }
+
+  box.addEventListener('pointerdown', function (e) {
+    if (!S || (e.target.closest && e.target.closest('button'))) return;
+    e.preventDefault();
+    C.audio.unlock();
+    go();
+    var p = local(e);
+    if (e.pointerType === 'mouse') { mouse = p; if (e.button === 0) mouseDown = true; return; }
+    if (steer.id === null) steer = { id: e.pointerId, x0: p.x, y0: p.y, x: p.x, y: p.y, aim: null };
+    else extra[e.pointerId] = true;
+    try { box.setPointerCapture(e.pointerId); } catch (er) { /* old browsers */ }
+  });
+  box.addEventListener('pointermove', function (e) {
+    var p = local(e);
+    if (e.pointerType === 'mouse') { mouse = p; return; }
+    if (e.pointerId !== steer.id) return;
+    steer.x = p.x; steer.y = p.y;
+    var dx = p.x - steer.x0, dy = p.y - steer.y0;
+    if (dx * dx + dy * dy > 64) steer.aim = Math.atan2(dy, dx);
+  });
+  function lift(e) {
+    if (e.pointerType === 'mouse') { mouseDown = false; return; }
+    if (e.pointerId === steer.id) steer = { id: null, x0: 0, y0: 0, x: 0, y: 0, aim: null };
+    delete extra[e.pointerId];
+  }
+  box.addEventListener('pointerup', lift);
+  box.addEventListener('pointercancel', lift);
+  box.addEventListener('pointerleave', function (e) { if (e.pointerType === 'mouse') { mouseDown = false; } });
+  box.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  function setBtn(on) { btnDown = on; boostBtn.classList.toggle('is-on', on); }
+  boostBtn.addEventListener('pointerdown', function (e) {
+    e.preventDefault(); e.stopPropagation();
+    C.audio.unlock(); go(); setBtn(true);
+    try { boostBtn.setPointerCapture(e.pointerId); } catch (er) { /* old browsers */ }
+  });
+  boostBtn.addEventListener('pointerup', function () { setBtn(false); });
+  boostBtn.addEventListener('pointercancel', function () { setBtn(false); });
+  // a click from the keyboard or a screen reader gives a short burst
+  boostBtn.addEventListener('click', function (e) { if (e.detail === 0) { go(); setBtn(true); setTimeout(function () { setBtn(false); }, 600); } });
+
+  function keyOf(e) {
+    if (e.key === 'ArrowLeft' || C.keyIs(e, 'a')) return 'l';
+    if (e.key === 'ArrowRight' || C.keyIs(e, 'd')) return 'r';
+    if (e.key === ' ' || e.key === 'ArrowUp' || C.keyIs(e, 'w')) return 'b';
+    return null;
+  }
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim')) return;
+    var k = keyOf(e);
+    if (k) {
+      if (e.key === ' ' && e.target && e.target.closest && e.target.closest('button') && e.target !== boostBtn) return;
+      keys[k] = true; mouse = null; go(); e.preventDefault();
+    } else if (C.keyIs(e, 'r') && !e.repeat) { e.preventDefault(); newRun(); }
+  });
+  window.addEventListener('keyup', function (e) { var k = keyOf(e); if (k) keys[k] = false; });
+
+  function letGo() { keys.l = keys.r = keys.b = false; extra = {}; mouseDown = false; setBtn(false); steer = { id: null, x0: 0, y0: 0, x: 0, y: 0, aim: null }; }
+  // An arena waits while the app is away or a dialog is open, and comes back waiting
+  // for a tap, so nobody returns to a snake already crashed
+  function hold() { if (S && !ended && !S.over && S.t > 0) waiting = true; letGo(); }
+  C.onPause(function () { paused = true; hold(); ctx.save(); draw(); });
+  C.onResume(function () { paused = false; kick(); });
+  document.addEventListener('visibilitychange', function () { if (document.hidden) hold(); else kick(); });
+  // back from the back/forward cache, the page runs on without a load (#385)
+  window.addEventListener('pageshow', function (e) { if (e.persisted) { paused = false; hold(); last = 0; kick(); } });
+  window.addEventListener('blur', letGo);
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  // HUD numbers are drawn in the app's font, which may arrive after the first frame
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { draw(); });
+  // a dialog closing does not tell the page; the loop looks again while one is open
+  setInterval(function () { if (S && !raf && !document.hidden && !paused) kick(); }, 500);
+
+  /* --------------------------------------------------------------- draw */
+
+  // how many arena units fit across the short side: more as the snake grows
+  function target() { return 560 + Math.min(420, Math.sqrt(S.snakes[0].len) * 22); }
+  function scale(w, h) { return Math.max(Math.min(w, h) / viewU, Math.max(w, h) / 1900); }
+  function lerpPt(s, i, al) {
+    var b = prev.get(s), p = s.pts;
+    if (!b || i >= b.n) return [p[i], p[i + 1]];
+    return [b.a[i] + (p[i] - b.a[i]) * al, b.a[i + 1] + (p[i + 1] - b.a[i + 1]) * al];
+  }
+  function headAt() { var q = lerpPt(S.snakes[0], 0, alpha); return { x: q[0], y: q[1] }; }
+
+  var tile = null;
+  function floorPattern(g) {
+    if (tile) return tile;
+    // scales on a dark floor, drawn once into a tile at twice the size and repeated
+    var c = document.createElement('canvas'), n = 128;
+    c.width = n; c.height = n;
+    var t = c.getContext('2d');
+    t.fillStyle = '#0E1224'; t.fillRect(0, 0, n, n);
+    t.fillStyle = '#131936'; t.strokeStyle = 'rgba(150,170,255,.07)'; t.lineWidth = 3;
+    [[64, 64], [0, 0], [n, 0], [0, n], [n, n]].forEach(function (q) { t.beginPath(); t.arc(q[0], q[1], 40, 0, Math.PI * 2); t.fill(); t.stroke(); });
+    var pat = g.createPattern(c, 'repeat');
+    if (pat && pat.setTransform && window.DOMMatrix) pat.setTransform(new DOMMatrix([0.5, 0, 0, 0.5, 0, 0]));
+    tile = pat;
+    return pat;
+  }
+  function lighten(hex, a) {
+    var v = [1, 3, 5].map(function (i) { return parseInt(hex.slice(i, i + 2), 16); });
+    return 'rgb(' + v.map(function (c) { return Math.round(c + (255 - c) * a); }).join(',') + ')';
+  }
+  var LIGHT = {}, PALE = {};
+  BOTC.concat([PLAYER]).forEach(function (c) { LIGHT[c] = lighten(c, 0.3); PALE[c] = lighten(c, 0.6); });
+  var buckets = FOODC.map(function () { return []; });
+
+  function draw() {
+    if (!S) return;
+    var Z = box.getBoundingClientRect(), w = Math.max(60, Math.round(Z.width)), h = Math.max(60, Math.round(Z.height));
+    var dpr = Math.min(2, window.devicePixelRatio || 1), W = Math.round(w * dpr), H = Math.round(h * dpr);
+    // both sides, every draw: a new canvas is 300×150 (#359) and a turned phone changes both (#474)
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+    cv.style.width = w + 'px'; cv.style.height = h + 'px';
+    var g = cv.getContext('2d'), now = performance.now();
+    var pl = S.snakes[0];
+    if (pl.alive) { var hd = headAt(); cam.x = hd.x; cam.y = hd.y; viewU += (target() - viewU) * 0.05; }
+    var k = scale(w, h);
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.fillStyle = '#05060C'; g.fillRect(0, 0, w, h);
+    g.setTransform(dpr * k, 0, 0, dpr * k, dpr * (w / 2 - cam.x * k), dpr * (h / 2 - cam.y * k));
+    var x0 = cam.x - w / 2 / k - 40, x1 = cam.x + w / 2 / k + 40, y0 = cam.y - h / 2 / k - 40, y1 = cam.y + h / 2 / k + 40;
+    // the floor and its soft red wall
+    g.beginPath(); g.arc(0, 0, E.R, 0, Math.PI * 2);
+    g.fillStyle = floorPattern(g); g.fill();
+    g.strokeStyle = 'rgba(255,59,92,.12)'; g.lineWidth = 60; g.beginPath(); g.arc(0, 0, E.R - 30, 0, Math.PI * 2); g.stroke();
+    g.strokeStyle = '#FF3B5C'; g.lineWidth = 6; g.beginPath(); g.arc(0, 0, E.R, 0, Math.PI * 2); g.stroke();
+    drawFood(g, x0, x1, y0, y1, now);
+    for (var i = S.snakes.length - 1; i >= 0; i--) {
+      var s = S.snakes[i];
+      if (s.alive) drawSnake(g, s, i === 0 ? PLAYER : BOTC[s.col % BOTC.length], x0, x1, y0, y1);
+    }
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    hud(g, w, h);
+  }
+
+  function drawFood(g, x0, x1, y0, y1, now) {
+    var F = S.food, c, i, f;
+    for (c = 0; c < buckets.length; c++) buckets[c].length = 0;
+    for (i = 0; i < F.length; i++) { f = F[i]; if (f.x > x0 && f.x < x1 && f.y > y0 && f.y < y1) buckets[f.c % buckets.length].push(f); }
+    var tm = now / 1000;
+    for (c = 0; c < buckets.length; c++) {
+      var b = buckets[c];
+      if (!b.length) continue;
+      g.fillStyle = FOODC[c];
+      // the glow: a larger faint disc that breathes, one path for the colour
+      g.globalAlpha = 0.22; g.beginPath();
+      for (i = 0; i < b.length; i++) { f = b[i]; var r = (2.5 + Math.min(6, f.v * 1.6)) * (2.1 + 0.25 * Math.sin(tm * 3 + f.x * 0.07 + f.y * 0.05)); g.moveTo(f.x + r, f.y); g.arc(f.x, f.y, r, 0, Math.PI * 2); }
+      g.fill();
+      g.globalAlpha = 1; g.beginPath();
+      for (i = 0; i < b.length; i++) { f = b[i]; var rc = 2.5 + Math.min(6, f.v * 1.6); g.moveTo(f.x + rc, f.y); g.arc(f.x, f.y, rc, 0, Math.PI * 2); }
+      g.fill();
+    }
+  }
+
+  function drawSnake(g, s, col, x0, x1, y0, y1) {
+    var p = s.pts, n = p.length, i, seen = false;
+    for (i = 0; i < n && !seen; i += 8) seen = p[i] > x0 - 40 && p[i] < x1 + 40 && p[i + 1] > y0 - 40 && p[i + 1] < y1 + 40;
+    if (!seen) return;
+    var r = E.radius(s.len), b = prev.get(s), al = alpha, bn = b ? b.n : 0, ba = b ? b.a : null;
+    // one path from the tail to the head, stroked a few times: cheaper than a circle a
+    // segment and no blur, so a long snake costs a handful of draw calls
+    g.beginPath();
+    for (i = n - 2; i >= 0; i -= 2) {
+      var x = p[i], y = p[i + 1];
+      if (i < bn) { x = ba[i] + (x - ba[i]) * al; y = ba[i + 1] + (y - ba[i + 1]) * al; }
+      if (i === n - 2) g.moveTo(x, y); else g.lineTo(x, y);
+    }
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    if (s.boost) { g.globalAlpha = 0.28; g.strokeStyle = col; g.lineWidth = r * 2 + 12; g.stroke(); g.globalAlpha = 1; }
+    g.strokeStyle = PALE[col]; g.lineWidth = r * 2 + 2.5; g.stroke();
+    g.strokeStyle = col; g.lineWidth = r * 2; g.stroke();
+    g.setLineDash([E.SP * 1.4, E.SP * 2.2]);
+    g.strokeStyle = LIGHT[col]; g.lineWidth = r * 1.1; g.stroke();
+    g.setLineDash([]);
+    // the head, and eyes that look where it goes
+    var hx = bn ? ba[0] + (p[0] - ba[0]) * al : p[0], hy = bn ? ba[1] + (p[1] - ba[1]) * al : p[1];
+    var ca = Math.cos(s.ang), sa = Math.sin(s.ang), er = r * 0.38;
+    g.fillStyle = col; g.beginPath(); g.arc(hx, hy, r * 1.08, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#FFFFFF'; g.beginPath();
+    var ex1 = hx + ca * r * 0.35 - sa * r * 0.5, ey1 = hy + sa * r * 0.35 + ca * r * 0.5, ex2 = hx + ca * r * 0.35 + sa * r * 0.5, ey2 = hy + sa * r * 0.35 - ca * r * 0.5;
+    g.moveTo(ex1 + er, ey1); g.arc(ex1, ey1, er, 0, Math.PI * 2); g.moveTo(ex2 + er, ey2); g.arc(ex2, ey2, er, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#10122A'; g.beginPath();
+    var pr = er * 0.55, pd = er * 0.4;
+    g.moveTo(ex1 + ca * pd + pr, ey1 + sa * pd); g.arc(ex1 + ca * pd, ey1 + sa * pd, pr, 0, Math.PI * 2);
+    g.moveTo(ex2 + ca * pd + pr, ey2 + sa * pd); g.arc(ex2 + ca * pd, ey2 + sa * pd, pr, 0, Math.PI * 2); g.fill();
+  }
+
+  function hud(g, w, h) {
+    var font = getComputedStyle(document.body).fontFamily || 'sans-serif', pl = S.snakes[0];
+    var big = Math.round(Math.max(18, Math.min(26, w / 18)));
+    g.textBaseline = 'top'; g.textAlign = 'left';
+    g.fillStyle = 'rgba(255,255,255,.95)'; g.font = '800 ' + big + 'px ' + font;
+    g.fillText(C.t('lenN', { n: C.num(Math.floor(pl.alive ? pl.len : E.score(S))) }), 14, 12);
+    var best = dailyDate ? dailyBest() : (C.stats.getBest('wrigglers', S.level) || 0);
+    if (best) { g.fillStyle = 'rgba(255,255,255,.65)'; g.font = '700 ' + Math.round(big * 0.6) + 'px ' + font; g.fillText(C.t(dailyDate ? 'bestToday' : 'bestN', { n: C.num(best) }), 14, 16 + big); }
+    // the mini-map: the arena, the other heads, and you
+    var mr = Math.round(Math.max(30, Math.min(52, Math.min(w, h) * 0.1))), mx = 14 + mr, my = h - 14 - mr, q = mr / E.R;
+    g.fillStyle = 'rgba(255,255,255,.07)'; g.strokeStyle = 'rgba(255,90,120,.6)'; g.lineWidth = 1.5;
+    g.beginPath(); g.arc(mx, my, mr, 0, Math.PI * 2); g.fill(); g.stroke();
+    g.fillStyle = 'rgba(255,255,255,.5)'; g.beginPath();
+    for (var i = 1; i < S.snakes.length; i++) {
+      var s = S.snakes[i];
+      if (!s.alive) continue;
+      var rr = 1.2 + Math.min(2.5, s.len / 120);
+      g.moveTo(mx + s.pts[0] * q + rr, my + s.pts[1] * q); g.arc(mx + s.pts[0] * q, my + s.pts[1] * q, rr, 0, Math.PI * 2);
+    }
+    g.fill();
+    g.fillStyle = PLAYER; g.beginPath(); g.arc(mx + cam.x * q, my + cam.y * q, 3.2, 0, Math.PI * 2); g.fill();
+    // the steering ring where the finger went down
+    if (steer.id !== null) {
+      g.strokeStyle = 'rgba(255,255,255,.4)'; g.lineWidth = 2;
+      g.beginPath(); g.arc(steer.x0, steer.y0, 36, 0, Math.PI * 2); g.stroke();
+      var dx = steer.x - steer.x0, dy = steer.y - steer.y0, d = Math.sqrt(dx * dx + dy * dy) || 1, m = Math.min(d, 36);
+      g.fillStyle = 'rgba(255,255,255,.55)'; g.beginPath(); g.arc(steer.x0 + dx / d * m, steer.y0 + dy / d * m, 11, 0, Math.PI * 2); g.fill();
+    }
+    if (waiting) {
+      g.fillStyle = 'rgba(5,6,12,.45)'; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#FFFFFF'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '800 ' + big + 'px ' + font;
+      // above the middle, where the player's own head is not
+      g.fillText(C.t('tapGo'), w / 2, h * 0.36);
+    }
+  }
+
+  // the share card: the snake as it was when it crashed, on the arena floor
+  function paintShare(g, w, h, body) {
+    g.fillStyle = '#0E1224'; C.rrect(g, 0, 0, w, h, 18); g.fill();
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, i;
+    for (i = 0; i < body.length; i += 2) { minX = Math.min(minX, body[i]); maxX = Math.max(maxX, body[i]); minY = Math.min(minY, body[i + 1]); maxY = Math.max(maxY, body[i + 1]); }
+    var k = Math.min((w - 40) / Math.max(40, maxX - minX), (h - 40) / Math.max(40, maxY - minY), 2.5);
+    g.save();
+    g.translate(w / 2 - (minX + maxX) / 2 * k, h / 2 - (minY + maxY) / 2 * k); g.scale(k, k);
+    var fake = { pts: body, len: S.snakes[0].len, ang: S.snakes[0].ang, boost: false };
+    drawSnake(g, fake, PLAYER, -1e9, 1e9, -1e9, 1e9);
+    g.restore();
+  }
+
+  /* ----------------------------------------------------------------- ui */
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (dailyDate) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyWg') + ' — ' + C.num(dailyDate) })]));
+    } else {
+      top.appendChild(el('button', { class: 'ch-badge ch-tap', type: 'button', onclick: showSettings, text: C.t(prefs.level) }));
+      var gear = el('button', { class: 'ch-iconbtn wg-gear', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+      gear.addEventListener('click', showSettings);
+      top.appendChild(gear);
+    }
+  }
+
+  // The level lives behind the gear, like Hop's controls; a change starts a new run
+  function showSettings() {
+    var seg = C.ui.segmented(LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), prefs.level, function (v) {
+      if (v === prefs.level || LEVELS.indexOf(v) < 0) return;
+      prefs.level = v;
+      ctx.store.set('prefs', prefs);
+      ctx.clearSave();
+      newRun();
+    });
+    C.ui.modal({
+      title: C.t('settings'),
+      body: [el('div', { class: 'ch-list' }, [el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('difficulty') }), seg])]), el('p', { class: 'ch-dim wg-note', text: C.t('levelNote') })],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← → / A D', C.t('kSteer')), kb('Space / ↑ / W', C.t('kBoost')), kb('R', C.t('kAgain'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function tSnake(d, col, w) {
+    return '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + w + '" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<path d="' + d + '" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="' + (w * 0.5) + '" stroke-dasharray="6 9" stroke-linecap="round"/>';
+  }
+  function tDot(x, y, c) { return '<circle cx="' + x + '" cy="' + y + '" r="8" fill="' + c + '" opacity=".25"/><circle cx="' + x + '" cy="' + y + '" r="3.5" fill="' + c + '"/>'; }
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 110" width="100%" direction="ltr"><rect width="200" height="110" rx="10" fill="#0E1224"/>';
+    if (kind === 1) s += tSnake('M20 80 Q50 40 80 70 T130 55', PLAYER, 12) + '<circle cx="130" cy="55" r="7" fill="' + PLAYER + '"/><circle cx="133" cy="51" r="2.6" fill="#fff"/><circle cx="133" cy="59" r="2.6" fill="#fff"/>' + tDot(152, 50, '#FFE74D') + tDot(170, 64, '#4FD1FF') + tDot(160, 30, '#7CFF6B') + tDot(182, 40, '#FF7AF0');
+    if (kind === 2) s += tSnake('M20 90 Q40 60 70 60', PLAYER, 10) + '<circle cx="120" cy="60" r="22" fill="none" stroke="rgba(255,255,255,.5)" stroke-width="2"/><circle cx="136" cy="46" r="7" fill="rgba(255,255,255,.7)"/><path d="M80 52 l10 -6 -2 11" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>' +
+      '<circle cx="176" cy="84" r="16" fill="#C84000" stroke="#fff" stroke-width="2"/><path d="M178 74 l-7 11 h6 l-3 9 8 -12 h-6 z" fill="#fff"/>';
+    if (kind === 3) s += tSnake('M15 30 Q70 30 100 60 T190 80', '#4FD1FF', 12) + tSnake('M80 100 Q90 85 98 66', PLAYER, 10) + '<path d="M92 56 l12 12 M104 56 l-12 12" stroke="#FF3B5C" stroke-width="3" stroke-linecap="round"/>' + tDot(30, 80, '#FFB84D') + tDot(45, 92, '#FFB84D') + tDot(20, 66, '#FFB84D');
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // A run in progress is saved when the app goes away and comes back waiting for a
+  // tap; the daily arena has its own slot (#132)
+  ctx.autosave(function () {
+    if (!S || S.over || ended || S.t < 60) return { inProgress: false };
+    return { s: E.snapshot(S), tries: tries, daily: dailyDate || null, elapsed: Date.now() - startedAt };
+  });
+  function resumeRun(sv) {
+    var R = E.restore(sv.s);
+    if (!R || R.over || R.level !== runLevel()) return false;
+    S = R; tries = sv.tries || 1; startedAt = Date.now() - (sv.elapsed || 0);
+    ended = false; waiting = true; acc = 0; last = 0; awarded = {}; prev = new WeakMap();
+    cam.x = S.snakes[0].pts[0]; cam.y = S.snakes[0].pts[1]; viewU = target();
+    renderTop(); draw(); kick();
+    return true;
+  }
+  var saved = ctx.loadSave();
+  if (dailyDate) {
+    if (!(saved && saved.s && saved.daily === dailyDate && resumeRun(saved))) newRun();
+    if (C.stats.dailyDone('wrigglers', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).wrigglers;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (!(saved && saved.s && !saved.daily && resumeRun(saved))) {
+    newRun();
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
