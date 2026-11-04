@@ -56,7 +56,10 @@
     var out = [];
     for (var i = 0; i < balls.length; i++) {
       var b = balls[i];
-      out.push({ id: b.id, x: b.x, y: b.y, vx: b.vx || 0, vy: b.vy || 0, inPlay: b.inPlay !== false });
+      var c = { id: b.id, x: b.x, y: b.y, vx: b.vx || 0, vy: b.vy || 0, inPlay: b.inPlay !== false };
+      if (b.r) c.r = b.r;
+      if (b.m) c.m = b.m;
+      out.push(c);
     }
     return out;
   }
@@ -103,6 +106,39 @@
     s.pots.push({ id: b.id, pocket: k, at: at });
   }
 
+  // #623: Button Football moves discs and a smaller, lighter ball round a pitch whose
+  // boards open at two goal mouths: the same motion as a table's, so it lives here and
+  // not in the game. A ball may carry its own radius r and mass m (else T.r and 1, which
+  // is all Pool and Snooker ever had, and the sums then come out exactly as before), and
+  // a board from walls() has straight boards given as segments [x1, y1, x2, y2] in place
+  // of cushions, jaws and pockets. A ball meets a segment at its nearest point, so the
+  // end of a board (a goal post) bounces like a post.
+  function walls(o) {
+    var T = table(o);
+    T.segs = o.segs.map(function (g) { return [g[0], g[1], g[2], g[3]]; });
+    T.pockets = []; T.tips = [];
+    return T;
+  }
+  function hitSegs(s, b, rb) {
+    var T = s.T, G = T.segs;
+    for (var k = 0; k < G.length; k++) {
+      var g = G[k], ex = g[2] - g[0], ey = g[3] - g[1], l2 = ex * ex + ey * ey;
+      var t = l2 > 0 ? ((b.x - g[0]) * ex + (b.y - g[1]) * ey) / l2 : 0;
+      t = t < 0 ? 0 : (t > 1 ? 1 : t);
+      var px = g[0] + ex * t, py = g[1] + ey * t, dx = b.x - px, dy = b.y - py, dd = dx * dx + dy * dy;
+      if (dd >= rb * rb || dd < 1e-12) continue;
+      var dl = Math.sqrt(dd), nx = dx / dl, ny = dy / dl;
+      b.x = px + nx * rb; b.y = py + ny * rb;
+      var vn = b.vx * nx + b.vy * ny;
+      if (vn < 0) {
+        var tx = b.vx - vn * nx, ty = b.vy - vn * ny;
+        b.vx = tx * T.cushionSlide - vn * T.cushion * nx;
+        b.vy = ty * T.cushionSlide - vn * T.cushion * ny;
+        cushion(s);
+      }
+    }
+  }
+
   function cushion(s) {
     s.ev.cushions++;
     if (s.ev.first !== null) s.ev.cushionsAfter++;
@@ -111,7 +147,7 @@
   // One physics step. Returns true while anything still moves. s.hits and
   // s.pots describe only this step, for sounds and effects on the page.
   function tick(s) {
-    var T = s.T, B = s.balls, n = B.length, r = T.r, d2min = 4 * r * r, i, j, b, o;
+    var T = s.T, B = s.balls, n = B.length, r = T.r, i, j, b, o;
     s.hits = 0; s.pots = [];
     for (i = 0; i < n; i++) {
       b = B[i];
@@ -121,19 +157,21 @@
     for (i = 0; i < n; i++) {
       b = B[i];
       if (!b.inPlay) continue;
-      var bm = b.vx !== 0 || b.vy !== 0;
+      var bm = b.vx !== 0 || b.vy !== 0, rb = b.r || r, mb = b.m || 1;
       for (j = i + 1; j < n; j++) {
         o = B[j];
         if (!o.inPlay || (!bm && o.vx === 0 && o.vy === 0)) continue;
+        var rr = rb + (o.r || r), mo = o.m || 1;
         var dx = o.x - b.x, dy = o.y - b.y, dd = dx * dx + dy * dy;
-        if (dd >= d2min) continue;
+        if (dd >= rr * rr) continue;
         var d = Math.sqrt(dd), nx, ny;
         if (d > 1e-9) { nx = dx / d; ny = dy / d; } else { nx = 1; ny = 0; d = 0; }
         var vn = (b.vx - o.vx) * nx + (b.vy - o.vy) * ny;
         if (vn > 0) {
-          var imp = vn * (1 + T.ball) / 2;
-          b.vx -= imp * nx; b.vy -= imp * ny;
-          o.vx += imp * nx; o.vy += imp * ny;
+          // the impulse of two masses; with both at 1 it is vn (1 + e) / 2, as it always was
+          var imp = vn * (1 + T.ball) / (1 / mb + 1 / mo);
+          b.vx -= imp / mb * nx; b.vy -= imp / mb * ny;
+          o.vx += imp / mo * nx; o.vy += imp / mo * ny;
           s.hits++;
           s.ev.contacts++;
           if (s.ev.first === null) {
@@ -142,16 +180,17 @@
           }
           bm = true;
         }
-        // push the pair apart so they never sink into each other
-        var push = (2 * r - d) / 2;
-        b.x -= nx * push; b.y -= ny * push;
-        o.x += nx * push; o.y += ny * push;
+        // push the pair apart so they never sink into each other, the lighter one further
+        var over = rr - d, pb = over * mo / (mb + mo), po = over * mb / (mb + mo);
+        b.x -= nx * pb; b.y -= ny * pb;
+        o.x += nx * po; o.y += ny * po;
       }
     }
     // Cushions, jaws and pockets
     for (i = 0; i < n; i++) {
       b = B[i];
       if (!b.inPlay) continue;
+      if (T.segs) { hitSegs(s, b, b.r || r); continue; }
       if (b.x < r && !gapY(T, b.y)) { b.x = 2 * r - b.x; if (b.vx < 0) { b.vx = -b.vx * T.cushion; b.vy *= T.cushionSlide; cushion(s); } }
       else if (b.x > T.L - r && !gapY(T, b.y)) { b.x = 2 * (T.L - r) - b.x; if (b.vx > 0) { b.vx = -b.vx * T.cushion; b.vy *= T.cushionSlide; cushion(s); } }
       if (b.y < r && !gapX(T, b.x)) { b.y = 2 * r - b.y; if (b.vy < 0) { b.vy = -b.vy * T.cushion; b.vx *= T.cushionSlide; cushion(s); } }
@@ -327,7 +366,7 @@
   var TURN_SPEEDS = { slow: 0.25, medium: 0.5, normal: 1 };
 
   var api = {
-    DT: DT, MAX_TICKS: MAX_TICKS, table: table, clone: clone, speedOf: speedOf,
+    DT: DT, MAX_TICKS: MAX_TICKS, table: table, walls: walls, clone: clone, speedOf: speedOf,
     start: start, tick: tick, simulate: simulate, aim: aim, free: free, clear: clear, nearestPocket: nearestPocket,
     pullsBack: pullsBack, onStick: onStick, turnStep: turnStep, barPower: barPower, SINK_MS: SINK_MS, sinksOf: sinksOf, sinkAt: sinkAt, FINE_STEP: FINE_STEP, TURN_SPEEDS: TURN_SPEEDS
   };

@@ -11295,6 +11295,203 @@ function testWaterSort() {
   ok(Date.now() - t0 < 12000, 'the Water Sort tests finish in under 12 s (' + (Date.now() - t0) + ' ms)');
 }
 
+// #623: Button Football, turn-based flicks on the shared table physics in www/lib/cue.js
+function testFootball() {
+  head('Button Football (#623)');
+  const t0 = Date.now();
+  const sandbox = { self: {}, module: { exports: {} }, console };
+  vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(path.join(ROOT, 'www/lib/cue.js'), 'utf8'), sandbox, { filename: 'cue.js' });
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/football/index.html'), 'utf8');
+  const m = html.match(/\/\* ==== ENGINE START ==== \*\/([\s\S]*?)\/\* ==== ENGINE END ==== \*\//);
+  ok(!!m, 'the football page has an engine block');
+  if (!m) return;
+  vm.runInContext(m[1], sandbox, { filename: 'football-engine.js' });
+  const Cue = sandbox.self.ChoganCue, E = sandbox.FootballEngineFactory(Cue);
+  const games = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games;
+  const lcg = (seed) => { let x = seed >>> 0; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; };
+  const disc = (id, x, y) => ({ id, x, y, vx: 0, vy: 0, inPlay: true, r: E.RD, m: E.MD });
+  const ballAt = (x, y) => ({ id: 0, x, y, vx: 0, vy: 0, inPlay: true, r: E.RB, m: E.MB });
+  // a match with only these bodies on the pitch
+  const setup = (bodies, turn) => { const M = E.match(); M.b = bodies; M.turn = turn || 0; return M; };
+  // the ball rolled on its own, as if struck, for the goal-line checks
+  const roll = (x, y, angle, power) => { const s = Cue.start(E.T, [ballAt(x, y)], { angle, power }, 0); s.by = 0; s.goal = -1; s.goalAt = 0; return E.run(s); };
+
+  ok(typeof Cue.walls === 'function' && E.T.segs.length === 12 && E.T.pockets.length === 0, 'cue.js builds a board of straight segments with no pockets for the pitch');
+
+  // A flick: the disc leaves along its angle at the speed of its power and slides as far as cue.js's friction says
+  const F = E.flick(setup([ballAt(10, 10), disc(3, 50, 120)]), 3, -Math.PI / 2, 0.6);
+  E.step(F);
+  const fd = F.balls[1], v0 = Cue.speedOf(E.T, 0.6);
+  ok(Math.abs(fd.vx) < 1e-9 && fd.vy < 0 && Math.abs(-fd.vy - v0) < v0 * 0.02 && fd.x === 50, 'a flick sends the disc along its angle at the speed of its power (' + (-fd.vy).toFixed(1) + ' of ' + v0.toFixed(1) + ')');
+  E.run(F);
+  const slid = 120 - F.balls[1].y;
+  ok(Math.abs(slid - E.travel(0.6)) < 3 && F.balls.every((b) => b.vx === 0 && b.vy === 0) && F.goal === -1, 'it slides ' + slid.toFixed(1) + ' units and stops, as the friction law says (' + E.travel(0.6).toFixed(1) + ')');
+  ok(E.flick(setup([ballAt(10, 10), disc(3, 50, 120)], 1), 3, 0, 1) === null && E.flick(setup([ballAt(10, 10), disc(3, 50, 120)]), 0, 0, 1) === null, 'only a disc of the team on turn can be flicked, never the ball');
+
+  // Collisions: a heavy disc into the light ball keeps the momentum and sends the ball off faster
+  const H = E.flick(setup([ballAt(50, 80), disc(2, 50, 110)]), 2, -Math.PI / 2, 0.5);
+  let pre = null, post = null, g = 0;
+  while (E.step(H) && g++ < 5000) {
+    const [b, d] = H.balls;
+    if (!post && H.ev.contacts === 0) pre = { p: d.vy * E.MD + b.vy * E.MB, v: d.vy };
+    if (!post && H.ev.contacts === 1) post = { p: d.vy * E.MD + b.vy * E.MB, b: b.vy, d: d.vy };
+  }
+  ok(!!pre && !!post && Math.abs(post.p - pre.p) < Math.abs(pre.p) * 0.03, 'the hit keeps the momentum, weighted by the masses (' + (pre && pre.p.toFixed(1)) + ' → ' + (post && post.p.toFixed(1)) + ')');
+  ok(!!post && post.b < pre.v * 1.15 && post.d < 0 && post.d > pre.v * 0.5 && H.ev.first === 0, 'the lighter ball leaves faster than the disc came and the disc follows on slower (' + (post && post.b.toFixed(0)) + ', ' + (post && post.d.toFixed(0)) + ' from ' + (pre && pre.v.toFixed(0)) + ')');
+  const two = E.run(E.flick(setup([ballAt(10, 140), disc(1, 30, 75), disc(7, 60, 75)]), 1, 0, 0.6));
+  ok(two.ev.first === 7 && two.balls[2].x > 65 && two.balls[1].x < 55, 'a disc hits another disc and passes its motion on (' + two.balls[1].x.toFixed(1) + ', ' + two.balls[2].x.toFixed(1) + ')');
+
+  // Boards: a disc flicked into the side board comes back slower and never leaves the pitch
+  const SB = E.flick(setup([ballAt(10, 10), disc(4, 70, 80)]), 4, 0, 1);
+  let back = false, out = false;
+  while (E.step(SB)) { const d = SB.balls[1]; if (d.vx < 0) back = true; if (d.x > E.W - E.RD + 1e-6 || d.x < E.RD - 1e-6) out = true; }
+  ok(back && !out && SB.ev.cushions >= 1 && SB.balls[1].x < 70, 'a disc flicked at the side board bounces back off it and stays on the pitch (rests at x ' + SB.balls[1].x.toFixed(1) + ')');
+  // the end line beside the mouth is a board too, and so is a post
+  const EB = roll(20, 30, -Math.PI / 2, 0.9);
+  ok(EB.goal === -1 && EB.ev.cushions >= 1 && EB.balls[0].y > 0, 'the ball rolled at the end line beside the goal bounces off it');
+  const PO = roll(E.G0, 30, -Math.PI / 2, 0.9);
+  ok(PO.goal === -1 && PO.ev.cushions >= 1 && PO.balls[0].y > 0, 'a ball straight onto a post bounces off it');
+  // every body stays inside the pitch and its goal boxes through a thousand random flicks
+  let inside = true, runs = 0;
+  const rr = lcg(11);
+  for (let k = 0; k < 80; k++) {
+    const M = E.match({ kicker: k % 2 });
+    for (let j = 0; j < 6 && M.winner < 0; j++) {
+      const mine = E.discs(M, M.turn), d = mine[Math.floor(rr() * mine.length)];
+      const s = E.flick(M, d.id, rr() * 6.283, 0.3 + rr() * 0.7);
+      while (E.step(s)) for (const b of s.balls) if (b.x < b.r - 1e-6 || b.x > E.W - b.r + 1e-6 || b.y < -E.D || b.y > E.L + E.D) inside = false;
+      E.resolve(M, s); runs++;
+    }
+  }
+  ok(runs > 400 && inside, 'no body ever leaves the pitch or its goal boxes (' + runs + ' random flicks)');
+
+  // A goal counts only when the whole ball is over the line between the posts
+  const part = roll(E.W / 2, 20, -Math.PI / 2, E.powerFor(21.5));
+  ok(part.goal === -1 && part.balls[0].y < 0 && part.balls[0].y > -E.RB, 'a ball that stops partly over the line is no goal (centre at y ' + part.balls[0].y.toFixed(2) + ')');
+  const full = roll(E.W / 2, 20, -Math.PI / 2, E.powerFor(25));
+  ok(full.goal === 0 && full.balls[0].y < -E.RB, 'a ball that crosses the line whole is a goal for the team attacking that end');
+  const low = roll(E.W / 2, 130, Math.PI / 2, E.powerFor(30));
+  ok(low.goal === 1, 'and at the other end, a goal for the top team');
+
+  // After a goal: the score, both teams back in line-up, and the team that let it in kicks off
+  const GM = setup([ballAt(50, 8), disc(1, 50, 22)].concat(E.lineup(0).slice(2, 6)));
+  const gs = E.flick(GM, 1, -Math.PI / 2, 0.5);
+  E.run(gs);
+  const ge = E.resolve(GM, gs);
+  const lineup1 = E.lineup(1).map((b) => b.id + ':' + b.x + ',' + b.y).join(' ');
+  ok(ge.goal === 0 && !ge.own && GM.score.join() === '1,0' && GM.turn === 1 && GM.turns === 1, 'a goal is counted and the team that let it in has the kick-off');
+  ok(GM.b.map((b) => b.id + ':' + b.x + ',' + b.y).join(' ') === lineup1 && GM.b.every((b) => b.vx === 0 && b.vy === 0), 'after a goal both teams stand in the kick-off line-up again, the ball on the spot');
+  const kf = E.byId(GM.b, 9), nf = E.byId(GM.b, 4);
+  ok(Math.abs(kf.x - E.W / 2) < 1e-9 && kf.y < E.L / 2 && Math.hypot(kf.x - GM.b[0].x, kf.y - GM.b[0].y) < 15 && Math.hypot(nf.x - GM.b[0].x, nf.y - GM.b[0].y) > 20, 'the kicking team has its centre forward behind the ball; the other team stands off');
+  // an own goal counts for the other team
+  const OG = setup([ballAt(50, 140), disc(2, 50, 125)].concat(E.lineup(0).slice(3, 8)));
+  const os = E.run(E.flick(OG, 2, Math.PI / 2, 0.6)), oe = E.resolve(OG, os);
+  ok(oe.goal === 1 && oe.own && OG.score.join() === '0,1' && OG.turn === 0, 'a ball knocked into your own goal is a goal for the other team, and you kick off');
+
+  // The turn passes only when everything has stopped; tiny speeds die away
+  const TM = E.match();
+  const ts = E.flick(TM, 4, -Math.PI / 2, 0.8);
+  let steps = 0, movingSeen = 0;
+  while (E.step(ts)) { steps++; if (ts.balls.some((b) => b.vx || b.vy)) movingSeen++; }
+  ok(TM.turn === 0 && movingSeen === steps && steps > 30 && ts.balls.every((b) => b.vx === 0 && b.vy === 0), 'while anything moves the turn stays (' + steps + ' steps), and the flick ends with everything at rest');
+  E.resolve(TM, ts);
+  ok(TM.turn === 1 && TM.turns === 1 && TM.b.every((b) => b.vx === 0 && b.vy === 0), 'then the turn passes to the other team');
+  const tiny = Cue.start(E.T, [ballAt(50, 75)], { angle: 0, power: 0 }, 0);
+  tiny.balls[0].vx = 0.01; tiny.balls[0].vy = 0.003; tiny.goal = -1; tiny.by = 0;
+  ok(!E.step(tiny) && tiny.balls[0].vx === 0, 'a body creeping below the rest speed is stopped at once');
+
+  // The turn limit: the side ahead wins, a level match goes to a golden goal, and the next goal ends it
+  const LM = E.match(); LM.turns = E.MAX_TURNS - 1; LM.score = [1, 0];
+  E.resolve(LM, E.run(E.flick(LM, 4, -Math.PI / 2, 0.2)));
+  ok(LM.winner === 0 && !LM.golden, 'when the turns run out, the team ahead wins');
+  const GG = E.match(); GG.turns = E.MAX_TURNS - 1; GG.score = [1, 1];
+  const ge1 = E.resolve(GG, E.run(E.flick(GG, 4, -Math.PI / 2, 0.2)));
+  ok(ge1.golden && GG.golden && GG.winner === -1 && GG.turn === 1, 'level when the turns run out: golden goal, the match goes on');
+  GG.b = [ballAt(50, 142), disc(6, 50, 128)];
+  const ge2 = E.resolve(GG, E.run(E.flick(GG, 6, Math.PI / 2, 0.6)));
+  ok(ge2.goal === 1 && GG.winner === 1 && GG.score.join() === '1,2', 'in golden goal time the next goal wins the match (' + GG.score.join('–') + ')');
+
+  // The bot: a legal flick of its own disc, and a shot on goal when one is open
+  const BM = E.match({ kicker: 1 });
+  for (const lv of ['easy', 'medium', 'hard']) {
+    const c = E.choose(BM, lv, lcg(3));
+    ok(E.teamOf(c.id) === 1 && isFinite(c.angle) && c.power >= 0.15 && c.power <= 1, lv + ' bot flicks one of its own discs with a sane power (' + c.id + ', ' + c.power.toFixed(2) + ')');
+  }
+  let open = 0;
+  for (let k = 0; k < 6; k++) {
+    const OM = setup([ballAt(44 + k * 2, 30), disc(1, 46 + k * 2, 48), disc(2, 10, 140), disc(3, 90, 140), disc(4, 15, 100), disc(5, 85, 100), disc(6, 10, 10), disc(7, 90, 12), disc(8, 6, 60), disc(9, 94, 60), disc(10, 90, 40)]);
+    const c = E.choose(OM, 'hard', lcg(k + 1));
+    const s = E.run(E.flick(OM, c.id, c.angle, c.power));
+    if (s.goal === 0) open++;
+  }
+  ok(open >= 5, 'the hard bot scores an open goal in front of it (' + open + ' of 6)');
+
+  // Bot against bot: every match ends, and the levels are ordered
+  const play = (l0, l1, seed) => {
+    const M = E.match({ kicker: seed % 2 }), r = lcg(seed);
+    let ticks = 0;
+    while (M.winner < 0 && M.turns < 300) {
+      const c = E.choose(M, M.turn === 0 ? l0 : l1, r);
+      const s = E.run(E.flick(M, c.id, c.angle, c.power));
+      ticks += s.ticks;
+      E.resolve(M, s);
+    }
+    return { w: M.winner, turns: M.turns, secs: ticks * Cue.DT };
+  };
+  const medEasy = [], hardMed = [];
+  for (let s = 1; s <= 8; s++) medEasy.push(s % 2 ? play('medium', 'easy', s) : Object.assign(play('easy', 'medium', s), { flip: true }));
+  for (let s = 1; s <= 6; s++) hardMed.push(s % 2 ? play('hard', 'medium', s + 20) : Object.assign(play('medium', 'hard', s + 20), { flip: true }));
+  const all = medEasy.concat(hardMed);
+  const winsOf = (list) => list.filter((x) => x.w === (x.flip ? 1 : 0)).length;
+  ok(all.length === 14 && all.every((x) => x.w >= 0 && x.turns < 300 && x.secs < 3600), 'every bot-against-bot match ends with a winner (longest ' + Math.max(...all.map((x) => x.turns)) + ' flicks, ' + Math.round(Math.max(...all.map((x) => x.secs))) + ' s of play)');
+  ok(winsOf(medEasy) >= 6, 'the medium bot beats the easy one most of the time (' + winsOf(medEasy) + ' of 8)');
+  ok(winsOf(hardMed) >= 4, 'the hard bot beats the medium one more often than not (' + winsOf(hardMed) + ' of 6)');
+
+  // Saves: a match at rest comes back the same; a broken save is refused
+  const SM = E.match({ winTo: 5 });
+  for (let k = 0; k < 3; k++) { const c = E.choose(SM, 'medium', lcg(k + 7)); E.resolve(SM, E.run(E.flick(SM, c.id, c.angle, c.power))); }
+  const snap = JSON.parse(JSON.stringify(E.snapshot(SM))), R = E.restore(snap);
+  ok(!!R && JSON.stringify(E.snapshot(R)) === JSON.stringify(E.snapshot(SM)) && R.winTo === 5 && R.b[0].r === E.RB && R.b[5].m === E.MD, 'a saved match comes back with every body, the score, the turn and the goal target');
+  const c1 = E.choose(SM, 'hard', lcg(99)), c2 = E.choose(R, 'hard', lcg(99));
+  ok(JSON.stringify(c1) === JSON.stringify(c2), 'and it plays on exactly as the saved one would');
+  const bad = [
+    Object.assign({}, snap, { winTo: 4 }), Object.assign({}, snap, { score: [5, 0] }), Object.assign({}, snap, { b: snap.b.slice(1) }),
+    Object.assign({}, snap, { b: [[NaN, 3]].concat(snap.b.slice(1)) }), Object.assign({}, snap, { b: [[50, -40]].concat(snap.b.slice(1)) }),
+    Object.assign({}, snap, { turn: 2 }), Object.assign({}, snap, { golden: true }), Object.assign({}, snap, { turns: -1 }), null, 'x'
+  ];
+  ok(bad.every((o) => E.restore(o) === null), 'a broken save is refused (' + bad.length + ' kinds)');
+
+  // Page wiring
+  const gm = games.find((x) => x.id === 'football');
+  ok(!!gm && gm.cat === 'skill' && gm.people === 2 && gm.added === '2026-11-03' && games[games.length - 1] === gm, 'games.json lists it last, as a skill game for up to two people');
+  ok(!!gm && /accent: '([^']+)'/.test(html) && html.match(/accent: '([^']+)'/)[1] === gm.color, 'games.json and the page share the accent');
+  ok(!!gm && LOCALE_CODES.every((l) => typeof gm.name[l] === 'string' && html.indexOf(l + ": '" + gm.name[l] + "'") > 0), 'the names match games.json in every language');
+  const icon = fs.readFileSync(path.join(ROOT, 'www/games/football/icon.svg'), 'utf8');
+  ok(!!gm && new RegExp('<rect width="96" height="96" rx="22" fill="' + gm.soft + '"/>').test(icon), 'the icon starts on the soft tint of games.json');
+  const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+  const lin = (c) => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  const lab = (h) => {
+    const [R1, G1, B1] = rgb(h).map(lin), f = (t) => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
+    const X = (R1 * 0.4124 + G1 * 0.3576 + B1 * 0.1805) / 0.95047, Y = R1 * 0.2126 + G1 * 0.7152 + B1 * 0.0722, Z = (R1 * 0.0193 + G1 * 0.1192 + B1 * 0.9505) / 1.08883;
+    return [116 * f(Y) - 16, 500 * (f(X) - f(Y)), 200 * (f(Y) - f(Z))];
+  };
+  const dE = (a, b) => { const A = lab(a), B = lab(b); return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]); };
+  const lum = (h) => rgb(h).map((c) => c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)).reduce((a, c, i) => a + c * [0.2126, 0.7152, 0.0722][i], 0);
+  const others = games.filter((x) => x.id !== 'football').map((x) => [x.id, x.color]);
+  const near = others.map(([id, c]) => [id, dE(c, gm.color)]).sort((x, y) => x[1] - y[1])[0];
+  ok(others.length > 40 && near[1] >= 15 && 1.05 / (lum(gm.color) + 0.05) >= 4.5, 'the accent differs from every other game by ΔE ≥ 15 (nearest ' + near[0] + ', ' + near[1].toFixed(1) + ') and keeps white text at 4.5:1');
+  ok(/C\.daily\('football', G\.daily \+ '\|t' \+ G\.M\.turns\)\.rng/.test(html) && /level: daily \? 'medium' : o\.level/.test(html) && /winTo: daily \? 3 : o\.winTo/.test(html), 'the daily match is against the medium bot, to three goals, its dice seeded by the day and the turn');
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  const ids = ['fb-win', 'fb-hard', 'fb-shut'];
+  ok(ids.every((id) => (core.match(new RegExp("\\{ id: '" + id + "'[^\\n]*", 'g')) || []).length === 1 && /dpl: '[^']+' \}/.test(core.match(new RegExp("\\{ id: '" + id + "'[^\\n]*"))[0]) && html.indexOf("unlock('" + id + "')") > 0), 'the three Button Football awards exist once, in every language, and are unlocked');
+  ok(/<script src="\.\.\/\.\.\/lib\/cue\.js"><\/script>/.test(html) && !/function tick\(|rollA \* |\(1 \+ T\.ball\)/.test(m[1]), 'the page loads lib/cue.js and keeps no copy of its physics');
+  ok(/ctx\.autosave\(/.test(html) && /ctx\.tutorialIfNew\(TUT\)/.test(html) && (html.match(/tArt\(\d\)/g) || []).length === 3, 'the match saves between flicks and the three-page tutorial shows once');
+  ok(!/[\s{,]again: '/.test(html), 'the page leaves the core\'s "again" label alone');
+  const ms = Date.now() - t0;
+  ok(ms < 12000, 'the Button Football group runs in under 12 s (' + ms + ' ms)');
+}
+
 // #554: xmha97 asked for Lights Out (named Lights Off: "Lights Out" is a trademark)
 function testLights() {
   head('Lights Off (#554)');

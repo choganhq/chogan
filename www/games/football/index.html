@@ -1,0 +1,876 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>فوتبال دکمه‌ای — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* the pitch stands upright in a tall game area and lies on its side in a wide one,
+     where the side column sits beside it */
+  .fb-wrap > .ch-fit { --fit-ar: calc(108 / 176); }
+  @container game (min-aspect-ratio: 5 / 4) {
+    .fb-wrap > .ch-fit { --fit-ar: calc(176 / 108); }
+  }
+  .ch-fit > .fb-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+  .fb-canvas { display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; user-select: none; -webkit-user-select: none; }
+  .fb-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .fb-players { display: flex; justify-content: space-between; gap: var(--s-2); width: 100%; max-width: 420px; direction: ltr; }
+  .fb-player { flex: 1; display: flex; align-items: center; gap: var(--s-2); padding: 6px 10px; border-radius: var(--r-md); background: var(--c-surface-2); font-weight: 700; min-width: 0; border: 2px solid transparent; }
+  .fb-player:last-child { flex-direction: row-reverse; }
+  .fb-player.is-on { border-color: var(--game); }
+  .fb-player__dot { width: 14px; height: 14px; border-radius: 50%; flex: none; box-shadow: inset 0 0 0 2px rgba(0,0,0,.25); }
+  .fb-player__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; text-align: start; }
+  .fb-player:last-child .fb-player__name { text-align: end; }
+  .fb-player__score { font-size: var(--fs-lg); font-weight: 800; font-variant-numeric: tabular-nums; min-width: 2ch; text-align: center; }
+  .fb-status { min-height: 2.8em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+  .fb-gear .ch-icon { pointer-events: none; }
+  .fb-wrap { user-select: none; -webkit-user-select: none; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script src="../../lib/cue.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+/* Button football on top of the shared table physics in lib/cue.js (#623). Body 0 is
+   the ball, 1–5 the bottom team's discs (team 0, attacking the top goal), 6–10 the top
+   team's (team 1). The pitch runs from x = 0 to W and y = 0 to L, with a goal box D
+   deep behind each end line. A match at rest is plain data, so it saves as is and the
+   bot can try flicks on copies of it. */
+function FootballEngineFactory(Cue) {
+  'use strict';
+  Cue = Cue || (typeof self !== 'undefined' && self.ChoganCue) || null;
+  if (!Cue) throw new Error('lib/cue.js is not loaded');
+
+  var W = 100, L = 150, D = 9, MOUTH = 32, RD = 7, RB = 3.8, MD = 2, MB = 1;
+  var G0 = W / 2 - MOUTH / 2, G1 = W / 2 + MOUTH / 2;
+  // the boards: both sides, each end line either side of its mouth, and the goal boxes
+  var SEGS = [
+    [0, 0, 0, L], [W, 0, W, L],
+    [0, 0, G0, 0], [G1, 0, W, 0], [G0, 0, G0, -D], [G0, -D, G1, -D], [G1, -D, G1, 0],
+    [0, L, G0, L], [G1, L, W, L], [G0, L, G0, L + D], [G0, L + D, G1, L + D], [G1, L + D, G1, L]
+  ];
+  var T = Cue.walls({ segs: SEGS, length: L, width: W, radius: RD, ball: 0.88, cushion: 0.7, cushionSlide: 0.95, rollA: 40, rollB: 2.4, minSpeed: 2.5, maxSpeed: 420 });
+  var WIN_TO = [3, 5], MAX_TURNS = 40;
+  // after a goal the ball runs on into the net this long, then everything stops
+  var AFTER_GOAL = Math.round(0.7 / Cue.DT);
+  // a pull this long (pitch units) is a full flick; a shorter one is a softer one
+  var PULL = 42;
+
+  // The bottom team's places, the goalkeeper first; the top team's are the same turned
+  // round. The team that kicks off has its centre forward behind the ball.
+  var BASE = [[50, 141], [28, 122], [72, 122], [24, 95], [76, 95]];
+  var KICK = [[50, 141], [28, 122], [72, 122], [50, 87], [20, 92]];
+
+  function teamOf(id) { return id === 0 ? -1 : (id <= 5 ? 0 : 1); }
+  function body(id, x, y) { return id === 0 ? { id: 0, x: x, y: y, vx: 0, vy: 0, inPlay: true, r: RB, m: MB } : { id: id, x: x, y: y, vx: 0, vy: 0, inPlay: true, r: RD, m: MD }; }
+  function lineupBodies(kicker) {
+    var b = [body(0, W / 2, L / 2)];
+    for (var t = 0; t < 2; t++) {
+      var P = t === kicker ? KICK : BASE;
+      for (var i = 0; i < 5; i++) {
+        var x = P[i][0], y = P[i][1];
+        if (t === 1) { x = W - x; y = L - y; }
+        b.push(body(1 + 5 * t + i, x, y));
+      }
+    }
+    return b;
+  }
+  function match(o) {
+    o = o || {};
+    var k = o.kicker === 1 ? 1 : 0;
+    return { b: lineupBodies(k), score: [0, 0], turn: k, turns: 0, winTo: WIN_TO.indexOf(o.winTo) >= 0 ? o.winTo : 3, maxTurns: MAX_TURNS, golden: false, winner: -1 };
+  }
+  function discs(M, t) { return M.b.filter(function (b) { return teamOf(b.id) === t; }); }
+  function byId(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
+
+  // A flick: the disc leaves at a speed from the pull's power, the rest is cue.js
+  function powerOf(pull) { return Math.max(0, Math.min(1, pull / PULL)); }
+  function flick(M, id, angle, power) {
+    if (M.winner >= 0 || teamOf(id) !== M.turn) return null;
+    var s = Cue.start(T, M.b, { angle: angle, power: power }, id);
+    s.by = M.turn; s.goal = -1; s.goalAt = 0;
+    return s;
+  }
+  // One physics step of a flick, and the goal check. Returns true while anything moves.
+  function step(s) {
+    var more = Cue.tick(s), B = s.balls;
+    // a squeeze between two discs and a board could push a body through the board:
+    // nothing ever leaves the pitch and its goal boxes
+    for (var i = 0; i < B.length; i++) {
+      var b = B[i], r = b.r;
+      if (b.x < r) { b.x = r; b.vx = Math.abs(b.vx) * 0.5; }
+      else if (b.x > W - r) { b.x = W - r; b.vx = -Math.abs(b.vx) * 0.5; }
+      var inMouth = b.x > G0 && b.x < G1;
+      var lo = inMouth ? -D + r : r, hi = inMouth ? L + D - r : L - r;
+      if (b.y < lo) { b.y = lo; b.vy = Math.abs(b.vy) * 0.5; }
+      else if (b.y > hi) { b.y = hi; b.vy = -Math.abs(b.vy) * 0.5; }
+    }
+    // a goal only when the whole ball is over the line between the posts
+    var ball = B[0];
+    if (s.goal < 0) {
+      if (ball.y < -RB && ball.x > G0 && ball.x < G1) { s.goal = 0; s.goalAt = s.ticks; }
+      else if (ball.y > L + RB && ball.x > G0 && ball.x < G1) { s.goal = 1; s.goalAt = s.ticks; }
+    }
+    if (s.goal >= 0 && (s.quick || s.ticks - s.goalAt >= AFTER_GOAL)) {
+      for (i = 0; i < B.length; i++) { B[i].vx = 0; B[i].vy = 0; }
+      more = false; s.moving = false;
+    }
+    return more;
+  }
+  function run(s) { while (step(s)) { /* the same steps the page animates */ } return s; }
+
+  // The flick is over: count it, score a goal or pass the turn. After a goal both teams
+  // line up again and the team that let it in kicks off. When the turns run out, the
+  // team ahead wins; level, the next goal wins (golden goal), so a match always ends.
+  function resolve(M, s) {
+    var ev = { goal: s.goal, own: s.goal >= 0 && s.goal !== s.by, first: s.ev.first, golden: false, win: -1 };
+    M.turns++;
+    M.b = s.balls.map(function (b) { var c = body(b.id, b.x, b.y); return c; });
+    if (s.goal >= 0) {
+      M.score[s.goal]++;
+      if (M.golden || M.score[s.goal] >= M.winTo) M.winner = s.goal;
+      else { M.b = lineupBodies(1 - s.goal); M.turn = 1 - s.goal; }
+    } else M.turn = 1 - M.turn;
+    if (M.winner < 0 && !M.golden && M.turns >= M.maxTurns) {
+      if (M.score[0] !== M.score[1]) M.winner = M.score[0] > M.score[1] ? 0 : 1;
+      else { M.golden = true; ev.golden = true; }
+    }
+    ev.win = M.winner;
+    return ev;
+  }
+
+  /* ------------------------------------------------------------------ bot */
+
+  // Distance a disc slides from power p, from the friction law in cue.js, and the power
+  // that slides it d units
+  function travel(p) {
+    var v = Cue.speedOf(T, p), a = T.rollA, b = T.rollB;
+    return v / b - a / (b * b) * Math.log(1 + b * v / a);
+  }
+  function powerFor(d) {
+    var lo = 0, hi = 1;
+    if (travel(1) <= d) return 1;
+    for (var i = 0; i < 30; i++) { var mid = (lo + hi) / 2; if (travel(mid) < d) lo = mid; else hi = mid; }
+    return hi;
+  }
+  function goalY(t) { return t === 0 ? -D / 2 : L + D / 2; }        // the goal team t attacks
+  function ownY(t) { return t === 0 ? L + D / 2 : -D / 2; }
+  function gain(t, y) { return t === 0 ? L - y : y; }               // how far up the pitch, for t
+  function norm(x, y) { var l = Math.sqrt(x * x + y * y) || 1; return { x: x / l, y: y / l, l: l }; }
+
+  var LEVELS = {
+    easy: { sim: false, aimSd: 0.1, powSd: 0.22 },
+    medium: { sim: true, discs: 3, aims: [0], powers: [0.7, 1], defend: 0, aimSd: 0.04, powSd: 0.1 },
+    hard: { sim: true, discs: 5, aims: [-9, 0, 9], powers: [0.5, 0.75, 1], defend: 1, aimSd: 0.012, powSd: 0.05 }
+  };
+
+  // How open the shot at t's goal is for the other team, from where the ball lies: a
+  // disc of theirs behind the ball, near it, with no disc of t's in the way
+  function threat(B, t) {
+    var ball = B[0], gx = W / 2, gy = ownY(t), u = norm(gx - ball.x, gy - ball.y), worst = 0;
+    var blocked = 0;
+    for (var i = 1; i < B.length; i++) {
+      var d = B[i];
+      if (teamOf(d.id) !== t) continue;
+      var ox = d.x - ball.x, oy = d.y - ball.y, along = ox * u.x + oy * u.y;
+      if (along <= 0 || along >= u.l) continue;
+      if (Math.abs(ox * u.y - oy * u.x) < RD + RB + 1) blocked++;
+    }
+    for (i = 1; i < B.length; i++) {
+      var o = B[i];
+      if (teamOf(o.id) !== 1 - t) continue;
+      var hx = ball.x - u.x * (RD + RB) - o.x, hy = ball.y - u.y * (RD + RB) - o.y, h = norm(hx, hy);
+      if (h.l > 90 || h.x * u.x + h.y * u.y < 0.45) continue;
+      worst = Math.max(worst, (90 - h.l) * (1.4 - u.l / 160));
+    }
+    return blocked ? worst * 0.35 : worst;
+  }
+  function judge(s, t, lv) {
+    if (s.goal === t) return 10000;
+    if (s.goal === 1 - t) return -10000;
+    var B = s.balls, ball = B[0], g = gain(t, ball.y);
+    var v = g - Math.abs(ball.x - W / 2) * 0.12 * g / L;
+    if (s.ev.first === null) v -= 12;
+    if (lv.defend) v -= threat(B, t) * lv.defend;
+    return v;
+  }
+  function sim(M, c) {
+    var s = flick(M, c.id, c.angle, c.power);
+    s.quick = true;
+    return run(s);
+  }
+  function noisy(c, lv, rnd) {
+    var g = function () { return (rnd() + rnd() + rnd() - 1.5) * 2; };
+    return { id: c.id, angle: c.angle + g() * lv.aimSd, power: Math.max(0.15, Math.min(1, c.power * (1 + g() * lv.powSd))) };
+  }
+  // The bot's flick for the team on turn. Easy flicks its disc nearest the ball at the
+  // middle of the goal without looking ahead. Medium tries a few flicks of its three
+  // discs nearest the ball and keeps the one that leaves the ball furthest up the pitch.
+  // Hard tries all five discs at three spots in the goal mouth, and weighs how open its
+  // own goal is left, so it also flicks a disc back into the way when that is safer.
+  function choose(M, level, rnd) {
+    var lv = LEVELS[level] || LEVELS.medium, t = M.turn, ball = M.b[0], mine = discs(M, t);
+    mine.sort(function (a, b) { return Math.hypot(a.x - ball.x, a.y - ball.y) - Math.hypot(b.x - ball.x, b.y - ball.y); });
+    function strike(d, ax, p) {
+      var u = norm(W / 2 + ax - ball.x, goalY(t) - ball.y);
+      var gx = ball.x - u.x * (RD + RB) * 0.97, gy = ball.y - u.y * (RD + RB) * 0.97, w = norm(gx - d.x, gy - d.y);
+      if (w.x * u.x + w.y * u.y < 0.2) return null;
+      return { id: d.id, angle: Math.atan2(w.y, w.x), power: p, kind: 'shot' };
+    }
+    if (!lv.sim) {
+      var pick = null;
+      for (var i = 0; i < mine.length && !pick; i++) pick = strike(mine[i], 0, 0.6 + rnd() * 0.4);
+      if (!pick) pick = { id: mine[0].id, angle: Math.atan2(ball.y - mine[0].y, ball.x - mine[0].x), power: 0.8 };
+      return noisy(pick, lv, rnd);
+    }
+    var cands = [];
+    mine.slice(0, lv.discs).forEach(function (d) {
+      lv.aims.forEach(function (ax) { lv.powers.forEach(function (p) { var c = strike(d, ax, p); if (c) cands.push(c); }); });
+      var a = Math.atan2(ball.y - d.y, ball.x - d.x);
+      cands.push({ id: d.id, angle: a, power: 0.65, kind: 'hit' }, { id: d.id, angle: a, power: 1, kind: 'hit' });
+    });
+    if (lv.defend) {
+      // a disc back between the ball and its own goal
+      var qx = W / 2 + (ball.x - W / 2) * 0.35, qy = ownY(t) + (ball.y - ownY(t)) * 0.3;
+      discs(M, t).slice().sort(function (a, b) { return Math.hypot(a.x - qx, a.y - qy) - Math.hypot(b.x - qx, b.y - qy); }).slice(0, 2).forEach(function (d) {
+        var dd = Math.hypot(qx - d.x, qy - d.y);
+        if (dd > RD) cands.push({ id: d.id, angle: Math.atan2(qy - d.y, qx - d.x), power: powerFor(dd), kind: 'block' });
+      });
+    }
+    var best = null, bv = -Infinity;
+    for (var k = 0; k < cands.length; k++) {
+      var v = judge(sim(M, cands[k]), t, lv) + rnd() * 0.5;
+      if (v > bv) { bv = v; best = cands[k]; }
+    }
+    return noisy(best, lv, rnd);
+  }
+
+  /* ---------------------------------------------------------------- saves */
+
+  // Saved only at rest, between flicks
+  function snapshot(M) {
+    return { b: M.b.map(function (b) { return [b.x, b.y]; }), score: M.score.slice(), turn: M.turn, turns: M.turns, winTo: M.winTo, golden: M.golden };
+  }
+  function restore(o) {
+    if (!o || typeof o !== 'object' || WIN_TO.indexOf(o.winTo) < 0 || (o.turn !== 0 && o.turn !== 1) || typeof o.golden !== 'boolean') return null;
+    if (!(o.turns === (o.turns | 0) && o.turns >= 0 && o.turns < 10000) || (o.golden && o.turns < MAX_TURNS)) return null;
+    if (!Array.isArray(o.score) || o.score.length !== 2 || !o.score.every(function (v) { return v === (v | 0) && v >= 0 && v < o.winTo; })) return null;
+    if (!Array.isArray(o.b) || o.b.length !== 11) return null;
+    var B = [];
+    for (var i = 0; i < 11; i++) {
+      var p = o.b[i], r = i === 0 ? RB : RD;
+      if (!Array.isArray(p) || p.length !== 2 || !isFinite(p[0]) || !isFinite(p[1]) || typeof p[0] !== 'number' || typeof p[1] !== 'number') return null;
+      if (p[0] < r - 1e-6 || p[0] > W - r + 1e-6 || p[1] < -D || p[1] > L + D) return null;
+      B.push(body(i, p[0], p[1]));
+    }
+    return { b: B, score: o.score.slice(), turn: o.turn, turns: o.turns, winTo: o.winTo, maxTurns: MAX_TURNS, golden: o.golden, winner: -1 };
+  }
+
+  return {
+    Cue: Cue, T: T, W: W, L: L, D: D, MOUTH: MOUTH, G0: G0, G1: G1, RD: RD, RB: RB, MD: MD, MB: MB, SEGS: SEGS, PULL: PULL,
+    WIN_TO: WIN_TO, MAX_TURNS: MAX_TURNS, AFTER_GOAL: AFTER_GOAL, LEVELS: LEVELS, BASE: BASE, KICK: KICK,
+    teamOf: teamOf, match: match, lineup: lineupBodies, discs: discs, byId: byId, powerOf: powerOf, flick: flick, step: step, run: run,
+    resolve: resolve, travel: travel, powerFor: powerFor, threat: threat, choose: choose, snapshot: snapshot, restore: restore
+  };
+}
+if (typeof module !== 'undefined') module.exports = FootballEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = FootballEngineFactory(window.ChoganCue), Cue = E.Cue;
+  var LEVELS = ['easy', 'medium', 'hard'];
+  // Team colours stay the same in both themes, like the grass: red at the bottom, blue at the top
+  var TEAM = [{ fill: '#E0503A', ring: '#A3301E' }, { fill: '#2E6BD8', ring: '#183F8C' }];
+  var BRD = 3; // the boards' width round the pitch, in pitch units
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'football',
+    name: { fa: 'فوتبال دکمه‌ای', en: 'Button Football', zh: '按钮足球', de: 'Knopffußball', es: 'Fútbol de chapas', pl: 'Piłkarzyki guzikowe' },
+    accent: '#0D4F2E',
+    mood: 'menu',
+    strings: {
+      fa: {
+        fbPitch: 'زمین فوتبال دکمه‌ای از بالا', fbVsBot: 'مقابل ربات', fbPeople: 'دو نفره', fbBot: 'ربات', fbPlayerN: 'بازیکن {n}', fbNew: 'مسابقه‌ی تازه',
+        fbFirstTo: 'تا {n} گل', fbTurnOf: 'نوبت {n} از {m}', fbGolden: 'گل طلایی', fbGoalBanner: 'گل!', fbGoalOf: 'گل برای {n}!', fbOwnGoal: 'گل به خودی! امتیاز برای {n}',
+        fbWon: '{n} برد', fbYour: 'نوبت توست: از یکی از مهره‌هایت عقب بکش و رها کن.', fbTurnName: 'نوبت {n}: از یک مهره عقب بکش و رها کن.', fbBotTurn: 'ربات نشانه می‌گیرد…',
+        fbGoldenNote: 'نوبت‌ها تمام شد و بازی مساوی است: گل بعدی برنده است.', fbGoals: 'گل برای بردن', fbNext: 'از مسابقه‌ی بعد', fbDaily: 'فوتبال روزانه', fbScore: 'نتیجه', fbFlicks: 'ضربه‌ها',
+        fbKPick: 'انتخاب مهره', fbKAim: 'چرخاندن جهت (با Shift آرام‌تر)', fbKPower: 'قدرت ضربه', fbKShoot: 'ضربه',
+        fbRules: 'زمین را از بالا می‌بینی؛ مهره‌های قرمز مال تو هستند و به دروازه‌ی حریف حمله می‌کنند. در نوبتت از یکی از پنج مهره‌ات عقب بکش و رها کن؛ هرچه بیشتر بکشی، ضربه محکم‌تر است. مهره‌ها و توپ به هم و به دیواره‌ها می‌خورند و برمی‌گردند. توپ وقتی گل است که کاملاً از خط دروازه میان دو تیرک رد شود. نوبت وقتی عوض می‌شود که همه چیز بایستد. بعد از هر گل هر دو تیم سر جایشان برمی‌گردند و تیمی که گل خورده شروع می‌کند. اول سه گل برنده است (پنج گل از دکمه‌ی چرخ‌دنده). بعد از چهل ضربه، تیم جلوتر می‌برد و اگر مساوی باشد گل بعدی برنده است. چالش روزانه مسابقه‌ای با ربات متوسط است.',
+        fbTutTitle1: 'هدف', fbTutText1: 'توپ سفید را به دروازه‌ی حریف بفرست و نگذار به دروازه‌ی خودت برود. اول سه گل.',
+        fbTutTitle2: 'ضربه', fbTutText2: 'انگشتت را روی یکی از مهره‌های قرمزت بگذار، به عقب بکش و رها کن. مهره به سمت مخالف کشیدن می‌رود.',
+        fbTutTitle3: 'نوبت', fbTutText3: 'هر نوبت یک ضربه. وقتی همه چیز ایستاد نوبت حریف است. از دیواره‌ها هم می‌شود کمانه زد.'
+      },
+      en: {
+        fbPitch: 'Button football pitch seen from above', fbVsBot: 'Against the bot', fbPeople: 'Two players', fbBot: 'Bot', fbPlayerN: 'Player {n}', fbNew: 'New match',
+        fbFirstTo: 'First to {n}', fbTurnOf: 'Turn {n} of {m}', fbGolden: 'Golden goal', fbGoalBanner: 'GOAL!', fbGoalOf: 'Goal for {n}!', fbOwnGoal: 'Own goal! A goal for {n}',
+        fbWon: '{n} wins', fbYour: 'Your turn: pull back from one of your discs and let go.', fbTurnName: '{n} to play: pull back from a disc and let go.', fbBotTurn: 'The bot is aiming…',
+        fbGoldenNote: 'The turns are up and the score is level: the next goal wins.', fbGoals: 'Goals to win', fbNext: 'From the next match', fbDaily: 'Daily Football', fbScore: 'Score', fbFlicks: 'Flicks',
+        fbKPick: 'Pick a disc', fbKAim: 'Turn the aim (finer with Shift)', fbKPower: 'Power', fbKShoot: 'Flick',
+        fbRules: 'You see the pitch from above: your red discs attack the other team\'s goal. On your turn, pull back from one of your five discs and let go; the further you pull, the harder the flick. Discs and the ball bounce off each other and off the boards. The ball is in only when all of it is over the goal line between the posts. The turn passes when everything has stopped. After a goal both teams line up again and the team that let it in kicks off. First to three goals wins (five behind the gear). After forty flicks the team ahead wins, and if the score is level the next goal wins. The daily challenge is a match against the medium bot.',
+        fbTutTitle1: 'The aim', fbTutText1: 'Send the white ball into the other goal and keep it out of yours. First to three.',
+        fbTutTitle2: 'The flick', fbTutText2: 'Put your finger on one of your red discs, pull back and let go. The disc flies the other way.',
+        fbTutTitle3: 'Turns', fbTutText3: 'One flick a turn. When everything stops, it is the other side\'s turn. Bank it off the boards, too.'
+      },
+      pl: {
+        fbPitch: 'Boisko do piłkarzyków guzikowych widziane z góry', fbVsBot: 'Przeciwko botowi', fbPeople: 'Dwóch graczy', fbBot: 'Bot', fbPlayerN: 'Gracz {n}', fbNew: 'Nowy mecz',
+        fbFirstTo: 'Do {n} goli', fbTurnOf: 'Ruch {n} z {m}', fbGolden: 'Złoty gol', fbGoalBanner: 'GOL!', fbGoalOf: 'Gol dla: {n}!', fbOwnGoal: 'Samobój! Gol dla: {n}',
+        fbWon: '{n} wygrywa', fbYour: 'Twój ruch: odciągnij jeden ze swoich krążków i puść.', fbTurnName: 'Ruch: {n}. Odciągnij krążek i puść.', fbBotTurn: 'Bot celuje…',
+        fbGoldenNote: 'Ruchy się skończyły, a wynik jest remisowy: następny gol wygrywa.', fbGoals: 'Gole do wygranej', fbNext: 'Od następnego meczu', fbDaily: 'Codzienne piłkarzyki', fbScore: 'Wynik', fbFlicks: 'Pstryknięcia',
+        fbKPick: 'Wybór krążka', fbKAim: 'Obrót celownika (z Shift dokładniej)', fbKPower: 'Siła', fbKShoot: 'Pstryknięcie',
+        fbRules: 'Widzisz boisko z góry: Twoje czerwone krążki atakują bramkę rywala. W swoim ruchu odciągnij jeden z pięciu krążków i puść; im dalej odciągniesz, tym mocniejsze pstryknięcie. Krążki i piłka odbijają się od siebie i od band. Gol jest wtedy, gdy cała piłka przekroczy linię bramkową między słupkami. Ruch przechodzi na rywala, gdy wszystko się zatrzyma. Po golu obie drużyny wracają na pozycje, a rozpoczyna drużyna, która straciła gola. Wygrywa ten, kto pierwszy zdobędzie trzy gole (pięć w ustawieniach pod zębatką). Po czterdziestu pstryknięciach wygrywa drużyna prowadząca, a przy remisie wygrywa następny gol. Codzienne wyzwanie to mecz z botem na średnim poziomie.',
+        fbTutTitle1: 'Cel gry', fbTutText1: 'Wbij białą piłkę do bramki rywala i nie wpuść jej do swojej. Gra do trzech goli.',
+        fbTutTitle2: 'Pstryknięcie', fbTutText2: 'Połóż palec na jednym z czerwonych krążków, odciągnij i puść. Krążek poleci w przeciwną stronę.',
+        fbTutTitle3: 'Ruchy', fbTutText3: 'Jedno pstryknięcie na ruch. Gdy wszystko stanie, ruch ma rywal. Możesz też odbijać od band.'
+      },
+      zh: {
+        fbPitch: '俯视的按钮足球场', fbVsBot: '对战电脑', fbPeople: '双人', fbBot: '电脑', fbPlayerN: '玩家 {n}', fbNew: '新比赛',
+        fbFirstTo: '先进 {n} 球', fbTurnOf: '第 {n} / {m} 轮', fbGolden: '金球', fbGoalBanner: '进球！', fbGoalOf: '{n} 进球！', fbOwnGoal: '乌龙球！{n} 得分',
+        fbWon: '{n} 获胜', fbYour: '轮到你：按住一枚自己的棋子向后拉，然后松开。', fbTurnName: '轮到 {n}：按住一枚棋子向后拉，然后松开。', fbBotTurn: '电脑正在瞄准…',
+        fbGoldenNote: '回合用完且比分持平：下一个进球获胜。', fbGoals: '获胜进球数', fbNext: '从下一场开始', fbDaily: '每日足球', fbScore: '比分', fbFlicks: '弹射次数',
+        fbKPick: '选择棋子', fbKAim: '转动方向（按住 Shift 更精细）', fbKPower: '力度', fbKShoot: '弹射',
+        fbRules: '从上方俯视球场：红色棋子是你的，进攻对方球门。轮到你时，按住五枚棋子之一向后拉再松开；拉得越远，弹得越重。棋子和球会相互碰撞，也会从边框弹回。整个球越过两门柱之间的球门线才算进球。所有东西都停下后才换人。进球后双方回到开球站位，由失球的一方开球。先进三球者获胜（齿轮里可改为五球）。四十次弹射后领先的一方获胜；若比分持平，下一个进球获胜。每日挑战是与中等电脑的比赛。',
+        fbTutTitle1: '目标', fbTutText1: '把白球送进对方球门，别让它进你的球门。先进三球。',
+        fbTutTitle2: '弹射', fbTutText2: '手指按住一枚红色棋子，向后拉再松开。棋子会朝相反方向飞出。',
+        fbTutTitle3: '回合', fbTutText3: '每回合弹一次。所有东西停下后轮到对方。也可以借边框反弹。'
+      },
+      de: {
+        fbPitch: 'Knopffußballfeld von oben', fbVsBot: 'Gegen den Bot', fbPeople: 'Zwei Spieler', fbBot: 'Bot', fbPlayerN: 'Spieler {n}', fbNew: 'Neues Spiel',
+        fbFirstTo: 'Bis {n} Tore', fbTurnOf: 'Zug {n} von {m}', fbGolden: 'Golden Goal', fbGoalBanner: 'TOR!', fbGoalOf: 'Tor für {n}!', fbOwnGoal: 'Eigentor! Ein Tor für {n}',
+        fbWon: 'Sieg: {n}', fbYour: 'Du bist dran: Zieh an einer deiner Scheiben zurück und lass los.', fbTurnName: 'Am Zug: {n}. Zieh an einer Scheibe zurück und lass los.', fbBotTurn: 'Der Bot zielt …',
+        fbGoldenNote: 'Die Züge sind um und es steht unentschieden: Das nächste Tor gewinnt.', fbGoals: 'Tore zum Sieg', fbNext: 'Ab dem nächsten Spiel', fbDaily: 'Tages-Knopffußball', fbScore: 'Ergebnis', fbFlicks: 'Schnipser',
+        fbKPick: 'Scheibe wählen', fbKAim: 'Richtung drehen (mit Shift feiner)', fbKPower: 'Kraft', fbKShoot: 'Schnippen',
+        fbRules: 'Du siehst das Feld von oben: Deine roten Scheiben greifen das gegnerische Tor an. Zieh in deinem Zug an einer deiner fünf Scheiben zurück und lass los; je weiter du ziehst, desto fester der Schnipser. Scheiben und Ball prallen voneinander und von den Banden ab. Ein Tor zählt erst, wenn der ganze Ball zwischen den Pfosten über der Torlinie ist. Der Zug wechselt, wenn alles stillsteht. Nach einem Tor stellen sich beide Teams neu auf, und wer das Tor kassiert hat, stößt an. Wer zuerst drei Tore hat, gewinnt (fünf über das Zahnrad). Nach vierzig Schnipsern gewinnt, wer vorn liegt; bei Gleichstand entscheidet das nächste Tor. Die Tagesaufgabe ist ein Spiel gegen den mittleren Bot.',
+        fbTutTitle1: 'Das Ziel', fbTutText1: 'Bring den weißen Ball ins gegnerische Tor und halte ihn aus deinem raus. Zuerst drei.',
+        fbTutTitle2: 'Der Schnipser', fbTutText2: 'Leg den Finger auf eine deiner roten Scheiben, zieh zurück und lass los. Die Scheibe fliegt in die Gegenrichtung.',
+        fbTutTitle3: 'Die Züge', fbTutText3: 'Ein Schnipser pro Zug. Steht alles still, ist die andere Seite dran. Über die Bande geht es auch.'
+      },
+      es: {
+        fbPitch: 'Campo de fútbol de chapas visto desde arriba', fbVsBot: 'Contra el bot', fbPeople: 'Dos jugadores', fbBot: 'Bot', fbPlayerN: 'Jugador {n}', fbNew: 'Nueva partida',
+        fbFirstTo: 'A {n} goles', fbTurnOf: 'Turno {n} de {m}', fbGolden: 'Gol de oro', fbGoalBanner: '¡GOL!', fbGoalOf: '¡Gol para {n}!', fbOwnGoal: '¡Gol en propia puerta! Gol para {n}',
+        fbWon: 'Gana {n}', fbYour: 'Te toca: tira hacia atrás de una de tus chapas y suelta.', fbTurnName: 'Le toca a {n}: tira hacia atrás de una chapa y suelta.', fbBotTurn: 'El bot está apuntando…',
+        fbGoldenNote: 'Se acabaron los turnos y van empatados: el próximo gol gana.', fbGoals: 'Goles para ganar', fbNext: 'Desde la próxima partida', fbDaily: 'Fútbol diario', fbScore: 'Resultado', fbFlicks: 'Tiros',
+        fbKPick: 'Elegir chapa', fbKAim: 'Girar la dirección (más fino con Shift)', fbKPower: 'Fuerza', fbKShoot: 'Tirar',
+        fbRules: 'Ves el campo desde arriba: tus chapas rojas atacan la portería rival. En tu turno, tira hacia atrás de una de tus cinco chapas y suelta; cuanto más tires, más fuerte sale. Las chapas y el balón rebotan entre sí y en las bandas. Es gol solo cuando todo el balón cruza la línea entre los postes. El turno pasa cuando todo se ha parado. Tras un gol, los dos equipos vuelven a su sitio y saca el que lo recibió. Gana quien marque antes tres goles (cinco desde el engranaje). Tras cuarenta tiros gana el que va por delante; si van empatados, el próximo gol gana. El reto diario es una partida contra el bot medio.',
+        fbTutTitle1: 'El objetivo', fbTutText1: 'Mete el balón blanco en la portería rival y no dejes que entre en la tuya. Gana quien llegue a tres.',
+        fbTutTitle2: 'El tiro', fbTutText2: 'Pon el dedo en una de tus chapas rojas, tira hacia atrás y suelta. La chapa sale hacia el otro lado.',
+        fbTutTitle3: 'Los turnos', fbTutText3: 'Un tiro por turno. Cuando todo se para, le toca al otro. También puedes rebotar en las bandas.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || typeof prefs !== 'object') prefs = {};
+  if (prefs.mode !== 'bot' && prefs.mode !== 'people') prefs.mode = 'bot';
+  if (LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+  if (E.WIN_TO.indexOf(prefs.winTo) < 0) prefs.winTo = 3;
+
+  // G: the match. shot: the flick on the move. drag: a finger pulling a disc back.
+  var G = null, shot = null, drag = null, sel = -1, kbAim = 0, kbPower = 0.6, kbOn = false, botAim = null, botTimer = 0;
+  var raf = 0, last = 0, acc = 0, paused = false, ended = false, msg = '', banner = 0, lastTap = 0, lastWall = 0, cushions = 0, V = null;
+
+  var cv = el('canvas', { class: 'fb-canvas', role: 'img', 'aria-label': C.t('fbPitch') });
+  var box = el('div', { class: 'fb-box' }, [cv]);
+  var top = el('div', { class: 'fb-top ch-above' });
+  var players = el('div', { class: 'fb-players ch-above' });
+  var status = el('div', { class: 'fb-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'fb-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, players, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('fbNew'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ setup */
+
+  // The bot's dice: on the daily match they come from the day and the turn, so a
+  // resumed daily match plays on the same way
+  function botRnd() { return G.daily ? C.daily('football', G.daily + '|t' + G.M.turns).rng : Math.random; }
+
+  function newGame(o) {
+    var daily = o.daily || null;
+    G = { mode: daily ? 'bot' : o.mode, level: daily ? 'medium' : o.level, daily: daily, startedAt: Date.now() };
+    G.M = E.match({ kicker: 0, winTo: daily ? 3 : o.winTo });
+    if (!daily) { prefs.mode = o.mode; prefs.level = o.level; ctx.store.set('prefs', prefs); }
+    reset();
+  }
+  function reset() {
+    shot = null; drag = null; botAim = null; clearTimeout(botTimer); ended = false; msg = ''; banner = 0;
+    sel = -1; kbOn = false;
+    render(); nextTurn();
+  }
+  function current() { return { mode: G.mode, level: G.level, winTo: prefs.winTo }; }
+  function fromPrefs() { return { mode: prefs.mode, level: prefs.level, winTo: prefs.winTo }; }
+  function isBot(t) { return G.mode === 'bot' && t === 1; }
+  function pname(t) {
+    if (t === 0) return G.mode === 'people' ? C.t('fbPlayerN', { n: C.num(1) }) : (C.state.profile.name || C.t('you'));
+    return isBot(t) ? C.t('fbBot') : C.t('fbPlayerN', { n: C.num(2) });
+  }
+  function humanTurn() { return G && !ended && !shot && !botAim && G.M.winner < 0 && !isBot(G.M.turn); }
+
+  /* ------------------------------------------------------------- turns */
+
+  function nextTurn() {
+    if (!G || ended) return;
+    if (isBot(G.M.turn)) {
+      clearTimeout(botTimer);
+      botTimer = setTimeout(botMove, C.ui.reduceMotion() ? 250 : 650);
+    } else {
+      // the keyboard's aim starts at the ball from the disc nearest it
+      var ball = G.M.b[0], mine = E.discs(G.M, G.M.turn);
+      mine.sort(function (a, b) { return Math.hypot(a.x - ball.x, a.y - ball.y) - Math.hypot(b.x - ball.x, b.y - ball.y); });
+      sel = mine[0].id;
+      kbAim = Math.atan2(ball.y - mine[0].y, ball.x - mine[0].x);
+    }
+    renderStatus(); kick();
+  }
+  function botMove() {
+    if (!G || ended || shot || paused || document.hidden) { if (G && !ended && !shot) botTimer = setTimeout(botMove, 400); return; }
+    var c = E.choose(G.M, G.level, botRnd());
+    botAim = { id: c.id, angle: c.angle, power: c.power, t0: performance.now() };
+    kick();
+  }
+  function shoot(id, angle, power) {
+    var s = E.flick(G.M, id, angle, power);
+    if (!s) return;
+    shot = s; cushions = 0; drag = null; botAim = null; last = 0; acc = 0;
+    C.audio.sfx('tap');
+    renderStatus(); kick();
+  }
+  function endShot() {
+    var s = shot, by = s.by;
+    shot = null;
+    var ev = E.resolve(G.M, s);
+    if (ev.goal >= 0) {
+      msg = ev.own ? C.t('fbOwnGoal', { n: pname(ev.goal) }) : C.t('fbGoalOf', { n: pname(ev.goal) });
+      C.feedback(G.mode === 'bot' ? (ev.goal === 0 ? 'good' : 'bad') : 'thud');
+    } else msg = '';
+    if (ev.golden) msg = C.t('fbGoldenNote');
+    G.flicks = (G.flicks || 0) + (by === 0 ? 1 : 0);
+    if (G.M.winner >= 0) {
+      ended = true; ctx.clearSave(); render();
+      setTimeout(finish, C.ui.reduceMotion() ? 300 : 1300);
+      return;
+    }
+    save(); render(); nextTurn();
+  }
+
+  /* -------------------------------------------------------------- loop */
+
+  function frame(now) {
+    raf = 0;
+    if (!G) return;
+    var blocked = paused || document.hidden || !!document.querySelector('.ch-scrim');
+    if (shot) {
+      if (!last || blocked) last = now;
+      acc += Math.min(0.1, (now - last) / 1000); last = now;
+      var goalBefore = shot.goal, hits = 0, more = true;
+      while (acc >= Cue.DT) {
+        acc -= Cue.DT;
+        more = E.step(shot);
+        hits += shot.hits;
+        if (!more) break;
+      }
+      if (hits && now - lastTap > 70) { C.audio.sfx('tap'); lastTap = now; }
+      if (shot.ev.cushions > cushions) { cushions = shot.ev.cushions; if (now - lastWall > 90) { C.audio.sfx('select'); lastWall = now; } }
+      if (goalBefore < 0 && shot.goal >= 0) banner = now;
+      if (!more) endShot();
+    }
+    if (botAim && !blocked && now - botAim.t0 > (C.ui.reduceMotion() ? 150 : 650)) shoot(botAim.id, botAim.angle, botAim.power);
+    draw(now);
+    if (shot || botAim || humanTurn() || (banner && now - banner < 1400)) kick();
+  }
+  function kick() { if (!raf) raf = requestAnimationFrame(frame); }
+
+  /* ------------------------------------------------------------ result */
+
+  function finish() {
+    var M = G.M, w = M.winner, won = G.mode === 'people' ? null : w === 0;
+    var coins = 6, points = 15;
+    if (G.mode === 'bot') {
+      var base = { easy: 6, medium: 12, hard: 20 }[G.level];
+      coins = won ? base : Math.max(2, Math.round(base * 0.3));
+      points = won ? base * 4 : Math.round(base * 1.2);
+      if (won) {
+        C.achievements.unlock('fb-win');
+        if (G.level === 'hard') C.achievements.unlock('fb-hard');
+        if (M.score[1] === 0) C.achievements.unlock('fb-shut');
+      }
+    }
+    var label = C.num(M.score[0]) + '–' + C.num(M.score[1]);
+    if (G.daily) {
+      var first = C.stats.daily('football', G.daily, { label: label, win: won });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.finish({
+      won: won,
+      title: G.mode === 'people' ? C.t('fbWon', { n: pname(w) }) : (won ? C.t('won') : C.t('lost')),
+      timeMs: Date.now() - G.startedAt, coins: coins, points: points,
+      lines: [{ label: C.t('fbScore'), value: label }, { label: C.t('fbFlicks'), value: C.num(M.turns) }],
+      shareText: 'چوگان · فوتبال دکمه‌ای' + (G.daily ? ('\nروزانه ' + G.daily) : '') + '\n' + M.score[0] + '–' + M.score[1],
+      paint: cardPaint(),
+      onAgain: G.daily ? null : function () { newGame(current()); }
+    });
+  }
+
+  /* ------------------------------------------------------------- saves */
+
+  // Saved at rest after every flick; a flick still on the move is played again
+  ctx.autosave(function () {
+    if (!G || ended || G.M.winner >= 0 || G.M.turns === 0) return { inProgress: false };
+    return { g: { mode: G.mode, level: G.level, daily: G.daily, m: E.snapshot(G.M), flicks: G.flicks || 0, elapsed: Date.now() - G.startedAt } };
+  });
+  function save() { ctx.save(); }
+  function restore(sv) {
+    var g = sv && sv.g;
+    if (!g || (g.mode !== 'bot' && g.mode !== 'people') || LEVELS.indexOf(g.level) < 0) return false;
+    var M = E.restore(g.m);
+    if (!M) return false;
+    G = { mode: g.mode, level: g.level, daily: g.daily || null, M: M, flicks: g.flicks | 0, startedAt: Date.now() - (g.elapsed || 0) };
+    reset();
+    return true;
+  }
+
+  function askNew() {
+    if (!G || !G.daily) { settings(); return; }
+    var dd = G.daily;
+    if (ended || G.M.turns === 0) { newGame({ daily: dd }); return; }
+    C.ui.confirm({ title: C.t('fbNew'), body: C.t('resetWarn'), onOk: function () { newGame({ daily: dd }); } });
+  }
+  function settings() {
+    var o = G ? current() : fromPrefs(), body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
+    function rows() {
+      body.innerHTML = '';
+      body.appendChild(C.ui.segmented([{ value: 'bot', label: C.t('fbVsBot') }, { value: 'people', label: C.t('fbPeople') }], o.mode, function (v) { o.mode = v; rows(); }));
+      if (o.mode === 'bot') body.appendChild(C.ui.segmented(LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), o.level, function (v) { o.level = v; }));
+      if (G && !ended && G.M.turns > 0) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('resetWarn') }));
+    }
+    rows();
+    C.ui.modal({
+      title: C.t('fbNew'), closeButton: true, body: [body],
+      actions: [{ label: C.t('cancel') }, { label: C.t('start'), kind: 'primary', onClick: function () { o.winTo = prefs.winTo; newGame(o); } }]
+    });
+  }
+  // Behind the gear: three or five goals. It changes the match on the pitch too, as long
+  // as nobody has reached the new number yet; the daily match is always to three.
+  function showGear() {
+    var note = el('p', { class: 'ch-xs ch-dim' });
+    function sync() {
+      var now = G && !G.daily && !ended && G.M.score[0] < prefs.winTo && G.M.score[1] < prefs.winTo;
+      note.textContent = now || !G || G.M.winTo === prefs.winTo ? '' : C.t('fbNext');
+      if (now) { G.M.winTo = prefs.winTo; save(); renderTop(); }
+    }
+    var seg = C.ui.segmented(E.WIN_TO.map(function (n) { return { value: String(n), label: C.num(n) }; }), String(prefs.winTo), function (v) {
+      prefs.winTo = +v === 5 ? 5 : 3; ctx.store.set('prefs', prefs); sync();
+    });
+    C.ui.modal({
+      title: C.t('settings'),
+      body: [el('div', { class: 'ch-list' }, [el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('fbGoals') }), seg])]), note],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+    sync();
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  // The view: the pitch upright in a tall box, on its side in a wide one, with the
+  // bottom team on the left. Input is read against the view last drawn.
+  function view() {
+    var r = box.getBoundingClientRect(), rw = Math.max(80, r.width || 0), rh = Math.max(120, r.height || 0);
+    var x0 = -BRD, y0 = -E.D - BRD, ww = E.W + 2 * BRD, wh = E.L + 2 * E.D + 2 * BRD;
+    var rot = rw > rh * 1.05;
+    var sw = rot ? wh : ww, sh = rot ? ww : wh, k = Math.min(rw / sw, rh / sh);
+    return { rot: rot, k: k, w: Math.floor(sw * k), h: Math.floor(sh * k), x0: x0, y0: y0, y1: y0 + wh };
+  }
+  function toScreen(v, x, y) { return v.rot ? { x: (v.y1 - y) * v.k, y: (x - v.x0) * v.k } : { x: (x - v.x0) * v.k, y: (y - v.y0) * v.k }; }
+  function toWorld(v, sx, sy) { return v.rot ? { x: sy / v.k + v.x0, y: v.y1 - sx / v.k } : { x: sx / v.k + v.x0, y: sy / v.k + v.y0 }; }
+  function draw(now) {
+    if (!G) return;
+    var v = view(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (cv.width !== Math.round(v.w * dpr) || cv.height !== Math.round(v.h * dpr)) { cv.width = Math.round(v.w * dpr); cv.height = Math.round(v.h * dpr); }
+    cv.style.width = v.w + 'px'; cv.style.height = v.h + 'px';
+    V = v;
+    var g = cv.getContext('2d'), k = v.k * dpr;
+    if (v.rot) g.setTransform(0, k, -k, 0, v.y1 * k, -v.x0 * k);
+    else g.setTransform(k, 0, 0, k, -v.x0 * k, -v.y0 * k);
+    var bodies = shot ? shot.balls : G.M.b;
+    paintPitch(g);
+    paintBodies(g, bodies, now || performance.now());
+    paintAim(g, now || performance.now());
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    paintBanner(g, v, now || performance.now());
+  }
+  function paintPitch(g) {
+    var W = E.W, L = E.L, D = E.D;
+    g.fillStyle = '#1C5232'; g.fillRect(-BRD, -D - BRD, W + 2 * BRD, L + 2 * D + 2 * BRD);
+    // the goal nets
+    for (var e = 0; e < 2; e++) {
+      var y0 = e === 0 ? -D : L, i;
+      g.fillStyle = '#123824'; g.fillRect(E.G0, y0, E.MOUTH, D);
+      g.strokeStyle = 'rgba(255,255,255,.28)'; g.lineWidth = 0.35;
+      g.beginPath();
+      for (i = 2; i < E.MOUTH; i += 2.5) { g.moveTo(E.G0 + i, y0); g.lineTo(E.G0 + i, y0 + D); }
+      for (i = 2; i < D; i += 2.5) { g.moveTo(E.G0, y0 + i); g.lineTo(E.G1, y0 + i); }
+      g.stroke();
+    }
+    // grass in stripes
+    for (var s = 0; s < 10; s++) { g.fillStyle = s % 2 ? '#2F8A4A' : '#35954F'; g.fillRect(0, s * L / 10, W, L / 10 + 0.05); }
+    // markings
+    g.strokeStyle = 'rgba(255,255,255,.82)'; g.lineWidth = 0.7;
+    g.strokeRect(0.35, 0.35, W - 0.7, L - 0.7);
+    g.beginPath(); g.moveTo(0, L / 2); g.lineTo(W, L / 2); g.stroke();
+    g.beginPath(); g.arc(W / 2, L / 2, 13, 0, Math.PI * 2); g.stroke();
+    g.fillStyle = 'rgba(255,255,255,.82)'; g.beginPath(); g.arc(W / 2, L / 2, 0.9, 0, Math.PI * 2); g.fill();
+    for (e = 0; e < 2; e++) {
+      var sg = e === 0 ? 1 : -1, yl = e === 0 ? 0 : L;
+      g.strokeRect(W / 2 - 30, Math.min(yl, yl + sg * 24), 60, 24);
+      g.strokeRect(W / 2 - 20, Math.min(yl, yl + sg * 9), 40, 9);
+      g.beginPath(); g.arc(W / 2, yl + sg * 17, 0.9, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.arc(W / 2, yl + sg * 17, 11, e === 0 ? 0.2 * Math.PI : 1.2 * Math.PI, e === 0 ? 0.8 * Math.PI : 1.8 * Math.PI); g.stroke();
+    }
+    // the boards and the goal frames
+    g.strokeStyle = '#E9F2EC'; g.lineWidth = 1.2; g.lineCap = 'round'; g.lineJoin = 'round';
+    g.beginPath();
+    E.SEGS.forEach(function (sg2) { g.moveTo(sg2[0], sg2[1]); g.lineTo(sg2[2], sg2[3]); });
+    g.stroke();
+    g.fillStyle = '#FFFFFF';
+    [[E.G0, 0], [E.G1, 0], [E.G0, L], [E.G1, L]].forEach(function (p) { g.beginPath(); g.arc(p[0], p[1], 1.3, 0, Math.PI * 2); g.fill(); });
+  }
+  // the star points up the screen, also when the pitch lies on its side
+  function star(g, x, y, R, up) {
+    g.beginPath();
+    for (var i = 0; i < 10; i++) {
+      var a = up + i * Math.PI / 5, r = i % 2 ? R * 0.45 : R;
+      if (i) g.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); else g.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+    }
+    g.closePath(); g.fill();
+  }
+  function paintBodies(g, B, now, flat) {
+    var up = !flat && V && V.rot ? Math.PI : -Math.PI / 2, on = humanTurn(), pulse = C.ui.reduceMotion() ? 0.5 : 0.5 + 0.5 * Math.sin(now / 260);
+    for (var i = 1; i < B.length; i++) {
+      var b = B[i], t = E.teamOf(b.id), c = TEAM[t];
+      g.fillStyle = 'rgba(0,0,0,.28)'; g.beginPath(); g.arc(b.x + 0.7, b.y + 1, E.RD, 0, Math.PI * 2); g.fill();
+      // the discs that may move now glow; the one picked has a bright ring
+      if (on && t === G.M.turn) {
+        g.strokeStyle = 'rgba(255,255,255,' + (0.35 + 0.4 * pulse) + ')'; g.lineWidth = 1.1;
+        g.beginPath(); g.arc(b.x, b.y, E.RD + 1.6, 0, Math.PI * 2); g.stroke();
+      }
+      if ((drag && drag.id === b.id) || (kbOn && on && sel === b.id)) {
+        g.strokeStyle = '#FFE15A'; g.lineWidth = 1.4;
+        g.beginPath(); g.arc(b.x, b.y, E.RD + 1.8, 0, Math.PI * 2); g.stroke();
+      }
+      g.fillStyle = c.ring; g.beginPath(); g.arc(b.x, b.y, E.RD, 0, Math.PI * 2); g.fill();
+      g.fillStyle = c.fill; g.beginPath(); g.arc(b.x, b.y, E.RD * 0.78, 0, Math.PI * 2); g.fill();
+      g.fillStyle = 'rgba(255,255,255,.18)'; g.beginPath(); g.arc(b.x - 1.4, b.y - 1.6, E.RD * 0.42, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#FFFFFF'; star(g, b.x, b.y, E.RD * 0.5, up);
+    }
+    var ball = B[0], R = E.RB;
+    g.fillStyle = 'rgba(0,0,0,.3)'; g.beginPath(); g.arc(ball.x + 0.5, ball.y + 0.8, R, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#FFFFFF'; g.beginPath(); g.arc(ball.x, ball.y, R, 0, Math.PI * 2); g.fill();
+    // patches that turn as the ball rolls
+    var spin = (ball.x + ball.y) * 0.35;
+    g.save(); g.beginPath(); g.arc(ball.x, ball.y, R, 0, Math.PI * 2); g.clip();
+    g.fillStyle = '#1E2B24';
+    g.beginPath(); g.arc(ball.x, ball.y, R * 0.36, 0, Math.PI * 2); g.fill();
+    for (var p = 0; p < 5; p++) {
+      var a = spin + p * Math.PI * 2 / 5;
+      g.beginPath(); g.arc(ball.x + Math.cos(a) * R * 1.02, ball.y + Math.sin(a) * R * 1.02, R * 0.3, 0, Math.PI * 2); g.fill();
+    }
+    g.restore();
+    g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 0.35; g.beginPath(); g.arc(ball.x, ball.y, R, 0, Math.PI * 2); g.stroke();
+  }
+  // The flick to come: an arrow from the disc, as long as the power, and a thin line
+  // back to the finger that pulls
+  function arrow(g, d, angle, power, finger) {
+    var ux = Math.cos(angle), uy = Math.sin(angle), len = E.RD + 4 + power * 34;
+    if (finger) {
+      g.strokeStyle = 'rgba(255,255,255,.5)'; g.lineWidth = 0.6; g.setLineDash([1.2, 1.4]);
+      g.beginPath(); g.moveTo(d.x, d.y); g.lineTo(finger.x, finger.y); g.stroke(); g.setLineDash([]);
+    }
+    var col = power > 0.8 ? '#FF8A3D' : (power > 0.45 ? '#FFD45A' : '#FFFFFF');
+    var ex = d.x + ux * len, ey = d.y + uy * len;
+    g.strokeStyle = col; g.lineWidth = 1.5; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(d.x + ux * (E.RD + 1.5), d.y + uy * (E.RD + 1.5)); g.lineTo(ex, ey); g.stroke();
+    g.fillStyle = col; g.beginPath();
+    g.moveTo(ex + ux * 3.2, ey + uy * 3.2); g.lineTo(ex - uy * 2.4, ey + ux * 2.4); g.lineTo(ex + uy * 2.4, ey - ux * 2.4); g.closePath(); g.fill();
+  }
+  function paintAim(g, now) {
+    if (shot) return;
+    if (drag && drag.power > 0) { var d = E.byId(G.M.b, drag.id); if (d) arrow(g, d, drag.angle, drag.power, drag.p); }
+    else if (botAim) {
+      var bd = E.byId(G.M.b, botAim.id), q = Math.min(1, (now - botAim.t0) / 500);
+      if (bd) arrow(g, bd, botAim.angle, botAim.power * q, null);
+    } else if (kbOn && humanTurn() && sel > 0) { var kd = E.byId(G.M.b, sel); if (kd) arrow(g, kd, kbAim, kbPower, null); }
+  }
+  function paintBanner(g, v, now) {
+    var q = banner ? (now - banner) / 1300 : 1;
+    if (q >= 1) return;
+    var a = q < 0.15 ? q / 0.15 : (q > 0.7 ? (1 - q) / 0.3 : 1), fs = Math.round(Math.min(v.w, v.h) * 0.13);
+    g.globalAlpha = a;
+    g.fillStyle = 'rgba(0,0,0,.45)'; g.fillRect(0, v.h / 2 - fs * 0.85, v.w, fs * 1.7);
+    g.fillStyle = '#FFFFFF'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = '800 ' + fs + 'px ' + (getComputedStyle(document.body).fontFamily || 'sans-serif');
+    g.fillText(C.t('fbGoalBanner'), v.w / 2, v.h / 2);
+    g.globalAlpha = 1;
+  }
+  function cardPaint() {
+    var B = G.M.b.map(function (b) { return { id: b.id, x: b.x, y: b.y }; });
+    return function (g, w, h) {
+      var ww = E.W + 2 * BRD, wh = E.L + 2 * E.D + 2 * BRD, k = Math.min(w / ww, h / wh);
+      g.save(); g.translate((w - ww * k) / 2, (h - wh * k) / 2); g.scale(k, k); g.translate(BRD, E.D + BRD);
+      paintPitch(g); paintBodies(g, B, 0, true);
+      g.restore();
+    };
+  }
+
+  /* ----------------------------------------------------------------- ui */
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (G.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('fbDaily') + ' — ' + C.num(G.daily) })]));
+    else top.appendChild(el('button', { class: 'ch-badge ch-tap', type: 'button', onclick: askNew, text: G.mode === 'bot' ? C.t('fbVsBot') + ' · ' + C.t(G.level) : C.t('fbPeople') }));
+    top.appendChild(el('span', { class: 'ch-badge', text: C.t('fbFirstTo', { n: C.num(G.M.winTo) }) }));
+    top.appendChild(el('span', { class: 'ch-badge' + (G.M.golden ? ' ch-badge--accent' : ''), text: G.M.golden ? C.t('fbGolden') : C.t('fbTurnOf', { n: C.num(Math.min(G.M.turns + 1, G.M.maxTurns)), m: C.num(G.M.maxTurns) }) }));
+    if (!G.daily) {
+      var gear = el('button', { class: 'ch-iconbtn fb-gear', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+      gear.addEventListener('click', showGear);
+      top.appendChild(gear);
+    }
+  }
+  function renderPlayers() {
+    players.innerHTML = '';
+    for (var t = 0; t < 2; t++) {
+      var row = el('div', { class: 'fb-player' }, [
+        el('span', { class: 'fb-player__dot', style: { background: TEAM[t].fill } }),
+        el('span', { class: 'fb-player__name', text: pname(t) }),
+        el('span', { class: 'fb-player__score', text: C.num(G.M.score[t]) })
+      ]);
+      if (!ended && G.M.turn === t) row.classList.add('is-on');
+      players.appendChild(row);
+    }
+  }
+  function renderStatus() {
+    if (!G) return;
+    var t = G.M.turn, s = msg;
+    if (!s && !ended && !shot) s = isBot(t) ? C.t('fbBotTurn') : (G.mode === 'bot' ? C.t('fbYour') : C.t('fbTurnName', { n: pname(t) }));
+    status.textContent = s;
+  }
+  function render() { if (!G) return; renderTop(); renderPlayers(); renderStatus(); draw(); }
+
+  /* -------------------------------------------------------------- input */
+
+  function worldPt(e) {
+    var r = cv.getBoundingClientRect();
+    return toWorld(V || view(), e.clientX - r.left, e.clientY - r.top);
+  }
+  // A finger goes down on (or close to) one of the discs on turn; pulling away from it
+  // aims the flick the other way, and the pull's length is the power
+  cv.addEventListener('pointerdown', function (e) {
+    if (!humanTurn() || drag) return;
+    e.preventDefault();
+    var p = worldPt(e), reach = Math.max(E.RD * 1.5, 24 / ((V && V.k) || 3)), best = null, bd = Infinity;
+    E.discs(G.M, G.M.turn).forEach(function (d) { var dd = Math.hypot(d.x - p.x, d.y - p.y); if (dd < bd) { bd = dd; best = d; } });
+    if (!best || bd > reach) return;
+    drag = { pid: e.pointerId, id: best.id, p: p, angle: 0, power: 0 };
+    sel = best.id; kbOn = false; msg = ''; renderStatus();
+    try { cv.setPointerCapture(e.pointerId); } catch (er) { /* old browsers */ }
+    kick();
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (!drag || e.pointerId !== drag.pid) return;
+    var p = worldPt(e), d = E.byId(G.M.b, drag.id), dx = d.x - p.x, dy = d.y - p.y;
+    drag.p = p; drag.angle = Math.atan2(dy, dx); drag.power = E.powerOf(Math.hypot(dx, dy) - E.RD * 0.5);
+    kick();
+  });
+  function lift(e) {
+    if (!drag || e.pointerId !== drag.pid) return;
+    var d = drag; drag = null;
+    // a pull back onto the disc is no flick
+    if (e.type === 'pointerup' && d.power >= 0.06 && humanTurn()) shoot(d.id, d.angle, d.power);
+    else kick();
+  }
+  cv.addEventListener('pointerup', lift);
+  cv.addEventListener('pointercancel', lift);
+  cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  // Keys: Tab picks the next disc, arrows aim and set the power, Space or Enter flicks
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim') || !humanTurn() || (e.target && e.target.tagName === 'BUTTON' && (e.key === ' ' || e.key === 'Enter'))) return;
+    var mine = E.discs(G.M, G.M.turn).map(function (d) { return d.id; }), i = mine.indexOf(sel), used = true;
+    if (e.key === 'Tab') { sel = mine[(i + (e.shiftKey ? mine.length - 1 : 1) + mine.length) % mine.length] || mine[0]; var d = E.byId(G.M.b, sel), b = G.M.b[0]; kbAim = Math.atan2(b.y - d.y, b.x - d.x); }
+    else if (e.key === 'ArrowLeft') kbAim -= e.shiftKey ? 0.01 : 0.06;
+    else if (e.key === 'ArrowRight') kbAim += e.shiftKey ? 0.01 : 0.06;
+    else if (e.key === 'ArrowUp') kbPower = Math.min(1, kbPower + 0.05);
+    else if (e.key === 'ArrowDown') kbPower = Math.max(0.1, kbPower - 0.05);
+    else if (e.key === ' ' || e.key === 'Enter') { if (kbOn && sel > 0) shoot(sel, kbAim, kbPower); else kbOn = true; }
+    else used = false;
+    if (used) { if (mine.indexOf(sel) < 0) sel = mine[0]; kbOn = true; e.preventDefault(); kick(); }
+  });
+
+  // Away from the app a flick on the move holds still
+  C.onPause(function () { paused = true; drag = null; });
+  C.onResume(function () { paused = false; last = 0; kick(); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { last = 0; kick(); } });
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('fbRules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('Tab', C.t('fbKPick')), kb('← →', C.t('fbKAim')), kb('↑ ↓', C.t('fbKPower')), kb('Space / Enter', C.t('fbKShoot'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 110" width="100%" direction="ltr"><rect width="200" height="110" rx="10" fill="#1C5232"/><rect x="12" y="8" width="176" height="94" fill="#2F8A4A"/>' +
+      '<path d="M100 8 V102 M12 8 H188 V102 H12 Z M188 38 h8 v34 h-8 M12 38 h-8 v34 h8" fill="none" stroke="#E9F2EC" stroke-width="2"/><circle cx="100" cy="55" r="16" fill="none" stroke="#E9F2EC" stroke-width="2"/>';
+    var disc = function (x, y, c, ring) { return '<circle cx="' + x + '" cy="' + y + '" r="10" fill="' + ring + '"/><circle cx="' + x + '" cy="' + y + '" r="7.5" fill="' + c + '"/><circle cx="' + x + '" cy="' + y + '" r="2.6" fill="#FFFFFF"/>'; };
+    var red = function (x, y) { return disc(x, y, '#E0503A', '#A3301E'); }, blue = function (x, y) { return disc(x, y, '#2E6BD8', '#183F8C'); };
+    var ball = function (x, y) { return '<circle cx="' + x + '" cy="' + y + '" r="5" fill="#FFFFFF" stroke="#1E2B24" stroke-width="1"/><circle cx="' + x + '" cy="' + y + '" r="1.8" fill="#1E2B24"/>'; };
+    if (kind === 1) s += red(40, 40) + red(40, 75) + red(70, 55) + blue(140, 40) + blue(150, 72) + ball(160, 56) + '<path d="M120 56 L184 56" stroke="#FFD45A" stroke-width="2.5" stroke-dasharray="5 4"/><path d="M186 56 l-7 -5 v10 z" fill="#FFD45A"/>';
+    if (kind === 2) s += red(80, 55) + ball(118, 55) + '<path d="M80 55 L44 66" stroke="rgba(255,255,255,.7)" stroke-width="1.5" stroke-dasharray="3 3"/><circle cx="44" cy="66" r="7" fill="rgba(255,255,255,.55)"/>' +
+      '<path d="M92 51 L108 46" stroke="#FF8A3D" stroke-width="3" stroke-linecap="round"/><path d="M113 44.5 l-7 -2 l2 8 z" fill="#FF8A3D"/>';
+    if (kind === 3) s += red(50, 80) + blue(120, 40) + ball(92, 60) + '<path d="M92 60 L140 12 L186 50" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-dasharray="4 4"/>';
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('fbTutTitle1'), text: C.t('fbTutText1'), art: tArt(1) },
+    { title: C.t('fbTutTitle2'), text: C.t('fbTutText2'), art: tArt(2) },
+    { title: C.t('fbTutTitle3'), text: C.t('fbTutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  var saved = ctx.loadSave();
+  if (dailyDate) {
+    // the daily match has its own slot, so a half-played day goes on
+    if (!(saved && saved.g && saved.g.daily === dailyDate && restore(saved))) newGame({ daily: dailyDate });
+    if (C.stats.dailyDone('football', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).football;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (!(saved && saved.g && !saved.g.daily && restore(saved))) {
+    newGame(fromPrefs());
+  }
+  ctx.tutorialIfNew(TUT);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { if (G) draw(); });
+})();
+</script>
+</body>
+</html>
