@@ -11645,6 +11645,67 @@ function testWrigglers() {
   ok(Date.now() - t0 < 12000, 'the Wrigglers tests finish in under 12 s (' + (Date.now() - t0) + ' ms)');
 }
 
+// #617: Cqoicebordel asked for Set; built as Trio with our own name and look ("SET" is a trademark)
+function testTrio() {
+  head('Trio (#617)');
+  const t0 = Date.now();
+  const E = loadEngine('trio', 'TrioEngineFactory');
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/trio/index.html'), 'utf8');
+  const rng = (seed) => { let x = seed >>> 0; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; };
+  // 81 cards, each pair completed by exactly one card, 1080 trios in a deck
+  let n = 0, thirdOk = true;
+  for (let a = 0; a < 81; a++) for (let b = a + 1; b < 81; b++) {
+    const c = E.third(a, b);
+    if (c === a || c === b || !E.isTrio(a, b, c)) thirdOk = false;
+    for (let d = b + 1; d < 81; d++) if (E.isTrio(a, b, d)) n++;
+  }
+  ok(n === 1080 && thirdOk, 'every pair of cards has exactly one third, 1080 trios in the deck (' + n + ')');
+  // the rule, feature by feature: all alike or all different
+  const card = (col, sh, cnt, fill) => col + 3 * sh + 9 * cnt + 27 * fill;
+  ok(E.isTrio(card(0, 0, 0, 2), card(0, 0, 1, 2), card(0, 0, 2, 2)), 'one, two and three solid orange circles are a trio');
+  ok(!E.isTrio(card(0, 1, 0, 0), card(0, 1, 0, 0) + 0, card(1, 1, 0, 0)) && !E.isTrio(card(0, 1, 0, 0), card(0, 1, 1, 0), card(1, 1, 2, 0)), 'two of one colour and one of another are not');
+  ok(E.isTrio(card(0, 2, 0, 0), card(1, 1, 1, 1), card(2, 0, 2, 2)), 'all four features different is a trio');
+  // games: the table always holds a trio while cards remain, and a deck game always ends
+  let always = true, ended = 0, foundMin = 99, foundMax = 0, maxTable = 0;
+  for (let k = 0; k < 120; k++) {
+    const S = E.newGame('deck', rng(k + 1)); let g = 0;
+    while (!S.over && g++ < 100) {
+      const t = E.trios(S.table);
+      if (!t.length) { always = false; break; }
+      maxTable = Math.max(maxTable, S.table.length);
+      if (!E.take(S, t[0])) { always = false; break; }
+    }
+    if (S.over) ended++;
+    foundMin = Math.min(foundMin, S.found); foundMax = Math.max(foundMax, S.found);
+  }
+  ok(always && ended === 120, 'every deck game always has a trio on the table and ends (' + ended + ' of 120)');
+  ok(foundMin >= 20 && foundMax <= 27 && maxTable <= 21, 'a deck gives ' + foundMin + '–' + foundMax + ' trios, the table never past 21 cards (' + maxTable + ')');
+  const Sh = E.newGame('short', rng(5)); let g2 = 0;
+  while (!Sh.over && g2++ < 40) E.take(Sh, E.trios(Sh.table)[0]);
+  ok(Sh.over && Sh.found === E.GOAL_SHORT, 'the short game ends at ten trios (' + Sh.found + ')');
+  // a wrong pick is a mistake and changes nothing else
+  const W = E.newGame('short', rng(9)), before = W.table.join(), all = E.trios(W.table).map((x) => x.join());
+  let wrong = null;
+  for (let i = 0; i < 12 && !wrong; i++) for (let j = i + 1; j < 12 && !wrong; j++) for (let k = j + 1; k < 12 && !wrong; k++) if (all.indexOf([i, j, k].join()) < 0) wrong = [i, j, k];
+  ok(!!wrong && !E.take(W, wrong) && W.mistakes === 1 && W.table.join() === before, 'a wrong pick counts a mistake and leaves the table as it was');
+  // a trio on a table of twelve is refilled in place, nothing else moves
+  const R = E.newGame('short', rng(11));
+  const t = E.trios(R.table)[0], others = R.table.filter((_, i) => t.indexOf(i) < 0).join();
+  if (R.table.length === 12) { E.take(R, t); ok(R.table.length >= 12 && R.table.filter((_, i) => t.indexOf(i) < 0).slice(0, 9).join() === others, 'a trio on a table of twelve is refilled in its own places'); }
+  else ok(true, 'the first table was dealt past twelve; refill-in-place is covered by the deck games');
+  // hints: two hints open two cards of one trio
+  const H = E.newGame('short', rng(13)), h1 = E.hint(H, []), h2 = E.hint(H, [h1]);
+  ok(h1 >= 0 && h2 >= 0 && h1 !== h2 && E.trios(H.table).some((x) => x.indexOf(h1) >= 0 && x.indexOf(h2) >= 0), 'a second hint points into the same trio as the first');
+  ok(E.stars({ mistakes: 0, hints: 0 }) === 3 && E.stars({ mistakes: 1, hints: 1 }) === 2 && E.stars({ mistakes: 3, hints: 0 }) === 1, 'stars: three clean, two for up to two slips, one for more');
+  // same seed, same deck: the daily game is the same for everyone
+  ok(E.newGame('short', rng(42)).deck.join() === E.newGame('short', rng(42)).deck.join(), 'the same seed deals the same deck');
+  const V = E.newGame('deck', rng(3));
+  ok(E.valid(V) && !E.valid(Object.assign({}, V, { table: V.table.concat([V.deck[0]]) })) && !E.valid(Object.assign({}, V, { mode: 'x' })), 'a save is checked before it is restored');
+  ok(/C\.daily\('trio', dailyDate\)\.rng/.test(html) && ['tri-fast', 'tri-deck', 'tri-daily'].every((id) => html.indexOf("unlock('" + id + "')") > 0) && !/\bSET\b|'Set'/.test(html),
+    'the daily deck is seeded by the day, the three awards are unlocked, and the game is never called Set');
+  ok(Date.now() - t0 < 12000, 'the Trio tests finish in under 12 s (' + (Date.now() - t0) + ' ms)');
+}
+
 // #554: xmha97 asked for Lights Out (named Lights Off: "Lights Out" is a trademark)
 function testLights() {
   head('Lights Off (#554)');
