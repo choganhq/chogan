@@ -11709,6 +11709,96 @@ function testTrio() {
   ok(Date.now() - t0 < 12000, 'the Trio tests finish in under 12 s (' + (Date.now() - t0) + ' ms)');
 }
 
+// #634: a drop-four game, named Four in a Row ("Connect Four" is a Hasbro trademark)
+function testFourrow() {
+  head('Four in a Row (#634)');
+  const t0 = Date.now();
+  const E = loadEngine('fourrow', 'FourRowEngineFactory');
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/fourrow/index.html'), 'utf8');
+  const rng = (seed) => { let x = seed >>> 0; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; };
+  const run = (cols, first) => { const S = E.newGame(first || 0); cols.forEach((c) => E.play(S, c)); return S; };
+  // gravity: a disc lands on the lowest free cell, a full column takes no more
+  const G = run([3, 3, 3]);
+  ok(G.b[5 * 7 + 3] === 0 && G.b[4 * 7 + 3] === 1 && G.b[3 * 7 + 3] === 0 && G.h[3] === 3 && G.turn === 1, 'discs stack from the bottom of a column and the turn passes');
+  const F = run([0, 0, 0, 0, 0, 0]);
+  ok(F.h[0] === 6 && E.play(F, 0) === -1 && F.plies === 6 && E.legal(F).indexOf(0) < 0, 'a full column refuses another disc');
+  ok(E.play(E.newGame(0), 7) === -1 && E.play(E.newGame(0), -1) === -1, 'columns outside 0–6 are refused');
+  // the four directions
+  const hz = run([0, 0, 1, 1, 2, 2, 3]);
+  ok(hz.winner === 0 && E.winLines(hz).some((l) => l.length === 4 && l.every((i) => Math.floor(i / 7) === 5)), 'four across on the bottom row wins');
+  const vt = run([4, 0, 4, 0, 4, 0, 4]);
+  ok(vt.winner === 0 && E.winLines(vt)[0].every((i) => i % 7 === 4), 'four up a column wins');
+  const d1 = run([0, 1, 1, 2, 2, 3, 2, 3, 3, 6, 3]);
+  ok(d1.winner === 0 && E.winLines(d1).some((l) => l.map((i) => i % 7).sort().join() === '0,1,2,3'), 'four on a rising diagonal wins');
+  const d2 = run([6, 5, 5, 4, 4, 3, 4, 3, 3, 0, 3]);
+  ok(d2.winner === 0 && E.winLines(d2).some((l) => l.map((i) => i % 7).sort().join() === '3,4,5,6'), 'four on a falling diagonal wins');
+  ok(run([0, 0, 1, 1, 2, 2]).winner === -1 && E.play(hz, 5) === -1, 'three is not a win, and nothing is played after a win');
+  // a draw: a full board with no line of four
+  const drawCols = [0, 6, 4, 5, 3, 5, 5, 3, 3, 2, 3, 3, 3, 1, 0, 0, 6, 4, 1, 0, 0, 6, 2, 5, 5, 0, 1, 6, 4, 2, 2, 2, 2, 1, 5, 1, 6, 4, 4, 1, 6, 4];
+  const D = E.newGame(0); let stuck = false;
+  drawCols.forEach((c) => { if (E.play(D, c) < 0) stuck = true; });
+  ok(!stuck && D.plies === 42 && D.winner === 2 && E.legal(D).length === 0, 'a full board with no line of four is a draw (' + D.plies + ' discs, winner ' + D.winner + ')');
+  // the bots: take a win, block a loss
+  const winPos = run([0, 6, 1, 6, 2]);             // seat 1 to move, seat 0 threatens column 3; seat 1 has two in column 6
+  const winMine = run([0, 6, 1, 6, 0, 6]);         // seat 0 to move, seat 1 has three in column 6, seat 0 none: block
+  const take = run([0, 6, 1, 6, 2, 5]);            // seat 0 to move and wins in column 3
+  let medOk = true, hardOk = true;
+  for (let s = 1; s <= 4; s++) {
+    if (E.think(take, 'medium', rng(s)) !== 3 || E.think(winPos, 'medium', rng(s)) !== 3 || E.think(winMine, 'medium', rng(s)) !== 6) medOk = false;
+  }
+  if (E.think(take, 'hard', rng(1), { ms: 300 }) !== 3 || E.think(winPos, 'hard', rng(1), { ms: 300 }) !== 3 || E.think(winMine, 'hard', rng(1), { ms: 300 }) !== 6) hardOk = false;
+  ok(medOk, 'the medium bot takes a win and blocks a loss in one');
+  ok(hardOk, 'the hard bot takes a win and blocks a loss in one');
+  // the hard bot keeps to its time on an open board
+  const th = Date.now(), hc = E.think(E.newGame(0), 'hard', rng(2), { ms: 400 }), tt = Date.now() - th;
+  ok(hc === 3 && tt < 1500, 'the hard bot opens in the centre within its time (' + tt + ' ms)');
+  // bot against bot always ends, every board legal on the way
+  let ends = 0, okAll = true, wins = [0, 0, 0];
+  const lv = ['easy', 'medium'];
+  for (let k = 0; k < 24; k++) {
+    const S = E.newGame(k % 2), r = rng(100 + k); let n = 0;
+    while (S.winner === -1 && n++ < 50) {
+      const c = E.think(S, lv[(S.turn + k) % 2], r);
+      if (E.play(S, c) < 0) { okAll = false; break; }
+      if (S.winner === -1 && !E.valid(S)) { okAll = false; break; }
+    }
+    if (S.winner >= 0) { ends++; wins[S.winner === 2 ? 2 : (lv[(S.winner + k) % 2] === 'medium' ? 1 : 0)]++; }
+  }
+  ok(okAll && ends === 24, 'easy against medium games all end with legal moves (' + ends + ' of 24)');
+  ok(wins[1] > wins[0], 'medium beats easy more often than it loses (' + wins[1] + ' to ' + wins[0] + ', ' + wins[2] + ' drawn)');
+  // the same seed plays the same game: the daily bot is the same for everyone
+  const play = () => { const S = E.newGame(0), r = rng(7); while (S.winner === -1) E.play(S, E.think(S, 'medium', r)); return S.b.join(''); };
+  ok(play() === play(), 'the same seed plays the same game');
+  // saves
+  const V = run([3, 3, 2]);
+  const bad1 = E.clone(V); bad1.b[0] = 0;                                   // floating disc
+  const bad2 = E.clone(V); bad2.turn = 1 - bad2.turn;                       // wrong turn
+  const bad3 = E.clone(V); bad3.h[3] = 1;                                   // height out of step
+  ok(E.valid(V) && !E.valid(bad1) && !E.valid(bad2) && !E.valid(bad3) && !E.valid(null), 'a save is checked before it is restored');
+  // the page
+  const gm = games.find((g) => g.id === 'fourrow');
+  ok(!!gm && gm.cat === 'board' && gm.people === 2 && gm.path === 'games/fourrow/index.html', 'Four in a Row is listed as a two-player board game');
+  const rgb = (x) => [1, 3, 5].map((i) => parseInt(x.slice(i, i + 2), 16) / 255);
+  const lin = (c) => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  const lab = (x) => {
+    const [R, Gr, Bl] = rgb(x).map(lin), f = (t) => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
+    const X = (R * 0.4124 + Gr * 0.3576 + Bl * 0.1805) / 0.95047, Y = R * 0.2126 + Gr * 0.7152 + Bl * 0.0722, Z = (R * 0.0193 + Gr * 0.1192 + Bl * 0.9505) / 1.08883;
+    return [116 * f(Y) - 16, 500 * (f(X) - f(Y)), 200 * (f(Y) - f(Z))];
+  };
+  const dE = (a, b) => { const P = lab(a), Q = lab(b); return Math.hypot(P[0] - Q[0], P[1] - Q[1], P[2] - Q[2]); };
+  const lum = (x) => rgb(x).map((c) => c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)).reduce((a, c, i) => a + c * [0.2126, 0.7152, 0.0722][i], 0);
+  const near = games.filter((g) => g.id !== 'fourrow').map((g) => [g.id, dE(g.color, gm.color)]).sort((x, y) => x[1] - y[1])[0];
+  ok(near[1] >= 15 && 1.05 / (lum(gm.color) + 0.05) >= 4.5 && html.indexOf("accent: '" + gm.color + "'") > 0, 'the accent differs from every other game by ΔE ≥ 15 (nearest ' + near[0] + ', ' + near[1].toFixed(1) + '), keeps white text at 4.5:1 and matches the page');
+  const icon = fs.readFileSync(path.join(ROOT, 'www/games/fourrow/icon.svg'), 'utf8');
+  ok(new RegExp('^<svg[^>]*>\\s*<rect width="96" height="96" rx="22" fill="' + gm.soft + '"/>').test(icon.trim()), 'the icon starts on the soft tint of games.json');
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  ok(['fr-win', 'fr-hard', 'fr-daily'].every((id) => core.indexOf("id: '" + id + "'") > 0 && html.indexOf("unlock('" + id + "')") > 0), 'the three awards are in the core and unlocked by the game');
+  ok(/C\.daily\('fourrow', G\.daily \+ '\|' \+ G\.S\.plies\)\.rng/.test(html) && /daily \? 'medium'/.test(html), 'the daily game plays the medium bot from the day\'s seed');
+  ok(!/Connect ?Four|Hasbro/i.test(html.replace(/"Connect Four" is a Hasbro trademark/, '')), 'the page never uses the trademarked name');
+  ok(/ctx\.tutorialIfNew\(TUT\)/.test(html) && /C\.icon\('gear', 20\)/.test(html) && !/history\.(push|replace)State|localStorage/.test(html), 'a tutorial, options behind a gear, no history or direct storage');
+  ok(Date.now() - t0 < 12000, 'the Four in a Row tests finish in under 12 s (' + (Date.now() - t0) + ' ms)');
+}
+
 // #554: xmha97 asked for Lights Out (named Lights Off: "Lights Out" is a trademark)
 function testLights() {
   head('Lights Off (#554)');
