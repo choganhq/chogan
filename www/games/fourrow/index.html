@@ -1,0 +1,795 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>چهار در ردیف — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* The board is the game's own and the same in both themes: a plum frame with a pale
+     back, coral and teal discs. Not the blue frame and red/yellow discs of the toy. */
+  :root { --fr-frame: #5B2A6E; --fr-rim: #43195A; --fr-back: #F3ECF4; --fr-a: #E4572E; --fr-a-lt: #F6A487; --fr-b: #12998C; --fr-b-lt: #8FD9D1; --fr-ink: #3A2244; }
+  /* 7.4 cells wide (7 and a rim), 7.2 high (a lane for the next disc, 6 rows and a rim) */
+  .fr-wrap > .ch-fit { --fit-ar: calc(37 / 36); }
+  .ch-fit > .fr-box { width: 100%; height: 100%; display: grid; place-items: center; }
+  .fr-canvas { display: block; touch-action: manipulation; cursor: pointer; }
+  .fr-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .fr-players { width: 100%; max-width: 520px; display: flex; gap: var(--s-2); }
+  .fr-player { flex: 1; display: flex; align-items: center; gap: var(--s-2); min-width: 0; background: var(--c-surface);
+    border-radius: var(--r-md); padding: 8px 12px; box-shadow: var(--sh-1); border: 2px solid transparent; min-height: 44px;
+    transition: border-color var(--t-mid) var(--ease), transform var(--t-mid) var(--ease); }
+  .fr-player--on { border-color: var(--game); transform: translateY(-2px); box-shadow: var(--sh-2); }
+  .fr-player__dot { width: 20px; height: 20px; border-radius: 50%; flex: 0 0 20px; }
+  .fr-player__name { flex: 1; min-width: 0; font-weight: 700; font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fr-thinking { animation: fr-blink 900ms infinite; }
+  @keyframes fr-blink { 50% { opacity: .55; } }
+  .fr-status { min-height: 2.9em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function FourRowEngineFactory() {
+  'use strict';
+
+  // 7 columns × 6 rows, cell r * 7 + c with row 0 at the top. A cell holds -1 (empty) or
+  // the seat (0 or 1) whose disc is in it; h[c] counts the discs in column c, so the next
+  // disc there lands on row 5 - h[c]. winner: -1 playing, 0 or 1 a seat, 2 a full board.
+  var W = 7, H = 6, N = W * H;
+  var LEVELS = ['easy', 'medium', 'hard'];
+  var ORDER = [3, 2, 4, 1, 5, 0, 6];          // the centre first: it sits in the most lines
+  var DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
+  var WIN = 100000;
+
+  // every run of four cells, for the bot's reading of a position
+  var LINES = [];
+  for (var r0 = 0; r0 < H; r0++) for (var c0 = 0; c0 < W; c0++) DIRS.forEach(function (d) {
+    var r3 = r0 + 3 * d[0], c3 = c0 + 3 * d[1];
+    if (r3 < 0 || r3 >= H || c3 < 0 || c3 >= W) return;
+    LINES.push([0, 1, 2, 3].map(function (k) { return (r0 + k * d[0]) * W + c0 + k * d[1]; }));
+  });
+
+  function newGame(first) {
+    var b = [];
+    for (var i = 0; i < N; i++) b.push(-1);
+    var f = first === 1 ? 1 : 0;
+    return { b: b, h: [0, 0, 0, 0, 0, 0, 0], first: f, turn: f, winner: -1, plies: 0, last: -1 };
+  }
+  function clone(S) {
+    return { b: S.b.slice(), h: S.h.slice(), first: S.first, turn: S.turn, winner: S.winner, plies: S.plies, last: S.last };
+  }
+  function landing(S, c) { return S.h[c] < H ? (H - 1 - S.h[c]) * W + c : -1; }
+  function canDrop(S, c) { return S.winner === -1 && c >= 0 && c < W && c === Math.floor(c) && S.h[c] < H; }
+  function legal(S) { return S.winner === -1 ? ORDER.filter(function (c) { return S.h[c] < H; }) : []; }
+
+  // The runs of four or more through cell i if seat p held it (b[i] itself is not read)
+  function runsAt(b, i, p) {
+    var r = Math.floor(i / W), c = i % W, out = [];
+    for (var k = 0; k < 4; k++) {
+      var d = DIRS[k], run = [i];
+      for (var s = -1; s <= 1; s += 2) {
+        var rr = r + s * d[0], cc = c + s * d[1];
+        while (rr >= 0 && rr < H && cc >= 0 && cc < W && b[rr * W + cc] === p) {
+          if (s < 0) run.unshift(rr * W + cc); else run.push(rr * W + cc);
+          rr += s * d[0]; cc += s * d[1];
+        }
+      }
+      if (run.length >= 4) out.push(run);
+    }
+    return out;
+  }
+  function wins(b, i, p) {
+    var r = Math.floor(i / W), c = i % W;
+    for (var k = 0; k < 4; k++) {
+      var d = DIRS[k], n = 1;
+      for (var s = -1; s <= 1; s += 2) {
+        var rr = r + s * d[0], cc = c + s * d[1];
+        while (rr >= 0 && rr < H && cc >= 0 && cc < W && b[rr * W + cc] === p) { n++; rr += s * d[0]; cc += s * d[1]; }
+      }
+      if (n >= 4) return true;
+    }
+    return false;
+  }
+
+  // Drops the seat to move's disc into column c; returns the cell it landed in, or -1
+  function play(S, c) {
+    if (!canDrop(S, c)) return -1;
+    var i = landing(S, c), p = S.turn;
+    S.b[i] = p; S.h[c]++; S.plies++; S.last = i;
+    if (wins(S.b, i, p)) S.winner = p;
+    else if (S.plies === N) S.winner = 2;
+    else S.turn = 1 - p;
+    return i;
+  }
+  // The winning lines, each as its cells in order, or []
+  function winLines(S) {
+    if (S.winner !== 0 && S.winner !== 1 || S.last < 0) return [];
+    return runsAt(S.b, S.last, S.winner);
+  }
+  // Columns where seat p would win at once
+  function winning(S, p) {
+    return ORDER.filter(function (c) { var i = landing(S, c); return i >= 0 && wins(S.b, i, p); });
+  }
+
+  /* ---- the bot ---- */
+
+  function evaluate(b, p) {
+    var q = 1 - p, v = 0;
+    for (var k = 0; k < LINES.length; k++) {
+      var L = LINES[k], mine = 0, theirs = 0;
+      for (var j = 0; j < 4; j++) { var x = b[L[j]]; if (x === p) mine++; else if (x === q) theirs++; }
+      if (theirs === 0) v += mine === 3 ? 5 : mine === 2 ? 2 : 0;
+      else if (mine === 0) v -= theirs === 3 ? 6 : theirs === 2 ? 2 : 0;
+    }
+    for (var r = 0; r < H; r++) { var m = b[r * W + 3]; if (m === p) v += 3; else if (m === q) v -= 3; }
+    return v;
+  }
+
+  // Negamax with alpha-beta on one shared board, made and unmade in place
+  function negamax(b, h, p, depth, alpha, beta, plies, T) {
+    if ((++T.nodes & 1023) === 0 && Date.now() > T.deadline) T.out = true;
+    if (T.out) return 0;
+    if (plies === N) return 0;
+    for (var a = 0; a < W; a++) {
+      var c = ORDER[a];
+      if (h[c] < H && wins(b, (H - 1 - h[c]) * W + c, p)) return WIN - plies - 1;   // a sooner win is worth more
+    }
+    if (depth === 0) return evaluate(b, p);
+    var best = -Infinity;
+    for (var k = 0; k < W; k++) {
+      var cc = ORDER[k];
+      if (h[cc] >= H) continue;
+      var i = (H - 1 - h[cc]) * W + cc;
+      b[i] = p; h[cc]++;
+      var v = -negamax(b, h, 1 - p, depth - 1, -beta, -alpha, plies + 1, T);
+      b[i] = -1; h[cc]--;
+      if (T.out) return 0;
+      if (v > best) best = v;
+      if (v > alpha) alpha = v;
+      if (alpha >= beta) break;
+    }
+    return best;
+  }
+  // Each legal column's value for the seat to move, searched depth plies ahead
+  function rate(S, cols, depth, T) {
+    var b = S.b.slice(), h = S.h.slice(), p = S.turn, out = [];
+    for (var k = 0; k < cols.length; k++) {
+      var c = cols[k], i = (H - 1 - h[c]) * W + c;
+      if (wins(b, i, p)) { out.push({ c: c, v: WIN - S.plies - 1 }); continue; }
+      b[i] = p; h[c]++;
+      var v = -negamax(b, h, 1 - p, depth - 1, -Infinity, Infinity, S.plies + 1, T);
+      b[i] = -1; h[c]--;
+      if (T.out) return null;
+      out.push({ c: c, v: v });
+    }
+    return out;
+  }
+
+  // The bot's column. easy: takes a win, blocks only now and then, else plays loosely;
+  // medium: takes a win, always blocks, then looks four plies ahead with a little noise;
+  // hard: deepens until its time runs out (ms, 600 by default), centre columns first.
+  function think(S, level, rnd, opt) {
+    rnd = rnd || Math.random;
+    var cols = legal(S), p = S.turn;
+    if (!cols.length) return -1;
+    var win = winning(S, p);
+    if (win.length) return win[0];
+    var threat = winning(S, 1 - p);
+    if (level === 'easy') {
+      if (threat.length && rnd() < 0.55) return threat[0];
+      // mostly avoid handing over a win straight above its own disc
+      var safe = cols.filter(function (c) {
+        var T = clone(S); play(T, c); return !winning(T, 1 - p).length;
+      });
+      var pool = safe.length && rnd() < 0.7 ? safe : cols;
+      // a loose lean to the middle
+      var wsum = 0, ws = pool.map(function (c) { var w = 4 - Math.abs(3 - c); wsum += w; return w; }), x = rnd() * wsum;
+      for (var k = 0; k < pool.length; k++) { x -= ws[k]; if (x < 0) return pool[k]; }
+      return pool[pool.length - 1];
+    }
+    if (threat.length) return threat[0];
+    if (level === 'medium') {
+      var R = rate(S, cols, 4, { nodes: 0, deadline: Infinity, out: false });
+      R.forEach(function (x) { x.v += rnd() * 7; });
+      R.sort(function (a, b) { return b.v - a.v; });
+      return R[0].c;
+    }
+    var ms = opt && opt.ms ? opt.ms : 600, T = { nodes: 0, deadline: Date.now() + ms, out: false };
+    var order = cols.slice(), best = null;
+    for (var depth = 2; depth <= N - S.plies; depth++) {
+      var got = rate(S, order, depth, T);
+      if (!got) break;
+      got.forEach(function (x) { x.v += rnd() * 0.5; });      // only breaks ties
+      got.sort(function (a, b) { return b.v - a.v; });
+      best = got;
+      if (got[0].v > WIN / 2 || got[0].v < -WIN / 2 || (opt && opt.depth && depth >= opt.depth)) break;
+      order = got.map(function (x) { return x.c; });            // the best line first next time
+    }
+    return best ? best[0].c : cols[0];
+  }
+
+  function valid(S) {
+    if (!S || !Array.isArray(S.b) || S.b.length !== N || !Array.isArray(S.h) || S.h.length !== W) return false;
+    if (S.first !== 0 && S.first !== 1) return false;
+    var n = [0, 0];
+    for (var c = 0; c < W; c++) {
+      var k = 0;
+      for (var r = H - 1; r >= 0; r--) {
+        var x = S.b[r * W + c];
+        if (x === -1) break;
+        if (x !== 0 && x !== 1) return false;
+        n[x]++; k++;
+      }
+      // nothing floats: above the first gap a column is empty
+      for (var r2 = H - 1 - k; r2 >= 0; r2--) if (S.b[r2 * W + c] !== -1) return false;
+      if (S.h[c] !== k) return false;
+    }
+    var f = S.first, o = 1 - f;
+    if (!(n[f] === n[o] || n[f] === n[o] + 1) || S.plies !== n[0] + n[1]) return false;
+    if (S.winner !== -1) return S.winner === 0 || S.winner === 1 || S.winner === 2;
+    if (S.turn !== (n[f] === n[o] ? f : o)) return false;
+    for (var i = 0; i < N; i++) if (S.b[i] !== -1 && wins(S.b, i, S.b[i])) return false;
+    return true;
+  }
+
+  return { W: W, H: H, N: N, LEVELS: LEVELS, ORDER: ORDER, LINES: LINES, newGame: newGame, clone: clone, landing: landing,
+    canDrop: canDrop, legal: legal, play: play, winLines: winLines, winning: winning, evaluate: evaluate, think: think, valid: valid };
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = FourRowEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = FourRowEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'fourrow',
+    name: { fa: 'چهار در ردیف', en: 'Four in a Row', zh: '四子连线', de: 'Vier in einer Reihe', es: 'Cuatro en línea', pl: 'Cztery w rzędzie' },
+    accent: '#703080',
+    mood: 'sudoku',
+    strings: {
+      fa: {
+        board: 'صفحه‌ی چهار در ردیف', vsBot: 'مقابل ربات', two: 'دو نفره', bot: 'ربات', playerN: 'بازیکن {n}',
+        modeT: 'بازیکن‌ها', firstT: 'چه کسی شروع کند', firstMe: 'من', firstAlt: 'به نوبت',
+        newMatch: 'بازی تازه', begin: 'شروع', undoMove: 'برگرداندن حرکت', endWarn: 'بازی فعلی تمام می‌شود. ادامه؟', settingsT: 'بازی تازه',
+        yourMove: 'روی یک ستون بزن تا مهره‌ات در آن بیفتد', turnOf: 'نوبت {n}', thinking: 'ربات فکر می‌کند…',
+        dailyFr: 'چهار در ردیف روزانه', vsMedium: 'مقابل ربات متوسط', playerWon: '{n} برد', tie: 'مساوی', discsL: 'مهره‌ها',
+        rules: 'به نوبت یک مهره در یکی از هفت ستون می‌اندازی و مهره تا پایین‌ترین خانه‌ی خالی همان ستون پایین می‌رود. هر کس اول چهار مهره‌ی خودش را پشت سر هم در یک خط بچیند برنده است: افقی، عمودی یا مورب. اگر صفحه پر شود و کسی چهارتا نچیده باشد، بازی مساوی است. مقابل ربات، برگرداندن حرکت هم حرکت تو و هم جواب ربات را برمی‌گرداند.',
+        kCol: 'انتخاب ستون', kDrop: 'انداختن مهره', kDigit: 'انداختن در همان ستون',
+        tutTitle1: 'مهره پایین می‌افتد', tutText1: 'روی یک ستون بزن؛ مهره تا پایین‌ترین خانه‌ی خالی آن می‌افتد.',
+        tutTitle2: 'چهارتا در یک خط', tutText2: 'چهار مهره‌ی خودت را پشت سر هم بچین: افقی، عمودی یا مورب.',
+        tutTitle3: 'راه حریف را ببند', tutText3: 'وقتی حریف سه‌تا چیده، خانه‌ی چهارمش را خودت بگیر.'
+      },
+      en: {
+        board: 'Four in a Row board', vsBot: 'Against the bot', two: 'Two players', bot: 'Bot', playerN: 'Player {n}',
+        modeT: 'Players', firstT: 'Who starts', firstMe: 'Me', firstAlt: 'Take turns',
+        newMatch: 'New game', begin: 'Start', undoMove: 'Undo move', endWarn: 'This ends the current game. Continue?', settingsT: 'New game',
+        yourMove: 'Tap a column to drop your disc', turnOf: "{n}'s turn", thinking: 'The bot is thinking…',
+        dailyFr: 'Daily Four in a Row', vsMedium: 'against the medium bot', playerWon: '{n} wins', tie: 'Draw', discsL: 'Discs',
+        rules: 'Take turns dropping a disc into one of the seven columns; it falls to the lowest empty cell of that column. The first to get four of their own discs in an unbroken line wins: across, up and down, or diagonally. If the board fills up with no line of four, the game is a draw. Against the bot, undo takes back your move and its reply together.',
+        kCol: 'Pick a column', kDrop: 'Drop a disc', kDigit: 'Drop in that column',
+        tutTitle1: 'Discs fall', tutText1: 'Tap a column; your disc drops to its lowest empty cell.',
+        tutTitle2: 'Four in a line', tutText2: 'Line up four of your discs: across, up and down, or diagonally.',
+        tutTitle3: 'Block the other side', tutText3: 'When they have three in a line, take the fourth cell yourself.'
+      },
+      pl: {
+        board: 'Plansza Cztery w rzędzie', vsBot: 'Przeciwko botowi', two: 'Dwóch graczy', bot: 'Bot', playerN: 'Gracz {n}',
+        modeT: 'Gracze', firstT: 'Kto zaczyna', firstMe: 'Ja', firstAlt: 'Na zmianę',
+        newMatch: 'Nowa gra', begin: 'Start', undoMove: 'Cofnij ruch', endWarn: 'To zakończy bieżącą grę. Kontynuować?', settingsT: 'Nowa gra',
+        yourMove: 'Dotknij kolumny, aby wrzucić swój krążek', turnOf: 'Ruch: {n}', thinking: 'Bot myśli…',
+        dailyFr: 'Codzienne Cztery w rzędzie', vsMedium: 'przeciwko botowi na średnim poziomie', playerWon: '{n} wygrywa', tie: 'Remis', discsL: 'Krążki',
+        rules: 'Na zmianę wrzucacie krążek do jednej z siedmiu kolumn; spada on na najniższe wolne pole tej kolumny. Wygrywa ten, kto pierwszy ułoży cztery swoje krążki w nieprzerwanej linii: poziomo, pionowo lub po skosie. Jeśli plansza się zapełni, a nikt nie ułoży czwórki, jest remis. W grze z botem cofnięcie zabiera Twój ruch razem z odpowiedzią bota.',
+        kCol: 'Wybór kolumny', kDrop: 'Wrzuć krążek', kDigit: 'Wrzuć do tej kolumny',
+        tutTitle1: 'Krążki spadają', tutText1: 'Dotknij kolumny; krążek spadnie na jej najniższe wolne pole.',
+        tutTitle2: 'Cztery w linii', tutText2: 'Ułóż cztery swoje krążki w linii: poziomo, pionowo lub po skosie.',
+        tutTitle3: 'Blokuj rywala', tutText3: 'Gdy rywal ma trzy w linii, zajmij czwarte pole sam.'
+      },
+      zh: {
+        board: '四子连线棋盘', vsBot: '对战电脑', two: '双人', bot: '电脑', playerN: '玩家 {n}',
+        modeT: '玩家', firstT: '谁先下', firstMe: '我', firstAlt: '轮流',
+        newMatch: '新一局', begin: '开始', undoMove: '悔棋', endWarn: '将结束当前对局，是否继续？', settingsT: '新一局',
+        yourMove: '点一列，把你的棋子投进去', turnOf: '轮到{n}', thinking: '电脑思考中……',
+        dailyFr: '每日四子连线', vsMedium: '对战中等电脑', playerWon: '{n}获胜', tie: '平局', discsL: '棋子',
+        rules: '双方轮流把一枚棋子投进七列中的一列，棋子会落到这一列最低的空格。先把自己的四枚棋子连成一条线的一方获胜：横、竖、斜都可以。如果棋盘下满了还没有人连成四个，就是平局。对战电脑时，悔棋会同时收回你的一步和电脑的回应。',
+        kCol: '选择一列', kDrop: '投下棋子', kDigit: '投进该列',
+        tutTitle1: '棋子会落下', tutText1: '点一列，棋子会落到这一列最低的空格。',
+        tutTitle2: '四子连成线', tutText2: '把你的四枚棋子连成一线：横、竖或斜。',
+        tutTitle3: '堵住对手', tutText3: '对手已有三个连成一线时，抢先占住第四格。'
+      },
+      de: {
+        board: 'Spielbrett Vier in einer Reihe', vsBot: 'Gegen den Bot', two: 'Zu zweit', bot: 'Bot', playerN: 'Spieler {n}',
+        modeT: 'Spieler', firstT: 'Wer beginnt', firstMe: 'Ich', firstAlt: 'Abwechselnd',
+        newMatch: 'Neue Partie', begin: 'Start', undoMove: 'Zug zurück', endWarn: 'Die aktuelle Partie endet. Weiter?', settingsT: 'Neue Partie',
+        yourMove: 'Tippe eine Spalte, um deine Scheibe einzuwerfen', turnOf: 'Am Zug: {n}', thinking: 'Der Bot überlegt …',
+        dailyFr: 'Vier in einer Reihe des Tages', vsMedium: 'gegen den mittleren Bot', playerWon: 'Sieg: {n}', tie: 'Unentschieden', discsL: 'Scheiben',
+        rules: 'Ihr werft abwechselnd eine Scheibe in eine der sieben Spalten; sie fällt auf das unterste freie Feld dieser Spalte. Wer zuerst vier eigene Scheiben in einer lückenlosen Linie hat (waagrecht, senkrecht oder diagonal), gewinnt. Ist das Brett voll und niemand hat vier in einer Reihe, endet die Partie unentschieden. Gegen den Bot nimmt »Zug zurück« deinen Zug und seine Antwort zusammen zurück.',
+        kCol: 'Spalte wählen', kDrop: 'Scheibe einwerfen', kDigit: 'In diese Spalte werfen',
+        tutTitle1: 'Scheiben fallen', tutText1: 'Tippe eine Spalte; deine Scheibe fällt auf ihr unterstes freies Feld.',
+        tutTitle2: 'Vier in einer Linie', tutText2: 'Bring vier deiner Scheiben in eine Linie: waagrecht, senkrecht oder diagonal.',
+        tutTitle3: 'Blockiere den Gegner', tutText3: 'Hat der Gegner drei in einer Linie, besetze das vierte Feld selbst.'
+      },
+      es: {
+        board: 'Tablero de Cuatro en línea', vsBot: 'Contra el bot', two: 'Dos jugadores', bot: 'Bot', playerN: 'Jugador {n}',
+        modeT: 'Jugadores', firstT: 'Quién empieza', firstMe: 'Yo', firstAlt: 'Por turnos',
+        newMatch: 'Nueva partida', begin: 'Empezar', undoMove: 'Deshacer jugada', endWarn: 'Esto termina la partida actual. ¿Seguir?', settingsT: 'Nueva partida',
+        yourMove: 'Toca una columna para soltar tu ficha', turnOf: 'Turno de {n}', thinking: 'El bot está pensando…',
+        dailyFr: 'Cuatro en línea diario', vsMedium: 'contra el bot medio', playerWon: 'Gana: {n}', tie: 'Empate', discsL: 'Fichas',
+        rules: 'Por turnos, cada uno suelta una ficha en una de las siete columnas; cae hasta la casilla libre más baja de esa columna. Gana quien primero junta cuatro fichas propias en una línea sin huecos: en horizontal, en vertical o en diagonal. Si el tablero se llena sin ninguna línea de cuatro, es empate. Contra el bot, deshacer quita tu jugada y su respuesta a la vez.',
+        kCol: 'Elegir columna', kDrop: 'Soltar una ficha', kDigit: 'Soltar en esa columna',
+        tutTitle1: 'Las fichas caen', tutText1: 'Toca una columna; tu ficha cae hasta su casilla libre más baja.',
+        tutTitle2: 'Cuatro en una línea', tutText2: 'Junta cuatro fichas tuyas en línea: horizontal, vertical o diagonal.',
+        tutTitle3: 'Cierra el paso', tutText3: 'Si el otro tiene tres en línea, ocupa tú la cuarta casilla.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var MODES = ['bot', 'two'], FIRSTS = ['p1', 'p2', 'alt'];
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs) prefs = { mode: 'bot', level: 'medium', first: 'p1', altNext: 0 };
+  if (MODES.indexOf(prefs.mode) < 0) prefs.mode = 'bot';
+  if (E.LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+  if (FIRSTS.indexOf(prefs.first) < 0) prefs.first = 'p1';
+  if (prefs.altNext !== 1) prefs.altNext = 0;
+
+  // G: the game around the engine's state S. cur: the keyboard's column; hover: the
+  // mouse's column. fx: discs still falling, by cell. winT: when the win line started.
+  var G = null, timer = null, kbOn = false, cur = 3, hover = -1, fx = {}, winT = 0, raf = 0;
+
+  var cv = el('canvas', { class: 'fr-canvas', role: 'img', 'aria-label': C.t('board') });
+  var box = el('div', { class: 'fr-box' }, [cv]);
+  var top = el('div', { class: 'fr-top ch-above' });
+  var players = el('div', { class: 'fr-players ch-above' });
+  var status = el('div', { class: 'fr-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'fr-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, players, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ setup */
+
+  function newGame(o) {
+    stop();
+    var daily = o.daily || null, first = 0;
+    if (!daily) {
+      if (o.first === 'p2') first = 1;
+      else if (o.first === 'alt') { first = prefs.altNext; prefs.altNext = 1 - first; }
+      prefs.mode = o.mode; prefs.level = o.level; prefs.first = o.first; ctx.store.set('prefs', prefs);
+    }
+    // the daily game: you start, against the medium bot
+    G = { mode: daily ? 'bot' : o.mode, level: daily ? 'medium' : o.level, first: daily ? 'p1' : o.first, daily: daily,
+      S: E.newGame(first), hist: [], startedAt: Date.now(), done: false };
+    fx = {}; winT = 0; cur = 3;
+    render(); save();
+    maybeBot();
+  }
+  function current() { return { mode: G.mode, level: G.level, first: G.first }; }
+
+  function isBot(seat) { return G.mode === 'bot' && seat === 1; }
+  function busy() { return !G || G.done || isBot(G.S.turn); }
+  function stop() { if (timer) { clearTimeout(timer); timer = null; } }
+
+  function maybeBot() {
+    if (!G || G.done || !isBot(G.S.turn)) return;
+    renderSide();
+    // after the player's disc has landed, so the search never stalls its fall
+    timer = setTimeout(function () {
+      timer = null;
+      if (!G || G.done || !isBot(G.S.turn)) return;
+      // the daily bot plays from the day's seed, so everyone meets the same opponent
+      var rnd = G.daily ? C.daily('fourrow', G.daily + '|' + G.S.plies).rng : Math.random;
+      var c = E.think(G.S, G.level, rnd, { ms: 600 });
+      if (c >= 0) act(c);
+    }, C.ui.reduceMotion() ? 200 : 460);
+  }
+
+  /* ------------------------------------------------------------- moves */
+
+  function act(c) {
+    var before = E.clone(G.S), who = G.S.turn;
+    var i = E.play(G.S, c);
+    if (i < 0) { C.feedback('bad'); return false; }
+    G.hist.push(before);
+    if (G.hist.length > 50) G.hist.shift();
+    var row = Math.floor(i / E.W);
+    if (!C.ui.reduceMotion()) fx[i] = { t0: performance.now(), dur: 150 + 70 * Math.sqrt(row + 1) };
+    C.feedback(isBot(who) ? 'soft' : 'place');
+    if (G.S.winner >= 0) { G.done = true; winT = 0; render(); kick(); finish(); return true; }
+    render(); kick(); save();
+    maybeBot();
+    return true;
+  }
+
+  // Against the bot one undo takes back its reply and your disc together
+  function undo() {
+    if (!G || G.done || !G.hist.length) return;
+    stop();
+    var steps = G.mode === 'bot' ? (isBot(G.S.turn) ? 1 : 2) : 1;
+    // when the bot started, its first disc stays: undo never hands the bot's turn back
+    if (G.mode === 'bot' && G.hist.length - steps >= 0 && isBot(G.hist[G.hist.length - steps].turn) && G.hist.length - steps === 0 && steps === 2) steps = 1;
+    if (G.hist.length < steps) steps = G.hist.length;
+    var h;
+    for (var k = 0; k < steps; k++) h = G.hist.pop();
+    G.S = h; fx = {};
+    C.feedback('soft');
+    render(); save();
+    maybeBot();
+  }
+
+  /* ------------------------------------------------------------ result */
+
+  function pname(seat) {
+    if (G.mode === 'bot') return seat === 0 ? (C.state.profile.name || C.t('you')) : C.t('bot');
+    return C.t('playerN', { n: C.num(seat + 1) });
+  }
+
+  function finish() {
+    stop();
+    var S = G.S, vsBot = G.mode === 'bot', tie = S.winner === 2, won = vsBot ? S.winner === 0 : !tie;
+    var base = vsBot ? ({ easy: 5, medium: 10, hard: 18 }[G.level] || 10) : 8;
+    var coins = Math.max(2, Math.round(won ? base : base * (tie ? 0.5 : 0.3))) + (G.daily ? 8 : 0);
+    var points = Math.max(3, Math.round(won ? base * 4 : base * (tie ? 2 : 1.2))) + (G.daily ? 25 : 0);
+    if (vsBot && won) {
+      C.achievements.unlock('fr-win');
+      if (G.level === 'hard') C.achievements.unlock('fr-hard');
+      if (G.daily) C.achievements.unlock('fr-daily');
+    }
+    var title = tie ? C.t('tie') : (vsBot ? (won ? C.t('won') : C.t('lost')) : C.t('playerWon', { n: pname(S.winner) }));
+    if (G.daily) {
+      var first = C.stats.daily('fourrow', G.daily, { label: title, win: won });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    var discs = [0, 1].map(function (p) { return S.b.filter(function (x) { return x === p; }).length; });
+    // after the last disc lands and the line is drawn
+    setTimeout(function () {
+      ctx.finish({
+        won: vsBot ? won : null,
+        title: title,
+        timeMs: Date.now() - G.startedAt, coins: coins, points: points,
+        lines: [{ label: C.t('discsL'), value: C.num(discs[0]) + ' / ' + C.num(discs[1]) }],
+        shareText: 'چوگان · چهار در ردیف' + (G.daily ? ('\nروزانه ' + G.daily) : '') + '\n' + title,
+        paint: cardPaint(),
+        onAgain: G.daily ? null : function () { newGame(current()); }
+      });
+    }, C.ui.reduceMotion() ? 150 : 1100);
+  }
+
+  /* ------------------------------------------------------------- saves */
+
+  ctx.autosave(function () {
+    if (!G || G.done || !G.hist.length) return { inProgress: false };
+    return { g: { mode: G.mode, level: G.level, first: G.first, daily: G.daily, S: G.S, elapsed: Date.now() - G.startedAt } };
+  });
+  function save() { ctx.save(); }
+  function validSave(sv) {
+    var g = sv && sv.g;
+    return !!(g && MODES.indexOf(g.mode) >= 0 && E.LEVELS.indexOf(g.level) >= 0 && FIRSTS.indexOf(g.first) >= 0 && E.valid(g.S) && g.S.winner === -1);
+  }
+  function restore(g) {
+    G = { mode: g.mode, level: g.level, first: g.first, daily: g.daily || null, S: g.S, hist: [], startedAt: Date.now() - (g.elapsed || 0), done: false };
+    fx = {}; cur = 3;
+    render();
+    maybeBot();
+  }
+
+  function askNew() {
+    if (G && G.daily) { go({ daily: G.daily }); return; }
+    settings();
+    function go(o) { if (!G || G.done || !G.hist.length) newGame(o); else C.ui.confirm({ title: C.t('newMatch'), body: C.t('endWarn'), onOk: function () { newGame(o); } }); }
+  }
+  function settings() {
+    var o = G && !G.daily ? current() : { mode: prefs.mode, level: prefs.level, first: prefs.first };
+    var body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
+    function rows() {
+      body.innerHTML = '';
+      body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('modeT') }));
+      body.appendChild(C.ui.segmented([{ value: 'bot', label: C.t('vsBot') }, { value: 'two', label: C.t('two') }], o.mode, function (v) { o.mode = v; rows(); }));
+      if (o.mode === 'bot') body.appendChild(C.ui.segmented(E.LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), o.level, function (v) { o.level = v; }));
+      body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('firstT') }));
+      var who = o.mode === 'bot'
+        ? [{ value: 'p1', label: C.t('firstMe') }, { value: 'p2', label: C.t('bot') }]
+        : [{ value: 'p1', label: C.t('playerN', { n: C.num(1) }) }, { value: 'p2', label: C.t('playerN', { n: C.num(2) }) }];
+      who.push({ value: 'alt', label: C.t('firstAlt') });
+      body.appendChild(C.ui.segmented(who, o.first, function (v) { o.first = v; }));
+      if (G && !G.done && G.hist.length) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('endWarn') }));
+    }
+    rows();
+    C.ui.modal({
+      title: C.t('settingsT'), closeButton: true, body: [body],
+      actions: [{ label: C.t('cancel') }, { label: C.t('begin'), kind: 'primary', onClick: function () { newGame(o); } }]
+    });
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function colors() {
+    var cs = getComputedStyle(document.documentElement);
+    var v = function (k, f) { return cs.getPropertyValue(k).trim() || f; };
+    return { frame: v('--fr-frame', '#5B2A6E'), rim: v('--fr-rim', '#43195A'), back: v('--fr-back', '#F3ECF4'),
+      a: v('--fr-a', '#E4572E'), aLt: v('--fr-a-lt', '#F6A487'), b: v('--fr-b', '#12998C'), bLt: v('--fr-b-lt', '#8FD9D1'), ink: v('--fr-ink', '#3A2244') };
+  }
+  // Shared by drawing and by reading a tap, so a tap lands on the column drawn under it
+  function geo(Wd, Hd) {
+    var u = Math.min(Wd / 7.4, Hd / 7.2), ox = (Wd - 7.4 * u) / 2, oy = (Hd - 7.2 * u) / 2;
+    return { u: u, ox: ox, oy: oy, fy: oy + 0.8 * u,
+      x: function (c) { return ox + (0.2 + c + 0.5) * u; },
+      y: function (r) { return oy + (1.0 + r + 0.5) * u; },
+      laneY: oy + 0.42 * u };
+  }
+  function disc(g, x, y, R, seat, col, alpha) {
+    g.globalAlpha = alpha == null ? 1 : alpha;
+    g.fillStyle = seat === 0 ? col.a : col.b;
+    g.beginPath(); g.arc(x, y, R, 0, Math.PI * 2); g.fill();
+    // a different mark on each side, so the two never rest on colour alone
+    if (seat === 0) {
+      g.strokeStyle = col.aLt; g.lineWidth = R * 0.16;
+      g.beginPath(); g.arc(x, y, R * 0.6, 0, Math.PI * 2); g.stroke();
+    } else {
+      g.fillStyle = col.bLt;
+      g.beginPath(); g.arc(x, y, R * 0.3, 0, Math.PI * 2); g.fill();
+    }
+    g.globalAlpha = 1;
+  }
+  function ease(p, Q, from, to) {
+    // a fall that speeds up, then one small bounce on landing
+    var f = 0.78;
+    if (p < f) { var t = p / f; return from + (to - from) * t * t; }
+    var q = (p - f) / (1 - f);
+    return to - Math.sin(Math.PI * q) * Q.u * 0.12;
+  }
+
+  function paint(g, Wd, Hd, o, col) {
+    var S = o.S, Q = geo(Wd, Hd), u = Q.u, R = u * 0.41, now = o.now || 0;
+    var fw = 7.4 * u, fh = 6.4 * u;
+    // the next disc waits in the lane above its column
+    if (o.ghost >= 0) disc(g, Q.x(o.ghost), Q.laneY, R * 0.92, o.ghostSeat, col, 0.75);
+    // the pale back the discs sit against
+    g.fillStyle = col.back; C.rrect(g, Q.ox + u * 0.08, Q.fy + u * 0.08, fw - u * 0.16, fh - u * 0.16, u * 0.2); g.fill();
+    for (var i = 0; i < E.N; i++) {
+      var p = S.b[i];
+      if (p < 0) continue;
+      var r = Math.floor(i / E.W), c = i % E.W, y = Q.y(r), f = o.fx && o.fx[i];
+      if (f) {
+        var t = Math.min(1, (now - f.t0) / f.dur);
+        y = ease(t, Q, Q.laneY, Q.y(r));
+      }
+      disc(g, Q.x(c), y, R, p, col);
+    }
+    // the frame over them, with a hole at every cell
+    g.fillStyle = col.frame;
+    g.beginPath();
+    var rad = u * 0.3, x0 = Q.ox, y0 = Q.fy;
+    g.moveTo(x0 + rad, y0); g.arcTo(x0 + fw, y0, x0 + fw, y0 + fh, rad); g.arcTo(x0 + fw, y0 + fh, x0, y0 + fh, rad);
+    g.arcTo(x0, y0 + fh, x0, y0, rad); g.arcTo(x0, y0, x0 + fw, y0, rad); g.closePath();
+    for (var r2 = 0; r2 < E.H; r2++) for (var c2 = 0; c2 < E.W; c2++) {
+      g.moveTo(Q.x(c2) + u * 0.4, Q.y(r2));
+      g.arc(Q.x(c2), Q.y(r2), u * 0.4, 0, Math.PI * 2);
+    }
+    g.fill('evenodd');
+    g.strokeStyle = col.rim; g.lineWidth = Math.max(1, u * 0.05);
+    for (var r3 = 0; r3 < E.H; r3++) for (var c3 = 0; c3 < E.W; c3++) { g.beginPath(); g.arc(Q.x(c3), Q.y(r3), u * 0.4, 0, Math.PI * 2); g.stroke(); }
+    // the keyboard's column
+    if (o.cursor >= 0) {
+      g.strokeStyle = col.ink; g.lineWidth = Math.max(2, u * 0.06);
+      C.rrect(g, Q.x(o.cursor) - u * 0.5, Q.oy + u * 0.02, u, u * 0.8 + fh - u * 0.04, u * 0.25); g.stroke();
+    }
+    // the last disc played, once it has landed
+    if (o.last >= 0 && !(o.fx && o.fx[o.last]) && !o.win.length) {
+      g.strokeStyle = '#FFFFFF'; g.lineWidth = Math.max(1.5, u * 0.06);
+      g.beginPath(); g.arc(Q.x(o.last % E.W), Q.y(Math.floor(o.last / E.W)), R * 0.2, 0, Math.PI * 2); g.stroke();
+    }
+    // the winning line, drawn from end to end
+    if (o.win.length) {
+      var k = o.winK == null ? 1 : o.winK;
+      o.win.forEach(function (line) {
+        var a = line[0], b = line[line.length - 1];
+        var ax = Q.x(a % E.W), ay = Q.y(Math.floor(a / E.W)), bx = Q.x(b % E.W), by = Q.y(Math.floor(b / E.W));
+        var ex = ax + (bx - ax) * k, ey = ay + (by - ay) * k;
+        g.lineCap = 'round';
+        g.strokeStyle = col.ink; g.lineWidth = u * 0.26;
+        g.beginPath(); g.moveTo(ax, ay); g.lineTo(ex, ey); g.stroke();
+        g.strokeStyle = '#FFFFFF'; g.lineWidth = u * 0.14;
+        g.beginPath(); g.moveTo(ax, ay); g.lineTo(ex, ey); g.stroke();
+      });
+    }
+  }
+
+  var view = null;   // the size last drawn at, which taps are read against (2026-10-19)
+  function size() {
+    var r = box.getBoundingClientRect(), Wb = r.width, Hb = r.height || r.width * 36 / 37;
+    var u = Math.min(Wb / 7.4, Hb / 7.2);
+    return { w: Math.max(1, Math.floor(7.4 * u)), h: Math.max(1, Math.floor(7.2 * u)) };
+  }
+  function falling(now) {
+    var any = false;
+    Object.keys(fx).forEach(function (k) { if (now - fx[k].t0 >= fx[k].dur) delete fx[k]; else any = true; });
+    return any;
+  }
+  function draw() {
+    if (!G) return;
+    var sz = size(), dpr = Math.min(2, window.devicePixelRatio || 1), now = performance.now();
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(sz.w * dpr) || cv.height !== Math.round(sz.h * dpr)) { cv.width = Math.round(sz.w * dpr); cv.height = Math.round(sz.h * dpr); }
+    cv.style.width = sz.w + 'px'; cv.style.height = sz.h + 'px';
+    view = sz;
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, sz.w, sz.h);
+    var drop = falling(now), mine = !busy();
+    var col = kbOn ? cur : hover;
+    var win = G.done && G.S.winner < 2 ? E.winLines(G.S) : [];
+    var winK = 1;
+    if (win.length) {
+      // the line waits for the last disc to land
+      if (drop) winK = 0;
+      else { if (!winT) winT = now; winK = C.ui.reduceMotion() ? 1 : Math.min(1, (now - winT) / 420); }
+    }
+    paint(g, sz.w, sz.h, {
+      S: G.S, now: now, fx: fx, last: G.S.last, win: winK > 0 ? win : [], winK: winK,
+      ghost: mine && col >= 0 && G.S.h[col] < E.H ? col : -1, ghostSeat: G.S.turn, cursor: kbOn && mine ? cur : -1
+    }, colors());
+    return drop || (win.length && winK < 1);
+  }
+  // keeps drawing while a disc falls or the win line grows
+  function kick() {
+    if (raf) return;
+    raf = requestAnimationFrame(function step() {
+      raf = 0;
+      if (draw()) raf = requestAnimationFrame(step);
+    });
+  }
+  function cardPaint() {
+    var o = { S: E.clone(G.S), fx: null, last: -1, win: G.S.winner < 2 ? E.winLines(G.S) : [], winK: 1, ghost: -1, cursor: -1 };
+    return function (g, Wd, Hd) { paint(g, Wd, Hd, o, colors()); };
+  }
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (G.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyFr') + ' — ' + C.num(G.daily) })]));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('vsMedium') }));
+      return;
+    }
+    top.appendChild(el('button', { class: 'ch-badge ch-tap', type: 'button', onclick: settings,
+      text: G.mode === 'bot' ? C.t('vsBot') + ' · ' + C.t(G.level) : C.t('two') }));
+    var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', settings);
+    top.appendChild(gear);
+  }
+  function renderSide() {
+    players.innerHTML = '';
+    [0, 1].forEach(function (k) {
+      var on = G.S.turn === k && !G.done;
+      players.appendChild(el('div', { class: 'fr-player' + (on ? ' fr-player--on' : '') + (on && isBot(k) ? ' fr-thinking' : '') }, [
+        el('div', { class: 'fr-player__dot', style: { background: k === 0 ? 'var(--fr-a)' : 'var(--fr-b)' } }),
+        el('div', { class: 'fr-player__name', text: pname(k) })
+      ]));
+    });
+    var line = '';
+    if (!G.done) {
+      if (isBot(G.S.turn)) line = C.t('thinking');
+      else if (G.mode === 'bot') line = C.t('yourMove');
+      else line = C.t('turnOf', { n: pname(G.S.turn) });
+    }
+    status.textContent = line;
+  }
+  function render() { renderTop(); renderSide(); draw(); }
+
+  /* -------------------------------------------------------------- input */
+
+  // The column under a point, read against the size last drawn
+  function readCol(x) {
+    var r = cv.getBoundingClientRect(), Q = geo(view ? view.w : r.width, view ? view.h : r.height);
+    var c = Math.floor((x - r.left - Q.ox - 0.2 * Q.u) / Q.u);
+    return c >= 0 && c < E.W ? c : -1;
+  }
+  function dropAt(c) {
+    if (busy()) return;
+    if (c < 0 || G.S.h[c] >= E.H) { C.feedback('bad'); return; }
+    act(c);
+  }
+  cv.addEventListener('pointerdown', function (e) {
+    if (busy()) return;
+    e.preventDefault();
+    kbOn = false;
+    hover = -1;
+    dropAt(readCol(e.clientX));
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (e.pointerType !== 'mouse') return;
+    var c = readCol(e.clientX);
+    if (c !== hover) { hover = c; if (!kbOn) draw(); }
+  });
+  cv.addEventListener('pointerleave', function () { if (hover >= 0) { hover = -1; draw(); } });
+
+  var DIGITS = { '1': 0, '2': 1, '3': 2, '4': 3, '5': 4, '6': 5, '7': 6, '۱': 0, '۲': 1, '۳': 2, '۴': 3, '۵': 4, '۶': 5, '۷': 6 };
+  window.addEventListener('keydown', function (e) {
+    if (!G || document.querySelector('.ch-scrim')) return;
+    if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
+    if (busy() || e.ctrlKey || e.metaKey || e.altKey) return;
+    var tg = e.target && e.target.tagName;
+    if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT') return;
+    // the board is drawn left to right in every language, so the arrows are geometric (#338)
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      if (kbOn) cur = Math.max(0, Math.min(E.W - 1, cur + (e.key === 'ArrowLeft' ? -1 : 1)));
+      kbOn = true; draw(); return;
+    }
+    if (DIGITS[e.key] !== undefined) { e.preventDefault(); kbOn = true; cur = DIGITS[e.key]; dropAt(cur); return; }
+    if ((e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') && tg !== 'BUTTON') {
+      e.preventDefault();
+      if (!kbOn) { kbOn = true; draw(); return; }
+      dropAt(cur);
+    }
+  });
+
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  else window.addEventListener('resize', draw);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← →', C.t('kCol')), kb('Space / Enter / ↓', C.t('kDrop')),
+          kb(C.num(1) + '–' + C.num(7), C.t('kDigit')), kb('U / Ctrl+Z', C.t('undoMove'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // a 4×3 corner of the board for the tutorial
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 110" width="100%"><rect x="48" y="22" width="104" height="84" rx="10" fill="#5B2A6E"/>';
+    var X = function (c) { return 63 + c * 25; }, Y = function (r) { return 38 + r * 25; };
+    var cells = {};
+    if (kind === 1) { cells['2,1'] = 1; cells['2,2'] = 0; }
+    if (kind === 2) { cells['2,0'] = 0; cells['1,1'] = 0; cells['0,2'] = 0; cells['2,1'] = 1; cells['2,2'] = 1; cells['1,2'] = 1; }
+    if (kind === 3) { cells['2,0'] = 1; cells['2,1'] = 1; cells['2,2'] = 1; cells['1,0'] = 0; cells['1,1'] = 0; }
+    for (var r = 0; r < 3; r++) for (var c = 0; c < 4; c++) {
+      var v = cells[r + ',' + c];
+      s += '<circle cx="' + X(c) + '" cy="' + Y(r) + '" r="10" fill="' + (v === 0 ? '#E4572E' : v === 1 ? '#12998C' : '#F3ECF4') + '"/>';
+      if (v === 0) s += '<circle cx="' + X(c) + '" cy="' + Y(r) + '" r="6" fill="none" stroke="#F6A487" stroke-width="1.8"/>';
+      if (v === 1) s += '<circle cx="' + X(c) + '" cy="' + Y(r) + '" r="3" fill="#8FD9D1"/>';
+    }
+    if (kind === 1) s += '<circle cx="' + X(1) + '" cy="10" r="10" fill="#E4572E"/><path d="M' + X(1) + ' 24v' + (Y(1) - 36) + 'm-5 -6l5 6l5 -6" stroke="#3A2244" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>';
+    if (kind === 2) s += '<circle cx="' + X(3) + '" cy="10" r="10" fill="#E4572E"/><path d="M' + (X(0) - 4) + ' ' + (Y(2) + 4) + 'L' + (X(3) + 4) + ' ' + (Y(-1) - 4) + '" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round"/>';
+    if (kind === 3) s += '<circle cx="' + X(3) + '" cy="' + Y(2) + '" r="10" fill="#E4572E"/><circle cx="' + X(3) + '" cy="' + Y(2) + '" r="6" fill="none" stroke="#F6A487" stroke-width="1.8"/><circle cx="' + X(3) + '" cy="' + Y(2) + '" r="13" fill="none" stroke="#3A2244" stroke-width="2.5"/>';
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  var saved = ctx.loadSave();
+  if (validSave(saved) && (saved.g.daily || null) === (dailyDate || null)) restore(saved.g);
+  else newGame(dailyDate ? { daily: dailyDate } : { mode: prefs.mode, level: prefs.level, first: prefs.first });
+  if (dailyDate && C.stats.dailyDone('fourrow', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).fourrow;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
