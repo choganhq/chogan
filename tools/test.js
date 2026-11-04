@@ -11663,6 +11663,9 @@ function testTrio() {
   // the rule, feature by feature: all alike or all different
   const card = (col, sh, cnt, fill) => col + 3 * sh + 9 * cnt + 27 * fill;
   ok(E.isTrio(card(0, 0, 0, 2), card(0, 0, 1, 2), card(0, 0, 2, 2)), 'one, two and three solid orange circles are a trio');
+  // #617: the "not a trio" tutorial page showed two identical cards, which the deck never holds
+  const tut = [...html.matchAll(/tArt\((\[\[[\d, \[\]]+\]\]), (true|false)\)/g)].map((m) => ({ cards: JSON.parse(m[1]).map((f) => card(f[0], f[1], f[2], f[3])), ok: m[2] === 'true' }));
+  ok(tut.length === 3 && tut.every((s) => s.cards.length === 3 && new Set(s.cards).size === 3 && E.isTrio(s.cards[0], s.cards[1], s.cards[2]) === s.ok), 'every tutorial page shows three different cards, and its tick or cross matches the rule (' + tut.length + ' pages)');
   ok(!E.isTrio(card(0, 1, 0, 0), card(0, 1, 0, 0) + 0, card(1, 1, 0, 0)) && !E.isTrio(card(0, 1, 0, 0), card(0, 1, 1, 0), card(1, 1, 2, 0)), 'two of one colour and one of another are not');
   ok(E.isTrio(card(0, 2, 0, 0), card(1, 1, 1, 1), card(2, 0, 2, 2)), 'all four features different is a trio');
   // games: the table always holds a trio while cards remain, and a deck game always ends
