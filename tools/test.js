@@ -11799,6 +11799,126 @@ function testFourrow() {
   ok(Date.now() - t0 < 12000, 'the Four in a Row tests finish in under 12 s (' + (Date.now() - t0) + ' ms)');
 }
 
+// #635: Cqoicebordel asked for a climbing card game; built as Peak with our own cards
+function testPeak() {
+  head('Peak (#635)');
+  const t0 = Date.now();
+  const E = loadEngine('peak', 'PeakEngineFactory');
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/peak/index.html'), 'utf8');
+  const rng = (seed) => { let x = seed >>> 0; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; };
+  const d = E.deck(), tally = {};
+  d.forEach((f) => { tally[f] = (tally[f] || 0) + 1; });
+  ok(d.length === 90 && tally[2] === 16 && tally[3] === 12 && tally[9] === 4 && tally[15] === 2 && [16, 17, 18, 19, 20].every((f) => tally[f] === 1), 'the deck has 90 cards: sixteen 2s down to one each of 16–20');
+  const N = E.newGame(4, rng(1), 0);
+  ok(N.hands.every((h) => h.length === 6) && N.pile.length === 66 && E.valid(N), 'four players get six cards each and 66 stay in the pile');
+  // the worked example from the issue, seats N E S W = 0 1 2 3; the pile is drawn from its end
+  const S = E.make([[3, 4, 9, 9, 9, 9], [5, 5, 9, 9, 9, 9], [3, 4, 9, 9, 9, 9], [3, 7, 9, 9, 9, 9]], [11, 12, 13, 14, 15, 16, 17, 18]);
+  const step = (f) => E.begin(S).concat(E.play(S, f)).map((x) => x.t + x.p + (x.face ? ':' + x.face : '')).join(' ');
+  const log = [3, 5, 3, 3, 4, 5, 4, 7].map(step);
+  const want = [
+    'play0:3',
+    'play1:5 beat0:3 draw0:18',
+    'play2:3',
+    'play3:3 beat1:5 draw1:17',
+    'play0:4',
+    'play1:5 beat0:4 draw0:16',
+    'clear2:3 play2:4 beat3:3 draw3:15',
+    'play3:7 beat1:5 beat2:4 draw1:14 draw2:13'
+  ];
+  const bad = log.map((l, i) => l === want[i] ? '' : (i + 1) + ': ' + l).filter(Boolean);
+  ok(!bad.length, 'the issue\'s worked example plays out step by step' + (bad.length ? ' (' + bad.join(' | ') + ')' : ''));
+  ok(S.table.join() === '0,0,0,7' && S.discard.length === 7, 'after the example only West\'s 7 stands, and seven cards are out');
+  // three 3s on the table are worth 9 each, so a lone 5 cannot beat them, and a 9 ties
+  const T = E.make([[9, 2], [2], [2], [2]], [], [0, 3, 3, 3]);
+  ok(E.value(T, 1) === 9 && E.preview(T, 9).beaten.length === 0 && E.preview(T, 9).v === 9, 'three 3s are worth 9 each, and a 9 ties them: ties stay');
+  // a cascade: a played 4 beats a lone 3; the 3s' partner gone, the other 3 is worth 3 and falls too
+  const K = E.make([[4, 9], [9], [9], [9]], [2, 2, 2, 2], [0, 3, 6, 0]);
+  const kv = E.play(K, 4);
+  ok(kv.filter((e) => e.t === 'beat').length === 1 && K.table.join() === '4,0,6,0', 'a lower lone card falls and a higher one stays');
+  const K2 = E.make([[5, 9], [9], [9], [9]], [2, 2, 2], [0, 3, 3, 0]);
+  ok(E.play(K2, 5).filter((e) => e.t === 'beat').length === 0 && K2.table.join() === '5,3,3,0', 'a pair of 3s (6 each) holds against a 5');
+  const K3 = E.make([[7, 9], [9], [9], [9]], [2, 2, 2], [0, 3, 3, 2]);
+  const k3 = E.play(K3, 7);
+  ok(k3.filter((e) => e.t === 'beat').length === 3 && K3.table.join() === '7,0,0,0', 'a 7 knocks down a pair of 3s and a 2 together');
+  // values are counted again as cards leave: a 4 joining another 4 (8 each) beats a pair of 3s
+  // (6 each) and a lone 5; with the 5 gone nothing changes for the 4s
+  const R = E.make([[4, 9], [9], [9], [9], [9]], [2, 2, 2, 2], [0, 4, 3, 3, 5]);
+  const rv = E.play(R, 4);
+  ok(rv[0].v === 8 && R.table.join() === '4,4,0,0,0', 'a played card joins its twin on the table and both count double');
+  // an empty pile: a beaten card goes with no draw
+  const P = E.make([[9, 9], [2, 2], [9], [9]], [], [0, 3, 0, 0]);
+  const pv = E.play(P, 9);
+  ok(pv.some((e) => e.t === 'beat' && e.p === 1) && !pv.some((e) => e.t === 'draw') && P.hands[1].length === 2, 'with the pile empty a beaten card is not replaced');
+  // a beaten player with no hand and no pile is out of cards at once, and wins; two at once share it
+  const W = E.make([[9, 2], [], [], [2]], [], [0, 3, 4, 0]);
+  const wv = E.play(W, 9);
+  ok(E.over(W) && W.winners.slice().sort().join() === '1,2' && wv[wv.length - 1].t === 'win', 'two players emptied at the same moment win together');
+  // a card that stands until its owner's next turn leaves with no draw; with an empty hand, that is the win
+  const L = E.make([[2, 9], [9, 9], [9, 9], [9, 9]], [5, 5, 5], [0, 0, 0, 0]);
+  L.turn = 2;
+  const seq = [];
+  for (let i = 0; i < 5; i++) { seq.push(L.turn); E.begin(L); E.play(L, E.legal(L)[0]); }
+  ok(seq.join() === '2,3,0,1,2', 'turns pass round the table in seat order (' + seq.join() + ')');
+  const Wn = E.make([[], [9], [9], [9]], [5], [6, 0, 0, 0]);
+  const bv = E.begin(Wn);
+  ok(bv.length === 2 && bv[0].t === 'clear' && bv[1].t === 'win' && Wn.winners.join() === '0' && Wn.discard.join() === '6', 'a standing last card clears at its owner\'s turn and that player wins');
+  const Cl = E.make([[2, 3], [9], [9], [9]], [5], [6, 0, 0, 0]);
+  ok(E.legal(Cl).length === 0 && E.begin(Cl).length === 1 && Cl.hands[0].length === 2 && !E.over(Cl) && E.legal(Cl).join() === '2,3', 'a standing card blocks play until it clears, with no draw and no win while cards are in hand');
+  ok(E.play(E.make([[3], [9], [9]], []), 4) === null, 'a card not in the hand is refused');
+  // the bots: every move legal, every game ends, and the levels are in order
+  let ends = 0, okAll = true, medW = 0, easyW = 0, moves = 0;
+  for (let k = 0; k < 120; k++) {
+    const lv = [0, 1, 2, 3].map((i) => ((i + k) % 2 ? 'medium' : 'easy'));
+    const r = rng(500 + k), G = E.newGame(4, r, k % 4);
+    let n = 0;
+    while (!E.over(G) && n++ < 400) {
+      E.begin(G); if (E.over(G)) break;
+      const f = E.botMove(G, lv[G.turn], r);
+      if (E.play(G, f) === null || !E.valid(G)) { okAll = false; break; }
+    }
+    if (E.over(G)) { ends++; moves += G.moves; G.winners.forEach((w) => { if (lv[w] === 'medium') medW++; else easyW++; }); }
+  }
+  ok(okAll && ends === 120, 'easy against medium: every move legal and every game ends (' + ends + ' of 120, ' + (moves / Math.max(1, ends)).toFixed(0) + ' turns on average)');
+  ok(medW > easyW, 'medium wins more often than easy (' + medW + ' to ' + easyW + ')');
+  const H = E.newGame(6, rng(3), 0), th = Date.now();
+  let hf = null;
+  for (let i = 0; i < 5; i++) hf = E.botMove(H, 'hard', rng(9 + i));
+  const ht = (Date.now() - th) / 5;
+  ok(E.legal(H).indexOf(hf) >= 0 && ht < 250, 'the hard bot picks a legal card at six players within its time (' + ht.toFixed(0) + ' ms a move)');
+  const replay = () => { const r = rng(42), G = E.newGame(4, r, 0); while (!E.over(G)) { E.begin(G); if (!E.over(G)) E.play(G, E.botMove(G, 'medium', r)); } return G.discard.join() + '|' + G.winners.join(); };
+  ok(replay() === replay(), 'the same seed plays the same game, so the daily is the same for everyone');
+  // saves
+  const V = E.newGame(5, rng(8), 2);
+  const b1 = E.clone(V); b1.hands[0].push(20);
+  const b2 = E.clone(V); b2.turn = 9;
+  const b3 = E.clone(V); b3.n = 7;
+  const b4 = E.clone(V); b4.pile[0] = b4.pile[0] === 2 ? 3 : 2;
+  ok(E.valid(V) && !E.valid(b1) && !E.valid(b2) && !E.valid(b3) && !E.valid(b4) && !E.valid(null), 'a save is checked before it is restored');
+  // the page
+  const gm = games.find((g) => g.id === 'peak');
+  ok(!!gm && gm.cat === 'cards' && gm.people === 1 && gm.path === 'games/peak/index.html', 'Peak is listed as a one-player card game');
+  const rgb = (x) => [1, 3, 5].map((i) => parseInt(x.slice(i, i + 2), 16) / 255);
+  const lin = (c) => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  const lab = (x) => {
+    const [Rr, Gr, Bl] = rgb(x).map(lin), f = (t) => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
+    const X = (Rr * 0.4124 + Gr * 0.3576 + Bl * 0.1805) / 0.95047, Y = Rr * 0.2126 + Gr * 0.7152 + Bl * 0.0722, Z = (Rr * 0.0193 + Gr * 0.1192 + Bl * 0.9505) / 1.08883;
+    return [116 * f(Y) - 16, 500 * (f(X) - f(Y)), 200 * (f(Y) - f(Z))];
+  };
+  const dE = (a, b) => { const A = lab(a), B = lab(b); return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]); };
+  const lum = (x) => rgb(x).map((c) => c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)).reduce((a, c, i) => a + c * [0.2126, 0.7152, 0.0722][i], 0);
+  const near = games.filter((g) => g.id !== 'peak').map((g) => [g.id, dE(g.color, gm.color)]).sort((x, y) => x[1] - y[1])[0];
+  ok(near[1] >= 15 && 1.05 / (lum(gm.color) + 0.05) >= 4.5 && html.indexOf("accent: '" + gm.color + "'") > 0, 'the accent differs from every other game by ΔE ≥ 15 (nearest ' + near[0] + ', ' + near[1].toFixed(1) + '), keeps white text at 4.5:1 and matches the page');
+  const icon = fs.readFileSync(path.join(ROOT, 'www/games/peak/icon.svg'), 'utf8');
+  ok(new RegExp('^<svg[^>]*>\\s*<rect width="96" height="96" rx="22" fill="' + gm.soft + '"/>').test(icon.trim()), 'the icon starts on the soft tint of games.json');
+  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
+  ok(['pk-win', 'pk-hard', 'pk-daily'].every((id) => core.indexOf("id: '" + id + "'") > 0 && html.indexOf("unlock('" + id + "')") > 0), 'the three awards are in the core and unlocked by the game');
+  ok(/C\.daily\('peak', M\.daily \+ '\|' \+ S\.moves/.test(html) && /daily \? 'medium'/.test(html) && /var n = daily \? 4/.test(html), 'the daily game seats four, plays medium bots and seeds them from the day');
+  ok(!/F\x75ji ?Fl\x75sh/i.test(html) && !/F\x75ji ?Fl\x75sh/i.test(JSON.stringify(gm)), 'the page never uses the product name');
+  ok(/cardSpeed: true/.test(html) && /C\.cards\.speedRow\(\)/.test(html) && /C\.cards\.pace\(/.test(html), 'the card speed setting is honoured');
+  ok(/ctx\.tutorialIfNew\(TUT\)/.test(html) && /C\.icon\('gear', 20\)/.test(html) && !/history\.(push|replace)State|localStorage/.test(html), 'a tutorial, options behind a gear, no history or direct storage');
+  ok(Date.now() - t0 < 12000, 'the Peak tests finish in under 12 s (' + (Date.now() - t0) + ' ms)');
+}
+
 // #554: xmha97 asked for Lights Out (named Lights Off: "Lights Out" is a trademark)
 function testLights() {
   head('Lights Off (#554)');

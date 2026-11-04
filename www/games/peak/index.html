@@ -1,0 +1,751 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>قله — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  :root { --ch-pface: var(--c-surface); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ch-pface: var(--c-surface-3); } }
+  :root[data-theme="dark"] { --ch-pface: var(--c-surface-3); }
+  /* cards grow with the game area (#359); the rivals' cards are a little smaller than the hand */
+  .pk-wrap { --cw: clamp(42px, min(14cqw, (100cqh - 290px) / 4.4), 92px); --sw: calc(var(--cw) * .86);
+    margin-block: auto; width: 100%; max-width: max(560px, calc(var(--cw) * 8)); display: flex; flex-direction: column; align-items: center; gap: var(--s-3); }
+  .pk-top { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; align-items: center; }
+  .pk-seats { width: 100%; display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: var(--s-2); }
+  .pk-seat { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 4px 8px; min-width: 0;
+    background: var(--c-surface); border-radius: var(--r-md); box-shadow: var(--sh-1); border: 2px solid transparent; }
+  .pk-seat--on { border-color: var(--game); }
+  .pk-who { font-size: var(--fs-sm); font-weight: 700; color: var(--c-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .pk-count { font-size: var(--fs-xs, 12px); font-weight: 700; color: var(--c-text-dim); font-variant-numeric: tabular-nums; }
+  .pk-spot { width: var(--sw, 48px); aspect-ratio: 5 / 7; border-radius: 8px; border: 2px dashed var(--c-line); display: grid; place-items: center; position: relative; }
+  .pk-spot--full { border-color: transparent; }
+  .pk-spot .ch-pcard { --pw: var(--sw, 48px); position: absolute; inset: -2px; width: auto; cursor: default; }
+  .pk-me .pk-spot { width: var(--cw, 56px); }
+  .pk-me .pk-spot .ch-pcard { --pw: var(--cw, 56px); }
+  /* the combined value is the number that decides; it sits under the card in the game's colour */
+  .pk-val { direction: ltr; min-height: 22px; padding: 1px 8px; border-radius: 999px; font-size: var(--fs-sm); font-weight: 800; font-variant-numeric: tabular-nums; line-height: 20px; }
+  .pk-val--on { background: var(--game); color: var(--c-accent-ink); }
+  .pk-backs { display: inline-flex; align-items: center; gap: 4px; }
+  .pk-backs .ch-pback { width: 12px; border-width: 1px; border-radius: 2px; box-shadow: none; }
+  .pk-spot .pk-try { opacity: .55; }
+  .pk-spot--fall { outline: 3px solid var(--c-bad); outline-offset: 3px; border-radius: 9px; }
+  .pk-spot--fall .ch-pcard { transform: translateY(4px) rotate(-4deg); opacity: .8; }
+  .pk-spot--pair { outline: 3px solid var(--game); outline-offset: 3px; border-radius: 9px; }
+  .pk-mid { direction: ltr; display: flex; align-items: flex-start; justify-content: center; gap: var(--s-4); }
+  .pk-heap { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: var(--fs-xs, 12px); font-weight: 700; color: var(--c-text-dim); }
+  .pk-heap .ch-pback, .pk-heap .pk-slot { width: calc(var(--cw, 56px) * .8); }
+  .pk-pile .ch-pback { box-shadow: 2px 2px 0 -1px #FBF5E6, 3px 3px 0 -1px var(--c-line), 4px 4px 0 -1px #FBF5E6; }
+  .pk-slot { aspect-ratio: 5 / 7; border-radius: 8px; border: 2px dashed var(--c-line); position: relative; }
+  .pk-slot .ch-pcard { --pw: calc(var(--cw, 56px) * .8); position: absolute; inset: -2px; width: auto; cursor: default; }
+  .pk-me { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 10px 8px; border-radius: var(--r-md); border: 2px solid transparent; }
+  .pk-me.pk-seat--on { border-color: var(--game); background: var(--c-surface); box-shadow: var(--sh-1); }
+  .pk-status { min-height: 2.6em; font-weight: 700; font-size: var(--fs-sm); color: var(--c-text-dim); text-align: center; display: flex; align-items: center; }
+  .pk-hand { direction: ltr; width: 100%; display: flex; justify-content: center; gap: 6px; min-height: calc(var(--cw, 56px) * 1.4 + 14px); padding-top: 14px; }
+  .pk-hand .ch-pcard { flex: 0 1 var(--cw, 56px); min-width: 0; }
+  .pk-hand .ch-pcard:disabled { opacity: .55; }
+  .pk-hand .pk-sel { transform: translateY(-12px); box-shadow: var(--sh-2), 0 0 0 3px var(--game); }
+  .pk-hand .pk-kf { outline: 3px solid var(--game); outline-offset: 2px; }
+  /* the play button keeps its room while hidden, so the hand never moves under the finger */
+  .pk-actions { display: flex; justify-content: center; min-height: 44px; }
+  .pk-actions .ch-btn[hidden] { display: inline-flex; visibility: hidden; }
+  /* the card art: a big number over a mountain that grows with the number */
+  .pk-n { position: absolute; top: 6%; left: 0; right: 0; text-align: center; font-weight: 800; font-size: calc(var(--pw) * .42); line-height: 1; font-variant-numeric: tabular-nums; }
+  .pk-c { position: absolute; bottom: 3px; right: 5px; font-weight: 800; font-size: calc(var(--pw) * .17); line-height: 1; opacity: .7; }
+  .pk-art { position: absolute; left: 4%; right: 4%; bottom: 4%; height: 52%; pointer-events: none; }
+  .pk-art svg { width: 100%; height: 100%; display: block; }
+  /* wide windows: the rivals on one side, your spot and hand on the other */
+  @container game (min-aspect-ratio: 13 / 10) {
+    /* a phone on its side has ~320px of height: your spot, the hand and the button stack on the right,
+       so the card width comes from that column's height; the controls move above the rivals */
+    .pk-wrap { --cw: clamp(40px, min(9cqw, (100cqh - 190px) / 2.8), 92px);
+      --sw: clamp(30px, min(var(--cw) * .86, ((100cqh - 70px) / var(--rows, 2) - 22px) / 1.4), 92px);
+      max-width: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-areas: "top mid" "seats mid" "seats status" "seats hand" "seats actions"; align-items: center; column-gap: var(--s-5); row-gap: var(--s-2); }
+    .pk-top { grid-area: top; align-self: end; } .pk-seats { grid-area: seats; align-self: start; } .pk-mid { grid-area: mid; }
+    .pk-status { grid-area: status; justify-content: center; } .pk-hand { grid-area: hand; } .pk-actions { grid-area: actions; }
+    .pk-seats { --cols: 2 !important; }
+    /* rivals lie flat, the card beside the name, so a row costs only a card's height */
+    .pk-seat { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "spot who" "spot count" "spot val";
+      align-items: center; justify-items: center; column-gap: 8px; row-gap: 0; padding: 3px 8px; }
+    .pk-seat .pk-val { min-height: 20px; line-height: 18px; }
+    .pk-seat .pk-who { grid-area: who; } .pk-seat .pk-count { grid-area: count; } .pk-seat .pk-spot { grid-area: spot; } .pk-seat .pk-val { grid-area: val; }
+  }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function PeakEngineFactory() {
+  'use strict';
+
+  // 90 numbered cards: many low ones, few high ones (#635)
+  var COUNTS = { 2: 16, 3: 12, 4: 9, 5: 8, 6: 6, 7: 6, 8: 5, 9: 4, 10: 4, 11: 4, 12: 3, 13: 3, 14: 3, 15: 2, 16: 1, 17: 1, 18: 1, 19: 1, 20: 1 };
+  var HAND = 6, MIN = 3, MAX = 6;
+
+  function deck() {
+    var d = [];
+    for (var f = 2; f <= 20; f++) for (var i = 0; i < COUNTS[f]; i++) d.push(f);
+    return d;
+  }
+  function shuffled(rnd) {
+    var d = deck();
+    for (var i = d.length - 1; i > 0; i--) { var j = Math.floor(rnd() * (i + 1)), t = d[i]; d[i] = d[j]; d[j] = t; }
+    return d;
+  }
+  function blank(n) {
+    var S = { n: n, pile: [], hands: [], table: [], discard: [], turn: 0, winners: [], moves: 0 };
+    for (var p = 0; p < n; p++) { S.hands.push([]); S.table.push(0); }
+    return S;
+  }
+  function newGame(n, rnd, first) {
+    n = Math.max(MIN, Math.min(MAX, n | 0));
+    var S = blank(n), d = shuffled(rnd);
+    for (var k = 0; k < HAND; k++) for (var p = 0; p < n; p++) S.hands[p].push(d.pop());
+    S.pile = d;
+    S.turn = first > 0 && first < n ? first | 0 : 0;
+    return S;
+  }
+  // a set position for tests and the tutorial; the pile is drawn from its end
+  function make(hands, pile, table) {
+    var S = blank(hands.length);
+    S.hands = hands.map(function (h) { return h.slice(); });
+    S.pile = (pile || []).slice();
+    if (table) S.table = table.slice();
+    return S;
+  }
+  function clone(S) { return JSON.parse(JSON.stringify(S)); }
+
+  function count(S, f) { var c = 0; for (var p = 0; p < S.n; p++) if (S.table[p] === f) c++; return c; }
+  // a card counts its face once for every card of that face on the table, itself included
+  function value(S, p) { var f = S.table[p]; return f ? f * count(S, f) : 0; }
+  function over(S) { return S.winners.length > 0; }
+  function out(S, p) { return !S.hands[p].length && !S.table[p]; }
+
+  // the start of a turn: a card that was not beaten since the last turn leaves without a draw
+  function begin(S) {
+    var ev = [], p = S.turn;
+    if (over(S) || !S.table[p]) return ev;
+    ev.push({ t: 'clear', p: p, face: S.table[p] });
+    S.discard.push(S.table[p]);
+    S.table[p] = 0;
+    if (!S.hands[p].length) { S.winners = [p]; ev.push({ t: 'win', ps: [p] }); }
+    return ev;
+  }
+  function legal(S) {
+    if (over(S) || S.table[S.turn]) return [];
+    var seen = {}, L = [];
+    S.hands[S.turn].forEach(function (f) { if (!seen[f]) { seen[f] = 1; L.push(f); } });
+    return L.sort(function (a, b) { return a - b; });
+  }
+
+  function play(S, face) {
+    var p = S.turn;
+    if (legal(S).indexOf(face) < 0) return null;
+    var h = S.hands[p];
+    h.splice(h.indexOf(face), 1);
+    S.table[p] = face;
+    S.moves++;
+    var ev = [{ t: 'play', p: p, face: face, v: value(S, p) }];
+    // combinations are counted again after every card that leaves; ties stay
+    for (;;) {
+      var v = value(S, p), lose = [];
+      for (var q = 0; q < S.n; q++) if (q !== p && S.table[q] && value(S, q) < v) lose.push(q);
+      if (!lose.length) break;
+      lose.forEach(function (q) {
+        ev.push({ t: 'beat', p: q, face: S.table[q] });
+        S.discard.push(S.table[q]);
+        S.table[q] = 0;
+      });
+      lose.forEach(function (q) {
+        if (S.pile.length) { var f = S.pile.pop(); S.hands[q].push(f); ev.push({ t: 'draw', p: q, face: f }); }
+      });
+    }
+    // with the pile empty a beaten player with no hand is out of cards: everyone who
+    // empties at the same moment wins together
+    var w = [];
+    for (var i = 1; i < S.n; i++) { var r = (p + i) % S.n; if (out(S, r)) w.push(r); }
+    if (w.length) { S.winners = w; ev.push({ t: 'win', ps: w }); return ev; }
+    S.turn = (p + 1) % S.n;
+    return ev;
+  }
+
+  // what a face would do now, without changing the game
+  function preview(S, face) {
+    var T = { n: S.n, table: S.table.slice() }, p = S.turn;
+    T.table[p] = face;
+    var v = value(T, p), beaten = [], partners = [];
+    for (var q = 0; q < S.n; q++) {
+      if (q === p || !T.table[q]) continue;
+      if (value(T, q) < v) beaten.push(q);
+      else if (T.table[q] === face) partners.push(q);
+    }
+    return { v: v, beaten: beaten, partners: partners };
+  }
+
+  // the cards a player cannot see: all of the deck but their hand, the table and the discards
+  function unseen(S, p) {
+    var c = {};
+    for (var f = 2; f <= 20; f++) c[f] = COUNTS[f];
+    S.hands[p].forEach(function (f) { c[f]--; });
+    S.table.forEach(function (f) { if (f) c[f]--; });
+    S.discard.forEach(function (f) { c[f]--; });
+    return c;
+  }
+  // Measured on 600 four-player games against random players (#635): always playing the
+  // lowest card wins 32%, the highest 22%. A beaten low card is swapped for a fresh one
+  // from the pile, which is on average higher, so the high cards are worth keeping.
+  function lowBeat(S) {
+    var L = legal(S), best = L[0], bs = -1e9;
+    L.forEach(function (f) { var s = -f + preview(S, f).beaten.length * 3; if (s > bs) { bs = s; best = f; } });
+    return best;
+  }
+  // the hard bot plays each candidate out to the end many times, over the same guesses of
+  // the hidden cards, so combining and timing (an empty pile, a rival about to finish) are
+  // weighed by what actually happens, not by a rule of thumb
+  function rollouts(S, rnd, R) {
+    var me = S.turn, L = legal(S), pool = unseen(S, me), un = [], deals = [], f, i, k;
+    for (f = 2; f <= 20; f++) for (i = 0; i < pool[f]; i++) un.push(f);
+    for (k = 0; k < R; k++) {
+      var u = un.slice();
+      for (i = u.length - 1; i > 0; i--) { var j = Math.floor(rnd() * (i + 1)), t = u[i]; u[i] = u[j]; u[j] = t; }
+      deals.push(u);
+    }
+    var best = L[0], bs = -1;
+    L.forEach(function (face) {
+      var s = 0;
+      deals.forEach(function (u) {
+        var T = clone(S), at = 0;
+        for (var p = 0; p < T.n; p++) if (p !== me) { var m = T.hands[p].length; T.hands[p] = u.slice(at, at + m); at += m; }
+        T.pile = u.slice(at, at + T.pile.length);
+        play(T, face);
+        for (var n = 0; !over(T) && n < 400; n++) { begin(T); if (!over(T)) play(T, legal(T)[0]); }
+        if (T.winners.indexOf(me) >= 0) s += 1 / T.winners.length;
+      });
+      if (s > bs) { bs = s; best = face; }
+    });
+    return best;
+  }
+
+  function botMove(S, level, rnd) {
+    var L = legal(S);
+    if (!L.length) return null;
+    if (L.length === 1) return L[0];
+    if (level === 'easy') return L[Math.floor(rnd() * L.length)];
+    if (level === 'hard') return rollouts(S, rnd, 24);
+    return lowBeat(S);
+  }
+
+  function valid(S) {
+    if (!S || typeof S !== 'object' || !(S.n >= MIN && S.n <= MAX)) return false;
+    if (!Array.isArray(S.pile) || !Array.isArray(S.hands) || !Array.isArray(S.table) || !Array.isArray(S.discard) || !Array.isArray(S.winners)) return false;
+    if (S.hands.length !== S.n || S.table.length !== S.n || !(S.turn >= 0 && S.turn < S.n) || (S.turn | 0) !== S.turn) return false;
+    var c = {}, all = S.pile.concat(S.discard), ok = true;
+    S.hands.forEach(function (h) { if (!Array.isArray(h)) ok = false; else all = all.concat(h); });
+    if (!ok) return false;
+    S.table.forEach(function (f) { if (f) all.push(f); });
+    all.forEach(function (f) { c[f] = (c[f] || 0) + 1; });
+    if (all.length !== 90) return false;
+    for (var f = 2; f <= 20; f++) if (c[f] !== COUNTS[f]) return false;
+    return true;
+  }
+
+  return { COUNTS: COUNTS, HAND: HAND, MIN: MIN, MAX: MAX, deck: deck, newGame: newGame, make: make, clone: clone, count: count, value: value, over: over,
+    begin: begin, legal: legal, play: play, preview: preview, unseen: unseen, botMove: botMove, valid: valid };
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = PeakEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = PeakEngineFactory();
+  var LEVELS = ['easy', 'medium', 'hard'];
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'peak',
+    name: { fa: 'قله', en: 'Peak', zh: '登顶', de: 'Gipfel', es: 'Cumbre', pl: 'Szczyt' },
+    accent: '#786054',
+    mood: 'menu',
+    cardSpeed: true,
+    scroll: true,
+    strings: {
+      fa: {
+        rivalN: 'حریف {n}', cardsN: '{n} کارت', dailyPk: 'قله‌ی روزانه', players: 'بازیکن‌ها', level: 'سطح', optNote: 'از بازی بعد اعمال می‌شود.',
+        pile: 'دسته', discard: 'سوخته', yourTurn: 'نوبت توست: یک کارت انتخاب کن', previewFall: 'ارزش {v}، {k} کارت می‌افتد', previewNone: 'ارزش {v}، کارتی نمی‌افتد', sep: '، ',
+        playBtn: 'بگذار', thinking: '{n} فکر می‌کند…', stayedUp: 'کارت {f} تو سر پا ماند و بی جایگزین کنار رفت', playedN: '{n} کارت {f} گذاشت', fellN: '{k} کارت افتاد',
+        youFell: 'کارتت افتاد؛ یک کارت تازه گرفتی', youFellEmpty: 'کارتت افتاد؛ دسته خالی است', youTop: 'به قله رسیدی!', sharedTop: 'با هم به قله رسیدید!', topN: '{n} به قله رسید',
+        turns: 'نوبت‌ها', kbCards: 'رفتن بین کارت‌ها', kbPlay: 'گذاشتن کارت',
+        rules: 'هر کس شش کارت شماره‌دار می‌گیرد (از ۲ تا ۲۰؛ عددهای کوچک زیادند و بزرگ‌ها کم). در نوبتت یک کارت جلوی خودت بگذار. کارت‌های هم‌عدد روی میز با هم حساب می‌شوند: هر کدام عددش ضرب در تعدادشان می‌ارزد. هر کارتی روی میز که از کارت تو کم‌ارزش‌تر باشد می‌افتد و صاحبش، اگر دسته خالی نشده باشد، یک کارت تازه برمی‌دارد. ارزش برابر می‌ماند. اگر نوبتت برگشت و کارتت هنوز سر پا بود، بی جایگزین کنار می‌رود. اولین کسی که نه در دست کارتی دارد نه جلویش، به قله رسیده و برنده است.',
+        tutTitle1: 'بزرگ‌تر می‌اندازد', tutText1: 'یک کارت جلوی خودت بگذار. هر کارت کم‌ارزش‌تر روی میز می‌افتد و صاحبش کارت تازه برمی‌دارد.',
+        tutTitle2: 'هم‌عددها با هم', tutText2: 'کارت‌های هم‌عدد روی میز با هم حساب می‌شوند: دو تا ۵ هر کدام ۱۰ می‌ارزند.',
+        tutTitle3: 'به قله برس', tutText3: 'کارتی که تا نوبت بعدت سر پا بماند بی جایگزین کنار می‌رود. اولین کسی که کارتش تمام شود می‌برد.'
+      },
+      en: {
+        rivalN: 'Rival {n}', cardsN: '{n} cards', dailyPk: 'Daily Peak', players: 'Players', level: 'Level', optNote: 'Applies from the next game.',
+        pile: 'Pile', discard: 'Out', yourTurn: 'Your turn: pick a card', previewFall: 'Worth {v} · {k} fall', previewNone: 'Worth {v} · nothing falls', sep: ' · ',
+        playBtn: 'Play', thinking: '{n} is thinking…', stayedUp: 'Your {f} stayed up and leaves with no new card', playedN: '{n} played {f}', fellN: '{k} fell',
+        youFell: 'Your card fell; you drew a new one', youFellEmpty: 'Your card fell; the pile is empty', youTop: 'You reached the peak!', sharedTop: 'You share the peak!', topN: '{n} reached the peak',
+        turns: 'Turns', kbCards: 'Move between cards', kbPlay: 'Play the card',
+        rules: 'Everyone gets six numbered cards (2 to 20; low numbers are common, high ones rare). On your turn, play one card in front of you. Cards of the same number on the table join forces: each is worth its number times how many of them there are. Every card on the table worth less than yours falls, and its owner draws a new card if the pile has any left. Equal values stay. When your turn comes back and your card is still standing, it leaves with no new card. The first with no cards in hand and none in front of them reaches the peak and wins.',
+        tutTitle1: 'Higher knocks lower', tutText1: 'Play a card in front of you. Every lower card on the table falls, and its owner draws a new one.',
+        tutTitle2: 'Twins join forces', tutText2: 'Cards of the same number on the table count together: two 5s are worth 10 each.',
+        tutTitle3: 'Reach the peak', tutText3: 'A card still standing when your turn comes back leaves with no new card. The first to run out of cards wins.'
+      },
+      pl: {
+        rivalN: 'Rywal {n}', cardsN: 'Karty: {n}', dailyPk: 'Codzienny Szczyt', players: 'Gracze', level: 'Poziom', optNote: 'Zmiany wejdą w życie od następnej gry.',
+        pile: 'Stos', discard: 'Odrzucone', yourTurn: 'Twoja kolej: wybierz kartę', previewFall: 'Wartość {v} · spada: {k}', previewNone: 'Wartość {v} · nic nie spada', sep: ' · ',
+        playBtn: 'Wyłóż', thinking: '{n} myśli…', stayedUp: 'Twoja karta {f} przetrwała i odchodzi bez nowej', playedN: '{n} wykłada {f}', fellN: 'Spada: {k}',
+        youFell: 'Twoja karta spadła; dobierasz nową', youFellEmpty: 'Twoja karta spadła; stos jest pusty', youTop: 'Zdobywasz szczyt!', sharedTop: 'Dzielisz szczyt!', topN: '{n} zdobywa szczyt',
+        turns: 'Ruchy', kbCards: 'Przechodzenie między kartami', kbPlay: 'Wyłóż kartę',
+        rules: 'Każdy dostaje sześć kart z liczbami (od 2 do 20; niskich jest dużo, wysokich mało). W swojej kolejce wyłóż jedną kartę przed sobą. Karty z tą samą liczbą na stole łączą siły: każda jest warta swoją liczbę razy liczbę takich kart. Każda karta na stole warta mniej niż twoja spada, a jej właściciel dobiera nową, jeśli stos nie jest pusty. Równe wartości zostają. Jeśli twoja karta wciąż stoi, gdy wraca twoja kolejka, odchodzi bez nowej karty. Kto pierwszy nie ma kart ani w ręce, ani przed sobą, zdobywa szczyt i wygrywa.',
+        tutTitle1: 'Wyższa strąca niższą', tutText1: 'Wyłóż kartę przed sobą. Każda niższa karta na stole spada, a jej właściciel dobiera nową.',
+        tutTitle2: 'Bliźniaki łączą siły', tutText2: 'Karty z tą samą liczbą na stole liczą się razem: dwie piątki są warte po 10.',
+        tutTitle3: 'Zdobądź szczyt', tutText3: 'Karta, która stoi do twojej następnej kolejki, odchodzi bez nowej. Wygrywa ten, komu pierwszemu skończą się karty.'
+      },
+      zh: {
+        rivalN: '对手 {n}', cardsN: '{n} 张', dailyPk: '每日登顶', players: '玩家', level: '难度', optNote: '从下一局开始生效。',
+        pile: '牌堆', discard: '弃牌', yourTurn: '轮到你：选一张牌', previewFall: '价值 {v} · 打落 {k} 张', previewNone: '价值 {v} · 没有牌被打落', sep: ' · ',
+        playBtn: '出牌', thinking: '{n} 正在思考…', stayedUp: '你的 {f} 撑住了，离场且不补牌', playedN: '{n} 出了 {f}', fellN: '打落 {k} 张',
+        youFell: '你的牌被打落，补了一张新牌', youFellEmpty: '你的牌被打落，牌堆已空', youTop: '你登顶了！', sharedTop: '你们一起登顶！', topN: '{n} 登顶了',
+        turns: '回合', kbCards: '在手牌间移动', kbPlay: '出这张牌',
+        rules: '每人六张数字牌（2到20；小数字多，大数字少）。轮到你时，在自己面前出一张牌。桌上数字相同的牌合力：每张的价值是数字乘以这种牌的张数。桌上价值比你低的牌都会被打落，牌主从牌堆补一张新牌（如果还有）。价值相同的留下。轮到你时如果你的牌还立着，它就离场，不补牌。第一个手里和面前都没有牌的人登顶获胜。',
+        tutTitle1: '大压小', tutText1: '在面前出一张牌。桌上价值更低的牌被打落，牌主补一张新牌。',
+        tutTitle2: '同数合力', tutText2: '桌上数字相同的牌一起计算：两张5每张值10。',
+        tutTitle3: '登顶', tutText3: '撑到你下一回合的牌会离场且不补牌。最先出完牌的人获胜。'
+      },
+      de: {
+        rivalN: 'Gegner {n}', cardsN: '{n} Karten', dailyPk: 'Täglicher Gipfel', players: 'Spieler', level: 'Stufe', optNote: 'Gilt ab dem nächsten Spiel.',
+        pile: 'Stapel', discard: 'Ablage', yourTurn: 'Du bist dran: wähle eine Karte', previewFall: 'Wert {v} · {k} fallen', previewNone: 'Wert {v} · nichts fällt', sep: ' · ',
+        playBtn: 'Legen', thinking: 'Am Zug: {n}…', stayedUp: 'Deine {f} hat gehalten und geht ohne neue Karte', playedN: '{n} legt {f}', fellN: '{k} fallen',
+        youFell: 'Deine Karte ist gefallen; du ziehst eine neue', youFellEmpty: 'Deine Karte ist gefallen; der Stapel ist leer', youTop: 'Du bist auf dem Gipfel!', sharedTop: 'Ihr teilt den Gipfel!', topN: 'Auf dem Gipfel: {n}',
+        turns: 'Züge', kbCards: 'Zwischen Karten wechseln', kbPlay: 'Karte legen',
+        rules: 'Jeder bekommt sechs Zahlenkarten (2 bis 20; kleine Zahlen gibt es oft, große selten). Leg in deinem Zug eine Karte vor dich. Karten mit gleicher Zahl auf dem Tisch halten zusammen: jede ist ihre Zahl mal ihre Anzahl wert. Jede Karte auf dem Tisch, die weniger wert ist als deine, fällt, und ihr Besitzer zieht eine neue, solange der Stapel reicht. Gleiche Werte bleiben liegen. Liegt deine Karte noch, wenn du wieder dran bist, geht sie ohne neue Karte. Wer zuerst weder auf der Hand noch vor sich eine Karte hat, ist auf dem Gipfel und gewinnt.',
+        tutTitle1: 'Höher wirft niedriger', tutText1: 'Leg eine Karte vor dich. Jede niedrigere Karte auf dem Tisch fällt, und ihr Besitzer zieht eine neue.',
+        tutTitle2: 'Gleiche halten zusammen', tutText2: 'Karten mit gleicher Zahl auf dem Tisch zählen zusammen: zwei 5er sind je 10 wert.',
+        tutTitle3: 'Auf den Gipfel', tutText3: 'Eine Karte, die bis zu deinem nächsten Zug liegt, geht ohne neue Karte. Wer zuerst keine Karten mehr hat, gewinnt.'
+      },
+      es: {
+        rivalN: 'Rival {n}', cardsN: '{n} cartas', dailyPk: 'Cumbre diaria', players: 'Jugadores', level: 'Nivel', optNote: 'Se aplica desde la próxima partida.',
+        pile: 'Mazo', discard: 'Fuera', yourTurn: 'Tu turno: elige una carta', previewFall: 'Vale {v} · caen {k}', previewNone: 'Vale {v} · no cae nada', sep: ' · ',
+        playBtn: 'Jugar', thinking: '{n} está pensando…', stayedUp: 'Tu {f} aguantó y se va sin carta nueva', playedN: '{n} jugó un {f}', fellN: 'caen {k}',
+        youFell: 'Tu carta cayó; robas una nueva', youFellEmpty: 'Tu carta cayó; el mazo está vacío', youTop: '¡Llegaste a la cumbre!', sharedTop: '¡Compartes la cumbre!', topN: '{n} llegó a la cumbre',
+        turns: 'Turnos', kbCards: 'Moverse entre cartas', kbPlay: 'Jugar la carta',
+        rules: 'Cada uno recibe seis cartas con números (del 2 al 20; los bajos abundan y los altos escasean). En tu turno, juega una carta delante de ti. Las cartas del mismo número en la mesa suman fuerzas: cada una vale su número por cuántas hay. Toda carta de la mesa que valga menos que la tuya cae, y su dueño roba una nueva si queda mazo. Los valores iguales se quedan. Si tu carta sigue en pie cuando vuelve tu turno, se va sin carta nueva. Quien primero no tenga cartas ni en la mano ni delante llega a la cumbre y gana.',
+        tutTitle1: 'La alta tumba a la baja', tutText1: 'Juega una carta delante de ti. Toda carta más baja de la mesa cae, y su dueño roba una nueva.',
+        tutTitle2: 'Las iguales se unen', tutText2: 'Las cartas del mismo número en la mesa cuentan juntas: dos cincos valen 10 cada uno.',
+        tutTitle3: 'Llega a la cumbre', tutText3: 'Una carta que sigue en pie al volver tu turno se va sin carta nueva. Gana quien primero se queda sin cartas.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', { players: 4, level: 'medium' });
+  if (!(prefs.players >= E.MIN && prefs.players <= E.MAX)) prefs.players = 4;
+  if (LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+
+  var BOT_MS = 900;
+  var M = null, S = null, botTimer = null, sel = 0, kf = -1, msg = '', pausedAt = 0;
+
+  var top = el('div', { class: 'pk-top' });
+  var seats = el('div', { class: 'pk-seats' });
+  var pileBox = el('div', { class: 'pk-heap pk-pile' });
+  var meBox = el('div', { class: 'pk-me' });
+  var outBox = el('div', { class: 'pk-heap' });
+  var mid = el('div', { class: 'pk-mid' }, [pileBox, meBox, outBox]);
+  var status = el('div', { class: 'pk-status', role: 'status', 'aria-live': 'polite' });
+  var hand = el('div', { class: 'pk-hand' });
+  var playBtn = el('button', { class: 'ch-btn ch-btn--primary', type: 'button', text: C.t('playBtn'), hidden: true });
+  var actions = el('div', { class: 'pk-actions' }, [playBtn]);
+  var wrap = el('div', { class: 'pk-wrap' }, [top, seats, mid, status, hand, actions]);
+  playBtn.addEventListener('click', function () { if (sel) humanPlay(sel); });
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newGame'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  function pname(p) { return p === 0 ? C.t('you') : C.t('rivalN', { n: C.num(p) }); }
+  function human() { return S && !E.over(S) && S.turn === 0; }
+  function busy() { return !!document.querySelector('.ch-scrim'); }
+
+  /* ------------------------------------------------------------- cards */
+
+  var BANDS = [[2, '#4F8A4B'], [6, '#3D7F86'], [10, '#5C6690'], [14, '#7A5C8E'], [18, '#8E4A4A']];
+  // the mountain grows with the number, so a hand reads high to low at a glance;
+  // from 10 up the summit wears snow
+  function mountain(f) {
+    var col = BANDS[0][1];
+    BANDS.forEach(function (b) { if (f >= b[0]) col = b[1]; });
+    var H = 18 + (f - 2) * 2.3, y = 60 - H;
+    var s = '<svg viewBox="0 0 100 60" preserveAspectRatio="none">' +
+      '<polygon points="0,60 20,' + (60 - H * 0.45).toFixed(1) + ' 42,60" fill="' + col + '" opacity=".5"/>' +
+      '<polygon points="58,60 82,' + (60 - H * 0.55).toFixed(1) + ' 100,60" fill="' + col + '" opacity=".5"/>' +
+      '<polygon points="4,60 50,' + y.toFixed(1) + ' 96,60" fill="' + col + '"/>';
+    if (f >= 10) {
+      var d = H * 0.3, w = 46 * d / H;
+      s += '<polygon points="50,' + y.toFixed(1) + ' ' + (50 - w).toFixed(1) + ',' + (y + d).toFixed(1) + ' ' + (50 - w * 0.35).toFixed(1) + ',' + (y + d * 0.72).toFixed(1) +
+        ' 50,' + (y + d).toFixed(1) + ' ' + (50 + w * 0.35).toFixed(1) + ',' + (y + d * 0.72).toFixed(1) + ' ' + (50 + w).toFixed(1) + ',' + (y + d).toFixed(1) + '" fill="#FBFAF6"/>';
+    }
+    return s + '</svg>';
+  }
+  function cardEl(f, extra) {
+    var b = el('button', { class: 'ch-pcard pk-card' + (extra ? ' ' + extra : ''), type: 'button', 'aria-label': C.num(f) });
+    b.appendChild(el('span', { class: 'pk-n', text: C.num(f) }));
+    var art = el('span', { class: 'pk-art', 'aria-hidden': 'true' });
+    art.innerHTML = mountain(f);
+    b.appendChild(art);
+    b._f = f;
+    return b;
+  }
+  function still(f, extra) { var c = cardEl(f, extra); c.disabled = true; c.tabIndex = -1; return c; }
+
+  /* ------------------------------------------------------------- start */
+
+  function newGame(daily) {
+    stopBot();
+    var n = daily ? 4 : prefs.players;
+    var rnd = daily ? C.daily('peak', daily).rng : Math.random;
+    // a random seat leads outside the daily, so the human does not always move first
+    S = E.newGame(n, rnd, daily ? 0 : Math.floor(Math.random() * n));
+    M = { S: S, level: daily ? 'medium' : prefs.level, daily: daily || null, startedAt: Date.now() };
+    sel = 0; kf = -1; msg = '';
+    render();
+    dealIn();
+    save();
+    next();
+  }
+  function resume(v) {
+    M = v; S = v.S;
+    M.startedAt = Date.now() - (v.elapsed || 0);
+    sel = 0; kf = -1; msg = '';
+    render();
+    next();
+  }
+  // on the daily, the bots' guesses come from the date and the move, so a reload replays them
+  function botRnd() { return M.daily ? C.daily('peak', M.daily + '|' + S.moves + '|' + S.turn).rng : Math.random; }
+
+  /* -------------------------------------------------------------- draw */
+
+  function valEl(p) {
+    var f = S.table[p], k = f ? E.count(S, f) : 0;
+    return el('span', { class: 'pk-val' + (k > 1 ? ' pk-val--on' : ''), text: !f ? '' : k > 1 ? C.num(f) + '×' + C.num(k) + ' = ' + C.num(f * k) : C.num(f) });
+  }
+  function spotEl(p) {
+    var f = S.table[p], box = el('div', { class: 'pk-spot' + (f ? ' pk-spot--full' : ''), 'data-spot': p });
+    if (f) box.appendChild(still(f));
+    return box;
+  }
+  function renderTop() {
+    top.innerHTML = '';
+    if (M.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyPk') + ' — ' + C.num(M.daily) })]));
+    else top.appendChild(el('span', { class: 'ch-badge', text: C.t(M.level) }));
+    top.appendChild(C.cards.backPicker());
+    // options behind a gear in the top row, never in «?» (#409)
+    var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', showSettings);
+    top.appendChild(gear);
+  }
+  function renderSeats(pv) {
+    seats.innerHTML = '';
+    var b = S.n - 1;
+    seats.style.setProperty('--cols', b === 4 ? 2 : Math.min(3, b));
+    // the wide layout sizes the rivals' cards so that this many rows of two fit the height
+    wrap.style.setProperty('--rows', Math.ceil(b / 2));
+    for (var p = 1; p < S.n; p++) {
+      var spot = spotEl(p);
+      if (pv && pv.beaten.indexOf(p) >= 0) spot.classList.add('pk-spot--fall');
+      else if (pv && pv.partners.indexOf(p) >= 0) spot.classList.add('pk-spot--pair');
+      seats.appendChild(el('div', { class: 'pk-seat' + (S.turn === p && !E.over(S) ? ' pk-seat--on' : ''), 'data-p': p }, [
+        el('span', { class: 'pk-who', text: pname(p) }),
+        el('span', { class: 'pk-count pk-backs', 'aria-label': C.t('cardsN', { n: C.num(S.hands[p].length) }) }, [C.cards.back(), el('span', { text: C.num(S.hands[p].length) })]),
+        spot, valEl(p)
+      ]));
+    }
+  }
+  function render() {
+    renderTop();
+    var pv = human() && sel ? E.preview(S, sel) : null;
+    renderSeats(pv);
+    pileBox.innerHTML = '';
+    pileBox.appendChild(S.pile.length ? C.cards.back() : el('div', { class: 'pk-slot' }));
+    pileBox.appendChild(el('span', { text: C.t('pile') + C.t('sep') + C.num(S.pile.length) }));
+    outBox.innerHTML = '';
+    var slot = el('div', { class: 'pk-slot pk-out' });
+    if (S.discard.length) slot.appendChild(still(S.discard[S.discard.length - 1]));
+    outBox.appendChild(slot);
+    outBox.appendChild(el('span', { text: C.t('discard') + C.t('sep') + C.num(S.discard.length) }));
+    meBox.className = 'pk-me' + (human() ? ' pk-seat--on' : '');
+    meBox.innerHTML = '';
+    var mine = spotEl(0), val = valEl(0);
+    // the chosen card waits faded in your spot with the value it would have
+    if (pv) {
+      mine.appendChild(still(sel, 'pk-try'));
+      var k = E.count(S, sel) + 1;
+      val = el('span', { class: 'pk-val' + (k > 1 ? ' pk-val--on' : ''), text: k > 1 ? C.num(sel) + '×' + C.num(k) + ' = ' + C.num(pv.v) : C.num(sel) });
+    }
+    meBox.appendChild(el('span', { class: 'pk-who', text: C.t('you') }));
+    meBox.appendChild(mine);
+    meBox.appendChild(val);
+    renderHand();
+    playBtn.hidden = !pv;
+    var st = msg;
+    if (pv) st = pv.beaten.length ? C.t('previewFall', { v: C.num(pv.v), k: C.num(pv.beaten.length) }) : C.t('previewNone', { v: C.num(pv.v) });
+    else if (!st && !E.over(S)) st = S.turn === 0 ? C.t('yourTurn') : C.t('thinking', { n: pname(S.turn) });
+    status.textContent = st;
+  }
+  function renderHand() {
+    hand.innerHTML = '';
+    var h = S.hands[0].slice().sort(function (a, b) { return a - b; }), on = human();
+    h.forEach(function (f, i) {
+      var b = cardEl(f, (sel === f && h.indexOf(f) === i ? 'pk-sel' : '') + (kf === i ? ' pk-kf' : ''));
+      b.disabled = !on;
+      b.addEventListener('click', function () { tapCard(f, i); });
+      hand.appendChild(b);
+    });
+  }
+  function spotCard(p) { return wrap.querySelector('[data-spot="' + p + '"] .ch-pcard:not(.pk-try)'); }
+  function seatFrom(p) { return p === 0 ? null : seats.querySelector('[data-p="' + p + '"] .pk-backs'); }
+  function handNode(f) { var k = hand.children, r = null; for (var i = 0; i < k.length; i++) if (k[i]._f === f) r = k[i]; return r; }
+  function snapshot() { var r = {}; for (var p = 0; p < S.n; p++) { var c = spotCard(p); if (c) r[p] = c.getBoundingClientRect(); } return r; }
+
+  // a card that leaves is copied where it stood and sent to the discard; the state
+  // itself has already moved on, so input is never held
+  function ghost(f, r, delay) {
+    if (C.ui.reduceMotion() || !r || !r.width) return;
+    var g = still(f);
+    g.style.cssText = 'position:fixed;left:' + r.left + 'px;top:' + r.top + 'px;--pw:' + r.width + 'px;width:' + r.width + 'px;margin:0;z-index:30;pointer-events:none';
+    document.body.appendChild(g);
+    var a = C.ui.sendTo(g, outBox.querySelector('.pk-slot'), { ms: 340, delay: delay, scale: 0.8 });
+    if (!a) { g.remove(); return; }
+    a.onfinish = a.oncancel = function () { g.remove(); };
+  }
+  function animate(ev, rects, from) {
+    var i = 0, fell = 0;
+    ev.forEach(function (e) {
+      if (e.t === 'play') { var n = spotCard(e.p); if (n && from) C.ui.fly(n, from, { ms: 260, flip: e.p !== 0 }); }
+      if (e.t === 'beat' || e.t === 'clear') { ghost(e.face, rects[e.p], (e.t === 'beat' ? 220 : 0) + i++ * 80); if (e.t === 'beat') fell++; }
+      if (e.t === 'draw' && e.p === 0) { var h = handNode(e.face); if (h) C.ui.fly(h, pileBox, { ms: 240, delay: 420, flip: true }); }
+    });
+    if (fell) C.audio.sfx('flip');
+  }
+  function dealIn() {
+    if (C.ui.reduceMotion()) return;
+    for (var i = 0; i < hand.children.length; i++) C.ui.fly(hand.children[i], pileBox, { ms: 220, delay: i * 50, flip: true });
+  }
+
+  /* ------------------------------------------------------------- moves */
+
+  function tapCard(f, i) {
+    if (!human() || busy()) return;
+    if (sel === f) { humanPlay(f); return; }
+    sel = f; kf = i; msg = '';
+    C.feedback('tap');
+    render();
+  }
+  function humanPlay(f) {
+    if (!human() || busy()) return;
+    var n = handNode(f);
+    commit(f, n ? n.getBoundingClientRect() : null);
+  }
+  function commit(f, from) {
+    var p = S.turn, rects = snapshot(), ev = E.play(S, f);
+    if (!ev) { C.feedback('bad'); return; }
+    sel = 0; kf = -1;
+    msg = describe(ev, p);
+    C.audio.sfx('place'); C.haptic('tap');
+    render();
+    animate(ev, rects, from);
+    save();
+    next();
+  }
+  function describe(ev, p) {
+    var beaten = ev.filter(function (e) { return e.t === 'beat'; });
+    var mine = beaten.some(function (e) { return e.p === 0; });
+    if (mine) return ev.some(function (e) { return e.t === 'draw' && e.p === 0; }) ? C.t('youFell') : C.t('youFellEmpty');
+    if (p === 0) return '';
+    var s = C.t('playedN', { n: pname(p), f: C.num(ev[0].face) });
+    return beaten.length ? s + C.t('sep') + C.t('fellN', { k: C.num(beaten.length) }) : s;
+  }
+
+  // what happens next: the end, the human's turn, or a bot after a short pause
+  function next() {
+    stopBot();
+    if (E.over(S)) { endGame(); return; }
+    if (S.turn === 0) { startHuman(); return; }
+    var G = S;
+    botTimer = setTimeout(function () {
+      botTimer = null;
+      if (S !== G || E.over(S) || S.turn === 0) return;
+      var rects = snapshot(), ev = E.begin(S);
+      if (!ev.length) { botPlay(); return; }
+      render();
+      animate(ev, rects, null);
+      save();
+      if (E.over(S)) { endGame(); return; }
+      botTimer = setTimeout(function () { botTimer = null; if (S === G && !E.over(S) && S.turn !== 0) botPlay(); }, C.cards.pace(450));
+    }, C.cards.pace(C.ui.reduceMotion() ? 300 : BOT_MS));
+  }
+  function botPlay() {
+    var p = S.turn, f = E.botMove(S, M.level, botRnd()), from = seatFrom(p);
+    commit(f, from ? from.getBoundingClientRect() : null);
+  }
+  // a card that stayed up since your last turn leaves first; with an empty hand that is the win
+  function startHuman() {
+    var rects = snapshot(), ev = E.begin(S);
+    if (ev.length) {
+      var gone = C.t('stayedUp', { f: C.num(ev[0].face) });
+      msg = msg ? msg + C.t('sep') + gone : gone;
+      render();
+      animate(ev, rects, null);
+      save();
+      if (E.over(S)) endGame();
+      return;
+    }
+    render();
+  }
+  function stopBot() { if (botTimer) { clearTimeout(botTimer); botTimer = null; } }
+
+  /* --------------------------------------------------------------- end */
+
+  function endGame() {
+    stopBot();
+    render();
+    var won = S.winners.indexOf(0) >= 0;
+    status.textContent = won ? (S.winners.length > 1 ? C.t('sharedTop') : C.t('youTop')) : C.t('topN', { n: pname(S.winners[0]) });
+    if (won) C.ui.burst(meBox, { count: 22, speed: 240, ring: 30, colors: ['#FBFAF6', '#786054', '#4F8A4B'] });
+    save();
+    var G = S;
+    setTimeout(function () { if (S === G) finish(); }, C.cards.pace(1000));
+  }
+  function finish() {
+    var ms = Date.now() - M.startedAt, won = S.winners.indexOf(0) >= 0;
+    var base = { easy: 6, medium: 12, hard: 20 }[M.level] || 12;
+    var coins = won ? base + (M.daily ? 8 : 0) : Math.max(2, Math.round(base * 0.3));
+    var points = won ? base * 4 + (M.daily ? 25 : 0) : Math.round(base * 1.2);
+    var title = won ? (S.winners.length > 1 ? C.t('sharedTop') : C.t('youTop')) : C.t('topN', { n: pname(S.winners[0]) });
+    if (won) {
+      C.achievements.unlock('pk-win');
+      if (M.level === 'hard' && !M.daily) C.achievements.unlock('pk-hard');
+    }
+    if (M.daily) {
+      if (won) C.achievements.unlock('pk-daily');
+      var first = C.stats.daily('peak', M.daily, { label: title, win: won });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    var lines = [];
+    for (var p = 0; p < S.n; p++) lines.push({ label: pname(p), value: C.t('cardsN', { n: C.num(S.hands[p].length + (S.table[p] ? 1 : 0)) }) });
+    lines.push({ label: C.t('turns'), value: C.num(S.moves) });
+    ctx.finish({
+      won: won, title: title, timeMs: ms, coins: coins, points: points, lines: lines,
+      shareText: 'چوگان · قله' + (M.daily ? ('\nروزانه ' + M.daily) : '') + '\n' + (won ? '⛰️' : '🧗') + ' ' + S.moves,
+      onAgain: M.daily ? null : function () { newGame(null); }
+    });
+  }
+
+  /* ----------------------------------------------------------- dialogs */
+
+  function showSettings() {
+    var nums = [];
+    for (var n = E.MIN; n <= E.MAX; n++) nums.push({ value: n, label: C.num(n) });
+    var seg1 = C.ui.segmented(nums, prefs.players, function (v) { prefs.players = v; ctx.store.set('prefs', prefs); });
+    var seg2 = C.ui.segmented(LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), prefs.level, function (v) { prefs.level = v; ctx.store.set('prefs', prefs); });
+    C.ui.modal({
+      title: C.t('settings'),
+      body: [el('div', { class: 'ch-list' }, [
+        el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('players') }), seg1]),
+        el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('level') }), seg2]),
+        C.cards.speedRow()
+      ]), el('p', { class: 'ch-dim', text: C.t('optNote') })],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function askNew() {
+    if (busy()) return;
+    var dd = M ? M.daily : null;
+    if (!S || !S.moves || E.over(S)) { newGame(dd); return; }
+    C.ui.confirm({ title: C.t('newGame'), body: C.t('resetWarn'), onOk: function () { newGame(dd); } });
+  }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← →', C.t('kbCards')), kb('Enter', C.t('kbPlay'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+
+  window.addEventListener('keydown', function (e) {
+    if (!human() || busy()) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter'))) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var h = S.hands[0].slice().sort(function (a, b) { return a - b; }), n = h.length;
+    if (!n) return;
+    // the hand is laid out left to right in every language, so the arrows are not flipped
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      kf = kf < 0 ? 0 : (kf + (e.key === 'ArrowRight' ? 1 : n - 1)) % n;
+      sel = h[kf]; msg = '';
+      render(); e.preventDefault(); return;
+    }
+    if (e.key === 'Enter' && sel) { humanPlay(sel); e.preventDefault(); }
+  });
+
+  function svgCard(x, y, f, extra) {
+    return '<rect x="' + x + '" y="' + y + '" width="34" height="48" rx="5" fill="var(--c-surface)" stroke="var(--c-line)"' + (extra || '') + '/>' +
+      '<text x="' + (x + 17) + '" y="' + (y + 22) + '" font-size="16" font-weight="800" text-anchor="middle" fill="var(--c-text)">' + C.num(f) + '</text>' +
+      '<polygon points="' + (x + 4) + ',' + (y + 44) + ' ' + (x + 17) + ',' + (y + 44 - 6 - f) + ' ' + (x + 30) + ',' + (y + 44) + '" fill="var(--game)"/>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr">' + svgCard(40, 30, 4, ' opacity=".45" transform="rotate(-12 57 54)"') +
+      '<path d="M86 54 H 112" stroke="var(--game)" stroke-width="4" stroke-linecap="round"/><path d="M95 46 l -9 8 9 8" stroke="var(--game)" stroke-width="4" fill="none" stroke-linecap="round"/>' + svgCard(122, 30, 9) + '</svg>' },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr">' + svgCard(30, 24, 5) + svgCard(74, 24, 5) + svgCard(140, 24, 9, ' opacity=".45"') +
+      '<text x="73" y="96" font-size="15" font-weight="800" text-anchor="middle" fill="var(--game)">' + C.num(5) + '×' + C.num(2) + ' = ' + C.num(10) + '</text>' +
+      '<text x="157" y="96" font-size="15" font-weight="800" text-anchor="middle" fill="var(--c-text-dim)">' + C.num(9) + '</text></svg>' },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr"><polygon points="30,96 100,16 170,96" fill="var(--game)"/>' +
+      '<polygon points="100,16 82,37 92,33 100,40 108,33 118,37" fill="#FBFAF6"/><path d="M100 16 V 2" stroke="var(--c-text)" stroke-width="3"/><path d="M100 3 l 16 5 -16 5 z" fill="var(--c-bad)"/></svg>' }
+  ];
+
+  /* -------------------------------------------------------------- save */
+
+  ctx.autosave(function () {
+    if (!M || !S || E.over(S)) return { inProgress: false };
+    var v = JSON.parse(JSON.stringify(M));
+    v.elapsed = (pausedAt || Date.now()) - M.startedAt;
+    return { m: v };
+  });
+  function save() { ctx.save(); }
+  C.onPause(function () { stopBot(); if (!pausedAt) pausedAt = Date.now(); });
+  C.onResume(function () { if (pausedAt && M) M.startedAt += Date.now() - pausedAt; pausedAt = 0; if (S && S.turn !== 0) next(); });
+
+  /* ------------------------------------------------------------- start */
+
+  var saved = ctx.loadSave();
+  var sv = saved && saved.m && E.valid(saved.m.S) && !E.over(saved.m.S) && LEVELS.indexOf(saved.m.level) >= 0 ? saved.m : null;
+  if (dailyDate) {
+    if (sv && sv.daily === dailyDate) resume(sv);
+    else newGame(dailyDate);
+    if (C.stats.dailyDone('peak', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).peak;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (sv && !sv.daily) resume(sv);
+  else newGame(null);
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
