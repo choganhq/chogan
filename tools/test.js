@@ -11845,14 +11845,20 @@ function testPeak() {
   const R = E.make([[4, 9], [9], [9], [9], [9]], [2, 2, 2, 2], [0, 4, 3, 3, 5]);
   const rv = E.play(R, 4);
   ok(rv[0].v === 8 && R.table.join() === '4,4,0,0,0', 'a played card joins its twin on the table and both count double');
-  // an empty pile: a beaten card goes with no draw
+  // an empty pile: the discards, the card just beaten included, are shuffled into a new one (#635)
   const P = E.make([[9, 9], [2, 2], [9], [9]], [], [0, 3, 0, 0]);
+  P.discard = [5, 6];
   const pv = E.play(P, 9);
-  ok(pv.some((e) => e.t === 'beat' && e.p === 1) && !pv.some((e) => e.t === 'draw') && P.hands[1].length === 2, 'with the pile empty a beaten card is not replaced');
-  // a beaten player with no hand and no pile is out of cards at once, and wins; two at once share it
+  ok(pv.some((e) => e.t === 'beat' && e.p === 1) && pv.some((e) => e.t === 'reshuffle') && pv.some((e) => e.t === 'draw' && e.p === 1) && P.hands[1].length === 3 && P.pile.length + P.discard.length === 2 && P.discard.length === 0, 'with the pile empty the discards become the new pile and a beaten card is replaced');
+  const P2 = E.make([[9, 9], [2, 2], [9], [9]], [], [0, 3, 0, 0]);
+  P2.discard = [5, 6, 7, 8, 10, 11];
+  const P3 = E.clone(P2);
+  E.play(P2, 9); E.play(P3, 9);
+  ok(P2.pile.join() === P3.pile.join(), 'the new pile is shuffled the same way from the same position, so the daily stays the same for everyone');
+  // a beaten player always draws, so nobody can empty their hand off-turn and nobody shares a win (#635)
   const W = E.make([[9, 2], [], [], [2]], [], [0, 3, 4, 0]);
   const wv = E.play(W, 9);
-  ok(E.over(W) && W.winners.slice().sort().join() === '1,2' && wv[wv.length - 1].t === 'win', 'two players emptied at the same moment win together');
+  ok(!E.over(W) && W.hands[1].length === 1 && W.hands[2].length === 1 && !wv.some((e) => e.t === 'win'), 'a beaten player with no hand draws from the reshuffled discards instead of winning');
   // a card that stands until its owner's next turn leaves with no draw; with an empty hand, that is the win
   const L = E.make([[2, 9], [9, 9], [9, 9], [9, 9]], [5, 5, 5], [0, 0, 0, 0]);
   L.turn = 2;

@@ -125,7 +125,20 @@ function PeakEngineFactory() {
   // a card counts its face once for every card of that face on the table, itself included
   function value(S, p) { var f = S.table[p]; return f ? f * count(S, f) : 0; }
   function over(S) { return S.winners.length > 0; }
-  function out(S, p) { return !S.hands[p].length && !S.table[p]; }
+
+  // An empty pile is rebuilt from the discards, as in the original rules (#635): without it a
+  // beaten player could run out of cards off-turn and win for free once the pile ran dry.
+  // The shuffle is seeded from the position, so a daily deal plays the same for everyone.
+  function refill(S) {
+    var d = S.discard, h = (S.moves * 2654435761) >>> 0, i;
+    for (i = 0; i < d.length; i++) h = Math.imul(h ^ d[i], 16777619) >>> 0;
+    for (i = d.length - 1; i > 0; i--) {
+      h = (Math.imul(h, 1103515245) + 12345) >>> 0;
+      var j = (h >>> 8) % (i + 1), t = d[i]; d[i] = d[j]; d[j] = t;
+    }
+    S.pile = d;
+    S.discard = [];
+  }
 
   // the start of a turn: a card that was not beaten since the last turn leaves without a draw
   function begin(S) {
@@ -163,14 +176,11 @@ function PeakEngineFactory() {
         S.table[q] = 0;
       });
       lose.forEach(function (q) {
-        if (S.pile.length) { var f = S.pile.pop(); S.hands[q].push(f); ev.push({ t: 'draw', p: q, face: f }); }
+        if (!S.pile.length) { refill(S); ev.push({ t: 'reshuffle', k: S.pile.length }); }
+        var f = S.pile.pop(); S.hands[q].push(f); ev.push({ t: 'draw', p: q, face: f });
       });
     }
-    // with the pile empty a beaten player with no hand is out of cards: everyone who
-    // empties at the same moment wins together
-    var w = [];
-    for (var i = 1; i < S.n; i++) { var r = (p + i) % S.n; if (out(S, r)) w.push(r); }
-    if (w.length) { S.winners = w; ev.push({ t: 'win', ps: w }); return ev; }
+    // a beaten player always draws, so a hand only empties on its owner's own turn (begin)
     S.turn = (p + 1) % S.n;
     return ev;
   }
@@ -281,9 +291,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PeakEngine
         rivalN: 'حریف {n}', cardsN: '{n} کارت', dailyPk: 'قله‌ی روزانه', players: 'بازیکن‌ها', level: 'سطح', optNote: 'از بازی بعد اعمال می‌شود.',
         pile: 'دسته', discard: 'سوخته', yourTurn: 'نوبت توست: یک کارت انتخاب کن', previewFall: 'ارزش {v}، {k} کارت می‌افتد', previewNone: 'ارزش {v}، کارتی نمی‌افتد', sep: '، ',
         playBtn: 'بگذار', thinking: '{n} فکر می‌کند…', stayedUp: 'کارت {f} تو سر پا ماند و بی جایگزین کنار رفت', playedN: '{n} کارت {f} گذاشت', fellN: '{k} کارت افتاد',
-        youFell: 'کارتت افتاد؛ یک کارت تازه گرفتی', youFellEmpty: 'کارتت افتاد؛ دسته خالی است', youTop: 'به قله رسیدی!', sharedTop: 'با هم به قله رسیدید!', topN: '{n} به قله رسید',
+        youFell: 'کارتت افتاد؛ یک کارت تازه گرفتی', youTop: 'به قله رسیدی!', topN: '{n} به قله رسید',
         turns: 'نوبت‌ها', kbCards: 'رفتن بین کارت‌ها', kbPlay: 'گذاشتن کارت',
-        rules: 'هر کس شش کارت شماره‌دار می‌گیرد (از ۲ تا ۲۰؛ عددهای کوچک زیادند و بزرگ‌ها کم). در نوبتت یک کارت جلوی خودت بگذار. کارت‌های هم‌عدد روی میز با هم حساب می‌شوند: هر کدام عددش ضرب در تعدادشان می‌ارزد. هر کارتی روی میز که از کارت تو کم‌ارزش‌تر باشد می‌افتد و صاحبش، اگر دسته خالی نشده باشد، یک کارت تازه برمی‌دارد. ارزش برابر می‌ماند. اگر نوبتت برگشت و کارتت هنوز سر پا بود، بی جایگزین کنار می‌رود. اولین کسی که نه در دست کارتی دارد نه جلویش، به قله رسیده و برنده است.',
+        rules: 'هر کس شش کارت شماره‌دار می‌گیرد (از ۲ تا ۲۰؛ عددهای کوچک زیادند و بزرگ‌ها کم). در نوبتت یک کارت جلوی خودت بگذار. کارت‌های هم‌عدد روی میز با هم حساب می‌شوند: هر کدام عددش ضرب در تعدادشان می‌ارزد. هر کارتی روی میز که از کارت تو کم‌ارزش‌تر باشد می‌افتد و صاحبش یک کارت تازه برمی‌دارد؛ اگر دسته تمام شود، کارت‌های سوخته بُر می‌خورند و دسته‌ی تازه می‌شوند. ارزش برابر می‌ماند. اگر نوبتت برگشت و کارتت هنوز سر پا بود، بی جایگزین کنار می‌رود. اولین کسی که نه در دست کارتی دارد نه جلویش، به قله رسیده و برنده است.',
         tutTitle1: 'بزرگ‌تر می‌اندازد', tutText1: 'یک کارت جلوی خودت بگذار. هر کارت کم‌ارزش‌تر روی میز می‌افتد و صاحبش کارت تازه برمی‌دارد.',
         tutTitle2: 'هم‌عددها با هم', tutText2: 'کارت‌های هم‌عدد روی میز با هم حساب می‌شوند: دو تا ۵ هر کدام ۱۰ می‌ارزند.',
         tutTitle3: 'به قله برس', tutText3: 'کارتی که تا نوبت بعدت سر پا بماند بی جایگزین کنار می‌رود. اولین کسی که کارتش تمام شود می‌برد.'
@@ -292,9 +302,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PeakEngine
         rivalN: 'Rival {n}', cardsN: '{n} cards', dailyPk: 'Daily Peak', players: 'Players', level: 'Level', optNote: 'Applies from the next game.',
         pile: 'Pile', discard: 'Out', yourTurn: 'Your turn: pick a card', previewFall: 'Worth {v} · {k} fall', previewNone: 'Worth {v} · nothing falls', sep: ' · ',
         playBtn: 'Play', thinking: '{n} is thinking…', stayedUp: 'Your {f} stayed up and leaves with no new card', playedN: '{n} played {f}', fellN: '{k} fell',
-        youFell: 'Your card fell; you drew a new one', youFellEmpty: 'Your card fell; the pile is empty', youTop: 'You reached the peak!', sharedTop: 'You share the peak!', topN: '{n} reached the peak',
+        youFell: 'Your card fell; you drew a new one', youTop: 'You reached the peak!', topN: '{n} reached the peak',
         turns: 'Turns', kbCards: 'Move between cards', kbPlay: 'Play the card',
-        rules: 'Everyone gets six numbered cards (2 to 20; low numbers are common, high ones rare). On your turn, play one card in front of you. Cards of the same number on the table join forces: each is worth its number times how many of them there are. Every card on the table worth less than yours falls, and its owner draws a new card if the pile has any left. Equal values stay. When your turn comes back and your card is still standing, it leaves with no new card. The first with no cards in hand and none in front of them reaches the peak and wins.',
+        rules: 'Everyone gets six numbered cards (2 to 20; low numbers are common, high ones rare). On your turn, play one card in front of you. Cards of the same number on the table join forces: each is worth its number times how many of them there are. Every card on the table worth less than yours falls, and its owner draws a new card; when the pile runs out, the discards are shuffled into a new one. Equal values stay. When your turn comes back and your card is still standing, it leaves with no new card. The first with no cards in hand and none in front of them reaches the peak and wins.',
         tutTitle1: 'Higher knocks lower', tutText1: 'Play a card in front of you. Every lower card on the table falls, and its owner draws a new one.',
         tutTitle2: 'Twins join forces', tutText2: 'Cards of the same number on the table count together: two 5s are worth 10 each.',
         tutTitle3: 'Reach the peak', tutText3: 'A card still standing when your turn comes back leaves with no new card. The first to run out of cards wins.'
@@ -303,9 +313,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PeakEngine
         rivalN: 'Rywal {n}', cardsN: 'Karty: {n}', dailyPk: 'Codzienny Szczyt', players: 'Gracze', level: 'Poziom', optNote: 'Zmiany wejdą w życie od następnej gry.',
         pile: 'Stos', discard: 'Odrzucone', yourTurn: 'Twoja kolej: wybierz kartę', previewFall: 'Wartość {v} · spada: {k}', previewNone: 'Wartość {v} · nic nie spada', sep: ' · ',
         playBtn: 'Wyłóż', thinking: '{n} myśli…', stayedUp: 'Twoja karta {f} przetrwała i odchodzi bez nowej', playedN: '{n} wykłada {f}', fellN: 'Spada: {k}',
-        youFell: 'Twoja karta spadła; dobierasz nową', youFellEmpty: 'Twoja karta spadła; stos jest pusty', youTop: 'Zdobywasz szczyt!', sharedTop: 'Dzielisz szczyt!', topN: '{n} zdobywa szczyt',
+        youFell: 'Twoja karta spadła; dobierasz nową', youTop: 'Zdobywasz szczyt!', topN: '{n} zdobywa szczyt',
         turns: 'Ruchy', kbCards: 'Przechodzenie między kartami', kbPlay: 'Wyłóż kartę',
-        rules: 'Każdy dostaje sześć kart z liczbami (od 2 do 20; niskich jest dużo, wysokich mało). W swojej kolejce wyłóż jedną kartę przed sobą. Karty z tą samą liczbą na stole łączą siły: każda jest warta swoją liczbę razy liczbę takich kart. Każda karta na stole warta mniej niż twoja spada, a jej właściciel dobiera nową, jeśli stos nie jest pusty. Równe wartości zostają. Jeśli twoja karta wciąż stoi, gdy wraca twoja kolejka, odchodzi bez nowej karty. Kto pierwszy nie ma kart ani w ręce, ani przed sobą, zdobywa szczyt i wygrywa.',
+        rules: 'Każdy dostaje sześć kart z liczbami (od 2 do 20; niskich jest dużo, wysokich mało). W swojej kolejce wyłóż jedną kartę przed sobą. Karty z tą samą liczbą na stole łączą siły: każda jest warta swoją liczbę razy liczbę takich kart. Każda karta na stole warta mniej niż twoja spada, a jej właściciel dobiera nową; gdy stos się skończy, odrzucone karty są tasowane w nowy stos. Równe wartości zostają. Jeśli twoja karta wciąż stoi, gdy wraca twoja kolejka, odchodzi bez nowej karty. Kto pierwszy nie ma kart ani w ręce, ani przed sobą, zdobywa szczyt i wygrywa.',
         tutTitle1: 'Wyższa strąca niższą', tutText1: 'Wyłóż kartę przed sobą. Każda niższa karta na stole spada, a jej właściciel dobiera nową.',
         tutTitle2: 'Bliźniaki łączą siły', tutText2: 'Karty z tą samą liczbą na stole liczą się razem: dwie piątki są warte po 10.',
         tutTitle3: 'Zdobądź szczyt', tutText3: 'Karta, która stoi do twojej następnej kolejki, odchodzi bez nowej. Wygrywa ten, komu pierwszemu skończą się karty.'
@@ -314,9 +324,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PeakEngine
         rivalN: '对手 {n}', cardsN: '{n} 张', dailyPk: '每日登顶', players: '玩家', level: '难度', optNote: '从下一局开始生效。',
         pile: '牌堆', discard: '弃牌', yourTurn: '轮到你：选一张牌', previewFall: '价值 {v} · 打落 {k} 张', previewNone: '价值 {v} · 没有牌被打落', sep: ' · ',
         playBtn: '出牌', thinking: '{n} 正在思考…', stayedUp: '你的 {f} 撑住了，离场且不补牌', playedN: '{n} 出了 {f}', fellN: '打落 {k} 张',
-        youFell: '你的牌被打落，补了一张新牌', youFellEmpty: '你的牌被打落，牌堆已空', youTop: '你登顶了！', sharedTop: '你们一起登顶！', topN: '{n} 登顶了',
+        youFell: '你的牌被打落，补了一张新牌', youTop: '你登顶了！', topN: '{n} 登顶了',
         turns: '回合', kbCards: '在手牌间移动', kbPlay: '出这张牌',
-        rules: '每人六张数字牌（2到20；小数字多，大数字少）。轮到你时，在自己面前出一张牌。桌上数字相同的牌合力：每张的价值是数字乘以这种牌的张数。桌上价值比你低的牌都会被打落，牌主从牌堆补一张新牌（如果还有）。价值相同的留下。轮到你时如果你的牌还立着，它就离场，不补牌。第一个手里和面前都没有牌的人登顶获胜。',
+        rules: '每人六张数字牌（2到20；小数字多，大数字少）。轮到你时，在自己面前出一张牌。桌上数字相同的牌合力：每张的价值是数字乘以这种牌的张数。桌上价值比你低的牌都会被打落，牌主从牌堆补一张新牌；牌堆用完时，弃牌洗匀成为新牌堆。价值相同的留下。轮到你时如果你的牌还立着，它就离场，不补牌。第一个手里和面前都没有牌的人登顶获胜。',
         tutTitle1: '大压小', tutText1: '在面前出一张牌。桌上价值更低的牌被打落，牌主补一张新牌。',
         tutTitle2: '同数合力', tutText2: '桌上数字相同的牌一起计算：两张5每张值10。',
         tutTitle3: '登顶', tutText3: '撑到你下一回合的牌会离场且不补牌。最先出完牌的人获胜。'
@@ -325,9 +335,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PeakEngine
         rivalN: 'Gegner {n}', cardsN: '{n} Karten', dailyPk: 'Täglicher Gipfel', players: 'Spieler', level: 'Stufe', optNote: 'Gilt ab dem nächsten Spiel.',
         pile: 'Stapel', discard: 'Ablage', yourTurn: 'Du bist dran: wähle eine Karte', previewFall: 'Wert {v} · {k} fallen', previewNone: 'Wert {v} · nichts fällt', sep: ' · ',
         playBtn: 'Legen', thinking: 'Am Zug: {n}…', stayedUp: 'Deine {f} hat gehalten und geht ohne neue Karte', playedN: '{n} legt {f}', fellN: '{k} fallen',
-        youFell: 'Deine Karte ist gefallen; du ziehst eine neue', youFellEmpty: 'Deine Karte ist gefallen; der Stapel ist leer', youTop: 'Du bist auf dem Gipfel!', sharedTop: 'Ihr teilt den Gipfel!', topN: 'Auf dem Gipfel: {n}',
+        youFell: 'Deine Karte ist gefallen; du ziehst eine neue', youTop: 'Du bist auf dem Gipfel!', topN: 'Auf dem Gipfel: {n}',
         turns: 'Züge', kbCards: 'Zwischen Karten wechseln', kbPlay: 'Karte legen',
-        rules: 'Jeder bekommt sechs Zahlenkarten (2 bis 20; kleine Zahlen gibt es oft, große selten). Leg in deinem Zug eine Karte vor dich. Karten mit gleicher Zahl auf dem Tisch halten zusammen: jede ist ihre Zahl mal ihre Anzahl wert. Jede Karte auf dem Tisch, die weniger wert ist als deine, fällt, und ihr Besitzer zieht eine neue, solange der Stapel reicht. Gleiche Werte bleiben liegen. Liegt deine Karte noch, wenn du wieder dran bist, geht sie ohne neue Karte. Wer zuerst weder auf der Hand noch vor sich eine Karte hat, ist auf dem Gipfel und gewinnt.',
+        rules: 'Jeder bekommt sechs Zahlenkarten (2 bis 20; kleine Zahlen gibt es oft, große selten). Leg in deinem Zug eine Karte vor dich. Karten mit gleicher Zahl auf dem Tisch halten zusammen: jede ist ihre Zahl mal ihre Anzahl wert. Jede Karte auf dem Tisch, die weniger wert ist als deine, fällt, und ihr Besitzer zieht eine neue; ist der Stapel leer, wird die Ablage zu einem neuen gemischt. Gleiche Werte bleiben liegen. Liegt deine Karte noch, wenn du wieder dran bist, geht sie ohne neue Karte. Wer zuerst weder auf der Hand noch vor sich eine Karte hat, ist auf dem Gipfel und gewinnt.',
         tutTitle1: 'Höher wirft niedriger', tutText1: 'Leg eine Karte vor dich. Jede niedrigere Karte auf dem Tisch fällt, und ihr Besitzer zieht eine neue.',
         tutTitle2: 'Gleiche halten zusammen', tutText2: 'Karten mit gleicher Zahl auf dem Tisch zählen zusammen: zwei 5er sind je 10 wert.',
         tutTitle3: 'Auf den Gipfel', tutText3: 'Eine Karte, die bis zu deinem nächsten Zug liegt, geht ohne neue Karte. Wer zuerst keine Karten mehr hat, gewinnt.'
@@ -336,9 +346,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PeakEngine
         rivalN: 'Rival {n}', cardsN: '{n} cartas', dailyPk: 'Cumbre diaria', players: 'Jugadores', level: 'Nivel', optNote: 'Se aplica desde la próxima partida.',
         pile: 'Mazo', discard: 'Fuera', yourTurn: 'Tu turno: elige una carta', previewFall: 'Vale {v} · caen {k}', previewNone: 'Vale {v} · no cae nada', sep: ' · ',
         playBtn: 'Jugar', thinking: '{n} está pensando…', stayedUp: 'Tu {f} aguantó y se va sin carta nueva', playedN: '{n} jugó un {f}', fellN: 'caen {k}',
-        youFell: 'Tu carta cayó; robas una nueva', youFellEmpty: 'Tu carta cayó; el mazo está vacío', youTop: '¡Llegaste a la cumbre!', sharedTop: '¡Compartes la cumbre!', topN: '{n} llegó a la cumbre',
+        youFell: 'Tu carta cayó; robas una nueva', youTop: '¡Llegaste a la cumbre!', topN: '{n} llegó a la cumbre',
         turns: 'Turnos', kbCards: 'Moverse entre cartas', kbPlay: 'Jugar la carta',
-        rules: 'Cada uno recibe seis cartas con números (del 2 al 20; los bajos abundan y los altos escasean). En tu turno, juega una carta delante de ti. Las cartas del mismo número en la mesa suman fuerzas: cada una vale su número por cuántas hay. Toda carta de la mesa que valga menos que la tuya cae, y su dueño roba una nueva si queda mazo. Los valores iguales se quedan. Si tu carta sigue en pie cuando vuelve tu turno, se va sin carta nueva. Quien primero no tenga cartas ni en la mano ni delante llega a la cumbre y gana.',
+        rules: 'Cada uno recibe seis cartas con números (del 2 al 20; los bajos abundan y los altos escasean). En tu turno, juega una carta delante de ti. Las cartas del mismo número en la mesa suman fuerzas: cada una vale su número por cuántas hay. Toda carta de la mesa que valga menos que la tuya cae, y su dueño roba una nueva; si el mazo se acaba, los descartes se barajan como mazo nuevo. Los valores iguales se quedan. Si tu carta sigue en pie cuando vuelve tu turno, se va sin carta nueva. Quien primero no tenga cartas ni en la mano ni delante llega a la cumbre y gana.',
         tutTitle1: 'La alta tumba a la baja', tutText1: 'Juega una carta delante de ti. Toda carta más baja de la mesa cae, y su dueño roba una nueva.',
         tutTitle2: 'Las iguales se unen', tutText2: 'Las cartas del mismo número en la mesa cuentan juntas: dos cincos valen 10 cada uno.',
         tutTitle3: 'Llega a la cumbre', tutText3: 'Una carta que sigue en pie al volver tu turno se va sin carta nueva. Gana quien primero se queda sin cartas.'
@@ -533,6 +543,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PeakEngine
     ev.forEach(function (e) {
       if (e.t === 'play') { var n = spotCard(e.p); if (n && from) C.ui.fly(n, from, { ms: 260, flip: e.p !== 0 }); }
       if (e.t === 'beat' || e.t === 'clear') { ghost(e.face, rects[e.p], (e.t === 'beat' ? 220 : 0) + i++ * 80); if (e.t === 'beat') fell++; }
+      // the discards visibly become the new pile, so a pile that refills is not a surprise
+      if (e.t === 'reshuffle') { var b = pileBox.firstChild; if (b) C.ui.fly(b, outBox, { ms: 320, delay: 200 }); }
       if (e.t === 'draw' && e.p === 0) { var h = handNode(e.face); if (h) C.ui.fly(h, pileBox, { ms: 240, delay: 420, flip: true }); }
     });
     if (fell) C.audio.sfx('flip');
@@ -570,7 +582,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PeakEngine
   function describe(ev, p) {
     var beaten = ev.filter(function (e) { return e.t === 'beat'; });
     var mine = beaten.some(function (e) { return e.p === 0; });
-    if (mine) return ev.some(function (e) { return e.t === 'draw' && e.p === 0; }) ? C.t('youFell') : C.t('youFellEmpty');
+    if (mine) return C.t('youFell');
     if (p === 0) return '';
     var s = C.t('playedN', { n: pname(p), f: C.num(ev[0].face) });
     return beaten.length ? s + C.t('sep') + C.t('fellN', { k: C.num(beaten.length) }) : s;
@@ -620,7 +632,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PeakEngine
     stopBot();
     render();
     var won = S.winners.indexOf(0) >= 0;
-    status.textContent = won ? (S.winners.length > 1 ? C.t('sharedTop') : C.t('youTop')) : C.t('topN', { n: pname(S.winners[0]) });
+    status.textContent = won ? C.t('youTop') : C.t('topN', { n: pname(S.winners[0]) });
     if (won) C.ui.burst(meBox, { count: 22, speed: 240, ring: 30, colors: ['#FBFAF6', '#786054', '#4F8A4B'] });
     save();
     var G = S;
@@ -631,7 +643,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PeakEngine
     var base = { easy: 6, medium: 12, hard: 20 }[M.level] || 12;
     var coins = won ? base + (M.daily ? 8 : 0) : Math.max(2, Math.round(base * 0.3));
     var points = won ? base * 4 + (M.daily ? 25 : 0) : Math.round(base * 1.2);
-    var title = won ? (S.winners.length > 1 ? C.t('sharedTop') : C.t('youTop')) : C.t('topN', { n: pname(S.winners[0]) });
+    var title = won ? C.t('youTop') : C.t('topN', { n: pname(S.winners[0]) });
     if (won) {
       C.achievements.unlock('pk-win');
       if (M.level === 'hard' && !M.daily) C.achievements.unlock('pk-hard');
