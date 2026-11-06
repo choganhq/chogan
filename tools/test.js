@@ -12920,33 +12920,27 @@ if (!isMainThread && workerData && workerData.cueGame) {
   return;
 }
 
-// #569: Minesweeper's and Sudoku's tutorial pictures typed ۱ ۲ and ۱۰ into their SVG, so
-// every language saw Persian digits there; digits drawn in a picture go through C.num
-function testTutorialDigits() {
-  head('Tutorial pictures draw digits in the app language (#569)');
-  const games = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games;
-  ok(games.length > 0, 'the game list is not empty');
-  const texts = [], bad = [];
-  for (const g of games) {
-    const src = fs.readFileSync(path.join(ROOT, 'www', g.path), 'utf8');
-    for (const m of src.matchAll(/<text\b[^>]*>([^<]*)<\/text>/g)) {
-      texts.push(g.id);
-      if (/[۰-۹]/.test(m[1])) bad.push(g.id + ' «' + m[1] + '»');
-    }
-  }
-  ok(texts.length > 0, 'SVG text in the games was found (' + texts.length + ')');
-  ok(!bad.length, 'no SVG text in a game is a Persian digit literal' + (bad.length ? ' (' + bad.join(', ') + ')' : ''));
-  const ms = fs.readFileSync(path.join(ROOT, 'www/games/minesweeper/index.html'), 'utf8');
-  const sd = fs.readFileSync(path.join(ROOT, 'www/games/sudoku/index.html'), 'utf8');
-  ok(/>' \+ C\.num\(1\) \+ '<\/text>/.test(ms) && />' \+ C\.num\(2\) \+ '<\/text>/.test(ms) && />' \+ C\.num\(10\) \+ '<\/text>/.test(sd), 'the Minesweeper and Sudoku tutorials draw their numbers with C.num');
-}
-
 // Every group runs: the runner finds each `function testX()` in this file and calls it in
 // the order written, waiting for the ones that return a promise. A new group needs no line
 // in a shared list, so two pull requests that each add a game no longer conflict here
 // (#493), and a group can't be left out by a missing call. A group that runs no check at
 // all fails the run.
 const GROUPS = [...fs.readFileSync(__filename, 'utf8').matchAll(/^(?:async )?function (test[A-Za-z0-9]+)\(\) \{/gm)].map((m) => m[1]);
+// This file reached the 1 MB guard of testNoStrayFiles (#654), so newer groups live in
+// tools/tests/*.js. Each exports `function (T)` that returns its groups by name; T carries
+// the shared helpers, and T.games() the list testFiles loaded. A file that exports no
+// group is a failure, not a silent skip.
+const SPLIT_DIR = path.join(__dirname, 'tests');
+const SPLIT_FILES = fs.existsSync(SPLIT_DIR) ? fs.readdirSync(SPLIT_DIR).filter((f) => f.endsWith('.js')).sort() : [];
+const SPLIT_T = { ok, head, loadEngine, rng, fs, path, vm, os, spawnSync, ROOT, LOCALE_CODES, games: () => games };
+const SPLIT_EMPTY = [];
+const SPLIT = [];
+for (const f of SPLIT_FILES) {
+  const groups = require(path.join(SPLIT_DIR, f))(SPLIT_T) || {};
+  const names = Object.keys(groups).filter((n) => /^test[A-Za-z0-9]+$/.test(n) && typeof groups[n] === 'function');
+  if (!names.length) SPLIT_EMPTY.push(f);
+  for (const n of names) SPLIT.push([f + ':' + n, groups[n]]);
+}
 (async function () {
   const idle = [];
   for (const name of GROUPS) {
@@ -12955,8 +12949,14 @@ const GROUPS = [...fs.readFileSync(__filename, 'utf8').matchAll(/^(?:async )?fun
     await eval(name)();
     if (checks === before) idle.push(name);
   }
+  for (const [name, fn] of SPLIT) {
+    const before = checks;
+    await fn();
+    if (checks === before) idle.push(name);
+  }
   head('کامل بودن اجرا');
-  ok(GROUPS.length >= 137, 'every test group was found and run (' + GROUPS.length + ')');
+  ok(GROUPS.length + SPLIT.length >= 137, 'every test group was found and run (' + GROUPS.length + ' in test.js, ' + SPLIT.length + ' in tools/tests)');
+  ok(!SPLIT_EMPTY.length, 'every file in tools/tests exports at least one test group (' + SPLIT.length + ' groups in ' + SPLIT_FILES.length + ' files)' + (SPLIT_EMPTY.length ? '; none in: ' + SPLIT_EMPTY.join(', ') : ''));
   ok(!idle.length, 'every test group ran at least one check' + (idle.length ? ' (none in: ' + idle.join(', ') + ')' : ''));
   ok(checks >= MIN_CHECKS, 'دست‌کم ' + MIN_CHECKS + ' بررسی اجرا شد (' + checks + ' اجرا شد)');
   console.log('\n' + (failures ? ('✗ ' + failures + ' خطا از ' + checks + ' بررسی') : ('همه‌ی ' + checks + ' بررسی سبز')));
