@@ -3064,6 +3064,10 @@ function testFiles() {
   const manLang = { fa: 'fa', zh: 'zh-Hans', de: 'de', es: 'es', pl: 'pl' };
   ok(LOCALE_CODES.filter((c) => c !== 'en').every((c) => man.description_localized[manLang[c]] && man.description_localized[manLang[c]].value), 'the manifest describes the app in every language');
   ok(man.name_localized.fa.value === 'چوگان', 'نام فارسی در منیفست درست است');
+  // Chrome on Android installed a WebAPK beside the Play app; the owner chose to send people to Play (#550)
+  const rel = (man.related_applications || []).filter((a) => a.platform === 'play');
+  ok(rel.length === 1 && rel[0].id === 'io.github.choganhq.chogan' && rel[0].url === 'https://play.google.com/store/apps/details?id=io.github.choganhq.chogan', 'the manifest names the Play app by its package');
+  ok(man.prefer_related_applications === true, 'the manifest prefers the Play app');
   // The installed desktop app showed the browser's own title bar above the app's (#344)
   const dov = man.display_override || [];
   ok(dov[0] === 'window-controls-overlay' && dov.includes('standalone') && man.display === 'standalone', 'the manifest asks for the window controls overlay first and keeps standalone');
