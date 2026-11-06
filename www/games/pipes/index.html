@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>لوله‌کشی — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* copper pipes on clay tiles; water is the one blue on the board, so a joined pipe
+     reads at a glance in both themes */
+  :root { --pw-line: #5A3A2A; --pw-tile: #F6EDE4; --pw-lockbg: #E3CBB6; --pw-pipe: #A0522D; --pw-dry: #F1E2D4;
+    --pw-water: #2E8FD0; --pw-lockink: #5A3A2A; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --pw-line: #120E0C; --pw-tile: #2B231F; --pw-lockbg: #4A392F;
+    --pw-pipe: #C77A4E; --pw-dry: #3A2E28; --pw-water: #4FB3F0; --pw-lockink: #F1E2D4; } }
+  :root[data-theme="dark"] { --pw-line: #120E0C; --pw-tile: #2B231F; --pw-lockbg: #4A392F;
+    --pw-pipe: #C77A4E; --pw-dry: #3A2E28; --pw-water: #4FB3F0; --pw-lockink: #F1E2D4; }
+  .pw-wrap > .ch-fit { --fit-ar: 1; }
+  .ch-fit > .pw-box { width: 100%; height: 100%; display: grid; place-items: center; }
+  /* the board is read left to right in every language, so the arrows are geometric */
+  .pw-board { width: 100%; aspect-ratio: 1; max-width: 100%; max-height: 100%; direction: ltr; box-sizing: border-box;
+    display: grid; grid-template-columns: repeat(var(--n), 1fr); grid-template-rows: repeat(var(--n), 1fr); gap: 0;
+    border: 3px solid var(--pw-line); border-radius: var(--r-md); overflow: hidden; background: var(--pw-line);
+    box-shadow: var(--sh-2); touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .pw-cell { position: relative; border: 0; padding: 0; margin: 0; min-width: 0; min-height: 0; cursor: pointer;
+    /* the grid is a shadow under the pipe, not a gap: a 1px gap cut every pipe at each cell edge */
+    background: var(--pw-tile); box-shadow: inset 0 0 0 0.5px var(--pw-line); display: block; overflow: hidden; }
+  .pw-cell svg.pw-pipe { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none;
+    transition: transform 150ms var(--ease); }
+  .pw-pipe .o { stroke: var(--pw-pipe); fill: var(--pw-pipe); }
+  .pw-pipe .w { stroke: var(--pw-dry); fill: var(--pw-dry); transition: stroke 220ms linear, fill 220ms linear; }
+  .pw-cell--wet .pw-pipe .w, .pw-pipe .src { stroke: var(--pw-water); fill: var(--pw-water); }
+  .pw-cell--locked { background: var(--pw-lockbg); outline: 2px solid var(--pw-lockink); outline-offset: -3px; }
+  .pw-cell .pw-lock { position: absolute; top: 2px; right: 2px; width: 30%; height: 30%; max-width: 18px; max-height: 18px; color: var(--pw-lockink);
+    pointer-events: none; }
+  .pw-cell--bad { animation: pw-shake 300ms var(--ease); }
+  .pw-cell:focus-visible { outline: 3px solid var(--game, var(--c-accent)); outline-offset: -4px; z-index: 1; }
+  .pw-board--done .pw-cell { cursor: default; }
+  .pw-board--done .pw-cell .w { animation: pw-wave 640ms var(--ease) both; animation-delay: var(--d, 0ms); }
+  @keyframes pw-wave { 0%, 100% { filter: none; } 40% { filter: brightness(1.45); } }
+  @keyframes pw-shake { 0%, 100% { transform: none; } 25% { transform: translateX(-6%); } 75% { transform: translateX(6%); } }
+  .pw-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .pw-side { align-items: center; }
+  .pw-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-variant-numeric: tabular-nums; }
+  .pw-stars { display: flex; gap: 2px; justify-content: center; color: var(--game, var(--c-accent)); font-size: 1.35rem; line-height: 1; }
+  .pw-stars .pw-lost { opacity: .25; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .pw-stars { color: var(--game-text-dark, var(--game, var(--c-accent))); } }
+  :root[data-theme="dark"] .pw-stars { color: var(--game-text-dark, var(--game, var(--c-accent))); }
+  @media (prefers-reduced-motion: reduce) { .pw-cell svg.pw-pipe { transition: none; } .pw-cell--bad, .pw-board--done .pw-cell .w { animation: none; } }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function PipesEngineFactory() {
+  'use strict';
+
+  var SIZES = [5, 7, 9];
+  // a tile is a bit mask of the sides its pipe opens to
+  var N = 1, E = 2, S = 4, W = 8, DIRS = [N, E, S, W];
+
+  function opp(d) { return d === N ? S : d === E ? W : d === S ? N : E; }
+  // one clockwise quarter turn moves every opening one side on: N→E→S→W→N
+  function rot(m, k) { k = ((k % 4) + 4) % 4; for (var i = 0; i < k; i++) m = ((m << 1) | (m >> 3)) & 15; return m; }
+  function degree(m) { var k = 0; for (var i = 0; i < 4; i++) if (m & DIRS[i]) k++; return k; }
+  // how many turns bring a tile back to itself: a straight pipe looks the same after two
+  function period(m) { return rot(m, 1) === m ? 1 : rot(m, 2) === m ? 2 : 4; }
+  function nb(n, i, d) {
+    var r = Math.floor(i / n) + (d === N ? -1 : d === S ? 1 : 0), c = i % n + (d === W ? -1 : d === E ? 1 : 0);
+    return r < 0 || c < 0 || r >= n || c >= n ? -1 : r * n + c;
+  }
+  function source(n) { return Math.floor(n * n / 2); }
+
+  // A random spanning tree grown from the source. It mostly extends the newest branch
+  // (long winding runs) and sometimes a random one (side branches). No cell gets four
+  // openings in the first pass, since a cross turns into itself and gives nothing to
+  // solve; a second pass allows one only where a cell could not be reached otherwise.
+  function tree(n, rnd) {
+    var NN = n * n, m = new Array(NN).fill(0), inT = new Array(NN).fill(false), src = source(n), cap, active;
+    inT[src] = true;
+    for (var pass = 0; pass < 2; pass++) {
+      cap = pass === 0 ? 3 : 4;
+      active = [];
+      for (var i = 0; i < NN; i++) if (inT[i]) active.push(i);
+      while (active.length) {
+        var k = rnd() < 0.55 ? active.length - 1 : Math.floor(rnd() * active.length), c = active[k], opts = [];
+        if (degree(m[c]) < cap) for (var q = 0; q < 4; q++) { var j = nb(n, c, DIRS[q]); if (j >= 0 && !inT[j]) opts.push(DIRS[q]); }
+        if (!opts.length) { active.splice(k, 1); continue; }
+        var d = opts[Math.floor(rnd() * opts.length)], t = nb(n, c, d);
+        m[c] |= d; m[t] |= opp(d); inT[t] = true; active.push(t);
+      }
+    }
+    return m;
+  }
+
+  function masks(base, r) { return base.map(function (b, i) { return rot(b, r[i]); }); }
+
+  // Water from the source: which tiles it reaches through two openings that meet, and
+  // how many reached tiles open onto a wall or a pipe that does not answer
+  function flow(n, base, r) {
+    var NN = n * n, m = masks(base, r), wet = new Array(NN).fill(false), dist = new Array(NN).fill(-1), src = source(n), q = [src], leaks = 0, count = 0;
+    wet[src] = true; dist[src] = 0;
+    while (q.length) {
+      var i = q.shift(); count++;
+      for (var k = 0; k < 4; k++) {
+        var d = DIRS[k];
+        if (!(m[i] & d)) continue;
+        var j = nb(n, i, d);
+        if (j < 0 || !(m[j] & opp(d))) { leaks++; continue; }
+        if (!wet[j]) { wet[j] = true; dist[j] = dist[i] + 1; q.push(j); }
+      }
+    }
+    return { wet: wet, dist: dist, count: count, leaks: leaks };
+  }
+  // the win is read from the board, never from a stored answer: every tile wet and no
+  // open end anywhere
+  function won(n, base, r) { var f = flow(n, base, r); return f.count === n * n && f.leaks === 0; }
+
+  // clockwise taps from turn r to a turn that looks like the answer's
+  function taps(m, r) { var p = period(m); return (p - (r % p)) % p; }
+  function par(base, r) { var s = 0; for (var i = 0; i < base.length; i++) s += taps(base[i], r[i]); return s; }
+
+  // A puzzle: a tree as the answer, every tile then turned at random. A board that
+  // starts solved or needs fewer taps than it has rows is thrown away.
+  function generate(n, rnd) {
+    for (var attempt = 0; attempt < 40; attempt++) {
+      var base = tree(n, rnd), r = base.map(function () { return Math.floor(rnd() * 4); });
+      var p = par(base, r);
+      if (p >= n && !won(n, base, r)) return { n: n, base: base, rot: r, par: p };
+    }
+    return null;
+  }
+
+  // three stars within the fewest taps the generator's answer needs, two within half as
+  // many again, one after that: never a loss
+  function stars(moves, p) { return moves <= p ? 3 : moves <= p + Math.ceil(p / 2) ? 2 : 1; }
+
+  function valid(o) {
+    if (!o || SIZES.indexOf(o.n) < 0 || !Array.isArray(o.base) || !Array.isArray(o.rot) || !Array.isArray(o.locked)) return false;
+    var NN = o.n * o.n;
+    if (o.base.length !== NN || o.rot.length !== NN || o.locked.length !== NN) return false;
+    for (var i = 0; i < NN; i++) {
+      if (!(o.base[i] >= 1 && o.base[i] <= 15) || [0, 1, 2, 3].indexOf(o.rot[i]) < 0 || typeof o.locked[i] !== 'boolean') return false;
+    }
+    // the shapes must fit together as a tree, or the board could never be won
+    if (!won(o.n, o.base, o.base.map(function () { return 0; }))) return false;
+    return typeof o.moves === 'number' && o.moves >= 0 && typeof o.par === 'number' && o.par >= 0;
+  }
+
+  return {
+    SIZES: SIZES, N: N, E: E, S: S, W: W, DIRS: DIRS,
+    opp: opp, rot: rot, degree: degree, period: period, nb: nb, source: source, tree: tree, masks: masks,
+    flow: flow, won: won, taps: taps, par: par, generate: generate, stars: stars, valid: valid
+  };
+}
+if (typeof module !== 'undefined') module.exports = PipesEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = PipesEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'pipes',
+    name: { fa: 'لوله‌کشی', en: 'Pipeworks', zh: '接水管', de: 'Rohrwerk', es: 'Cañerías', pl: 'Rury' },
+    accent: '#AC5C39',
+    mood: 'menu',
+    strings: {
+      fa: {
+        board: 'صفحه‌ی لوله‌ها', cellN: 'خانه‌ی ردیف {r} ستون {c}', stWet: 'آب دارد', stDry: 'خشک', stSource: 'منبع آب', stLocked: 'قفل‌شده',
+        sizeN: '{n}×{n}', dailyPw: 'لوله‌کشی روزانه', wetN: 'آب: {a} از {n}', movesN: 'چرخش: {m}', parN: 'هدف: {p}',
+        solvedPw: 'آب به همه رسید!', perfect: 'بدون یک چرخش اضافه!', movesL: 'چرخش‌ها', parL: 'کمترین چرخش', pwNew: 'پازل تازه',
+        fewestN: 'رکورد تازه: {n} چرخش', starsN: '{s} ستاره از ۳',
+        kMove: 'جابه‌جایی بین خانه‌ها', kRotate: 'چرخاندن در جهت ساعت', kLock: 'قفل کردن یا باز کردن خانه', kNew: 'پازل تازه',
+        rules: 'هر ضربه یک خانه را یک ربع در جهت ساعت می‌چرخاند. لوله‌ها را طوری بچرخان که همه به منبع آب وسط صفحه وصل شوند و هیچ سر لوله‌ای باز نماند، نه رو به دیوار و نه رو به خانه‌ای که جوابش را نمی‌دهد. هر خانه‌ای که آب به آن برسد آبی می‌شود. لمس طولانی (یا کلیک راست) خانه را قفل می‌کند تا اشتباهی نچرخد؛ دوباره لمس طولانی قفل را باز می‌کند. ستاره‌ها با تعداد چرخش‌ها حساب می‌شوند: تا کمترین تعداد لازم سه ستاره. هیچ‌وقت نمی‌بازی و زمانی هم در کار نیست. چالش روزانه ۷×۷ و برای همه یکی است.',
+        tutTitle1: 'بچرخان', tutText1: 'با هر ضربه خانه یک ربع در جهت ساعت می‌چرخد.',
+        tutTitle2: 'آب را برسان', tutText2: 'همه‌ی لوله‌ها باید به منبع وسط وصل شوند و هیچ سری باز نماند. خانه‌ی آب‌دار آبی می‌شود.',
+        tutTitle3: 'قفل کن', tutText3: 'لمس طولانی خانه‌ای را که مطمئنی قفل می‌کند تا دیگر نچرخد.'
+      },
+      en: {
+        board: 'The pipes', cellN: 'Cell row {r} column {c}', stWet: 'has water', stDry: 'dry', stSource: 'water source', stLocked: 'locked',
+        sizeN: '{n}×{n}', dailyPw: 'Daily Pipeworks', wetN: 'Water: {a} of {n}', movesN: 'Turns: {m}', parN: 'Target: {p}',
+        solvedPw: 'Water everywhere!', perfect: 'Not a single wasted turn!', movesL: 'Turns', parL: 'Fewest turns', pwNew: 'New puzzle',
+        fewestN: 'New best: {n} turns', starsN: '{s} of 3 stars',
+        kMove: 'Move between cells', kRotate: 'Turn clockwise', kLock: 'Lock or unlock a cell', kNew: 'New puzzle',
+        rules: 'Each tap turns a cell a quarter clockwise. Turn the pipes until every one is joined to the water source in the middle and no pipe end is left open, neither against the wall nor against a cell that does not answer it. Every cell the water reaches turns blue. A long press (or a right click) locks a cell so it cannot turn by mistake; another long press unlocks it. Stars count your turns: three up to the fewest needed. You never lose and there is no clock. The daily challenge is 7×7 and the same for everyone.',
+        tutTitle1: 'Turn', tutText1: 'Each tap turns a cell a quarter clockwise.',
+        tutTitle2: 'Bring the water', tutText2: 'Every pipe must join the source in the middle with no end left open. Cells with water turn blue.',
+        tutTitle3: 'Lock', tutText3: 'A long press locks a cell you are sure of, so it no longer turns.'
+      },
+      pl: {
+        board: 'Rury', cellN: 'Pole rząd {r} kolumna {c}', stWet: 'z wodą', stDry: 'suche', stSource: 'źródło wody', stLocked: 'zablokowane',
+        sizeN: '{n}×{n}', dailyPw: 'Codzienne Rury', wetN: 'Woda: {a} z {n}', movesN: 'Obroty: {m}', parN: 'Cel: {p}',
+        solvedPw: 'Woda dotarła wszędzie!', perfect: 'Ani jednego zbędnego obrotu!', movesL: 'Obroty', parL: 'Najmniej obrotów', pwNew: 'Nowa łamigłówka',
+        fewestN: 'Nowy rekord: {n} obrotów', starsN: '{s} z 3 gwiazdek',
+        kMove: 'Przemieść między polami', kRotate: 'Obróć zgodnie z zegarem', kLock: 'Zablokuj lub odblokuj pole', kNew: 'Nowa łamigłówka',
+        rules: 'Każde dotknięcie obraca pole o ćwierć obrotu zgodnie z ruchem wskazówek zegara. Obracaj rury, aż wszystkie połączą się ze źródłem wody pośrodku i żaden koniec nie zostanie otwarty, ani w stronę ściany, ani w stronę pola, które na niego nie odpowiada. Każde pole, do którego dotrze woda, robi się niebieskie. Długie przytrzymanie (lub prawy przycisk) blokuje pole, żeby nie obróciło się przez pomyłkę; kolejne je odblokowuje. Gwiazdki liczą obroty: trzy do najmniejszej potrzebnej liczby. Nigdy nie przegrywasz i nie ma zegara. Codzienne wyzwanie ma 7×7 i jest takie samo dla wszystkich.',
+        tutTitle1: 'Obracaj', tutText1: 'Każde dotknięcie obraca pole o ćwierć obrotu zgodnie z zegarem.',
+        tutTitle2: 'Doprowadź wodę', tutText2: 'Każda rura musi łączyć się ze źródłem pośrodku i żaden koniec nie może zostać otwarty. Pola z wodą robią się niebieskie.',
+        tutTitle3: 'Blokuj', tutText3: 'Długie przytrzymanie blokuje pole, którego jesteś pewien, żeby już się nie obracało.'
+      },
+      zh: {
+        board: '水管', cellN: '第 {r} 行第 {c} 列', stWet: '有水', stDry: '没水', stSource: '水源', stLocked: '已锁定',
+        sizeN: '{n}×{n}', dailyPw: '每日接水管', wetN: '水：{a} / {n}', movesN: '转动：{m}', parN: '目标：{p}',
+        solvedPw: '水流到了每一格！', perfect: '一次多余的转动都没有！', movesL: '转动次数', parL: '最少转动', pwNew: '新题',
+        fewestN: '新纪录：{n} 次转动', starsN: '{s} / 3 星',
+        kMove: '在格子之间移动', kRotate: '顺时针转动', kLock: '锁定或解锁格子', kNew: '新题',
+        rules: '每点一下，格子就顺时针转四分之一圈。转动水管，让每一根都连到中间的水源，并且不留任何开口，既不能对着墙，也不能对着接不上的格子。水流到的格子会变成蓝色。长按（或右键）可以锁定格子，防止误转；再长按一次解锁。星星按转动次数计算：不超过最少所需次数得三星。永远不会输，也不计时。每日挑战是 7×7，对所有人相同。',
+        tutTitle1: '转动', tutText1: '每点一下，格子顺时针转四分之一圈。',
+        tutTitle2: '把水引过来', tutText2: '每根水管都要连到中间的水源，不能留开口。有水的格子会变蓝。',
+        tutTitle3: '锁定', tutText3: '长按一个你确定的格子来锁定它，它就不会再转了。'
+      },
+      de: {
+        board: 'Die Rohre', cellN: 'Feld Reihe {r} Spalte {c}', stWet: 'mit Wasser', stDry: 'trocken', stSource: 'Wasserquelle', stLocked: 'gesperrt',
+        sizeN: '{n}×{n}', dailyPw: 'Rohrwerk des Tages', wetN: 'Wasser: {a} von {n}', movesN: 'Drehungen: {m}', parN: 'Ziel: {p}',
+        solvedPw: 'Überall Wasser!', perfect: 'Keine einzige Drehung zu viel!', movesL: 'Drehungen', parL: 'Wenigste Drehungen', pwNew: 'Neues Rätsel',
+        fewestN: 'Neuer Bestwert: {n} Drehungen', starsN: '{s} von 3 Sternen',
+        kMove: 'Zwischen Feldern wechseln', kRotate: 'Im Uhrzeigersinn drehen', kLock: 'Feld sperren oder freigeben', kNew: 'Neues Rätsel',
+        rules: 'Jedes Tippen dreht ein Feld um eine Vierteldrehung im Uhrzeigersinn. Dreh die Rohre, bis alle mit der Wasserquelle in der Mitte verbunden sind und kein Rohrende offen bleibt, weder zur Wand noch zu einem Feld, das nicht anschließt. Jedes Feld, das Wasser erreicht, wird blau. Langes Drücken (oder Rechtsklick) sperrt ein Feld, damit es sich nicht aus Versehen dreht; nochmal lang drücken gibt es frei. Die Sterne zählen deine Drehungen: drei bis zur kleinsten nötigen Zahl. Du verlierst nie, und es läuft keine Uhr. Die Tagesaufgabe ist 7×7 und für alle gleich.',
+        tutTitle1: 'Drehen', tutText1: 'Jedes Tippen dreht ein Feld um eine Vierteldrehung im Uhrzeigersinn.',
+        tutTitle2: 'Wasser hinbringen', tutText2: 'Jedes Rohr muss mit der Quelle in der Mitte verbunden sein, ohne offenes Ende. Felder mit Wasser werden blau.',
+        tutTitle3: 'Sperren', tutText3: 'Langes Drücken sperrt ein Feld, bei dem du dir sicher bist, damit es sich nicht mehr dreht.'
+      },
+      es: {
+        board: 'Las cañerías', cellN: 'Casilla fila {r} columna {c}', stWet: 'con agua', stDry: 'seca', stSource: 'fuente de agua', stLocked: 'bloqueada',
+        sizeN: '{n}×{n}', dailyPw: 'Cañerías diarias', wetN: 'Agua: {a} de {n}', movesN: 'Giros: {m}', parN: 'Objetivo: {p}',
+        solvedPw: '¡Agua en todas partes!', perfect: '¡Ni un giro de más!', movesL: 'Giros', parL: 'Menos giros', pwNew: 'Puzle nuevo',
+        fewestN: 'Nuevo récord: {n} giros', starsN: '{s} de 3 estrellas',
+        kMove: 'Moverse entre casillas', kRotate: 'Girar en sentido horario', kLock: 'Bloquear o desbloquear una casilla', kNew: 'Puzle nuevo',
+        rules: 'Cada toque gira una casilla un cuarto de vuelta en sentido horario. Gira las cañerías hasta que todas queden unidas a la fuente de agua del centro y ningún extremo quede abierto, ni contra la pared ni contra una casilla que no le responde. Cada casilla a la que llega el agua se vuelve azul. Una pulsación larga (o clic derecho) bloquea una casilla para que no gire por error; otra pulsación larga la desbloquea. Las estrellas cuentan tus giros: tres hasta el mínimo necesario. Nunca pierdes y no hay reloj. El reto diario es de 7×7 e igual para todos.',
+        tutTitle1: 'Gira', tutText1: 'Cada toque gira una casilla un cuarto de vuelta en sentido horario.',
+        tutTitle2: 'Lleva el agua', tutText2: 'Todas las cañerías deben unirse a la fuente del centro sin extremos abiertos. Las casillas con agua se vuelven azules.',
+        tutTitle3: 'Bloquea', tutText3: 'Una pulsación larga bloquea una casilla de la que estás seguro, para que ya no gire.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var DAILY_N = 7, LONG_MS = 420;
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || E.SIZES.indexOf(prefs.n) < 0) prefs = { n: 5 };
+
+  var S = null, startedAt = 0, ended = false, focusAt = 0, turns = [];
+
+  var board = el('div', { class: 'pw-board', role: 'group', 'aria-label': C.t('board') });
+  var cells = [];
+  var box = el('div', { class: 'pw-box' }, [board]);
+  var top = el('div', { class: 'pw-top ch-above' });
+  var stars = el('div', { class: 'pw-stars', role: 'img' });
+  var status = el('div', { class: 'pw-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'pw-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side pw-side' }, [top, stars, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  if (!dailyDate) ctx.button({ icon: 'refresh', label: C.t('pwNew'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- game */
+
+  function newPuzzle(n) {
+    var rnd = dailyDate ? C.daily('pipes', dailyDate).rng : Math.random;
+    var P = E.generate(n, rnd);
+    S = { n: n, base: P.base, rot: P.rot, locked: P.base.map(function () { return false; }), moves: 0, par: P.par, daily: dailyDate || null };
+    startedAt = Date.now(); ended = false; focusAt = E.source(n);
+    build();
+    save();
+  }
+  function askNew() {
+    if (S && S.moves > 0 && !ended) C.ui.confirm({ title: C.t('pwNew'), body: C.t('resetWarn'), onOk: function () { newPuzzle(prefs.n); } });
+    else newPuzzle(prefs.n);
+  }
+  function setSize(n) {
+    if (n === S.n) return;
+    var go = function () { prefs.n = n; ctx.store.set('prefs', prefs); newPuzzle(n); };
+    if (S.moves > 0 && !ended) C.ui.confirm({ title: C.t('pwNew'), body: C.t('resetWarn'), onOk: go, onCancel: render });
+    else go();
+  }
+
+  // A tap turns the tile a quarter clockwise and counts one turn. A locked tile does
+  // not turn and costs nothing; it shakes so the player sees why.
+  function tap(i) {
+    if (!S || ended) return;
+    focusAt = i;
+    if (S.locked[i]) {
+      C.feedback('bad');
+      var b = cells[i]; b.classList.remove('pw-cell--bad'); void b.offsetWidth; b.classList.add('pw-cell--bad');
+      render();
+      return;
+    }
+    var wetBefore = E.flow(S.n, S.base, S.rot).count;
+    S.rot[i] = (S.rot[i] + 1) % 4;
+    turns[i]++;
+    S.moves++;
+    var f = E.flow(S.n, S.base, S.rot);
+    C.feedback(f.count > wetBefore ? 'select' : 'tap');
+    render(f); save();
+    if (f.count === S.n * S.n && f.leaks === 0) win(f);
+  }
+  function toggleLock(i) {
+    if (!S || ended) return;
+    focusAt = i;
+    S.locked[i] = !S.locked[i];
+    C.feedback('place');
+    render(); save();
+  }
+
+  function win(f) {
+    ended = true;
+    var st = E.stars(S.moves, S.par), clean = S.moves <= S.par, note = clean ? C.t('perfect') : null;
+    var base = { 5: [3, 10], 7: [5, 20], 9: [8, 35] }[S.n], k = st === 3 ? 1 : st === 2 ? 0.7 : 0.4;
+    var coins = Math.max(1, Math.round(base[0] * k)), points = Math.max(1, Math.round(base[1] * k));
+    if (clean && S.n >= 7) C.achievements.unlock('pw-clean');
+    if (S.n === 9) C.achievements.unlock('pw-big');
+    if (S.daily) {
+      if (!C.stats.daily('pipes', S.daily, { label: C.t('movesN', { m: C.num(S.moves) }), win: true, stars: st, moves: S.moves })) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+      C.achievements.unlock('pw-daily');
+    } else if (C.stats.best('pipes', 'moves' + S.n, S.moves, true) && !clean) note = C.t('fewestN', { n: C.num(S.moves) });
+    ctx.clearSave();
+    C.feedback('good');
+    render(f);
+    var elapsed = Date.now() - startedAt, maxD = Math.max.apply(null, f.dist);
+    setTimeout(function () {
+      ctx.finish({
+        won: true, title: C.t('solvedPw'), note: note, stars: st, timeMs: elapsed, coins: coins, points: points,
+        lines: [
+          S.daily ? { label: C.t('daily'), value: C.num(S.daily) } : { label: C.t('sizeN', { n: C.num(S.n) }), value: '' },
+          { label: C.t('movesL'), value: C.num(S.moves) },
+          { label: C.t('parL'), value: C.num(S.par) },
+          { label: C.t('time'), value: C.time(elapsed) }
+        ],
+        shareText: 'چوگان · لوله‌کشی' + (S.daily ? ('\nروزانه ' + S.daily) : ('\n' + S.n + '×' + S.n)) + '\n' + '★'.repeat(st),
+        againLabel: S.daily ? null : C.t('pwNew'),
+        onAgain: S.daily ? null : function () { newPuzzle(prefs.n); }
+      });
+    }, C.ui.reduceMotion() ? 200 : 700 + maxD * 45);
+  }
+
+  /* --------------------------------------------------------------- view */
+
+  // A tile drawn in a 100×100 box for its unturned shape; the whole picture is turned
+  // with CSS, so a tap animates. `o` is the copper wall, `w` the channel that fills.
+  var ARM = { 1: 'M50 50V0', 2: 'M50 50H100', 4: 'M50 50V100', 8: 'M50 50H0' };
+  function shape(m, isSrc) {
+    var d = '', k;
+    for (k = 0; k < 4; k++) if (m & E.DIRS[k]) d += ARM[E.DIRS[k]];
+    var s = '<path class="o" d="' + d + '" stroke-width="34" fill="none"/><circle class="o" cx="50" cy="50" r="17"/>' +
+      '<path class="w" d="' + d + '" stroke-width="15" fill="none"/><circle class="w" cx="50" cy="50" r="7.5"/>';
+    // the source is a round tank; a dead end is a small basin, so the ends read as ends
+    if (isSrc) s += '<circle class="o" cx="50" cy="50" r="31"/><circle class="src" cx="50" cy="50" r="22"/><path d="M50 36c6 8 9 12 9 16a9 9 0 0 1-18 0c0-4 3-8 9-16z" fill="#fff" opacity=".85"/>';
+    else if (E.degree(m) === 1) s += '<circle class="o" cx="50" cy="50" r="24"/><circle class="w" cx="50" cy="50" r="15"/>';
+    return s;
+  }
+  function pipeSvg(m, isSrc) { return '<svg class="pw-pipe" viewBox="0 0 100 100" aria-hidden="true">' + shape(m, isSrc) + '</svg>'; }
+
+  function build() {
+    board.innerHTML = '';
+    cells = [];
+    turns = S.rot.slice();
+    board.style.setProperty('--n', S.n);
+    var src = E.source(S.n);
+    for (var i = 0; i < S.n * S.n; i++) {
+      (function (idx) {
+        var b = el('button', { class: 'pw-cell', type: 'button', tabindex: '-1' });
+        b.innerHTML = pipeSvg(S.base[idx], idx === src);
+        var press = null, longFired = false;
+        b.addEventListener('pointerdown', function (e) {
+          longFired = false;
+          if (e.pointerType !== 'mouse') press = setTimeout(function () { longFired = true; toggleLock(idx); }, LONG_MS);
+        });
+        var stop = function () { clearTimeout(press); };
+        b.addEventListener('pointerup', stop);
+        b.addEventListener('pointercancel', stop);
+        b.addEventListener('pointerleave', stop);
+        // Android fires both our timer and the browser's context menu on a long press;
+        // the guard stays set so the click that follows does not turn the tile too
+        b.addEventListener('contextmenu', function (e) {
+          e.preventDefault(); clearTimeout(press);
+          if (longFired) return;
+          toggleLock(idx);
+        });
+        b.addEventListener('click', function () {
+          if (longFired) { longFired = false; return; }
+          tap(idx);
+        });
+        b.addEventListener('focus', function () { if (focusAt !== idx) { focusAt = idx; render(); } });
+        cells.push(b); board.appendChild(b);
+      })(i);
+    }
+    render();
+  }
+  function render(f) {
+    f = f || E.flow(S.n, S.base, S.rot);
+    var src = E.source(S.n), lockSvg = null;
+    for (var i = 0; i < cells.length; i++) {
+      var b = cells[i], svg = b.firstChild;
+      svg.style.transform = 'rotate(' + (turns[i] * 90) + 'deg)';
+      b.classList.toggle('pw-cell--wet', f.wet[i]);
+      b.classList.toggle('pw-cell--locked', S.locked[i]);
+      var lk = b.querySelector('.pw-lock');
+      if (S.locked[i] && !lk) { lockSvg = C.icon('lock', 18); lockSvg.setAttribute('class', 'pw-lock'); b.appendChild(lockSvg); }
+      else if (!S.locked[i] && lk) lk.remove();
+      if (ended) b.style.setProperty('--d', (f.dist[i] * 45) + 'ms');
+      b.setAttribute('aria-label', C.t('cellN', { r: C.num(Math.floor(i / S.n) + 1), c: C.num(i % S.n + 1) }) + ' · ' +
+        (i === src ? C.t('stSource') : C.t(f.wet[i] ? 'stWet' : 'stDry')) + (S.locked[i] ? ' · ' + C.t('stLocked') : ''));
+      b.setAttribute('tabindex', i === focusAt ? '0' : '-1');
+    }
+    board.classList.toggle('pw-board--done', ended);
+    top.innerHTML = '';
+    if (S.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyPw') + ' — ' + C.num(S.daily) })]));
+    else top.appendChild(C.ui.segmented(E.SIZES.map(function (n) { return { value: n, label: C.t('sizeN', { n: C.num(n) }) }; }), S.n, setSize));
+    var st = E.stars(S.moves, S.par);
+    stars.innerHTML = '';
+    for (var s = 0; s < 3; s++) stars.appendChild(el('span', { class: s < st ? '' : 'pw-lost', text: '★' }));
+    stars.setAttribute('aria-label', C.t('starsN', { s: C.num(st) }));
+    // each part keeps its words together, so a narrow side column breaks only between parts
+    // (in phone landscape "Target:" ended one line and its number started the next)
+    status.textContent = [C.t('wetN', { a: C.num(f.count), n: C.num(S.n * S.n) }), C.t('movesN', { m: C.num(S.moves) }), C.t('parN', { p: C.num(S.par) })]
+      .map(function (t) { return t.replace(/ /g, '\u00a0'); }).join(' · ');
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  board.addEventListener('keydown', function (e) {
+    // handled here rather than left to the button's own click, so a held key does not
+    // spin the tile once per repeat
+    if ((e.key === ' ' || e.key === 'Enter') && S) { e.preventDefault(); if (!e.repeat) tap(focusAt); return; }
+    var d ={ ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.key];
+    if (!d || !S) return;
+    e.preventDefault();
+    var r = Math.floor(focusAt / S.n), c = focusAt % S.n;
+    r = Math.max(0, Math.min(S.n - 1, r + d[1])); c = Math.max(0, Math.min(S.n - 1, c + d[0]));
+    focusAt = r * S.n + c;
+    render();
+    cells[focusAt].focus();
+  });
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || !S) return;
+    if (C.keyIs(e, 'n') && !dailyDate) { askNew(); e.preventDefault(); return; }
+    if (C.keyIs(e, 'l')) { toggleLock(focusAt); cells[focusAt].focus(); e.preventDefault(); return; }
+    // Space and Enter on a focused cell are the button's own click; from elsewhere they
+    // turn the cell under the cursor
+    if ((e.key === ' ' || e.key === 'Enter') && !board.contains(document.activeElement) && !(document.activeElement && /^(BUTTON|INPUT|A)$/.test(document.activeElement.tagName))) {
+      tap(focusAt); cells[focusAt].focus(); e.preventDefault(); return;
+    }
+    // the first arrow from anywhere on the page lands on the board
+    if (/^Arrow/.test(e.key) && cells.length && !board.contains(document.activeElement)) { cells[focusAt].focus(); e.preventDefault(); }
+  });
+
+  /* ------------------------------------------------------------ dialogs */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    var keys = [kb('← ↑ → ↓', C.t('kMove')), kb('Space / Enter', C.t('kRotate')), kb('L', C.t('kLock'))];
+    if (!dailyDate) keys.push(kb('N', C.t('kNew')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, keys)
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // 3×3 boards for the tutorial with literal colours (the light theme's), each tile
+  // given as [mask, wet, locked]
+  function tArt(tiles, arrowAt) {
+    var s = '<svg viewBox="0 0 200 110" width="100%"><rect x="51" y="3" width="98" height="98" rx="6" fill="#5A3A2A"/>';
+    for (var i = 0; i < 9; i++) {
+      var x = 54 + (i % 3) * 31, y = 6 + Math.floor(i / 3) * 31, t = tiles[i];
+      s += '<rect x="' + x + '" y="' + y + '" width="30" height="30" fill="' + (t[2] ? '#E3CBB6' : '#F6EDE4') + '"/>';
+      s += '<g transform="translate(' + x + ' ' + y + ') scale(.3)" style="--pw-pipe:#A0522D;--pw-dry:#F1E2D4;--pw-water:#2E8FD0">' +
+        shape(t[0], i === 4).replace(/class="w"/g, 'fill="' + (t[1] ? '#2E8FD0' : '#F1E2D4') + '" stroke="' + (t[1] ? '#2E8FD0' : '#F1E2D4') + '"')
+          .replace(/class="o"/g, 'fill="#A0522D" stroke="#A0522D"').replace(/class="src"/g, 'fill="#2E8FD0"') + '</g>';
+      if (t[2]) s += '<rect x="' + (x + 1) + '" y="' + (y + 1) + '" width="28" height="28" fill="none" stroke="#5A3A2A" stroke-width="1.5"/>' +
+        '<path d="M' + (x + 21) + ' ' + (y + 6) + 'h6v5h-6zM' + (x + 22) + ' ' + (y + 6) + 'v-1.5a2 2 0 0 1 4 0V' + (y + 6) + '" fill="none" stroke="#5A3A2A" stroke-width="1"/>';
+    }
+    if (arrowAt != null) {
+      var ax = 54 + (arrowAt % 3) * 31 + 15, ay = 6 + Math.floor(arrowAt / 3) * 31 + 15;
+      s += '<path d="M' + (ax + 10) + ' ' + (ay - 8) + 'a13 13 0 0 1 0 16" fill="none" stroke="#AC5C39" stroke-width="2.5" stroke-linecap="round"/><path d="M' + (ax + 10) + ' ' + (ay + 8) + 'l-5 1 3 -5z" fill="#AC5C39"/>';
+    }
+    return s + '</svg>';
+  }
+  // a small solved tree: corner, tee, corner / straight, source, straight / corner, tee, corner
+  var DONE = [[6, 1], [14, 1], [12, 1], [5, 1], [5, 1], [5, 1], [3, 1], [11, 1], [9, 1]];
+  // the source here is a straight N–S pipe; tiles 1 and 7 are tees that reach the corners
+  var T1 = DONE.map(function (t, i) { return [i === 2 ? 6 : t[0], i !== 2 && i !== 5 && i !== 8 ? 1 : 0, 0]; });
+  var T2 = DONE.map(function (t) { return [t[0], 1, 0]; });
+  var T3 = DONE.map(function (t, i) { return [t[0], 1, i === 0 || i === 6 ? 1 : 0]; });
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(T1, 2) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(T2, null) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(T3, null) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // the board is saved after every turn and lock; the daily one has its own slot
+  ctx.autosave(function () {
+    if (!S || ended) return { inProgress: false };
+    return { n: S.n, base: S.base, rot: S.rot, locked: S.locked, moves: S.moves, par: S.par, daily: S.daily, elapsed: Date.now() - startedAt };
+  });
+  function save() { ctx.save(); }
+  var saved = ctx.loadSave();
+  if (saved && E.valid(saved) && (saved.daily || null) === (dailyDate || null) && !E.won(saved.n, saved.base, saved.rot)) {
+    S = { n: saved.n, base: saved.base.slice(), rot: saved.rot.slice(), locked: saved.locked.slice(), moves: saved.moves, par: saved.par, daily: saved.daily || null };
+    startedAt = Date.now() - (saved.elapsed || 0); focusAt = E.source(S.n);
+    build();
+  } else newPuzzle(dailyDate ? DAILY_N : prefs.n);
+  if (dailyDate && C.stats.dailyDone('pipes', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).pipes;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  // the board keeps its square through rotation and late fonts by CSS alone; nothing
+  // here is measured, so there is nothing to redraw
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
