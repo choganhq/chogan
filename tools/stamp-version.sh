@@ -17,11 +17,15 @@ sha="${GITHUB_SHA:-}"
 run="${GITHUB_RUN_ID:-}"
 attempt="${GITHUB_RUN_ATTEMPT:-}"
 env="${APP_ENV:-}"
+# The Profile shows how long ago this build went live (#659). DEPLOYED_AT lets the
+# tests pin the time; in CI it is simply now.
+at="${DEPLOYED_AT:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]]  || { echo "stamp-version: GITHUB_SHA must be a 40-character hex commit, got: '$sha'" >&2; exit 1; }
 [[ "$run" =~ ^[0-9]+$ ]]        || { echo "stamp-version: GITHUB_RUN_ID must be a number, got: '$run'" >&2; exit 1; }
 [[ "$attempt" =~ ^[0-9]+$ ]]    || { echo "stamp-version: GITHUB_RUN_ATTEMPT must be a number, got: '$attempt'" >&2; exit 1; }
 [[ "$env" =~ ^[a-z]+$ ]]        || { echo "stamp-version: APP_ENV must be lowercase Latin letters only, got: '$env'" >&2; exit 1; }
+[[ "$at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || { echo "stamp-version: DEPLOYED_AT must be an ISO UTC time like 2026-11-06T18:00:00Z, got: '$at'" >&2; exit 1; }
 
 {
   printf '\n// Deploy identity, stamped by tools/stamp-version.sh. Present only in the published build.\n'
@@ -30,5 +34,6 @@ env="${APP_ENV:-}"
   printf "self.APP_COMMIT = '%s';\n" "$sha"
   printf "self.APP_ENV = '%s';\n" "$env"
   printf "self.APP_DEPLOY = '%s-%s';\n" "$run" "$attempt"
+  printf "self.APP_DEPLOYED_AT = '%s';\n" "$at"
 } >> "$f"
-tail -n 6 "$f"
+tail -n 7 "$f"
