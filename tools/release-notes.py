@@ -69,9 +69,11 @@ def main():
         print('%s: %s' % (sys.argv[2], e), file=sys.stderr)
         return 1
     if sys.argv[1] == '--check':
-        # F-Droid and Google Play show the same file and stop at 500 characters
-        if len(text) > 500:
-            print('%s: %d characters, over 500' % (sys.argv[2], len(text)), file=sys.stderr)
+        # F-Droid and Google Play stop at 500 characters; Play gets each @login as
+        # github.com/login (tools/play-api.sh, #644), so count that longer form
+        n = len(MENTION.sub(lambda m: 'github.com/' + m.group(1), text))
+        if n > 500:
+            print('%s: %d characters as Play shows it, over 500' % (sys.argv[2], n), file=sys.stderr)
             return 1
         return 0
     out = []
