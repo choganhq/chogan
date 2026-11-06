@@ -579,6 +579,50 @@
     return Chogan.num(h) + ' ' + Chogan.t('hours');
   };
 
+  // "3 hours ago" beside the version in the Profile (#659). `when` is an ISO time
+  // (the web deploy stamp) or a bare day (APP_RELEASED in the Android app, which
+  // cannot carry a build time because F-Droid rebuilds the same bytes); a bare day
+  // is counted in whole local days, so it never claims "5 hours ago" for a date.
+  // Old WebViews have no Intl.RelativeTimeFormat (Chrome < 71); they get the date.
+  var AGO_UNITS = [['year', 365 * 86400], ['month', 30 * 86400], ['week', 7 * 86400], ['day', 86400], ['hour', 3600], ['minute', 60]];
+  function parseWhen(when) {
+    var d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(when || '');
+    if (d) return { t: new Date(+d[1], +d[2] - 1, +d[3]).getTime(), day: true };
+    var t = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(when || '') ? Date.parse(when) : NaN;
+    return isFinite(t) ? { t: t, day: false } : null;
+  }
+  Chogan.ago = function (when, now) {
+    var w = parseWhen(when);
+    if (!w) return '';
+    var loc = localeOf(state.settings.lang);
+    now = now == null ? Date.now() : now;
+    var secs = Math.max(0, (now - w.t) / 1000);
+    if (w.day) {
+      var n = new Date(now);
+      secs = Math.max(0, Math.round((new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime() - w.t) / 864e5)) * 86400;
+    }
+    var rtf;
+    try { rtf = new Intl.RelativeTimeFormat(loc.tag, { numeric: 'auto' }); } catch (e) { rtf = null; }
+    if (!rtf) return Chogan.exactDate(when);
+    for (var i = 0; i < AGO_UNITS.length; i++) {
+      if (w.day && AGO_UNITS[i][1] < 86400) break;
+      if (secs >= AGO_UNITS[i][1]) return rtf.format(-Math.floor(secs / AGO_UNITS[i][1]), AGO_UNITS[i][0]);
+    }
+    return w.day ? rtf.format(0, 'day') : rtf.format(0, 'second');
+  };
+  // The exact moment, for the tooltip beside "3 hours ago" and for old WebViews
+  Chogan.exactDate = function (when) {
+    var w = parseWhen(when);
+    if (!w) return '';
+    var loc = localeOf(state.settings.lang).date;
+    try {
+      var d = new Date(w.t);
+      return w.day ? d.toLocaleDateString(loc) : d.toLocaleString(loc, { dateStyle: 'medium', timeStyle: 'short' });
+    } catch (e) {
+      return Chogan.num(String(when).slice(0, 10));
+    }
+  };
+
   Chogan.applyLang = function () {
     var loc = localeOf(state.settings.lang);
     document.documentElement.lang = loc.tag;
@@ -3446,6 +3490,9 @@
   // stamped only on the published build; elsewhere this stays empty.
   Chogan.commit = /^[0-9a-f]{40}$/.test(global.APP_COMMIT || '') ? global.APP_COMMIT : '';
   Chogan.build = Chogan.commit.slice(0, 7);
+  // When this build reached the player: the web deploy's stamp, else the release day
+  // the Android app ships with (#659). Empty when neither is a valid time.
+  Chogan.builtAt = [global.APP_DEPLOYED_AT, global.APP_RELEASED].filter(function (v) { return !!parseWhen(v); })[0] || '';
 
   // برای تست‌های خودکار در نود
   if (typeof module !== 'undefined' && module.exports) module.exports = Chogan;
