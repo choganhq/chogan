@@ -1,0 +1,724 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>قلمرو — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  :root { --tr-line: #3A2E28; --tr-ink: #3A2E28; --tr-bad: #D62828;
+    --tr-r0: #F9D9A8; --tr-r1: #CFE6B8; --tr-r2: #BFDDF2; --tr-r3: #F5C6D6;
+    --tr-r4: #E2D3F2; --tr-r5: #F3E7A0; --tr-r6: #BFE7DD; --tr-r7: #DAD7D0; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --tr-line: #0E0C0B; --tr-ink: #F1E9E2; --tr-bad: #FF6B6B;
+    --tr-r0: #6E5536; --tr-r1: #48603A; --tr-r2: #375873; --tr-r3: #714257; --tr-r4: #574A74; --tr-r5: #67612C; --tr-r6: #2F6158; --tr-r7: #4F5057; } }
+  :root[data-theme="dark"] { --tr-line: #0E0C0B; --tr-ink: #F1E9E2; --tr-bad: #FF6B6B;
+    --tr-r0: #6E5536; --tr-r1: #48603A; --tr-r2: #375873; --tr-r3: #714257; --tr-r4: #574A74; --tr-r5: #67612C; --tr-r6: #2F6158; --tr-r7: #4F5057; }
+  .tr-wrap > .ch-fit { --fit-ar: 1; }
+  .ch-fit > .tr-box { width: 100%; height: 100%; display: grid; place-items: center; }
+  /* the board is read left to right in every language, so the arrows are geometric
+     and a cell keeps its place */
+  .tr-board { width: 100%; aspect-ratio: 1; max-width: 100%; max-height: 100%; direction: ltr; box-sizing: border-box;
+    display: grid; grid-template-columns: repeat(var(--n), 1fr); grid-template-rows: repeat(var(--n), 1fr); gap: 1px;
+    border: 3px solid var(--tr-line); border-radius: var(--r-md); overflow: hidden; background: var(--tr-line);
+    box-shadow: var(--sh-2); touch-action: manipulation; }
+  .tr-cell { position: relative; border: 0; padding: 0; margin: 0; min-width: 0; min-height: 0; cursor: pointer;
+    display: grid; place-items: center; color: var(--tr-ink); }
+  .tr-cell svg { width: 74%; height: 74%; display: block; pointer-events: none; }
+  .tr-cell .tr-x { width: 42%; height: 42%; }
+  .tr-cell--auto .tr-x { opacity: .3; }
+  .tr-cell--bad::after { content: ''; position: absolute; inset: 7%; border-radius: 50%; border: 3px solid var(--tr-bad); pointer-events: none; }
+  .tr-cell--bad { animation: tr-shake 320ms var(--ease); }
+  .tr-cell:focus-visible { outline: 3px solid var(--game, var(--c-accent)); outline-offset: -4px; z-index: 1; }
+  .tr-board--done .tr-cell { cursor: default; }
+  .tr-board--done .tr-animal { animation: tr-hop 520ms var(--ease) both; animation-delay: var(--d, 0ms); }
+  @keyframes tr-hop { 0%, 100% { transform: none; } 40% { transform: translateY(-14%) scale(1.12); } }
+  @keyframes tr-shake { 0%, 100% { transform: none; } 25% { transform: translateX(-6%); } 75% { transform: translateX(6%); } }
+  .tr-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .tr-side { align-items: center; }
+  .tr-side > .ch-btn { align-self: center; width: auto; }
+  .tr-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-variant-numeric: tabular-nums; }
+  .tr-stars { display: flex; gap: 2px; justify-content: center; color: var(--game, var(--c-accent)); font-size: 1.35rem; line-height: 1; }
+  .tr-stars .tr-lost { opacity: .25; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tr-stars { color: var(--game-text-dark, var(--game, var(--c-accent))); } }
+  :root[data-theme="dark"] .tr-stars { color: var(--game-text-dark, var(--game, var(--c-accent))); }
+  @media (prefers-reduced-motion: reduce) { .tr-cell--bad, .tr-board--done .tr-animal { animation: none; } }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function TerritoriesEngineFactory() {
+  'use strict';
+
+  var SIZES = [6, 7, 8];
+  var EMPTY = 0, CROSS = 1, ANIMAL = 2;
+
+  function rowOf(n, i) { return Math.floor(i / n); }
+  function colOf(n, i) { return i % n; }
+  function touching(n, a, b) {
+    return a !== b && Math.abs(rowOf(n, a) - rowOf(n, b)) <= 1 && Math.abs(colOf(n, a) - colOf(n, b)) <= 1;
+  }
+  // two animals clash when they share a row, a column or a region, or touch, corners too
+  function clash(n, reg, a, b) {
+    return a !== b && (rowOf(n, a) === rowOf(n, b) || colOf(n, a) === colOf(n, b) || reg[a] === reg[b] || touching(n, a, b));
+  }
+
+  function shuffle(a, rnd) {
+    for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(rnd() * (i + 1)), t = a[i]; a[i] = a[j]; a[j] = t; }
+    return a;
+  }
+
+  // One animal a row, a column each, and no two in neighbouring rows on neighbouring
+  // columns: a random permutation found by backtracking. sol[r] is the column of row r.
+  function solution(n, rnd) {
+    var sol = [], used = [];
+    function go(r) {
+      if (r === n) return true;
+      var cols = shuffle(Array.from({ length: n }, function (_, i) { return i; }), rnd);
+      for (var k = 0; k < n; k++) {
+        var c = cols[k];
+        if (used[c] || (r > 0 && Math.abs(sol[r - 1] - c) < 2)) continue;
+        used[c] = true; sol[r] = c;
+        if (go(r + 1)) return true;
+        used[c] = false;
+      }
+      return false;
+    }
+    go(0);
+    return sol;
+  }
+
+  // Regions grow from the animals' cells, each at its own pace, so some stay small and
+  // some sprawl: small ones give a solver its first foothold
+  function grow(n, sol, rnd) {
+    var N = n * n, reg = new Array(N).fill(-1), w = [], left = N - n;
+    for (var r = 0; r < n; r++) { reg[r * n + sol[r]] = r; w.push(0.5 + rnd() * 0.7); }
+    while (left > 0) {
+      var opts = [], tot = 0;
+      for (var i = 0; i < N; i++) {
+        if (reg[i] >= 0) continue;
+        var nb = neighbours4(n, i);
+        for (var k = 0; k < nb.length; k++) {
+          var g = reg[nb[k]];
+          if (g >= 0) { opts.push([i, g]); tot += w[g]; }
+        }
+      }
+      var x = rnd() * tot, pick = opts[opts.length - 1];
+      for (k = 0; k < opts.length; k++) { x -= w[opts[k][1]]; if (x <= 0) { pick = opts[k]; break; } }
+      reg[pick[0]] = pick[1]; left--;
+    }
+    return reg;
+  }
+  function biggest(n, reg) {
+    var c = new Array(n).fill(0);
+    for (var i = 0; i < reg.length; i++) c[reg[i]]++;
+    return Math.max.apply(null, c);
+  }
+  function neighbours4(n, i) {
+    var r = rowOf(n, i), c = colOf(n, i), out = [];
+    if (r > 0) out.push(i - n);
+    if (r < n - 1) out.push(i + n);
+    if (c > 0) out.push(i - 1);
+    if (c < n - 1) out.push(i + 1);
+    return out;
+  }
+  function connected(n, reg, g) {
+    var cells = [], i;
+    for (i = 0; i < reg.length; i++) if (reg[i] === g) cells.push(i);
+    if (!cells.length) return false;
+    var seen = {}, stack = [cells[0]], k = 0;
+    seen[cells[0]] = 1;
+    while (stack.length) {
+      var c = stack.pop(); k++;
+      var nb = neighbours4(n, c);
+      for (i = 0; i < nb.length; i++) if (reg[nb[i]] === g && !seen[nb[i]]) { seen[nb[i]] = 1; stack.push(nb[i]); }
+    }
+    return k === cells.length;
+  }
+
+  // The units every animal belongs to: n rows, n columns, n regions
+  function units(n, reg) {
+    var U = [], i, r;
+    for (r = 0; r < n; r++) { U.push([]); }
+    for (r = 0; r < n; r++) { U.push([]); }
+    for (r = 0; r < n; r++) { U.push([]); }
+    for (i = 0; i < n * n; i++) { U[rowOf(n, i)].push(i); U[n + colOf(n, i)].push(i); U[2 * n + reg[i]].push(i); }
+    return U;
+  }
+  // every cell an animal on i rules out: its row, column, region and the eight around it
+  function sees(n, reg, i) {
+    var out = [];
+    for (var j = 0; j < n * n; j++) if (clash(n, reg, i, j)) out.push(j);
+    return out;
+  }
+
+  // A solver that only deduces, never guesses. Each step is one a person can follow:
+  //  - a unit with one free cell left takes the animal, and the animal crosses what it sees;
+  //  - k regions that fit inside k rows (or columns) use those lines up, and the other
+  //    way round: k lines that fit inside k regions use those regions up;
+  //  - a cell that would leave some unit with no free cell can hold no animal.
+  // Every step is sound, so if it fills the board, the board has exactly one answer.
+  // Returns { g, solved, broken, steps, levels }.
+  function solve(n, reg, start) {
+    var N = n * n, U = units(n, reg), SEE = [], i;
+    for (i = 0; i < N; i++) SEE.push(sees(n, reg, i));
+    var g = start ? start.slice() : new Array(N).fill(EMPTY), steps = 0, levels = [0, 0, 0], broken = false;
+    function place(i) {
+      g[i] = ANIMAL; steps++;
+      var s = SEE[i];
+      for (var k = 0; k < s.length; k++) { if (g[s[k]] === ANIMAL) broken = true; else g[s[k]] = CROSS; }
+    }
+    function free(u) { var out = []; for (var k = 0; k < u.length; k++) if (g[u[k]] === EMPTY) out.push(u[k]); return out; }
+    function done(u) { for (var k = 0; k < u.length; k++) if (g[u[k]] === ANIMAL) return true; return false; }
+    function singles() {
+      for (var u = 0; u < U.length; u++) {
+        if (done(U[u])) continue;
+        var f = free(U[u]);
+        if (!f.length) { broken = true; return false; }
+        if (f.length === 1) { place(f[0]); return true; }
+      }
+      return false;
+    }
+    // A = the kind of unit that is confined, B = the kind it is confined to (0 rows,
+    // 1 columns, 2 regions); bit masks of B indices
+    function confined() {
+      for (var A = 0; A < 3; A++) for (var B = 0; B < 3; B++) {
+        if (A === B) continue;
+        var open = [], masks = [];
+        for (var a = 0; a < n; a++) {
+          var u = U[A * n + a];
+          if (done(u)) continue;
+          var m = 0, f = free(u);
+          for (var k = 0; k < f.length; k++) m |= 1 << bOf(B, f[k]);
+          open.push(a); masks.push(m);
+        }
+        var m2 = open.length;
+        for (var set = 1; set < (1 << m2) - 1; set++) {
+          var mask = 0, cnt = 0, inA = {};
+          for (k = 0; k < m2; k++) if (set & (1 << k)) { mask |= masks[k]; cnt++; inA[open[k]] = 1; }
+          if (popcount(mask) !== cnt) continue;
+          var changed = false;
+          for (var b = 0; b < n; b++) {
+            if (!(mask & (1 << b))) continue;
+            var ub = U[B * n + b];
+            for (k = 0; k < ub.length; k++) {
+              var c = ub[k];
+              if (g[c] === EMPTY && !inA[bOf(A, c)]) { g[c] = CROSS; changed = true; }
+            }
+          }
+          if (changed) { steps++; return true; }
+        }
+      }
+      return false;
+    }
+    function bOf(K, c) { return K === 0 ? rowOf(n, c) : K === 1 ? colOf(n, c) : reg[c]; }
+    function lookahead() {
+      for (var i = 0; i < N; i++) {
+        if (g[i] !== EMPTY) continue;
+        var hit = {}, s = SEE[i], k;
+        for (k = 0; k < s.length; k++) hit[s[k]] = 1;
+        hit[i] = 1;
+        for (var u = 0; u < U.length; u++) {
+          var cell = U[u];
+          if (cell.indexOf(i) >= 0 || done(cell)) continue;
+          var left = false;
+          for (k = 0; k < cell.length; k++) if (g[cell[k]] === EMPTY && !hit[cell[k]]) { left = true; break; }
+          if (!left) { g[i] = CROSS; steps++; return true; }
+        }
+      }
+      return false;
+    }
+    for (;;) {
+      if (broken) break;
+      if (singles()) { levels[0]++; continue; }
+      if (broken) break;
+      if (confined()) { levels[1]++; continue; }
+      if (lookahead()) { levels[2]++; continue; }
+      break;
+    }
+    var animals = 0;
+    for (i = 0; i < N; i++) if (g[i] === ANIMAL) animals++;
+    return { g: g, solved: !broken && animals === n, broken: broken, steps: steps, levels: levels };
+  }
+  function popcount(m) { var k = 0; while (m) { m &= m - 1; k++; } return k; }
+
+  // Brute force, row by row, stopping at `limit` answers: the tests' second opinion
+  function count(n, reg, limit) {
+    var usedC = 0, usedR = 0, found = 0;
+    limit = limit || 2;
+    function go(r, prev) {
+      if (r === n) { found++; return; }
+      for (var c = 0; c < n && found < limit; c++) {
+        var g = reg[r * n + c];
+        if (usedC & (1 << c) || usedR & (1 << g) || Math.abs(c - prev) < 2) continue;
+        usedC |= 1 << c; usedR |= 1 << g;
+        go(r + 1, c);
+        usedC &= ~(1 << c); usedR &= ~(1 << g);
+      }
+    }
+    go(0, -9);
+    return found;
+  }
+
+  // A puzzle: an answer, regions grown around it, and then, while the solver gets
+  // stuck, a stuck cell handed to a neighbouring region (keeping both whole and every
+  // animal in its own) until the solver finishes. Starts over after too many tries.
+  function generate(n, rnd) {
+    for (var attempt = 0; attempt < 60; attempt++) {
+      var sol = solution(n, rnd), reg = grow(n, sol, rnd), home = {};
+      for (var r = 0; r < n; r++) home[r * n + sol[r]] = 1;
+      var res = solve(n, reg);
+      for (var t = 0; t < 40 && !res.solved; t++) {
+        var open = [];
+        for (var i = 0; i < n * n; i++) if (res.g[i] === EMPTY && !home[i]) open.push(i);
+        if (!open.length) break;
+        var moved = false;
+        shuffle(open, rnd);
+        for (var k = 0; k < open.length && !moved; k++) {
+          var c = open[k], nb = shuffle(neighbours4(n, c), rnd);
+          for (var j = 0; j < nb.length; j++) {
+            var to = reg[nb[j]], from = reg[c];
+            if (to === from) continue;
+            reg[c] = to;
+            if (connected(n, reg, from)) { moved = true; break; }
+            reg[c] = from;
+          }
+        }
+        if (!moved) break;
+        res = solve(n, reg);
+      }
+      // the first draft let one region sprawl over 15 of 36 cells on a typical board,
+      // which read as a blank field with a few specks; keep every region within 2.5n cells
+      if (res.solved && biggest(n, reg) <= Math.floor(2.5 * n)) return { n: n, reg: reg, sol: sol, levels: res.levels };
+    }
+    return null;
+  }
+
+  // what the board shows about the player's marks
+  function animals(g) { var out = []; for (var i = 0; i < g.length; i++) if (g[i] === ANIMAL) out.push(i); return out; }
+  function conflicts(n, reg, g) {
+    var a = animals(g), bad = new Array(g.length).fill(false);
+    for (var x = 0; x < a.length; x++) for (var y = x + 1; y < a.length; y++)
+      if (clash(n, reg, a[x], a[y])) { bad[a[x]] = true; bad[a[y]] = true; }
+    return bad;
+  }
+  // cells some animal rules out: what auto-cross shows, without storing a mark
+  function seen(n, reg, g) {
+    var a = animals(g), out = new Array(g.length).fill(false);
+    for (var i = 0; i < g.length; i++) {
+      if (g[i] === ANIMAL) continue;
+      for (var k = 0; k < a.length; k++) if (clash(n, reg, a[k], i)) { out[i] = true; break; }
+    }
+    return out;
+  }
+  function won(n, reg, g) {
+    return animals(g).length === n && conflicts(n, reg, g).indexOf(true) < 0;
+  }
+  // a tap: empty → cross → animal → empty
+  function cycle(v) { return v === EMPTY ? CROSS : v === CROSS ? ANIMAL : EMPTY; }
+
+  // three stars with no rule broken, two after one, one after more: never a loss
+  function stars(mistakes) { return mistakes <= 0 ? 3 : mistakes === 1 ? 2 : 1; }
+
+  function valid(o) {
+    if (!o || SIZES.indexOf(o.n) < 0 || !Array.isArray(o.reg) || !Array.isArray(o.g)) return false;
+    var N = o.n * o.n, seenR = {};
+    if (o.reg.length !== N || o.g.length !== N) return false;
+    for (var i = 0; i < N; i++) {
+      if (!(o.reg[i] >= 0 && o.reg[i] < o.n) || [0, 1, 2].indexOf(o.g[i]) < 0) return false;
+      seenR[o.reg[i]] = 1;
+    }
+    for (var r = 0; r < o.n; r++) if (!seenR[r] || !connected(o.n, o.reg, r)) return false;
+    return typeof o.mistakes === 'number' && o.mistakes >= 0;
+  }
+
+  return {
+    SIZES: SIZES, EMPTY: EMPTY, CROSS: CROSS, ANIMAL: ANIMAL,
+    clash: clash, touching: touching, solution: solution, grow: grow, connected: connected, solve: solve, count: count,
+    generate: generate, conflicts: conflicts, seen: seen, won: won, cycle: cycle, stars: stars, valid: valid
+  };
+}
+if (typeof module !== 'undefined') module.exports = TerritoriesEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = TerritoriesEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'territories',
+    name: { fa: 'قلمرو', en: 'Territories', zh: '领地', de: 'Reviere', es: 'Territorios', pl: 'Terytoria' },
+    accent: '#A058B4',
+    mood: 'menu',
+    strings: {
+      fa: {
+        board: 'صفحه‌ی قلمروها', cellN: 'خانه‌ی ردیف {r} ستون {c}', regionN: 'قلمرو {k}', stEmpty: 'خالی', stCross: 'ضربدر', stAnimal: 'حیوان',
+        sizeN: '{n}×{n}', dailyTr: 'قلمرو روزانه', placed: 'حیوان‌ها: {a} از {n}', mistakesN: 'اشتباه: {m}', solvedTr: 'همه سر جایشان!',
+        perfect: 'بدون هیچ اشتباهی!', mistakesL: 'اشتباه‌ها', trNew: 'پازل تازه', trClear: 'پاک کردن صفحه', autoCross: 'ضربدر خودکار',
+        autoNote: 'خانه‌هایی که حیوان‌ها می‌بینند خودبه‌خود ضربدر کم‌رنگ می‌خورند.', starsN: '{s} ستاره از ۳',
+        kMove: 'جابه‌جایی بین خانه‌ها', kCycle: 'خالی، ضربدر، حیوان', kNew: 'پازل تازه',
+        rules: 'صفحه به چند قلمروی رنگی تقسیم شده، به تعداد ردیف‌ها. در هر ردیف، هر ستون و هر قلمرو باید دقیقاً یک حیوان باشد و هیچ دو حیوانی به هم نچسبند، حتی گوشه‌به‌گوشه. هر ضربه خانه را از خالی به ضربدر، از ضربدر به حیوان و دوباره به خالی می‌برد؛ ضربدر فقط یادداشت خودت است. اگر حیوانی بگذاری که قانونی را بشکند، حیوان‌های درگیر علامت می‌خورند و یک ستاره کم می‌شود، ولی هیچ‌وقت نمی‌بازی. هر پازل فقط یک جواب دارد و بدون حدس زدن حل می‌شود. چالش روزانه ۷×۷ و برای همه یکی است.',
+        tutTitle1: 'یکی در هر ردیف، ستون و قلمرو', tutText1: 'در هر ردیف، هر ستون و هر قلمروی رنگی دقیقاً یک حیوان می‌نشیند.',
+        tutTitle2: 'به هم نچسبند', tutText2: 'دو حیوان نباید کنار هم باشند، حتی گوشه‌به‌گوشه.',
+        tutTitle3: 'اول ضربدر', tutText3: 'یک ضربه ضربدر می‌گذارد و ضربه‌ی دوم حیوان. با ضربدر جاهای ممنوع را علامت بزن.'
+      },
+      en: {
+        board: 'The territories', cellN: 'Cell row {r} column {c}', regionN: 'region {k}', stEmpty: 'empty', stCross: 'crossed', stAnimal: 'animal',
+        sizeN: '{n}×{n}', dailyTr: 'Daily Territories', placed: 'Animals: {a} of {n}', mistakesN: 'Mistakes: {m}', solvedTr: 'Everyone has a home!',
+        perfect: 'Not a single mistake!', mistakesL: 'Mistakes', trNew: 'New puzzle', trClear: 'Clear the board', autoCross: 'Auto-cross',
+        autoNote: 'Cells an animal rules out get a faint cross by themselves.', starsN: '{s} of 3 stars',
+        kMove: 'Move between cells', kCycle: 'Empty, cross, animal', kNew: 'New puzzle',
+        rules: 'The board is split into coloured regions, as many as there are rows. Every row, every column and every region needs exactly one animal, and no two animals may touch, not even at a corner. Each tap takes a cell from empty to a cross, from a cross to an animal, and back to empty; crosses are only your own notes. Placing an animal that breaks a rule marks the animals involved and costs a star, but you never lose. Every puzzle has exactly one answer and can be solved without guessing. The daily challenge is 7×7 and the same for everyone.',
+        tutTitle1: 'One per row, column and region', tutText1: 'Every row, every column and every coloured region holds exactly one animal.',
+        tutTitle2: 'No touching', tutText2: 'Two animals may not be neighbours, not even at a corner.',
+        tutTitle3: 'Cross first', tutText3: 'One tap puts a cross, a second tap an animal. Cross out the cells that cannot hold one.'
+      },
+      pl: {
+        board: 'Terytoria', cellN: 'Pole rząd {r} kolumna {c}', regionN: 'kraina {k}', stEmpty: 'puste', stCross: 'skreślone', stAnimal: 'zwierzę',
+        sizeN: '{n}×{n}', dailyTr: 'Codzienne Terytoria', placed: 'Zwierzęta: {a} z {n}', mistakesN: 'Błędy: {m}', solvedTr: 'Każdy ma swój dom!',
+        perfect: 'Ani jednego błędu!', mistakesL: 'Błędy', trNew: 'Nowa łamigłówka', trClear: 'Wyczyść planszę', autoCross: 'Automatyczne skreślanie',
+        autoNote: 'Pola wykluczone przez zwierzę same dostają blady krzyżyk.', starsN: '{s} z 3 gwiazdek',
+        kMove: 'Przemieść między polami', kCycle: 'Puste, krzyżyk, zwierzę', kNew: 'Nowa łamigłówka',
+        rules: 'Plansza jest podzielona na kolorowe krainy, tyle, ile jest rzędów. W każdym rzędzie, każdej kolumnie i każdej krainie musi być dokładnie jedno zwierzę, a żadne dwa nie mogą się stykać, nawet rogami. Każde dotknięcie zmienia pole z pustego na krzyżyk, z krzyżyka na zwierzę i z powrotem na puste; krzyżyki to tylko twoje notatki. Zwierzę, które łamie zasadę, oznacza zwierzęta w konflikcie i kosztuje gwiazdkę, ale nigdy nie przegrywasz. Każda łamigłówka ma dokładnie jedno rozwiązanie i da się ją rozwiązać bez zgadywania. Codzienne wyzwanie ma 7×7 i jest takie samo dla wszystkich.',
+        tutTitle1: 'Jedno w rzędzie, kolumnie i krainie', tutText1: 'W każdym rzędzie, każdej kolumnie i każdej kolorowej krainie jest dokładnie jedno zwierzę.',
+        tutTitle2: 'Bez stykania', tutText2: 'Dwa zwierzęta nie mogą sąsiadować, nawet rogami.',
+        tutTitle3: 'Najpierw krzyżyki', tutText3: 'Jedno dotknięcie stawia krzyżyk, drugie zwierzę. Skreślaj pola, na których zwierzę stanąć nie może.'
+      },
+      zh: {
+        board: '领地', cellN: '第 {r} 行第 {c} 列', regionN: '第 {k} 块领地', stEmpty: '空', stCross: '叉', stAnimal: '动物',
+        sizeN: '{n}×{n}', dailyTr: '每日领地', placed: '动物：{a} / {n}', mistakesN: '失误：{m}', solvedTr: '大家都有家了！',
+        perfect: '一次失误都没有！', mistakesL: '失误', trNew: '新题', trClear: '清空棋盘', autoCross: '自动打叉',
+        autoNote: '动物看得到的格子会自动打上浅色的叉。', starsN: '{s} / 3 星',
+        kMove: '在格子之间移动', kCycle: '空、叉、动物', kNew: '新题',
+        rules: '棋盘分成若干块彩色领地，数量和行数相同。每一行、每一列、每一块领地都要恰好有一只动物，任意两只动物都不能相邻，斜着也不行。每点一下，格子就从空变成叉，从叉变成动物，再变回空；叉只是你自己的标记。放下违反规则的动物时，相关的动物会被标出并扣一颗星，但永远不会输。每道题都只有一个答案，不用猜就能解开。每日挑战是 7×7，对所有人相同。',
+        tutTitle1: '每行、每列、每块领地各一只', tutText1: '每一行、每一列和每一块彩色领地都恰好有一只动物。',
+        tutTitle2: '不能相邻', tutText2: '两只动物不能挨着，斜角也不行。',
+        tutTitle3: '先打叉', tutText3: '点一下打叉，再点一下放动物。把放不了动物的格子都打上叉。'
+      },
+      de: {
+        board: 'Die Reviere', cellN: 'Feld Reihe {r} Spalte {c}', regionN: 'Revier {k}', stEmpty: 'leer', stCross: 'gekreuzt', stAnimal: 'Tier',
+        sizeN: '{n}×{n}', dailyTr: 'Reviere des Tages', placed: 'Tiere: {a} von {n}', mistakesN: 'Fehler: {m}', solvedTr: 'Alle haben ein Zuhause!',
+        perfect: 'Kein einziger Fehler!', mistakesL: 'Fehler', trNew: 'Neues Rätsel', trClear: 'Brett leeren', autoCross: 'Automatisch kreuzen',
+        autoNote: 'Felder, die ein Tier ausschließt, bekommen von selbst ein blasses Kreuz.', starsN: '{s} von 3 Sternen',
+        kMove: 'Zwischen Feldern wechseln', kCycle: 'Leer, Kreuz, Tier', kNew: 'Neues Rätsel',
+        rules: 'Das Brett ist in farbige Reviere geteilt, so viele, wie es Reihen hat. Jede Reihe, jede Spalte und jedes Revier braucht genau ein Tier, und keine zwei Tiere dürfen sich berühren, auch nicht über Eck. Jedes Tippen schaltet ein Feld von leer auf Kreuz, von Kreuz auf Tier und zurück auf leer; Kreuze sind nur deine Notizen. Ein Tier, das eine Regel bricht, markiert die betroffenen Tiere und kostet einen Stern, aber du verlierst nie. Jedes Rätsel hat genau eine Lösung und lässt sich ohne Raten lösen. Die Tagesaufgabe ist 7×7 und für alle gleich.',
+        tutTitle1: 'Eins je Reihe, Spalte und Revier', tutText1: 'Jede Reihe, jede Spalte und jedes farbige Revier hat genau ein Tier.',
+        tutTitle2: 'Nicht berühren', tutText2: 'Zwei Tiere dürfen nicht nebeneinander stehen, auch nicht über Eck.',
+        tutTitle3: 'Erst kreuzen', tutText3: 'Einmal tippen setzt ein Kreuz, zweimal ein Tier. Kreuze die Felder an, auf die kein Tier kann.'
+      },
+      es: {
+        board: 'Los territorios', cellN: 'Casilla fila {r} columna {c}', regionN: 'región {k}', stEmpty: 'vacía', stCross: 'tachada', stAnimal: 'animal',
+        sizeN: '{n}×{n}', dailyTr: 'Territorios diarios', placed: 'Animales: {a} de {n}', mistakesN: 'Errores: {m}', solvedTr: '¡Todos tienen casa!',
+        perfect: '¡Ni un solo error!', mistakesL: 'Errores', trNew: 'Puzle nuevo', trClear: 'Vaciar el tablero', autoCross: 'Tachar solo',
+        autoNote: 'Las casillas que descarta un animal reciben solas una cruz tenue.', starsN: '{s} de 3 estrellas',
+        kMove: 'Moverse entre casillas', kCycle: 'Vacía, cruz, animal', kNew: 'Puzle nuevo',
+        rules: 'El tablero está dividido en regiones de colores, tantas como filas. Cada fila, cada columna y cada región necesita exactamente un animal, y dos animales nunca pueden tocarse, ni siquiera en diagonal. Cada toque pasa una casilla de vacía a cruz, de cruz a animal y de nuevo a vacía; las cruces son solo tus notas. Poner un animal que rompe una regla marca los animales implicados y cuesta una estrella, pero nunca pierdes. Cada puzle tiene una única solución y se resuelve sin adivinar. El reto diario es de 7×7 e igual para todos.',
+        tutTitle1: 'Uno por fila, columna y región', tutText1: 'Cada fila, cada columna y cada región de color tiene exactamente un animal.',
+        tutTitle2: 'Sin tocarse', tutText2: 'Dos animales no pueden ser vecinos, ni siquiera en diagonal.',
+        tutTitle3: 'Primero cruces', tutText3: 'Un toque pone una cruz y el segundo un animal. Tacha las casillas donde no cabe ninguno.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var DAILY_N = 7;
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || E.SIZES.indexOf(prefs.n) < 0) prefs = { n: 6, auto: false };
+  prefs.auto = !!prefs.auto;
+
+  var S = null, startedAt = 0, ended = false, focusAt = 0, shakeAt = -1;
+
+  var board = el('div', { class: 'tr-board', role: 'group', 'aria-label': C.t('board') });
+  var cells = [];
+  var box = el('div', { class: 'tr-box' }, [board]);
+  var top = el('div', { class: 'tr-top ch-above' });
+  var stars = el('div', { class: 'tr-stars', role: 'img' });
+  var status = el('div', { class: 'tr-status', role: 'status', 'aria-live': 'polite' });
+  // clearing sits under the count rather than in the bar: a fourth bar button cut the
+  // game's name on a phone (as in Lights Off)
+  var clearBtn = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', onclick: function () { clearAll(); } }, [C.icon('rotate', 16), el('span', { text: C.t('trClear') })]);
+  var wrap = el('div', { class: 'tr-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side tr-side' }, [top, stars, status, clearBtn])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undo'), onClick: undo });
+  if (!dailyDate) ctx.button({ icon: 'refresh', label: C.t('trNew'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- game */
+
+  function newPuzzle(n) {
+    var rnd = dailyDate ? C.daily('territories', dailyDate).rng : Math.random;
+    var P = E.generate(n, rnd);
+    S = { n: n, reg: P.reg, g: new Array(n * n).fill(E.EMPTY), mistakes: 0, daily: dailyDate || null, stack: [] };
+    startedAt = Date.now(); ended = false; focusAt = 0;
+    build();
+    save();
+  }
+  function hasMarks() { return !!S && S.g.some(function (v) { return v !== E.EMPTY; }); }
+  function askNew() {
+    if (hasMarks() && !ended) C.ui.confirm({ title: C.t('trNew'), body: C.t('resetWarn'), onOk: function () { newPuzzle(prefs.n); } });
+    else newPuzzle(prefs.n);
+  }
+  function setSize(n) {
+    if (n === S.n) return;
+    var go = function () { prefs.n = n; ctx.store.set('prefs', prefs); newPuzzle(n); };
+    if (hasMarks() && !ended) C.ui.confirm({ title: C.t('trNew'), body: C.t('resetWarn'), onOk: go, onCancel: render });
+    else go();
+  }
+
+  // A tap moves the cell on one step: empty, cross, animal, empty. An animal that
+  // breaks a rule costs a star at the moment it is placed; taking it away or undoing
+  // it does not give the star back, or a player could test cells for free.
+  function tap(i) {
+    if (!S || ended) return;
+    var prev = S.g[i], next = E.cycle(prev);
+    S.stack.push([i, prev]);
+    S.g[i] = next;
+    focusAt = i;
+    if (next === E.ANIMAL && E.conflicts(S.n, S.reg, S.g)[i]) {
+      S.mistakes++;
+      shakeAt = i;
+      C.feedback('bad');
+    } else C.feedback(next === E.ANIMAL ? 'select' : 'tap');
+    render(); save();
+    if (E.won(S.n, S.reg, S.g)) win();
+  }
+  function clearAll() {
+    if (!S || ended || !hasMarks()) return;
+    S.stack.push([-1, S.g.slice()]);
+    S.g = new Array(S.n * S.n).fill(E.EMPTY);
+    C.feedback('tap');
+    render(); save();
+  }
+  function undo() {
+    if (!S || ended || !S.stack.length) { C.feedback('bad'); return; }
+    var u = S.stack.pop();
+    if (u[0] < 0) S.g = u[1].slice();
+    else { S.g[u[0]] = u[1]; focusAt = u[0]; }
+    C.feedback('tap');
+    render(); save();
+  }
+
+  function win() {
+    ended = true;
+    var st = E.stars(S.mistakes), clean = S.mistakes === 0;
+    var base = { 6: [4, 15], 7: [6, 25], 8: [9, 40] }[S.n], k = st === 3 ? 1 : st === 2 ? 0.7 : 0.4;
+    var coins = Math.max(1, Math.round(base[0] * k)), points = Math.max(1, Math.round(base[1] * k));
+    if (clean && S.n >= 7) C.achievements.unlock('tr-clean');
+    if (S.n === 8) C.achievements.unlock('tr-big');
+    if (S.daily) {
+      if (!C.stats.daily('territories', S.daily, { label: C.t('mistakesN', { m: C.num(S.mistakes) }), win: true, stars: st })) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+      if (clean) C.achievements.unlock('tr-daily');
+    }
+    ctx.clearSave();
+    C.feedback('good');
+    render();
+    var elapsed = Date.now() - startedAt;
+    setTimeout(function () {
+      ctx.finish({
+        won: true, title: C.t('solvedTr'), note: clean ? C.t('perfect') : null, stars: st, timeMs: elapsed, coins: coins, points: points,
+        lines: [
+          S.daily ? { label: C.t('daily'), value: C.num(S.daily) } : { label: C.t('sizeN', { n: C.num(S.n) }), value: '' },
+          { label: C.t('mistakesL'), value: C.num(S.mistakes) },
+          { label: C.t('time'), value: C.time(elapsed) }
+        ],
+        shareText: 'چوگان · قلمرو' + (S.daily ? ('\nروزانه ' + S.daily) : ('\n' + S.n + '×' + S.n)) + '\n' + '★'.repeat(st),
+        againLabel: S.daily ? null : C.t('trNew'),
+        onAgain: S.daily ? null : function () { newPuzzle(prefs.n); }
+      });
+    }, C.ui.reduceMotion() ? 200 : 900);
+  }
+
+  /* --------------------------------------------------------------- view */
+
+  var INK = '#3A2E28';
+  // Eight friendly faces, one for each region, drawn in a 40×40 box around 0,0
+  function eyes(y) { return '<circle cx="-4.5" cy="' + y + '" r="1.9" fill="' + INK + '"/><circle cx="4.5" cy="' + y + '" r="1.9" fill="' + INK + '"/>'; }
+  function smile(y) { return '<path d="M-3.2 ' + y + 'q3.2 3 6.4 0" fill="none" stroke="' + INK + '" stroke-width="1.6" stroke-linecap="round"/>'; }
+  var O = ' stroke="' + INK + '" stroke-width="1.6" stroke-linejoin="round"';
+  var FACES = [
+    // cat
+    '<path d="M-12-3-11-17-2-11zM12-3 11-17 2-11z" fill="#F2A65A"' + O + '/><circle r="12" cy="1" fill="#F2A65A"' + O + '/>' + eyes(-1) + '<path d="M-1.5 3h3l-1.5 1.6z" fill="' + INK + '"/>' + smile(5),
+    // bear
+    '<circle cx="-9.5" cy="-9.5" r="5" fill="#B07A52"' + O + '/><circle cx="9.5" cy="-9.5" r="5" fill="#B07A52"' + O + '/><circle r="12" cy="1" fill="#B07A52"' + O + '/><ellipse cy="5" rx="6" ry="4.5" fill="#EBD3BC"/>' + eyes(-2) + '<ellipse cy="3.2" rx="2" ry="1.4" fill="' + INK + '"/>' + smile(5.6),
+    // rabbit
+    '<ellipse cx="-5" cy="-11" rx="3.6" ry="8.5" fill="#F7F3EE"' + O + '/><ellipse cx="5" cy="-11" rx="3.6" ry="8.5" fill="#F7F3EE"' + O + '/><circle r="11" cy="4" fill="#F7F3EE"' + O + '/>' + eyes(2) + '<ellipse cy="6" rx="1.6" ry="1.1" fill="#E88AA2"/>' + smile(8),
+    // frog
+    '<circle cx="-7" cy="-8" r="5.5" fill="#7CC46A"' + O + '/><circle cx="7" cy="-8" r="5.5" fill="#7CC46A"' + O + '/><ellipse cy="3" rx="13.5" ry="10" fill="#7CC46A"' + O + '/><circle cx="-7" cy="-8" r="2.6" fill="#fff"/><circle cx="7" cy="-8" r="2.6" fill="#fff"/><circle cx="-7" cy="-8" r="1.4" fill="' + INK + '"/><circle cx="7" cy="-8" r="1.4" fill="' + INK + '"/><path d="M-7 4q7 6 14 0" fill="none" stroke="' + INK + '" stroke-width="1.6" stroke-linecap="round"/>',
+    // mouse
+    '<circle cx="-10" cy="-8" r="7" fill="#B9BAC8"' + O + '/><circle cx="10" cy="-8" r="7" fill="#B9BAC8"' + O + '/><circle cx="-10" cy="-8" r="3.6" fill="#F2B8C6"/><circle cx="10" cy="-8" r="3.6" fill="#F2B8C6"/><circle r="10.5" cy="3" fill="#B9BAC8"' + O + '/>' + eyes(1) + '<circle cy="5" r="1.6" fill="#E88AA2"/>' + smile(7),
+    // pig
+    '<path d="M-11-4-9-14-3-9zM11-4 9-14 3-9z" fill="#F4A7B9"' + O + '/><circle r="12" cy="1" fill="#F4A7B9"' + O + '/>' + eyes(-3) + '<ellipse cy="4" rx="5" ry="3.6" fill="#F7C3CF"' + O + '/><circle cx="-1.7" cy="4" r="1" fill="' + INK + '"/><circle cx="1.7" cy="4" r="1" fill="' + INK + '"/>',
+    // chick
+    '<path d="M-2-12q2-6 4 0" fill="none" stroke="' + INK + '" stroke-width="1.6"/><circle r="12" cy="1" fill="#FFD45C"' + O + '/>' + eyes(-1) + '<path d="M-3 3h6l-3 4z" fill="#F08A24"' + O + '/>',
+    // panda
+    '<circle cx="-9.5" cy="-9.5" r="4.8" fill="' + INK + '"/><circle cx="9.5" cy="-9.5" r="4.8" fill="' + INK + '"/><circle r="12" cy="1" fill="#FAFAF7"' + O + '/><ellipse cx="-5" cy="0" rx="3.4" ry="4" fill="' + INK + '" transform="rotate(25 -5 0)"/><ellipse cx="5" cy="0" rx="3.4" ry="4" fill="' + INK + '" transform="rotate(-25 5 0)"/><circle cx="-4.6" cy="-0.5" r="1.2" fill="#fff"/><circle cx="4.6" cy="-0.5" r="1.2" fill="#fff"/><ellipse cy="5" rx="1.8" ry="1.2" fill="' + INK + '"/>' + smile(7)
+  ];
+  function animal(kind) { return '<svg class="tr-animal" viewBox="-20 -20 40 40" aria-hidden="true">' + FACES[kind % FACES.length] + '</svg>'; }
+  var CROSS = '<svg class="tr-x" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3 17 17M17 3 3 17" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>';
+
+  // a thick line wherever two regions meet, drawn inside each cell so the grid needs
+  // no extra layer
+  function edges(n, reg, i) {
+    var r = Math.floor(i / n), c = i % n, w = '2px', out = [];
+    if (r > 0 && reg[i - n] !== reg[i]) out.push('inset 0 ' + w + ' 0 var(--tr-line)');
+    if (r < n - 1 && reg[i + n] !== reg[i]) out.push('inset 0 -' + w + ' 0 var(--tr-line)');
+    if (c > 0 && reg[i - 1] !== reg[i]) out.push('inset ' + w + ' 0 0 var(--tr-line)');
+    if (c < n - 1 && reg[i + 1] !== reg[i]) out.push('inset -' + w + ' 0 0 var(--tr-line)');
+    return out.join(', ') || 'none';
+  }
+
+  function build() {
+    board.innerHTML = '';
+    cells = [];
+    board.style.setProperty('--n', S.n);
+    for (var i = 0; i < S.n * S.n; i++) {
+      (function (k) {
+        var b = el('button', { class: 'tr-cell', type: 'button', tabindex: '-1' });
+        b.style.background = 'var(--tr-r' + S.reg[k] + ')';
+        b.style.boxShadow = edges(S.n, S.reg, k);
+        b.addEventListener('click', function () { tap(k); });
+        cells.push(b); board.appendChild(b);
+      })(i);
+    }
+    render();
+  }
+  function render() {
+    var bad = E.conflicts(S.n, S.reg, S.g), seen = prefs.auto ? E.seen(S.n, S.reg, S.g) : null, a = 0, order = 0;
+    for (var i = 0; i < cells.length; i++) {
+      var v = S.g[i], auto = v === E.EMPTY && seen && seen[i], b = cells[i];
+      if (v === E.ANIMAL) a++;
+      var html = v === E.ANIMAL ? animal(S.reg[i]) : (v === E.CROSS || auto) ? CROSS : '';
+      if (b.getAttribute('data-v') !== html) { b.innerHTML = html; b.setAttribute('data-v', html); }
+      b.classList.toggle('tr-cell--auto', !!auto);
+      b.classList.toggle('tr-cell--bad', !!bad[i]);
+      if (i === shakeAt && bad[i]) { b.classList.remove('tr-cell--bad'); void b.offsetWidth; b.classList.add('tr-cell--bad'); }
+      if (v === E.ANIMAL && ended) b.style.setProperty('--d', (order++ * 70) + 'ms');
+      b.setAttribute('aria-label', C.t('cellN', { r: C.num(Math.floor(i / S.n) + 1), c: C.num(i % S.n + 1) }) + ' · ' + C.t('regionN', { k: C.num(S.reg[i] + 1) }) + ' · ' +
+        C.t(v === E.ANIMAL ? 'stAnimal' : (v === E.CROSS || auto) ? 'stCross' : 'stEmpty'));
+      b.setAttribute('tabindex', i === focusAt ? '0' : '-1');
+    }
+    shakeAt = -1;
+    board.classList.toggle('tr-board--done', ended);
+    top.innerHTML = '';
+    if (S.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyTr') + ' — ' + C.num(S.daily) })]));
+    else top.appendChild(C.ui.segmented(E.SIZES.map(function (n) { return { value: n, label: C.t('sizeN', { n: C.num(n) }) }; }), S.n, setSize));
+    // options behind a gear in the top row, never in «?» (#409)
+    var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', showSettings);
+    top.appendChild(gear);
+    var st = E.stars(S.mistakes);
+    stars.innerHTML = '';
+    for (var s = 0; s < 3; s++) stars.appendChild(el('span', { class: s < st ? '' : 'tr-lost', text: '★' }));
+    stars.setAttribute('aria-label', C.t('starsN', { s: C.num(st) }));
+    status.textContent = C.t('placed', { a: C.num(a), n: C.num(S.n) }) + ' · ' + C.t('mistakesN', { m: C.num(S.mistakes) });
+    clearBtn.disabled = ended || !hasMarks();
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  board.addEventListener('keydown', function (e) {
+    var d = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.key];
+    if (!d || !S) return;
+    e.preventDefault();
+    var r = Math.floor(focusAt / S.n), c = focusAt % S.n;
+    r = Math.max(0, Math.min(S.n - 1, r + d[1])); c = Math.max(0, Math.min(S.n - 1, c + d[0]));
+    focusAt = r * S.n + c;
+    render();
+    cells[focusAt].focus();
+  });
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim')) return;
+    if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (C.keyIs(e, 'n') && !dailyDate) { askNew(); e.preventDefault(); return; }
+    // the first arrow from anywhere on the page lands on the board
+    if (/^Arrow/.test(e.key) && cells.length && !board.contains(document.activeElement)) { cells[focusAt].focus(); e.preventDefault(); }
+  });
+
+  /* ------------------------------------------------------------ dialogs */
+
+  function showSettings() {
+    C.ui.modal({
+      title: C.t('settings'),
+      body: [el('div', { class: 'ch-list' }, [
+        el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('autoCross') }),
+          C.ui.switch(prefs.auto, function (v) { prefs.auto = v; ctx.store.set('prefs', prefs); if (S) render(); })])
+      ]), el('p', { class: 'ch-dim', text: C.t('autoNote') })],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    var keys = [kb('← ↑ → ↓', C.t('kMove')), kb('Space / Enter', C.t('kCycle')), kb('U / Ctrl+Z', C.t('undo'))];
+    if (!dailyDate) keys.push(kb('N', C.t('kNew')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, keys)
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // 4×4 boards for the tutorial: four regions, the animals on them, crosses, and a
+  // ring on animals that break a rule
+  var T_REG = [0, 0, 1, 1, 0, 2, 1, 1, 3, 2, 2, 1, 3, 3, 2, 2];
+  var T_FILL = ['#F9D9A8', '#CFE6B8', '#BFDDF2', '#F5C6D6'];
+  function tArt(animals, crosses, bad) {
+    var s = '<svg viewBox="0 0 200 110" width="100%"><rect x="54" y="3" width="92" height="92" rx="6" fill="#3A2E28"/>';
+    for (var i = 0; i < 16; i++) {
+      var x = 57 + (i % 4) * 21.5, y = 6 + Math.floor(i / 4) * 21.5;
+      s += '<rect x="' + x + '" y="' + y + '" width="21" height="21" fill="' + T_FILL[T_REG[i]] + '"/>';
+    }
+    for (i = 0; i < 16; i++) {
+      var cx = 67.5 + (i % 4) * 21.5, cy = 16.5 + Math.floor(i / 4) * 21.5;
+      if (animals.indexOf(i) >= 0) s += '<g transform="translate(' + cx + ' ' + cy + ') scale(.42)">' + FACES[T_REG[i] * 2 % 8] + '</g>';
+      if (crosses.indexOf(i) >= 0) s += '<path d="M' + (cx - 4) + ' ' + (cy - 4) + 'l8 8m0-8-8 8" stroke="#3A2E28" stroke-width="2" stroke-linecap="round"/>';
+      if (bad.indexOf(i) >= 0) s += '<circle cx="' + cx + '" cy="' + cy + '" r="9" fill="none" stroke="#D62828" stroke-width="2"/>';
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt([1, 7, 8, 14], [], []) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt([5, 10], [], [5, 10]) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt([1], [0, 2, 3, 4, 5, 6, 9, 13], []) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // the board is saved after every tap; the daily one has its own slot
+  ctx.autosave(function () {
+    if (!S || ended) return { inProgress: false };
+    return { n: S.n, reg: S.reg, g: S.g, mistakes: S.mistakes, daily: S.daily, stack: S.stack.slice(-200), elapsed: Date.now() - startedAt };
+  });
+  function save() { ctx.save(); }
+  var saved = ctx.loadSave();
+  if (saved && E.valid(saved) && (saved.daily || null) === (dailyDate || null) && !E.won(saved.n, saved.reg, saved.g)) {
+    var N = saved.n * saved.n;
+    var stack = Array.isArray(saved.stack) ? saved.stack.filter(function (u) {
+      return Array.isArray(u) && (u[0] === -1 ? Array.isArray(u[1]) && u[1].length === N : u[0] >= 0 && u[0] < N && [0, 1, 2].indexOf(u[1]) >= 0);
+    }) : [];
+    S = { n: saved.n, reg: saved.reg.slice(), g: saved.g.slice(), mistakes: saved.mistakes, daily: saved.daily || null, stack: stack };
+    startedAt = Date.now() - (saved.elapsed || 0); focusAt = 0;
+    build();
+  } else newPuzzle(dailyDate ? DAILY_N : prefs.n);
+  if (dailyDate && C.stats.dailyDone('territories', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).territories;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>

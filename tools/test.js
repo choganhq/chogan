@@ -11972,6 +11972,62 @@ function testLights() {
   ok(Date.now() - t0 < 8000, 'the Lights Off tests finish in under 8 s (' + (Date.now() - t0) + ' ms)');
 }
 
+// #639: itun0 asked for a one-per-region animal puzzle; built as Territories with our own
+// name and animals. A puzzle must have one answer and be solvable without guessing, so the
+// generator is checked against a brute-force count and the page's own logic solver.
+function testTerritories() {
+  head('Territories (#639)');
+  const t0 = Date.now();
+  const E = loadEngine('territories', 'TerritoriesEngineFactory');
+  const html = fs.readFileSync(path.join(ROOT, 'www/games/territories/index.html'), 'utf8');
+  const rng = (seed) => { let x = seed >>> 0; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; };
+  // the 4×4 board of the tutorial: rows AABB / ACBB / DCCB / DDCC
+  const R4 = [0, 0, 1, 1, 0, 2, 1, 1, 3, 2, 2, 1, 3, 3, 2, 2];
+  const grid = (n, cells, v) => { const g = new Array(n * n).fill(E.EMPTY); cells.forEach((i) => { g[i] = v === undefined ? E.ANIMAL : v; }); return g; };
+  ok(E.touching(6, 0, 7) && E.touching(6, 0, 1) && E.touching(6, 0, 6) && !E.touching(6, 0, 2) && !E.touching(6, 5, 6), 'animals touch side by side and corner to corner, and the end of a row does not touch the next row\'s start');
+  ok(E.clash(4, R4, 0, 3) && E.clash(4, R4, 0, 12) && E.clash(4, R4, 0, 4) && E.clash(4, R4, 2, 7) && !E.clash(4, R4, 1, 7), 'two animals clash in the same row, column or region, or touching');
+  ok(E.won(4, R4, grid(4, [1, 7, 8, 14])) && !E.won(4, R4, grid(4, [1, 7, 8])) && !E.won(4, R4, grid(4, [0, 7, 8, 14])), 'the tutorial\'s answer wins; three animals or a wrong one do not');
+  const bad = E.conflicts(4, R4, grid(4, [5, 10, 3]));
+  ok(bad[5] && bad[10] && !bad[3], 'only the animals that break a rule are marked (two touching, a third one alone is not)');
+  const seen = E.seen(4, R4, grid(4, [5]));
+  ok(seen[0] && seen[4] && seen[6] && seen[9] && seen[13] && seen[15] && !seen[3] && !seen[5] && seen.filter(Boolean).length === 12, 'auto-cross covers the animal\'s row, column, region and neighbours, and nothing else (' + seen.filter(Boolean).length + ' cells)');
+  ok(E.cycle(E.EMPTY) === E.CROSS && E.cycle(E.CROSS) === E.ANIMAL && E.cycle(E.ANIMAL) === E.EMPTY, 'a tap goes empty, cross, animal and back to empty');
+  ok(E.stars(0) === 3 && E.stars(1) === 2 && E.stars(2) === 1 && E.stars(40) === 1, 'three stars with no mistake, two after one, one after more: never a loss');
+  ok(E.count(4, R4, 5) === 1 && E.solve(4, R4).solved, 'the tutorial board has one answer and the solver finds it');
+  // generated puzzles: every size, several seeds; each has one answer by brute force, and
+  // the logic solver (no guessing) ends on exactly that answer
+  let gen = 0, unique = 0, logic = 0, shaped = 0, slow = 0, even = 0;
+  const r = rng(639);
+  for (const n of E.SIZES) for (let k = 0; k < 12; k++) {
+    const s = Date.now(), P = E.generate(n, r);
+    if (Date.now() - s > 1500) slow++;
+    gen++;
+    if (!P) continue;
+    const regs = new Set(P.reg);
+    if (P.reg.length === n * n && regs.size === n && [...regs].every((g) => E.connected(n, P.reg, g))) shaped++;
+    // the first draft's median board gave one region 15 of 36 cells
+    if (Math.max(...[...regs].map((g) => P.reg.filter((x) => x === g).length)) <= Math.floor(2.5 * n)) even++;
+    if (E.count(n, P.reg, 2) === 1) unique++;
+    const S = E.solve(n, P.reg), want = P.sol.map((c, row) => row * n + c);
+    if (S.solved && !S.broken && E.won(n, P.reg, S.g) && want.every((i) => S.g[i] === E.ANIMAL)) logic++;
+  }
+  ok(gen === 36 && shaped === gen, 'every generated puzzle has n whole regions on an n×n board (' + shaped + '/' + gen + ')');
+  ok(even === gen, 'no region of a generated puzzle covers more than 2.5n cells (' + even + '/' + gen + ')');
+  ok(unique === gen, 'every generated puzzle has exactly one answer, counted by brute force (' + unique + '/' + gen + ')');
+  ok(logic === gen, 'the logic solver finishes every generated puzzle without guessing, on the generator\'s answer (' + logic + '/' + gen + ')');
+  ok(slow === 0, 'no puzzle takes over 1.5 s to make');
+  const a = E.generate(7, rng(5)), b = E.generate(7, rng(5));
+  ok(a && b && a.reg.join() === b.reg.join(), 'the same seed gives the same puzzle, so the daily is the same for everyone');
+  const N = 36, zero = new Array(N).fill(0), R6 = E.generate(6, rng(9)).reg;
+  ok(E.valid({ n: 6, reg: R6, g: zero, mistakes: 0 }) && !E.valid({ n: 5, reg: R6, g: zero, mistakes: 0 }) && !E.valid({ n: 6, reg: R6, g: zero.slice(1), mistakes: 0 }) &&
+    !E.valid({ n: 6, reg: R6.map(() => 0), g: zero, mistakes: 0 }) && !E.valid({ n: 6, reg: R6, g: zero.map(() => 3), mistakes: 0 }), 'a save is checked before it is restored (size, lengths, regions, marks)');
+  ok(/C\.daily\('territories', dailyDate\)\.rng/.test(html) && /DAILY_N = 7/.test(html) && ['tr-clean', 'tr-big', 'tr-daily'].every((id) => html.indexOf("unlock('" + id + "')") > 0), 'the daily 7×7 is seeded by the day, and the three awards are unlocked');
+  ok(/\.tr-board \{[^}]*direction: ltr;/.test(html) && /board\.addEventListener\('keydown'/.test(html) && /C\.undoKey\(e\)/.test(html), 'the board is left to right in every language, arrows move on it, and undo has its keys');
+  ok(!/<img|\.png|\.webp|[\u{1F400}-\u{1F43F}]/u.test(html), 'the animals are drawn in code: no image files and no emoji');
+  ok(/function showSettings[\s\S]{0,300}C\.ui\.switch\(prefs\.auto/.test(html), 'auto-cross is a switch behind the gear');
+  ok(Date.now() - t0 < 15000, 'the Territories tests finish in under 15 s (' + (Date.now() - t0) + ' ms)');
+}
+
 // #544: a player asked for Simon (named Echo in English: "Simon" is a trademark)
 function testSimon() {
   head('Echo / Simon (#544)');
