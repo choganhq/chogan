@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>دوبرابر — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* One colour pair per tile value: background and ink, at least 4.5:1 in both themes
+     (tools/test.js reads these blocks and checks every pair) */
+  :root {
+    --db-2: #F3E4F3; --db-2-i: #4E2652;
+    --db-4: #EBCDEF; --db-4-i: #4E2652;
+    --db-8: #F8C9A4; --db-8-i: #5B2A06;
+    --db-16: #F4A06D; --db-16-i: #4A1D00;
+    --db-32: #EF7A68; --db-32-i: #3E0B04;
+    --db-64: #C93454; --db-64-i: #FFFFFF;
+    --db-128: #F3D46E; --db-128-i: #4A3500;
+    --db-256: #E5B93A; --db-256-i: #3F2D00;
+    --db-512: #93CF80; --db-512-i: #173A0C;
+    --db-1024: #1F7F70; --db-1024-i: #FFFFFF;
+    --db-2048: #B73EBB; --db-2048-i: #FFFFFF;
+    --db-big: #3D2163; --db-big-i: #FFFFFF;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --db-2: #4A3650; --db-2-i: #F7E8F8;
+      --db-4: #5E3F69; --db-4-i: #F7E8F8;
+      --db-8: #D9875A; --db-8-i: #2A1000;
+      --db-16: #E0703F; --db-16-i: #260C00;
+      --db-32: #D9544A; --db-32-i: #1E0402;
+      --db-64: #B42A49; --db-64-i: #FFFFFF;
+      --db-128: #D9B84E; --db-128-i: #2E2100;
+      --db-256: #C99A1F; --db-256-i: #241900;
+      --db-512: #6FAE5D; --db-512-i: #0F2808;
+      --db-1024: #1F7F70; --db-1024-i: #FFFFFF;
+      --db-2048: #B73EBB; --db-2048-i: #FFFFFF;
+      --db-big: #6A3FA8; --db-big-i: #FFFFFF;
+    }
+  }
+  :root[data-theme="dark"] {
+    --db-2: #4A3650; --db-2-i: #F7E8F8;
+    --db-4: #5E3F69; --db-4-i: #F7E8F8;
+    --db-8: #D9875A; --db-8-i: #2A1000;
+    --db-16: #E0703F; --db-16-i: #260C00;
+    --db-32: #D9544A; --db-32-i: #1E0402;
+    --db-64: #B42A49; --db-64-i: #FFFFFF;
+    --db-128: #D9B84E; --db-128-i: #2E2100;
+    --db-256: #C99A1F; --db-256-i: #241900;
+    --db-512: #6FAE5D; --db-512-i: #0F2808;
+    --db-1024: #1F7F70; --db-1024-i: #FFFFFF;
+    --db-2048: #B73EBB; --db-2048-i: #FFFFFF;
+    --db-big: #6A3FA8; --db-big-i: #FFFFFF;
+  }
+  .db-wrap > .ch-fit { --fit-ar: 1; }
+  .ch-fit > .db-box { width: 100%; height: 100%; display: grid; place-items: center; }
+  /* a swipe left always goes left on screen, so the board never follows the page's direction */
+  .db-board { --g: 2.8%; position: relative; direction: ltr; width: 100%; aspect-ratio: 1; max-width: 100%; max-height: 100%;
+    box-sizing: border-box; border-radius: 6%; background: var(--c-surface-2); overflow: hidden;
+    touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
+  .db-board:focus-visible { outline: 3px solid var(--c-accent); outline-offset: 3px; }
+  .db-cell, .db-tile { position: absolute; width: calc((100% - 5 * var(--g)) / 4); height: calc((100% - 5 * var(--g)) / 4);
+    left: calc(var(--g) + var(--c) * (100% - var(--g)) / 4); top: calc(var(--g) + var(--r) * (100% - var(--g)) / 4);
+    border-radius: 14%; box-sizing: border-box; }
+  .db-cell { background: var(--c-surface); opacity: .6; }
+  .db-tile { display: grid; place-items: center; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1;
+    font-size: calc(var(--cw, 60px) * var(--k, .48)); box-shadow: var(--sh-1); will-change: transform; }
+  .db-d3 { --k: .40; } .db-d4 { --k: .32; } .db-d5 { --k: .26; } .db-d6 { --k: .22; }
+  .db-ghost { z-index: 0; } .db-tile:not(.db-ghost) { z-index: 1; }
+  .db-v2 { background: var(--db-2); color: var(--db-2-i); }
+  .db-v4 { background: var(--db-4); color: var(--db-4-i); }
+  .db-v8 { background: var(--db-8); color: var(--db-8-i); }
+  .db-v16 { background: var(--db-16); color: var(--db-16-i); }
+  .db-v32 { background: var(--db-32); color: var(--db-32-i); }
+  .db-v64 { background: var(--db-64); color: var(--db-64-i); }
+  .db-v128 { background: var(--db-128); color: var(--db-128-i); }
+  .db-v256 { background: var(--db-256); color: var(--db-256-i); }
+  .db-v512 { background: var(--db-512); color: var(--db-512-i); }
+  .db-v1024 { background: var(--db-1024); color: var(--db-1024-i); }
+  .db-v2048 { background: var(--db-2048); color: var(--db-2048-i); }
+  .db-vbig { background: var(--db-big); color: var(--db-big-i); }
+  .db-side { align-items: center; }
+  .db-scores { display: flex; gap: var(--s-2); justify-content: center; }
+  .db-score { position: relative; min-width: 96px; padding: var(--s-2) var(--s-3); border-radius: var(--r-md, 14px);
+    background: var(--c-surface); box-shadow: var(--sh-1); text-align: center; }
+  .db-score__l { font-size: .8rem; color: var(--c-text-dim); font-weight: 700; }
+  .db-score__v { font-size: 1.35rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--c-text); }
+  .db-gain { position: absolute; inset-inline: 0; top: 0; font-weight: 800; color: var(--game-text, var(--c-accent)); pointer-events: none; }
+  .db-top { display: flex; justify-content: center; }
+  .db-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function DoublesEngineFactory() {
+  'use strict';
+
+  var SIZE = 4, GOAL = 2048, N = SIZE * SIZE;
+
+  // The cells of each line in the order tiles travel towards the wall: the first index
+  // is the cell against the wall the swipe points at
+  var LINES = { left: [], right: [], up: [], down: [] };
+  for (var k = 0; k < SIZE; k++) {
+    var row = [], col = [];
+    for (var j = 0; j < SIZE; j++) { row.push(k * SIZE + j); col.push(j * SIZE + k); }
+    LINES.left.push(row); LINES.right.push(row.slice().reverse());
+    LINES.up.push(col); LINES.down.push(col.slice().reverse());
+  }
+  var DIRS = ['left', 'right', 'up', 'down'];
+
+  // A small seeded generator whose whole state is one integer, so a saved game (and the
+  // daily game) goes on spawning exactly the tiles it would have spawned
+  function rand(S) {
+    var t = (S.seed = (S.seed + 0x6D2B79F5) | 0);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  function spawn(S) {
+    var empty = [];
+    for (var i = 0; i < N; i++) if (!S.b[i]) empty.push(i);
+    if (!empty.length) return null;
+    var at = empty[Math.floor(rand(S) * empty.length)];
+    var v = rand(S) < 0.9 ? 2 : 4;
+    S.b[at] = v;
+    return { i: at, v: v };
+  }
+
+  function newGame(seed) {
+    var S = { b: new Array(N).fill(0), score: 0, moves: 0, seed: seed | 0, won: false };
+    spawn(S); spawn(S);
+    return S;
+  }
+
+  // Slide every line one way. A tile merges at most once per move: the tile that a merge
+  // made is closed for the rest of the move, so 2 2 2 2 becomes 4 4, never 8
+  function slide(b, dir) {
+    var out = new Array(N).fill(0), moves = [], merged = [], gain = 0;
+    LINES[dir].forEach(function (idx) {
+      var pos = 0, open = false;
+      for (var k = 0; k < SIZE; k++) {
+        var v = b[idx[k]];
+        if (!v) continue;
+        if (open && out[idx[pos - 1]] === v) {
+          out[idx[pos - 1]] = v * 2; gain += v * 2; open = false;
+          moves.push({ from: idx[k], to: idx[pos - 1], v: v, merge: true });
+          merged.push(idx[pos - 1]);
+        } else {
+          out[idx[pos]] = v; open = true;
+          moves.push({ from: idx[k], to: idx[pos], v: v, merge: false });
+          pos++;
+        }
+      }
+    });
+    var moved = false;
+    for (var i = 0; i < N; i++) if (out[i] !== b[i]) { moved = true; break; }
+    return { b: out, moved: moved, gain: gain, moves: moves, merged: merged };
+  }
+
+  function canMove(b) {
+    for (var i = 0; i < N; i++) {
+      if (!b[i]) return true;
+      var r = Math.floor(i / SIZE), c = i % SIZE;
+      if (c < SIZE - 1 && b[i] === b[i + 1]) return true;
+      if (r < SIZE - 1 && b[i] === b[i + SIZE]) return true;
+    }
+    return false;
+  }
+
+  function maxTile(b) { var m = 0; for (var i = 0; i < b.length; i++) if (b[i] > m) m = b[i]; return m; }
+
+  // One turn: null when the swipe changes nothing (and then no tile appears)
+  function move(S, dir) {
+    var r = slide(S.b, dir);
+    if (!r.moved) return null;
+    var hadGoal = maxTile(S.b) >= GOAL;
+    S.b = r.b; S.score += r.gain; S.moves++;
+    var sp = spawn(S);
+    return { moves: r.moves, merged: r.merged, gain: r.gain, spawn: sp,
+      reached: !hadGoal && maxTile(S.b) >= GOAL, over: !canMove(S.b) };
+  }
+
+  function pow2(v) { return typeof v === 'number' && v >= 2 && v <= 131072 && (v & (v - 1)) === 0; }
+  function valid(s) {
+    if (!s || !Array.isArray(s.b) || s.b.length !== N) return false;
+    var tiles = 0;
+    for (var i = 0; i < N; i++) {
+      if (s.b[i] === 0) continue;
+      if (!pow2(s.b[i])) return false;
+      tiles++;
+    }
+    return tiles > 0 && Number.isInteger(s.score) && s.score >= 0 && Number.isInteger(s.moves) && s.moves >= 0 &&
+      Number.isInteger(s.seed) && canMove(s.b);
+  }
+
+  return { SIZE: SIZE, GOAL: GOAL, DIRS: DIRS, LINES: LINES, rand: rand, spawn: spawn, newGame: newGame,
+    slide: slide, move: move, canMove: canMove, maxTile: maxTile, valid: valid };
+}
+if (typeof module !== 'undefined') module.exports = DoublesEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = DoublesEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'doubles',
+    name: { fa: 'دوبرابر', en: 'Doubles', zh: '翻倍', de: 'Doppelt', es: 'Dobles', pl: 'Podwójne' },
+    accent: '#B73EBB',
+    mood: 'menu',
+    strings: {
+      fa: {
+        board: 'صفحه‌ی کاشی‌ها', boardN: 'امتیاز {s}، بزرگ‌ترین کاشی {m}', dailyDb: 'دوبرابر روزانه', scoreN: 'امتیاز {s}',
+        keepGoing: 'ادامه بده', reachedT: 'به {g} رسیدی!', reachedNote: 'می‌توانی ادامه بدهی و رکورد امتیازت را بالا ببری.',
+        overT: 'دیگر حرکتی نمانده', maxTileL: 'بزرگ‌ترین کاشی', movesL: 'حرکت', newBest: 'رکورد تازه!', goalN: 'هدف: کاشی {g}', chaseN: 'حالا برای رکورد امتیاز',
+        kSlide: 'سُر دادن کاشی‌ها', kNew: 'بازی تازه',
+        rules: 'با کشیدن انگشت به یک سو، همه‌ی کاشی‌ها تا جایی که می‌شود به همان سو می‌روند. دو کاشی هم‌عدد که به هم برسند یکی می‌شوند و عددشان دو برابر می‌شود؛ هر کاشی در هر حرکت فقط یک بار. بعد از هر حرکتی که چیزی را جابه‌جا کند، یک کاشی ۲ (گاهی ۴) در خانه‌ای خالی پیدا می‌شود. امتیاز، جمع عددهای کاشی‌های یکی‌شده است. به کاشی {g} برسی بُرده‌ای و می‌توانی برای رکورد ادامه بدهی. وقتی صفحه پر شود و هیچ دو کاشی کنار هم برابر نباشند، بازی تمام است. برگشت به عقب ندارد.',
+        tutTitle1: 'همه با هم سُر می‌خورند', tutText1: 'انگشتت را به یک سو بکش؛ همه‌ی کاشی‌ها به همان سو می‌روند.',
+        tutTitle2: 'دو تا یکی می‌شوند', tutText2: 'دو کاشی هم‌عدد که به هم برسند یکی می‌شوند و دو برابر.',
+        tutTitle3: 'تا {g}', tutText3: 'به کاشی {g} برس. اگر صفحه پر شود و جفتی نماند، بازی تمام است.'
+      },
+      en: {
+        board: 'Tile board', boardN: 'Score {s}, biggest tile {m}', dailyDb: 'Daily Doubles', scoreN: 'Score {s}',
+        keepGoing: 'Keep going', reachedT: 'You made {g}!', reachedNote: 'You can keep going and push your best score higher.',
+        overT: 'No moves left', maxTileL: 'Biggest tile', movesL: 'Moves', newBest: 'New best!', goalN: 'Goal: the {g} tile', chaseN: 'Now going for a best score',
+        kSlide: 'Slide the tiles', kNew: 'New game',
+        rules: 'Swipe one way and every tile slides as far as it can that way. Two tiles with the same number that meet become one tile worth double; a tile merges at most once per move. After every move that changes the board, a 2 (sometimes a 4) appears in an empty cell. Your score is the sum of all the merged tiles. Reach the {g} tile to win, then keep going for a best score if you like. When the board is full and no two neighbours match, the game is over. There is no undo.',
+        tutTitle1: 'All tiles slide', tutText1: 'Swipe one way and every tile slides that way.',
+        tutTitle2: 'Two become one', tutText2: 'Two equal tiles that meet merge into one worth double.',
+        tutTitle3: 'Up to {g}', tutText3: 'Reach the {g} tile. A full board with no pair left ends the game.'
+      },
+      pl: {
+        board: 'Plansza z kafelkami', boardN: 'Wynik {s}, największy kafelek {m}', dailyDb: 'Codzienne Podwójne', scoreN: 'Wynik {s}',
+        keepGoing: 'Graj dalej', reachedT: 'Masz {g}!', reachedNote: 'Możesz grać dalej i poprawić swój rekord.',
+        overT: 'Brak ruchów', maxTileL: 'Największy kafelek', movesL: 'Ruchy', newBest: 'Nowy rekord!', goalN: 'Cel: kafelek {g}', chaseN: 'Teraz walka o rekord',
+        kSlide: 'Przesuń kafelki', kNew: 'Nowa gra',
+        rules: 'Przesuń palcem w jedną stronę, a każdy kafelek przesunie się w nią tak daleko, jak może. Dwa kafelki z tą samą liczbą, które się spotkają, łączą się w jeden o podwójnej wartości; kafelek łączy się najwyżej raz na ruch. Po każdym ruchu, który zmienia planszę, na pustym polu pojawia się 2 (czasem 4). Wynik to suma wszystkich połączonych kafelków. Zdobądź kafelek {g}, aby wygrać, a potem możesz grać dalej o rekord. Gdy plansza jest pełna i żadni sąsiedzi nie pasują, gra się kończy. Nie ma cofania.',
+        tutTitle1: 'Wszystkie się przesuwają', tutText1: 'Przesuń palcem w jedną stronę, a każdy kafelek pojedzie tam.',
+        tutTitle2: 'Dwa w jeden', tutText2: 'Dwa równe kafelki, które się spotkają, łączą się w jeden podwójny.',
+        tutTitle3: 'Aż do {g}', tutText3: 'Zdobądź kafelek {g}. Pełna plansza bez pary kończy grę.'
+      },
+      zh: {
+        board: '方块棋盘', boardN: '分数 {s}，最大方块 {m}', dailyDb: '每日翻倍', scoreN: '分数 {s}',
+        keepGoing: '继续', reachedT: '你合成了 {g}！', reachedNote: '你可以继续玩，刷新最高分。',
+        overT: '无路可走', maxTileL: '最大方块', movesL: '步数', newBest: '新纪录！', goalN: '目标：{g} 方块', chaseN: '现在冲击最高分',
+        kSlide: '滑动方块', kNew: '新游戏',
+        rules: '向一个方向滑动，所有方块都会尽量向那边移动。两个数字相同的方块相遇就会合成一个，数值翻倍；每次移动中一个方块最多合成一次。每次让棋盘发生变化的移动之后，会在空格里出现一个 2（偶尔是 4）。分数是所有合成方块的数值之和。合成 {g} 方块就赢了，之后可以继续冲击最高分。棋盘填满且相邻方块都不相同时，游戏结束。不能悔棋。',
+        tutTitle1: '一起滑动', tutText1: '向一个方向滑动，所有方块都往那边走。',
+        tutTitle2: '二合一', tutText2: '相同的两个方块相遇，合成一个，数值翻倍。',
+        tutTitle3: '直到 {g}', tutText3: '合成 {g} 方块。棋盘填满又无法合成时，游戏结束。'
+      },
+      de: {
+        board: 'Spielfeld mit Steinen', boardN: 'Punkte {s}, größter Stein {m}', dailyDb: 'Doppelt des Tages', scoreN: 'Punkte {s}',
+        keepGoing: 'Weiterspielen', reachedT: 'Du hast {g} geschafft!', reachedNote: 'Du kannst weiterspielen und deinen Rekord steigern.',
+        overT: 'Keine Züge mehr', maxTileL: 'Größter Stein', movesL: 'Züge', newBest: 'Neuer Rekord!', goalN: 'Ziel: der Stein {g}', chaseN: 'Jetzt geht es um den Rekord',
+        kSlide: 'Steine schieben', kNew: 'Neues Spiel',
+        rules: 'Wische in eine Richtung, und jeder Stein rutscht so weit wie möglich dorthin. Zwei Steine mit derselben Zahl, die sich treffen, werden zu einem mit doppeltem Wert; ein Stein verschmilzt höchstens einmal pro Zug. Nach jedem Zug, der das Feld verändert, erscheint auf einem freien Feld eine 2 (manchmal eine 4). Deine Punkte sind die Summe aller verschmolzenen Steine. Mit dem Stein {g} gewinnst du, danach kannst du um den Rekord weiterspielen. Ist das Feld voll und passen keine Nachbarn mehr, ist das Spiel vorbei. Rückgängig gibt es nicht.',
+        tutTitle1: 'Alle rutschen mit', tutText1: 'Wische in eine Richtung, und jeder Stein rutscht dorthin.',
+        tutTitle2: 'Aus zwei wird eins', tutText2: 'Zwei gleiche Steine, die sich treffen, werden zu einem doppelten.',
+        tutTitle3: 'Bis {g}', tutText3: 'Schaffe den Stein {g}. Ein volles Feld ohne Paar beendet das Spiel.'
+      },
+      es: {
+        board: 'Tablero de fichas', boardN: 'Puntos {s}, ficha mayor {m}', dailyDb: 'Dobles diario', scoreN: 'Puntos {s}',
+        keepGoing: 'Seguir', reachedT: '¡Llegaste a {g}!', reachedNote: 'Puedes seguir jugando y subir tu récord.',
+        overT: 'No quedan movimientos', maxTileL: 'Ficha mayor', movesL: 'Movimientos', newBest: '¡Nuevo récord!', goalN: 'Meta: la ficha {g}', chaseN: 'Ahora a por el récord',
+        kSlide: 'Deslizar las fichas', kNew: 'Partida nueva',
+        rules: 'Desliza hacia un lado y todas las fichas se mueven hacia allí tanto como pueden. Dos fichas con el mismo número que se encuentran se unen en una que vale el doble; una ficha se une como mucho una vez por movimiento. Tras cada movimiento que cambia el tablero, aparece un 2 (a veces un 4) en una casilla vacía. Tus puntos son la suma de todas las fichas unidas. Llega a la ficha {g} para ganar y, si quieres, sigue a por el récord. Cuando el tablero está lleno y ningún par de vecinas coincide, la partida termina. No se puede deshacer.',
+        tutTitle1: 'Todas se deslizan', tutText1: 'Desliza hacia un lado y todas las fichas van hacia allí.',
+        tutTitle2: 'Dos se hacen una', tutText2: 'Dos fichas iguales que se encuentran se unen en una que vale el doble.',
+        tutTitle3: 'Hasta {g}', tutText3: 'Llega a la ficha {g}. Un tablero lleno sin parejas termina la partida.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var GOAL = E.GOAL, SWIPE = 24, SLIDE_MS = 110, POP_MS = 170;
+
+  var S = null, startedAt = 0, ended = false, paused = false, winScore = 0, wonAt = 0;
+
+  var board = el('div', { class: 'db-board', role: 'application', tabindex: '0', 'aria-label': C.t('board') });
+  var box = el('div', { class: 'db-box' }, [board]);
+  var top = el('div', { class: 'db-top ch-above' });
+  var scoreV = el('div', { class: 'db-score__v', text: '0' }), bestV = el('div', { class: 'db-score__v', text: '0' });
+  var scoreBox = el('div', { class: 'db-score' }, [el('div', { class: 'db-score__l', text: C.t('score') }), scoreV]);
+  var bestBox = el('div', { class: 'db-score' }, [el('div', { class: 'db-score__l', text: C.t('best') }), bestV]);
+  var status = el('div', { class: 'db-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'db-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]),
+    el('div', { class: 'ch-side db-side' }, [top, el('div', { class: 'db-scores' }, [scoreBox, bestBox]), status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  if (!dailyDate) ctx.button({ icon: 'refresh', label: C.t('newGame'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  for (var ci = 0; ci < 16; ci++) board.appendChild(el('div', { class: 'db-cell', style: { '--c': ci % 4, '--r': Math.floor(ci / 4) } }));
+  var layer = el('div', { 'aria-hidden': 'true' });
+  board.appendChild(layer);
+
+  /* ------------------------------------------------------------- game */
+
+  function seedFor() {
+    var r = dailyDate ? C.daily('doubles', dailyDate).rng : Math.random;
+    return Math.floor(r() * 4294967296) | 0;
+  }
+  function newGame() {
+    S = E.newGame(seedFor());
+    S.daily = dailyDate || null;
+    startedAt = Date.now(); ended = false; paused = false; winScore = 0; wonAt = 0;
+    draw(null);
+    save();
+  }
+  function askNew() {
+    if (S && !ended && S.moves > 0) C.ui.confirm({ title: C.t('newGame'), body: C.t('resetWarn'), onOk: newGame });
+    else newGame();
+  }
+
+  function best() { return C.stats.getBest('doubles', 'score') || 0; }
+
+  function go(dir) {
+    if (!S || ended || paused) return;
+    var t = E.move(S, dir);
+    if (!t) { C.feedback('tap'); return; }
+    C.feedback(t.gain ? 'place' : 'tap');
+    if (t.gain) floatGain(t.gain);
+    C.stats.best('doubles', 'score', S.score);
+    C.stats.best('doubles', 'tile', E.maxTile(S.b));
+    var m = E.maxTile(S.b);
+    if (m >= 4096) C.achievements.unlock('db-4096');
+    if (S.daily && m >= 1024) C.achievements.unlock('db-daily');
+    draw(t);
+    if (t.reached && !S.won) { save(); win(); return; }
+    if (t.over) { over(); return; }
+    save();
+  }
+
+  function rewards(base) {
+    var m = E.maxTile(S.b), lg = Math.log2(m);
+    return { coins: Math.max(1, Math.round(lg * 2 - 8)), points: Math.max(1, Math.min(160, Math.round(S.score / 100))), m: m };
+  }
+
+  // Reaching the goal is a win, counted once; keeping going afterwards is the same game
+  // chasing a score, so its end is reported as a continuation (not a second play)
+  function win() {
+    paused = true; S.won = true; winScore = S.score; wonAt = Date.now() - startedAt;
+    C.achievements.unlock('db-2048');
+    var rw = rewards();
+    if (S.daily && !C.stats.daily('doubles', S.daily, { label: C.t('scoreN', { s: C.num(S.score) }), win: true })) {
+      rw.coins = Math.round(rw.coins * 0.2); rw.points = Math.round(rw.points * 0.2);
+    }
+    var fin = function () {
+      ctx.finish({
+        won: true, title: C.t('reachedT', { g: C.num(GOAL) }), note: C.t('reachedNote'), timeMs: wonAt, coins: rw.coins, points: rw.points,
+        lines: lines(),
+        shareText: share(),
+        againLabel: C.t('keepGoing'), onAgain: keepGoing
+      });
+      // finish clears the save; the game goes on, so it is written again
+      save();
+    };
+    setTimeout(fin, C.ui.reduceMotion() ? 150 : 450);
+  }
+  function keepGoing() {
+    paused = false;
+    C.feedback('select');
+    render();
+    board.focus({ preventScroll: true });
+  }
+
+  function over() {
+    ended = true;
+    var rw = rewards(), cont = S.won;
+    if (cont) {
+      // only what was earned after the goal
+      rw.coins = Math.max(0, Math.round((Math.log2(rw.m) - 11) * 5));
+      rw.points = Math.max(0, Math.min(100, Math.round((S.score - winScore) / 200)));
+    } else if (S.daily && !C.stats.daily('doubles', S.daily, { label: C.t('scoreN', { s: C.num(S.score) }), win: false })) {
+      rw.coins = Math.round(rw.coins * 0.2); rw.points = Math.round(rw.points * 0.2);
+    }
+    var isBest = S.score > 0 && S.score >= best();
+    ctx.clearSave();
+    C.feedback('bad');
+    setTimeout(function () {
+      ctx.finish({
+        won: false, continued: cont, title: C.t('overT'), note: isBest ? C.t('newBest') : null,
+        timeMs: Date.now() - startedAt, coins: rw.coins, points: rw.points,
+        lines: lines(), shareText: share(),
+        againLabel: S.daily ? null : C.t('newGame'), onAgain: S.daily ? null : newGame
+      });
+    }, C.ui.reduceMotion() ? 200 : 700);
+  }
+
+  function lines() {
+    var out = [];
+    if (S.daily) out.push({ label: C.t('daily'), value: C.num(S.daily) });
+    out.push({ label: C.t('score'), value: C.num(S.score) });
+    out.push({ label: C.t('best'), value: C.num(Math.max(best(), S.score)) });
+    out.push({ label: C.t('maxTileL'), value: C.num(E.maxTile(S.b)) });
+    out.push({ label: C.t('movesL'), value: C.num(S.moves) });
+    return out;
+  }
+  function share() {
+    return 'چوگان · دوبرابر' + (S.daily ? '\nروزانه ' + S.daily : '') + '\n' + S.score + ' · ' + E.maxTile(S.b);
+  }
+
+  /* --------------------------------------------------------------- view */
+
+  function cls(v) { return 'db-tile ' + (v <= GOAL ? 'db-v' + v : 'db-vbig') + (String(v).length > 2 ? ' db-d' + String(v).length : ''); }
+  function tile(i, v, ghost) {
+    return el('div', { class: cls(v) + (ghost ? ' db-ghost' : ''), style: { '--c': i % 4, '--r': Math.floor(i / 4) }, text: C.num(v) });
+  }
+  // Each turn the tiles are rebuilt where they end up and animated from where they were,
+  // so a quick second swipe simply replaces the half-played animation with the new board
+  function draw(t) {
+    layer.innerHTML = '';
+    var anim = t && !C.ui.reduceMotion();
+    var step = (board.clientWidth || 0) * (1 - parseFloat(getComputedStyle(board).getPropertyValue('--g')) / 100) / 4;
+    var byTo = {};
+    if (t) t.moves.forEach(function (m) { if (!m.merge) byTo[m.to] = m; });
+    var merged = {};
+    if (t) t.merged.forEach(function (i) { merged[i] = 1; });
+    for (var i = 0; i < 16; i++) {
+      var v = S.b[i];
+      if (!v) continue;
+      var isSpawn = t && t.spawn && t.spawn.i === i;
+      var node = tile(i, v);
+      layer.appendChild(node);
+      if (!anim) continue;
+      if (isSpawn) {
+        node.animate([{ transform: 'scale(0)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }],
+          { duration: POP_MS, delay: SLIDE_MS, easing: 'ease-out', fill: 'backwards' });
+      } else if (merged[i]) {
+        // the two tiles that met slide in underneath, then the new one pops up over them
+        t.moves.forEach(function (m) {
+          if (m.to !== i) return;
+          var g = tile(i, m.v, true);
+          layer.insertBefore(g, layer.firstChild);
+          slideIn(g, m, step).onfinish = function () { if (g.parentNode) g.parentNode.removeChild(g); };
+        });
+        node.animate([{ transform: 'scale(.4)', opacity: 0 }, { transform: 'scale(1.14)', opacity: 1, offset: .6 }, { transform: 'scale(1)', opacity: 1 }],
+          { duration: POP_MS, delay: SLIDE_MS, easing: 'ease-out', fill: 'backwards' });
+      } else if (byTo[i] && byTo[i].from !== i) {
+        slideIn(node, byTo[i], step);
+      }
+    }
+    render();
+  }
+  function slideIn(node, m, step) {
+    var dx = (m.from % 4 - m.to % 4) * step, dy = (Math.floor(m.from / 4) - Math.floor(m.to / 4)) * step;
+    return node.animate([{ transform: 'translate(' + dx + 'px,' + dy + 'px)' }, { transform: 'translate(0,0)' }],
+      { duration: SLIDE_MS, easing: 'ease-in-out' });
+  }
+  function floatGain(g) {
+    if (C.ui.reduceMotion()) return;
+    var f = el('div', { class: 'db-gain', text: '+' + C.num(g) });
+    scoreBox.appendChild(f);
+    f.animate([{ transform: 'translateY(0)', opacity: 1 }, { transform: 'translateY(-28px)', opacity: 0 }], { duration: 650, easing: 'ease-out' })
+      .onfinish = function () { if (f.parentNode) f.parentNode.removeChild(f); };
+  }
+  function render() {
+    scoreV.textContent = C.num(S.score);
+    bestV.textContent = C.num(Math.max(best(), S.score));
+    board.setAttribute('aria-label', C.t('board') + ' — ' + C.t('boardN', { s: C.num(S.score), m: C.num(E.maxTile(S.b)) }));
+    top.innerHTML = '';
+    if (S.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyDb') + ' — ' + C.num(S.daily) })]));
+    status.textContent = S.won ? C.t('chaseN') : C.t('goalN', { g: C.num(GOAL) });
+  }
+  // the numbers scale with the tiles; measured rather than set in cq units, which the
+  // Android WebViews before Chrome 105 drop (#611)
+  function fitFont() {
+    var w = board.getBoundingClientRect().width;
+    if (w) board.style.setProperty('--cw', (w * (1 - 0.028 * 5) / 4).toFixed(1) + 'px');
+  }
+  if (window.ResizeObserver) new ResizeObserver(fitFont).observe(board); else window.addEventListener('resize', fitFont);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitFont);
+
+  /* -------------------------------------------------------------- input */
+
+  // A swipe is decided as soon as the finger has gone far enough, not on release, so a
+  // quick flick feels immediate; one swipe moves the board once
+  var sx = 0, sy = 0, pid = null, done = false;
+  board.addEventListener('pointerdown', function (e) {
+    if (pid !== null) return;
+    pid = e.pointerId; sx = e.clientX; sy = e.clientY; done = false;
+    try { board.setPointerCapture(pid); } catch (err) { /* already released */ }
+  });
+  function track(e, last) {
+    if (e.pointerId !== pid) return;
+    if (!done) {
+      var dx = e.clientX - sx, dy = e.clientY - sy, ax = Math.abs(dx), ay = Math.abs(dy);
+      if (Math.max(ax, ay) >= SWIPE) { done = true; go(ax > ay ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up')); }
+    }
+    if (last) pid = null;
+  }
+  board.addEventListener('pointermove', function (e) { track(e, false); });
+  board.addEventListener('pointerup', function (e) { track(e, true); });
+  board.addEventListener('pointercancel', function (e) { if (e.pointerId === pid) pid = null; });
+
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim') || e.ctrlKey || e.metaKey || e.altKey) return;
+    var dir = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' }[e.key] ||
+      (C.keyIs(e, 'a') ? 'left' : C.keyIs(e, 'd') ? 'right' : C.keyIs(e, 'w') ? 'up' : C.keyIs(e, 's') ? 'down' : null);
+    if (dir) { e.preventDefault(); go(dir); return; }
+    if (C.keyIs(e, 'n') && !dailyDate) { e.preventDefault(); askNew(); }
+  });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    var keys = [kb('← ↑ → ↓', C.t('kSlide')), kb('W A S D', C.t('kSlide'))];
+    if (!dailyDate) keys.push(kb('N', C.t('kNew')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules', { g: C.num(GOAL) }) }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, keys)
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // a 4×4 board for the tutorial: tiles as [cell, value], and an optional arrow.
+  // Colours are the board's own variables: fixed light colours put a bright board in the dark dialog.
+  function tArt(tiles, arrow) {
+    var s = '<svg viewBox="0 0 200 120" width="100%" font-family="sans-serif" font-weight="800" text-anchor="middle">';
+    s += '<rect x="50" y="6" width="108" height="108" rx="10" fill="var(--c-surface-2)"/>';
+    for (var i = 0; i < 16; i++) s += '<rect x="' + (54 + (i % 4) * 26) + '" y="' + (10 + Math.floor(i / 4) * 26) + '" width="22" height="22" rx="4" fill="var(--c-surface)" opacity=".6"/>';
+    tiles.forEach(function (t) {
+      var x = 54 + (t[0] % 4) * 26, y = 10 + Math.floor(t[0] / 4) * 26, f = ['var(--db-' + t[1] + ')', 'var(--db-' + t[1] + '-i)'];
+      s += '<rect x="' + x + '" y="' + y + '" width="22" height="22" rx="4" fill="' + f[0] + '"/>';
+      s += '<text x="' + (x + 11) + '" y="' + (y + 15) + '" font-size="' + (t[1] > 99 ? 7 : 11) + '" fill="' + f[1] + '">' + C.num(t[1]) + '</text>';
+    });
+    if (arrow) s += '<path d="M40 60H14m8-8-8 8 8 8" stroke="#B73EBB" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>';
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt([[2, 2], [7, 4], [13, 2]], true) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt([[4, 4], [8, 4], [12, 8]], true) },
+    { title: C.t('tutTitle3', { g: C.num(GOAL) }), text: C.t('tutText3', { g: C.num(GOAL) }), art: tArt([[0, 2048], [1, 8], [4, 4], [5, 2]], false) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // saved after every move; the daily game has its own slot
+  ctx.autosave(function () {
+    if (!S || ended) return { inProgress: false };
+    return { b: S.b, score: S.score, moves: S.moves, seed: S.seed, won: S.won, daily: S.daily, winScore: winScore, elapsed: Date.now() - startedAt };
+  });
+  function save() { ctx.save(); }
+  var saved = ctx.loadSave();
+  if (saved && E.valid(saved) && (saved.daily || null) === (dailyDate || null)) {
+    S = { b: saved.b.slice(), score: saved.score, moves: saved.moves, seed: saved.seed, won: !!saved.won, daily: saved.daily || null };
+    winScore = saved.winScore || 0;
+    startedAt = Date.now() - (saved.elapsed || 0);
+    draw(null);
+  } else newGame();
+  if (dailyDate && C.stats.dailyDone('doubles', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).doubles;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  fitFont();
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
