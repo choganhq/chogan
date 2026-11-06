@@ -150,9 +150,15 @@ function TerritoriesEngineFactory() {
     return U;
   }
   // every cell an animal on i rules out: its row, column, region and the eight around it
+  // The solver builds this for all n*n cells on every call and the generator calls it
+  // hundreds of times a puzzle; through clash() it made an 8x8 board take up to 1.6 s
+  // (#656), so the same test is written out here with the row and column worked out once.
   function sees(n, reg, i) {
-    var out = [];
-    for (var j = 0; j < n * n; j++) if (clash(n, reg, i, j)) out.push(j);
+    var out = [], ri = Math.floor(i / n), ci = i % n, gi = reg[i];
+    for (var j = 0, r = 0, c = 0; j < n * n; j++) {
+      if (j !== i && (r === ri || c === ci || reg[j] === gi || (r - ri <= 1 && ri - r <= 1 && c - ci <= 1 && ci - c <= 1))) out.push(j);
+      if (++c === n) { c = 0; r++; }
+    }
     return out;
   }
 
