@@ -3045,9 +3045,11 @@ function testFiles() {
   for (const loc of clLocales) {
     const dir = path.join(ROOT, 'fastlane/metadata/android', loc, 'changelogs');
     for (const f of fs.readdirSync(dir)) {
-      // Measured as Play receives it: play-api.sh turns @login into github.com/login (#644)
-      const text = fs.readFileSync(path.join(dir, f), 'utf8').replace(/(?<![\w@/])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))(?![\w-])/g, 'github.com/$1');
-      ok(text.length <= CHANGELOG_LIMIT, loc + '/' + f + ' is under ' + CHANGELOG_LIMIT + ' characters as Play shows it (' + text.length + ')');
+      const text = fs.readFileSync(path.join(dir, f), 'utf8');
+      ok(text.length <= CHANGELOG_LIMIT, loc + '/' + f + ' زیر ' + CHANGELOG_LIMIT + ' کاراکتر است (' + text.length + ')');
+      // F-Droid and Play show the file as plain text, where a bare @login leads nowhere (#644)
+      const at = text.match(/(?<![\w@/])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))(?![\w-])/);
+      ok(!at, loc + '/' + f + ' credits a contributor as github.com/login, not @login' + (at ? ' (' + at[0] + ')' : ''));
     }
     ok(fs.existsSync(path.join(dir, code + '.txt')), loc + ': توضیح انتشار برای کد نسخه‌ی ' + code + ' هست');
   }
@@ -7911,7 +7913,7 @@ function testPlayApi() {
 
     // promote (#613): the tested bundle goes to production with its changelogs as notes
     const pmeta = path.join(tmp, 'pmeta');
-    for (const [lang, text] of [['en-US', 'New games:\n- Link Up'], ['fa', 'بازی تازه'], ['de-DE', 'Neu, danke an @some-one (a@b.de)']]) {
+    for (const [lang, text] of [['en-US', 'New games:\n- Link Up'], ['fa', 'بازی تازه'], ['de-DE', 'Neu']]) {
       fs.mkdirSync(path.join(pmeta, lang, 'changelogs'), { recursive: true });
       fs.writeFileSync(path.join(pmeta, lang, 'changelogs', '17.txt'), text + '\n');
     }
@@ -7923,9 +7925,6 @@ function testPlayApi() {
     ok(r.code === 0 && !!rel && rel.status === 'completed' && rel.versionCodes.join() === '17', 'promote: production gets versionCode 17, completed (' + r.code + ')');
     ok(!!rel && (rel.releaseNotes || []).map((n) => n.language).join() === 'de-DE,en-US,fa' && rel.releaseNotes.some((n) => n.text === 'New games:\n- Link Up'),
       'promote: every language\'s changelog for that version code is a release note');
-    // Play shows notes as plain text; a bare @login there was a handle nobody could follow (#644)
-    ok(!!rel && (rel.releaseNotes || []).some((n) => n.language === 'de-DE' && n.text === 'Neu, danke an github.com/some-one (a@b.de)'),
-      'promote: an @login becomes github.com/login in Play\'s notes, an email stays');
     ok(calls.length > 0 && !calls.some((c) => c.u.indexOf('/upload/') === 0) && calls[calls.length - 1].u.endsWith('/E1:commit'), 'promote: no bundle is uploaded, the edit is committed last');
     for (const [vc, why] of [['18', 'a draft on alpha'], ['19', 'not on alpha at all']]) {
       r = await run(['promote', 'alpha', vc, pmeta], env);
@@ -12785,19 +12784,23 @@ function testTelegramPost() {
   let kb = null; try { kb = JSON.parse(btnLine); } catch (e) { kb = null; }
   const urls = kb && Array.isArray(kb.inline_keyboard) ? [].concat(...kb.inline_keyboard).map((b) => b.text && b.url) : [];
   ok(urls.join() === ['https://choganhq.github.io/chogan/', 'https://github.com/choganhq/chogan/releases/tag/v0.5.1', 'https://f-droid.org/packages/io.github.choganhq.chogan/'].join(), 'the post has buttons for the web, this release and F-Droid');
-  ok(!/https?:\/\//.test(block('v0.5.1').replace(/^\[(buttons|cover)\].*$/gm, '').replace(/<a href="https:\/\/github\.com\/[A-Za-z0-9-]+">@[A-Za-z0-9-]+<\/a>/g, '')), 'no bare links in the text; they are buttons (only a contributor\'s name links to their profile)');
+  ok(!/https?:\/\//.test(block('v0.5.1').replace(/^\[(buttons|cover)\].*$/gm, '').replace(/<a href="https:\/\/github\.com\/([A-Za-z0-9-]+)">github\.com\/\1<\/a>/g, '')), 'no bare links in the text; they are buttons (only a contributor\'s name links to their profile)');
   // A contributor is credited on the line of their change, linked to their profile (owner's wish, #530, #533)
-  ok(/\n• Chinese chess, thanks to <a href="https:\/\/github\.com\/lanlan3292">@lanlan3292<\/a>\n/.test(block('v0.18.0')) && /• Way Out: [^\n]*, thanks to <a href="https:\/\/github\.com\/ggYasin">@ggYasin<\/a>\n/.test(block('v0.5.1')) && !/<b>Thanks to<\/b>/.test(hist.stdout || '') && !/@margani/.test(hist.stdout || ''),
+  ok(/\n• Chinese chess, thanks to <a href="https:\/\/github\.com\/lanlan3292">github\.com\/lanlan3292<\/a>\n/.test(block('v0.18.0')) && /• Way Out: [^\n]*, thanks to <a href="https:\/\/github\.com\/ggYasin">github\.com\/ggYasin<\/a>\n/.test(block('v0.5.1')) && !/<b>Thanks to<\/b>/.test(hist.stdout || '') && !/@margani/.test(hist.stdout || ''),
     'the credit sits on the change\'s own line, linked, never as a line of its own at the end, and never the owner');
   const cl39 = path.join(clDir, '39.txt');
   const mdT = spawnSync('python3', [path.join(ROOT, 'tools/release-notes.py'), '--md', cl39], { encoding: 'utf8' }).stdout;
-  ok(/\n  - Chinese chess, thanks to \[@lanlan3292\]\(https:\/\/github\.com\/lanlan3292\)\n/.test(mdT), 'the GitHub notes link the name on the same line');
+  ok(/\n  - Chinese chess, thanks to \[github\.com\/lanlan3292\]\(https:\/\/github\.com\/lanlan3292\)\n/.test(mdT), 'the GitHub notes link the name on the same line');
   const tricky = path.join(os.tmpdir(), 'chogan-cl-at-' + process.pid + '.txt');
-  fs.writeFileSync(tricky, 'Improvements:\n- mail a@b.c and @x"><b and @ok-name\n');
+  fs.writeFileSync(tricky, 'Improvements:\n- mail a@b.c, see https://github.com/choganhq/chogan, github.com/x"><b and github.com/ok-name\n');
   const tH = spawnSync('python3', [path.join(ROOT, 'tools/release-notes.py'), '--html', tricky], { encoding: 'utf8' }).stdout;
+  fs.writeFileSync(tricky, 'Improvements:\n- Polish, thanks to @tmpjx555\n');
+  const tAt = spawnSync('python3', [path.join(ROOT, 'tools/release-notes.py'), '--check', tricky], { encoding: 'utf8' });
   fs.unlinkSync(tricky);
-  ok(/a@b\.c/.test(tH) && /<a href="https:\/\/github\.com\/x">@x<\/a>&quot;&gt;&lt;b/.test(tH) && /<a href="https:\/\/github\.com\/ok-name">@ok-name<\/a>/.test(tH) && !/"><b/.test(tH.replace(/<a href="[^"]*">/g, '')),
-    'only a login after @ becomes a link; an email stays text and nothing can break out of the link');
+  ok(/a@b\.c/.test(tH) && /<a href="https:\/\/github\.com\/x">github\.com\/x<\/a>&quot;&gt;&lt;b/.test(tH) && /<a href="https:\/\/github\.com\/ok-name">github\.com\/ok-name<\/a>/.test(tH) && /see https:\/\/github\.com\/choganhq\/chogan,/.test(tH) && !/"><b/.test(tH.replace(/<a href="[^"]*">/g, '')),
+    'only a github.com/login credit becomes a link; an email or a longer URL stays text and nothing can break out of the link');
+  // F-Droid and Play show the file as plain text, where @login leads nowhere (#644)
+  ok(tAt.status === 1 && /github\.com\/tmpjx555/.test(tAt.stderr), '--check refuses an @login credit and names the github.com form');
   // Every contributor git can name is credited in the changelog of the release that carries their work
   const missing = [];
   for (const t of tags) {
@@ -12806,7 +12809,7 @@ function testTelegramPost() {
     if (!who.length) continue;
     const code = (spawnSync('git', ['show', t + ':www/version.js'], { cwd: ROOT, encoding: 'utf8' }).stdout.match(/APP_VERSION_CODE = (\d+)/) || [])[1];
     const f = path.join(clDir, code + '.txt'), text = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
-    who.filter((w) => text.indexOf('@' + w) < 0).forEach((w) => missing.push(t + ' ' + w));
+    who.filter((w) => text.indexOf('github.com/' + w) < 0).forEach((w) => missing.push(t + ' ' + w));
   }
   const contrib = spawnSync('bash', [path.join(ROOT, 'tools/contributors.sh'), 'v0.18.0'], { cwd: ROOT, env: Object.assign({}, process.env, { CONTRIBUTORS_OFFLINE: '1' }), encoding: 'utf8' });
   ok(contrib.status === 0 && contrib.stdout === 'lanlan3292\n' && !missing.length, 'tools/contributors.sh names a release\'s contributors, and each is credited in its changelog' + (missing.length ? ' (missing: ' + missing.join(', ') + ')' : ''));

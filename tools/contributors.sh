@@ -2,7 +2,7 @@
 # Prints the GitHub logins of the people whose commits are in a release, other than
 # the owner and bots, one per line in the order they first appear (#530). Each one
 # is credited on the line of their change in the release's changelog, as
-# "thanks to @login" (#533); run this before writing a changelog, and the tests
+# "thanks to github.com/login" (#533, #644); run this before writing a changelog, and the tests
 # check that no one found offline is left out.
 #
 #   tools/contributors.sh v0.18.0
