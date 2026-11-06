@@ -1,0 +1,798 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>انباردار — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .sk-wrap > .ch-fit { --fit-ar: calc(6.8 / 7.8); }
+  .ch-fit > .sk-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+  /* the warehouse is a picture, the same way round in every language, so an arrow
+     always means the way it points on the screen */
+  .sk-canvas { display: block; touch-action: none; direction: ltr; user-select: none; -webkit-user-select: none; cursor: pointer; border-radius: var(--r-md); box-shadow: var(--sh-2); }
+  .sk-canvas:focus-visible { outline: 3px solid var(--game, var(--c-accent)); outline-offset: 3px; }
+  .sk-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .sk-side { align-items: center; }
+  .sk-side > .ch-btn { align-self: center; width: auto; }
+  .sk-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-variant-numeric: tabular-nums; }
+  .sk-goal { font-size: var(--fs-sm); color: var(--c-text-dim); text-align: center; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function StorekeeperEngineFactory() {
+  'use strict';
+
+  // Three sizes. cols × rows is the room inside its outer wall; the generator keeps a
+  // level only when its best solution takes at least `min` pushes.
+  var SIZES = {
+    small: { cols: 5, rows: 6, boxes: 2, walls: 4, min: 8, cap: 6000 },
+    medium: { cols: 6, rows: 7, boxes: 3, walls: 6, min: 14, cap: 16000 },
+    large: { cols: 7, rows: 8, boxes: 3, walls: 9, min: 18, cap: 14000 }
+  };
+  var ORDER = ['small', 'medium', 'large'];
+  // 0 up, 1 right, 2 down, 3 left: screen directions, the same in every language
+  var DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];
+
+  function off(L, d) { return DY[d] * L.w + DX[d]; }
+  function isFloor(L, i) { return i >= 0 && i < L.map.length && L.map.charAt(i) !== '#'; }
+  function isGoal(L, i) { return L.map.charAt(i) === '.'; }
+  function has(arr, v) { return arr.indexOf(v) >= 0; }
+  function sorted(a) { return a.slice().sort(function (x, y) { return x - y; }); }
+
+  // Cells the keeper can reach from `from` without passing a crate; `prev` lets a
+  // walk be traced back. Breadth first, so the walk found is a shortest one.
+  function reach(L, boxes, from) {
+    var N = L.map.length, seen = new Int16Array(N).fill(-1), q = [from], blocked = {};
+    for (var k = 0; k < boxes.length; k++) blocked[boxes[k]] = 1;
+    seen[from] = 4;
+    for (var h = 0; h < q.length; h++) {
+      var c = q[h];
+      for (var d = 0; d < 4; d++) {
+        var n = c + off(L, d);
+        if (seen[n] !== -1 || !isFloor(L, n) || blocked[n]) continue;
+        seen[n] = d; q.push(n);
+      }
+    }
+    return { seen: seen, cells: q };
+  }
+  function norm(R) { var m = R.cells[0]; for (var k = 1; k < R.cells.length; k++) if (R.cells[k] < m) m = R.cells[k]; return m; }
+  function key(boxes, p) { return boxes.join(',') + '|' + p; }
+
+  // the steps of a shortest walk to `to`, or null when a crate is in the way
+  function walk(L, boxes, from, to) {
+    if (from === to) return [];
+    var R = reach(L, boxes, from);
+    if (R.seen[to] === -1) return null;
+    var out = [], c = to;
+    while (c !== from) { var d = R.seen[c]; out.push(d); c -= off(L, d); }
+    return out.reverse();
+  }
+
+  // Dead cells: a crate pushed there can never reach a goal. A crate can reach a goal
+  // from exactly the cells a single crate can be pulled to from some goal.
+  function live(L) {
+    var N = L.map.length, ok = new Uint8Array(N), q = [];
+    for (var i = 0; i < N; i++) if (isGoal(L, i)) { ok[i] = 1; q.push(i); }
+    for (var h = 0; h < q.length; h++) {
+      for (var d = 0; d < 4; d++) {
+        var b = q[h] + off(L, d), p = b + off(L, d);
+        if (isFloor(L, b) && isFloor(L, p) && !ok[b]) { ok[b] = 1; q.push(b); }
+      }
+    }
+    return ok;
+  }
+
+  // Forward solver: breadth first over pushes, so the first answer found has the
+  // fewest pushes. A state is the crates plus the area the keeper stands in. Returns
+  // { pushes, path: [[crate, dir], …] } or null if there is no answer within `cap` states.
+  function solve(L, boxes, player, cap) {
+    cap = cap || 200000;
+    var ok = live(L), start = sorted(boxes), R0 = reach(L, start, player);
+    var seen = new Map(), front = [{ b: start, p: player, r: R0, k: key(start, norm(R0)), par: null, mv: null }];
+    seen.set(front[0].k, 1);
+    var goals = L.goals, n = 0;
+    function solved(b) { for (var k = 0; k < b.length; k++) if (!isGoal(L, b[k])) return false; return true; }
+    if (solved(start)) return { pushes: 0, path: [] };
+    for (var depth = 1; front.length; depth++) {
+      var next = [];
+      for (var f = 0; f < front.length; f++) {
+        var s = front[f], R = s.r || reach(L, s.b, s.p);
+        s.r = null;
+        for (var k = 0; k < s.b.length; k++) {
+          var b = s.b[k];
+          for (var d = 0; d < 4; d++) {
+            var o = off(L, d), stand = b - o, to = b + o;
+            if (R.seen[stand] === -1 || !isFloor(L, to) || !ok[to] || has(s.b, to)) continue;
+            var nb = s.b.slice(); nb[k] = to; nb = sorted(nb);
+            var R2 = reach(L, nb, b), kk = key(nb, norm(R2));
+            if (seen.has(kk)) continue;
+            seen.set(kk, 1);
+            var st = { b: nb, p: b, r: R2, k: kk, par: s, mv: [b, d] };
+            if (solved(nb)) {
+              var path = [];
+              for (var x = st; x.par; x = x.par) path.push(x.mv);
+              return { pushes: depth, path: path.reverse() };
+            }
+            if (++n > cap) return null;
+            next.push(st);
+          }
+        }
+      }
+      // reach() is kept only for the newest layer, so memory stays small
+      front = next;
+    }
+    return null;
+  }
+
+  function shuffle(a, rnd) {
+    for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(rnd() * (i + 1)), t = a[i]; a[i] = a[j]; a[j] = t; }
+    return a;
+  }
+
+  // A room: the floor inside an outer wall, with a few wall blocks dropped in as long
+  // as the floor stays in one piece and no floor cell is left walled on three sides.
+  function room(sz, rnd) {
+    var w = sz.cols + 2, h = sz.rows + 2, m = [];
+    for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) m.push(x === 0 || y === 0 || x === w - 1 || y === h - 1 ? '#' : ' ');
+    var inner = [];
+    for (y = 1; y < h - 1; y++) for (x = 1; x < w - 1; x++) inner.push(y * w + x);
+    shuffle(inner, rnd);
+    var placed = 0;
+    for (var t = 0; t < inner.length && placed < sz.walls; t++) {
+      var c = inner[t];
+      m[c] = '#';
+      if (connectedRoom(m, w) && !pockets(m, w)) placed++;
+      else m[c] = ' ';
+    }
+    return { w: w, h: h, m: m };
+  }
+  function connectedRoom(m, w) {
+    var first = m.indexOf(' '), total = 0, i;
+    for (i = 0; i < m.length; i++) if (m[i] !== '#') total++;
+    var seen = {}, q = [first]; seen[first] = 1;
+    for (var h = 0; h < q.length; h++) {
+      var nb = [q[h] - w, q[h] + 1, q[h] + w, q[h] - 1];
+      for (i = 0; i < 4; i++) if (m[nb[i]] !== '#' && !seen[nb[i]]) { seen[nb[i]] = 1; q.push(nb[i]); }
+    }
+    return q.length === total;
+  }
+  function pockets(m, w) {
+    for (var i = 0; i < m.length; i++) {
+      if (m[i] === '#') continue;
+      var open = (m[i - w] !== '#') + (m[i + 1] !== '#') + (m[i + w] !== '#') + (m[i - 1] !== '#');
+      if (open < 2) return true;
+    }
+    return false;
+  }
+
+  // Backwards from the finished room: every crate on its goal and the keeper anywhere,
+  // the search pulls crates away one step at a time, breadth first. The depth of a
+  // state is then exactly the fewest pushes that solve it, and the deepest state with
+  // every crate off its goal is the level.
+  function deepest(L, sz, rnd) {
+    var start = sorted(L.goals), seen = new Map(), front = [], all = [];
+    for (var i = 0; i < L.map.length; i++) {
+      if (!isFloor(L, i) || has(start, i)) continue;
+      var R = reach(L, start, i), k = key(start, norm(R));
+      if (!seen.has(k)) { seen.set(k, 0); front.push({ b: start, p: i }); }
+    }
+    var best = null, depth = 0, count = front.length;
+    while (front.length && count < sz.cap) {
+      var next = [];
+      depth++;
+      for (var f = 0; f < front.length; f++) {
+        var s = front[f], Rs = reach(L, s.b, s.p);
+        for (var j = 0; j < s.b.length; j++) {
+          var b = s.b[j];
+          for (var d = 0; d < 4; d++) {
+            // the keeper stands at b+o and steps back to b+2o, pulling the crate to b+o
+            var o = off(L, d), stand = b + o, back = b + 2 * o;
+            if (Rs.seen[stand] === -1 || !isFloor(L, back) || has(s.b, back)) continue;
+            var nb = s.b.slice(); nb[j] = stand; nb = sorted(nb);
+            var R2 = reach(L, nb, back), kk = key(nb, norm(R2));
+            if (seen.has(kk)) continue;
+            seen.set(kk, depth);
+            next.push({ b: nb, p: back });
+            count++;
+          }
+        }
+      }
+      var cand = [];
+      for (f = 0; f < next.length; f++) {
+        var off0 = true;
+        for (j = 0; j < next[f].b.length; j++) if (isGoal(L, next[f].b[j])) { off0 = false; break; }
+        if (off0) cand.push(next[f]);
+      }
+      if (cand.length) best = { s: cand[Math.floor(rnd() * cand.length)], depth: depth };
+      front = next;
+    }
+    return best;
+  }
+
+  // One level: rooms are tried until one gives a deep enough start. Returns
+  // { size, w, h, map, goals, boxes, player, best }; `map` has '#' walls, '.' goals.
+  function generate(size, rnd) {
+    var sz = SIZES[size] || SIZES.medium, fallback = null;
+    for (var attempt = 0; attempt < 40; attempt++) {
+      var R = room(sz, rnd), floor = [];
+      for (var i = 0; i < R.m.length; i++) if (R.m[i] !== '#') floor.push(i);
+      // goals not in a corner, where a crate pushed off could never come back
+      var goals = shuffle(floor.filter(function (c) {
+        var openX = (R.m[c - 1] !== '#') + (R.m[c + 1] !== '#'), openY = (R.m[c - R.w] !== '#') + (R.m[c + R.w] !== '#');
+        return openX > 0 && openY > 0;
+      }), rnd).slice(0, sz.boxes);
+      if (goals.length < sz.boxes) continue;
+      var m = R.m.slice();
+      for (i = 0; i < goals.length; i++) m[goals[i]] = '.';
+      var L = { size: size, w: R.w, h: R.h, map: m.join(''), goals: sorted(goals) };
+      var D = deepest(L, sz, rnd);
+      if (!D) continue;
+      var lv = { size: size, w: L.w, h: L.h, map: L.map, goals: L.goals, boxes: D.s.b, player: D.s.p, best: D.depth };
+      if (D.depth >= sz.min) return lv;
+      if (!fallback || D.depth > fallback.best) fallback = lv;
+    }
+    return fallback;
+  }
+
+  /* ------------------------------------------------------------- play */
+
+  function start(L) { return { boxes: L.boxes.slice(), player: L.player, moves: 0, pushes: 0, face: 2 }; }
+  // One step: 'wall' or 'blocked' changes nothing; 'move' walks; 'push' moves a crate.
+  function step(L, S, d) {
+    var o = off(L, d), to = S.player + o;
+    S.face = d;
+    if (!isFloor(L, to)) return 'wall';
+    var k = S.boxes.indexOf(to);
+    if (k >= 0) {
+      var beyond = to + o;
+      if (!isFloor(L, beyond) || has(S.boxes, beyond)) return 'blocked';
+      S.boxes[k] = beyond; S.player = to; S.moves++; S.pushes++;
+      return 'push';
+    }
+    S.player = to; S.moves++;
+    return 'move';
+  }
+  function won(L, S) {
+    for (var k = 0; k < S.boxes.length; k++) if (!isGoal(L, S.boxes[k])) return false;
+    return true;
+  }
+  // a crate that can never move again off a goal: stuck in a corner, for a hint
+  function stuck(L, S, b) {
+    if (isGoal(L, b)) return false;
+    var u = !isFloor(L, b - L.w), dn = !isFloor(L, b + L.w), l = !isFloor(L, b - 1), r = !isFloor(L, b + 1);
+    return (u || dn) && (l || r);
+  }
+  // Three stars at the solver's best, two within a fifth more (at least two pushes),
+  // one otherwise: never a loss
+  function stars(pushes, best) {
+    if (pushes <= best) return 3;
+    return pushes <= best + Math.max(2, Math.ceil(best * 0.2)) ? 2 : 1;
+  }
+
+  function validLevel(L) {
+    if (!L || !SIZES[L.size] || !(L.w > 2) || !(L.h > 2) || typeof L.map !== 'string' || L.map.length !== L.w * L.h || !/^[# .]+$/.test(L.map)) return false;
+    if (!Array.isArray(L.goals) || !Array.isArray(L.boxes) || L.goals.length !== L.boxes.length || !L.boxes.length) return false;
+    for (var k = 0; k < L.goals.length; k++) if (!isGoal(L, L.goals[k]) || !isFloor(L, L.boxes[k])) return false;
+    return isFloor(L, L.player) && !has(L.boxes, L.player) && L.best > 0;
+  }
+  function validState(L, S) {
+    if (!S || !Array.isArray(S.boxes) || S.boxes.length !== L.boxes.length || !isFloor(L, S.player) || has(S.boxes, S.player)) return false;
+    var u = {};
+    for (var k = 0; k < S.boxes.length; k++) { if (!isFloor(L, S.boxes[k]) || u[S.boxes[k]]) return false; u[S.boxes[k]] = 1; }
+    return S.moves >= 0 && S.pushes >= 0;
+  }
+
+  return {
+    SIZES: SIZES, ORDER: ORDER, DX: DX, DY: DY,
+    off: off, isFloor: isFloor, isGoal: isGoal, reach: reach, walk: walk, live: live, solve: solve,
+    room: room, deepest: deepest, generate: generate,
+    start: start, step: step, won: won, stuck: stuck, stars: stars, validLevel: validLevel, validState: validState
+  };
+}
+if (typeof module !== 'undefined') module.exports = StorekeeperEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = StorekeeperEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'storekeeper',
+    name: { fa: 'انباردار', en: 'Storekeeper', zh: '仓库管理员', de: 'Lagerist', es: 'Almacenero', pl: 'Magazynier' },
+    accent: '#A63F73',
+    mood: 'menu',
+    strings: {
+      fa: {
+        skBoard: 'انبار', skSmall: 'کوچک', skMedium: 'متوسط', skLarge: 'بزرگ', skDaily: 'انبار روزانه',
+        skMoves: 'قدم: {n}', skPushes: 'هل: {n}', skFewest: 'کمترین هل ممکن: {n}', skOnGoal: 'جعبه‌های سر جا: {a} از {n}',
+        skNew: 'انبار تازه', skRestart: 'از اول', skSolved: 'انبار مرتب شد!', skPerfect: 'با کمترین هل ممکن!',
+        skPushesL: 'هل‌ها', skMovesL: 'قدم‌ها', skFewestL: 'کمترین ممکن', skStuck: 'این جعبه دیگر تکان نمی‌خورد؛ برگرد یا از اول شروع کن.',
+        skKMove: 'یک قدم، یا هل دادن', skKRestart: 'از اول', skKNew: 'انبار تازه',
+        rules: 'انباردار را راه ببر و همه‌ی جعبه‌ها را روی علامت‌ها هل بده. جعبه را فقط می‌شود هل داد، نه کشید، و دو جعبه را با هم نمی‌شود جلو برد. جعبه‌ای که در کنج دیوار گیر کند دیگر بیرون نمی‌آید؛ آن وقت برگرد یا از اول شروع کن. با کشیدن انگشت یک قدم برمی‌داری، با زدن روی یک خانه انباردار خودش تا آنجا می‌رود و با زدن روی جعبه‌ی کنارش آن را هل می‌دهد. هر انبار تازه ساخته می‌شود و یک حل‌کننده پیش از نشان دادنش آن را حل می‌کند؛ اگر با کمترین تعداد هل ممکن مرتبش کنی سه ستاره می‌گیری. هیچ‌وقت نمی‌بازی. چالش روزانه اندازه‌ی متوسط دارد و برای همه یکی است.',
+        tutTitle1: 'جعبه‌ها روی علامت', tutText1: 'انباردار را راه ببر و هر جعبه را روی یک علامت هل بده.',
+        tutTitle2: 'فقط هل، نه کشیدن', tutText2: 'جعبه را نمی‌شود کشید. جعبه‌ای که در کنج گیر کند دیگر بیرون نمی‌آید؛ برگرد.',
+        tutTitle3: 'بزن یا بکش', tutText3: 'روی یک خانه بزن تا انباردار برود، روی جعبه‌ی کنارش بزن تا هلش بدهد، یا انگشت را بکش تا یک قدم بردارد. هل کمتر، ستاره‌ی بیشتر.'
+      },
+      en: {
+        skBoard: 'The warehouse', skSmall: 'Small', skMedium: 'Medium', skLarge: 'Large', skDaily: 'Daily Storekeeper',
+        skMoves: 'Moves: {n}', skPushes: 'Pushes: {n}', skFewest: 'Fewest possible pushes: {n}', skOnGoal: 'Crates in place: {a} of {n}',
+        skNew: 'New warehouse', skRestart: 'Start over', skSolved: 'All stored away!', skPerfect: 'In the fewest pushes possible!',
+        skPushesL: 'Pushes', skMovesL: 'Moves', skFewestL: 'Fewest possible', skStuck: 'That crate can never move again: undo or start over.',
+        skKMove: 'Step, or push', skKRestart: 'Start over', skKNew: 'New warehouse',
+        rules: 'Walk the storekeeper around and push every crate onto a mark. Crates can only be pushed, never pulled, and you cannot push two at once. A crate pushed into a corner can never come out again; then undo or start over. A swipe takes one step, a tap on a cell walks the storekeeper there, and a tap on a crate next to him pushes it. Every warehouse is newly built, and a solver solves it before you see it; store everything in the fewest pushes possible for three stars. You never lose. The daily challenge is medium-sized and the same for everyone.',
+        tutTitle1: 'Crates on the marks', tutText1: 'Walk the storekeeper around and push each crate onto a mark.',
+        tutTitle2: 'Push, never pull', tutText2: 'A crate cannot be pulled. One pushed into a corner is stuck for good, so undo.',
+        tutTitle3: 'Tap or swipe', tutText3: 'Tap a cell to walk there, tap a crate beside you to push it, or swipe to take one step. Fewer pushes, more stars.'
+      },
+      pl: {
+        skBoard: 'Magazyn', skSmall: 'Mały', skMedium: 'Średni', skLarge: 'Duży', skDaily: 'Codzienny Magazynier',
+        skMoves: 'Kroki: {n}', skPushes: 'Pchnięcia: {n}', skFewest: 'Najmniej możliwych pchnięć: {n}', skOnGoal: 'Skrzynie na miejscu: {a} z {n}',
+        skNew: 'Nowy magazyn', skRestart: 'Od nowa', skSolved: 'Wszystko na miejscu!', skPerfect: 'W najmniejszej liczbie pchnięć!',
+        skPushesL: 'Pchnięcia', skMovesL: 'Kroki', skFewestL: 'Najmniej możliwych', skStuck: 'Ta skrzynia już się nie ruszy: cofnij albo zacznij od nowa.',
+        skKMove: 'Krok albo pchnięcie', skKRestart: 'Od nowa', skKNew: 'Nowy magazyn',
+        rules: 'Prowadź magazyniera i wepchnij każdą skrzynię na znak. Skrzynie można tylko pchać, nigdy ciągnąć, i nie da się pchnąć dwóch naraz. Skrzynia wepchnięta w róg już z niego nie wyjdzie; wtedy cofnij albo zacznij od nowa. Przesunięcie palcem to jeden krok, dotknięcie pola prowadzi tam magazyniera, a dotknięcie skrzyni obok niego ją pcha. Każdy magazyn powstaje od nowa, a solver rozwiązuje go, zanim go zobaczysz; ułóż wszystko w najmniejszej liczbie pchnięć, a dostaniesz trzy gwiazdki. Nigdy nie przegrywasz. Codzienne wyzwanie ma średni rozmiar i jest takie samo dla wszystkich.',
+        tutTitle1: 'Skrzynie na znakach', tutText1: 'Prowadź magazyniera i wepchnij każdą skrzynię na znak.',
+        tutTitle2: 'Pchaj, nie ciągnij', tutText2: 'Skrzyni nie da się ciągnąć. Wepchnięta w róg zostaje tam na zawsze, więc cofnij.',
+        tutTitle3: 'Dotknij albo przesuń', tutText3: 'Dotknij pola, aby tam pójść, dotknij skrzyni obok, aby ją pchnąć, albo przesuń palcem o jeden krok. Mniej pchnięć, więcej gwiazdek.'
+      },
+      zh: {
+        skBoard: '仓库', skSmall: '小', skMedium: '中', skLarge: '大', skDaily: '每日仓库',
+        skMoves: '步数：{n}', skPushes: '推动：{n}', skFewest: '最少推动次数：{n}', skOnGoal: '到位的箱子：{a} / {n}',
+        skNew: '新仓库', skRestart: '重新开始', skSolved: '全部归位！', skPerfect: '用了最少的推动次数！',
+        skPushesL: '推动', skMovesL: '步数', skFewestL: '最少可能', skStuck: '这个箱子再也动不了了：撤销或重新开始。',
+        skKMove: '走一步或推动', skKRestart: '重新开始', skKNew: '新仓库',
+        rules: '带着仓库管理员四处走动，把每个箱子都推到标记上。箱子只能推，不能拉，也不能一次推两个。推进墙角的箱子再也出不来，这时请撤销或重新开始。滑动一下走一步，点一个格子管理员会自己走过去，点他身边的箱子就会推动它。每个仓库都是新生成的，在你看到之前已由求解器解过；用最少的推动次数完成可得三颗星。你永远不会输。每日挑战为中等大小，对所有人相同。',
+        tutTitle1: '箱子放到标记上', tutText1: '带着仓库管理员走动，把每个箱子推到一个标记上。',
+        tutTitle2: '只能推，不能拉', tutText2: '箱子不能拉。推进墙角的箱子就永远卡住了，请撤销。',
+        tutTitle3: '点击或滑动', tutText3: '点格子走过去，点身边的箱子推动它，或滑动走一步。推得越少，星星越多。'
+      },
+      de: {
+        skBoard: 'Das Lager', skSmall: 'Klein', skMedium: 'Mittel', skLarge: 'Groß', skDaily: 'Lager des Tages',
+        skMoves: 'Schritte: {n}', skPushes: 'Schübe: {n}', skFewest: 'Wenigste mögliche Schübe: {n}', skOnGoal: 'Kisten am Platz: {a} von {n}',
+        skNew: 'Neues Lager', skRestart: 'Von vorn', skSolved: 'Alles verstaut!', skPerfect: 'Mit den wenigsten möglichen Schüben!',
+        skPushesL: 'Schübe', skMovesL: 'Schritte', skFewestL: 'Wenigste möglich', skStuck: 'Diese Kiste bewegt sich nie wieder: zurück oder von vorn.',
+        skKMove: 'Schritt oder Schub', skKRestart: 'Von vorn', skKNew: 'Neues Lager',
+        rules: 'Führe den Lageristen herum und schiebe jede Kiste auf eine Markierung. Kisten lassen sich nur schieben, nie ziehen, und zwei auf einmal gehen nicht. Eine Kiste in einer Ecke kommt nie wieder heraus; dann zurück oder von vorn. Ein Wischen macht einen Schritt, ein Tippen auf ein Feld lässt den Lageristen dorthin gehen, und ein Tippen auf eine Kiste neben ihm schiebt sie. Jedes Lager wird neu gebaut und von einem Löser gelöst, bevor du es siehst; mit den wenigsten möglichen Schüben gibt es drei Sterne. Du verlierst nie. Die Tagesaufgabe ist mittelgroß und für alle gleich.',
+        tutTitle1: 'Kisten auf die Markierungen', tutText1: 'Führe den Lageristen herum und schiebe jede Kiste auf eine Markierung.',
+        tutTitle2: 'Schieben, nie ziehen', tutText2: 'Eine Kiste lässt sich nicht ziehen. In einer Ecke steckt sie für immer fest, also zurück.',
+        tutTitle3: 'Tippen oder wischen', tutText3: 'Tippe auf ein Feld, um hinzugehen, auf eine Kiste neben dir, um sie zu schieben, oder wische für einen Schritt. Weniger Schübe, mehr Sterne.'
+      },
+      es: {
+        skBoard: 'El almacén', skSmall: 'Pequeño', skMedium: 'Mediano', skLarge: 'Grande', skDaily: 'Almacén del día',
+        skMoves: 'Pasos: {n}', skPushes: 'Empujes: {n}', skFewest: 'Mínimo de empujes posible: {n}', skOnGoal: 'Cajas en su sitio: {a} de {n}',
+        skNew: 'Almacén nuevo', skRestart: 'Empezar de nuevo', skSolved: '¡Todo guardado!', skPerfect: '¡Con el mínimo de empujes posible!',
+        skPushesL: 'Empujes', skMovesL: 'Pasos', skFewestL: 'Mínimo posible', skStuck: 'Esa caja ya no se puede mover: deshaz o empieza de nuevo.',
+        skKMove: 'Paso o empuje', skKRestart: 'Empezar de nuevo', skKNew: 'Almacén nuevo',
+        rules: 'Lleva al almacenero y empuja cada caja sobre una marca. Las cajas solo se empujan, nunca se arrastran, y no se pueden empujar dos a la vez. Una caja metida en una esquina ya no sale; entonces deshaz o empieza de nuevo. Deslizar el dedo da un paso, tocar una casilla lleva al almacenero allí y tocar una caja a su lado la empuja. Cada almacén se crea de nuevo y un solucionador lo resuelve antes de que lo veas; termínalo con el mínimo de empujes posible para tres estrellas. Nunca pierdes. El reto diario es mediano e igual para todos.',
+        tutTitle1: 'Cajas sobre las marcas', tutText1: 'Lleva al almacenero y empuja cada caja sobre una marca.',
+        tutTitle2: 'Empujar, nunca tirar', tutText2: 'Una caja no se puede arrastrar. Metida en una esquina queda atascada para siempre, así que deshaz.',
+        tutTitle3: 'Toca o desliza', tutText3: 'Toca una casilla para ir, toca una caja a tu lado para empujarla o desliza para dar un paso. Menos empujes, más estrellas.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var DAILY = 'medium';
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || E.ORDER.indexOf(prefs.size) < 0) prefs = { size: 'small' };
+
+  // S: { lv, st, daily, stack } — lv the level as built, st the play on it
+  var S = null, startedAt = 0, ended = false;
+  // a walk is queued step by step; each step slides over STEP_MS
+  var queue = [], anim = null, pending = null, raf = 0, stuckSaid = false;
+  var STEP_MS = 95;
+
+  var cv = el('canvas', { class: 'sk-canvas', tabindex: '0', role: 'img', 'aria-label': C.t('skBoard') });
+  var box = el('div', { class: 'sk-box' }, [cv]);
+  var fit = el('div', { class: 'ch-fit' }, [box]);
+  var top = el('div', { class: 'sk-top ch-above' });
+  var status = el('div', { class: 'sk-status', role: 'status', 'aria-live': 'polite' });
+  var goalLine = el('div', { class: 'sk-goal' });
+  // starting over sits under the count, not in the bar: a fourth bar button cut the
+  // game's name on a phone (as in Territories)
+  var restartBtn = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', onclick: function () { restart(); } }, [C.icon('refresh', 16), el('span', { text: C.t('skRestart') })]);
+  var wrap = el('div', { class: 'sk-wrap ch-split' }, [fit, el('div', { class: 'ch-side sk-side' }, [top, status, goalLine, restartBtn])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undo'), onClick: undo });
+  if (!dailyDate) ctx.button({ icon: 'plus', label: C.t('skNew'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- game */
+
+  // Built here and solved again before it is shown: the generator's own count is
+  // trusted only when the forward solver agrees with it.
+  function build(size, rnd) {
+    for (var t = 0; t < 8; t++) {
+      var lv = E.generate(size, rnd);
+      if (!lv) continue;
+      var sol = E.solve(lv, lv.boxes, lv.player, 60000);
+      if (sol && sol.pushes === lv.best) return lv;
+    }
+    return null;
+  }
+  function newLevel(size) {
+    var rnd = dailyDate ? C.daily('storekeeper', dailyDate).rng : Math.random;
+    var lv = build(size, rnd);
+    if (!lv) { C.ui.toast({ icon: 'info', title: C.t('skNew') }); return; }
+    S = { lv: lv, st: E.start(lv), daily: dailyDate || null, stack: [] };
+    startedAt = Date.now(); ended = false; stuckSaid = false;
+    stop();
+    layout(); render(); save();
+  }
+  function moved() { return !!S && S.st.moves > 0; }
+  function askNew() {
+    if (moved() && !ended) C.ui.confirm({ title: C.t('skNew'), body: C.t('resetWarn'), onOk: function () { newLevel(prefs.size); } });
+    else newLevel(prefs.size);
+  }
+  function setSize(size) {
+    if (size === S.lv.size) return;
+    var go = function () { prefs.size = size; ctx.store.set('prefs', prefs); newLevel(size); };
+    if (moved() && !ended) C.ui.confirm({ title: C.t('skNew'), body: C.t('resetWarn'), onOk: go, onCancel: render });
+    else go();
+  }
+  function snap() { var s = S.st; return [s.boxes.slice(), s.player, s.moves, s.pushes, s.face]; }
+  // starting over can be undone like any move
+  function restart() {
+    if (!S || ended || !moved()) return;
+    stop();
+    S.stack.push(snap());
+    S.st = E.start(S.lv); stuckSaid = false;
+    C.feedback('tap');
+    render(); save();
+  }
+  function undo() {
+    if (!S || ended) return;
+    stop();
+    if (!S.stack.length) { C.feedback('bad'); return; }
+    var u = S.stack.pop();
+    S.st = { boxes: u[0].slice(), player: u[1], moves: u[2], pushes: u[3], face: u[4] };
+    stuckSaid = false;
+    C.feedback('tap');
+    render(); save();
+  }
+
+  // One input (a swipe, a tap, an arrow key) is one undo step, however many cells
+  // it walks. The snapshot is kept only once a step actually moves.
+  function act(dirs) {
+    if (!S || ended || !dirs.length) return;
+    C.audio.unlock();
+    if (anim) { finishAnim(); }
+    queue = dirs.slice();
+    pending = snap();
+    pump();
+  }
+  function stop() { queue = []; pending = null; if (anim) finishAnim(); }
+  function pump() {
+    if (anim || ended) return;
+    if (!queue.length) { pending = null; return; }
+    var d = queue.shift(), st = S.st, p0 = st.player, before = st.boxes.slice();
+    var r = E.step(S.lv, st, d);
+    if (r === 'wall' || r === 'blocked') { queue = []; pending = null; C.feedback('bad'); draw(); return; }
+    if (pending) { S.stack.push(pending); if (S.stack.length > 400) S.stack.shift(); pending = null; }
+    var k = -1;
+    for (var i = 0; i < before.length; i++) if (before[i] !== st.boxes[i]) k = i;
+    if (r === 'push') C.feedback(E.isGoal(S.lv, st.boxes[k]) ? 'select' : 'place');
+    anim = { t0: performance.now(), dur: C.ui.reduceMotion() ? 0 : STEP_MS, p0: p0, k: k, b0: k >= 0 ? before[k] : -1 };
+    render(); save();
+    if (k >= 0 && !stuckSaid && E.stuck(S.lv, st, st.boxes[k])) { stuckSaid = true; C.ui.toast({ icon: 'info', title: C.t('skStuck') }); }
+    tick();
+  }
+  function tick() {
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(function () {
+      if (!anim) return;
+      if (performance.now() - anim.t0 >= anim.dur) { finishAnim(); pump(); }
+      else { draw(); tick(); }
+    });
+  }
+  function finishAnim() {
+    anim = null; cancelAnimationFrame(raf);
+    draw();
+    if (S && !ended && E.won(S.lv, S.st)) win();
+  }
+
+  function win() {
+    ended = true; queue = []; pending = null;
+    var st = S.st, lv = S.lv, stars = E.stars(st.pushes, lv.best), best = st.pushes <= lv.best;
+    var base = { small: [3, 10], medium: [5, 20], large: [8, 32] }[lv.size], k = stars === 3 ? 1 : stars === 2 ? 0.7 : 0.4;
+    var coins = Math.max(1, Math.round(base[0] * k)), points = Math.max(1, Math.round(base[1] * k));
+    if (best && lv.size !== 'small') C.achievements.unlock('sk-best');
+    if (lv.size === 'large') C.achievements.unlock('sk-big');
+    if (best) { var n = (ctx.store.get('perfect', 0) || 0) + 1; ctx.store.set('perfect', n); C.stats.best('storekeeper', 'perfect', n, false); }
+    if (S.daily) {
+      if (!C.stats.daily('storekeeper', S.daily, { label: C.t('skPushes', { n: C.num(st.pushes) }), win: true, stars: stars })) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+      if (stars === 3) C.achievements.unlock('sk-daily');
+    }
+    ctx.clearSave();
+    C.feedback('good');
+    render();
+    var elapsed = Date.now() - startedAt;
+    setTimeout(function () {
+      ctx.finish({
+        won: true, title: C.t('skSolved'), note: best ? C.t('skPerfect') : null, stars: stars, timeMs: elapsed, coins: coins, points: points,
+        lines: [
+          S.daily ? { label: C.t('daily'), value: C.num(S.daily) } : { label: C.t(sizeKey(lv.size)), value: '' },
+          { label: C.t('skPushesL'), value: C.num(st.pushes) },
+          { label: C.t('skFewestL'), value: C.num(lv.best) },
+          { label: C.t('skMovesL'), value: C.num(st.moves) },
+          { label: C.t('time'), value: C.time(elapsed) }
+        ],
+        shareText: 'چوگان · انباردار' + (S.daily ? ('\nروزانه ' + S.daily) : '') + '\n' + st.pushes + ' / ' + lv.best + '\n' + '★'.repeat(stars),
+        againLabel: S.daily ? null : C.t('skNew'),
+        onAgain: S.daily ? null : function () { newLevel(prefs.size); }
+      });
+    }, C.ui.reduceMotion() ? 200 : 700);
+  }
+  function sizeKey(s) { return { small: 'skSmall', medium: 'skMedium', large: 'skLarge' }[s]; }
+
+  /* --------------------------------------------------------------- view */
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return !!(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+  }
+  var PAL = {
+    light: { wall: '#7A5543', mortar: '#5E3F31', brick: '#8E6550', floor: '#EDE4D3', seam: '#DCD0BA', goal: '#A63F73',
+      wood: '#CF9455', woodDk: '#8C5A2A', woodLt: '#E4B47A', done: '#A63F73', doneDk: '#6E2449', doneLt: '#D98AB3', stuck: '#C62828',
+      body: '#35506F', bodyDk: '#22364D', skin: '#F0C7A0', cap: '#A63F73', capDk: '#76284F' },
+    dark: { wall: '#3A2A22', mortar: '#271B15', brick: '#46332A', floor: '#3B3631', seam: '#312C28', goal: '#E58BB8',
+      wood: '#B27A43', woodDk: '#6C431D', woodLt: '#C99A62', done: '#C35A8F', doneDk: '#7A2F55', doneLt: '#EBA6C9', stuck: '#FF6B6B',
+      body: '#5C7EA6', bodyDk: '#3A5675', skin: '#E2B48C', cap: '#D7669E', capDk: '#9A3F6C' }
+  };
+  // The outer wall is drawn at a fraction of a cell, so the floor gets the room:
+  // 9 cells across at 390px would be under 44px a cell, 7.8 are not.
+  var RIM = 0.4;
+  var view = null;
+  function layout() {
+    if (!S) return;
+    fit.style.setProperty('--fit-ar', 'calc(' + (S.lv.w - 2 + 2 * RIM) + ' / ' + (S.lv.h - 2 + 2 * RIM) + ')');
+    draw();
+  }
+  function size() {
+    // read on every draw, so a turned phone gets a new view
+    var r = box.getBoundingClientRect(), cw = S.lv.w - 2 + 2 * RIM, ch = S.lv.h - 2 + 2 * RIM;
+    var c = Math.max(12, Math.floor(Math.min((r.width || 300) / cw, (r.height || 300) / ch)));
+    return { c: c, w: Math.round(c * cw), h: Math.round(c * ch) };
+  }
+  function cellXY(i) { return [i % S.lv.w, Math.floor(i / S.lv.w)]; }
+  function rr(g, x, y, w, h, r) {
+    g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+  }
+  function draw() {
+    if (!S) return;
+    var Z = size(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
+    cv.style.width = Z.w + 'px'; cv.style.height = Z.h + 'px';
+    var g = cv.getContext('2d'), P = PAL[dark() ? 'dark' : 'light'], c = Z.c, lv = S.lv, st = S.st, m = RIM * c;
+    // input is read against the view last drawn, never a fresh measure (Bowling, 2026-10-19)
+    view = { c: c, m: m, w: Z.w, h: Z.h };
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var X = function (x) { return m + (x - 1) * c; }, Y = function (y) { return m + (y - 1) * c; };
+    // brick walls everywhere first, then the floor laid over them
+    g.fillStyle = P.wall; g.fillRect(0, 0, Z.w, Z.h);
+    var bh = c / 3;
+    g.fillStyle = P.brick;
+    for (var by = 0, row = 0; by < Z.h; by += bh, row++) {
+      for (var bx = (row % 2 ? -c / 3 : 0); bx < Z.w; bx += 2 * c / 3) g.fillRect(bx + 1, by + 1, 2 * c / 3 - 2, bh - 2);
+    }
+    for (var i = 0; i < lv.map.length; i++) {
+      if (!E.isFloor(lv, i)) continue;
+      var xy = cellXY(i), x0 = X(xy[0]), y0 = Y(xy[1]);
+      g.fillStyle = P.floor; g.fillRect(x0 - 0.5, y0 - 0.5, c + 1, c + 1);
+      g.strokeStyle = P.seam; g.lineWidth = 1; g.strokeRect(x0 + 0.5, y0 + 0.5, c - 1, c - 1);
+    }
+    // a soft shadow where the floor meets a wall above or to the left
+    g.fillStyle = 'rgba(0,0,0,.12)';
+    for (i = 0; i < lv.map.length; i++) {
+      if (!E.isFloor(lv, i)) continue;
+      xy = cellXY(i); x0 = X(xy[0]); y0 = Y(xy[1]);
+      if (!E.isFloor(lv, i - lv.w)) g.fillRect(x0, y0, c, c * 0.08);
+      if (!E.isFloor(lv, i - 1)) g.fillRect(x0, y0, c * 0.08, c);
+    }
+    // goal marks: a ring of four corner ticks around a diamond
+    for (i = 0; i < lv.goals.length; i++) {
+      xy = cellXY(lv.goals[i]); var cx = X(xy[0]) + c / 2, cy = Y(xy[1]) + c / 2, q = c * 0.3, t = c * 0.12;
+      g.strokeStyle = P.goal; g.lineWidth = Math.max(2, c * 0.06); g.lineCap = 'round';
+      g.beginPath();
+      [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(function (s) { g.moveTo(cx + s[0] * q, cy + s[1] * (q - t)); g.lineTo(cx + s[0] * q, cy + s[1] * q); g.lineTo(cx + s[0] * (q - t), cy + s[1] * q); });
+      g.stroke();
+      g.fillStyle = P.goal; g.beginPath(); g.moveTo(cx, cy - c * 0.12); g.lineTo(cx + c * 0.12, cy); g.lineTo(cx, cy + c * 0.12); g.lineTo(cx - c * 0.12, cy); g.closePath(); g.fill();
+    }
+    var f = anim ? Math.min(1, (performance.now() - anim.t0) / Math.max(1, anim.dur)) : 1;
+    f = 1 - (1 - f) * (1 - f);
+    function at(from, to) { var a = cellXY(from), b = cellXY(to); return [X(a[0] + (b[0] - a[0]) * f), Y(a[1] + (b[1] - a[1]) * f)]; }
+    for (i = 0; i < st.boxes.length; i++) {
+      var pos = anim && anim.k === i ? at(anim.b0, st.boxes[i]) : at(st.boxes[i], st.boxes[i]);
+      var home = E.isGoal(lv, st.boxes[i]) && (!anim || anim.k !== i || f >= 1);
+      crate(g, P, pos[0], pos[1], c, home, !home && E.stuck(lv, st, st.boxes[i]));
+    }
+    var pp = anim ? at(anim.p0, st.player) : at(st.player, st.player);
+    keeper(g, P, pp[0] + c / 2, pp[1] + c / 2, c, st.face);
+  }
+  function crate(g, P, x, y, c, home, stuck) {
+    var p = c * 0.09, s = c - 2 * p, r = c * 0.08, b = s * 0.16;
+    g.fillStyle = 'rgba(0,0,0,.18)'; rr(g, x + p + c * 0.04, y + p + c * 0.06, s, s, r); g.fill();
+    g.fillStyle = home ? P.done : P.wood; rr(g, x + p, y + p, s, s, r); g.fill();
+    g.lineWidth = Math.max(1.5, c * 0.045); g.strokeStyle = home ? P.doneDk : P.woodDk; g.stroke();
+    // the inner frame and one diagonal brace of a wooden crate
+    g.strokeStyle = home ? P.doneLt : P.woodLt; g.lineWidth = Math.max(1, c * 0.035);
+    g.strokeRect(x + p + b, y + p + b, s - 2 * b, s - 2 * b);
+    g.strokeStyle = home ? P.doneDk : P.woodDk; g.lineWidth = Math.max(1.5, c * 0.06);
+    g.beginPath(); g.moveTo(x + p + b, y + p + s - b); g.lineTo(x + p + s - b, y + p + b); g.stroke();
+    if (stuck) { g.strokeStyle = P.stuck; g.lineWidth = Math.max(2, c * 0.06); rr(g, x + p - 1, y + p - 1, s + 2, s + 2, r); g.stroke(); }
+  }
+  // the storekeeper from above: shoulders, head and a cap whose peak shows the way he faces
+  function keeper(g, P, cx, cy, c, face) {
+    var a = [-Math.PI / 2, 0, Math.PI / 2, Math.PI][face || 0];
+    g.save(); g.translate(cx, cy); g.rotate(a + Math.PI / 2);
+    g.fillStyle = 'rgba(0,0,0,.18)'; g.beginPath(); g.ellipse(c * 0.03, c * 0.05, c * 0.36, c * 0.24, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = P.body; g.strokeStyle = P.bodyDk; g.lineWidth = Math.max(1.5, c * 0.04);
+    g.beginPath(); g.ellipse(0, c * 0.04, c * 0.34, c * 0.21, 0, 0, Math.PI * 2); g.fill(); g.stroke();
+    g.fillStyle = P.skin; g.beginPath(); g.arc(0, 0, c * 0.17, 0, Math.PI * 2); g.fill();
+    g.fillStyle = P.cap; g.strokeStyle = P.capDk;
+    g.beginPath(); g.arc(0, c * 0.02, c * 0.165, Math.PI * 1.05, Math.PI * 1.95 + Math.PI, false); g.closePath(); g.fill();
+    // the peak, in front
+    g.beginPath(); g.ellipse(0, -c * 0.15, c * 0.13, c * 0.07, 0, Math.PI, 0); g.fill(); g.stroke();
+    g.restore();
+  }
+
+  function render() {
+    if (!S) return;
+    top.innerHTML = '';
+    if (S.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('skDaily') + ' — ' + C.num(S.daily) })]));
+    else top.appendChild(C.ui.segmented(E.ORDER.map(function (s) { return { value: s, label: C.t(sizeKey(s)) }; }), S.lv.size, setSize));
+    var a = 0;
+    for (var i = 0; i < S.st.boxes.length; i++) if (E.isGoal(S.lv, S.st.boxes[i])) a++;
+    status.textContent = C.t('skMoves', { n: C.num(S.st.moves) }) + ' · ' + C.t('skPushes', { n: C.num(S.st.pushes) });
+    goalLine.textContent = C.t('skOnGoal', { a: C.num(a), n: C.num(S.st.boxes.length) }) + ' · ' + C.t('skFewest', { n: C.num(S.lv.best) });
+    cv.setAttribute('aria-label', C.t('skBoard') + ' · ' + C.t('skOnGoal', { a: C.num(a), n: C.num(S.st.boxes.length) }));
+    restartBtn.disabled = ended || !moved();
+    draw();
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  // A swipe is one step; a tap walks to a cell, or pushes a crate beside the keeper.
+  var down = null;
+  cv.addEventListener('pointerdown', function (e) {
+    if (!view || !S) return;
+    down = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    try { cv.setPointerCapture(e.pointerId); } catch (er) { /* not every browser */ }
+    e.preventDefault();
+  });
+  cv.addEventListener('pointerup', function (e) {
+    if (!down || down.id !== e.pointerId) return;
+    var dx = e.clientX - down.x, dy = e.clientY - down.y, d0 = down;
+    down = null;
+    var far = Math.max(16, view.c * 0.35);
+    if (Math.abs(dx) >= far || Math.abs(dy) >= far) {
+      act([Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : (dy > 0 ? 2 : 0)]);
+      return;
+    }
+    var r = cv.getBoundingClientRect();
+    tapAt(Math.floor((d0.x - r.left - view.m) / view.c) + 1, Math.floor((d0.y - r.top - view.m) / view.c) + 1);
+  });
+  cv.addEventListener('pointercancel', function () { down = null; });
+  cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  function tapAt(x, y) {
+    if (!S || ended) return;
+    var lv = S.lv;
+    if (x < 1 || y < 1 || x > lv.w - 2 || y > lv.h - 2) return;
+    var i = y * lv.w + x, st = S.st;
+    if (anim) finishAnim();
+    if (ended) return;
+    if (i === st.player) return;
+    if (st.boxes.indexOf(i) >= 0) {
+      for (var d = 0; d < 4; d++) if (st.player + E.off(lv, d) === i) { act([d]); return; }
+      C.feedback('bad'); return;
+    }
+    var path = E.isFloor(lv, i) ? E.walk(lv, st.boxes, st.player, i) : null;
+    if (path && path.length) act(path);
+    else C.feedback('bad');
+  }
+
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim')) return;
+    if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var d = { ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3 }[e.key];
+    if (d !== undefined) {
+      e.preventDefault();
+      // a held key queues at most one step behind the one moving
+      if (anim && queue.length) return;
+      if (anim) { queue.push(d); return; }
+      act([d]); return;
+    }
+    if (C.keyIs(e, 'r')) { restart(); e.preventDefault(); return; }
+    if (C.keyIs(e, 'n') && !dailyDate) { askNew(); e.preventDefault(); }
+  });
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw); } catch (er) { /* old WebViews */ } }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { draw(); });
+  window.addEventListener('resize', draw);
+
+  /* ------------------------------------------------------------ dialogs */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    var keys = [kb('← ↑ → ↓', C.t('skKMove')), kb('U / Ctrl+Z', C.t('undo')), kb('R', C.t('skKRestart'))];
+    if (!dailyDate) keys.push(kb('N', C.t('skKNew')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, keys)
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // little warehouses for the tutorial: rows of '#' walls, '.' marks, '$' crates,
+  // '*' a crate on a mark, '@' the keeper and '>' an arrow of the way to go
+  function tArt(rows, note) {
+    var P = PAL[dark() ? 'dark' : 'light'], n = rows[0].length, k = 22, w = n * k, h = rows.length * k, ox = (200 - w) / 2;
+    var s = '<svg viewBox="0 0 200 ' + (h + 8) + '" width="100%"><g transform="translate(' + ox + ' 4)">';
+    rows.forEach(function (row, y) {
+      for (var x = 0; x < n; x++) {
+        var ch = row.charAt(x), X0 = x * k, Y0 = y * k;
+        if (ch === '#') { s += '<rect x="' + X0 + '" y="' + Y0 + '" width="' + k + '" height="' + k + '" fill="' + P.wall + '"/>'; continue; }
+        s += '<rect x="' + X0 + '" y="' + Y0 + '" width="' + k + '" height="' + k + '" fill="' + P.floor + '" stroke="' + P.seam + '"/>';
+        if (ch === '.' || ch === '*') s += '<path d="M' + (X0 + 11) + ' ' + (Y0 + 7) + 'l4 4-4 4-4-4z" fill="' + P.goal + '"/>';
+        if (ch === '$' || ch === '*') s += '<rect x="' + (X0 + 3) + '" y="' + (Y0 + 3) + '" width="16" height="16" rx="2" fill="' + (ch === '*' ? P.done : P.wood) + '" stroke="' + (ch === '*' ? P.doneDk : P.woodDk) + '" stroke-width="1.5"/><path d="M' + (X0 + 6) + ' ' + (Y0 + 16) + 'l10-10" stroke="' + (ch === '*' ? P.doneDk : P.woodDk) + '" stroke-width="2"/>';
+        if (ch === 'x') s += '<rect x="' + (X0 + 3) + '" y="' + (Y0 + 3) + '" width="16" height="16" rx="2" fill="' + P.wood + '" stroke="' + P.stuck + '" stroke-width="2.5"/>';
+        if (ch === '@') s += '<ellipse cx="' + (X0 + 11) + '" cy="' + (Y0 + 12) + '" rx="8" ry="5" fill="' + P.body + '"/><circle cx="' + (X0 + 11) + '" cy="' + (Y0 + 11) + '" r="4" fill="' + P.cap + '"/>';
+        if (ch === '>') s += '<path d="M' + (X0 + 5) + ' ' + (Y0 + 11) + 'h11m-4-4 4 4-4 4" fill="none" stroke="' + P.goal + '" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>';
+      }
+    });
+    return s + '</g>' + (note || '') + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(['#######', '#@>$ .#', '#######']) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(['#####', '#x  #', '#  @#', '#####']) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(['#######', '# *@  #', '#  >  #', '#######']) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // saved after every step; the daily one has its own slot
+  ctx.autosave(function () {
+    if (!S || ended) return { inProgress: false };
+    var st = S.st;
+    return { lv: S.lv, boxes: st.boxes, player: st.player, moves: st.moves, pushes: st.pushes, face: st.face, daily: S.daily, stack: S.stack.slice(-200), elapsed: Date.now() - startedAt };
+  });
+  function save() { ctx.save(); }
+  var saved = ctx.loadSave();
+  if (saved && E.validLevel(saved.lv) && E.validState(saved.lv, saved) && (saved.daily || null) === (dailyDate || null) && !E.won(saved.lv, saved)) {
+    var lv0 = saved.lv;
+    var stack = Array.isArray(saved.stack) ? saved.stack.filter(function (u) {
+      return Array.isArray(u) && E.validState(lv0, { boxes: u[0], player: u[1], moves: u[2], pushes: u[3] });
+    }) : [];
+    S = { lv: lv0, st: { boxes: saved.boxes.slice(), player: saved.player, moves: saved.moves, pushes: saved.pushes, face: saved.face | 0 }, daily: saved.daily || null, stack: stack };
+    startedAt = Date.now() - (saved.elapsed || 0);
+    layout(); render();
+  } else newLevel(dailyDate ? DAILY : prefs.size);
+  if (dailyDate && C.stats.dailyDone('storekeeper', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).storekeeper;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
