@@ -10,9 +10,11 @@ A changelog is sections in this order, each a heading line and "- " bullets:
     - ...
 --check validates that shape instead and exits 1 with the reason.
 A contributor is credited on the line of their change, e.g.
-"- Chinese chess, thanks to @lanlan3292"; --md and --html link every @login to
-the GitHub profile (owner's wish, #533: the credit belongs on the change, not
-in a line of its own at the end).
+"- Chinese chess, thanks to github.com/lanlan3292"; --md and --html link it to
+the profile (owner's wish, #533: the credit belongs on the change, not in a line
+of its own at the end). The address, not "@login": F-Droid and Google Play show
+the file as plain text, where a bare handle leads nowhere (#644), so --check
+refuses an @login.
 Usage: tools/release-notes.py --md|--html|--check <changelog.txt>
 """
 import html
@@ -48,14 +50,16 @@ def parse(text):
     return sections
 
 
-# Only GitHub's own login characters, so a mention can never break out of its link
+# Only GitHub's own login characters, so a credit can never break out of its link
+CREDIT = re.compile(r'(?<![\w./:@-])github\.com/([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))(?![\w/.-])')
+# A GitHub-style @login (not an email, not a Telegram @name_with_underscore)
 MENTION = re.compile(r'(?<![\w@/])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))(?![\w-])')
 
 
 def linked(text, fmt):
     if fmt == '--md':
-        return MENTION.sub(lambda m: '[@%s](https://github.com/%s)' % (m.group(1), m.group(1)), text)
-    return MENTION.sub(lambda m: '<a href="https://github.com/%s">@%s</a>' % (m.group(1), m.group(1)), html.escape(text))
+        return CREDIT.sub(lambda m: '[github.com/%s](https://github.com/%s)' % (m.group(1), m.group(1)), text)
+    return CREDIT.sub(lambda m: '<a href="https://github.com/%s">github.com/%s</a>' % (m.group(1), m.group(1)), html.escape(text))
 
 
 def main():
@@ -69,11 +73,14 @@ def main():
         print('%s: %s' % (sys.argv[2], e), file=sys.stderr)
         return 1
     if sys.argv[1] == '--check':
-        # F-Droid and Google Play stop at 500 characters; Play gets each @login as
-        # github.com/login (tools/play-api.sh, #644), so count that longer form
-        n = len(MENTION.sub(lambda m: 'github.com/' + m.group(1), text))
-        if n > 500:
-            print('%s: %d characters as Play shows it, over 500' % (sys.argv[2], n), file=sys.stderr)
+        m = MENTION.search(text)
+        if m:
+            print('%s: write github.com/%s, not @%s: F-Droid and Google Play show it as plain text (#644)'
+                  % (sys.argv[2], m.group(1), m.group(1)), file=sys.stderr)
+            return 1
+        # F-Droid and Google Play show the same file and stop at 500 characters
+        if len(text) > 500:
+            print('%s: %d characters, over 500' % (sys.argv[2], len(text)), file=sys.stderr)
             return 1
         return 0
     out = []
