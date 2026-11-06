@@ -56,6 +56,10 @@ module.exports = function (T) {
     ok(/state\.stats\.days = dayAdd\(state\.stats\.days \|\| \{\}, o, new Date\(\)\);/.test(core), 'every finished round is written to the day log');
     const page = fs.readFileSync(path.join(ROOT, 'www/index.html'), 'utf8');
     ok(/C\.stats\.week\(0\)/.test(page) && /C\.stats\.week\(1\)/.test(page) && /weekTable\(\)/.test(page), 'the profile shows this week and last week under the totals');
+    // The four totals above the weeks wrapped 3 + 1 on a phone (owner's screenshot): two by two, or one row
+    const css = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8');
+    ok(/class: 'ch-stats ch-stats--4' \}/.test(page) && /\.ch-stats--4 \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/.test(css) && /\.ch-stats--4 \{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\); \}/.test(css),
+      'the four profile totals sit two by two on a phone and in one row when wide');
     for (const k of ['thisWeek', 'lastWeek', 'weekWins', 'weekDays', 'weekGames']) {
       const n = (core.match(new RegExp('\\b' + k + ": '[^']+'", 'g')) || []).length;
       ok(n === T.LOCALE_CODES.length, k + ' is in all ' + T.LOCALE_CODES.length + ' languages (' + n + ')');
