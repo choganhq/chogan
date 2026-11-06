@@ -3045,8 +3045,9 @@ function testFiles() {
   for (const loc of clLocales) {
     const dir = path.join(ROOT, 'fastlane/metadata/android', loc, 'changelogs');
     for (const f of fs.readdirSync(dir)) {
-      const text = fs.readFileSync(path.join(dir, f), 'utf8');
-      ok(text.length <= CHANGELOG_LIMIT, loc + '/' + f + ' زیر ' + CHANGELOG_LIMIT + ' کاراکتر است (' + text.length + ')');
+      // Measured as Play receives it: play-api.sh turns @login into github.com/login (#644)
+      const text = fs.readFileSync(path.join(dir, f), 'utf8').replace(/(?<![\w@/])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))(?![\w-])/g, 'github.com/$1');
+      ok(text.length <= CHANGELOG_LIMIT, loc + '/' + f + ' is under ' + CHANGELOG_LIMIT + ' characters as Play shows it (' + text.length + ')');
     }
     ok(fs.existsSync(path.join(dir, code + '.txt')), loc + ': توضیح انتشار برای کد نسخه‌ی ' + code + ' هست');
   }
@@ -7910,7 +7911,7 @@ function testPlayApi() {
 
     // promote (#613): the tested bundle goes to production with its changelogs as notes
     const pmeta = path.join(tmp, 'pmeta');
-    for (const [lang, text] of [['en-US', 'New games:\n- Link Up'], ['fa', 'بازی تازه'], ['de-DE', 'Neu']]) {
+    for (const [lang, text] of [['en-US', 'New games:\n- Link Up'], ['fa', 'بازی تازه'], ['de-DE', 'Neu, danke an @some-one (a@b.de)']]) {
       fs.mkdirSync(path.join(pmeta, lang, 'changelogs'), { recursive: true });
       fs.writeFileSync(path.join(pmeta, lang, 'changelogs', '17.txt'), text + '\n');
     }
@@ -7922,6 +7923,9 @@ function testPlayApi() {
     ok(r.code === 0 && !!rel && rel.status === 'completed' && rel.versionCodes.join() === '17', 'promote: production gets versionCode 17, completed (' + r.code + ')');
     ok(!!rel && (rel.releaseNotes || []).map((n) => n.language).join() === 'de-DE,en-US,fa' && rel.releaseNotes.some((n) => n.text === 'New games:\n- Link Up'),
       'promote: every language\'s changelog for that version code is a release note');
+    // Play shows notes as plain text; a bare @login there was a handle nobody could follow (#644)
+    ok(!!rel && (rel.releaseNotes || []).some((n) => n.language === 'de-DE' && n.text === 'Neu, danke an github.com/some-one (a@b.de)'),
+      'promote: an @login becomes github.com/login in Play\'s notes, an email stays');
     ok(calls.length > 0 && !calls.some((c) => c.u.indexOf('/upload/') === 0) && calls[calls.length - 1].u.endsWith('/E1:commit'), 'promote: no bundle is uploaded, the edit is committed last');
     for (const [vc, why] of [['18', 'a draft on alpha'], ['19', 'not on alpha at all']]) {
       r = await run(['promote', 'alpha', vc, pmeta], env);

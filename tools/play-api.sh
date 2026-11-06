@@ -158,11 +158,15 @@ sys.exit(0 if ok else 1)' "$vc"; then
     fail "versionCode $vc is not a completed release on $from; nothing changed"
   fi
   python3 - "$dir" "$vc" > "$WORK/release.json" <<'PY' || bail "could not build the release notes for versionCode $vc"
-import json, sys, pathlib
+import json, re, sys, pathlib
 d, vc = pathlib.Path(sys.argv[1]), sys.argv[2]
+# Play shows notes as plain text, so "thanks to @login" was a handle nobody could
+# follow (0.24.0, #644). Same mention rule as tools/release-notes.py; no scheme, by
+# the owner's choice.
+MENTION = re.compile(r'(?<![\w@/])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))(?![\w-])')
 notes = []
 for f in sorted(d.glob('*/changelogs/%s.txt' % vc)):
-    text = f.read_text(encoding='utf-8').strip()
+    text = MENTION.sub(r'github.com/\1', f.read_text(encoding='utf-8').strip())
     assert len(text) <= 500, '%s is over Play\'s 500 characters' % f
     notes.append({'language': f.parent.parent.name, 'text': text})
 assert any(n['language'] == 'en-US' for n in notes), 'no en-US changelog for versionCode %s' % vc
