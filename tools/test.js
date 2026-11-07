@@ -8015,7 +8015,15 @@ function testHomeGrid() {
   ok(/C\.store\.set\('settings', C\.state\.settings\)/.test(menu.slice(menu.indexOf('var asList'))), 'انتخاب نما در تنظیمات ذخیره می‌شود');
   // قاعده‌ی دو ستون باید بیرون از media query باشد تا روی گوشی هم اعمال شود
   const topLevel = css.replace(/@media[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, '');
-  ok(/\.ch-games--grid \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/.test(topLevel), 'دو ستون روی پهنای گوشی (بیرون از media query)');
+  // #666: three tiles a row on a phone (the owner chose it from a mock), with a smaller icon
+  // and name and the badges as corner marks, all only below the 620px breakpoint
+  ok(/\.ch-games--grid \{ grid-template-columns: repeat\(3, minmax\(0, 1fr\)\); \}/.test(topLevel), 'three tiles a row at phone width (outside any media query)');
+  const phone = (css.match(/@media \(max-width: 619px\) \{\n  \.ch-games--grid \{[\s\S]*?\n\}\n/) || [''])[0];
+  ok(/\.ch-games--grid \.ch-game__icon \{ width: 42px; height: 42px; flex: 0 0 42px; \}/.test(phone) && /\.ch-games--grid \.ch-game__name \{ font-size: 13px; \}/.test(phone),
+    'below 620px the tile has a 42px icon and a 13px name');
+  ok(/\.ch-games--grid \.ch-game__meta \{\n    position: absolute; top: 6px; inset-inline-start: 6px;/.test(phone) && /padding: 24px 6px/.test(phone),
+    'below 620px the New and Continue badges sit in a top strip, in the corner opposite the pin');
+  ok(/@media \(min-width: 620px\) \{ \.ch-games--grid \{ grid-template-columns: repeat\(auto-fill, minmax\(168px, 1fr\)\); \} \}/.test(css), 'a wide screen still fits as many tiles as it can');
   ok(/^\s+list: '/m.test(core), 'نماد list در هسته هست');
   for (const k of ['viewGrid', 'viewList']) {
     const n = (menu.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length;
