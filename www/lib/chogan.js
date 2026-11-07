@@ -3494,6 +3494,105 @@
     return Chogan;
   };
 
+  /* ------------------------------------------------ Two phones: Nearby link */
+  // Chogan Plus (choganhq/chogan-plus#4) lets two phones in one room play one game over
+  // Nearby Connections. Only that app carries the native plugin; on the web, the PWA and
+  // the F-Droid app `available()` is false, no game offers the option, and nothing here
+  // touches the network (#185).
+  //
+  // A dropped link must not lose a move: every message carries a sequence number, each side
+  // keeps what it sent, and on reconnecting both say how far they got, so the other resends
+  // only what was missed. Duplicates are dropped by number.
+  function makeLink(getTransport) {
+    var api = { status: 'idle' };
+    var t = null, opts = null, peer = null, outbox = [], sent = 0, got = 0, said = false;
+    var HELLO = 'hello', DATA = 'data';
+    function set(status, info) {
+      api.status = status;
+      if (opts && opts.onStatus) { try { opts.onStatus(status, info || null); } catch (e) { console.error(e); } }
+    }
+    function raw(obj) { if (t && peer) t.send(peer, JSON.stringify(obj)); }
+    function hello() { said = true; raw({ k: HELLO, game: opts.game, v: opts.version || '', got: got }); }
+    function onEvent(ev) {
+      if (!opts) return;
+      if (ev.type === 'connected') {
+        if (peer === ev.id && said) return;
+        peer = ev.id; said = false;
+        hello();
+      } else if (ev.type === 'disconnected') {
+        if (ev.id !== peer) return;
+        peer = null; said = false;
+        set('lost');
+      } else if (ev.type === 'error') {
+        // No permission, Bluetooth off, Play Services missing: the page says why
+        set('error', { message: String(ev.message || '') });
+      } else if (ev.type === 'message') {
+        var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+        if (!m || typeof m !== 'object') return;
+        // The two phones learn of the connection a moment apart, so the other side's hello can
+        // come before our own "connected"; only a hello may name the peer, and only while none is
+        if (peer === null && m.k === HELLO) { peer = ev.id; said = false; }
+        if (ev.id !== peer) return;
+        if (m.k === HELLO) {
+          // Another game or another build would read our moves wrongly: stop, don't guess
+          if (m.game !== opts.game || (m.v || '') !== (opts.version || '')) {
+            if (!said) hello(); // so the other phone says why too, instead of waiting forever
+            set('mismatch', { game: m.game, v: m.v });
+            api.close();
+            return;
+          }
+          if (!said) hello();
+          for (var i = 0; i < outbox.length; i++) if (outbox[i].n > (m.got | 0)) raw(outbox[i]);
+          set('connected');
+        } else if (m.k === DATA && (m.n | 0) === got + 1) {
+          got = m.n;
+          if (opts.onMessage) { try { opts.onMessage(m.d); } catch (e) { console.error(e); } }
+        }
+      }
+    }
+    api.available = function () { return !!getTransport(); };
+    // role: 'host' waits to be found, 'guest' looks for a host of the same game
+    api.open = function (o) {
+      api.close();
+      t = getTransport();
+      if (!t) { set('unavailable'); return false; }
+      opts = o; outbox = []; sent = 0; got = 0; peer = null; said = false;
+      set('searching');
+      t.start({ role: o.role, service: 'chogan.' + o.game, name: o.name || '' }, onEvent);
+      return true;
+    };
+    api.send = function (d) {
+      if (!opts) return false;
+      var m = { k: DATA, n: ++sent, d: d };
+      outbox.push(m);
+      raw(m);
+      return true;
+    };
+    api.close = function () {
+      if (t) { try { t.stop(); } catch (e) { /* already stopped */ } }
+      var had = !!opts;
+      t = null; peer = null; outbox = [];
+      if (had) set('idle');
+      opts = null;
+    };
+    return api;
+  }
+  // The native side (chogan-plus's ChoganNearby plugin) speaks the same small transport shape
+  function nativeTransport() {
+    var P = global.Capacitor && global.Capacitor.Plugins && global.Capacitor.Plugins.ChoganNearby;
+    if (!P) return null;
+    var sub = null;
+    return {
+      start: function (o, cb) {
+        Promise.resolve(P.addListener('link', cb)).then(function (h) { sub = h; });
+        P.start(o).catch(function (e) { cb({ type: 'error', message: String(e && e.message || e) }); });
+      },
+      send: function (id, data) { P.send({ id: id, data: data }); },
+      stop: function () { if (sub) sub.remove(); sub = null; P.stop(); }
+    };
+  }
+  Chogan.link = makeLink(nativeTransport);
+
   /* ------------------------------------------------------- کمکی‌ها */
 
   Chogan.flag = function (cc) {
