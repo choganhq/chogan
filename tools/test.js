@@ -7704,7 +7704,7 @@ function testPrivacyPage() {
   ok(perms.length > 0 && perms.every((p) => p === 'android.permission.VIBRATE'), 'Android declares only VIBRATE, as the page says (' + perms.join(', ') + ')');
   ok(/android:allowBackup="false"/.test(manifest), 'Android backup is off, as the page says');
   const menu = fs.readFileSync(path.join(ROOT, 'www/index.html'), 'utf8');
-  ok(/href: 'privacy\.html'/.test(menu), 'the profile links to the privacy page');
+  ok(/href: (Chogan\.plus \? 'privacy-plus\.html' : )?'privacy\.html'/.test(menu), 'the profile links to the privacy page');
 }
 
 /* ------------------------------------------------ Google Play API */
