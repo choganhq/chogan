@@ -75,7 +75,7 @@ module.exports = function (T) {
       !E.valid(Object.assign({}, sv, { locked: sv.locked.slice(1) })) && !E.valid(Object.assign({}, sv, { base: sv.base.map(() => 1) })) && !E.valid(null),
       'a save is checked before it is restored (size, turns, locks, shapes that form a tree)');
     // the page
-    ok(/function tap\(i\) \{[\s\S]{0,120}if \(S\.locked\[i\]\) \{[\s\S]{0,300}return;\s*\}\s*var wetBefore/.test(html), 'a locked tile does not turn and costs no move');
+    ok(/function tap\(i\) \{[\s\S]{0,120}if \(S\.locked\[i\]\) \{[\s\S]{0,300}return;\s*\}\s*var was = E\.flow/.test(html), 'a locked tile does not turn and costs no move');
     ok(/LONG_MS = 420/.test(html) && /addEventListener\('contextmenu'/.test(html) && /C\.keyIs\(e, 'l'\)/.test(html) && /board\.addEventListener\('keydown'/.test(html), 'long press, right click and L lock a tile, and arrows move on the board');
     ok(/\.pw-board \{[^}]*direction: ltr;/.test(html) && /\.pw-cell--locked \{[^}]*outline/.test(html) && /C\.icon\('lock'/.test(html), 'the board is left to right in every language, and a locked tile has its own frame and a lock');
     ok(/C\.daily\('pipes', dailyDate\)\.rng/.test(html) && /DAILY_N = 7/.test(html), 'the daily 7×7 is seeded by the day');
@@ -99,6 +99,28 @@ module.exports = function (T) {
     // "Pipes" and "FreeNet" are other products' names
     ok(!/\bPipes\b|FreeNet/.test(JSON.stringify(gm)) && !/\bPipes\b|FreeNet/.test(html.replace(/PipesEngineFactory/g, '')), 'the page and the listing never use another product\'s name');
     ok(/ctx\.tutorialIfNew\(TUT\)/.test(html) && !/history\.(push|replace)State|localStorage/.test(html), 'a tutorial, no history or direct storage');
+    // #663: the water's direction, for the current drawn along it
+    {
+      const rS = rng(663);
+      let bad = 0, seen = 0;
+      for (let k = 0; k < 20; k++) {
+        const n = [5, 7, 9][k % 3], P = E.generate(n, rS), rot = k % 2 ? P.rot : P.base.map(() => 0), f = E.flow(n, P.base, rot), src = E.source(n);
+        if (!Array.isArray(f.from)) { bad++; continue; }
+        for (let i = 0; i < n * n; i++) {
+          if (!f.wet[i]) { if (f.from[i] !== -1) bad++; continue; }
+          if (i === src) { if (f.from[i] !== -1) bad++; continue; }
+          seen++;
+          const k2 = f.from[i], j = E.nb(n, i, E.DIRS[k2]), m = E.rot(P.base[i], rot[i]);
+          // the tile opens toward the side the water came from, and that neighbour is one step nearer the source
+          if (j < 0 || !f.wet[j] || f.dist[j] !== f.dist[i] - 1 || !(m & E.DIRS[k2]) || !(E.rot(P.base[j], rot[j]) & E.DIRS[(k2 + 2) % 4])) bad++;
+        }
+      }
+      ok(bad === 0 && seen > 200, 'every wet tile names the open side its water came in by, from a neighbour one step nearer the source; the source and dry tiles name none (' + seen + ' tiles, ' + bad + ' wrong)');
+      const P = E.generate(5, rng(6630)), z = P.base.map(() => 0), wasWet = z.map((x, i) => i === E.source(5));
+      const f = E.flow(5, P.base, z), d = typeof E.fillDelays === 'function' ? E.fillDelays(wasWet, f, 70) : null;
+      ok(!!d && d[E.source(5)] === 0 && d.every((x, i) => (wasWet[i] || !f.wet[i]) ? x === 0 : x === (f.dist[i] - 1) * 70) && Math.max.apply(null, d) > 0, 'newly wet tiles fill one after another by distance, and tiles already wet or dry wait for nothing');
+    }
+    ok(/strokeDashoffset/.test(html) && /startTime = 0/.test(html) && /\.pw-pipe \.cur \{ display: none; \}/.test(html), 'the current runs on one shared clock and is off with reduced motion');
     ok(Date.now() - t0 < 3000, 'the Pipeworks tests finish in under 3 s (' + (Date.now() - t0) + ' ms)');
   }
   return { testPipes };

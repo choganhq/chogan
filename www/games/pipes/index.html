@@ -29,7 +29,11 @@
   .pw-cell svg.pw-pipe { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none;
     transition: transform 150ms var(--ease); }
   .pw-pipe .o { stroke: var(--pw-pipe); fill: var(--pw-pipe); }
-  .pw-pipe .w { stroke: var(--pw-dry); fill: var(--pw-dry); transition: stroke 220ms linear, fill 220ms linear; }
+  .pw-pipe .w { stroke: var(--pw-dry); fill: var(--pw-dry); transition: stroke 220ms linear, fill 220ms linear; transition-delay: var(--fd, 0ms); }
+  /* the current: light dashes running along the water the way it flows (#663) */
+  .pw-pipe .cur { fill: none; stroke: #fff; stroke-width: 5; stroke-linecap: round; stroke-dasharray: 9 16; opacity: 0;
+    transition: opacity 300ms linear; }
+  .pw-board--flow .pw-cell--wet .pw-pipe .cur, .pw-board--done .pw-cell--wet .pw-pipe .cur { opacity: .6; transition-delay: var(--fd, 0ms); }
   .pw-cell--wet .pw-pipe .w, .pw-pipe .src { stroke: var(--pw-water); fill: var(--pw-water); }
   .pw-cell--locked { background: var(--pw-lockbg); outline: 2px solid var(--pw-lockink); outline-offset: -3px; }
   .pw-cell .pw-lock { position: absolute; top: 2px; right: 2px; width: 30%; height: 30%; max-width: 18px; max-height: 18px; color: var(--pw-lockink);
@@ -47,7 +51,8 @@
   .pw-stars .pw-lost { opacity: .25; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .pw-stars { color: var(--game-text-dark, var(--game, var(--c-accent))); } }
   :root[data-theme="dark"] .pw-stars { color: var(--game-text-dark, var(--game, var(--c-accent))); }
-  @media (prefers-reduced-motion: reduce) { .pw-cell svg.pw-pipe { transition: none; } .pw-cell--bad, .pw-board--done .pw-cell .w { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .pw-cell svg.pw-pipe, .pw-pipe .w { transition: none; } .pw-cell--bad, .pw-board--done .pw-cell .w { animation: none; }
+    .pw-pipe .cur { display: none; } }
 </style>
 </head>
 <body>
@@ -99,9 +104,11 @@ function PipesEngineFactory() {
   function masks(base, r) { return base.map(function (b, i) { return rot(b, r[i]); }); }
 
   // Water from the source: which tiles it reaches through two openings that meet, and
-  // how many reached tiles open onto a wall or a pipe that does not answer
+  // how many reached tiles open onto a wall or a pipe that does not answer. `from` is the
+  // side (an index into DIRS) the water came in by, -1 for the source and dry tiles, so
+  // the page can draw the current running the way the water goes (#663).
   function flow(n, base, r) {
-    var NN = n * n, m = masks(base, r), wet = new Array(NN).fill(false), dist = new Array(NN).fill(-1), src = source(n), q = [src], leaks = 0, count = 0;
+    var NN = n * n, m = masks(base, r), wet = new Array(NN).fill(false), dist = new Array(NN).fill(-1), from = new Array(NN).fill(-1), src = source(n), q = [src], leaks = 0, count = 0;
     wet[src] = true; dist[src] = 0;
     while (q.length) {
       var i = q.shift(); count++;
@@ -110,10 +117,19 @@ function PipesEngineFactory() {
         if (!(m[i] & d)) continue;
         var j = nb(n, i, d);
         if (j < 0 || !(m[j] & opp(d))) { leaks++; continue; }
-        if (!wet[j]) { wet[j] = true; dist[j] = dist[i] + 1; q.push(j); }
+        if (!wet[j]) { wet[j] = true; dist[j] = dist[i] + 1; from[j] = (k + 2) % 4; q.push(j); }
       }
     }
-    return { wet: wet, dist: dist, count: count, leaks: leaks };
+    return { wet: wet, dist: dist, from: from, count: count, leaks: leaks };
+  }
+  // When a turn wets new tiles, they fill one ring after another going out from where
+  // the water already was, `step` ms a ring; tiles that were wet or stay dry wait 0.
+  // Before #663 every new tile turned blue at once, so nothing read as water moving.
+  function fillDelays(wasWet, f, step) {
+    var lo = Infinity, i, out = new Array(f.wet.length).fill(0);
+    for (i = 0; i < f.wet.length; i++) if (f.wet[i] && !wasWet[i] && f.dist[i] < lo) lo = f.dist[i];
+    for (i = 0; i < f.wet.length; i++) if (f.wet[i] && !wasWet[i]) out[i] = (f.dist[i] - lo) * step;
+    return out;
   }
   // the win is read from the board, never from a stored answer: every tile wet and no
   // open end anywhere
@@ -153,7 +169,7 @@ function PipesEngineFactory() {
   return {
     SIZES: SIZES, N: N, E: E, S: S, W: W, DIRS: DIRS,
     opp: opp, rot: rot, degree: degree, period: period, nb: nb, source: source, tree: tree, masks: masks,
-    flow: flow, won: won, taps: taps, par: par, generate: generate, stars: stars, valid: valid
+    flow: flow, fillDelays: fillDelays, won: won, taps: taps, par: par, generate: generate, stars: stars, valid: valid
   };
 }
 if (typeof module !== 'undefined') module.exports = PipesEngineFactory;
@@ -294,13 +310,14 @@ if (typeof module !== 'undefined') module.exports = PipesEngineFactory;
       render();
       return;
     }
-    var wetBefore = E.flow(S.n, S.base, S.rot).count;
+    var was = E.flow(S.n, S.base, S.rot), wetBefore = was.count;
     S.rot[i] = (S.rot[i] + 1) % 4;
     turns[i]++;
     S.moves++;
-    var f = E.flow(S.n, S.base, S.rot);
+    var f = E.flow(S.n, S.base, S.rot), delays = C.ui.reduceMotion() ? null : E.fillDelays(was.wet, f, FILL_STEP);
     C.feedback(f.count > wetBefore ? 'select' : 'tap');
-    render(f); save();
+    if (f.count > wetBefore) flowFor(FLOW_MS + Math.max.apply(null, delays || [0]));
+    render(f, delays); save();
     if (f.count === S.n * S.n && f.leaks === 0) win(f);
   }
   function toggleLock(i) {
@@ -357,7 +374,40 @@ if (typeof module !== 'undefined') module.exports = PipesEngineFactory;
     else if (E.degree(m) === 1) s += '<circle class="o" cx="50" cy="50" r="24"/><circle class="w" cx="50" cy="50" r="15"/>';
     return s;
   }
-  function pipeSvg(m, isSrc) { return '<svg class="pw-pipe" viewBox="0 0 100 100" aria-hidden="true">' + shape(m, isSrc) + '</svg>'; }
+  function pipeSvg(m, isSrc) { return '<svg class="pw-pipe" viewBox="0 0 100 100" aria-hidden="true">' + shape(m, isSrc) + '<g class="curs"></g></svg>'; }
+  // The current in one tile, in the tile's unturned frame like its shape: the arm the
+  // water comes in by runs from the edge to the middle, every other arm from the middle
+  // out. An arm is 50 long and the dash pattern 25, so the dashes meet the next tile's
+  // in step at the shared edge.
+  var EDGE = [[50, 0], [100, 50], [50, 100], [0, 50]];
+  function curPaths(m, inlet) {
+    var s = '';
+    for (var k = 0; k < 4; k++) {
+      if (!(m & E.DIRS[k])) continue;
+      var e = EDGE[k];
+      s += '<path class="cur" d="' + (k === inlet ? 'M' + e[0] + ' ' + e[1] + 'L50 50' : 'M50 50L' + e[0] + ' ' + e[1]) + '"/>';
+    }
+    return s;
+  }
+  // All dashes run on one clock (start time 0 on the document timeline), so a tile that
+  // fills later is still in step with its neighbours. They run while water is moving: a
+  // few seconds after a turn that wets new tiles, and for good once the board is solved.
+  var RUN_MS = 900, FILL_STEP = 70, FLOW_MS = 2600, flowUntil = 0, flowTimer = null;
+  function runCurrent(on) {
+    var paths = board.querySelectorAll('.cur');
+    for (var i = 0; i < paths.length; i++) {
+      var p = paths[i];
+      if (on && !p._run && p.animate) {
+        p._run = p.animate([{ strokeDashoffset: 25 }, { strokeDashoffset: 0 }], { duration: RUN_MS, iterations: Infinity });
+        p._run.startTime = 0;
+      } else if (!on && p._run) { p._run.cancel(); p._run = null; }
+    }
+  }
+  function flowFor(ms) {
+    flowUntil = Date.now() + ms;
+    clearTimeout(flowTimer);
+    flowTimer = setTimeout(function () { render(); }, ms + 50);
+  }
 
   function build() {
     board.innerHTML = '';
@@ -395,12 +445,16 @@ if (typeof module !== 'undefined') module.exports = PipesEngineFactory;
     }
     render();
   }
-  function render(f) {
+  function render(f, delays) {
     f = f || E.flow(S.n, S.base, S.rot);
     var src = E.source(S.n), lockSvg = null;
     for (var i = 0; i < cells.length; i++) {
       var b = cells[i], svg = b.firstChild;
       svg.style.transform = 'rotate(' + (turns[i] * 90) + 'deg)';
+      b.style.setProperty('--fd', (delays ? delays[i] : 0) + 'ms');
+      // the inlet in the tile's own frame: the board side turned back by the tile's turns
+      var inlet = f.from[i] < 0 ? -1 : (((f.from[i] - S.rot[i]) % 4) + 4) % 4, key = f.wet[i] ? 'w' + inlet : '';
+      if (b._cur !== key) { b._cur = key; svg.lastChild.innerHTML = key ? curPaths(S.base[i], inlet) : ''; }
       b.classList.toggle('pw-cell--wet', f.wet[i]);
       b.classList.toggle('pw-cell--locked', S.locked[i]);
       var lk = b.querySelector('.pw-lock');
@@ -412,6 +466,9 @@ if (typeof module !== 'undefined') module.exports = PipesEngineFactory;
       b.setAttribute('tabindex', i === focusAt ? '0' : '-1');
     }
     board.classList.toggle('pw-board--done', ended);
+    var running = !C.ui.reduceMotion() && (ended || Date.now() < flowUntil);
+    board.classList.toggle('pw-board--flow', running);
+    runCurrent(running);
     top.innerHTML = '';
     if (S.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyPw') + ' — ' + C.num(S.daily) })]));
     else top.appendChild(C.ui.segmented(E.SIZES.map(function (n) { return { value: n, label: C.t('sizeN', { n: C.num(n) }) }; }), S.n, setSize));
