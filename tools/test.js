@@ -6041,28 +6041,36 @@ function testStoreGames() {
   }
 }
 
-/* ------------------------------------------------ README game tables */
+/* ------------------------------------------------ Game tables (GAMES.md) */
 // #188: the README stopped at Breakout while five more games shipped, and nothing noticed.
 // Every game in games.json must have a row in both the English and the Persian table.
+// #665: with ~60 rows a language the README was mostly the game list, so the tables moved
+// to GAMES.md and each half of the README links there instead.
 function testReadme() {
-  head('README game tables');
+  head('Game tables in GAMES.md');
   const md = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+  const gp = path.join(ROOT, 'GAMES.md');
+  const list = fs.existsSync(gp) ? fs.readFileSync(gp, 'utf8') : '';
   const raw = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8'));
   const games = Array.isArray(raw) ? raw : raw.games;
   ok(Array.isArray(games) && games.length > 0, 'games.json lists games');
-  const section = (start) => {
-    const at = md.indexOf(start);
+  const section = (text, start) => {
+    const at = text.indexOf(start + '\n');
     if (at < 0) return '';
-    const end = md.indexOf('\n### ', at + start.length);
-    return md.slice(at, end < 0 ? md.length : end);
+    const end = text.indexOf('\n## ', at + start.length);
+    return text.slice(at, end < 0 ? text.length : end);
   };
   const rows = (sec) => sec.split('\n').filter((l) => /^\| /.test(l)).map((l) => l.split('|')[1].trim());
-  const en = rows(section('### The games')), fa = rows(section('### بازی‌ها'));
-  ok(en.length > 0 && fa.length > 0, 'README has an English and a Persian game table');
+  const en = rows(section(list, '## English')), fa = rows(section(list, '## فارسی'));
+  ok(en.length > 0 && fa.length > 0, 'GAMES.md has an English and a Persian game table');
   const missEn = games.filter((g) => en.indexOf(g.name.en) < 0).map((g) => g.id);
   const missFa = games.filter((g) => fa.indexOf(g.name.fa) < 0).map((g) => g.id);
   ok(!missEn.length, 'every game has a row in the English table' + (missEn.length ? ' (missing: ' + missEn.join(', ') + ')' : ''));
   ok(!missFa.length, 'every game has a row in the Persian table' + (missFa.length ? ' (missing: ' + missFa.join(', ') + ')' : ''));
+  const faAt = md.indexOf('## فارسی');
+  ok(faAt > 0 && /\]\(GAMES\.md#english\)/.test(md.slice(0, faAt)) && /\]\(GAMES\.md#فارسی\)/.test(md.slice(faAt)),
+    'each half of the README links its own table in GAMES.md');
+  ok(!md.split('\n').some((l) => /^\| /.test(l)), 'the README itself no longer carries a game table');
   // #615: playchogan.com is only a redirect; the web line must still name the real
   // origin, because that is where a player's progress lives (localStorage is per origin).
   const webEn = (md.match(/^- \*\*Web:\*\*.*$/m) || [''])[0], webFa = (md.match(/^- \*\*وب:\*\*.*$/m) || [''])[0];
@@ -8015,7 +8023,15 @@ function testHomeGrid() {
   ok(/C\.store\.set\('settings', C\.state\.settings\)/.test(menu.slice(menu.indexOf('var asList'))), 'انتخاب نما در تنظیمات ذخیره می‌شود');
   // قاعده‌ی دو ستون باید بیرون از media query باشد تا روی گوشی هم اعمال شود
   const topLevel = css.replace(/@media[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, '');
-  ok(/\.ch-games--grid \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/.test(topLevel), 'دو ستون روی پهنای گوشی (بیرون از media query)');
+  // #666: three tiles a row on a phone (the owner chose it from a mock), with a smaller icon
+  // and name and the badges as corner marks, all only below the 620px breakpoint
+  ok(/\.ch-games--grid \{ grid-template-columns: repeat\(3, minmax\(0, 1fr\)\); \}/.test(topLevel), 'three tiles a row at phone width (outside any media query)');
+  const phone = (css.match(/@media \(max-width: 619px\) \{\n  \.ch-games--grid \{[\s\S]*?\n\}\n/) || [''])[0];
+  ok(/\.ch-games--grid \.ch-game__icon \{ width: 42px; height: 42px; flex: 0 0 42px; \}/.test(phone) && /\.ch-games--grid \.ch-game__name \{ font-size: 13px; \}/.test(phone),
+    'below 620px the tile has a 42px icon and a 13px name');
+  ok(/\.ch-games--grid \.ch-game__meta \{\n    position: absolute; top: 6px; inset-inline-start: 6px;/.test(phone) && /padding: 24px 6px/.test(phone),
+    'below 620px the New and Continue badges sit in a top strip, in the corner opposite the pin');
+  ok(/@media \(min-width: 620px\) \{ \.ch-games--grid \{ grid-template-columns: repeat\(auto-fill, minmax\(168px, 1fr\)\); \} \}/.test(css), 'a wide screen still fits as many tiles as it can');
   ok(/^\s+list: '/m.test(core), 'نماد list در هسته هست');
   for (const k of ['viewGrid', 'viewList']) {
     const n = (menu.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length;
@@ -10423,6 +10439,12 @@ function testPeopleFilter() {
   const n = (p) => games.filter((g) => sb.f(g, p)).length;
   ok(n('all') === games.length && n('1') + n('2') === games.length && n('3') > 0 && n('3') < n('2'), 'one player lists the solo games, two the rest, three and four a few of those (' + ['all', '1', '2', '3'].map(n).join(', ') + ')');
   ok(/g\.cat === c && peopleFit\(g, people\)/.test(html) && /C\.state\.settings\.gamePeople = v;/.test(html) && /if \(!any\) box\.appendChild/.test(html), 'the filter works with the category chips, is remembered, and says so when nothing fits');
+  // Measured in Playwright (#674): with Nunito's Latin, 7–10px of chip padding put the English
+  // players row and the Polish categories on two lines at 360 and 390px; 6px fits them again.
+  const css = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8');
+  const pads = [...css.matchAll(/\.ch-seg\.ch-cats button \{ padding-inline: (\d+)px; \}/g)].map((m) => +m[1]);
+  ok(/pchips\.classList\.add\('ch-seg--wrap', 'ch-cats', 'ch-people'\)/.test(html) && pads.length === 1 && pads[0] <= 6,
+    'the category and players chips share one padding of at most 6px, at every width (' + pads.join(', ') + ')');
 }
 
 function testInstallBar() {
