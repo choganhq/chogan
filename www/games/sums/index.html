@@ -169,22 +169,30 @@ function SumsEngineFactory() {
     return last;
   }
 
-  // A line is finished when every digit it must lose is gone
-  function lineDone(P, st, k) {
+  // Every digit a line must lose is gone; its other digits may still be open
+  function extrasGone(P, st, k) {
     return line(P.n, k).every(function (c) { return P.keep[c] || st[c] === 2; });
+  }
+  // A digit is decided once it is erased or ringed the right way. A line (its sum greys
+  // out) and the puzzle are finished only when every digit is decided: counting the
+  // erasures alone finished them with digits still un-ringed once #667 left the rings to
+  // the player (#699)
+  function decided(P, st, c) { return st[c] === (P.keep[c] ? 1 : 2); }
+  function lineDone(P, st, k) {
+    return line(P.n, k).every(function (c) { return decided(P, st, c); });
   }
   // The digits left in a finished line all stay; ringing them is the player's move unless
   // they turned the automatic ring on (#667)
   function ringDone(P, st) {
     var out = st.slice();
     for (var k = 0; k < 2 * P.n; k++) {
-      if (!lineDone(P, st, k)) continue;
+      if (!extrasGone(P, st, k)) continue;
       line(P.n, k).forEach(function (c) { if (!out[c]) out[c] = 1; });
     }
     return out;
   }
   function solved(P, st) {
-    for (var i = 0; i < P.d.length; i++) if (!P.keep[i] && st[i] !== 2) return false;
+    for (var i = 0; i < P.d.length; i++) if (!decided(P, st, i)) return false;
     return true;
   }
   // three stars with no mistake, two for one or two, one for any finish: a mistake never
@@ -205,7 +213,7 @@ function SumsEngineFactory() {
   }
 
   return { SIZES: SIZES, NEED: NEED, line: line, target: target, ways: ways, deduce: deduce, hint: hint, count: count,
-    targets: targets, generate: generate, lineDone: lineDone, ringDone: ringDone, solved: solved, stars: stars, valid: valid };
+    targets: targets, generate: generate, extrasGone: extrasGone, lineDone: lineDone, ringDone: ringDone, solved: solved, stars: stars, valid: valid };
 }
 if (typeof module !== 'undefined') module.exports = SumsEngineFactory;
 /* ==== ENGINE END ==== */
@@ -230,7 +238,7 @@ if (typeof module !== 'undefined') module.exports = SumsEngineFactory;
         mistakesN: 'اشتباه: {m}', solvedT: 'همه‌ی جمع‌ها درست شد!', mistakesL: 'اشتباه', hintsL: 'راهنمایی', newPuzzle: 'پازل تازه',
         clean: 'بدون هیچ اشتباهی!', wrongErase: 'این عدد لازم است', wrongKeep: 'این عدد اضافه است', hintCost: 'راهنمایی ({c} سکه)',
         kMove: 'جابه‌جایی بین خانه‌ها', kUse: 'ابزار انتخاب‌شده', kErase: 'پاک کردن', kKeep: 'نگه داشتن', kTool: 'عوض کردن ابزار', kNew: 'پازل تازه',
-        rules: 'عددهایی را پاک کن تا عددهای باقی‌مانده‌ی هر ردیف و هر ستون با هم برابر جمع کنار همان ردیف یا بالای همان ستون شوند. ابزار پاک‌کن عدد را برمی‌دارد و ابزار حلقه عددی را که مطمئنی لازم است علامت می‌زند؛ لمس طولانی کار ابزار دیگر را می‌کند. هر پازل فقط یک جواب دارد و بدون حدس، فقط با فکر حل می‌شود. اشتباه را نشانت می‌دهیم و همان‌جا درستش می‌کنیم: بازی تمام نمی‌شود، فقط ستاره کم می‌شود. وقتی همه‌ی عددهای اضافه پاک شوند پازل حل شده است.',
+        rules: 'عددهایی را پاک کن تا عددهای باقی‌مانده‌ی هر ردیف و هر ستون با هم برابر جمع کنار همان ردیف یا بالای همان ستون شوند. ابزار پاک‌کن عدد را برمی‌دارد و ابزار حلقه عددی را که مطمئنی لازم است علامت می‌زند؛ لمس طولانی کار ابزار دیگر را می‌کند. هر پازل فقط یک جواب دارد و بدون حدس، فقط با فکر حل می‌شود. اشتباه را نشانت می‌دهیم و همان‌جا درستش می‌کنیم: بازی تمام نمی‌شود، فقط ستاره کم می‌شود. وقتی همه‌ی عددهای اضافه پاک و همه‌ی عددهای ماندنی حلقه شوند پازل حل شده است.',
         tutTitle1: 'جمع هر خط', tutText1: 'عددهای باقی‌مانده‌ی هر ردیف و ستون باید با جمع کنارش برابر شوند.',
         tutTitle2: 'پاک کن یا نگه دار', tutText2: 'با پاک‌کن عدد اضافه را بردار، با حلقه عدد لازم را علامت بزن. لمس طولانی ابزار دیگر است.',
         tutTitle3: 'بدون حدس', tutText3: 'هر پازل یک جواب دارد. اشتباه فقط ستاره کم می‌کند.'
@@ -242,7 +250,7 @@ if (typeof module !== 'undefined') module.exports = SumsEngineFactory;
         mistakesN: 'Mistakes: {m}', solvedT: 'Every sum adds up!', mistakesL: 'Mistakes', hintsL: 'Hints', newPuzzle: 'New puzzle',
         clean: 'Without a single mistake!', wrongErase: 'That number is needed', wrongKeep: 'That number has to go', hintCost: 'Hint ({c} coins)',
         kMove: 'Move between cells', kUse: 'Use the chosen tool', kErase: 'Erase', kKeep: 'Keep', kTool: 'Switch tool', kNew: 'New puzzle',
-        rules: 'Erase numbers until the ones left in each row and each column add up to the sum beside that row or above that column. The eraser takes a number away, and the ring marks one you are sure must stay; a long press does what the other tool does. Every puzzle has exactly one answer and is solved by thinking alone, never by guessing. A mistake is shown and put right on the spot: it never ends the puzzle, it only costs stars. The puzzle is solved when every extra number is gone.',
+        rules: 'Erase numbers until the ones left in each row and each column add up to the sum beside that row or above that column. The eraser takes a number away, and the ring marks one you are sure must stay; a long press does what the other tool does. Every puzzle has exactly one answer and is solved by thinking alone, never by guessing. A mistake is shown and put right on the spot: it never ends the puzzle, it only costs stars. The puzzle is solved when every extra number is gone and every number that stays is ringed.',
         tutTitle1: 'Every line adds up', tutText1: 'The numbers left in each row and column must add up to the sum beside it.',
         tutTitle2: 'Erase or keep', tutText2: 'Erase the extra numbers, ring the ones that must stay. A long press uses the other tool.',
         tutTitle3: 'Never a guess', tutText3: 'Every puzzle has one answer. A mistake only costs stars.'
@@ -254,7 +262,7 @@ if (typeof module !== 'undefined') module.exports = SumsEngineFactory;
         mistakesN: 'Błędy: {m}', solvedT: 'Wszystkie sumy się zgadzają!', mistakesL: 'Błędy', hintsL: 'Podpowiedzi', newPuzzle: 'Nowa łamigłówka',
         clean: 'Bez ani jednego błędu!', wrongErase: 'Ta liczba jest potrzebna', wrongKeep: 'Ta liczba musi zniknąć', hintCost: 'Podpowiedź ({c} monet)',
         kMove: 'Przemieść między polami', kUse: 'Użyj wybranego narzędzia', kErase: 'Wymaż', kKeep: 'Zostaw', kTool: 'Zmień narzędzie', kNew: 'Nowa łamigłówka',
-        rules: 'Wymazuj liczby, aż te, które zostaną w każdym rzędzie i każdej kolumnie, dadzą sumę podaną obok rzędu lub nad kolumną. Gumka usuwa liczbę, a kółko zaznacza tę, która na pewno zostaje; długie naciśnięcie działa jak drugie narzędzie. Każda łamigłówka ma dokładnie jedno rozwiązanie i rozwiązuje się ją samym myśleniem, nigdy zgadywaniem. Błąd jest pokazywany i od razu poprawiany: nigdy nie kończy gry, kosztuje tylko gwiazdki. Łamigłówka jest rozwiązana, gdy znikną wszystkie zbędne liczby.',
+        rules: 'Wymazuj liczby, aż te, które zostaną w każdym rzędzie i każdej kolumnie, dadzą sumę podaną obok rzędu lub nad kolumną. Gumka usuwa liczbę, a kółko zaznacza tę, która na pewno zostaje; długie naciśnięcie działa jak drugie narzędzie. Każda łamigłówka ma dokładnie jedno rozwiązanie i rozwiązuje się ją samym myśleniem, nigdy zgadywaniem. Błąd jest pokazywany i od razu poprawiany: nigdy nie kończy gry, kosztuje tylko gwiazdki. Łamigłówka jest rozwiązana, gdy znikną wszystkie zbędne liczby, a te, które zostają, będą zakreślone.',
         tutTitle1: 'Każda linia się sumuje', tutText1: 'Liczby, które zostaną w rzędzie i kolumnie, muszą dać sumę obok.',
         tutTitle2: 'Wymaż albo zostaw', tutText2: 'Wymaż zbędne liczby, zakreśl te, które zostają. Długie naciśnięcie to drugie narzędzie.',
         tutTitle3: 'Bez zgadywania', tutText3: 'Każda łamigłówka ma jedno rozwiązanie. Błąd kosztuje tylko gwiazdki.'
@@ -266,7 +274,7 @@ if (typeof module !== 'undefined') module.exports = SumsEngineFactory;
         mistakesN: '错误：{m}', solvedT: '每个和都对上了！', mistakesL: '错误', hintsL: '提示', newPuzzle: '新题',
         clean: '一个错误都没有！', wrongErase: '这个数字是需要的', wrongKeep: '这个数字要擦掉', hintCost: '提示（{c} 金币）',
         kMove: '在格子之间移动', kUse: '使用选中的工具', kErase: '擦除', kKeep: '保留', kTool: '切换工具', kNew: '新题',
-        rules: '擦掉一些数字，让每行每列剩下的数字之和等于该行旁边或该列上方的数。橡皮擦掉数字，圆圈标出你确定要留下的数字；长按使用另一个工具。每道题只有一个答案，只靠推理就能解开，从不需要猜。错误会被指出并当场改正：不会结束游戏，只会少星。所有多余的数字都擦掉时，题目就解开了。',
+        rules: '擦掉一些数字，让每行每列剩下的数字之和等于该行旁边或该列上方的数。橡皮擦掉数字，圆圈标出你确定要留下的数字；长按使用另一个工具。每道题只有一个答案，只靠推理就能解开，从不需要猜。错误会被指出并当场改正：不会结束游戏，只会少星。所有多余的数字都擦掉、留下的数字都圈上时，题目就解开了。',
         tutTitle1: '每条线的和', tutText1: '每行每列剩下的数字之和必须等于旁边的数。',
         tutTitle2: '擦除或保留', tutText2: '擦掉多余的数字，圈出要留下的。长按使用另一个工具。',
         tutTitle3: '从不靠猜', tutText3: '每道题只有一个答案。错误只会少星。'
@@ -278,7 +286,7 @@ if (typeof module !== 'undefined') module.exports = SumsEngineFactory;
         mistakesN: 'Fehler: {m}', solvedT: 'Alle Summen stimmen!', mistakesL: 'Fehler', hintsL: 'Tipps', newPuzzle: 'Neues Rätsel',
         clean: 'Ohne einen einzigen Fehler!', wrongErase: 'Diese Zahl wird gebraucht', wrongKeep: 'Diese Zahl muss weg', hintCost: 'Tipp ({c} Münzen)',
         kMove: 'Zwischen den Feldern wechseln', kUse: 'Gewähltes Werkzeug nutzen', kErase: 'Löschen', kKeep: 'Behalten', kTool: 'Werkzeug wechseln', kNew: 'Neues Rätsel',
-        rules: 'Lösche Zahlen, bis die übrigen in jeder Reihe und Spalte die Summe neben der Reihe oder über der Spalte ergeben. Der Radierer nimmt eine Zahl weg, der Ring markiert eine, die sicher bleibt; langes Drücken macht, was das andere Werkzeug tut. Jedes Rätsel hat genau eine Lösung und ist allein durch Nachdenken lösbar, nie durch Raten. Ein Fehler wird gezeigt und sofort richtiggestellt: Er beendet das Rätsel nie, er kostet nur Sterne. Gelöst ist es, wenn jede überzählige Zahl weg ist.',
+        rules: 'Lösche Zahlen, bis die übrigen in jeder Reihe und Spalte die Summe neben der Reihe oder über der Spalte ergeben. Der Radierer nimmt eine Zahl weg, der Ring markiert eine, die sicher bleibt; langes Drücken macht, was das andere Werkzeug tut. Jedes Rätsel hat genau eine Lösung und ist allein durch Nachdenken lösbar, nie durch Raten. Ein Fehler wird gezeigt und sofort richtiggestellt: Er beendet das Rätsel nie, er kostet nur Sterne. Gelöst ist es, wenn jede überzählige Zahl weg ist und jede bleibende einen Ring hat.',
         tutTitle1: 'Jede Linie geht auf', tutText1: 'Die übrigen Zahlen jeder Reihe und Spalte ergeben die Summe daneben.',
         tutTitle2: 'Löschen oder behalten', tutText2: 'Lösche überzählige Zahlen, umkreise die, die bleiben. Langes Drücken nutzt das andere Werkzeug.',
         tutTitle3: 'Nie raten', tutText3: 'Jedes Rätsel hat eine Lösung. Ein Fehler kostet nur Sterne.'
@@ -290,7 +298,7 @@ if (typeof module !== 'undefined') module.exports = SumsEngineFactory;
         mistakesN: 'Errores: {m}', solvedT: '¡Todas las sumas cuadran!', mistakesL: 'Errores', hintsL: 'Pistas', newPuzzle: 'Puzle nuevo',
         clean: '¡Sin un solo error!', wrongErase: 'Ese número hace falta', wrongKeep: 'Ese número sobra', hintCost: 'Pista ({c} monedas)',
         kMove: 'Moverse entre casillas', kUse: 'Usar la herramienta elegida', kErase: 'Borrar', kKeep: 'Conservar', kTool: 'Cambiar de herramienta', kNew: 'Puzle nuevo',
-        rules: 'Borra números hasta que los que quedan en cada fila y cada columna sumen el número que hay junto a la fila o sobre la columna. La goma quita un número y el aro marca uno que seguro se queda; una pulsación larga hace lo de la otra herramienta. Cada puzle tiene una sola solución y se resuelve pensando, nunca adivinando. Un error se muestra y se corrige en el acto: nunca termina el puzle, solo cuesta estrellas. El puzle está resuelto cuando no queda ningún número de más.',
+        rules: 'Borra números hasta que los que quedan en cada fila y cada columna sumen el número que hay junto a la fila o sobre la columna. La goma quita un número y el aro marca uno que seguro se queda; una pulsación larga hace lo de la otra herramienta. Cada puzle tiene una sola solución y se resuelve pensando, nunca adivinando. Un error se muestra y se corrige en el acto: nunca termina el puzle, solo cuesta estrellas. El puzle está resuelto cuando no queda ningún número de más y cada número que se queda tiene su aro.',
         tutTitle1: 'Cada línea suma', tutText1: 'Los números que quedan en cada fila y columna deben sumar el número de al lado.',
         tutTitle2: 'Borra o conserva', tutText2: 'Borra los que sobran y rodea los que se quedan. Una pulsación larga usa la otra herramienta.',
         tutTitle3: 'Nunca adivinar', tutText3: 'Cada puzle tiene una solución. Un error solo cuesta estrellas.'

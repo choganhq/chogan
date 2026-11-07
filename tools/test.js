@@ -10905,11 +10905,16 @@ function testSums() {
   ok(P.rows.join() === '3,10,10' && P.cols.join() === '7,2,14', 'targets are the sums of the kept digits (' + P.rows + ' / ' + P.cols + ')');
   ok(E.line(3, 1).join() === '3,4,5' && E.line(3, 4).join() === '1,4,7', 'a row and a column list their own cells');
   ok(E.ways(P, new Array(9).fill(0), 0).length === 1, 'the first row adds up to 3 in exactly one way (keep the 3)');
-  // a game is won when every digit that must go is gone, and not before
+  // a game is won when every digit is decided: the extras erased and the rest ringed (#699)
   const st = new Array(9).fill(0);
   ok(!E.solved(P, st), 'an untouched board is not solved');
   P.keep.forEach((k, i) => { if (!k) st[i] = 2; });
-  ok(E.solved(P, st) && [0, 1, 2, 3, 4, 5].every((k) => E.lineDone(P, st, k)), 'with every extra digit erased the board is solved and every line is done');
+  ok(!E.solved(P, st) && [0, 1, 2, 3, 4, 5].every((k) => !E.lineDone(P, st, k)),
+    'with every extra digit erased but nothing ringed the board is not solved and no sum greys out (#699)');
+  st[0] = 1;
+  ok(E.lineDone(P, st, 0) && !E.lineDone(P, st, 3) && !E.solved(P, st), 'ringing the 3 finishes the first row, and only that row');
+  P.keep.forEach((k, i) => { if (k) st[i] = 1; });
+  ok(E.solved(P, st) && [0, 1, 2, 3, 4, 5].every((k) => E.lineDone(P, st, k)), 'with the extras erased and the rest ringed the board is solved and every line is done');
   // generated puzzles: deduction solves them, the search proves exactly one answer, and each
   // size is as hard as it should be
   let made = 0, unique = 0, logical = 0, hardEnough = 0, mixed = 0, slow = 0;
