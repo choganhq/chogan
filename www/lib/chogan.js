@@ -1569,7 +1569,9 @@
   /* ==================================== recently played and pinned (#193) */
   // Stats only change when a round ends, so a game left half-played never looked
   // played. Recent is written when a game page opens; pins live in the settings.
-  var RECENT_MAX = 6;
+  // Since the menu sorts by last played (#687) it keeps every game, not the six
+  // its old row showed.
+  var RECENT_MAX = 200;
   Chogan.recent = {
     list: function () { var r = appStore.get('recent', []); return Array.isArray(r) ? r : []; },
     touch: function (id) {
