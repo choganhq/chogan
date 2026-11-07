@@ -1,0 +1,859 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>یورش — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .sr-wrap > .ch-fit { --fit-ar: calc(360 / 640); }
+  .ch-fit > .sr-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+  .sr-canvas { display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; }
+  .sr-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .sr-hud { display: flex; justify-content: center; align-items: stretch; gap: var(--s-2); width: 100%; max-width: 420px; }
+  .sr-pill { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 4px 8px; border-radius: var(--r-md); background: var(--c-surface-2); min-width: 0; }
+  .sr-pill__label { font-size: var(--fs-xs); color: var(--c-text-dim); white-space: nowrap; }
+  .sr-pill__value { font-size: var(--fs-lg); font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.3; }
+  .sr-lives { display: flex; gap: 3px; align-items: center; min-height: 1.3em; direction: ltr; }
+  .sr-lives svg { display: block; }
+  .sr-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+  .sr-wrap { touch-action: none; user-select: none; -webkit-user-select: none; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function StarRaidEngineFactory() {
+  'use strict';
+
+  // The sky is 360 × 640 units, y down; the player's ship flies along a line near the
+  // bottom. The run advances in fixed steps of 1/60 s, so a frame rate never changes
+  // the game, and every chance is drawn from the run's own seeded generator (kept in
+  // the state), so a saved run goes on exactly as it would have and a bot can be
+  // tested against the very rules the page plays.
+  var W = 360, H = 640, DT = 1 / 60;
+  var PY = H - 72, PR = 10;             // the ship's line and its hit radius
+  var PSPEED = 540, KSPEED = 330;       // top speed after a finger, speed on the keys
+  var BV = 540, COOL = 0.22, EBR = 4;   // own shot speed, time between shots, enemy shot radius
+  var PBMAX = 2;                        // own shots in the air at once: a miss costs time, so aim matters
+  var LIVES = 3, WAVES = 11, GAP = 2.2, DEAD = 1.3, INV = 2.2;
+  var KIND = {
+    s: { hp: 1, pts: 10, r: 12 },       // scout
+    w: { hp: 1, pts: 20, r: 13 },       // winged raider
+    b: { hp: 2, pts: 40, r: 14 },       // armoured raider, two hits
+    k: { hp: 18, pts: 600, r: 28, boss: true } // the flagship of the last wave
+  };
+  // Ten formations, eight columns wide, top row first. A run plays all ten in an
+  // order drawn from its seed (the daily run's order is the day's), then the short
+  // final wave with the flagship.
+  var TEMPLATES = [
+    ['..wwww..', 'ssssssss', '.ssssss.'],
+    ['b..bb..b', 'wwwwwwww', 'ss.ss.ss'],
+    ['.wwwwww.', 'w.ssss.w', 'ssssssss'],
+    ['..bbbb..', '.wwwwww.', 'ssssssss'],
+    ['w.w.w.w.', '.s.s.s.s', 'w.w.w.w.', '.s.s.s.s'],
+    ['bb....bb', 'wwwwwwww', 'ssssssss'],
+    ['...bb...', '..wwww..', '.ssssss.', 'ssssssss'],
+    ['b.b..b.b', 'ww.ww.ww', '.ssssss.'],
+    ['.bbbbbb.', 'w......w', 'wwssssww'],
+    ['bwwbbwwb', '.s.ss.s.', 'ssssssss']
+  ];
+  var FINAL = [{ k: 'k', c: 3.5, r: 0.3 }, { k: 'w', c: 0, r: 1.6 }, { k: 'w', c: 1, r: 1.6 }, { k: 'w', c: 6, r: 1.6 }, { k: 'w', c: 7, r: 1.6 },
+    { k: 's', c: 2, r: 2.6 }, { k: 's', c: 3, r: 2.6 }, { k: 's', c: 4, r: 2.6 }, { k: 's', c: 5, r: 2.6 }];
+  var STATES = { wait: 1, enter: 1, form: 1, dive: 1, back: 1 };
+
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function rnd(S) {
+    var t = (S.rs = (S.rs + 0x6D2B79F5) | 0);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  // How hard the current wave is, 0 on the first and 1 from the tenth: a wave's
+  // place in the run sets the pace, its formation only sets the shape
+  function lv(S) { return clamp((S.wave - 1) / 9, 0, 1); }
+  function diveGap(S) { return (3.2 - 1.7 * lv(S)) * (S.foes.length <= 3 ? 0.55 : 1); }
+  function maxDivers(S) { return 1 + Math.floor(lv(S) * 2.5); }
+  function fireGap(S) { return 1.7 - 0.85 * lv(S); }
+  function ebV(S) { return 210 + 90 * lv(S); }
+  function diveV(S) { return 190 + 110 * lv(S); }
+
+  function sway(S) { return 24 * Math.sin(S.t * 0.85); }
+  function slot(S, f) { return { x: W / 2 + (f.c - 3.5) * 36 + sway(S), y: 84 + f.r * 34 }; }
+
+  function newRun(seed) {
+    seed = (seed >>> 0) || 1;
+    var S = {
+      v: 1, seed: seed, rs: seed | 0, t: 0, wave: 0, phase: 'gap', timer: 0.8, lives: LIVES,
+      score: 0, kills: 0, shots: 0, hits: 0, clean: 0, streak: 0, top: 0, lost: false, bonus: 0, won: false, over: false,
+      p: { x: W / 2, cd: 0, dead: 0, inv: 0 }, pb: [], eb: [], foes: [], diveT: 0, fireT: 0, bossT: 0, order: []
+    };
+    var o = [];
+    for (var i = 0; i < TEMPLATES.length; i++) o.push(i);
+    for (var j = o.length - 1; j > 0; j--) { var k = Math.floor(rnd(S) * (j + 1)), x = o[j]; o[j] = o[k]; o[k] = x; }
+    S.order = o;
+    return S;
+  }
+
+  function startWave(S) {
+    S.wave++;
+    var list = [];
+    if (S.wave < WAVES) {
+      var T = TEMPLATES[S.order[S.wave - 1]];
+      for (var r = 0; r < T.length; r++) for (var c = 0; c < 8; c++) if (KIND[T[r][c]]) list.push({ k: T[r][c], c: c, r: r });
+    } else list = FINAL.map(function (f) { return { k: f.k, c: f.c, r: f.r }; });
+    // rows fly in one after another, each half from its own side of the sky
+    S.foes = list.map(function (f, i) {
+      var side = f.c < 3.5 ? -1 : 1, s = slot(S, f);
+      return {
+        id: S.wave * 100 + i, k: f.k, c: f.c, r: f.r, hp: KIND[f.k].hp, st: 'wait',
+        d: 0.2 + Math.floor(f.r) * 0.55 + Math.abs(f.c - 3.5) * 0.07,
+        x: clamp(s.x + side * 160, -40, W + 40), y: -30, vx: 0, vy: 0, side: side, dt: 0, sh: 0, shootY: 0, fl: 0
+      };
+    });
+    S.pb = []; S.eb = []; S.lost = false; S.bonus = 0;
+    S.diveT = diveGap(S) + 1.6; S.fireT = fireGap(S) + 1.2; S.bossT = 2;
+    S.phase = 'play';
+  }
+
+  function enemyShot(S, x, y, vx, vy) { S.eb.push({ x: x, y: y, vx: vx, vy: vy }); }
+  function aimed(S, f, speed) {
+    var dx = S.p.x - f.x, dy = PY - f.y, d = Math.hypot(dx, dy) || 1;
+    enemyShot(S, f.x, f.y + 10, dx / d * speed, Math.max(0.5, dy / d) * speed);
+  }
+
+  function kill(S, f, ev) {
+    var pts = KIND[f.k].pts * (f.st === 'dive' ? 2 : 1);
+    S.score += pts; S.kills++;
+    S.foes.splice(S.foes.indexOf(f), 1);
+    ev.push({ e: 'kill', k: f.k, x: f.x, y: f.y, pts: pts });
+  }
+
+  function die(S, ev) {
+    var p = S.p;
+    S.lives--; S.lost = true; S.streak = 0;
+    p.dead = DEAD; p.inv = 0; S.eb = [];
+    ev.push({ e: 'die', x: p.x, y: PY });
+    if (S.lives <= 0) { S.over = true; S.phase = 'over'; ev.push({ e: 'over' }); }
+  }
+
+  // inp: { x: where the ship should go (sky units) or null, dir: -1, 0 or 1 from the
+  // keys, fire: true while the player shoots }. Returns what happened, for the
+  // page's sounds and sparks.
+  function step(S, inp) {
+    var ev = [];
+    if (S.over) return ev;
+    inp = inp || {};
+    S.t += DT;
+    var p = S.p, i, f;
+
+    if (S.phase === 'gap') {
+      S.timer -= DT;
+      if (S.timer <= 0) { startWave(S); ev.push({ e: 'wave', n: S.wave }); }
+    }
+
+    // the ship
+    if (p.dead > 0) {
+      p.dead -= DT;
+      if (p.dead <= 0) { p.dead = 0; p.inv = INV; }
+    } else {
+      if (p.inv > 0) p.inv = Math.max(0, p.inv - DT);
+      var dir = clamp(+inp.dir || 0, -1, 1);
+      if (dir) p.x += dir * KSPEED * DT;
+      else if (typeof inp.x === 'number' && isFinite(inp.x)) { var dx = inp.x - p.x, m = PSPEED * DT; p.x += clamp(dx, -m, m); }
+      p.x = clamp(p.x, 18, W - 18);
+      p.cd = Math.max(0, p.cd - DT);
+      if (inp.fire && p.cd <= 0 && S.phase === 'play' && S.pb.length < PBMAX) { S.pb.push({ x: p.x, y: PY - 18 }); p.cd = COOL; S.shots++; ev.push({ e: 'shot' }); }
+    }
+
+    // own shots
+    for (i = S.pb.length - 1; i >= 0; i--) {
+      var b = S.pb[i];
+      b.y -= BV * DT;
+      if (b.y < -20) { S.pb.splice(i, 1); continue; }
+      for (var j = 0; j < S.foes.length; j++) {
+        f = S.foes[j];
+        if (f.st === 'wait') continue;
+        var R = KIND[f.k].r;
+        if (Math.abs(b.x - f.x) < R + 2 && Math.abs(b.y - f.y) < R + 6) {
+          S.pb.splice(i, 1); S.hits++;
+          f.hp--; f.fl = 0.12;
+          if (f.hp <= 0) kill(S, f, ev);
+          else ev.push({ e: 'hit', k: f.k, x: f.x, y: f.y });
+          break;
+        }
+      }
+    }
+
+    // the raiders
+    var divers = 0;
+    for (i = S.foes.length - 1; i >= 0; i--) {
+      f = S.foes[i];
+      if (f.fl > 0) f.fl = Math.max(0, f.fl - DT);
+      var s = slot(S, f);
+      if (f.st === 'wait') {
+        f.d -= DT;
+        if (f.d <= 0) f.st = 'enter';
+        continue;
+      }
+      if (f.st === 'enter' || f.st === 'back') {
+        var ex = s.x - f.x, ey = s.y - f.y, ed = Math.hypot(ex, ey), sp = (f.st === 'enter' ? 300 : 230) * DT;
+        if (ed <= sp + 1) { f.x = s.x; f.y = s.y; f.st = 'form'; }
+        else {
+          // a swirl on the way in, gone near the slot so the raider settles
+          var curl = f.st === 'enter' ? clamp((ed - 50) / 200, 0, 0.7) * f.side : 0;
+          var ux = ex / ed, uy = ey / ed;
+          var mx = ux - uy * curl, my = uy + ux * curl, md = Math.hypot(mx, my) || 1;
+          f.x += mx / md * sp; f.y += my / md * sp;
+        }
+      } else if (f.st === 'form') {
+        f.x = s.x; f.y = s.y;
+      } else if (f.st === 'dive') {
+        divers++;
+        f.dt += DT;
+        if (f.dt < 0.4) { f.vx = f.side * 110; f.vy = -90; }
+        else {
+          f.vy = Math.min(diveV(S), f.vy + 620 * DT);
+          if (f.y < PY - 60 && p.dead === 0) f.vx = clamp(f.vx + clamp((p.x - f.x) * 4, -420, 420) * DT, -160, 160);
+        }
+        f.x += f.vx * DT; f.y += f.vy * DT;
+        if (f.x < 12 || f.x > W - 12) { f.x = clamp(f.x, 12, W - 12); f.vx = -f.vx; }
+        if (f.sh > 0 && f.y > f.shootY && f.vy > 0 && p.dead === 0) { aimed(S, f, ebV(S) * 1.1); f.sh--; f.shootY += 110; ev.push({ e: 'eshot' }); }
+        // a diver that misses goes out at the bottom and comes back in at the top
+        if (f.y > H + 30) { f.y = -30; f.x = s.x; f.st = 'back'; }
+      }
+      // ramming the ship costs a life, and the raider too
+      if (p.dead === 0 && p.inv === 0 && S.phase === 'play' && f.st !== 'wait' && Math.hypot(f.x - p.x, f.y - PY) < KIND[f.k].r + PR - 2) {
+        kill(S, f, ev);
+        die(S, ev);
+        if (S.over) return ev;
+      }
+    }
+
+    if (S.phase === 'play' && p.dead === 0) {
+      // dives
+      S.diveT -= DT;
+      if (S.diveT <= 0) {
+        var ready = S.foes.filter(function (x) { return x.st === 'form' && !KIND[x.k].boss; });
+        if (ready.length && divers < maxDivers(S)) {
+          f = ready[Math.floor(rnd(S) * ready.length)];
+          f.st = 'dive'; f.dt = 0; f.side = f.x < p.x ? -1 : 1; f.vx = 0; f.vy = -90;
+          f.sh = lv(S) < 0.3 ? 1 : 2; f.shootY = 170 + rnd(S) * 90;
+          ev.push({ e: 'dive', k: f.k });
+        }
+        S.diveT = diveGap(S) + rnd(S) * 0.8;
+      }
+      // shots from the formation: only the lowest raider of a column fires
+      S.fireT -= DT;
+      if (S.fireT <= 0) {
+        S.fireT = fireGap(S) * (0.7 + rnd(S) * 0.6);
+        var low = S.foes.filter(function (x) {
+          if (x.st !== 'form' || KIND[x.k].boss) return false;
+          for (var q = 0; q < S.foes.length; q++) { var o = S.foes[q]; if (o !== x && o.st === 'form' && Math.abs(o.c - x.c) < 0.5 && o.r > x.r) return false; }
+          return true;
+        });
+        if (low.length) {
+          f = low[Math.floor(rnd(S) * low.length)];
+          enemyShot(S, f.x, f.y + 10, clamp((p.x - f.x) * 0.25, -60, 60), ebV(S));
+          ev.push({ e: 'eshot' });
+        }
+      }
+      // the flagship fires a fan of three
+      var boss = null;
+      for (i = 0; i < S.foes.length; i++) if (KIND[S.foes[i].k].boss && S.foes[i].st === 'form') boss = S.foes[i];
+      if (boss) {
+        S.bossT -= DT;
+        if (S.bossT <= 0) {
+          S.bossT = 1.5 + rnd(S) * 0.5;
+          var a0 = Math.atan2(p.x - boss.x, PY - boss.y), v = ebV(S);
+          for (var n = -1; n <= 1; n++) { var a = a0 + n * 0.28; enemyShot(S, boss.x, boss.y + 16, Math.sin(a) * v, Math.cos(a) * v); }
+          ev.push({ e: 'eshot' });
+        }
+      }
+    }
+
+    // enemy shots
+    for (i = S.eb.length - 1; i >= 0; i--) {
+      var e = S.eb[i];
+      e.x += e.vx * DT; e.y += e.vy * DT;
+      if (e.y > H + 10 || e.x < -10 || e.x > W + 10) { S.eb.splice(i, 1); continue; }
+      if (p.dead === 0 && p.inv === 0 && S.phase === 'play' && Math.hypot(e.x - p.x, e.y - PY) < PR + EBR) {
+        S.eb.splice(i, 1);
+        die(S, ev);
+        if (S.over) return ev;
+        break;
+      }
+    }
+
+    // the wave is cleared
+    if (S.phase === 'play' && S.foes.length === 0) {
+      if (!S.lost) { S.bonus = 100 * S.wave; S.score += S.bonus; S.clean++; S.streak++; S.top = Math.max(S.top, S.streak); ev.push({ e: 'clean', n: S.bonus }); }
+      ev.push({ e: 'cleared', n: S.wave });
+      S.eb = []; S.pb = [];
+      if (S.wave >= WAVES) {
+        var lb = 500 * S.lives;
+        S.score += lb; S.won = true; S.over = true; S.phase = 'over';
+        ev.push({ e: 'win', n: lb });
+      } else { S.phase = 'gap'; S.timer = GAP; }
+    }
+    return ev;
+  }
+
+  function score(S) { return S.score; }
+  function cleared(S) { return S.won ? WAVES : Math.max(0, S.wave - 1 + (S.phase === 'gap' && S.wave > 0 ? 1 : 0)); }
+  function clone(S) { return JSON.parse(JSON.stringify(S)); }
+  function snapshot(S) { return clone(S); }
+
+  // A saved run comes back only if every part of it makes sense
+  function restore(o) {
+    try {
+      if (!o || o.v !== 1 || typeof o !== 'object') return null;
+      var num = function (x) { return typeof x === 'number' && isFinite(x); };
+      if (!['t', 'wave', 'timer', 'lives', 'score', 'kills', 'shots', 'hits', 'clean', 'streak', 'top', 'rs', 'seed', 'diveT', 'fireT', 'bossT'].every(function (k) { return num(o[k]); })) return null;
+      if (o.wave < 0 || o.wave > WAVES || o.lives < 1 || o.lives > LIVES || o.score < 0 || o.over) return null;
+      if (o.phase !== 'play' && o.phase !== 'gap') return null;
+      if (!o.p || !num(o.p.x) || !num(o.p.cd) || !num(o.p.dead) || !num(o.p.inv)) return null;
+      if (!Array.isArray(o.order) || o.order.length !== TEMPLATES.length || o.order.slice().sort(function (a, b) { return a - b; }).join() !== TEMPLATES.map(function (_, i) { return i; }).join()) return null;
+      if (!Array.isArray(o.pb) || !Array.isArray(o.eb) || !Array.isArray(o.foes)) return null;
+      if (!o.pb.every(function (b) { return b && num(b.x) && num(b.y); })) return null;
+      if (!o.eb.every(function (b) { return b && num(b.x) && num(b.y) && num(b.vx) && num(b.vy); })) return null;
+      if (!o.foes.every(function (f) { return f && KIND[f.k] && STATES[f.st] && ['x', 'y', 'c', 'r', 'hp', 'd', 'vx', 'vy', 'dt', 'sh', 'shootY', 'fl', 'side'].every(function (k) { return num(f[k]); }) && f.hp >= 1; })) return null;
+      return clone(o);
+    } catch (er) { return null; }
+  }
+
+  var api = {
+    W: W, H: H, DT: DT, PY: PY, PR: PR, LIVES: LIVES, WAVES: WAVES, KIND: KIND, TEMPLATES: TEMPLATES, COOL: COOL,
+    newRun: newRun, step: step, score: score, cleared: cleared, clone: clone, snapshot: snapshot, restore: restore, slot: slot, level: lv
+  };
+  if (typeof self !== 'undefined') self.StarRaidEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = StarRaidEngineFactory;
+/* ==== ENGINE END ==== */
+
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el, E = StarRaidEngineFactory();
+  C.boot({});
+  var ctx = C.game({
+    id: 'starraid',
+    name: { fa: 'یورش', en: 'Star Raid', zh: '星际突袭', de: 'Sternenangriff', es: 'Asalto estelar', pl: 'Gwiezdny najazd' },
+    accent: '#133DE7',
+    mood: 'tower-defence',
+    strings: {
+      fa: {
+        field: 'آسمان شب و مهاجم‌ها', srScore: 'امتیاز', srWave: 'موج', srLives: 'سفینه‌ها', waveN: 'موج {n}', finalWave: 'موج آخر',
+        cleanN: 'بی‌آسیب +{n}', how: 'انگشتت را هرجا بکش؛ سفینه دنبالش می‌رود و خودش شلیک می‌کند.', tapGo: 'بزن تا ادامه بدهی',
+        newRun: 'یورش تازه', dailySr: 'یورش روزانه', bestN: 'بهترین {n}', scoreN: 'امتیاز {n}', downed: 'مهاجم‌های زده‌شده', wavesDone: 'موج‌های پاک‌شده',
+        accuracy: 'دقت', victory: 'آسمان پاک شد', shotDown: 'سفینه‌هایت تمام شد', kMove: 'جابه‌جایی سفینه', kFire: 'شلیک (نگه دار)', kGo: 'ادامه بعد از توقف',
+        rules: 'مهاجم‌ها دسته‌دسته از بالا می‌آیند، در صف تاب می‌خورند و گاهی یکی به سمت سفینه‌ات شیرجه می‌زند و از بالا برمی‌گردد. ده موج و یک موج کوتاه آخر با ناو فرماندهی داری. سه سفینه داری؛ هر تیر یا برخورد یکی را می‌گیرد. هر مهاجم امتیاز دارد و مهاجمی که در حال شیرجه زده شود دو برابر. موجی که بی‌آسیب تمام شود جایزه دارد. چالش روزانه برای همه همان ترتیب موج‌هاست.',
+        tutTitle1: 'آسمان را پاک کن', tutText1: 'یازده موج مهاجم می‌آیند. همه را بزن تا یورش تمام شود؛ سه سفینه داری.',
+        tutTitle2: 'هرجا بکش', tutText2: 'انگشتت را هرجای صفحه بگذار و به چپ و راست بکش. سفینه همراهش می‌رود و تا انگشتت روی صفحه است شلیک می‌کند.',
+        tutTitle3: 'شیرجه‌ها', tutText3: 'بعضی مهاجم‌ها شیرجه می‌زنند و تیر می‌اندازند. کنار بکش، و اگر وسط شیرجه بزنی‌شان امتیاز دو برابر است.'
+      },
+      en: {
+        field: 'Night sky with raiders', srScore: 'Score', srWave: 'Wave', srLives: 'Ships', waveN: 'Wave {n}', finalWave: 'Final wave',
+        cleanN: 'Unharmed +{n}', how: 'Drag anywhere; the ship follows your finger and fires on its own.', tapGo: 'Tap to go on',
+        newRun: 'New raid', dailySr: 'Daily raid', bestN: 'Best {n}', scoreN: 'Score {n}', downed: 'Raiders downed', wavesDone: 'Waves cleared',
+        accuracy: 'Accuracy', victory: 'The sky is clear', shotDown: 'Out of ships', kMove: 'Move the ship', kFire: 'Fire (hold)', kGo: 'Go on after a pause',
+        rules: 'Raiders arrive in groups from the top, sway in formation, and now and then one dives at your ship and comes back in from the top. There are ten waves and a short final wave with the flagship. You have three ships; a shot or a crash costs one. Every raider scores, and a raider hit during its dive scores double. A wave cleared without losing a ship earns a bonus. The daily run has the same wave order for everyone.',
+        tutTitle1: 'Clear the sky', tutText1: 'Eleven waves of raiders are coming. Shoot them all to end the raid; you have three ships.',
+        tutTitle2: 'Drag anywhere', tutText2: 'Put a finger anywhere on the screen and slide left and right. The ship moves with it and fires while your finger is down.',
+        tutTitle3: 'Dives', tutText3: 'Some raiders dive and shoot. Slide out of the way, and hit them mid-dive for double points.'
+      },
+      pl: {
+        field: 'Nocne niebo z najeźdźcami', srScore: 'Wynik', srWave: 'Fala', srLives: 'Statki', waveN: 'Fala {n}', finalWave: 'Ostatnia fala',
+        cleanN: 'Bez strat +{n}', how: 'Przesuwaj palec w dowolnym miejscu; statek podąża za nim i sam strzela.', tapGo: 'Dotknij, aby kontynuować',
+        newRun: 'Nowy najazd', dailySr: 'Codzienny najazd', bestN: 'Rekord {n}', scoreN: 'Wynik {n}', downed: 'Zestrzeleni najeźdźcy', wavesDone: 'Odparte fale',
+        accuracy: 'Celność', victory: 'Niebo jest czyste', shotDown: 'Koniec statków', kMove: 'Ruch statku', kFire: 'Strzał (przytrzymaj)', kGo: 'Kontynuuj po pauzie',
+        rules: 'Najeźdźcy nadlatują grupami z góry, kołyszą się w szyku, a co jakiś czas jeden nurkuje na Twój statek i wraca od góry. Czeka Cię dziesięć fal i krótka ostatnia fala z okrętem flagowym. Masz trzy statki; każdy pocisk lub zderzenie zabiera jeden. Każdy najeźdźca daje punkty, a trafiony w trakcie nurkowania – podwójne. Fala odparta bez utraty statku daje premię. Codzienny najazd ma tę samą kolejność fal dla wszystkich.',
+        tutTitle1: 'Oczyść niebo', tutText1: 'Nadciąga jedenaście fal najeźdźców. Zestrzel wszystkich, aby zakończyć najazd; masz trzy statki.',
+        tutTitle2: 'Przesuwaj gdziekolwiek', tutText2: 'Połóż palec w dowolnym miejscu ekranu i przesuwaj w lewo i w prawo. Statek podąża za nim i strzela, dopóki palec jest na ekranie.',
+        tutTitle3: 'Nurkowanie', tutText3: 'Niektórzy najeźdźcy nurkują i strzelają. Usuń się z drogi, a trafienie w trakcie nurkowania daje podwójne punkty.'
+      },
+      zh: {
+        field: '夜空中的入侵者', srScore: '得分', srWave: '波次', srLives: '飞船', waveN: '第 {n} 波', finalWave: '最后一波',
+        cleanN: '无损 +{n}', how: '在任意位置拖动手指，飞船会跟着移动并自动射击。', tapGo: '点击继续',
+        newRun: '新的突袭', dailySr: '每日突袭', bestN: '最佳 {n}', scoreN: '得分 {n}', downed: '击落的入侵者', wavesDone: '清除的波次',
+        accuracy: '命中率', victory: '天空肃清了', shotDown: '飞船用完了', kMove: '移动飞船', kFire: '射击（按住）', kGo: '暂停后继续',
+        rules: '入侵者成群从上方飞来，在队形中摇摆，不时有一个俯冲向你的飞船，再从上方飞回。共有十波，外加有旗舰的简短最后一波。你有三艘飞船，每次被击中或相撞损失一艘。每个入侵者都有分数，在俯冲中击落得双倍。一波中没有损失飞船可获得奖励。每日突袭对所有人都是相同的波次顺序。',
+        tutTitle1: '肃清天空', tutText1: '十一波入侵者即将到来。全部击落即可结束突袭；你有三艘飞船。',
+        tutTitle2: '随处拖动', tutText2: '把手指放在屏幕任意位置并左右滑动。飞船会跟着移动，手指按住时持续射击。',
+        tutTitle3: '俯冲', tutText3: '有些入侵者会俯冲并射击。及时躲开，在俯冲中击中它们得双倍分数。'
+      },
+      de: {
+        field: 'Nachthimmel mit Angreifern', srScore: 'Punkte', srWave: 'Welle', srLives: 'Schiffe', waveN: 'Welle {n}', finalWave: 'Letzte Welle',
+        cleanN: 'Unversehrt +{n}', how: 'Wisch irgendwo; das Schiff folgt deinem Finger und schießt von selbst.', tapGo: 'Tippe zum Weiterspielen',
+        newRun: 'Neuer Angriff', dailySr: 'Angriff des Tages', bestN: 'Bestwert {n}', scoreN: 'Punkte {n}', downed: 'Abgeschossene Angreifer', wavesDone: 'Geschaffte Wellen',
+        accuracy: 'Treffsicherheit', victory: 'Der Himmel ist frei', shotDown: 'Keine Schiffe mehr', kMove: 'Schiff bewegen', kFire: 'Schießen (halten)', kGo: 'Nach einer Pause weiter',
+        rules: 'Die Angreifer kommen in Gruppen von oben, schaukeln in Formation, und hin und wieder stürzt sich einer auf dein Schiff und kommt von oben zurück. Es gibt zehn Wellen und eine kurze letzte Welle mit dem Flaggschiff. Du hast drei Schiffe; ein Treffer oder Zusammenstoß kostet eines. Jeder Angreifer bringt Punkte, im Sturzflug getroffen doppelt. Eine Welle ohne Verlust bringt einen Bonus. Der Angriff des Tages hat für alle dieselbe Reihenfolge der Wellen.',
+        tutTitle1: 'Mach den Himmel frei', tutText1: 'Elf Wellen von Angreifern kommen. Schieß alle ab, um den Angriff zu beenden; du hast drei Schiffe.',
+        tutTitle2: 'Wisch irgendwo', tutText2: 'Leg einen Finger irgendwo auf den Bildschirm und wisch nach links und rechts. Das Schiff folgt und schießt, solange der Finger unten ist.',
+        tutTitle3: 'Sturzflüge', tutText3: 'Manche Angreifer stürzen herab und schießen. Weich aus – und triffst du sie im Sturzflug, gibt es doppelte Punkte.'
+      },
+      es: {
+        field: 'Cielo nocturno con invasores', srScore: 'Puntos', srWave: 'Oleada', srLives: 'Naves', waveN: 'Oleada {n}', finalWave: 'Última oleada',
+        cleanN: 'Sin daños +{n}', how: 'Desliza el dedo por cualquier sitio; la nave lo sigue y dispara sola.', tapGo: 'Toca para seguir',
+        newRun: 'Nuevo asalto', dailySr: 'Asalto diario', bestN: 'Récord {n}', scoreN: 'Puntos {n}', downed: 'Invasores derribados', wavesDone: 'Oleadas superadas',
+        accuracy: 'Puntería', victory: 'El cielo está despejado', shotDown: 'Sin naves', kMove: 'Mover la nave', kFire: 'Disparar (mantener)', kGo: 'Seguir tras una pausa',
+        rules: 'Los invasores llegan en grupos desde arriba, se balancean en formación y, de vez en cuando, uno se lanza en picado hacia tu nave y vuelve a entrar por arriba. Hay diez oleadas y una última oleada corta con la nave insignia. Tienes tres naves; un disparo o un choque te cuesta una. Cada invasor da puntos, y si lo derribas en picado, el doble. Una oleada superada sin perder ninguna nave da una bonificación. El asalto diario tiene el mismo orden de oleadas para todos.',
+        tutTitle1: 'Despeja el cielo', tutText1: 'Llegan once oleadas de invasores. Derríbalos a todos para terminar el asalto; tienes tres naves.',
+        tutTitle2: 'Desliza donde quieras', tutText2: 'Pon un dedo en cualquier parte de la pantalla y deslízalo a izquierda y derecha. La nave lo sigue y dispara mientras tu dedo esté apoyado.',
+        tutTitle3: 'Picados', tutText3: 'Algunos invasores se lanzan en picado y disparan. Apártate, y derríbalos en pleno picado para ganar el doble.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+
+  // S: the run. waiting: held until a tap or a key, after a return from the
+  // background or a restored save, so nobody is dropped straight into enemy fire
+  var S = null, raf = 0, last = 0, acc = 0, paused = false, waiting = false, ended = false, startedAt = 0, touched = false;
+  var sparks = [], hudKey = '';
+
+  var cv = el('canvas', { class: 'sr-canvas', role: 'img', 'aria-label': C.t('field') });
+  var box = el('div', { class: 'sr-box' }, [cv]);
+  var top = el('div', { class: 'sr-top ch-above' });
+  var vScore = el('span', { class: 'sr-pill__value', text: '0' }), vWave = el('span', { class: 'sr-pill__value', text: '0' }), vLives = el('span', { class: 'sr-lives' });
+  var hud = el('div', { class: 'sr-hud ch-above' }, [
+    el('div', { class: 'sr-pill' }, [el('span', { class: 'sr-pill__label', text: C.t('srScore') }), vScore]),
+    el('div', { class: 'sr-pill' }, [el('span', { class: 'sr-pill__label', text: C.t('srWave') }), vWave]),
+    el('div', { class: 'sr-pill' }, [el('span', { class: 'sr-pill__label', text: C.t('srLives') }), vLives])
+  ]);
+  var status = el('div', { class: 'sr-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'sr-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, hud, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newRun'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ setup */
+
+  function newRun() {
+    var seed = dailyDate ? C.daily('starraid', dailyDate).seed : Math.floor(Math.random() * 4294967295);
+    S = E.newRun(seed);
+    ended = false; waiting = false; acc = 0; last = 0; sparks = []; startedAt = Date.now();
+    render(); kick();
+  }
+  function askNew() {
+    if (!S || ended || S.wave === 0) { newRun(); return; }
+    C.ui.confirm({ title: C.t('newRun'), body: C.t('resetWarn'), onOk: function () { ctx.clearSave(); newRun(); } });
+  }
+
+  /* -------------------------------------------------------------- loop */
+
+  function blocked() { return paused || waiting || document.hidden || !!document.querySelector('.ch-scrim'); }
+  function tick(now) {
+    raf = 0;
+    if (!S) return;
+    var stop = blocked() || ended;
+    if (!last || stop) last = now;
+    acc += Math.min(0.1, (now - last) / 1000);
+    last = now;
+    if (stop) acc = 0;
+    var ev = [], inp = input();
+    while (acc >= E.DT) {
+      acc -= E.DT;
+      var e = E.step(S, inp);
+      if (e.length) ev = ev.concat(e);
+      if (S.over) { acc = 0; break; }
+    }
+    if (ev.length) events(ev);
+    draw();
+    if (S.over && !ended) { ended = true; ctx.clearSave(); renderHud(); setTimeout(finish, C.ui.reduceMotion() ? 250 : 1200); }
+    // nothing moves behind a dialog or while the app is away: stop asking for frames
+    if (!document.hidden && !paused && (!ended || sparks.length)) raf = requestAnimationFrame(tick);
+  }
+  function kick() { if (!raf) raf = requestAnimationFrame(tick); }
+
+  var COLORS = { s: '#2FD3A6', w: '#FF5FA2', b: '#FFB23F', k: '#A66BFF' };
+  function spark(x, y, col, big) { sparks.push({ x: x, y: y, col: col, t0: performance.now(), big: !!big }); }
+
+  function events(ev) {
+    var shot = false, save = false;
+    for (var i = 0; i < ev.length; i++) {
+      var e = ev[i];
+      if (e.e === 'shot') shot = true;
+      else if (e.e === 'hit') { C.audio.sfx('hit'); spark(e.x, e.y, COLORS[e.k], false); }
+      else if (e.e === 'kill') { C.audio.sfx(E.KIND[e.k].boss ? 'boom' : 'pop'); spark(e.x, e.y, COLORS[e.k], true); }
+      else if (e.e === 'die') { C.audio.sfx('boom'); C.feedback('bad'); spark(e.x, e.y, '#7FA6FF', true); save = true; }
+      else if (e.e === 'clean') C.audio.sfx('coin');
+      else if (e.e === 'cleared') { C.feedback('good'); save = true; }
+      else if (e.e === 'wave') { C.audio.sfx('select'); save = true; }
+    }
+    if (shot) C.audio.sfx('shoot');
+    renderHud();
+    if (save && !S.over) ctx.save();
+  }
+
+  /* ------------------------------------------------------------ result */
+
+  function finish() {
+    var n = E.score(S), won = S.won, note = null, waves = E.cleared(S);
+    var coins = won ? 24 : Math.max(2, Math.round(waves * 1.6)), points = won ? 90 : Math.max(3, waves * 7);
+    if (won) C.achievements.unlock('sr-win');
+    if (S.top >= 3) C.achievements.unlock('sr-clean');
+    var lines = [
+      { label: C.t('wavesDone'), value: C.num(waves) + ' / ' + C.num(E.WAVES) },
+      { label: C.t('downed'), value: C.num(S.kills) },
+      { label: C.t('accuracy'), value: C.num(S.shots ? Math.round(S.hits / S.shots * 100) : 0) + (C.isRtl() ? '٪' : '%') }
+    ];
+    if (dailyDate) {
+      if (S.wave >= 6 || won) C.achievements.unlock('sr-daily');
+      if (!C.stats.daily('starraid', dailyDate, { label: C.t('scoreN', { n: C.num(n) }), win: won })) { coins = Math.max(1, Math.round(coins * 0.2)); points = Math.max(1, Math.round(points * 0.2)); }
+    } else {
+      if (C.stats.best('starraid', 'score', n) && n > 0) note = C.t('bestN', { n: C.num(n) });
+      lines.push({ label: C.t('best'), value: C.num(C.stats.getBest('starraid', 'score') || n) });
+    }
+    var shot = E.clone(S);
+    ctx.finish({
+      won: won,
+      title: won ? C.t('victory') : C.t('shotDown'),
+      note: note, timeMs: Date.now() - startedAt, coins: coins, points: points,
+      lines: [{ label: C.t('srScore'), value: C.num(n) }].concat(lines),
+      shareText: 'چوگان · یورش' + (dailyDate ? ('\nروزانه ' + dailyDate) : '') + '\nامتیاز ' + n + ' · موج ' + waves + ' از ' + E.WAVES,
+      paint: function (g, w, h) {
+        var k = Math.min(w / E.W, h / E.H);
+        g.save(); g.translate((w - E.W * k) / 2, (h - E.H * k) / 2); g.scale(k, k);
+        paint(g, shot, 0);
+        g.restore();
+      },
+      againLabel: C.t('newRun'),
+      onAgain: function () { newRun(); }
+    });
+  }
+
+  /* ------------------------------------------------------------- saves */
+
+  // A run in progress is saved at every wave and every lost ship, and when the app
+  // goes away; it comes back waiting for a tap
+  ctx.autosave(function () {
+    if (!S || S.over || ended || S.wave === 0) return { inProgress: false };
+    return { s: E.snapshot(S), daily: dailyDate || null, elapsed: Date.now() - startedAt };
+  });
+  function restore(sv) {
+    if (!sv || !sv.s || (sv.daily || null) !== (dailyDate || null)) return false;
+    var R = E.restore(sv.s);
+    if (!R) return false;
+    S = R; startedAt = Date.now() - (+sv.elapsed || 0);
+    ended = false; waiting = true; acc = 0; last = 0; sparks = [];
+    render(); kick();
+    return true;
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  // Touch: a finger anywhere steers by how far it slides, so it never has to sit on
+  // (and hide) the ship; the ship fires while a finger is down. Mouse: the ship
+  // follows the pointer, a held button fires. Keys: arrows or A/D move, Space fires.
+  var drag = null, mouseX = null, mouseDown = false, keys = { l: false, r: false, f: false };
+  function unit() { var r = cv.getBoundingClientRect(); return E.W / (r.width || 1); }
+  function fieldX(e) { var r = cv.getBoundingClientRect(); return (e.clientX - r.left) / (r.width || 1) * E.W; }
+  function input() {
+    var dir = (keys.r ? 1 : 0) - (keys.l ? 1 : 0);
+    return { dir: dir, x: drag ? drag.want : mouseX, fire: !!drag || mouseDown || keys.f };
+  }
+  function go() { if (waiting) { waiting = false; last = 0; renderStatus(); kick(); } }
+  function letGo() { drag = null; mouseDown = false; keys = { l: false, r: false, f: false }; }
+
+  wrap.addEventListener('pointerdown', function (e) {
+    if (!S || (e.target.closest && e.target.closest('button, .ch-badge, a'))) return;
+    e.preventDefault();
+    if (C.audio.unlock) C.audio.unlock();
+    go();
+    if (!touched) { touched = true; renderStatus(); }
+    if (e.pointerType === 'mouse') { mouseDown = true; mouseX = fieldX(e); return; }
+    drag = { id: e.pointerId, x0: e.clientX, s0: S.p.x, want: S.p.x };
+    try { wrap.setPointerCapture(e.pointerId); } catch (er) { /* old browsers */ }
+  });
+  wrap.addEventListener('pointermove', function (e) {
+    if (drag && e.pointerId === drag.id) {
+      var k = unit(), w = drag.s0 + (e.clientX - drag.x0) * k, c = Math.max(18, Math.min(E.W - 18, w));
+      // at a wall the drag starts again from there, so turning back moves at once
+      if (c !== w) { drag.s0 = c; drag.x0 = e.clientX; }
+      drag.want = c;
+    } else if (e.pointerType === 'mouse') { mouseX = fieldX(e); }
+  });
+  function lift(e) { if (drag && e.pointerId === drag.id) drag = null; if (e.pointerType === 'mouse') mouseDown = false; }
+  wrap.addEventListener('pointerup', lift);
+  wrap.addEventListener('pointercancel', lift);
+  wrap.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim')) return;
+    var k = e.key;
+    if (k === 'ArrowLeft' || C.keyIs(e, 'a')) keys.l = true;
+    else if (k === 'ArrowRight' || C.keyIs(e, 'd')) keys.r = true;
+    else if (k === ' ' || k === 'Enter') { if (e.target && e.target.tagName === 'BUTTON') return; keys.f = true; go(); }
+    else return;
+    e.preventDefault();
+    mouseX = null;
+    if (C.audio.unlock) C.audio.unlock();
+    if (!touched) { touched = true; renderStatus(); }
+  });
+  window.addEventListener('keyup', function (e) {
+    var k = e.key;
+    if (k === 'ArrowLeft' || C.keyIs(e, 'a')) keys.l = false;
+    else if (k === 'ArrowRight' || C.keyIs(e, 'd')) keys.r = false;
+    else if (k === ' ' || k === 'Enter') keys.f = false;
+  });
+
+  // Away from the app the run holds, and it waits for a tap when the app comes back
+  function hold() { if (S && !ended && !S.over && S.wave > 0) { waiting = true; renderStatus(); } letGo(); }
+  C.onPause(function () { paused = true; hold(); ctx.save(); draw(); });
+  C.onResume(function () { paused = false; last = 0; kick(); });
+  document.addEventListener('visibilitychange', function () { if (document.hidden) { hold(); ctx.save(); } else { last = 0; kick(); } });
+  // back from the back/forward cache, the page runs on without a load (#385)
+  window.addEventListener('pageshow', function (e) { if (e.persisted) { paused = false; hold(); last = 0; kick(); } });
+  window.addEventListener('blur', letGo);
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw); } catch (er) { /* old WebViews */ } }
+  // a dialog closing does not tell the page; the loop looks again while one is open
+  setInterval(function () { if (S && !raf && !ended && !document.hidden && !paused) kick(); }, 500);
+
+  /* --------------------------------------------------------------- draw */
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  // The sky is night in both themes; the light theme gets a lighter, bluer night
+  function palette() {
+    return dark()
+      ? { sky0: '#0A1030', sky1: '#03050E', star: '#C9D6FF', text: '#F4F1FF', dim: 'rgba(244,241,255,.6)' }
+      : { sky0: '#1B2B6E', sky1: '#0B1438', star: '#E4EBFF', text: '#FFFFFF', dim: 'rgba(255,255,255,.7)' };
+  }
+  // Stars from a fixed pattern, in three depths that drift down at their own pace
+  var STARS = (function () {
+    var a = [], s = 7;
+    function r() { s = (s * 16807) % 2147483647; return s / 2147483647; }
+    for (var i = 0; i < 80; i++) a.push({ x: r() * 360, y: r() * 640, z: 1 + Math.floor(r() * 3), tw: r() * 6 });
+    return a;
+  })();
+
+  function size() {
+    // the slot's own size, both sides (#359, #474)
+    var r = box.getBoundingClientRect(), h = Math.floor(Math.min(r.height, r.width * E.H / E.W));
+    h = Math.max(120, h || 0);
+    return { w: Math.round(h * E.W / E.H), h: h };
+  }
+  function draw() {
+    if (!S) return;
+    var Z = size(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    var W = Math.round(Z.w * dpr), H = Math.round(Z.h * dpr);
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+    cv.style.width = Z.w + 'px'; cv.style.height = Z.h + 'px';
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.save(); g.scale(Z.w / E.W, Z.w / E.W);
+    paint(g, S, performance.now());
+    g.restore();
+  }
+
+  function paint(g, R, now) {
+    var P = palette(), W = E.W, H = E.H, t = R.t, i;
+    var grd = g.createLinearGradient(0, 0, 0, H);
+    grd.addColorStop(0, P.sky0); grd.addColorStop(1, P.sky1);
+    g.fillStyle = grd; g.fillRect(0, 0, W, H);
+    g.fillStyle = P.star;
+    for (i = 0; i < STARS.length; i++) {
+      var st = STARS[i], y = (st.y + t * 14 * st.z) % H;
+      g.globalAlpha = 0.25 + 0.2 * st.z + 0.15 * Math.sin(t * 2 + st.tw);
+      g.fillRect(st.x, y, st.z * 0.8, st.z * 0.8);
+    }
+    g.globalAlpha = 1;
+
+    // enemy shots: an orange core in a soft halo
+    for (i = 0; i < R.eb.length; i++) {
+      var b = R.eb[i];
+      g.fillStyle = 'rgba(255,120,60,.35)'; g.beginPath(); g.arc(b.x, b.y, 7, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#FFC46B'; g.beginPath(); g.arc(b.x, b.y, 3.5, 0, Math.PI * 2); g.fill();
+    }
+    // own shots
+    g.fillStyle = '#9FF3FF';
+    for (i = 0; i < R.pb.length; i++) { C.rrect(g, R.pb[i].x - 1.6, R.pb[i].y - 7, 3.2, 14, 1.6); g.fill(); }
+
+    for (i = 0; i < R.foes.length; i++) if (R.foes[i].st !== 'wait') raider(g, R.foes[i], t);
+
+    var p = R.p;
+    if (!(R.over && !R.won) && p.dead <= 0 && !(p.inv > 0 && Math.floor(t * 10) % 2)) ship(g, p.x, E.PY, t);
+
+    // sparks of a hit or a downed raider live in page time, outside the engine
+    if (now) {
+      for (i = sparks.length - 1; i >= 0; i--) {
+        var s = sparks[i], a = (now - s.t0) / (s.big ? 520 : 260);
+        if (a >= 1) { sparks.splice(i, 1); continue; }
+        var rr = (s.big ? 26 : 12) * a;
+        g.globalAlpha = 1 - a;
+        g.strokeStyle = s.col; g.lineWidth = 2;
+        g.beginPath(); g.arc(s.x, s.y, rr, 0, Math.PI * 2); g.stroke();
+        g.fillStyle = s.col;
+        if (s.big) for (var q = 0; q < 8; q++) { var an = q * Math.PI / 4 + 0.3; g.fillRect(s.x + Math.cos(an) * rr * 1.3 - 1.5, s.y + Math.sin(an) * rr * 1.3 - 1.5, 3, 3); }
+        g.globalAlpha = 1;
+      }
+    }
+
+    // the wave's name between waves, and the bonus of an unharmed wave
+    if (R.phase === 'gap') {
+      var font = getComputedStyle(document.body).fontFamily || 'sans-serif';
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillStyle = P.text; g.font = '800 30px ' + font;
+      var next = R.wave + 1;
+      g.fillText(next >= E.WAVES ? C.t('finalWave') : C.t('waveN', { n: C.num(next) }), W / 2, H * 0.42);
+      if (R.bonus) { g.fillStyle = '#FFD166'; g.font = '700 18px ' + font; g.fillText(C.t('cleanN', { n: C.num(R.bonus) }), W / 2, H * 0.42 + 38); }
+    }
+  }
+
+  // The player's ship: a pale hull between two blue wings, with an engine flame
+  function ship(g, x, y, t) {
+    g.save(); g.translate(x, y);
+    var fl = 7 + 3 * Math.sin(t * 38);
+    g.fillStyle = '#FF9F43'; g.beginPath(); g.moveTo(-5, 11); g.lineTo(0, 11 + fl); g.lineTo(5, 11); g.closePath(); g.fill();
+    g.fillStyle = '#FFE08A'; g.beginPath(); g.moveTo(-2.5, 11); g.lineTo(0, 11 + fl * 0.6); g.lineTo(2.5, 11); g.closePath(); g.fill();
+    g.fillStyle = '#3D6BFF';
+    g.beginPath(); g.moveTo(0, -12); g.lineTo(17, 9); g.lineTo(11, 13); g.lineTo(0, 7); g.lineTo(-11, 13); g.lineTo(-17, 9); g.closePath(); g.fill();
+    g.fillStyle = '#7FD3FF'; g.fillRect(-17, 2, 3, 9); g.fillRect(14, 2, 3, 9);
+    g.fillStyle = '#EEF2FF';
+    g.beginPath(); g.moveTo(0, -20); g.quadraticCurveTo(7, -6, 6, 12); g.lineTo(-6, 12); g.quadraticCurveTo(-7, -6, 0, -20); g.closePath(); g.fill();
+    g.fillStyle = '#133DE7'; g.beginPath(); g.ellipse(0, -5, 2.8, 5.5, 0, 0, Math.PI * 2); g.fill();
+    g.restore();
+  }
+
+  // Raiders face down, at the player: a round scout with feelers, a winged raider
+  // that beats its wings, an armoured hexagon that cracks on the first hit, and the
+  // flagship of the last wave with its armour shown as a bar
+  function raider(g, f, t) {
+    var shape = f.k, col = COLORS[shape], ph = t * 7 + f.id;
+    g.save(); g.translate(f.x, f.y);
+    if (f.st === 'dive') g.rotate(Math.max(-0.5, Math.min(0.5, -f.vx / 300)));
+    if (shape === 's') {
+      var leg = 3 * Math.sin(ph);
+      g.strokeStyle = col; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(-6, -6); g.lineTo(-9, -12); g.moveTo(6, -6); g.lineTo(9, -12);
+      g.moveTo(-8, 2); g.lineTo(-13, 6 + leg); g.moveTo(8, 2); g.lineTo(13, 6 - leg); g.stroke();
+      g.fillStyle = col; g.beginPath(); g.arc(0, 0, 9, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#0B1438'; g.beginPath(); g.arc(-3.5, 2, 2.2, 0, Math.PI * 2); g.arc(3.5, 2, 2.2, 0, Math.PI * 2); g.fill();
+    } else if (shape === 'w') {
+      var fl = 0.75 + 0.25 * Math.sin(ph * 1.3);
+      g.fillStyle = col;
+      g.beginPath(); g.moveTo(0, -4); g.lineTo(-15 * fl, -10); g.lineTo(-12 * fl, 4); g.lineTo(-3, 6); g.closePath(); g.fill();
+      g.beginPath(); g.moveTo(0, -4); g.lineTo(15 * fl, -10); g.lineTo(12 * fl, 4); g.lineTo(3, 6); g.closePath(); g.fill();
+      g.fillStyle = '#FFD1E6'; g.beginPath(); g.ellipse(0, 1, 4.5, 9, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#0B1438'; g.beginPath(); g.arc(0, 5, 2, 0, Math.PI * 2); g.fill();
+    } else if (shape === 'b') {
+      hex(g, 14); g.fillStyle = f.hp > 1 ? col : '#B86E14'; g.fill();
+      hex(g, 8); g.fillStyle = '#5A3200'; g.fill();
+      g.fillStyle = '#FFE3A8'; g.beginPath(); g.arc(0, 1, 3, 0, Math.PI * 2); g.fill();
+      if (f.hp < 2) { g.strokeStyle = '#3A2000'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(-10, -6); g.lineTo(-4, -2); g.lineTo(-7, 4); g.moveTo(9, 5); g.lineTo(4, 2); g.stroke(); }
+    } else {
+      g.fillStyle = '#5B2CA8'; g.beginPath(); g.ellipse(0, 4, 34, 13, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = col; g.beginPath(); g.ellipse(0, 0, 30, 11, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#FF5D8F'; g.beginPath(); g.ellipse(0, -6, 12, 9, 0, Math.PI, 0); g.fill();
+      for (var n = -2; n <= 2; n++) { g.fillStyle = Math.floor(t * 4 + n) % 2 ? '#FFE08A' : '#2A0F5C'; g.beginPath(); g.arc(n * 11, 4, 2.4, 0, Math.PI * 2); g.fill(); }
+      var hpw = 50 * f.hp / E.KIND.k.hp;
+      g.fillStyle = 'rgba(255,255,255,.25)'; g.fillRect(-25, -24, 50, 4);
+      g.fillStyle = '#FF5D8F'; g.fillRect(-25, -24, hpw, 4);
+    }
+    if (f.fl > 0) { g.globalAlpha = 0.6; g.fillStyle = '#FFFFFF'; g.beginPath(); g.arc(0, 0, E.KIND[f.k].r * 0.8, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1; }
+    g.restore();
+  }
+  function hex(g, r) {
+    g.beginPath();
+    for (var i = 0; i < 6; i++) { var a = Math.PI / 6 + i * Math.PI / 3; if (i) g.lineTo(Math.cos(a) * r, Math.sin(a) * r); else g.moveTo(Math.cos(a) * r, Math.sin(a) * r); }
+    g.closePath();
+  }
+
+  /* ----------------------------------------------------------------- ui */
+
+  var SHIP_SVG = '<svg viewBox="-18 -21 36 36" width="16" height="16" aria-hidden="true"><path d="M0 -12 L17 9 L11 13 L0 7 L-11 13 L-17 9Z" fill="#3D6BFF"/><path d="M0 -20 Q7 -6 6 12 L-6 12 Q-7 -6 0 -20Z" fill="currentColor"/></svg>';
+  function renderHud() {
+    if (!S) return;
+    var key = S.score + '|' + S.wave + '|' + S.lives;
+    if (key === hudKey) return;
+    hudKey = key;
+    vScore.textContent = C.num(S.score);
+    vWave.textContent = C.num(Math.max(1, S.wave)) + '/' + C.num(E.WAVES);
+    var h = '';
+    for (var i = 0; i < E.LIVES; i++) h += '<span style="opacity:' + (i < S.lives ? 1 : 0.2) + '">' + SHIP_SVG + '</span>';
+    vLives.innerHTML = h;
+    vLives.setAttribute('aria-label', C.num(S.lives));
+  }
+  function renderTop() {
+    top.innerHTML = '';
+    if (dailyDate) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailySr') + ' — ' + C.num(dailyDate) })]));
+    else {
+      var b = C.stats.getBest('starraid', 'score');
+      if (b) top.appendChild(el('span', { class: 'ch-badge' }, [C.icon('trophy', 14), el('span', { text: C.t('bestN', { n: C.num(b) }) })]));
+    }
+  }
+  function renderStatus() {
+    status.textContent = waiting ? C.t('tapGo') : (!touched ? C.t('how') : '');
+  }
+  function render() { hudKey = ''; renderTop(); renderHud(); renderStatus(); draw(); }
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← →  /  A D', C.t('kMove')), kb('Space', C.t('kFire')), kb('Space / Enter', C.t('kGo'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 110" width="100%" direction="ltr"><rect width="200" height="110" rx="10" fill="#1B2B6E"/>' +
+      '<circle cx="20" cy="18" r="1.2" fill="#fff"/><circle cx="170" cy="30" r="1" fill="#fff"/><circle cx="120" cy="12" r="1.4" fill="#fff"/><circle cx="60" cy="70" r="1" fill="#fff"/>';
+    var shipAt = function (x, y) { return '<g transform="translate(' + x + ' ' + y + ') scale(.7)"><path d="M0 -12 L17 9 L11 13 L0 7 L-11 13 L-17 9Z" fill="#3D6BFF"/><path d="M0 -20 Q7 -6 6 12 L-6 12 Q-7 -6 0 -20Z" fill="#EEF2FF"/></g>'; };
+    var scout = function (x, y) { return '<circle cx="' + x + '" cy="' + y + '" r="6" fill="#2FD3A6"/>'; };
+    var wing = function (x, y) { return '<path d="M' + x + ' ' + (y - 3) + ' l-10 -4 l2 9 l8 2 l8 -2 l2 -9z" fill="#FF5FA2"/>'; };
+    if (kind === 1) {
+      for (var c = 0; c < 6; c++) { s += wing(45 + c * 22, 22) + scout(45 + c * 22, 42); }
+      s += '<rect x="99" y="62" width="2" height="9" rx="1" fill="#9FF3FF"/>' + shipAt(100, 92);
+    }
+    if (kind === 2) {
+      s += shipAt(100, 92) + '<path d="M70 96 L130 96" stroke="#fff" stroke-width="2" stroke-dasharray="3 4"/>' +
+        '<circle cx="140" cy="60" r="11" fill="rgba(255,255,255,.55)"/><path d="M112 60 L128 60 M152 60 L168 60" stroke="#fff" stroke-width="2"/><path d="M112 60 l5 -4 m-5 4 l5 4 M168 60 l-5 -4 m5 4 l-5 4" stroke="#fff" stroke-width="2"/>';
+    }
+    if (kind === 3) {
+      for (var d = 0; d < 5; d++) s += scout(50 + d * 25, 20);
+      s += wing(130, 60) + '<path d="M150 20 Q 160 40 132 56" fill="none" stroke="#FF5FA2" stroke-width="1.5" stroke-dasharray="3 3"/>' +
+        '<circle cx="120" cy="78" r="3" fill="#FFC46B"/>' + shipAt(80, 92) + '<path d="M96 92 L64 92" stroke="#fff" stroke-width="1.5" stroke-dasharray="3 3"/>';
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  var saved = ctx.loadSave();
+  if (!restore(saved)) newRun();
+  if (dailyDate && C.stats.dailyDone('starraid', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).starraid;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+  // the wave names are drawn in the app's font, which may arrive after the first frame
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { draw(); });
+})();
+</script>
+</body>
+</html>
