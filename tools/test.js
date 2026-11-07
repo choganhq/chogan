@@ -10439,6 +10439,12 @@ function testPeopleFilter() {
   const n = (p) => games.filter((g) => sb.f(g, p)).length;
   ok(n('all') === games.length && n('1') + n('2') === games.length && n('3') > 0 && n('3') < n('2'), 'one player lists the solo games, two the rest, three and four a few of those (' + ['all', '1', '2', '3'].map(n).join(', ') + ')');
   ok(/g\.cat === c && peopleFit\(g, people\)/.test(html) && /C\.state\.settings\.gamePeople = v;/.test(html) && /if \(!any\) box\.appendChild/.test(html), 'the filter works with the category chips, is remembered, and says so when nothing fits');
+  // Measured in Playwright (#674): with Nunito's Latin, 7–10px of chip padding put the English
+  // players row and the Polish categories on two lines at 360 and 390px; 6px fits them again.
+  const css = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8');
+  const pads = [...css.matchAll(/\.ch-seg\.ch-cats button \{ padding-inline: (\d+)px; \}/g)].map((m) => +m[1]);
+  ok(/pchips\.classList\.add\('ch-seg--wrap', 'ch-cats', 'ch-people'\)/.test(html) && pads.length === 1 && pads[0] <= 6,
+    'the category and players chips share one padding of at most 6px, at every width (' + pads.join(', ') + ')');
 }
 
 function testInstallBar() {
