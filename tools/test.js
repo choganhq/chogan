@@ -2939,14 +2939,7 @@ function testFiles() {
   ok(/drawGames\(\)/.test(chipFn) && !/render\(/.test(chipFn), 'a category chip redraws only the games, not the whole page');
   ok(/C\.pins\.toggle\(g\.id\);[\s\S]{0,80}render\(true\)/.test(menu) && /window\.scrollTo\(0, keep \? y : 0\)/.test(menu), 'a pin tap keeps the scroll position');
 
-  // An 18px pin at 1.9 stroke and 45% opacity was a faint smudge on a 173px card (#289)
-  const pinCss = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
-  const pinSize = +((menu.match(/C\.icon\('pin', (\d+)\)/) || [])[1] || 0);
-  ok(pinSize >= 22, 'the pin icon on a menu card is at least 22px (' + pinSize + ')');
-  const pinStroke = +((pinCss.match(/\.ch-game__pin svg \{[^}]*stroke-width: ([\d.]+)/) || [])[1] || 0);
-  const pinOp = +((pinCss.match(/\.ch-game__pin \{[^}]*opacity: ([\d.]+)/) || [])[1] || 0);
-  ok(pinStroke >= 2.2 && pinOp >= 0.6, 'the pin icon is drawn bold enough to see (stroke ' + pinStroke + ', opacity ' + pinOp + ')');
-  ok(/\.ch-game__pin--on \{[^}]*background-color:/.test(pinCss), 'a pinned card shows a filled circle behind its pin');
+  // #289's bolder pin button went with the button itself in #687: tiles are pinned by holding them (testMenuPins)
 
   // Five languages wrapped onto two rows at every phone width, Español alone below (#291)
   const langCss = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
@@ -6078,40 +6071,6 @@ function testReadme() {
     'both README web lines link playchogan.com and the real origin');
 }
 
-/* ------------------------------------------------ Menu: pinned and recent (#193) */
-// The home page gained a pinned section and a recently played row. Recent is written
-// when a game page opens (stats only change when a round ends), pins in the settings.
-function testMenuPins() {
-  head('Menu pins and recent');
-  const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
-  const home = fs.readFileSync(path.join(ROOT, 'www/index.html'), 'utf8');
-  ok(/Chogan\.recent = \{/.test(core) && /Chogan\.pins = \{/.test(core), 'the core has Chogan.recent and Chogan.pins');
-  const gameAt = core.indexOf('Chogan.game = function (cfg)');
-  ok(gameAt > 0 && /Chogan\.recent\.touch\(cfg\.id\)/.test(core.slice(gameAt, gameAt + 400)), 'opening a game page records it as recent');
-  ok(/pinned: \[\]/.test(core), 'pinned is a default setting');
-  ok(/C\.pins\.toggle\(g\.id\)/.test(home) && /e\.stopPropagation\(\)/.test(home), 'every menu card has a pin toggle that does not open the game');
-  ok(/ch-section--pinned/.test(home) && /C\.recent\.list\(\)/.test(home), 'the home page shows pinned games and recent games');
-  const keys = ['pinned', 'recent', 'pin', 'unpin'];
-  const missing = [];
-  for (const k of keys) { const n = (home.match(new RegExp('[ ,{]' + k + ": '", 'g')) || []).length; if (n < LOCALE_CODES.length) missing.push(k + ' ' + n); }
-  ok(!missing.length, 'pin and recent strings exist in every language' + (missing.length ? ' (' + missing.join(', ') + ')' : ''));
-  // #481: new games went to the end of their section and the owner couldn't find Hop.
-  // The menu's own isNew and row code, run on invented games: new and unplayed only,
-  // newest first, pinned ones left out, six at most.
-  const isNewSrc = (home.match(/  function isNew\(g\) \{[\s\S]*?\n  \}\n/) || [''])[0];
-  const rowSrc = (home.match(/    var freshGames = [\s\S]*?\.slice\(0, 6\)\.map\(function \(x\) \{ return x\.g; \}\);/) || [''])[0];
-  ok(isNewSrc.length > 0 && rowSrc.length > 0, 'the menu has a row of new games');
-  if (isNewSrc && rowSrc) {
-    const day = (k) => new Date(Date.UTC(2026, 9, 25 - k)).toISOString().slice(0, 10);
-    const G = [['old', 40], ['a', 9], ['b', 2], ['c', 2], ['played', 1], ['pinned', 1], ['d', 5], ['e', 6], ['f', 7], ['g', 8], ['h', 20]].map((x) => ({ id: x[0], added: day(x[1]) }));
-    const sb = { GAMES: G, Date: { now: () => Date.UTC(2026, 9, 25, 12) },
-      C: { stats: { get: () => ({ byGame: { played: { plays: 1 } } }) }, keyToDate: (k) => new Date(k + 'T00:00:00Z'), pins: { has: (id) => id === 'pinned' } } };
-    vm.runInNewContext(isNewSrc + rowSrc + ';this.out = freshGames.map(function (g) { return g.id; });', sb);
-    ok(sb.out.join() === 'c,b,d,e,f,g', 'the row shows unplayed games added in the last three weeks, newest first, no pinned ones, six at most (' + sb.out.join() + ')');
-  }
-  ok((home.match(/[ ,{]freshRow: '/g) || []).length === LOCALE_CODES.length, 'the row is named in every language');
-}
-
 /* ------------------------------------------------ Ways to play (#203) */
 // The app runs on the web, on Android and as a Telegram Mini App (@chogangamebot).
 // Before #203 neither the app nor the README said so; F-Droid and Telegram were missing.
@@ -8023,15 +7982,15 @@ function testHomeGrid() {
   ok(/C\.store\.set\('settings', C\.state\.settings\)/.test(menu.slice(menu.indexOf('var asList'))), 'انتخاب نما در تنظیمات ذخیره می‌شود');
   // قاعده‌ی دو ستون باید بیرون از media query باشد تا روی گوشی هم اعمال شود
   const topLevel = css.replace(/@media[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, '');
-  // #666: three tiles a row on a phone (the owner chose it from a mock), with a smaller icon
-  // and name and the badges as corner marks, all only below the 620px breakpoint
-  ok(/\.ch-games--grid \{ grid-template-columns: repeat\(3, minmax\(0, 1fr\)\); \}/.test(topLevel), 'three tiles a row at phone width (outside any media query)');
-  const phone = (css.match(/@media \(max-width: 619px\) \{\n  \.ch-games--grid \{[\s\S]*?\n\}\n/) || [''])[0];
-  ok(/\.ch-games--grid \.ch-game__icon \{ width: 42px; height: 42px; flex: 0 0 42px; \}/.test(phone) && /\.ch-games--grid \.ch-game__name \{ font-size: 13px; \}/.test(phone),
-    'below 620px the tile has a 42px icon and a 13px name');
-  ok(/\.ch-games--grid \.ch-game__meta \{\n    position: absolute; top: 6px; inset-inline-start: 6px;/.test(phone) && /padding: 24px 6px/.test(phone),
-    'below 620px the New and Continue badges sit in a top strip, in the corner opposite the pin');
-  ok(/@media \(min-width: 620px\) \{ \.ch-games--grid \{ grid-template-columns: repeat\(auto-fill, minmax\(168px, 1fr\)\); \} \}/.test(css), 'a wide screen still fits as many tiles as it can');
+  // #666 put three tiles a row on a phone; since #687 the icon fills the tile at every
+  // width (a friend could not find games among 42px icons in framed cards)
+  ok(/\.ch-games--grid \{ grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/.test(topLevel), 'three tiles a row at phone width (outside any media query)');
+  ok(/\.ch-games--grid \.ch-game__icon \{ width: 100%; height: auto; aspect-ratio: 1;/.test(topLevel) && /\.ch-games--grid \.ch-game__name \{ font-size: 14px;/.test(topLevel),
+    'the icon fills its tile and the name is 14px, at every width');
+  ok(/\.ch-games--grid \.ch-game \{[^}]*background: transparent; border: 0; box-shadow: none;/.test(topLevel) && /\.ch-games--grid \.ch-game\.ch-tap:hover, \.ch-games--grid \.ch-game\.ch-tap:active \{ box-shadow: none; \}/.test(topLevel),
+    'a tile has no card frame, and hover or press does not draw one');
+  ok(/\.ch-games--grid \.ch-game__meta \{\n  position: absolute; top: 4px; inset-inline-start: 4px;/.test(topLevel), 'the Continue badge sits in the icon\'s corner');
+  ok(/@media \(min-width: 620px\) \{ \.ch-games--grid \{ grid-template-columns: repeat\(auto-fill, minmax\(112px, 1fr\)\);/.test(css), 'a wide screen still fits as many tiles as it can');
   ok(/^\s+list: '/m.test(core), 'نماد list در هسته هست');
   for (const k of ['viewGrid', 'viewList']) {
     const n = (menu.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length;
@@ -8449,15 +8408,16 @@ function testDarkAccentText() {
   ok(!far.length && changed.length >= 20 && changed.length < games.length, 'accents that already read keep their colour; ' + changed.length + ' are lightened' + (far.length ? ' (changed needlessly: ' + far.join(', ') + ')' : ''));
   const bw = txt('#3C4F9A');
   ok(cr(bw, '#342C22') < 5.5 && lum(bw) > lum('#3C4F9A') && txt('nonsense') === '', 'Bowling\'s blue is lightened only as far as needed (' + bw + ', ' + cr(bw, '#342C22').toFixed(2) + ':1), and a bad colour gives nothing');
-  const rules = ['.ch-game__pin--on', '.ch-badge--accent', '.ch-btn--soft', '.ch-iconbtn[aria-pressed="true"]', '.ch-seg button[aria-selected="true"]'];
+  const rules = ['.ch-badge--accent', '.ch-btn--soft', '.ch-iconbtn[aria-pressed="true"]', '.ch-seg button[aria-selected="true"]'];
   ok(rules.every((r) => css.indexOf(':root:not([data-theme="light"]) ' + r) > 0 && css.indexOf(':root[data-theme="dark"] ' + r) > 0) &&
     (css.match(/\{ color: var\(--game-text-dark, var\(--game, var\(--c-accent\)\)\); \}/g) || []).length === 2,
-    'the dark theme gives the lightened text to the selected option, soft buttons, accent badges, pressed icon buttons and menu pins');
+    'the dark theme gives the lightened text to the selected option, soft buttons, accent badges and pressed icon buttons');
   ok(/r\.style\.setProperty\('--game-text-dark', Chogan\.textOnDark\(color\)\);/.test(core) && /r\.style\.removeProperty\('--game-text-dark'\);/.test(core), 'a game sets and clears it with its accent');
   // every place that gives an element a game's colour also gives it the dark-theme text
-  // (counting a fixed four broke when #481 added the new-games row)
+  // (counting a fixed four broke when #481 added the new-games row; #687 removed that row and
+  // the recent row, leaving the tile, the daily list and the game sheet)
   const withColour = (menu.match(/'--game': g\.color/g) || []).length;
-  ok(withColour >= 4 && (menu.match(/'--game': g\.color, '--game-soft': g\.soft, '--game-text-dark': C\.textOnDark\(g\.color\)/g) || []).length === withColour,
+  ok(withColour >= 2 && (menu.match(/'--game': g\.color, '--game-soft': g\.soft, '--game-text-dark': C\.textOnDark\(g\.color\)/g) || []).length === withColour,
     'every menu element that carries a game colour carries its dark text too');
 }
 

@@ -45,8 +45,8 @@ module.exports = function (T) {
 
     const sw = fs.readFileSync(path.join(ROOT, 'www/sw.js'), 'utf8');
     ok(sw.indexOf("'./fonts/nunito-latin.woff2'") > 0, 'the service worker caches it, so it works offline');
-    ok(/@media \(max-width: 559px\) \{\s*\.ch-recent__item \{ flex-direction: column;/.test(css) && /\.ch-recent__name \{ overflow-wrap: break-word;/.test(css),
-      'on a phone the new-games chips put the icon above the name, so a name breaks only between words');
+    // The new-games chips this once checked went with their row in #687; the menu tiles'
+    // name wrapping is checked in testMenuPins and the #687 CSS checks.
     const ci = fs.readFileSync(path.join(ROOT, '.github/workflows/test.yml'), 'utf8');
     ok(/assets\/public\/fonts\/nunito-latin\.woff2/.test(ci), 'the APK check asks for it inside the package');
   }
