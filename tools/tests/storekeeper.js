@@ -28,9 +28,11 @@ module.exports = function (T) {
     const W = E.walk(L, [10], 8, 9);
     ok(Array.isArray(W) && W.join() === '1' && E.walk(L, [10], 8, 12) === null, 'a tap walks the shortest way around crates, and not through them');
     // generated levels: every size, many seeds; the forward solver agrees with the
-    // generator's count, and a bot playing only step() solves each with that many pushes
+    // generator's count, and a bot playing only step() solves each with that many pushes.
+    // Large levels get 8 seeds, not 14: they were 1.1 s of the group's 1.7 s, and CI ran
+    // the group past its 3 s limit (#678).
     let gen = 0, made = 0, agree = 0, played = 0, deep = 0, slow = 0, worst = 0;
-    for (const size of E.ORDER) for (let k = 1; k <= 14; k++) {
+    for (const size of E.ORDER) for (let k = 1; k <= (size === 'large' ? 8 : 14); k++) {
       gen++;
       const s = Date.now(), lv = E.generate(size, rng(k * 7919 + size.length));
       const ms = Date.now() - s; worst = Math.max(worst, ms); if (ms > 400) slow++;
