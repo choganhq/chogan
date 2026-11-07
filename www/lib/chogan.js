@@ -302,7 +302,7 @@
       rank: 'رتبه', points: 'امتیاز', you: 'تو',
       offlineRivals: 'حریف‌های آفلاین، ساخته‌شده روی همین دستگاه',
       streak: 'پیوستگی', dayStreak: 'روز پیوسته', locked: 'قفل',
-      unlockedAt: 'باز شد', totalPlays: 'بازی', playTime: 'زمان بازی',
+      unlockedAt: 'باز شد', totalPlays: 'بازی', playTime: 'زمان بازی', thisWeek: 'این هفته', lastWeek: 'هفته‌ی قبل', weekWins: 'برد', weekDays: 'روز بازی', weekGames: 'بازی‌های مختلف',
       language: 'زبان', theme: 'تم', themeAuto: 'خودکار', themeLight: 'روشن', themeDark: 'تاریک',
       sfx: 'افکت صوتی', music: 'موسیقی', haptics: 'لرزش',
       resetGame: 'بازنشانی داده‌ی بازی', resetAsk: 'داده‌ی این بازی کامل پاک شود؟',
@@ -344,7 +344,7 @@
       rank: 'Rank', points: 'Points', you: 'You',
       offlineRivals: 'Offline rivals, generated on this device',
       streak: 'Streak', dayStreak: 'day streak', locked: 'Locked',
-      unlockedAt: 'Unlocked', totalPlays: 'Games', playTime: 'Play time',
+      unlockedAt: 'Unlocked', totalPlays: 'Games', playTime: 'Play time', thisWeek: 'This week', lastWeek: 'Last week', weekWins: 'Wins', weekDays: 'Days played', weekGames: 'Different games',
       language: 'Language', theme: 'Theme', themeAuto: 'Auto', themeLight: 'Light', themeDark: 'Dark',
       sfx: 'Sound effects', music: 'Music', haptics: 'Vibration',
       resetGame: 'Reset game data', resetAsk: 'Erase all data for this game?',
@@ -386,7 +386,7 @@
       rank: 'Miejsce', points: 'Punkty', you: 'Ty',
       offlineRivals: 'Przeciwnicy offline, generowani na tym urządzeniu',
       streak: 'Seria', dayStreak: 'dni z rzędu', locked: 'Zablokowane',
-      unlockedAt: 'Odblokowano', totalPlays: 'Rozegrane gry', playTime: 'Czas gry',
+      unlockedAt: 'Odblokowano', totalPlays: 'Rozegrane gry', playTime: 'Czas gry', thisWeek: 'Ten tydzień', lastWeek: 'Poprzedni tydzień', weekWins: 'Wygrane', weekDays: 'Dni gry', weekGames: 'Różne gry',
       language: 'Język', theme: 'Motyw', themeAuto: 'Automatyczny', themeLight: 'Jasny', themeDark: 'Ciemny',
       sfx: 'Efekty dźwiękowe', music: 'Muzyka', haptics: 'Wibracje',
       resetGame: 'Resetuj dane gry', resetAsk: 'Usunąć wszystkie dane tej gry?',
@@ -428,7 +428,7 @@
       rank: '排名', points: '积分', you: '你',
       offlineRivals: '离线对手，在本机生成',
       streak: '连续', dayStreak: '天连续', locked: '未解锁',
-      unlockedAt: '解锁于', totalPlays: '局数', playTime: '游戏时长',
+      unlockedAt: '解锁于', totalPlays: '局数', playTime: '游戏时长', thisWeek: '本周', lastWeek: '上周', weekWins: '胜局', weekDays: '游戏天数', weekGames: '玩过的游戏',
       language: '语言', theme: '主题', themeAuto: '自动', themeLight: '浅色', themeDark: '深色',
       sfx: '音效', music: '音乐', haptics: '振动',
       resetGame: '重置游戏数据', resetAsk: '确定清除这个游戏的全部数据？',
@@ -470,7 +470,7 @@
       rank: 'Platz', points: 'Punkte', you: 'Du',
       offlineRivals: 'Offline-Gegner, auf diesem Gerät erzeugt',
       streak: 'Serie', dayStreak: 'Tage in Folge', locked: 'Gesperrt',
-      unlockedAt: 'Freigeschaltet', totalPlays: 'Spiele', playTime: 'Spielzeit',
+      unlockedAt: 'Freigeschaltet', totalPlays: 'Spiele', playTime: 'Spielzeit', thisWeek: 'Diese Woche', lastWeek: 'Letzte Woche', weekWins: 'Siege', weekDays: 'Spieltage', weekGames: 'Verschiedene Spiele',
       language: 'Sprache', theme: 'Design', themeAuto: 'Auto', themeLight: 'Hell', themeDark: 'Dunkel',
       sfx: 'Soundeffekte', music: 'Musik', haptics: 'Vibration',
       resetGame: 'Spieldaten zurücksetzen', resetAsk: 'Alle Daten dieses Spiels löschen?',
@@ -512,7 +512,7 @@
       rank: 'Puesto', points: 'Puntos', you: 'Tú',
       offlineRivals: 'Rivales sin conexión, creados en este dispositivo',
       streak: 'Racha', dayStreak: 'días seguidos', locked: 'Bloqueado',
-      unlockedAt: 'Desbloqueado', totalPlays: 'Partidas', playTime: 'Tiempo de juego',
+      unlockedAt: 'Desbloqueado', totalPlays: 'Partidas', playTime: 'Tiempo de juego', thisWeek: 'Esta semana', lastWeek: 'Semana pasada', weekWins: 'Victorias', weekDays: 'Días jugados', weekGames: 'Juegos distintos',
       language: 'Idioma', theme: 'Tema', themeAuto: 'Auto', themeLight: 'Claro', themeDark: 'Oscuro',
       sfx: 'Efectos de sonido', music: 'Música', haptics: 'Vibración',
       resetGame: 'Borrar datos del juego', resetAsk: '¿Borrar todos los datos de este juego?',
@@ -1472,8 +1472,39 @@
     saveStats();
   }
 
+  // This week and last week on the profile (#664). The totals above carry no dates, so
+  // each local day keeps its own small sum, and only the last 14 days are kept: the start
+  // of last week is at most 13 days back, whichever day the week starts on.
+  var KEEP_DAYS = 14;
+  function dayAdd(days, o, now) {
+    var k = dateKey(now), d = days[k] || (days[k] = { p: 0, t: 0, w: 0, g: [] });
+    if (!o.continued) d.p++;
+    if (o.won) d.w++;
+    d.t += Math.max(0, o.timeMs || 0);
+    if (o.gameId && d.g.indexOf(o.gameId) < 0) d.g.push(o.gameId);
+    var cut = new Date(now.getFullYear(), now.getMonth(), now.getDate() - KEEP_DAYS);
+    Object.keys(days).forEach(function (key) { if (keyToDate(key) < cut) delete days[key]; });
+    return days;
+  }
+  // Persian weeks run Saturday to Friday, the others Monday to Sunday (the owner, #664).
+  function weekOf(days, lang, ago, now) {
+    var first = lang === 'fa' ? 6 : 1;
+    var start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    start.setDate(start.getDate() - ((start.getDay() - first + 7) % 7) - 7 * (ago || 0));
+    var out = { from: dateKey(start), plays: 0, timeMs: 0, wins: 0, days: 0, games: 0 }, seen = {};
+    for (var i = 0; i < 7; i++) {
+      var r = days[dateKey(new Date(start.getFullYear(), start.getMonth(), start.getDate() + i))];
+      if (!r) continue;
+      out.plays += r.p; out.timeMs += r.t; out.wins += r.w;
+      if (r.p || r.t) out.days++;
+      r.g.forEach(function (g) { if (!seen[g]) { seen[g] = 1; out.games++; } });
+    }
+    return out;
+  }
+
   var statsApi = {
     get: function () { return state.stats; },
+    week: function (ago, now) { return weekOf(state.stats.days || {}, state.settings.lang, ago, now || new Date()); },
     game: function (id) {
       if (!state.stats.byGame[id]) state.stats.byGame[id] = { plays: 0, wins: 0, timeMs: 0, best: {} };
       return state.stats.byGame[id];
@@ -1486,6 +1517,7 @@
       if (o.won) g.wins++;
       g.timeMs += Math.max(0, o.timeMs || 0);
       state.stats.timeMs += Math.max(0, o.timeMs || 0);
+      state.stats.days = dayAdd(state.stats.days || {}, o, new Date());
       touchStreak();
       saveStats();
       var pts = leagueApi.add(o.points || 0);
