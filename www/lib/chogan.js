@@ -115,6 +115,17 @@
     } catch (e) { return false; }
   })();
 
+  function lsKeys() {
+    var out = [];
+    try {
+      if (lsOk) for (var i = 0; i < global.localStorage.length; i++) out.push(global.localStorage.key(i));
+    } catch (e) { /* بی‌خیال */ }
+    return out;
+  }
+  // Read before anything below writes a setting: a cloud restore in Chogan Plus (#702) is
+  // only for an install that started with no progress at all.
+  var FRESH = lsKeys().every(function (k) { return !k || k.indexOf(NS + '.') !== 0; });
+
   function rawGet(key) {
     try { return lsOk ? global.localStorage.getItem(key) : (memFallback[key] || null); }
     catch (e) { return memFallback[key] || null; }
@@ -3595,6 +3606,67 @@
     };
   }
   Chogan.link = makeLink(nativeTransport);
+
+  // Chogan Plus keeps a copy of all progress in Play Games Saved Games (#702,
+  // choganhq/chogan-plus#3), so a new phone or a reinstall starts where the old one was.
+  // One snapshot of every chogan.* key. It is read back only on a fresh install, and
+  // nothing is saved before that read has finished: otherwise the first hide of a new
+  // install would overwrite the cloud copy with an empty one.
+  var CLOUD_NAME = 'progress';
+  function makeCloud(P, io) {
+    var player = { authenticated: false }, last = null, settled = false;
+    function snapshot() {
+      var keys = {}, list = io.keys();
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].indexOf(NS + '.') === 0) keys[list[i]] = io.get(list[i]);
+      }
+      return JSON.stringify({ v: 1, keys: keys });
+    }
+    var ready = Promise.resolve().then(function () { return P.status(); }).then(function (s) {
+      player = s || player;
+      if (!player.authenticated || !io.fresh) return 'kept';
+      return P.load({ name: CLOUD_NAME }).then(function (r) {
+        var d = null;
+        try { d = r && r.data ? JSON.parse(r.data) : null; } catch (e) { d = null; }
+        if (!d || d.v !== 1 || !d.keys || typeof d.keys !== 'object') return 'empty';
+        var n = 0;
+        for (var k in d.keys) {
+          if (k.indexOf(NS + '.') === 0 && typeof d.keys[k] === 'string') { io.set(k, d.keys[k]); n++; }
+        }
+        if (!n) return 'empty';
+        io.reload();
+        return 'restored';
+      });
+    }).catch(function () { return 'failed'; }).then(function (how) {
+      // After a restore the page reloads; this copy must not save the old state over it
+      settled = how !== 'restored';
+      return how;
+    });
+    return {
+      ready: ready,
+      player: function () { return player; },
+      push: function () {
+        if (!settled || !player.authenticated) return Promise.resolve(false);
+        var snap = snapshot();
+        if (snap === last) return Promise.resolve(false);
+        last = snap;
+        return P.save({ name: CLOUD_NAME, data: snap, description: 'Chogan Plus' })
+          .then(function () { return true; }, function () { last = null; return false; });
+      }
+    };
+  }
+  var gamesPlugin = PLUS && global.Capacitor && global.Capacitor.Plugins && global.Capacitor.Plugins.ChoganGames;
+  Chogan.cloud = gamesPlugin ? makeCloud(gamesPlugin, {
+    fresh: FRESH, keys: lsKeys, get: rawGet, set: rawSet,
+    reload: function () { global.location.reload(); }
+  }) : null;
+  if (Chogan.cloud && global.document) {
+    // A phone may kill a hidden WebView without another event, so hiding is the save point
+    global.document.addEventListener('visibilitychange', function () {
+      if (global.document.visibilityState === 'hidden') Chogan.cloud.push();
+    });
+    global.addEventListener('pagehide', function () { Chogan.cloud.push(); });
+  }
 
   /* ------------------------------------------------------- کمکی‌ها */
 
