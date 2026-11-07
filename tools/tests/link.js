@@ -84,6 +84,13 @@ module.exports = function (T) {
     E0.open({ role: 'host', game: 'reversi', version: '1', onStatus: (s, info) => es.push([s, info && info.message]) });
     net3.ends[0].cb({ type: 'error', message: 'permission' });
     ok(E0.status === 'error' && JSON.stringify(es[es.length - 1]) === '["error","permission"]', 'a native error shows as status error with its message');
+
+    // #693: the hint is a sentence inside .ch-badge, which never wraps, so on a phone it ran off
+    // both edges. Its own rule must let it wrap; the Playwright proof in the PR measured the box.
+    const rv = fs.readFileSync(path.join(ROOT, 'www/games/reversi/index.html'), 'utf8');
+    ok(/el\('span', \{ class: 'ch-badge rv-link'/.test(rv), 'Reversi shows the two-phones hint as .rv-link');
+    const rule = (rv.match(/\.rv-top \.rv-link\s*\{([^}]*)\}/) || [])[1] || '';
+    ok(/white-space:\s*normal/.test(rule) && /max-width:\s*100%/.test(rule), 'the two-phones hint wraps inside the screen (' + (rule.trim() || 'no .rv-top .rv-link rule') + ')');
   }
   return { testLink };
 };
