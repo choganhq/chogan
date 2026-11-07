@@ -72,6 +72,7 @@ Every game in Chogan with a line about it. Each one in `www/games.json` has a ro
 | Storekeeper | Push every crate onto a mark: crates can only be pushed, never pulled, one at a time; swipe a step or tap a cell to walk there; every warehouse is newly built and solved by a solver before you see it, with three stars for the fewest pushes; undo, no losing, and a daily warehouse the same for everyone |
 | Star Raid | Clear the sky of raiders: drag to steer and the ship fires on its own; ten waves and a short final wave with the flagship, three ships, double points for a raider hit while it dives, a bonus for a wave cleared without a loss, and a daily raid the same for everyone |
 | Crossing | Get the hedgehog across the road and the river and fill five burrows: swipe to hop, dodge cars, trucks and bikes, ride logs and turtles that dive now and then; five levels, each faster and busier, three lives with a generous minute each, and a daily crossing the same for everyone |
+| Carrom | The board game from South Asia, seen from above: slide the striker along your line, pull back and let go to knock your coins into the four corner pockets; your coin in gives another shot, the striker in is a foul that costs a coin, and the red queen must be covered by one of your coins in the next shot or she goes back to the centre; clear your coins with the queen covered to win the board, against a bot at three levels or two players on one phone, and a daily board against the medium bot |
 
 ## فارسی
 
@@ -147,5 +148,6 @@ Every game in Chogan with a line about it. Each one in `www/games.json` has a ro
 | انباردار | همه‌ی جعبه‌ها را روی علامت‌ها هل بده: جعبه فقط هل داده می‌شود، نه کشیده، و یکی‌یکی؛ با کشیدن انگشت یک قدم برو یا روی خانه‌ای بزن تا انباردار خودش برود؛ هر انبار تازه ساخته می‌شود و پیش از دیدنت حل شده، با سه ستاره برای کمترین هل؛ با برگشت، بدون باخت، و انبار روزانه‌ای که برای همه یکی است |
 | یورش | آسمان را از مهاجم‌ها پاک کن: بکش تا سفینه حرکت کند، خودش شلیک می‌کند؛ ده موج و یک موج کوتاه آخر با ناوِ فرمانده، سه سفینه، امتیاز دوبرابر برای زدن مهاجمی که شیرجه می‌زند، جایزه برای موجی که بی‌باخت پاک شود، و یورش روزانه‌ای که برای همه یکی است |
 | گذرگاه | جوجه‌تیغی را از جاده و رود بگذران و پنج لانه را پر کن: با کشیدن انگشت بپر، از ماشین و کامیون و دوچرخه دوری کن، روی کنده‌ها و لاک‌پشت‌هایی که گاهی زیر آب می‌روند بایست؛ پنج مرحله که هر کدام تندتر و شلوغ‌تر است، سه جان و برای هر جان یک دقیقه‌ی دست‌ودل‌باز، و گذرگاه روزانه‌ای که برای همه یکی است |
+| کاروم | بازی تخته‌ای جنوب آسیا از بالا: ضربه‌زن را روی خطت جابه‌جا کن، عقب بکش و رها کن تا مهره‌هایت به چهار جیب گوشه بیفتند؛ مهره‌ی خودت که بیفتد دوباره می‌زنی، افتادن ضربه‌زن خطاست و یک مهره خرج دارد، و ملکه‌ی قرمز را باید در ضربه‌ی بعد با یکی از مهره‌هایت بپوشانی وگرنه به وسط برمی‌گردد؛ مهره‌هایت را با ملکه‌ی پوشیده تمام کن تا ببری، مقابل ربات در سه سطح یا دونفره روی یک گوشی، و بازی روزانه با ربات متوسط |
 
 </div>

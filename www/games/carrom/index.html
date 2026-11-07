@@ -1,0 +1,1027 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>کاروم — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .cm-wrap > .ch-fit { --fit-ar: 1; }
+  .ch-fit > .cm-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+  .cm-canvas { display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; user-select: none; -webkit-user-select: none; }
+  .cm-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .cm-players { display: flex; justify-content: space-between; gap: var(--s-2); width: 100%; max-width: 420px; direction: ltr; }
+  .cm-player { flex: 1; display: flex; align-items: center; gap: var(--s-2); padding: 6px 10px; border-radius: var(--r-md); background: var(--c-surface-2); font-weight: 700; min-width: 0; border: 2px solid transparent; }
+  .cm-player:last-child { flex-direction: row-reverse; }
+  .cm-player.is-on { border-color: var(--game); }
+  .cm-player__dot { width: 16px; height: 16px; border-radius: 50%; flex: none; border: 2px solid rgba(0,0,0,.3); box-sizing: border-box; }
+  /* never shrink: in phone landscape the side column measured the name 1px short and showed «…ت» for «ربات» */
+  .cm-player__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 0 auto; text-align: start; }
+  .cm-player:last-child .cm-player__name { text-align: end; }
+  .cm-player__score { font-size: var(--fs-lg); font-weight: 800; font-variant-numeric: tabular-nums; min-width: 2ch; text-align: center; white-space: nowrap; }
+  .cm-player__queen { width: 12px; height: 12px; border-radius: 50%; background: #D0263C; flex: none; border: 2px solid #8E1426; box-sizing: border-box; }
+  /* two lines exactly, so the board does not jump when the hint empties during a shot */
+  .cm-status { min-height: 2.8em; line-height: 1.4; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+  .cm-wrap { user-select: none; -webkit-user-select: none; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script src="../../lib/cue.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+/* Carrom on top of the shared table physics in lib/cue.js (#697). The playing surface
+   runs from 0 to S both ways, framed by four straight boards; the pockets are holes in
+   the corners of the surface, and a coin drops once its centre is over one. Body 0 is
+   the striker, 1 the red queen, 2–10 the white coins (side 0, at the bottom, who breaks)
+   and 11–19 the black ones (side 1, at the top). A board at rest is plain data, so it
+   saves as is and the bot can try shots on copies of it. */
+function CarromEngineFactory(Cue) {
+  'use strict';
+  Cue = Cue || (typeof self !== 'undefined' && self.ChoganCue) || null;
+  if (!Cue) throw new Error('lib/cue.js is not loaded');
+
+  var S = 100, RC = 2.4, RS = 3.2, MC = 1, MS = 2.4;
+  // pocket holes: centre PC in from both boards, radius PR
+  var PC = 4, PR = 3.7;
+  var POCKETS = [{ x: PC, y: PC }, { x: S - PC, y: PC }, { x: PC, y: S - PC }, { x: S - PC, y: S - PC }];
+  // the striker's line: its centre sits BASE in from a side's own board, between XL and XR
+  var BASE = 14, XL = 20, XR = 80;
+  var SEGS = [[0, 0, S, 0], [S, 0, S, S], [S, S, 0, S], [0, S, 0, 0]];
+  var T = Cue.walls({ segs: SEGS, length: S, width: S, radius: RC, ball: 0.9, cushion: 0.72, cushionSlide: 0.96, rollA: 26, rollB: 1.4, minSpeed: 2, maxSpeed: 340 });
+  // a pull this long (board units) is a full shot
+  var PULL = 30;
+  // a board that has not ended after this many shots goes to the side with fewer coins left
+  var MAX_SHOTS = 200;
+  var QUEEN = 1;
+
+  function sideOf(id) { return id >= 2 && id <= 10 ? 0 : (id >= 11 && id <= 19 ? 1 : -1); }
+  function baseY(t) { return t === 0 ? S - BASE : BASE; }
+  function body(id, x, y, inPlay) {
+    return id === 0 ? { id: 0, x: x, y: y, vx: 0, vy: 0, inPlay: true, r: RS, m: MS } : { id: id, x: x, y: y, vx: 0, vy: 0, inPlay: inPlay !== false, r: RC, m: MC };
+  }
+  // The start: the queen in the middle, six coins round her and twelve round those,
+  // close packed, the colours alternating in each ring
+  function rack() {
+    var d = 2 * RC + 0.04, B = [body(0, S / 2, baseY(0)), body(QUEEN, S / 2, S / 2)], w = 2, k = 11, i, a;
+    function put(x, y, white) { B.push(body(white ? w++ : k++, x, y)); }
+    for (i = 0; i < 6; i++) { a = Math.PI / 2 + i * Math.PI / 3; put(S / 2 + Math.cos(a) * d, S / 2 + Math.sin(a) * d, i % 2 === 0); }
+    for (i = 0; i < 6; i++) { a = Math.PI / 2 + i * Math.PI / 3; put(S / 2 + Math.cos(a) * 2 * d, S / 2 + Math.sin(a) * 2 * d, i % 2 === 1); }
+    for (i = 0; i < 6; i++) { a = Math.PI / 2 + Math.PI / 6 + i * Math.PI / 3; put(S / 2 + Math.cos(a) * d * Math.sqrt(3), S / 2 + Math.sin(a) * d * Math.sqrt(3), i % 2 === 0); }
+    B.sort(function (p, q) { return p.id - q.id; });
+    return B;
+  }
+  function board() {
+    var M = { b: rack(), turn: 0, shots: 0, queenBy: -1, pending: -1, debt: [0, 0], sx: [S / 2, S / 2], winner: -1, over: false, draw: false };
+    place(M, S / 2);
+    return M;
+  }
+  function left(M, t) { var n = 0; for (var i = 0; i < M.b.length; i++) if (M.b[i].inPlay && sideOf(M.b[i].id) === t) n++; return n; }
+  function queenOn(M) { return M.b[QUEEN].inPlay; }
+
+  // May the striker stand at x on the line of the side on turn, clear of every coin?
+  function canPlace(M, x) {
+    if (x < XL - 1e-9 || x > XR + 1e-9) return false;
+    var y = baseY(M.turn), rr = (RS + RC) * (RS + RC);
+    for (var i = 1; i < M.b.length; i++) {
+      var b = M.b[i];
+      if (!b.inPlay) continue;
+      var dx = b.x - x, dy = b.y - y;
+      if (dx * dx + dy * dy < rr) return false;
+    }
+    return true;
+  }
+  // the free spot on the line nearest x, or x itself if the whole line is covered
+  function freeX(M, x) {
+    x = Math.max(XL, Math.min(XR, x));
+    for (var d = 0; d <= XR - XL; d += 0.25) {
+      if (canPlace(M, x - d)) return x - d;
+      if (canPlace(M, x + d)) return x + d;
+    }
+    return x;
+  }
+  function place(M, x) {
+    x = Math.max(XL, Math.min(XR, x));
+    var st = M.b[0];
+    st.x = x; st.y = baseY(M.turn); st.vx = 0; st.vy = 0; st.inPlay = true;
+    M.sx[M.turn] = x;
+    return x;
+  }
+
+  // A shot: the striker leaves from x on the line at a speed from the pull's power
+  function powerOf(pull) { return Math.max(0, Math.min(1, pull / PULL)); }
+  function shoot(M, x, angle, power) {
+    if (M.over || !canPlace(M, x)) return null;
+    place(M, x);
+    var s = Cue.start(T, M.b, { angle: angle, power: power }, 0);
+    s.by = M.turn; s.x = x; s.potted = []; s.drops = [];
+    return s;
+  }
+  // One physics step and the pockets. Returns true while anything moves; s.drops lists
+  // what fell in this step, for the page's sounds and the sinking coins.
+  function step(s) {
+    var more = Cue.tick(s), B = s.balls;
+    s.drops = [];
+    for (var i = 0; i < B.length; i++) {
+      var b = B[i];
+      if (!b.inPlay) continue;
+      // a squeeze between two coins and a board could push one through the board
+      var r = b.r;
+      if (b.x < r) { b.x = r; b.vx = Math.abs(b.vx) * 0.5; } else if (b.x > S - r) { b.x = S - r; b.vx = -Math.abs(b.vx) * 0.5; }
+      if (b.y < r) { b.y = r; b.vy = Math.abs(b.vy) * 0.5; } else if (b.y > S - r) { b.y = S - r; b.vy = -Math.abs(b.vy) * 0.5; }
+      for (var k = 0; k < 4; k++) {
+        var dx = b.x - POCKETS[k].x, dy = b.y - POCKETS[k].y;
+        if (dx * dx + dy * dy < PR * PR) {
+          s.drops.push({ id: b.id, pocket: k, x: b.x, y: b.y });
+          s.potted.push(b.id);
+          b.inPlay = false; b.vx = 0; b.vy = 0;
+          break;
+        }
+      }
+    }
+    if (s.drops.length) {
+      more = false;
+      for (i = 0; i < B.length; i++) if (B[i].inPlay && (B[i].vx || B[i].vy)) more = true;
+      s.moving = more;
+    }
+    return more;
+  }
+  function run(s) { while (step(s)) { /* the same steps the page animates */ } return s; }
+
+  // A coin going back sits on the centre, or the free spot nearest it
+  function spot(M, id) {
+    var c = M.b[id], rr = 4 * RC * RC * 1.0001;
+    function free(x, y) {
+      for (var i = 1; i < M.b.length; i++) {
+        var b = M.b[i];
+        if (!b.inPlay || b.id === id) continue;
+        var dx = b.x - x, dy = b.y - y;
+        if (dx * dx + dy * dy < rr) return false;
+      }
+      return true;
+    }
+    var x = S / 2, y = S / 2;
+    search: for (var ring = 0; ring < 40; ring++) {
+      var n = ring ? ring * 8 : 1;
+      for (var j = 0; j < n; j++) {
+        var a = j * 2 * Math.PI / n, px = S / 2 + Math.cos(a) * ring * 1.2, py = S / 2 + Math.sin(a) * ring * 1.2;
+        if (free(px, py)) { x = px; y = py; break search; }
+      }
+    }
+    c.x = x; c.y = y; c.vx = 0; c.vy = 0; c.inPlay = true;
+    return c;
+  }
+
+  // The shot is over. The rules, as in the common (ICF) game:
+  // - your own coin in: shoot again; a coin you owe is paid with it first
+  // - the queen in: shoot again, and cover her with a coin of yours in the same or the
+  //   next shot, or she goes back to the centre
+  // - the striker in is a foul: your coins from that shot go back, and one more of
+  //   yours (or you owe one), and the turn passes
+  // - your last coin, or the other side's, may not go in before the queen is covered:
+  //   that is a foul too
+  // - a side wins when all its coins are in and the queen is covered, by anyone;
+  //   it scores a point for each coin the other side has left, and 3 for the queen
+  function resolve(M, s) {
+    var me = M.turn, op = 1 - me, P = s.potted;
+    var ev = { by: me, potted: P.slice(), mine: 0, theirs: 0, queen: false, foul: false, striker: false, early: false, earlyOp: false, covered: false, queenBack: false, owe: false, paid: 0, again: false, win: -1, points: 0, draw: false };
+    M.shots++;
+    M.b = s.balls.map(function (b) { return body(b.id, b.x, b.y, b.inPlay); });
+    var mine = P.filter(function (id) { return sideOf(id) === me; }), theirs = P.filter(function (id) { return sideOf(id) === op; });
+    var q = P.indexOf(QUEEN) >= 0;
+    ev.mine = mine.length; ev.theirs = theirs.length; ev.queen = q;
+    var foul = P.indexOf(0) >= 0;
+    ev.striker = foul;
+    if (!foul) {
+      if (M.pending === me) {
+        M.pending = -1;
+        if (mine.length) { M.queenBy = me; ev.covered = true; } else { spot(M, QUEEN); ev.queenBack = true; }
+      }
+      if (q) { if (mine.length) { M.queenBy = me; ev.covered = true; } else M.pending = me; }
+      if (left(M, me) === 0 && M.queenBy < 0) { foul = true; ev.early = true; }
+      else if (left(M, op) === 0 && M.queenBy < 0) { foul = true; ev.earlyOp = true; }
+    }
+    if (foul) {
+      mine.forEach(function (id) { spot(M, id); });
+      if (ev.earlyOp) theirs.forEach(function (id) { spot(M, id); });
+      // a cover made in a foul shot does not count, and a queen not covered goes back
+      if (ev.covered) { M.queenBy = -1; ev.covered = false; }
+      if (!M.b[QUEEN].inPlay && M.queenBy < 0) { spot(M, QUEEN); ev.queenBack = true; }
+      M.pending = -1;
+      // the penalty: one more of yours from those already in, or one owed
+      var back = -1;
+      for (var id = 2; id <= 19; id++) if (sideOf(id) === me && !M.b[id].inPlay) { back = id; break; }
+      if (back > 0) spot(M, back); else { M.debt[me]++; ev.owe = true; }
+      M.turn = op;
+    } else {
+      // a coin owed is paid with the next coins of yours that go in
+      while (M.debt[me] > 0 && mine.length > ev.paid) { spot(M, mine[ev.paid]); ev.paid++; M.debt[me]--; }
+      ev.again = mine.length > 0 || M.pending === me;
+      if (!ev.again) M.turn = op;
+    }
+    ev.foul = foul;
+    for (var t = 0; t < 2; t++) {
+      if (left(M, t) === 0 && M.queenBy >= 0) { M.winner = t; M.over = true; }
+    }
+    if (!M.over && M.shots >= MAX_SHOTS) {
+      var l0 = left(M, 0), l1 = left(M, 1);
+      M.over = true;
+      if (l0 !== l1) M.winner = l0 < l1 ? 0 : 1;
+      else if (M.queenBy >= 0) M.winner = M.queenBy;
+      else M.draw = true;
+    }
+    if (M.over) {
+      ev.again = false; ev.draw = M.draw; ev.win = M.winner;
+      ev.points = M.winner >= 0 ? points(M, M.winner) : 0;
+    } else place(M, freeX(M, M.sx[M.turn]));
+    return ev;
+  }
+  function points(M, t) { return left(M, 1 - t) + (M.queenBy === t ? 3 : 0); }
+
+  // Where a shot from (x, y) at this angle first meets a coin or a board: the page
+  // draws the aim line from it and the bot aims with the same geometry
+  function ray(M, x, y, angle) {
+    var dx = Math.cos(angle), dy = Math.sin(angle), best = Infinity, hit = null, rr = (RS + RC) * (RS + RC);
+    for (var i = 1; i < M.b.length; i++) {
+      var b = M.b[i];
+      if (!b.inPlay) continue;
+      var ox = b.x - x, oy = b.y - y, along = ox * dx + oy * dy;
+      if (along <= 0) continue;
+      var perp2 = ox * ox + oy * oy - along * along;
+      if (perp2 >= rr) continue;
+      var t = along - Math.sqrt(rr - perp2);
+      if (t < best && t >= -1e-9) { best = t; hit = b; }
+    }
+    var tw = Infinity;
+    if (dx > 1e-9) tw = Math.min(tw, (S - RS - x) / dx); else if (dx < -1e-9) tw = Math.min(tw, (RS - x) / dx);
+    if (dy > 1e-9) tw = Math.min(tw, (S - RS - y) / dy); else if (dy < -1e-9) tw = Math.min(tw, (RS - y) / dy);
+    if (hit && best <= tw) {
+      var gx = x + dx * best, gy = y + dy * best;
+      return { id: hit.id, t: best, x: gx, y: gy, obj: Math.atan2(hit.y - gy, hit.x - gx) };
+    }
+    return { id: null, t: tw, x: x + dx * tw, y: y + dy * tw };
+  }
+
+  /* ------------------------------------------------------------------ bot */
+
+  // Distance a body slides from speed v, from the friction law in cue.js, and the power
+  // that slides the striker d units
+  function slide(v) { var a = T.rollA, b = T.rollB; return v / b - a / (b * b) * Math.log(1 + b * v / a); }
+  function powerFor(d) {
+    if (slide(Cue.speedOf(T, 1)) <= d) return 1;
+    var lo = 0, hi = 1;
+    for (var i = 0; i < 30; i++) { var mid = (lo + hi) / 2; if (slide(Cue.speedOf(T, mid)) < d) lo = mid; else hi = mid; }
+    return hi;
+  }
+  function norm(x, y) { var l = Math.sqrt(x * x + y * y) || 1; return { x: x / l, y: y / l, l: l }; }
+  // nothing but the skipped bodies within w of the segment a→b
+  function open(M, ax, ay, bx, by, w, skip) {
+    var u = norm(bx - ax, by - ay);
+    for (var i = 1; i < M.b.length; i++) {
+      var o = M.b[i];
+      if (!o.inPlay || skip.indexOf(o.id) >= 0) continue;
+      var ox = o.x - ax, oy = o.y - ay, t = ox * u.x + oy * u.y;
+      if (t <= 0 || t >= u.l) continue;
+      if (Math.abs(ox * u.y - oy * u.x) < w) return false;
+    }
+    return true;
+  }
+
+  var LEVELS = {
+    easy: { sim: false, xs: 5, pick: 4, aimSd: 0.04, powSd: 0.18 },
+    medium: { sim: true, xs: 7, top: 8, aimSd: 0.014, powSd: 0.07 },
+    hard: { sim: true, xs: 11, top: 20, aimSd: 0.004, powSd: 0.03 }
+  };
+
+  // Straight pots: for each spot on the line, each coin it may play and each pocket,
+  // the striker aims at the point that sends the coin along the line to the pocket
+  function pots(M, lv) {
+    var t = M.turn, y = baseY(t), out = [], targets = [];
+    var mineLeft = left(M, t);
+    for (var i = 1; i < M.b.length; i++) {
+      var c = M.b[i];
+      if (!c.inPlay) continue;
+      if (c.id === QUEEN || (sideOf(c.id) === t && !(mineLeft === 1 && M.queenBy < 0 && queenOn(M)))) targets.push(c);
+    }
+    for (var j = 0; j < lv.xs; j++) {
+      var x = XL + (XR - XL) * (lv.xs === 1 ? 0.5 : j / (lv.xs - 1));
+      if (!canPlace(M, x)) x = freeX(M, x);
+      if (!canPlace(M, x)) continue;
+      targets.forEach(function (c) {
+        POCKETS.forEach(function (P) {
+          var u = norm(P.x - c.x, P.y - c.y), cx = c.x - u.x * (RC + RS), cy = c.y - u.y * (RC + RS);
+          var w = norm(cx - x, cy - y), cut = w.x * u.x + w.y * u.y;
+          if (cut < 0.35 || cx < RS || cx > S - RS || cy < RS || cy > S - RS) return;
+          if (!open(M, x, y, cx, cy, RS + RC, [c.id]) || !open(M, c.x, c.y, P.x, P.y, 2 * RC, [c.id])) return;
+          // the coin leaves at the striker's speed along the line of centres, times what
+          // the heavier striker gives it; a thinner cut gives it less
+          var gainV = (1 + T.ball) * MS / (MS + MC) * cut;
+          var need = w.l + (u.l + 6) / Math.max(0.5, gainV);
+          out.push({ x: x, angle: Math.atan2(w.y, w.x), power: Math.max(0.2, Math.min(1, powerFor(need))), score: cut * 2 - (w.l + u.l) / 120 + (c.id === QUEEN ? 0.25 : 0) });
+        });
+      });
+    }
+    out.sort(function (a, b) { return b.score - a.score; });
+    return out;
+  }
+  // when no straight pot is open: a firm shot at the nearest coin of ours
+  function fallback(M, rnd) {
+    var t = M.turn, y = baseY(t), x = freeX(M, XL + (XR - XL) * rnd()), best = null, bd = Infinity;
+    for (var i = 1; i < M.b.length; i++) {
+      var c = M.b[i];
+      if (!c.inPlay || (sideOf(c.id) !== t && c.id !== QUEEN)) continue;
+      var d = Math.hypot(c.x - x, c.y - y);
+      if (d < bd) { bd = d; best = c; }
+    }
+    if (!best) return { x: x, angle: t === 0 ? -Math.PI / 2 : Math.PI / 2, power: 0.7 };
+    return { x: x, angle: Math.atan2(best.y - y, best.x - x), power: 0.75 };
+  }
+  function copy(M) {
+    return { b: M.b.map(function (b) { return body(b.id, b.x, b.y, b.inPlay); }), turn: M.turn, shots: M.shots, queenBy: M.queenBy, pending: M.pending, debt: M.debt.slice(), sx: M.sx.slice(), winner: M.winner, over: M.over, draw: M.draw };
+  }
+  function judge(M, c) {
+    var t = M.turn, op = 1 - t, N = copy(M), s = shoot(N, c.x, c.angle, c.power);
+    if (!s) return -1e9;
+    run(s);
+    var ev = resolve(N, s);
+    if (N.winner === t) return 1000;
+    if (N.winner === op) return -1000;
+    var v = 10 * (left(M, t) - left(N, t)) - 6 * (left(M, op) - left(N, op));
+    if (N.queenBy === t && M.queenBy !== t) v += 12;
+    if (N.pending === t) v += 5;
+    if (ev.queenBack) v -= 3;
+    if (ev.foul) v -= 14;
+    if (ev.again) v += 2;
+    return v;
+  }
+  function noisy(c, lv, rnd) {
+    var g = function () { return (rnd() + rnd() + rnd() - 1.5) * 2; };
+    return { x: c.x, angle: c.angle + g() * lv.aimSd, power: Math.max(0.15, Math.min(1, c.power * (1 + g() * lv.powSd))) };
+  }
+  // The bot's shot for the side on turn. The break is a full shot at the middle. Easy
+  // picks one of its few best-looking straight pots without looking ahead. Medium and
+  // hard play their best-looking pots (and a firmer copy of each) to the end on copies
+  // of the board and keep the one that leaves them best off; hard tries more spots on
+  // the line and more shots, and aims more finely.
+  function choose(M, level, rnd) {
+    var lv = LEVELS[level] || LEVELS.medium, t = M.turn;
+    if (M.shots === 0) return noisy({ x: S / 2 + (rnd() - 0.5) * 6, angle: t === 0 ? -Math.PI / 2 : Math.PI / 2, power: 1 }, lv, rnd);
+    var list = pots(M, lv);
+    if (!lv.sim) {
+      var pick = list.length ? list[Math.floor(rnd() * Math.min(lv.pick, list.length))] : fallback(M, rnd);
+      return noisy(pick, lv, rnd);
+    }
+    var cands = [];
+    list.slice(0, lv.top).forEach(function (c) { cands.push(c, { x: c.x, angle: c.angle, power: Math.min(1, c.power * 1.3) }); });
+    if (!cands.length) cands.push(fallback(M, rnd), fallback(M, rnd));
+    var best = null, bv = -Infinity;
+    for (var k = 0; k < cands.length; k++) {
+      var v = judge(M, cands[k]) + rnd() * 0.5;
+      if (v > bv) { bv = v; best = cands[k]; }
+    }
+    return noisy(best, lv, rnd);
+  }
+
+  /* ---------------------------------------------------------------- saves */
+
+  // Saved only at rest, between shots
+  function snapshot(M) {
+    return { b: M.b.map(function (b) { return [b.x, b.y, b.inPlay ? 1 : 0]; }), turn: M.turn, shots: M.shots, queenBy: M.queenBy, pending: M.pending, debt: M.debt.slice(), sx: M.sx.slice() };
+  }
+  function restore(o) {
+    if (!o || typeof o !== 'object' || (o.turn !== 0 && o.turn !== 1)) return null;
+    if (!(o.shots === (o.shots | 0) && o.shots >= 0 && o.shots < MAX_SHOTS)) return null;
+    if ([-1, 0, 1].indexOf(o.queenBy) < 0 || [-1, 0, 1].indexOf(o.pending) < 0 || (o.pending >= 0 && (o.pending !== o.turn || o.queenBy >= 0))) return null;
+    if (!Array.isArray(o.debt) || o.debt.length !== 2 || !o.debt.every(function (v) { return v === (v | 0) && v >= 0 && v <= 9; })) return null;
+    if (!Array.isArray(o.sx) || o.sx.length !== 2 || !o.sx.every(function (v) { return typeof v === 'number' && v >= XL && v <= XR; })) return null;
+    if (!Array.isArray(o.b) || o.b.length !== 20) return null;
+    var B = [];
+    for (var i = 0; i < 20; i++) {
+      var p = o.b[i], r = i === 0 ? RS : RC;
+      if (!Array.isArray(p) || p.length !== 3 || typeof p[0] !== 'number' || typeof p[1] !== 'number' || !isFinite(p[0]) || !isFinite(p[1]) || (p[2] !== 0 && p[2] !== 1)) return null;
+      if (p[0] < r - 1e-6 || p[0] > S - r + 1e-6 || p[1] < r - 1e-6 || p[1] > S - r + 1e-6) return null;
+      B.push(body(i, p[0], p[1], p[2] === 1));
+    }
+    if (!B[0].inPlay || B[QUEEN].inPlay !== (o.queenBy < 0 && o.pending < 0)) return null;
+    var M = { b: B, turn: o.turn, shots: o.shots, queenBy: o.queenBy, pending: o.pending, debt: o.debt.slice(), sx: o.sx.slice(), winner: -1, over: false, draw: false };
+    if (left(M, 0) === 0 || left(M, 1) === 0) return null;
+    place(M, freeX(M, M.sx[M.turn]));
+    return M;
+  }
+
+  return {
+    Cue: Cue, T: T, S: S, RC: RC, RS: RS, MC: MC, MS: MS, PC: PC, PR: PR, POCKETS: POCKETS, BASE: BASE, XL: XL, XR: XR, SEGS: SEGS, PULL: PULL, MAX_SHOTS: MAX_SHOTS, QUEEN: QUEEN, LEVELS: LEVELS,
+    sideOf: sideOf, baseY: baseY, body: body, rack: rack, board: board, left: left, queenOn: queenOn, canPlace: canPlace, freeX: freeX, place: place,
+    powerOf: powerOf, shoot: shoot, step: step, run: run, spot: spot, resolve: resolve, points: points, ray: ray,
+    slide: slide, powerFor: powerFor, pots: pots, copy: copy, choose: choose, snapshot: snapshot, restore: restore
+  };
+}
+if (typeof module !== 'undefined') module.exports = CarromEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = CarromEngineFactory(window.ChoganCue), Cue = E.Cue, S = E.S;
+  var LEVELS = ['easy', 'medium', 'hard'];
+  var ACCENT = '#8C5464';
+  // The board keeps its wood in both themes. Side 0 plays the white coins, side 1 the black.
+  var COIN = [{ fill: '#F3EBDD', ring: '#B9A98E', line: '#CDBFA6' }, { fill: '#2D2926', ring: '#0E0C0B', line: '#4A4440' }];
+  var QUEEN = { fill: '#D0263C', ring: '#8E1426', line: '#E8596B' };
+  var FR = 8; // the frame round the playing surface, in board units
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'carrom',
+    name: { fa: 'کاروم', en: 'Carrom', zh: '克朗棋', de: 'Carrom', es: 'Carrom', pl: 'Carrom' },
+    accent: ACCENT,
+    mood: 'menu',
+    strings: {
+      fa: {
+        cmBoard: 'صفحه‌ی کاروم از بالا', cmVsBot: 'مقابل ربات', cmPeople: 'دو نفره', cmBot: 'ربات', cmPlayerN: 'بازیکن {n}', cmNew: 'بازی تازه',
+        cmShotN: 'ضربه‌ی {n}', cmWon: '{n} برد', cmDraw: 'مساوی',
+        cmYour: 'نوبت توست: ضربه‌زن را روی خطت جابه‌جا کن، بعد از آن عقب بکش و رها کن.', cmTurnName: 'نوبت {n}: ضربه‌زن را جابه‌جا کن، عقب بکش و رها کن.', cmBotTurn: 'ربات نشانه می‌گیرد…',
+        cmFoul: 'خطا: ضربه‌زن در جیب افتاد.', cmOwe: 'یک مهره بدهکار شد؛ با مهره‌ی بعدی که بیندازد پرداخت می‌شود.', cmPaid: 'بدهی پرداخت شد.',
+        cmQueenIn: 'ملکه افتاد! در همین ضربه‌ی بعد یکی از مهره‌های خودت را بینداز تا پوشانده شود.', cmCovered: 'ملکه پوشانده شد و مال {n} است.', cmQueenBack: 'ملکه پوشانده نشد و به وسط برگشت.',
+        cmEarly: 'خطا: مهره‌ی آخر پیش از پوشاندن ملکه افتاد.', cmEarlyOp: 'خطا: مهره‌ی آخر حریف پیش از پوشاندن ملکه افتاد.', cmAgain: 'یک ضربه‌ی دیگر.',
+        cmBlocked: 'ضربه‌زن روی یک مهره است؛ کمی جابه‌جایش کن.', cmDaily: 'کاروم روزانه', cmPoints: 'امتیاز', cmPocketed: 'انداخته‌شده', cmShots: 'ضربه‌ها',
+        cmKMove: 'جابه‌جایی ضربه‌زن (با Shift آرام‌تر)', cmKAim: 'چرخاندن جهت (با Shift آرام‌تر)', cmKPower: 'قدرت ضربه', cmKShoot: 'ضربه',
+        cmRules: 'صفحه را از بالا می‌بینی. مهره‌ها را با ضربه‌زنِ بزرگ‌تر به چهار جیب گوشه می‌اندازی. سفید از پایین بازی می‌کند و شروع‌کننده است، سیاه از بالا. در نوبتت ضربه‌زن را روی خط خودت (میان دو دایره‌ی قرمز) جابه‌جا کن، بعد از آن عقب بکش و رها کن؛ هرچه بیشتر بکشی ضربه محکم‌تر است. اگر مهره‌ی خودت بیفتد دوباره ضربه می‌زنی. ملکه‌ی قرمز را باید بپوشانی: در همان ضربه یا ضربه‌ی بعد یکی از مهره‌های خودت را هم بینداز، وگرنه به وسط برمی‌گردد. افتادن ضربه‌زن خطاست: مهره‌های آن ضربه برمی‌گردند، یکی از مهره‌های قبلی‌ات هم برمی‌گردد (یا بدهکار می‌شوی) و نوبت عوض می‌شود. مهره‌ی آخرِ تو یا حریف نباید پیش از پوشاندن ملکه بیفتد. هر کس زودتر همه‌ی مهره‌هایش را بیندازد و ملکه پوشانده شده باشد می‌برد؛ به ازای هر مهره‌ی مانده‌ی حریف یک امتیاز می‌گیرد و اگر ملکه را خودش پوشانده باشد سه امتیاز دیگر. چالش روزانه بازی با ربات متوسط است.',
+        cmTutTitle1: 'هدف', cmTutText1: 'مهره‌های سفیدت را با ضربه‌زن به چهار جیب گوشه بینداز. هر کس زودتر همه‌ی مهره‌هایش را بیندازد می‌برد.',
+        cmTutTitle2: 'ضربه', cmTutText2: 'ضربه‌زن را روی خط پایین جابه‌جا کن. بعد انگشتت را رویش بگذار، عقب بکش و رها کن.',
+        cmTutTitle3: 'ملکه', cmTutText3: 'ملکه‌ی قرمز را بینداز و همان موقع یا در ضربه‌ی بعد یکی از مهره‌هایت را هم، تا مال تو شود. ضربه‌زن نباید بیفتد.'
+      },
+      en: {
+        cmBoard: 'Carrom board seen from above', cmVsBot: 'Against the bot', cmPeople: 'Two players', cmBot: 'Bot', cmPlayerN: 'Player {n}', cmNew: 'New game',
+        cmShotN: 'Shot {n}', cmWon: '{n} wins', cmDraw: 'Draw',
+        cmYour: 'Your turn: slide the striker along your line, then pull back from it and let go.', cmTurnName: '{n} to play: slide the striker, pull back and let go.', cmBotTurn: 'The bot is aiming…',
+        cmFoul: 'Foul: the striker went into a pocket.', cmOwe: 'One coin owed; the next coin of that side to go in pays it.', cmPaid: 'The coin owed is paid.',
+        cmQueenIn: 'The queen is in! Pocket one of your own coins with the next shot to cover her.', cmCovered: 'The queen is covered and belongs to {n}.', cmQueenBack: 'The queen was not covered and goes back to the centre.',
+        cmEarly: 'Foul: the last coin went in before the queen was covered.', cmEarlyOp: 'Foul: the other side\'s last coin went in before the queen was covered.', cmAgain: 'Shoot again.',
+        cmBlocked: 'The striker is on a coin; slide it a little.', cmDaily: 'Daily Carrom', cmPoints: 'Points', cmPocketed: 'Pocketed', cmShots: 'Shots',
+        cmKMove: 'Slide the striker (finer with Shift)', cmKAim: 'Turn the aim (finer with Shift)', cmKPower: 'Power', cmKShoot: 'Shoot',
+        cmRules: 'You see the board from above. The coins go into the four corner pockets, struck with the bigger striker. White plays from the bottom and breaks; black plays from the top. On your turn, slide the striker along your line (between the two red circles), then pull back from it and let go; the further you pull, the harder the shot. Pocket one of your own coins and you shoot again. The red queen must be covered: pocket one of your coins in the same shot or the next, or she goes back to the centre. Pocketing the striker is a foul: the coins of that shot come back, one of yours already in comes back too (or you owe one), and the turn passes. Your last coin, or the other side\'s, may not go in before the queen is covered. Whoever pockets all their coins first, with the queen covered, wins and scores a point for each coin the other side has left, plus three if they covered the queen. The daily challenge is a game against the medium bot.',
+        cmTutTitle1: 'The aim', cmTutText1: 'Strike your white coins into the four corner pockets. Whoever pockets all theirs first wins.',
+        cmTutTitle2: 'The shot', cmTutText2: 'Slide the striker along the bottom line. Then put your finger on it, pull back and let go.',
+        cmTutTitle3: 'The queen', cmTutText3: 'Pocket the red queen, and one of your coins with it or with the next shot, to make her yours. Keep the striker out of the pockets.'
+      },
+      zh: {
+        cmBoard: '俯视的克朗棋盘', cmVsBot: '对战电脑', cmPeople: '双人', cmBot: '电脑', cmPlayerN: '玩家 {n}', cmNew: '新游戏',
+        cmShotN: '第 {n} 击', cmWon: '{n} 获胜', cmDraw: '平局',
+        cmYour: '轮到你：沿你的底线移动母子，然后按住它向后拉再松开。', cmTurnName: '轮到 {n}：移动母子，向后拉再松开。', cmBotTurn: '电脑正在瞄准…',
+        cmFoul: '犯规：母子掉进了袋口。', cmOwe: '欠一枚棋子；该方下一枚进袋的棋子用来抵还。', cmPaid: '欠的棋子已还清。',
+        cmQueenIn: '红后进袋了！下一击打进一枚自己的棋子来保住她。', cmCovered: '红后已保住，归 {n} 所有。', cmQueenBack: '红后没有保住，回到中心。',
+        cmEarly: '犯规：红后保住之前最后一枚棋子进袋了。', cmEarlyOp: '犯规：红后保住之前对方的最后一枚棋子进袋了。', cmAgain: '再击一次。',
+        cmBlocked: '母子压在棋子上；稍微挪一下。', cmDaily: '每日克朗棋', cmPoints: '得分', cmPocketed: '进袋', cmShots: '击数',
+        cmKMove: '移动母子（按住 Shift 更精细）', cmKAim: '转动方向（按住 Shift 更精细）', cmKPower: '力度', cmKShoot: '击打',
+        cmRules: '从上方俯视棋盘。用较大的母子把棋子击进四角的袋口。白方在下方并先开球，黑方在上方。轮到你时，沿你的底线（两个红圈之间）移动母子，然后按住它向后拉再松开；拉得越远，击得越重。打进自己的棋子就可以再击一次。红后必须保住：在同一击或下一击打进一枚自己的棋子，否则她回到中心。母子进袋是犯规：这一击进袋的棋子退回，你已进袋的一枚也退回（没有就欠一枚），并换对方。在红后保住之前，你或对方的最后一枚棋子都不能进袋。先打完全部棋子且红后已保住的一方获胜，对方每剩一枚得一分，自己保住红后再加三分。每日挑战是与中等电脑的对局。',
+        cmTutTitle1: '目标', cmTutText1: '用母子把你的白色棋子击进四角的袋口。先打完的一方获胜。',
+        cmTutTitle2: '击打', cmTutText2: '沿底线移动母子。然后手指按住它，向后拉再松开。',
+        cmTutTitle3: '红后', cmTutText3: '打进红后，并在同一击或下一击打进一枚自己的棋子，她就归你。别让母子进袋。'
+      },
+      de: {
+        cmBoard: 'Carrom-Brett von oben', cmVsBot: 'Gegen den Bot', cmPeople: 'Zwei Spieler', cmBot: 'Bot', cmPlayerN: 'Spieler {n}', cmNew: 'Neues Spiel',
+        cmShotN: 'Stoß {n}', cmWon: 'Sieg: {n}', cmDraw: 'Unentschieden',
+        cmYour: 'Du bist dran: Schieb den Striker auf deiner Linie, dann zieh an ihm zurück und lass los.', cmTurnName: 'Am Zug: {n}. Striker schieben, zurückziehen, loslassen.', cmBotTurn: 'Der Bot zielt …',
+        cmFoul: 'Foul: Der Striker ist eingelocht.', cmOwe: 'Ein Stein ist geschuldet; der nächste eingelochte Stein dieser Seite zahlt ihn.', cmPaid: 'Der geschuldete Stein ist bezahlt.',
+        cmQueenIn: 'Die Dame ist drin! Loch mit dem nächsten Stoß einen eigenen Stein ein, um sie zu decken.', cmCovered: 'Die Dame ist gedeckt und gehört {n}.', cmQueenBack: 'Die Dame wurde nicht gedeckt und kommt zurück in die Mitte.',
+        cmEarly: 'Foul: Der letzte Stein fiel, bevor die Dame gedeckt war.', cmEarlyOp: 'Foul: Der letzte Stein der Gegenseite fiel, bevor die Dame gedeckt war.', cmAgain: 'Noch ein Stoß.',
+        cmBlocked: 'Der Striker liegt auf einem Stein; schieb ihn ein Stück.', cmDaily: 'Tages-Carrom', cmPoints: 'Punkte', cmPocketed: 'Eingelocht', cmShots: 'Stöße',
+        cmKMove: 'Striker schieben (mit Shift feiner)', cmKAim: 'Richtung drehen (mit Shift feiner)', cmKPower: 'Kraft', cmKShoot: 'Stoßen',
+        cmRules: 'Du siehst das Brett von oben. Die Steine kommen mit dem größeren Striker in die vier Ecktaschen. Weiß spielt von unten und eröffnet, Schwarz von oben. Schieb in deinem Zug den Striker auf deiner Linie (zwischen den beiden roten Kreisen), dann zieh an ihm zurück und lass los; je weiter du ziehst, desto fester der Stoß. Lochst du einen eigenen Stein ein, stößt du noch einmal. Die rote Dame muss gedeckt werden: Loch im selben oder im nächsten Stoß einen eigenen Stein ein, sonst kommt sie zurück in die Mitte. Ein eingelochter Striker ist ein Foul: Die Steine dieses Stoßes kommen zurück, dazu einer deiner schon eingelochten (oder du schuldest einen), und der Zug wechselt. Dein letzter Stein und der der Gegenseite dürfen erst fallen, wenn die Dame gedeckt ist. Wer zuerst alle Steine eingelocht hat, bei gedeckter Dame, gewinnt und bekommt einen Punkt für jeden Stein der Gegenseite, drei mehr, wenn er die Dame gedeckt hat. Die Tagesaufgabe ist ein Spiel gegen den mittleren Bot.',
+        cmTutTitle1: 'Das Ziel', cmTutText1: 'Stoß deine weißen Steine mit dem Striker in die vier Ecktaschen. Wer zuerst alle drin hat, gewinnt.',
+        cmTutTitle2: 'Der Stoß', cmTutText2: 'Schieb den Striker auf der unteren Linie. Dann leg den Finger darauf, zieh zurück und lass los.',
+        cmTutTitle3: 'Die Dame', cmTutText3: 'Loch die rote Dame ein und mit ihr oder im nächsten Stoß einen eigenen Stein, dann gehört sie dir. Der Striker darf nicht fallen.'
+      },
+      es: {
+        cmBoard: 'Tablero de carrom visto desde arriba', cmVsBot: 'Contra el bot', cmPeople: 'Dos jugadores', cmBot: 'Bot', cmPlayerN: 'Jugador {n}', cmNew: 'Nueva partida',
+        cmShotN: 'Tiro {n}', cmWon: 'Gana {n}', cmDraw: 'Empate',
+        cmYour: 'Te toca: desliza el striker por tu línea, luego tira hacia atrás de él y suelta.', cmTurnName: 'Le toca a {n}: desliza el striker, tira hacia atrás y suelta.', cmBotTurn: 'El bot está apuntando…',
+        cmFoul: 'Falta: el striker entró en una tronera.', cmOwe: 'Se debe una ficha; la paga la próxima ficha de ese lado que entre.', cmPaid: 'La ficha debida está pagada.',
+        cmQueenIn: '¡Entró la reina! Mete una ficha tuya en el siguiente tiro para cubrirla.', cmCovered: 'La reina está cubierta y es de {n}.', cmQueenBack: 'La reina no se cubrió y vuelve al centro.',
+        cmEarly: 'Falta: la última ficha entró antes de cubrir la reina.', cmEarlyOp: 'Falta: la última ficha del rival entró antes de cubrir la reina.', cmAgain: 'Tira otra vez.',
+        cmBlocked: 'El striker está sobre una ficha; deslízalo un poco.', cmDaily: 'Carrom diario', cmPoints: 'Puntos', cmPocketed: 'Metidas', cmShots: 'Tiros',
+        cmKMove: 'Deslizar el striker (más fino con Shift)', cmKAim: 'Girar la dirección (más fino con Shift)', cmKPower: 'Fuerza', cmKShoot: 'Tirar',
+        cmRules: 'Ves el tablero desde arriba. Las fichas van a las cuatro troneras de las esquinas, golpeadas con el striker, más grande. Las blancas juegan desde abajo y abren; las negras, desde arriba. En tu turno, desliza el striker por tu línea (entre los dos círculos rojos), luego tira hacia atrás de él y suelta; cuanto más tires, más fuerte sale. Si metes una ficha tuya, vuelves a tirar. La reina roja se debe cubrir: mete una ficha tuya en el mismo tiro o en el siguiente, o vuelve al centro. Meter el striker es falta: las fichas de ese tiro vuelven, también una tuya que ya estaba dentro (o debes una), y pasa el turno. Tu última ficha, o la del rival, no puede entrar antes de cubrir la reina. Gana quien meta antes todas sus fichas con la reina cubierta, y suma un punto por cada ficha que le quede al rival, más tres si cubrió la reina. El reto diario es una partida contra el bot medio.',
+        cmTutTitle1: 'El objetivo', cmTutText1: 'Mete tus fichas blancas en las cuatro troneras con el striker. Gana quien las meta todas antes.',
+        cmTutTitle2: 'El tiro', cmTutText2: 'Desliza el striker por la línea de abajo. Luego pon el dedo encima, tira hacia atrás y suelta.',
+        cmTutTitle3: 'La reina', cmTutText3: 'Mete la reina roja y, con ella o en el siguiente tiro, una ficha tuya para que sea tuya. Que no entre el striker.'
+      },
+      pl: {
+        cmBoard: 'Plansza do carromu widziana z góry', cmVsBot: 'Przeciwko botowi', cmPeople: 'Dwóch graczy', cmBot: 'Bot', cmPlayerN: 'Gracz {n}', cmNew: 'Nowa gra',
+        cmShotN: 'Strzał {n}', cmWon: '{n} wygrywa', cmDraw: 'Remis',
+        cmYour: 'Twój ruch: przesuń strikera po swojej linii, potem odciągnij go i puść.', cmTurnName: 'Ruch: {n}. Przesuń strikera, odciągnij i puść.', cmBotTurn: 'Bot celuje…',
+        cmFoul: 'Faul: striker wpadł do łuzy.', cmOwe: 'Jeden pion jest winien; spłaci go następny wbity pion tej strony.', cmPaid: 'Dług spłacony.',
+        cmQueenIn: 'Królowa wpadła! Wbij swój pion następnym strzałem, żeby ją pokryć.', cmCovered: 'Królowa pokryta, należy do: {n}.', cmQueenBack: 'Królowa nie została pokryta i wraca na środek.',
+        cmEarly: 'Faul: ostatni pion wpadł przed pokryciem królowej.', cmEarlyOp: 'Faul: ostatni pion rywala wpadł przed pokryciem królowej.', cmAgain: 'Strzelaj jeszcze raz.',
+        cmBlocked: 'Striker leży na pionie; przesuń go trochę.', cmDaily: 'Codzienny carrom', cmPoints: 'Punkty', cmPocketed: 'Wbite', cmShots: 'Strzały',
+        cmKMove: 'Przesuwanie strikera (z Shift dokładniej)', cmKAim: 'Obrót celownika (z Shift dokładniej)', cmKPower: 'Siła', cmKShoot: 'Strzał',
+        cmRules: 'Widzisz planszę z góry. Piony wbija się do czterech narożnych łuz większym strikerem. Białe grają od dołu i zaczynają, czarne od góry. W swoim ruchu przesuń strikera po swojej linii (między dwoma czerwonymi kółkami), potem odciągnij go i puść; im dalej odciągniesz, tym mocniejszy strzał. Gdy wbijesz swój pion, strzelasz jeszcze raz. Czerwoną królową trzeba pokryć: wbij swój pion w tym samym albo następnym strzale, inaczej wraca na środek. Wbicie strikera to faul: piony z tego strzału wracają, wraca też jeden z Twoich wcześniej wbitych (albo jesteś go winien), a ruch przechodzi na rywala. Twój ostatni pion ani ostatni pion rywala nie mogą wpaść przed pokryciem królowej. Wygrywa ten, kto pierwszy wbije wszystkie piony przy pokrytej królowej; dostaje punkt za każdy pion, który został rywalowi, i trzy więcej, jeśli sam pokrył królową. Codzienne wyzwanie to gra z botem na średnim poziomie.',
+        cmTutTitle1: 'Cel gry', cmTutText1: 'Wbij strikerem swoje białe piony do czterech narożnych łuz. Wygrywa ten, kto pierwszy wbije wszystkie.',
+        cmTutTitle2: 'Strzał', cmTutText2: 'Przesuń strikera po dolnej linii. Potem połóż na nim palec, odciągnij i puść.',
+        cmTutTitle3: 'Królowa', cmTutText3: 'Wbij czerwoną królową, a z nią lub następnym strzałem swój pion, a będzie Twoja. Striker nie może wpaść.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || typeof prefs !== 'object') prefs = {};
+  if (prefs.mode !== 'bot' && prefs.mode !== 'people') prefs.mode = 'bot';
+  if (LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+
+  // G: the game. shot: the shot on the move. drag: a finger aiming or sliding the striker.
+  var G = null, shot = null, drag = null, kbAim = -Math.PI / 2, kbPower = 0.6, kbOn = false, botAim = null, botTimer = 0;
+  var raf = 0, last = 0, acc = 0, paused = false, ended = false, msg = '', lastHit = 0, lastWall = 0, cushions = 0, sinks = [], V = null;
+
+  var cv = el('canvas', { class: 'cm-canvas', role: 'img', 'aria-label': C.t('cmBoard') });
+  var box = el('div', { class: 'cm-box' }, [cv]);
+  var top = el('div', { class: 'cm-top ch-above' });
+  var players = el('div', { class: 'cm-players ch-above' });
+  var status = el('div', { class: 'cm-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'cm-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, players, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('cmNew'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ setup */
+
+  // The bot's dice: on the daily game they come from the day and the shot, so a
+  // resumed daily game plays on the same way
+  function botRnd() { return G.daily ? C.daily('carrom', G.daily + '|t' + G.M.shots).rng : Math.random; }
+
+  function newGame(o) {
+    var daily = o.daily || null;
+    G = { mode: daily ? 'bot' : o.mode, level: daily ? 'medium' : o.level, daily: daily, startedAt: Date.now() };
+    G.M = E.board();
+    if (!daily) { prefs.mode = o.mode; prefs.level = o.level; ctx.store.set('prefs', prefs); }
+    reset();
+  }
+  function reset() {
+    shot = null; drag = null; botAim = null; clearTimeout(botTimer); ended = false; msg = ''; sinks = []; kbOn = false;
+    render(); nextTurn();
+  }
+  function current() { return { mode: G.mode, level: G.level }; }
+  function isBot(t) { return G.mode === 'bot' && t === 1; }
+  function pname(t) {
+    if (t === 0) return G.mode === 'people' ? C.t('cmPlayerN', { n: C.num(1) }) : (C.state.profile.name || C.t('you'));
+    return isBot(t) ? C.t('cmBot') : C.t('cmPlayerN', { n: C.num(2) });
+  }
+  function humanTurn() { return G && !ended && !shot && !botAim && !G.M.over && !isBot(G.M.turn); }
+
+  /* ------------------------------------------------------------- turns */
+
+  function nextTurn() {
+    if (!G || ended) return;
+    if (isBot(G.M.turn)) {
+      clearTimeout(botTimer);
+      botTimer = setTimeout(botMove, C.ui.reduceMotion() ? 250 : 650);
+    } else kbAim = G.M.turn === 0 ? -Math.PI / 2 : Math.PI / 2;
+    renderStatus(); kick();
+  }
+  function botMove() {
+    if (!G || ended || shot || paused || document.hidden) { if (G && !ended && !shot) botTimer = setTimeout(botMove, 400); return; }
+    var c = E.choose(G.M, G.level, botRnd());
+    if (!E.canPlace(G.M, c.x)) c.x = E.freeX(G.M, c.x);
+    botAim = { x0: G.M.b[0].x, x: c.x, angle: c.angle, power: c.power, t0: performance.now() };
+    kick();
+  }
+  function shoot(x, angle, power) {
+    var s = E.shoot(G.M, x, angle, power);
+    if (!s) { msg = C.t('cmBlocked'); C.feedback('bad'); renderStatus(); kick(); return; }
+    shot = s; cushions = 0; drag = null; botAim = null; last = 0; acc = 0; msg = '';
+    C.audio.sfx('shoot');
+    renderStatus(); kick();
+  }
+  function endShot() {
+    var s = shot, by = s.by;
+    shot = null; sinks = [];
+    var ev = E.resolve(G.M, s), parts = [];
+    if (ev.striker) parts.push(C.t('cmFoul'));
+    if (ev.early) parts.push(C.t('cmEarly'));
+    if (ev.earlyOp) parts.push(C.t('cmEarlyOp'));
+    if (ev.owe) parts.push(C.t('cmOwe'));
+    if (ev.paid) parts.push(C.t('cmPaid'));
+    if (ev.covered) parts.push(C.t('cmCovered', { n: pname(by) }));
+    else if (G.M.pending >= 0) parts.push(C.t('cmQueenIn'));
+    if (ev.queenBack) parts.push(C.t('cmQueenBack'));
+    if (ev.again && !G.M.over) parts.push(C.t('cmAgain'));
+    msg = parts.join(' ');
+    if (ev.foul) C.feedback(G.mode === 'bot' && by === 1 ? 'good' : 'bad');
+    else if (ev.mine || ev.covered) C.feedback(G.mode === 'bot' && by === 1 ? 'thud' : 'good');
+    if (G.M.over) {
+      ended = true; ctx.clearSave(); render();
+      setTimeout(finish, C.ui.reduceMotion() ? 300 : 1100);
+      return;
+    }
+    save(); render(); nextTurn();
+  }
+
+  /* -------------------------------------------------------------- loop */
+
+  function frame(now) {
+    raf = 0;
+    if (!G) return;
+    var blocked = paused || document.hidden || !!document.querySelector('.ch-scrim');
+    if (shot) {
+      if (!last || blocked) last = now;
+      acc += Math.min(0.1, (now - last) / 1000); last = now;
+      var hits = 0, more = true, dropped = false;
+      while (acc >= Cue.DT) {
+        acc -= Cue.DT;
+        more = E.step(shot);
+        hits += shot.hits;
+        for (var i = 0; i < shot.drops.length; i++) {
+          var d = shot.drops[i], P = E.POCKETS[d.pocket];
+          sinks.push({ id: d.id, x: d.x, y: d.y, px: P.x, py: P.y, t0: now });
+          dropped = true;
+        }
+        if (!more) break;
+      }
+      if (hits && now - lastHit > 70) { C.audio.sfx('hit'); lastHit = now; }
+      if (dropped) C.audio.sfx('pop');
+      if (shot.ev.cushions > cushions) { cushions = shot.ev.cushions; if (now - lastWall > 90) { C.audio.sfx('select'); lastWall = now; } }
+      if (!more) endShot();
+    }
+    if (botAim && !blocked) {
+      var q = (now - botAim.t0) / (C.ui.reduceMotion() ? 1 : 450);
+      E.place(G.M, botAim.x0 + (botAim.x - botAim.x0) * Math.min(1, q));
+      if (now - botAim.t0 > (C.ui.reduceMotion() ? 150 : 1100)) shoot(botAim.x, botAim.angle, botAim.power);
+    }
+    draw(now);
+    sinks = sinks.filter(function (k) { return now - k.t0 < Cue.SINK_MS; });
+    if (shot || botAim || sinks.length || humanTurn()) kick();
+  }
+  function kick() { if (!raf) raf = requestAnimationFrame(frame); }
+
+  /* ------------------------------------------------------------ result */
+
+  function pocketed(t) { return 9 - E.left(G.M, t); }
+  function finish() {
+    var M = G.M, w = M.winner, won = G.mode === 'people' || M.draw ? null : w === 0;
+    var coins = 6, points = 15, pts = w >= 0 ? E.points(M, w) : 0;
+    if (G.mode === 'bot') {
+      var base = { easy: 6, medium: 12, hard: 20 }[G.level];
+      coins = won ? base : Math.max(2, Math.round(base * 0.3));
+      points = won ? base * 4 : Math.round(base * 1.2);
+      if (won) {
+        C.achievements.unlock('cm-win');
+        if (G.level === 'hard') C.achievements.unlock('cm-hard');
+        if (M.queenBy === 0) C.achievements.unlock('cm-queen');
+      }
+    }
+    var label = C.num(pocketed(0)) + '–' + C.num(pocketed(1));
+    if (G.daily) {
+      var first = C.stats.daily('carrom', G.daily, { label: label, win: won === true });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.finish({
+      won: won,
+      title: M.draw ? C.t('cmDraw') : (G.mode === 'people' ? C.t('cmWon', { n: pname(w) }) : (won ? C.t('won') : C.t('lost'))),
+      timeMs: Date.now() - G.startedAt, coins: coins, points: points,
+      lines: [{ label: C.t('cmPocketed'), value: label }, { label: C.t('cmPoints'), value: C.num(pts) }, { label: C.t('cmShots'), value: C.num(M.shots) }],
+      shareText: 'چوگان · کاروم' + (G.daily ? ('\nروزانه ' + G.daily) : '') + '\n' + pocketed(0) + '–' + pocketed(1),
+      paint: cardPaint(),
+      onAgain: G.daily ? null : function () { newGame(current()); }
+    });
+  }
+
+  /* ------------------------------------------------------------- saves */
+
+  // Saved at rest after every shot; a shot still on the move is played again
+  ctx.autosave(function () {
+    if (!G || ended || G.M.over || G.M.shots === 0) return { inProgress: false };
+    return { g: { mode: G.mode, level: G.level, daily: G.daily, m: E.snapshot(G.M), elapsed: Date.now() - G.startedAt } };
+  });
+  function save() { ctx.save(); }
+  function restore(sv) {
+    var g = sv && sv.g;
+    if (!g || (g.mode !== 'bot' && g.mode !== 'people') || LEVELS.indexOf(g.level) < 0) return false;
+    var M = E.restore(g.m);
+    if (!M) return false;
+    G = { mode: g.mode, level: g.level, daily: g.daily || null, M: M, startedAt: Date.now() - (g.elapsed || 0) };
+    reset();
+    return true;
+  }
+
+  function askNew() {
+    if (!G || !G.daily) { settings(); return; }
+    var dd = G.daily;
+    if (ended || G.M.shots === 0) { newGame({ daily: dd }); return; }
+    C.ui.confirm({ title: C.t('cmNew'), body: C.t('resetWarn'), onOk: function () { newGame({ daily: dd }); } });
+  }
+  function settings() {
+    var o = G ? current() : { mode: prefs.mode, level: prefs.level }, body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
+    function rows() {
+      body.innerHTML = '';
+      body.appendChild(C.ui.segmented([{ value: 'bot', label: C.t('cmVsBot') }, { value: 'people', label: C.t('cmPeople') }], o.mode, function (v) { o.mode = v; rows(); }));
+      if (o.mode === 'bot') body.appendChild(C.ui.segmented(LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), o.level, function (v) { o.level = v; }));
+      if (G && !ended && G.M.shots > 0) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('resetWarn') }));
+    }
+    rows();
+    C.ui.modal({
+      title: C.t('cmNew'), closeButton: true, body: [body],
+      actions: [{ label: C.t('cancel') }, { label: C.t('start'), kind: 'primary', onClick: function () { newGame(o); } }]
+    });
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  // A square board in the largest square that fits. Input is read against the view last drawn.
+  function view() {
+    var r = box.getBoundingClientRect(), side = Math.max(120, Math.min(r.width || 0, r.height || 0));
+    var k = side / (S + 2 * FR);
+    return { k: k, w: Math.floor(side), h: Math.floor(side) };
+  }
+  function toWorld(v, sx, sy) { return { x: sx / v.k - FR, y: sy / v.k - FR }; }
+  function draw(now) {
+    if (!G) return;
+    now = now || performance.now();
+    var v = view(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (cv.width !== Math.round(v.w * dpr) || cv.height !== Math.round(v.h * dpr)) { cv.width = Math.round(v.w * dpr); cv.height = Math.round(v.h * dpr); }
+    cv.style.width = v.w + 'px'; cv.style.height = v.h + 'px';
+    V = v;
+    var g = cv.getContext('2d'), k = v.k * dpr;
+    g.setTransform(k, 0, 0, k, FR * k, FR * k);
+    paintBoard(g);
+    paintSinks(g, now);
+    paintBodies(g, shot ? shot.balls : G.M.b, now);
+    paintAim(g, now);
+  }
+  function paintBoard(g) {
+    // the frame, darker at its outer edge
+    g.fillStyle = '#4A2E1A'; rr(g, -FR, -FR, S + 2 * FR, S + 2 * FR, 4); g.fill();
+    g.fillStyle = '#6B4427'; rr(g, -FR + 1.2, -FR + 1.2, S + 2 * FR - 2.4, S + 2 * FR - 2.4, 3); g.fill();
+    g.fillStyle = '#33200F'; g.fillRect(-0.8, -0.8, S + 1.6, S + 1.6);
+    // the playing surface, light birch with a faint grain
+    g.fillStyle = '#EBD5A8'; g.fillRect(0, 0, S, S);
+    g.strokeStyle = 'rgba(150,105,50,.10)'; g.lineWidth = 0.5;
+    g.beginPath();
+    for (var y = 3; y < S; y += 4.3) { g.moveTo(0, y); g.bezierCurveTo(S * 0.3, y + 1.2, S * 0.7, y - 1.2, S, y + 0.4); }
+    g.stroke();
+    // the pockets
+    E.POCKETS.forEach(function (P) {
+      g.fillStyle = '#1A120C'; g.beginPath(); g.arc(P.x, P.y, E.PR + 0.3, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = '#8A6A44'; g.lineWidth = 0.4; g.beginPath(); g.arc(P.x, P.y, E.PR + 0.5, 0, Math.PI * 2); g.stroke();
+    });
+    var ink = '#3B2614', red = '#C23A3A';
+    g.strokeStyle = ink; g.lineWidth = 0.35;
+    // the four lines, each a pair of rails with a red circle at both ends
+    for (var side = 0; side < 4; side++) {
+      g.save(); g.translate(S / 2, S / 2); g.rotate(side * Math.PI / 2); g.translate(-S / 2, -S / 2);
+      var by = S - E.BASE;
+      g.beginPath();
+      g.moveTo(E.XL, by - E.RS); g.lineTo(E.XR, by - E.RS);
+      g.moveTo(E.XL, by + E.RS); g.lineTo(E.XR, by + E.RS);
+      g.stroke();
+      [E.XL, E.XR].forEach(function (x) {
+        g.fillStyle = red; g.beginPath(); g.arc(x, by, E.RS * 0.82, 0, Math.PI * 2); g.fill();
+        g.beginPath(); g.arc(x, by, E.RS, 0, Math.PI * 2); g.stroke();
+      });
+      // the corner arrow towards the pocket on the left of this line
+      g.beginPath(); g.moveTo(E.PC + 7, S - E.PC - 7); g.lineTo(26, S - 26); g.stroke();
+      g.beginPath(); g.arc(28.2, S - 28.2, 3.1, Math.PI * 0.25 + Math.PI / 2, Math.PI * 0.25 + Math.PI * 1.75); g.stroke();
+      g.beginPath(); g.moveTo(E.PC + 7, S - E.PC - 7); g.lineTo(E.PC + 9.6, S - E.PC - 7.4); g.moveTo(E.PC + 7, S - E.PC - 7); g.lineTo(E.PC + 7.4, S - E.PC - 9.6); g.stroke();
+      g.restore();
+    }
+    // the centre: two circles and a small rose
+    g.beginPath(); g.arc(S / 2, S / 2, 3.4, 0, Math.PI * 2); g.stroke();
+    g.beginPath(); g.arc(S / 2, S / 2, 15, 0, Math.PI * 2); g.stroke();
+    g.fillStyle = 'rgba(194,58,58,.55)';
+    for (var i = 0; i < 8; i++) {
+      var a = i * Math.PI / 4;
+      g.beginPath(); g.moveTo(S / 2 + Math.cos(a) * 4.2, S / 2 + Math.sin(a) * 4.2);
+      g.lineTo(S / 2 + Math.cos(a + 0.18) * 9, S / 2 + Math.sin(a + 0.18) * 9);
+      g.lineTo(S / 2 + Math.cos(a) * 13, S / 2 + Math.sin(a) * 13);
+      g.lineTo(S / 2 + Math.cos(a - 0.18) * 9, S / 2 + Math.sin(a - 0.18) * 9);
+      g.closePath(); g.fill();
+    }
+  }
+  function rr(g, x, y, w, h, r) {
+    g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+  }
+  function coinLook(id) { return id === E.QUEEN ? QUEEN : COIN[E.sideOf(id)]; }
+  function coin(g, x, y, r, look) {
+    g.fillStyle = look.ring; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+    g.fillStyle = look.fill; g.beginPath(); g.arc(x, y, r * 0.86, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = look.line; g.lineWidth = r * 0.12; g.beginPath(); g.arc(x, y, r * 0.52, 0, Math.PI * 2); g.stroke();
+  }
+  function paintBodies(g, B, now, flat) {
+    var i, b;
+    for (i = 1; i < B.length; i++) {
+      b = B[i];
+      if (!b.inPlay) continue;
+      g.fillStyle = 'rgba(40,20,0,.22)'; g.beginPath(); g.arc(b.x + 0.35, b.y + 0.5, b.r, 0, Math.PI * 2); g.fill();
+      coin(g, b.x, b.y, b.r, coinLook(b.id));
+    }
+    b = B[0];
+    if (flat || !b.inPlay) return;
+    var ok = shot || E.canPlace(G.M, b.x), on = humanTurn();
+    g.fillStyle = 'rgba(40,20,0,.25)'; g.beginPath(); g.arc(b.x + 0.4, b.y + 0.6, E.RS, 0, Math.PI * 2); g.fill();
+    g.fillStyle = ok ? ACCENT : '#D23B3B'; g.beginPath(); g.arc(b.x, b.y, E.RS, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#FAF6EC'; g.beginPath(); g.arc(b.x, b.y, E.RS * 0.8, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = ok ? ACCENT : '#D23B3B'; g.lineWidth = 0.3; g.beginPath(); g.arc(b.x, b.y, E.RS * 0.45, 0, Math.PI * 2); g.stroke();
+    // the striker on turn breathes, so a new player sees what to touch
+    if (on && !drag) {
+      var pulse = C.ui.reduceMotion() ? 0.5 : 0.5 + 0.5 * Math.sin(now / 260);
+      g.strokeStyle = 'rgba(140,84,100,' + (0.3 + 0.45 * pulse) + ')'; g.lineWidth = 0.6;
+      g.beginPath(); g.arc(b.x, b.y, E.RS + 1.4, 0, Math.PI * 2); g.stroke();
+    }
+  }
+  function paintSinks(g, now) {
+    sinks.forEach(function (k) {
+      var q = Math.min(1, (now - k.t0) / Cue.SINK_MS), r = (k.id === 0 ? E.RS : E.RC) * (1 - q * 0.7);
+      var x = k.x + (k.px - k.x) * q, y = k.y + (k.py - k.y) * q;
+      g.globalAlpha = 1 - q * 0.6;
+      if (k.id === 0) { g.fillStyle = '#FAF6EC'; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill(); }
+      else coin(g, x, y, r, coinLook(k.id));
+      g.globalAlpha = 1;
+    });
+  }
+  // The shot to come: a dotted path to the first coin it meets, the striker's ghost
+  // there and the way that coin will go; the colour says how hard
+  function guide(g, angle, power, finger) {
+    var st = G.M.b[0], hit = E.ray(G.M, st.x, st.y, angle);
+    var col = power > 0.8 ? '#D9480F' : (power > 0.45 ? '#B7791F' : '#3B2614');
+    if (finger) {
+      g.strokeStyle = 'rgba(59,38,20,.35)'; g.lineWidth = 0.4; g.setLineDash([0.8, 1]);
+      g.beginPath(); g.moveTo(st.x, st.y); g.lineTo(finger.x, finger.y); g.stroke();
+    }
+    g.strokeStyle = col; g.lineWidth = 0.55; g.setLineDash([1.4, 1.2]);
+    g.beginPath(); g.moveTo(st.x, st.y); g.lineTo(hit.x, hit.y); g.stroke();
+    g.setLineDash([]);
+    if (hit.id !== null) {
+      g.strokeStyle = col; g.lineWidth = 0.4; g.beginPath(); g.arc(hit.x, hit.y, E.RS, 0, Math.PI * 2); g.stroke();
+      var c = G.M.b[hit.id];
+      g.lineWidth = 0.6; g.beginPath(); g.moveTo(c.x, c.y); g.lineTo(c.x + Math.cos(hit.obj) * 12, c.y + Math.sin(hit.obj) * 12); g.stroke();
+    }
+    // the power as an arc round the striker
+    g.strokeStyle = col; g.lineWidth = 0.9; g.lineCap = 'round';
+    g.beginPath(); g.arc(st.x, st.y, E.RS + 1.6, angle + Math.PI - power * Math.PI, angle + Math.PI + power * Math.PI); g.stroke();
+    g.lineCap = 'butt';
+  }
+  function paintAim(g, now) {
+    if (shot) return;
+    if (drag && drag.mode === 'aim' && drag.power > 0) guide(g, drag.angle, drag.power, drag.p);
+    else if (botAim && now - botAim.t0 > 450) guide(g, botAim.angle, botAim.power * Math.min(1, (now - botAim.t0 - 450) / 400), null);
+    else if (kbOn && humanTurn()) guide(g, kbAim, kbPower, null);
+  }
+  function cardPaint() {
+    var B = G.M.b.map(function (b) { return { id: b.id, x: b.x, y: b.y, r: b.r, inPlay: b.inPlay }; });
+    return function (g, w, h) {
+      var ww = S + 2 * FR, k = Math.min(w / ww, h / ww);
+      g.save(); g.translate((w - ww * k) / 2, (h - ww * k) / 2); g.scale(k, k); g.translate(FR, FR);
+      paintBoard(g); paintBodies(g, B, 0, true);
+      g.restore();
+    };
+  }
+
+  /* ----------------------------------------------------------------- ui */
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (G.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('cmDaily') + ' — ' + C.num(G.daily) })]));
+    else top.appendChild(el('button', { class: 'ch-badge ch-tap', type: 'button', onclick: askNew, text: G.mode === 'bot' ? C.t('cmVsBot') + ' · ' + C.t(G.level) : C.t('cmPeople') }));
+    top.appendChild(el('span', { class: 'ch-badge', text: C.t('cmShotN', { n: C.num(G.M.shots + (G.M.over ? 0 : 1)) }) }));
+  }
+  function renderPlayers() {
+    players.innerHTML = '';
+    for (var t = 0; t < 2; t++) {
+      var kids = [
+        el('span', { class: 'cm-player__dot', style: { background: COIN[t].fill } }),
+        el('span', { class: 'cm-player__name', text: pname(t) }),
+        el('span', { class: 'cm-player__score', text: C.num(pocketed(t)) + '/' + C.num(9) })
+      ];
+      if (G.M.queenBy === t || G.M.pending === t) kids.splice(2, 0, el('span', { class: 'cm-player__queen', style: G.M.pending === t ? { opacity: '.45' } : null }));
+      var row = el('div', { class: 'cm-player' }, kids);
+      if (!ended && G.M.turn === t) row.classList.add('is-on');
+      players.appendChild(row);
+    }
+  }
+  function renderStatus() {
+    if (!G) return;
+    var t = G.M.turn, s = msg;
+    if (!ended && !shot) {
+      var p = isBot(t) ? C.t('cmBotTurn') : (G.mode === 'bot' ? C.t('cmYour') : C.t('cmTurnName', { n: pname(t) }));
+      s = s ? s + ' ' + p : p;
+    }
+    status.textContent = s;
+  }
+  function render() { if (!G) return; renderTop(); renderPlayers(); renderStatus(); draw(); }
+
+  /* -------------------------------------------------------------- input */
+
+  function worldPt(e) {
+    var r = cv.getBoundingClientRect();
+    return toWorld(V || view(), e.clientX - r.left, e.clientY - r.top);
+  }
+  // A finger on the striker pulls it back to shoot: the shot goes the other way and the
+  // pull's length is the power. A finger elsewhere on the player's line slides it there.
+  cv.addEventListener('pointerdown', function (e) {
+    if (!humanTurn() || drag) return;
+    var p = worldPt(e), st = G.M.b[0], reach = Math.max(E.RS * 1.8, 22 / ((V && V.k) || 3)), by = E.baseY(G.M.turn);
+    if (Math.hypot(st.x - p.x, st.y - p.y) <= reach) drag = { pid: e.pointerId, mode: 'aim', p: p, angle: 0, power: 0 };
+    else if (Math.abs(p.y - by) < 8 && p.x > E.XL - 8 && p.x < E.XR + 8) { drag = { pid: e.pointerId, mode: 'slide' }; E.place(G.M, p.x); }
+    else return;
+    e.preventDefault();
+    kbOn = false; msg = ''; renderStatus();
+    try { cv.setPointerCapture(e.pointerId); } catch (er) { /* old browsers */ }
+    kick();
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (!drag || e.pointerId !== drag.pid) return;
+    var p = worldPt(e), st = G.M.b[0];
+    if (drag.mode === 'slide') E.place(G.M, p.x);
+    else { var dx = st.x - p.x, dy = st.y - p.y; drag.p = p; drag.angle = Math.atan2(dy, dx); drag.power = E.powerOf(Math.hypot(dx, dy) - E.RS * 0.5); }
+    kick();
+  });
+  function lift(e) {
+    if (!drag || e.pointerId !== drag.pid) return;
+    var d = drag; drag = null;
+    // a pull back onto the striker is no shot
+    if (d.mode === 'aim' && e.type === 'pointerup' && d.power >= 0.06 && humanTurn()) shoot(G.M.b[0].x, d.angle, d.power);
+    else kick();
+  }
+  cv.addEventListener('pointerup', lift);
+  cv.addEventListener('pointercancel', lift);
+  cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  // Keys: A and D slide the striker, arrows aim and set the power, Space or Enter shoots
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim') || !humanTurn() || (e.target && e.target.tagName === 'BUTTON' && (e.key === ' ' || e.key === 'Enter'))) return;
+    var used = true, st = G.M.b[0], step = e.shiftKey ? 0.25 : 1.5;
+    if (C.keyIs(e, 'a')) E.place(G.M, st.x - step);
+    else if (C.keyIs(e, 'd')) E.place(G.M, st.x + step);
+    else if (e.key === 'ArrowLeft') kbAim -= e.shiftKey ? 0.01 : 0.05;
+    else if (e.key === 'ArrowRight') kbAim += e.shiftKey ? 0.01 : 0.05;
+    else if (e.key === 'ArrowUp') kbPower = Math.min(1, kbPower + 0.05);
+    else if (e.key === 'ArrowDown') kbPower = Math.max(0.1, kbPower - 0.05);
+    else if (e.key === ' ' || e.key === 'Enter') { if (kbOn) shoot(st.x, kbAim, kbPower); else kbOn = true; }
+    else used = false;
+    if (used) { if (e.key !== ' ' && e.key !== 'Enter') kbOn = true; e.preventDefault(); kick(); }
+  });
+
+  // Away from the app a shot on the move holds still
+  C.onPause(function () { paused = true; drag = null; });
+  C.onResume(function () { paused = false; last = 0; kick(); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { last = 0; kick(); } });
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('cmRules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('A D', C.t('cmKMove')), kb('← →', C.t('cmKAim')), kb('↑ ↓', C.t('cmKPower')), kb('Space / Enter', C.t('cmKShoot'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 110" width="100%" direction="ltr"><rect width="200" height="110" rx="10" fill="#4A2E1A"/><rect x="45" y="5" width="110" height="100" rx="3" fill="#6B4427"/><rect x="52" y="10" width="96" height="90" fill="#EBD5A8"/>' +
+      '<circle cx="57" cy="15" r="5" fill="#1A120C"/><circle cx="143" cy="15" r="5" fill="#1A120C"/><circle cx="57" cy="95" r="5" fill="#1A120C"/><circle cx="143" cy="95" r="5" fill="#1A120C"/>' +
+      '<path d="M72 82 H128 M72 90 H128" stroke="#3B2614" stroke-width="1"/><circle cx="72" cy="86" r="3.5" fill="#C23A3A"/><circle cx="128" cy="86" r="3.5" fill="#C23A3A"/>';
+    var c = function (x, y, f, r) { return '<circle cx="' + x + '" cy="' + y + '" r="4" fill="' + r + '"/><circle cx="' + x + '" cy="' + y + '" r="3.2" fill="' + f + '"/>'; };
+    var w = function (x, y) { return c(x, y, '#F3EBDD', '#B9A98E'); }, b = function (x, y) { return c(x, y, '#2D2926', '#0E0C0B'); }, q = function (x, y) { return c(x, y, '#D0263C', '#8E1426'); };
+    var striker = function (x, y) { return '<circle cx="' + x + '" cy="' + y + '" r="5.5" fill="' + ACCENT + '"/><circle cx="' + x + '" cy="' + y + '" r="4.4" fill="#FAF6EC"/>'; };
+    if (kind === 1) s += q(100, 52) + w(108, 52) + b(92, 52) + w(96, 45) + b(104, 45) + b(96, 59) + w(104, 59) + w(126, 30) + '<path d="M129 27 L140 17" stroke="#D9480F" stroke-width="1.6" stroke-dasharray="3 2"/>' + striker(110, 86);
+    if (kind === 2) s += w(100, 45) + b(88, 55) + striker(114, 86) + '<path d="M114 86 L124 100" stroke="rgba(59,38,20,.5)" stroke-width="1.2" stroke-dasharray="2 2"/><path d="M114 86 L102 50" stroke="#D9480F" stroke-width="1.4" stroke-dasharray="3 2"/><path d="M96 86 H106" stroke="#3B2614" stroke-width="1.2"/><path d="M93 86 l4 -3 v6 z M130 86 l-4 -3 v6 z" fill="#3B2614"/>';
+    if (kind === 3) s += q(70, 30) + w(132, 28) + '<path d="M67 27 L59 18 M135 25 L141 18" stroke="#D9480F" stroke-width="1.6" stroke-dasharray="3 2"/>' + striker(100, 86);
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('cmTutTitle1'), text: C.t('cmTutText1'), art: tArt(1) },
+    { title: C.t('cmTutTitle2'), text: C.t('cmTutText2'), art: tArt(2) },
+    { title: C.t('cmTutTitle3'), text: C.t('cmTutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  var saved = ctx.loadSave();
+  if (dailyDate) {
+    // the daily game has its own slot, so a half-played day goes on
+    if (!(saved && saved.g && saved.g.daily === dailyDate && restore(saved))) newGame({ daily: dailyDate });
+    if (C.stats.dailyDone('carrom', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).carrom;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (!(saved && saved.g && !saved.g.daily && restore(saved))) {
+    newGame({ mode: prefs.mode, level: prefs.level });
+  }
+  ctx.tutorialIfNew(TUT);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { if (G) draw(); });
+})();
+</script>
+</body>
+</html>
