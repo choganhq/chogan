@@ -1,0 +1,863 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>گذرگاه — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .cx-wrap > .ch-fit { --fit-ar: calc(440 / 544); }
+  .ch-fit > .cx-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+  .cx-canvas { display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; user-select: none; -webkit-user-select: none; }
+  .cx-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .cx-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function CrossingEngineFactory() {
+  'use strict';
+
+  // The board: row 0 holds the burrows, rows 1–5 are river, 6 the safe middle verge,
+  // 7–11 road and 12 the start. Columns are whole cells; on the river the hedgehog
+  // rides a log or turtles, so its column there is a fraction.
+  var COLS = 11, ROWS = 13, DT = 1 / 60;
+  var HOME = 0, MID = 6, START = 12, START_X = 5;
+  var BURROWS = [1, 3, 5, 7, 9];
+  var LEVELS = 5, LIVES = 3;
+  // ticks: one hop, one life (a generous minute for one burrow), the bump or splash
+  var HOP = 8, LIFE = 3600, DYING = 54;
+  // A lane is a loop of P cells, of which the screen shows COLS; objects wrap out of
+  // sight, M cells left of the screen, so none ever pops up on it
+  var ROAD_P = 17, ROAD_M = 3, RIVER_P = 23, RIVER_M = 6;
+
+  function mulberry(sd) {
+    var a = sd >>> 0;
+    return function () { a = (a + 0x6D2B79F5) >>> 0; var t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  function mod(a, p) { return ((a % p) + p) % p; }
+  function isRiver(r) { return r >= 1 && r <= 5; }
+  function isRoad(r) { return r >= 7 && r <= 11; }
+
+  // n objects round a loop of P, each in its own slot with at least gmin free behind it
+  function place(rnd, n, P, lmin, lmax, gmin) {
+    var out = [], slot = P / n, off = rnd() * P;
+    for (var i = 0; i < n; i++) {
+      var len = lmin + Math.floor(rnd() * (lmax - lmin + 1));
+      var room = Math.max(0, slot - len - gmin);
+      out.push({ s: mod(off + i * slot + rnd() * room, P), len: len });
+    }
+    return out;
+  }
+
+  // A level's lanes come from its own seed alone, so a saved run stores only the seeds
+  function makeLevel(lv, seed) {
+    var rnd = mulberry(seed), f = 1 + 0.15 * (lv - 1), fr = 1 + 0.08 * (lv - 1), lanes = [], r, L, i;
+    var kinds = ['car', 'truck', 'bike', 'car', 'truck'];
+    for (i = kinds.length - 1; i > 0; i--) { var j = Math.floor(rnd() * (i + 1)), t = kinds[i]; kinds[i] = kinds[j]; kinds[j] = t; }
+    var d = rnd() < 0.5 ? 1 : -1;
+    for (r = 11; r >= 7; r--) {
+      var k = kinds[11 - r];
+      if (k === 'car') L = { v: (1.0 + 0.5 * rnd()) * f, objs: place(rnd, lv >= 3 ? 3 : 2, ROAD_P, 1, 1, 3) };
+      else if (k === 'truck') L = { v: (0.7 + 0.35 * rnd()) * f, objs: place(rnd, 2, ROAD_P, 2, 3, lv >= 4 ? 3.5 : 4.5) };
+      else L = { v: (1.9 + 0.5 * rnd()) * f, objs: place(rnd, lv >= 4 ? 2 : 1, ROAD_P, 1, 1, 4) };
+      L.kind = k; L.dir = d; L.P = ROAD_P; L.M = ROAD_M; L.paint = Math.floor(rnd() * 5);
+      lanes[r] = L; d = -d;
+    }
+    // logs get shorter as the levels go on; turtles dive more often
+    var river = ['turtle', 'log', 'log', 'turtle', 'log'], lmax = 5 - Math.floor((lv - 1) / 2), lmin = Math.max(3, lmax - 1);
+    d = rnd() < 0.5 ? 1 : -1;
+    for (r = 5; r >= 1; r--) {
+      var kk = river[5 - r];
+      if (kk === 'log') L = { v: (0.7 + 0.5 * rnd()) * fr, objs: place(rnd, 3, RIVER_P, lmin, lmax, 1.5) };
+      else {
+        L = { v: (0.8 + 0.4 * rnd()) * fr, objs: place(rnd, 4, RIVER_P, 2, 3, 1.5) };
+        // the first group never dives, so a turtle lane always has a raft
+        for (i = 1; i < L.objs.length; i++) {
+          if (rnd() < 0.12 * lv) { var o = L.objs[i]; o.D = Math.round((5 - 0.3 * lv) * 60); o.ph = Math.floor(rnd() * o.D); }
+        }
+      }
+      L.kind = kk; L.dir = d; L.P = RIVER_P; L.M = RIVER_M; L.paint = 0;
+      lanes[r] = L; d = -d;
+    }
+    return lanes;
+  }
+
+  function objX(L, o, tick) { return mod(o.s + L.dir * L.v * tick * DT, L.P) - L.M; }
+  // A diving group: it sinks over 0.60–0.72 of its cycle, stays under until 0.92, then
+  // comes up. It holds the hedgehog until it is fully under.
+  function phase(o, tick) { return o.D ? ((tick + o.ph) % o.D) / o.D : 0; }
+  function supports(o, tick) { var u = phase(o, tick); return !o.D || u < 0.72 || u >= 0.92; }
+  function depth(o, tick) {
+    if (!o.D) return 0;
+    var u = phase(o, tick);
+    if (u < 0.6) return 0;
+    if (u < 0.72) return (u - 0.6) / 0.12;
+    if (u < 0.92) return 1;
+    return 1 - (u - 0.92) / 0.08;
+  }
+
+  function objects(S, r) {
+    var L = S.lanes[r];
+    if (!L) return [];
+    return L.objs.map(function (o) { return { x: objX(L, o, S.tick), len: o.len, depth: depth(o, S.tick), up: supports(o, S.tick) }; });
+  }
+  function hitByTraffic(S) {
+    var L = S.lanes[S.row];
+    if (!L || !isRoad(S.row)) return false;
+    for (var i = 0; i < L.objs.length; i++) {
+      var x = objX(L, L.objs[i], S.tick);
+      if (x < S.px + 0.85 && x + L.objs[i].len > S.px + 0.15) return true;
+    }
+    return false;
+  }
+  function onPlatform(S) {
+    var L = S.lanes[S.row], c = S.px + 0.5;
+    if (!L || !isRiver(S.row)) return false;
+    for (var i = 0; i < L.objs.length; i++) {
+      var o = L.objs[i], x = objX(L, o, S.tick);
+      if (c >= x - 0.05 && c <= x + o.len + 0.05 && supports(o, S.tick)) return true;
+    }
+    return false;
+  }
+
+  function respawn(S) { S.row = START; S.px = START_X; S.cd = 0; S.from = null; S.time = LIFE; S.reach = START; S.dying = 0; S.cause = null; }
+  function startLevel(S, lv) { S.lv = lv; S.lanes = makeLevel(lv, S.seeds[lv - 1]); S.tick = 0; S.filled = [0, 0, 0, 0, 0]; S.lvDeaths = 0; respawn(S); }
+  function fromSeeds(seeds) {
+    var S = { seeds: seeds.slice(0, LEVELS), lives: LIVES, score: 0, homes: 0, deaths: 0, over: false, won: false, ev: [] };
+    startLevel(S, 1);
+    return S;
+  }
+  function newGame(rnd) {
+    var seeds = [];
+    for (var i = 0; i < LEVELS; i++) seeds.push(Math.floor(rnd() * 4294967296));
+    return fromSeeds(seeds);
+  }
+
+  function die(S, cause) {
+    S.lives--; S.deaths++; S.lvDeaths++;
+    S.dying = DYING; S.cause = cause;
+    S.ev.push({ t: 'die', cause: cause });
+  }
+  function check(S) {
+    if (isRoad(S.row)) { if (hitByTraffic(S)) die(S, 'car'); }
+    else if (isRiver(S.row)) {
+      if (S.px + 0.5 < 0 || S.px + 0.5 > COLS) die(S, 'swept');
+      else if (!onPlatform(S)) die(S, 'water');
+    }
+  }
+
+  function step(S) {
+    if (S.over) return;
+    S.tick++;
+    if (S.dying) {
+      if (--S.dying === 0) {
+        if (S.lives <= 0) { S.over = true; S.ev.push({ t: 'over' }); } else respawn(S);
+      }
+      return;
+    }
+    if (S.cd > 0) S.cd--;
+    if (isRiver(S.row)) { var L = S.lanes[S.row]; S.px += L.dir * L.v * DT; }
+    if (--S.time <= 0) { S.time = 0; die(S, 'time'); return; }
+    check(S);
+  }
+
+  function canHop(S) { return !S.over && !S.dying && S.cd === 0; }
+
+  // Into the burrow row: only an empty burrow close to the hedgehog takes it. Anywhere
+  // else the hop is refused rather than fatal: the hedge is a wall, not a trap.
+  function enter(S) {
+    var c = S.px + 0.5, b = -1, best = 0.65;
+    for (var i = 0; i < BURROWS.length; i++) {
+      if (S.filled[i]) continue;
+      var dd = Math.abs(c - (BURROWS[i] + 0.5));
+      if (dd <= best) { best = dd; b = i; }
+    }
+    if (b < 0) return false;
+    S.filled[b] = 1; S.homes++;
+    S.score += 10 + 50 + 2 * Math.floor(S.time * DT);
+    S.ev.push({ t: 'home', b: b, from: { row: S.row, px: S.px } });
+    if (S.filled.every(function (v) { return v; })) {
+      S.score += 100 * S.lv;
+      S.ev.push({ t: 'level', lv: S.lv, clean: S.lvDeaths === 0 });
+      if (S.lv >= LEVELS) {
+        S.score += 200 * S.lives;
+        S.over = true; S.won = true; S.row = HOME; S.px = BURROWS[b]; S.cd = 0;
+        S.ev.push({ t: 'win' });
+        return true;
+      }
+      startLevel(S, S.lv + 1);
+      return true;
+    }
+    respawn(S);
+    return true;
+  }
+
+  function hop(S, dir) {
+    if (!canHop(S)) return false;
+    var r = S.row, x = S.px;
+    if (dir === 'up') r--; else if (dir === 'down') r++; else if (dir === 'left') x--; else if (dir === 'right') x++; else return false;
+    if (r > START) return false;
+    if (r === HOME) return enter(S);
+    if (!isRiver(r)) x = Math.round(x);
+    if (x < -0.001 || x > COLS - 1 + 0.001) return false;
+    S.from = { row: S.row, px: S.px };
+    S.row = r; S.px = x; S.cd = HOP;
+    if (r < S.reach) { S.reach = r; S.score += 10; }
+    S.ev.push({ t: 'hop', dir: dir });
+    check(S);
+    return true;
+  }
+
+  function drain(S) { var e = S.ev; S.ev = []; return e; }
+
+  function clone(S) {
+    var c = {};
+    for (var k in S) c[k] = S[k];
+    c.filled = S.filled.slice();
+    c.from = S.from ? { row: S.from.row, px: S.from.px } : null;
+    c.ev = [];
+    return c;
+  }
+
+  var KEYS = ['lv', 'tick', 'row', 'px', 'cd', 'time', 'reach', 'dying', 'lives', 'score', 'homes', 'deaths', 'lvDeaths'];
+  function snapshot(S) {
+    var o = { seeds: S.seeds.slice(), filled: S.filled.slice(), cause: S.cause, over: S.over, won: S.won };
+    KEYS.forEach(function (k) { o[k] = S[k]; });
+    return o;
+  }
+  function restore(o) {
+    if (!o || !Array.isArray(o.seeds) || o.seeds.length !== LEVELS || !o.seeds.every(function (s) { return typeof s === 'number' && isFinite(s); })) return null;
+    if (!KEYS.every(function (k) { return typeof o[k] === 'number' && isFinite(o[k]); })) return null;
+    if (o.lv < 1 || o.lv > LEVELS || o.row < HOME || o.row > START || o.lives < 0 || o.lives > LIVES) return null;
+    if (!Array.isArray(o.filled) || o.filled.length !== BURROWS.length) return null;
+    var S = fromSeeds(o.seeds);
+    startLevel(S, o.lv);
+    KEYS.forEach(function (k) { S[k] = o[k]; });
+    S.filled = o.filled.map(function (v) { return v ? 1 : 0; });
+    S.cause = o.cause || null; S.over = !!o.over; S.won = !!o.won; S.from = null;
+    return S;
+  }
+
+  return {
+    COLS: COLS, ROWS: ROWS, DT: DT, HOME: HOME, MID: MID, START: START, START_X: START_X, BURROWS: BURROWS,
+    LEVELS: LEVELS, LIVES: LIVES, HOP: HOP, LIFE: LIFE, DYING: DYING,
+    newGame: newGame, fromSeeds: fromSeeds, makeLevel: makeLevel, step: step, hop: hop, canHop: canHop,
+    clone: clone, snapshot: snapshot, restore: restore, drain: drain, objects: objects,
+    isRiver: isRiver, isRoad: isRoad, onPlatform: onPlatform, hitByTraffic: hitByTraffic
+  };
+}
+if (typeof module !== 'undefined') module.exports = CrossingEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = CrossingEngineFactory();
+  // the logical view: 40 units a cell, and a strip for the time bar below the board
+  var T = 40, VW = E.COLS * T, BOARD = E.ROWS * T, VH = BOARD + 24;
+  var ACCENT = '#8415BC';
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'crossing',
+    name: { fa: 'گذرگاه', en: 'Crossing', zh: '刺猬过路', de: 'Überweg', es: 'Cruce', pl: 'Przejście' },
+    accent: ACCENT,
+    mood: 'dots',
+    strings: {
+      fa: {
+        scene: 'جاده، رود و پنج لانه', hint: 'انگشت را بکش تا بپری؛ لمس یعنی یک خانه جلو.', tapGo: 'برای ادامه صفحه را لمس کن.',
+        lvN: 'مرحله‌ی {n}', livesN: 'جان: {n}', ptsN: 'امتیاز: {n}', bestN: 'بهترین: {n}', dailyCx: 'گذرگاه روزانه', newRun: 'دور تازه',
+        inBurrow: 'رسید خانه!', bump: 'تصادف!', splash: 'شلپ!', swept: 'آب بردش!', timeUp: 'وقت تمام شد!', allHome: 'همه به خانه رسیدند!', outLives: 'جان‌ها تمام شد',
+        ptsL: 'امتیاز', lvL: 'مرحله', homesL: 'لانه‌های پرشده', tries: 'تلاش‌ها', kHop: 'پریدن', kFwd: 'پریدن به جلو', kAgain: 'دور تازه',
+        rules: 'جوجه‌تیغی باید از جاده و رود بگذرد و به لانه‌اش برسد. انگشت را به هر طرف بکش تا یک خانه به همان طرف بپرد؛ لمس ساده یک خانه جلو می‌برد. در جاده به ماشین‌ها، کامیون‌ها و دوچرخه‌ها نخور. وسط راه یک نوار چمن امن است. در رود فقط روی کنده‌ها و لاک‌پشت‌ها می‌شود ایستاد؛ آب آن‌ها را با خودش می‌برد، و بعضی لاک‌پشت‌ها گاهی زیر آب می‌روند (اول کم‌رنگ می‌شوند). اگر کنده تو را از صفحه بیرون ببرد، یک جان از دست می‌رود. بالای صفحه پنج لانه هست؛ به لانه‌ی خالی بپر تا پر شود. هر پنج تا که پر شد، مرحله‌ی بعد تندتر و شلوغ‌تر است. پنج مرحله را تمام کن تا ببری. سه جان داری و برای هر جان یک دقیقه‌ی دست‌ودل‌باز. هر پرش رو به جلو، هر لانه و هر مرحله امتیاز دارد. گذرگاه روزانه برای همه یکسان است.',
+        tutTitle1: 'بپر', tutText1: 'انگشت را بکش تا به همان طرف بپری، یا لمس کن تا جلو بپری. به ماشین‌ها نخور.',
+        tutTitle2: 'سوار شو', tutText2: 'در رود روی کنده‌ها و لاک‌پشت‌ها بایست. لاک‌پشتی که کم‌رنگ می‌شود الان زیر آب می‌رود.',
+        tutTitle3: 'خانه', tutText3: 'به یک لانه‌ی خالی بپر. هر پنج تا که پر شود، مرحله‌ی بعد می‌آید.'
+      },
+      en: {
+        scene: 'Roads, a river and five burrows', hint: 'Swipe to hop. A tap hops forward.', tapGo: 'Tap to go on.',
+        lvN: 'Level {n}', livesN: 'Lives: {n}', ptsN: 'Score: {n}', bestN: 'Best: {n}', dailyCx: 'Daily crossing', newRun: 'New run',
+        inBurrow: 'Home!', bump: 'Bump!', splash: 'Splash!', swept: 'Swept away!', timeUp: 'Time is up!', allHome: 'All home!', outLives: 'Out of lives',
+        ptsL: 'Score', lvL: 'Level', homesL: 'Burrows filled', tries: 'Tries', kHop: 'Hop', kFwd: 'Hop forward', kAgain: 'New run',
+        rules: 'Help the hedgehog across the road and the river to its burrow. Swipe in any direction to hop one square that way; a plain tap hops forward. On the road, keep clear of cars, trucks and bikes. Halfway there is a safe strip of grass. On the river you can only stand on logs and turtles; the water carries them along, and some turtles dive now and then (they fade first). If a log carries you off the screen, you lose a life. Five burrows wait at the top: hop into an empty one to fill it. Fill all five and the next level is faster and busier. Finish five levels to win. You have three lives and a generous minute for each. Every forward hop, every burrow and every level scores. The daily crossing is the same for everyone.',
+        tutTitle1: 'Hop', tutText1: 'Swipe to hop that way, or tap to hop forward. Keep clear of the traffic.',
+        tutTitle2: 'Ride', tutText2: 'On the river, stand on logs and turtles. Turtles that fade are about to dive.',
+        tutTitle3: 'Home', tutText3: 'Hop into an empty burrow. Fill all five to reach the next level.'
+      },
+      pl: {
+        scene: 'Drogi, rzeka i pięć norek', hint: 'Przesuń palcem, aby skoczyć. Stuknięcie skacze do przodu.', tapGo: 'Stuknij, aby kontynuować.',
+        lvN: 'Poziom {n}', livesN: 'Życia: {n}', ptsN: 'Punkty: {n}', bestN: 'Najlepszy: {n}', dailyCx: 'Przejście dnia', newRun: 'Nowa gra',
+        inBurrow: 'W domu!', bump: 'Potrącony!', splash: 'Plusk!', swept: 'Porwał go nurt!', timeUp: 'Koniec czasu!', allHome: 'Wszyscy w domu!', outLives: 'Koniec żyć',
+        ptsL: 'Punkty', lvL: 'Poziom', homesL: 'Zapełnione norki', tries: 'Próby', kHop: 'Skok', kFwd: 'Skok do przodu', kAgain: 'Nowa gra',
+        rules: 'Pomóż jeżowi przejść przez drogę i rzekę do norki. Przesuń palcem w dowolną stronę, aby skoczyć o jedno pole w tę stronę; zwykłe stuknięcie skacze do przodu. Na drodze unikaj samochodów, ciężarówek i rowerów. W połowie drogi jest bezpieczny pas trawy. Na rzece możesz stać tylko na kłodach i żółwiach; woda je niesie, a niektóre żółwie co jakiś czas nurkują (wcześniej bledną). Jeśli kłoda wyniesie cię poza ekran, tracisz życie. Na górze czeka pięć norek: wskocz do pustej, aby ją zapełnić. Gdy wszystkie pięć są pełne, następny poziom jest szybszy i bardziej zatłoczony. Ukończ pięć poziomów, aby wygrać. Masz trzy życia i na każde hojną minutę. Każdy skok do przodu, każda norka i każdy poziom dają punkty. Przejście dnia jest takie samo dla wszystkich.',
+        tutTitle1: 'Skacz', tutText1: 'Przesuń palcem, aby skoczyć w tę stronę, albo stuknij, aby skoczyć do przodu. Unikaj ruchu.',
+        tutTitle2: 'Płyń', tutText2: 'Na rzece stawaj na kłodach i żółwiach. Bladnące żółwie zaraz zanurkują.',
+        tutTitle3: 'Do domu', tutText3: 'Wskocz do pustej norki. Zapełnij wszystkie pięć, aby przejść poziom.'
+      },
+      zh: {
+        scene: '公路、河流和五个洞穴', hint: '滑动跳一格，点一下向前跳。', tapGo: '点一下继续。',
+        lvN: '第 {n} 关', livesN: '生命：{n}', ptsN: '得分：{n}', bestN: '最佳：{n}', dailyCx: '每日过路', newRun: '重新开始',
+        inBurrow: '到家了！', bump: '被撞了！', splash: '扑通！', swept: '被冲走了！', timeUp: '时间到！', allHome: '全部到家！', outLives: '生命用完了',
+        ptsL: '得分', lvL: '关卡', homesL: '填满的洞穴', tries: '尝试次数', kHop: '跳', kFwd: '向前跳', kAgain: '重新开始',
+        rules: '帮小刺猬穿过公路和河流回到洞穴。向任意方向滑动就朝那边跳一格，轻点一下向前跳。在公路上要躲开汽车、卡车和自行车。中间有一条安全的草地。河里只能站在木头和乌龟背上；它们随水漂走，有些乌龟不时潜水（潜水前会先变淡）。如果木头把你带出屏幕，就会失去一条命。顶上有五个洞穴：跳进空洞穴就把它填上。五个都填满后，下一关更快、车更多。通过五关就赢了。你有三条命，每条命都有宽裕的一分钟。每次向前跳、每个洞穴和每一关都会加分。每日过路对所有人都一样。',
+        tutTitle1: '跳', tutText1: '滑动朝那个方向跳，或者点一下向前跳。躲开来往的车辆。',
+        tutTitle2: '乘', tutText2: '在河里要站在木头和乌龟上。变淡的乌龟马上要潜水了。',
+        tutTitle3: '回家', tutText3: '跳进一个空洞穴。五个都填满就进入下一关。'
+      },
+      de: {
+        scene: 'Straßen, ein Fluss und fünf Baue', hint: 'Wische, um zu hüpfen. Ein Tippen hüpft nach vorn.', tapGo: 'Tippe, um weiterzumachen.',
+        lvN: 'Stufe {n}', livesN: 'Leben: {n}', ptsN: 'Punkte: {n}', bestN: 'Bestwert: {n}', dailyCx: 'Überweg des Tages', newRun: 'Neuer Lauf',
+        inBurrow: 'Zu Hause!', bump: 'Zusammenstoß!', splash: 'Platsch!', swept: 'Abgetrieben!', timeUp: 'Die Zeit ist um!', allHome: 'Alle zu Hause!', outLives: 'Keine Leben mehr',
+        ptsL: 'Punkte', lvL: 'Stufe', homesL: 'Gefüllte Baue', tries: 'Versuche', kHop: 'Hüpfen', kFwd: 'Nach vorn hüpfen', kAgain: 'Neuer Lauf',
+        rules: 'Hilf dem Igel über die Straße und den Fluss bis in seinen Bau. Wische in eine Richtung, um ein Feld dorthin zu hüpfen; ein einfaches Tippen hüpft nach vorn. Auf der Straße weich Autos, Lastwagen und Fahrrädern aus. In der Mitte liegt ein sicherer Grasstreifen. Im Fluss kannst du nur auf Baumstämmen und Schildkröten stehen; sie treiben mit dem Wasser, und manche Schildkröten tauchen ab und zu ab (vorher werden sie blass). Trägt dich ein Stamm aus dem Bild, verlierst du ein Leben. Oben warten fünf Baue: Hüpf in einen leeren, um ihn zu füllen. Sind alle fünf voll, ist die nächste Stufe schneller und voller. Schaffe fünf Stufen, um zu gewinnen. Du hast drei Leben und für jedes eine großzügige Minute. Jeder Hüpfer nach vorn, jeder Bau und jede Stufe bringen Punkte. Der Überweg des Tages ist für alle gleich.',
+        tutTitle1: 'Hüpfen', tutText1: 'Wische, um in diese Richtung zu hüpfen, oder tippe, um nach vorn zu hüpfen. Weich dem Verkehr aus.',
+        tutTitle2: 'Mitfahren', tutText2: 'Im Fluss stehst du auf Stämmen und Schildkröten. Blasse Schildkröten tauchen gleich ab.',
+        tutTitle3: 'Nach Hause', tutText3: 'Hüpf in einen leeren Bau. Sind alle fünf voll, geht es zur nächsten Stufe.'
+      },
+      es: {
+        scene: 'Carreteras, un río y cinco madrigueras', hint: 'Desliza para saltar. Un toque salta hacia delante.', tapGo: 'Toca para seguir.',
+        lvN: 'Nivel {n}', livesN: 'Vidas: {n}', ptsN: 'Puntos: {n}', bestN: 'Mejor: {n}', dailyCx: 'Cruce del día', newRun: 'Partida nueva',
+        inBurrow: '¡En casa!', bump: '¡Choque!', splash: '¡Chof!', swept: '¡Se lo llevó el río!', timeUp: '¡Se acabó el tiempo!', allHome: '¡Todos en casa!', outLives: 'Sin vidas',
+        ptsL: 'Puntos', lvL: 'Nivel', homesL: 'Madrigueras llenas', tries: 'Intentos', kHop: 'Saltar', kFwd: 'Saltar hacia delante', kAgain: 'Partida nueva',
+        rules: 'Ayuda al erizo a cruzar la carretera y el río hasta su madriguera. Desliza en cualquier dirección para saltar una casilla hacia allí; un toque simple salta hacia delante. En la carretera, esquiva coches, camiones y bicis. A mitad de camino hay una franja de hierba segura. En el río solo puedes pisar troncos y tortugas; el agua los arrastra, y algunas tortugas se sumergen de vez en cuando (antes se ven más claras). Si un tronco te saca de la pantalla, pierdes una vida. Arriba esperan cinco madrigueras: salta a una vacía para llenarla. Con las cinco llenas, el nivel siguiente es más rápido y con más tráfico. Supera cinco niveles para ganar. Tienes tres vidas y un minuto generoso para cada una. Cada salto hacia delante, cada madriguera y cada nivel dan puntos. El cruce del día es igual para todos.',
+        tutTitle1: 'Salta', tutText1: 'Desliza para saltar en esa dirección, o toca para saltar hacia delante. Esquiva el tráfico.',
+        tutTitle2: 'Súbete', tutText2: 'En el río, pisa troncos y tortugas. Las tortugas que palidecen van a sumergirse.',
+        tutTitle3: 'A casa', tutText3: 'Salta a una madriguera vacía. Llena las cinco para pasar de nivel.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+
+  var S = null, raf = 0, last = 0, acc = 0, paused = false, waiting = false, ended = false, tries = 0, startedAt = 0, seed = 0;
+  // drawing state: which way the hedgehog faces, a hop queued during the last one,
+  // the floating word, the glow of a burrow just filled
+  var facing = 'up', queued = null, pop = null, glow = null, lastCause = null, deadAt = null;
+
+  var cv = el('canvas', { class: 'cx-canvas', role: 'img', 'aria-label': C.t('scene') });
+  var box = el('div', { class: 'cx-box' }, [cv]);
+  var top = el('div', { class: 'cx-top ch-above' });
+  var status = el('div', { class: 'cx-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'cx-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newRun'), onClick: function () { newRun(); } });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- runs */
+
+  function seeded(sd) {
+    var a = sd >>> 0;
+    return function () { a = (a + 0x6D2B79F5) >>> 0; var t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  // the daily run's lanes come from the day, the same for everyone
+  function rngFor(sd) { return dailyDate ? C.daily('crossing', dailyDate).rng : seeded(sd); }
+
+  function newRun() {
+    seed = Math.floor(Math.random() * 4294967296);
+    S = E.newGame(rngFor(seed));
+    tries++;
+    startedAt = Date.now();
+    ended = false; waiting = false; last = 0; acc = 0;
+    facing = 'up'; queued = null; pop = null; glow = null; deadAt = null;
+    ctx.clearSave();
+    renderTop(); renderStatus();
+    kick();
+  }
+
+  function blocked() { return paused || waiting || document.hidden || !!document.querySelector('.ch-scrim'); }
+  function tick(now) {
+    raf = 0;
+    if (!S) return;
+    var dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
+    last = now;
+    if (!blocked() && !ended) {
+      // a fixed step, so a run plays the same on every screen
+      acc += dt;
+      var n = 0;
+      while (acc >= E.DT && n < 8) {
+        E.step(S); acc -= E.DT; n++;
+        if (queued && E.canHop(S)) { var q = queued; queued = null; doHop(q); }
+        events();
+        if (ended) break;
+      }
+      if (n >= 8) acc = 0;
+    }
+    if (pop) { pop.t -= dt * 0.8; if (pop.t <= 0) pop = null; }
+    if (glow) { glow.t -= dt * 1.2; if (glow.t <= 0) glow = null; }
+    draw();
+    raf = requestAnimationFrame(tick);
+  }
+  function kick() { if (!raf) { last = 0; raf = requestAnimationFrame(tick); } }
+
+  function doHop(dir) {
+    if (!S || ended || S.over) return;
+    if (!E.canHop(S)) { if (!S.dying) queued = dir; return; }
+    facing = dir;
+    E.hop(S, dir);
+    events();
+  }
+
+  function causeText(c) { return c === 'car' ? C.t('bump') : c === 'time' ? C.t('timeUp') : c === 'swept' ? C.t('swept') : C.t('splash'); }
+
+  function events() {
+    var ev = E.drain(S), save = false;
+    for (var i = 0; i < ev.length; i++) {
+      var e = ev[i];
+      if (e.t === 'hop') C.audio.sfx('tap');
+      else if (e.t === 'home') {
+        C.feedback('good'); C.haptic('success');
+        glow = { b: e.b, t: 1 };
+        pop = { text: C.t('inBurrow'), t: 1 };
+        facing = 'up'; queued = null; save = true;
+      } else if (e.t === 'level') {
+        if (e.clean) C.achievements.unlock('cx-clean');
+        if (e.lv < E.LEVELS) { C.audio.sfx('win'); pop = { text: C.t('lvN', { n: C.num(e.lv + 1) }), t: 1.4 }; }
+      } else if (e.t === 'die') {
+        lastCause = e.cause; deadAt = { row: S.row, px: S.px, cause: e.cause };
+        C.feedback('bad');
+        pop = { text: causeText(e.cause), t: 1 };
+        queued = null; save = true;
+      } else if (e.t === 'win' || e.t === 'over') {
+        ended = true;
+        ctx.clearSave();
+        setTimeout(finish, C.ui.reduceMotion() ? 300 : 1100);
+      }
+    }
+    if (ev.length) { renderTop(); renderStatus(); }
+    if (save && !ended) ctx.save();
+    if (S && !S.dying) deadAt = null;
+  }
+
+  function finish() {
+    var won = S.won, sc = S.score, note = null;
+    var coins = won ? 30 : Math.min(24, 1 + S.homes), points = won ? 120 : Math.min(100, 4 + S.homes * 4);
+    if (won) C.achievements.unlock('cx-home');
+    var lines = [{ label: C.t('ptsL'), value: C.num(sc) }, { label: C.t('lvL'), value: C.num(S.lv) }, { label: C.t('homesL'), value: C.num(S.homes) }];
+    if (dailyDate) {
+      if (won) C.achievements.unlock('cx-daily');
+      if (!C.stats.daily('crossing', dailyDate, { label: C.t('ptsN', { n: C.num(sc) }), win: won, tries: tries })) { coins = Math.max(1, Math.round(coins * 0.2)); points = Math.max(1, Math.round(points * 0.2)); }
+      lines.push({ label: C.t('tries'), value: C.num(tries) });
+    } else {
+      if (C.stats.best('crossing', 'score', sc) && sc > 0) note = C.t('bestN', { n: C.num(sc) });
+      lines.push({ label: C.t('best'), value: C.num(C.stats.getBest('crossing', 'score') || sc) });
+    }
+    ctx.finish({
+      won: won,
+      title: won ? C.t('allHome') : C.t('outLives'),
+      note: note, timeMs: Date.now() - startedAt, coins: coins, points: points,
+      lines: lines,
+      shareText: 'چوگان · گذرگاه' + (dailyDate ? ('\nروزانه ' + dailyDate) : '') + '\nامتیاز ' + sc,
+      paint: function (g, w, h) { paintShare(g, w, h); },
+      againLabel: C.t('newRun'),
+      onAgain: function () { newRun(); }
+    });
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  function palette(dk) {
+    return dk ? {
+      hedge: '#2E4A2A', hedge2: '#3B5C35', earth: '#5C4430', hole: '#140E0A', water: '#1F4560', wave: 'rgba(255,255,255,.10)',
+      grass: '#3B5734', grass2: '#4A6B40', flower: 'rgba(255,240,200,.35)', road: '#2A2830', dash: 'rgba(255,255,255,.28)', kerb: '#5E5968',
+      log: '#7A5234', log2: '#A88056', shell: '#2E7449', shell2: '#5BA676', flip: '#24583A',
+      hog: '#7E5639', spike: '#D9B68E', face: '#F0D5B0', eye: '#1B1310', glass: 'rgba(200,225,255,.55)', tyre: '#0C0B10',
+      bar: 'rgba(255,255,255,.10)', fill: '#B86AE6', text: 'rgba(244,238,228,.95)', shade: 'rgba(0,0,0,.55)',
+      cars: ['#D45A50', '#E0A23A', '#4A8FD0', '#46A874', '#D877A8']
+    } : {
+      hedge: '#4F8443', hedge2: '#66A055', earth: '#A07A55', hole: '#3A2A1F', water: '#74B2DA', wave: 'rgba(255,255,255,.38)',
+      grass: '#A8CF88', grass2: '#94BF74', flower: 'rgba(255,255,255,.7)', road: '#56535F', dash: 'rgba(255,255,255,.6)', kerb: '#D8D2C6',
+      log: '#93623C', log2: '#CFA06A', shell: '#3D8C58', shell2: '#72BA88', flip: '#2D6B43',
+      hog: '#8B5E3C', spike: '#5A3A24', face: '#EFCFA4', eye: '#241A15', glass: 'rgba(30,45,70,.55)', tyre: '#1F1D24',
+      bar: 'rgba(0,0,0,.10)', fill: ACCENT, text: 'rgba(31,26,23,.9)', shade: 'rgba(255,255,255,.75)',
+      cars: ['#E2584D', '#F0A830', '#3E8FD6', '#3FA872', '#E57AAE']
+    };
+  }
+
+  function size() {
+    var r = box.getBoundingClientRect(), h = Math.floor(Math.min(r.height, r.width * VH / VW));
+    h = Math.max(120, h || 0);
+    return { w: Math.round(h * VW / VH), h: h };
+  }
+
+  function rr(g, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    g.beginPath();
+    g.moveTo(x + r, y); g.lineTo(x + w - r, y); g.quadraticCurveTo(x + w, y, x + w, y + r);
+    g.lineTo(x + w, y + h - r); g.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    g.lineTo(x + r, y + h); g.quadraticCurveTo(x, y + h, x, y + h - r);
+    g.lineTo(x, y + r); g.quadraticCurveTo(x, y, x + r, y); g.closePath();
+  }
+
+  // The hedgehog seen from above: spines round the back, a pale face and a dark nose
+  // toward where it is going. curl draws it rolled up asleep in a burrow.
+  var ANG = { up: 0, right: Math.PI / 2, down: Math.PI, left: -Math.PI / 2 };
+  function hog(g, cx, cy, ang, s, P, curl, flat) {
+    var R = 13 * s;
+    g.save(); g.translate(cx, cy); g.rotate(ang); if (flat) g.scale(1.25, 0.55);
+    g.fillStyle = P.spike;
+    var from = curl ? 0 : 0.28, to = curl ? 1 : 0.72, n = curl ? 16 : 13;
+    for (var i = 0; i <= n; i++) {
+      var a = (from + (to - from) * i / n) * Math.PI * 2 - Math.PI / 2 + Math.PI;
+      var ca = Math.cos(a), sa = Math.sin(a), w = 0.22;
+      g.beginPath();
+      g.moveTo(Math.cos(a - w) * R * 0.8, Math.sin(a - w) * R * 0.8);
+      g.lineTo(ca * R * 1.32, sa * R * 1.32);
+      g.lineTo(Math.cos(a + w) * R * 0.8, Math.sin(a + w) * R * 0.8);
+      g.fill();
+    }
+    g.fillStyle = P.hog;
+    g.beginPath(); g.ellipse(0, 0, R * 0.95, R, 0, 0, Math.PI * 2); g.fill();
+    if (curl) {
+      g.fillStyle = P.face; g.beginPath(); g.ellipse(0, R * 0.2, R * 0.42, R * 0.34, 0, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = P.eye; g.lineWidth = 1.4 * s;
+      g.beginPath(); g.arc(-R * 0.17, R * 0.12, R * 0.1, 0.2, Math.PI - 0.2); g.stroke();
+      g.beginPath(); g.arc(R * 0.17, R * 0.12, R * 0.1, 0.2, Math.PI - 0.2); g.stroke();
+    } else {
+      g.fillStyle = P.face;
+      g.beginPath(); g.ellipse(0, -R * 0.55, R * 0.58, R * 0.6, 0, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.moveTo(-R * 0.3, -R * 0.9); g.lineTo(0, -R * 1.32); g.lineTo(R * 0.3, -R * 0.9); g.fill();
+      g.fillStyle = P.eye;
+      g.beginPath(); g.arc(0, -R * 1.3, R * 0.15, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.arc(-R * 0.27, -R * 0.68, R * 0.1, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.arc(R * 0.27, -R * 0.68, R * 0.1, 0, Math.PI * 2); g.fill();
+    }
+    g.restore();
+  }
+
+  function vehicle(g, kind, x, y, len, dir, col, P) {
+    var w = len * T, front = dir > 0;
+    if (kind === 'bike') {
+      g.strokeStyle = P.tyre; g.lineWidth = 4; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(x + 7, y + T / 2); g.lineTo(x + w - 7, y + T / 2); g.stroke();
+      g.strokeStyle = col; g.lineWidth = 3;
+      g.beginPath(); g.moveTo(x + 13, y + T / 2); g.lineTo(x + w - 13, y + T / 2); g.stroke();
+      g.fillStyle = col;
+      g.beginPath(); g.ellipse(x + w / 2, y + T / 2, 6, 11, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = P.tyre;
+      g.beginPath(); g.arc(x + w / 2 + (front ? 2 : -2), y + T / 2, 5, 0, Math.PI * 2); g.fill();
+      return;
+    }
+    // wheels peek out past the body
+    g.fillStyle = P.tyre;
+    [x + 7, x + w - 15].forEach(function (wx) { rr(g, wx, y + 5, 8, 4, 2); g.fill(); rr(g, wx, y + T - 9, 8, 4, 2); g.fill(); });
+    if (kind === 'truck') {
+      var cab = 0.8 * T, cx = front ? x + w - cab - 2 : x + 2, tx = front ? x + 2 : x + cab + 4;
+      g.fillStyle = P.kerb; rr(g, tx, y + 6, w - cab - 6, T - 12, 4); g.fill();
+      g.fillStyle = col; rr(g, tx + 3, y + T / 2 - 3, w - cab - 12, 6, 3); g.fill();
+      g.fillStyle = col; rr(g, cx, y + 7, cab, T - 14, 6); g.fill();
+      g.fillStyle = P.glass; rr(g, front ? cx + cab - 11 : cx + 4, y + 10, 7, T - 20, 3); g.fill();
+      return;
+    }
+    g.fillStyle = col; rr(g, x + 3, y + 7, w - 6, T - 14, 8); g.fill();
+    g.fillStyle = P.glass;
+    rr(g, front ? x + w - 16 : x + 9, y + 11, 7, T - 22, 3); g.fill();
+    rr(g, front ? x + 9 : x + w - 14, y + 12, 5, T - 24, 2); g.fill();
+  }
+
+  function logShape(g, x, y, len, P) {
+    var w = len * T;
+    g.fillStyle = P.log; rr(g, x + 2, y + 6, w - 4, T - 12, 12); g.fill();
+    g.strokeStyle = 'rgba(0,0,0,.18)'; g.lineWidth = 1.5;
+    for (var i = 0; i < len; i++) { g.beginPath(); g.moveTo(x + 12 + i * T, y + 14); g.lineTo(x + 30 + i * T, y + 14); g.moveTo(x + 20 + i * T, y + 25); g.lineTo(x + 38 + i * T, y + 25); g.stroke(); }
+    g.fillStyle = P.log2;
+    g.beginPath(); g.ellipse(x + w - 7, y + T / 2, 5, T / 2 - 7, 0, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = P.log; g.lineWidth = 1.2;
+    g.beginPath(); g.ellipse(x + w - 7, y + T / 2, 2.5, T / 2 - 11, 0, 0, Math.PI * 2); g.stroke();
+  }
+
+  function turtles(g, x, y, len, dir, depth, P, t) {
+    for (var i = 0; i < len; i++) {
+      var cx = x + (i + 0.5) * T, cy = y + T / 2;
+      g.globalAlpha = 1 - 0.85 * depth;
+      g.fillStyle = P.flip;
+      var paddle = Math.sin(t * 6 + i) * 2;
+      [[-9, -10], [9, -10], [-9, 10], [9, 10]].forEach(function (f) { g.beginPath(); g.ellipse(cx + f[0] + (f[1] < 0 ? paddle : -paddle), cy + f[1], 5, 3.5, 0, 0, Math.PI * 2); g.fill(); });
+      g.beginPath(); g.arc(cx + dir * 15, cy, 5, 0, Math.PI * 2); g.fill();
+      g.fillStyle = P.shell; g.beginPath(); g.ellipse(cx, cy, 13, 11, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = P.shell2;
+      g.beginPath();
+      for (var k = 0; k < 6; k++) { var a = k * Math.PI / 3; g.lineTo(cx + Math.cos(a) * 6, cy + Math.sin(a) * 5); }
+      g.closePath(); g.fill();
+      g.globalAlpha = 1;
+      if (depth > 0 && depth < 1) {
+        g.strokeStyle = P.wave; g.lineWidth = 2;
+        g.beginPath(); g.ellipse(cx, cy, 15 + 4 * depth, 13 + 3 * depth, 0, 0, Math.PI * 2); g.stroke();
+      }
+    }
+  }
+
+  // the whole board in logical units; the hedgehog is drawn separately
+  function scene(g, P, t) {
+    var r, i;
+    // the hedge and the five burrows
+    g.fillStyle = P.hedge; g.fillRect(0, 0, VW, T);
+    g.fillStyle = P.hedge2;
+    for (i = 0; i < 23; i++) { g.beginPath(); g.arc(i * 20, 6 + (i % 2) * 4, 9, 0, Math.PI * 2); g.fill(); }
+    E.BURROWS.forEach(function (b, k) {
+      var x = b * T;
+      g.fillStyle = P.earth; rr(g, x + 2, 4, T - 4, T - 2, 16); g.fill();
+      g.fillStyle = P.hole; g.beginPath(); g.ellipse(x + T / 2, T / 2 + 4, 14, 13, 0, 0, Math.PI * 2); g.fill();
+      if (S && S.filled[k]) hog(g, x + T / 2, T / 2 + 4, 0, 0.85, P, true);
+      if (glow && glow.b === k) {
+        g.strokeStyle = 'rgba(255,230,140,' + Math.max(0, glow.t) + ')'; g.lineWidth = 3;
+        g.beginPath(); g.arc(x + T / 2, T / 2 + 4, 16 + (1 - glow.t) * 10, 0, Math.PI * 2); g.stroke();
+      }
+    });
+    // the river, with ripples drifting with each lane
+    g.fillStyle = P.water; g.fillRect(0, T, VW, 5 * T);
+    g.strokeStyle = P.wave; g.lineWidth = 1.5;
+    for (r = 1; r <= 5; r++) {
+      var L = S && S.lanes[r], sh = L ? ((L.dir * L.v * t * T * 0.5) % 60 + 60) % 60 : 0;
+      for (i = -1; i < 9; i++) {
+        var wx = i * 60 + sh + (r % 2) * 30, wy = r * T + 12 + (i % 2) * 14;
+        g.beginPath(); g.moveTo(wx, wy); g.quadraticCurveTo(wx + 6, wy - 4, wx + 12, wy); g.quadraticCurveTo(wx + 18, wy + 4, wx + 24, wy); g.stroke();
+      }
+    }
+    // the two verges
+    [E.MID, E.START].forEach(function (row) {
+      g.fillStyle = P.grass; g.fillRect(0, row * T, VW, T);
+      g.fillStyle = P.grass2;
+      for (i = 0; i < 22; i++) { var gx = (i * 37 + row * 13) % VW, gy = row * T + 8 + (i * 11) % 24; g.fillRect(gx, gy, 2, 6); g.fillRect(gx + 3, gy + 2, 2, 5); }
+      g.fillStyle = P.flower;
+      for (i = 0; i < 6; i++) { g.beginPath(); g.arc((i * 73 + row * 29) % VW + 6, row * T + 10 + (i * 17) % 22, 2.2, 0, Math.PI * 2); g.fill(); }
+    });
+    // the road: kerbs at both edges and dashed lines between the lanes
+    g.fillStyle = P.road; g.fillRect(0, 7 * T, VW, 5 * T);
+    g.fillStyle = P.kerb; g.fillRect(0, 7 * T, VW, 3); g.fillRect(0, 12 * T - 3, VW, 3);
+    g.fillStyle = P.dash;
+    for (r = 8; r <= 11; r++) for (i = 0; i < 11; i++) g.fillRect(i * 40 + 8, r * T - 1, 22, 2);
+    if (!S) return;
+    // what moves in each lane
+    for (r = 1; r <= 11; r++) {
+      var lane = S.lanes[r];
+      if (!lane) continue;
+      var objs = E.objects(S, r);
+      for (i = 0; i < objs.length; i++) {
+        var o = objs[i], x = o.x * T, y = r * T;
+        if (o.x > E.COLS || o.x + o.len < 0) continue;
+        if (lane.kind === 'log') logShape(g, x, y, o.len, P);
+        else if (lane.kind === 'turtle') turtles(g, x, y, o.len, lane.dir, o.depth, P, t);
+        else vehicle(g, lane.kind, x, y, o.len, lane.dir, P.cars[(lane.paint + i) % P.cars.length], P);
+      }
+    }
+  }
+
+  function draw() {
+    if (!S) return;
+    var Z = size(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
+    cv.style.width = Z.w + 'px'; cv.style.height = Z.h + 'px';
+    var g = cv.getContext('2d'), k = Z.w / VW, P = palette(dark()), t = S.tick * E.DT;
+    g.setTransform(dpr * k, 0, 0, dpr * k, 0, 0);
+    g.clearRect(0, 0, VW, VH);
+    g.save();
+    g.beginPath(); g.rect(0, 0, VW, BOARD); g.clip();
+    scene(g, P, t);
+    drawHog(g, P, t);
+    g.restore();
+    // the time bar: a whole minute for each life
+    g.fillStyle = P.bar; rr(g, 4, BOARD + 7, VW - 8, 10, 5); g.fill();
+    var f = Math.max(0, Math.min(1, S.time / E.LIFE));
+    if (f > 0) { g.fillStyle = P.fill; rr(g, 4, BOARD + 7, (VW - 8) * f, 10, 5); g.fill(); }
+    if (pop) {
+      var font = getComputedStyle(document.body).fontFamily || 'sans-serif';
+      g.globalAlpha = Math.max(0, Math.min(1, pop.t * 2));
+      g.font = '800 26px ' + font; g.textAlign = 'center'; g.textBaseline = 'middle';
+      var y = E.MID * T + T / 2 - (1 - Math.min(1, pop.t)) * 8;
+      g.lineWidth = 5; g.strokeStyle = P.shade; g.strokeText(pop.text, VW / 2, y);
+      g.fillStyle = P.text; g.fillText(pop.text, VW / 2, y);
+      g.globalAlpha = 1;
+    }
+  }
+
+  function drawHog(g, P, t) {
+    if (S.over && S.won) return;
+    if (S.dying && deadAt) {
+      var a = 1 - S.dying / E.DYING, x = (deadAt.px + 0.5) * T, y = deadAt.row * T + T / 2;
+      if (deadAt.cause === 'water' || deadAt.cause === 'swept') {
+        g.strokeStyle = P.wave; g.lineWidth = 3;
+        for (var i = 0; i < 3; i++) { var rad = 6 + a * 22 - i * 7; if (rad > 0) { g.beginPath(); g.ellipse(x, y, rad, rad * 0.7, 0, 0, Math.PI * 2); g.stroke(); } }
+        if (a < 0.4) { g.globalAlpha = 1 - a / 0.4; hog(g, x, y, ANG[facing], 1 - a, P); g.globalAlpha = 1; }
+      } else {
+        // a bump or the end of the minute: flattened and dizzy, never gory
+        hog(g, x, y, ANG[facing], 1, P, false, deadAt.cause === 'car');
+        g.fillStyle = '#F6C445';
+        for (var s = 0; s < 3; s++) { var sa = t * 5 + s * 2.1; g.beginPath(); g.arc(x + Math.cos(sa) * 14, y - 12 + Math.sin(sa) * 5, 3, 0, Math.PI * 2); g.fill(); }
+      }
+      return;
+    }
+    if (S.dying) return;
+    // between hops the hedgehog glides from the last square to the new one
+    var p = 1 - S.cd / E.HOP, fx = S.px, fy = S.row;
+    if (S.from && S.cd > 0) { fx = S.from.px + (S.px - S.from.px) * p; fy = S.from.row + (S.row - S.from.row) * p; }
+    var lift = S.cd > 0 ? Math.sin(p * Math.PI) : 0;
+    var cx = (fx + 0.5) * T, cy = fy * T + T / 2;
+    g.fillStyle = 'rgba(0,0,0,.18)'; g.beginPath(); g.ellipse(cx, cy + 4, 12, 7, 0, 0, Math.PI * 2); g.fill();
+    hog(g, cx, cy - lift * 5, ANG[facing], 1 + lift * 0.15, P);
+  }
+
+  // the share card: the board as it ended, burrows and all
+  function paintShare(g, w, h) {
+    var P = palette(dark());
+    g.fillStyle = P.grass; g.fillRect(0, 0, w, h);
+    var k = Math.min(w / VW, h / BOARD);
+    g.save();
+    g.translate((w - VW * k) / 2, (h - BOARD * k) / 2); g.scale(k, k);
+    scene(g, P, S.tick * E.DT);
+    g.restore();
+  }
+
+  /* ----------------------------------------------------------------- ui */
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (dailyDate) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyCx') + ' — ' + C.num(dailyDate) })]));
+    if (!S) return;
+    top.appendChild(el('span', { class: 'ch-badge', text: C.t('lvN', { n: C.num(S.lv) }) }));
+    top.appendChild(el('span', { class: 'ch-badge', text: C.t('livesN', { n: C.num(Math.max(0, S.lives)) }) }));
+    top.appendChild(el('span', { class: 'ch-badge', text: C.t('ptsN', { n: C.num(S.score) }) }));
+    var best = dailyDate ? 0 : C.stats.getBest('crossing', 'score');
+    if (best) top.appendChild(el('span', { class: 'ch-badge', text: C.t('bestN', { n: C.num(best) }) }));
+  }
+  function renderStatus() { status.textContent = waiting ? C.t('tapGo') : C.t('hint'); }
+  function go() { if (waiting) { waiting = false; last = 0; acc = 0; renderStatus(); kick(); } }
+
+  /* -------------------------------------------------------------- input */
+
+  // A swipe hops as soon as it has gone far enough; a touch that never does is a tap,
+  // which hops forward. The whole game area listens, so a thumb need not find the hedgehog.
+  var ptr = null, SWIPE = 22;
+  wrap.addEventListener('pointerdown', function (e) {
+    if (!S || (e.target.closest && e.target.closest('button'))) return;
+    if (e.button !== undefined && e.button > 0) return;
+    e.preventDefault();
+    C.audio.unlock();
+    if (waiting) { go(); return; }
+    ptr = { id: e.pointerId, x: e.clientX, y: e.clientY, done: false };
+  });
+  window.addEventListener('pointermove', function (e) {
+    if (!ptr || ptr.done || e.pointerId !== ptr.id) return;
+    var dx = e.clientX - ptr.x, dy = e.clientY - ptr.y;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE) return;
+    ptr.done = true;
+    doHop(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
+  });
+  window.addEventListener('pointerup', function (e) {
+    if (!ptr || e.pointerId !== ptr.id) return;
+    if (!ptr.done) doHop('up');
+    ptr = null;
+  });
+  window.addEventListener('pointercancel', function () { ptr = null; });
+  wrap.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  wrap.style.touchAction = 'none';
+  // the board is drawn left to right in every language, so the arrows are never flipped
+  var KEYDIR = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', ' ': 'up' };
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim') || e.repeat) return;
+    if (e.target && e.target.closest && e.target.closest('button') && (e.key === ' ' || e.key === 'Enter')) return;
+    var dir = KEYDIR[e.key] || (C.keyIs(e, 'w') ? 'up' : C.keyIs(e, 's') ? 'down' : C.keyIs(e, 'a') ? 'left' : C.keyIs(e, 'd') ? 'right' : null);
+    if (dir) {
+      e.preventDefault();
+      if (waiting) go(); else doHop(dir);
+    } else if (C.keyIs(e, 'r')) { e.preventDefault(); newRun(); }
+  });
+  // a run waits while the app is away, and comes back waiting for a tap
+  C.onPause(function () { paused = true; if (S && !ended) waiting = true; ctx.save(); renderStatus(); });
+  C.onResume(function () { paused = false; kick(); });
+  document.addEventListener('visibilitychange', function () { if (document.hidden) { if (S && !ended) { waiting = true; renderStatus(); } } else kick(); });
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw); } catch (er) { /* old WebViews */ } }
+  // the floating words use the app's font, which may arrive after the first frame
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { draw(); });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← ↑ → ↓ / W A S D', C.t('kHop')), kb('Space', C.t('kFwd')), kb('R', C.t('kAgain'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // little pictures for the tutorial: a hedgehog, a strip of road or river, burrows
+  var SVG_HOG = function (x, y) {
+    return '<g transform="translate(' + x + ',' + y + ')"><circle r="11" fill="#5A3A24"/><path d="M-11 0 L-15 -4 L-11 -6 L-13 -11 L-7 -10 L-6 -15 L0 -11 L6 -15 L7 -10 L13 -11 L11 -6 L15 -4 L11 0 Z" fill="#5A3A24" transform="rotate(180)"/><circle r="9" fill="#8B5E3C"/><ellipse cy="-6" rx="6" ry="6" fill="#EFCFA4"/><path d="M-3 -10 L0 -15 L3 -10Z" fill="#EFCFA4"/><circle cy="-14.5" r="2" fill="#241A15"/><circle cx="-3" cy="-7" r="1.3" fill="#241A15"/><circle cx="3" cy="-7" r="1.3" fill="#241A15"/></g>';
+  };
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 120" width="100%" direction="ltr"><rect width="200" height="120" rx="10" fill="#EFE2F8"/>';
+    if (kind === 1) {
+      s += '<rect x="10" y="20" width="180" height="60" fill="#56535F"/><rect x="10" y="49" width="180" height="2" fill="#fff" opacity=".6"/>' +
+        '<rect x="30" y="26" width="34" height="20" rx="6" fill="#E2584D"/><rect x="120" y="55" width="50" height="20" rx="5" fill="#3E8FD6"/>' +
+        '<rect x="10" y="80" width="180" height="30" fill="#A8CF88"/>' + SVG_HOG(100, 95) +
+        '<path d="M100 78 v-18 M94 66 l6 -7 6 7" stroke="' + ACCENT + '" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>';
+    } else if (kind === 2) {
+      s += '<rect x="10" y="20" width="180" height="80" fill="#74B2DA"/><rect x="24" y="30" width="110" height="24" rx="12" fill="#93623C"/>' +
+        '<g fill="#3D8C58"><ellipse cx="120" cy="80" rx="13" ry="11"/><ellipse cx="148" cy="80" rx="13" ry="11"/></g>' +
+        '<ellipse cx="176" cy="80" rx="13" ry="11" fill="#3D8C58" opacity=".35"/>' + SVG_HOG(70, 42);
+    } else {
+      s += '<rect x="10" y="20" width="180" height="40" fill="#4F8443"/>' +
+        [30, 70, 110, 150].map(function (x, i) { return '<rect x="' + (x + 2) + '" y="24" width="36" height="34" rx="14" fill="#A07A55"/><ellipse cx="' + (x + 20) + '" cy="44" rx="13" ry="12" fill="#3A2A1F"/>' + (i < 2 ? '<circle cx="' + (x + 20) + '" cy="44" r="9" fill="#8B5E3C"/>' : ''); }).join('') +
+        '<rect x="10" y="60" width="180" height="50" fill="#74B2DA"/><rect x="100" y="76" width="80" height="22" rx="11" fill="#93623C"/>' + SVG_HOG(130, 87) +
+        '<path d="M130 72 v-6" stroke="' + ACCENT + '" stroke-width="3" stroke-linecap="round"/>';
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // A run in progress is saved after each burrow and each lost life and when the app
+  // goes away; the daily run has its own slot
+  ctx.autosave(function () {
+    if (!S || S.over || ended) return { inProgress: false };
+    return { s: E.snapshot(S), seed: seed, tries: tries, daily: dailyDate || null, elapsed: Date.now() - startedAt };
+  });
+  function resumeRun(sv) {
+    var R = E.restore(sv.s);
+    if (!R || R.over) return false;
+    S = R; seed = sv.seed; tries = sv.tries || 1; startedAt = Date.now() - (sv.elapsed || 0);
+    ended = false; waiting = true; last = 0; acc = 0;
+    renderTop(); renderStatus(); draw(); kick();
+    return true;
+  }
+  var saved = ctx.loadSave();
+  if (dailyDate) {
+    if (!(saved && saved.s && saved.daily === dailyDate && resumeRun(saved))) newRun();
+    if (C.stats.dailyDone('crossing', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).crossing;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (!(saved && saved.s && !saved.daily && resumeRun(saved))) {
+    newRun();
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
