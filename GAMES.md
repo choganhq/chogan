@@ -70,6 +70,7 @@ Every game in Chogan with a line about it. Each one in `www/games.json` has a ro
 | Pipeworks | Each tap turns a cell a quarter clockwise: turn the pipes until every one joins the water source in the middle with no open end; cells with water turn blue, and a long press locks a cell you are sure of; three sizes (5×5, 7×7, 9×9), stars by the number of turns, and a daily puzzle |
 | Doubles | Swipe and every tile slides as far as it can; two equal tiles that meet merge into one worth double; reach the 2048 tile on the 4×4 board, then keep going for a best score; no undo, and a daily game with the same tiles for everyone |
 | Storekeeper | Push every crate onto a mark: crates can only be pushed, never pulled, one at a time; swipe a step or tap a cell to walk there; every warehouse is newly built and solved by a solver before you see it, with three stars for the fewest pushes; undo, no losing, and a daily warehouse the same for everyone |
+| Star Raid | Clear the sky of raiders: drag to steer and the ship fires on its own; ten waves and a short final wave with the flagship, three ships, double points for a raider hit while it dives, a bonus for a wave cleared without a loss, and a daily raid the same for everyone |
 | Crossing | Get the hedgehog across the road and the river and fill five burrows: swipe to hop, dodge cars, trucks and bikes, ride logs and turtles that dive now and then; five levels, each faster and busier, three lives with a generous minute each, and a daily crossing the same for everyone |
 
 ## فارسی
@@ -144,6 +145,7 @@ Every game in Chogan with a line about it. Each one in `www/games.json` has a ro
 | لوله‌کشی | هر ضربه یک خانه را ربع دور می‌چرخاند: لوله‌ها را بچرخان تا همه به منبع آب وسط وصل شوند و هیچ سر لوله‌ای باز نماند؛ خانه‌های آب‌دار آبی می‌شوند و با فشار طولانی می‌شود خانه‌ای را قفل کرد؛ سه اندازه‌ی ۵×۵، ۷×۷ و ۹×۹، ستاره بر اساس تعداد چرخش‌ها، و پازل روزانه |
 | دوبرابر | با کشیدن انگشت همه‌ی کاشی‌ها تا جایی که بشود سُر می‌خورند و دو کاشی هم‌عدد که به هم برسند یکی و دو برابر می‌شوند؛ روی صفحه‌ی ۴×۴ به کاشی ۲۰۴۸ برس و بعد برای رکورد ادامه بده؛ بدون برگشت، با بازی روزانه‌ای که کاشی‌هایش برای همه یکی است |
 | انباردار | همه‌ی جعبه‌ها را روی علامت‌ها هل بده: جعبه فقط هل داده می‌شود، نه کشیده، و یکی‌یکی؛ با کشیدن انگشت یک قدم برو یا روی خانه‌ای بزن تا انباردار خودش برود؛ هر انبار تازه ساخته می‌شود و پیش از دیدنت حل شده، با سه ستاره برای کمترین هل؛ با برگشت، بدون باخت، و انبار روزانه‌ای که برای همه یکی است |
+| یورش | آسمان را از مهاجم‌ها پاک کن: بکش تا سفینه حرکت کند، خودش شلیک می‌کند؛ ده موج و یک موج کوتاه آخر با ناوِ فرمانده، سه سفینه، امتیاز دوبرابر برای زدن مهاجمی که شیرجه می‌زند، جایزه برای موجی که بی‌باخت پاک شود، و یورش روزانه‌ای که برای همه یکی است |
 | گذرگاه | جوجه‌تیغی را از جاده و رود بگذران و پنج لانه را پر کن: با کشیدن انگشت بپر، از ماشین و کامیون و دوچرخه دوری کن، روی کنده‌ها و لاک‌پشت‌هایی که گاهی زیر آب می‌روند بایست؛ پنج مرحله که هر کدام تندتر و شلوغ‌تر است، سه جان و برای هر جان یک دقیقه‌ی دست‌ودل‌باز، و گذرگاه روزانه‌ای که برای همه یکی است |
 
 </div>
