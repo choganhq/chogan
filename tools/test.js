@@ -6041,28 +6041,36 @@ function testStoreGames() {
   }
 }
 
-/* ------------------------------------------------ README game tables */
+/* ------------------------------------------------ Game tables (GAMES.md) */
 // #188: the README stopped at Breakout while five more games shipped, and nothing noticed.
 // Every game in games.json must have a row in both the English and the Persian table.
+// #665: with ~60 rows a language the README was mostly the game list, so the tables moved
+// to GAMES.md and each half of the README links there instead.
 function testReadme() {
-  head('README game tables');
+  head('Game tables in GAMES.md');
   const md = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+  const gp = path.join(ROOT, 'GAMES.md');
+  const list = fs.existsSync(gp) ? fs.readFileSync(gp, 'utf8') : '';
   const raw = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8'));
   const games = Array.isArray(raw) ? raw : raw.games;
   ok(Array.isArray(games) && games.length > 0, 'games.json lists games');
-  const section = (start) => {
-    const at = md.indexOf(start);
+  const section = (text, start) => {
+    const at = text.indexOf(start + '\n');
     if (at < 0) return '';
-    const end = md.indexOf('\n### ', at + start.length);
-    return md.slice(at, end < 0 ? md.length : end);
+    const end = text.indexOf('\n## ', at + start.length);
+    return text.slice(at, end < 0 ? text.length : end);
   };
   const rows = (sec) => sec.split('\n').filter((l) => /^\| /.test(l)).map((l) => l.split('|')[1].trim());
-  const en = rows(section('### The games')), fa = rows(section('### بازی‌ها'));
-  ok(en.length > 0 && fa.length > 0, 'README has an English and a Persian game table');
+  const en = rows(section(list, '## English')), fa = rows(section(list, '## فارسی'));
+  ok(en.length > 0 && fa.length > 0, 'GAMES.md has an English and a Persian game table');
   const missEn = games.filter((g) => en.indexOf(g.name.en) < 0).map((g) => g.id);
   const missFa = games.filter((g) => fa.indexOf(g.name.fa) < 0).map((g) => g.id);
   ok(!missEn.length, 'every game has a row in the English table' + (missEn.length ? ' (missing: ' + missEn.join(', ') + ')' : ''));
   ok(!missFa.length, 'every game has a row in the Persian table' + (missFa.length ? ' (missing: ' + missFa.join(', ') + ')' : ''));
+  const faAt = md.indexOf('## فارسی');
+  ok(faAt > 0 && /\]\(GAMES\.md#english\)/.test(md.slice(0, faAt)) && /\]\(GAMES\.md#فارسی\)/.test(md.slice(faAt)),
+    'each half of the README links its own table in GAMES.md');
+  ok(!md.split('\n').some((l) => /^\| /.test(l)), 'the README itself no longer carries a game table');
   // #615: playchogan.com is only a redirect; the web line must still name the real
   // origin, because that is where a player's progress lives (localStorage is per origin).
   const webEn = (md.match(/^- \*\*Web:\*\*.*$/m) || [''])[0], webFa = (md.match(/^- \*\*وب:\*\*.*$/m) || [''])[0];
