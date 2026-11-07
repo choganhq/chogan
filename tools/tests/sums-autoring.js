@@ -34,11 +34,24 @@ module.exports = function (T) {
     ok(off.S.st[0] === 0, 'with no saved setting the finished row\'s digit stays for the player to ring (' + off.S.st.join() + ')');
     const on = play({ n: 5, autoRing: true });
     ok(on.S.st[0] === 1, 'with the setting on the game rings it, as before (' + on.S.st.join() + ')');
-    // winning never needed the rings: erasing the last extra digit still ends the puzzle
+    // with the setting off, erasing the last extra digit does not end the puzzle: the owner
+    // got the result window with a digit still un-ringed (#699)
     const last = play({ n: 5 });
     P.keep.forEach((k, i) => { if (!k) last.S.st[i] = 2; });
     vm.runInContext('settle();', last);
-    ok(last.won === 1 && last.S.st.some((v) => v === 0), 'with the setting off the puzzle is still won when the last extra digit goes, rings or not');
+    ok(last.won === 0 && last.S.st.some((v) => v === 0), 'with the setting off the puzzle is not won while a digit that stays is un-ringed (#699)');
+    P.keep.forEach((k, i) => { if (k) last.S.st[i] = 1; });
+    vm.runInContext('settle();', last);
+    ok(last.won === 1, 'ringing the last of them wins it');
+    // with the setting on, the last erasure rings the rest and wins at once, as before
+    const auto = play({ n: 5, autoRing: true });
+    P.keep.forEach((k, i) => { if (!k) auto.S.st[i] = 2; });
+    vm.runInContext('settle();', auto);
+    ok(auto.won === 1 && auto.S.st.every((v) => v), 'with the setting on the last erasure rings the rest and wins (' + auto.S.st.join() + ')');
+    // every language's help says the rings are part of the finish
+    const rules = LOCALE_CODES.map((l) => ((html.match(new RegExp('\\n      ' + l + ': \\{([\\s\\S]*?)\\n      \\}')) || [])[1] || '').match(/rules: '([^']*)'/));
+    ok(rules.length === LOCALE_CODES.length && rules.every((r) => r && /حلقه شوند|is ringed|zakreślone|圈上|einen Ring hat|tiene su aro/.test(r[1])),
+      'the help names the rings in the finish in all ' + LOCALE_CODES.length + ' languages');
 
     ok(/var prefs = ctx\.store\.get\('prefs', null\);[\s\S]{0,200}prefs = \{ n: 5 \}/.test(html) && !/autoRing: true/.test(html),
       'a new player starts with the setting off');
