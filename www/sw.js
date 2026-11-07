@@ -17,6 +17,7 @@ const SHELL = [
   './manifest.webmanifest',
   './favicon.svg',
   './privacy.html',
+  './privacy-plus.html',
   './icon-192.png',
   './icon-512.png',
   './icon-maskable-512.png',

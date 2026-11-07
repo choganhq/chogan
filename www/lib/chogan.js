@@ -551,7 +551,7 @@
   // appends "ChoganPlus" to the WebView user agent. Without this it greeted players as
   // Chogan and promised "fully offline", which a Play Games build cannot (#689).
   var PLUS = /\bChoganPlus\b/.test((global.navigator && global.navigator.userAgent) || '');
-  var PLUS_KEYS = { appName: 1, welcomeTitle: 1, welcomeSub: 1, aboutText: 1 };
+  var PLUS_KEYS = { appName: 1, welcomeTitle: 1, welcomeSub: 1, aboutText: 1, privacyNone: 1 };
   function brandKey(key) { return PLUS && PLUS_KEYS[key] ? key + 'Plus' : key; }
   Chogan.plus = PLUS;
 
