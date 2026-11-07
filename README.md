@@ -135,7 +135,7 @@ So both sources carry the identical, identically-signed APK. You can install fro
 
 ### License
 
-MIT, see [LICENSE](LICENSE). The Vazirmatn font is under the OFL; its licence text ships beside the font in `www/fonts/OFL.txt`.
+MIT, see [LICENSE](LICENSE). The Vazirmatn font and the Latin subset of Nunito are under the OFL; their licence texts ship beside the fonts in `www/fonts/OFL.txt` and `www/fonts/OFL-Nunito.txt`.
 
 ---
 
@@ -248,7 +248,7 @@ www/
   sw.js                    سرویس‌ورکر آفلاین، کش-اول
   lib/chogan.css           سیستم طراحی: توکن‌های رنگ و شعاع و سایه و فاصله
   lib/chogan.js            هسته‌ی مشترک همه‌ی بازی‌ها
-  fonts/                   وزیرمتن، داخل بسته
+  fonts/                   وزیرمتن و حروف لاتین نونیتو، داخل بسته
   games/<id>/              هر بازی یک پوشه: index.html و icon.svg
 android/                   پروژه‌ی اندروید، فقط یک فایل جاوا
 template/game/             اسکلت بازی جدید
@@ -306,6 +306,6 @@ git tag v0.2.0 && git push origin v0.2.0
 
 ### مجوز
 
-MIT. متن کامل در [LICENSE](LICENSE). فونت وزیرمتن زیر مجوز OFL است، متنش کنار خود فونت در `www/fonts/OFL.txt`.
+MIT. متن کامل در [LICENSE](LICENSE). فونت وزیرمتن و زیرمجموعه‌ی لاتین نونیتو زیر مجوز OFL هستند، متنشان کنار خود فونت‌ها در `www/fonts/OFL.txt` و `www/fonts/OFL-Nunito.txt`.
 
 </div>
