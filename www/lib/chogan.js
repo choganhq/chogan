@@ -309,6 +309,7 @@
       resetWarn: 'این کار برگشت ندارد.', resetDone: 'پاک شد',
       about: 'درباره', version: 'نسخه', commitHash: 'کامیت', source: 'کد منبع', license: 'مجوز',
       aboutText: 'رایگان، متن‌باز، بدون تبلیغ، بدون ردیاب، کاملاً آفلاین.',
+      appNamePlus: 'چوگان پلاس', aboutTextPlus: 'رایگان، بدون تبلیغ، بدون خرید درون‌برنامه‌ای. همه‌ی بازی‌ها بدون اینترنت هم کار می‌کنند.',
       name: 'نام', country: 'کشور', optional: 'اختیاری',
       hint: 'راهنمایی', hints: 'راهنمایی', notEnoughCoins: 'سکه کافی نداری', hintUsed: 'راهنمایی گرفتی',
       coinsEarned: 'سکه گرفتی', playToEarn: 'یک دور بازی کن تا سکه بگیری',
@@ -351,6 +352,7 @@
       resetWarn: 'This cannot be undone.', resetDone: 'Erased',
       about: 'About', version: 'Version', source: 'Source code', commitHash: 'commit', license: 'License',
       aboutText: 'Free, open source, no ads, no trackers, fully offline.',
+      appNamePlus: 'Chogan Plus', aboutTextPlus: 'Free, no ads, no in-app purchases. Every game also works offline.',
       name: 'Name', country: 'Country', optional: 'optional',
       hint: 'Hint', hints: 'Hints', notEnoughCoins: 'Not enough coins', hintUsed: 'Hint used',
       coinsEarned: 'coins earned', playToEarn: 'Play a round to earn coins',
@@ -393,6 +395,7 @@
       resetWarn: 'Tej operacji nie można cofnąć.', resetDone: 'Usunięto',
       about: 'O aplikacji', version: 'Wersja', source: 'Kod źródłowy', commitHash: 'commit', license: 'Licencja',
       aboutText: 'Darmowa, otwartoźródłowa, bez reklam, bez śledzenia, w pełni offline.',
+      appNamePlus: 'Chogan Plus', aboutTextPlus: 'Darmowa, bez reklam, bez zakupów w aplikacji. Wszystkie gry działają też offline.',
       name: 'Nazwa', country: 'Kraj', optional: 'opcjonalnie',
       hint: 'Wskazówka', hints: 'Wskazówki', notEnoughCoins: 'Za mało monet', hintUsed: 'Użyto wskazówki',
       coinsEarned: 'zdobyte monety', playToEarn: 'Zagraj rundę, aby zdobyć monety',
@@ -435,6 +438,7 @@
       resetWarn: '此操作无法撤销。', resetDone: '已清除',
       about: '关于', version: '版本', commitHash: '提交', source: '源代码', license: '许可协议',
       aboutText: '免费、开源、无广告、无追踪，完全离线。',
+      appNamePlus: 'Chogan Plus', aboutTextPlus: '免费、无广告、无内购。所有游戏也可离线游玩。',
       name: '名字', country: '国家', optional: '可选',
       hint: '提示', hints: '提示', notEnoughCoins: '金币不足', hintUsed: '已使用提示',
       coinsEarned: '获得金币', playToEarn: '玩一局即可获得金币',
@@ -477,6 +481,7 @@
       resetWarn: 'Das lässt sich nicht rückgängig machen.', resetDone: 'Gelöscht',
       about: 'Über', version: 'Version', source: 'Quellcode', commitHash: 'Commit', license: 'Lizenz',
       aboutText: 'Kostenlos, Open Source, ohne Werbung, ohne Tracker, komplett offline.',
+      appNamePlus: 'Chogan Plus', aboutTextPlus: 'Kostenlos, ohne Werbung, ohne In-App-Käufe. Alle Spiele laufen auch offline.',
       name: 'Name', country: 'Land', optional: 'optional',
       hint: 'Tipp', hints: 'Tipps', notEnoughCoins: 'Nicht genug Münzen', hintUsed: 'Tipp genutzt',
       coinsEarned: 'Münzen verdient', playToEarn: 'Spiel eine Runde, um Münzen zu verdienen',
@@ -519,6 +524,7 @@
       resetWarn: 'No se puede deshacer.', resetDone: 'Borrado',
       about: 'Acerca de', version: 'Versión', commitHash: 'commit', source: 'Código fuente', license: 'Licencia',
       aboutText: 'Gratis, de código abierto, sin anuncios, sin rastreadores, totalmente sin conexión.',
+      appNamePlus: 'Chogan Plus', aboutTextPlus: 'Gratis, sin anuncios, sin compras dentro de la app. Todos los juegos funcionan también sin conexión.',
       name: 'Nombre', country: 'País', optional: 'opcional',
       hint: 'Pista', hints: 'Pistas', notEnoughCoins: 'No tienes monedas suficientes', hintUsed: 'Pista usada',
       coinsEarned: 'monedas ganadas', playToEarn: 'Juega una partida para ganar monedas',
@@ -541,7 +547,16 @@
     }
   };
 
+  // Chogan Plus (choganhq/chogan-plus) ships this same www/, and its Capacitor config
+  // appends "ChoganPlus" to the WebView user agent. Without this it greeted players as
+  // Chogan and promised "fully offline", which a Play Games build cannot (#689).
+  var PLUS = /\bChoganPlus\b/.test((global.navigator && global.navigator.userAgent) || '');
+  var PLUS_KEYS = { appName: 1, welcomeTitle: 1, welcomeSub: 1, aboutText: 1 };
+  function brandKey(key) { return PLUS && PLUS_KEYS[key] ? key + 'Plus' : key; }
+  Chogan.plus = PLUS;
+
   Chogan.t = function (key, vars) {
+    key = brandKey(key);
     var l = state.settings.lang;
     var s = (localStrings[l] || {})[key];
     if (s === undefined) s = (STR[l] || {})[key];
