@@ -11333,6 +11333,34 @@ function testFootball() {
   ok(GM.b.map((b) => b.id + ':' + b.x + ',' + b.y).join(' ') === lineup1 && GM.b.every((b) => b.vx === 0 && b.vy === 0), 'after a goal both teams stand in the kick-off line-up again, the ball on the spot');
   const kf = E.byId(GM.b, 9), nf = E.byId(GM.b, 4);
   ok(Math.abs(kf.x - E.W / 2) < 1e-9 && kf.y < E.L / 2 && Math.hypot(kf.x - GM.b[0].x, kf.y - GM.b[0].y) < 15 && Math.hypot(nf.x - GM.b[0].x, nf.y - GM.b[0].y) > 20, 'the kicking team has its centre forward behind the ball; the other team stands off');
+  // Formations behind the gear (#713): each stands in its own half, apart and on the
+  // pitch; at kick-off one disc stands behind the ball and the other team stands off
+  ok(Array.isArray(E.FORM_IDS) && E.FORM_IDS.length >= 3 && E.FORM_IDS[0] === '2-2', 'Football offers several formations, the classic 2-2 first');
+  for (const f of (E.FORM_IDS || [])) {
+    for (const kicker of [0, 1]) {
+      const B = E.lineup(kicker, [f, f]), ball = B[0];
+      const discsOk = B.slice(1).every((d) => d.x >= d.r && d.x <= E.W - d.r && (E.teamOf(d.id) === 0 ? d.y > E.L / 2 : d.y < E.L / 2));
+      let apart = true;
+      for (let i = 1; i < 11; i++) for (let j = i + 1; j < 11; j++) if (Math.hypot(B[i].x - B[j].x, B[i].y - B[j].y) < 2 * E.RD + 2) apart = false;
+      const near = (t) => B.filter((d) => E.teamOf(d.id) === t && Math.hypot(d.x - ball.x, d.y - ball.y) < 20).length;
+      ok(discsOk && apart && near(kicker) === 1 && near(1 - kicker) === 0, 'formation ' + f + ', kick-off by team ' + kicker + ': every disc in its own half and apart, one kicker by the ball, the others stand off');
+    }
+  }
+  if (E.FORM_IDS) {
+    const FM = E.match({ kicker: 0, form: ['1-3', '3-1'] });
+    const fp = (t) => E.discs(FM, t).map((d) => t === 0 ? [d.x, d.y] : [E.W - d.x, E.L - d.y]);
+    ok(JSON.stringify(fp(0)) === JSON.stringify(E.FORMS['1-3'].kick) && JSON.stringify(fp(1)) === JSON.stringify(E.FORMS['3-1'].base), 'a match lines each team up in its own formation');
+    const FG = setup([ballAt(50, 8), disc(1, 50, 22)].concat(E.lineup(0).slice(2, 6)));
+    FG.form = ['1-3', '3-1'];
+    E.resolve(FG, E.run(E.flick(FG, 1, -Math.PI / 2, 0.5)));
+    ok(JSON.stringify(E.discs(FG, 1).map((d) => [E.W - d.x, E.L - d.y])) === JSON.stringify(E.FORMS['3-1'].kick), 'after a goal the teams line up again in their formations');
+    const back = E.restore(JSON.parse(JSON.stringify(E.snapshot(FM))));
+    ok(back && back.form.join() === '1-3,3-1', 'a saved match keeps its formations');
+    const old = E.snapshot(FM); delete old.form;
+    const oldBack = E.restore(old);
+    ok(oldBack && oldBack.form.join() === '2-2,2-2', 'a save from before formations restores with the classic one');
+    ok(E.match({ form: ['x', null] }).form.join() === '2-2,2-2', 'an unknown formation falls back to the classic one');
+  }
   // an own goal counts for the other team
   const OG = setup([ballAt(50, 140), disc(2, 50, 125)].concat(E.lineup(0).slice(3, 8)));
   const os = E.run(E.flick(OG, 2, Math.PI / 2, 0.6)), oe = E.resolve(OG, os);
