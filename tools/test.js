@@ -12318,6 +12318,20 @@ function testTanks() {
   ok(['tnk-win', 'tnk-hard', 'tnk-big'].every((id) => new RegExp("\\{ id: '" + id + "',[^\\n]*dde: '[^\\n]*des: '").test(core) && html.indexOf("unlock('" + id + "')") > 0), 'the three Tanks awards exist in every language and are unlocked');
   // #510: the field is drawn left to right in every language, so the step buttons must not follow RTL
   ok(/el\('span', \{ class: 'tk-steps', dir: 'ltr' \}, \[stepBtn\(-1, 'moveL', '◀'\), stepBtn\(1, 'moveR', '▶'\)\]\)/.test(html), 'the step buttons sit in a left-to-right group, ◀ (left) first, in every language');
+  // #714: on a tall phone the field was a 640 x 440 box with empty space above and below;
+  // a taller slot now becomes sky above the same world, never a different world
+  {
+    const m = html.match(/(var VIEW_H = \d+;[^\n]*\n)?  function size\(\) \{[\s\S]*?\n  \}\n/);
+    ok(!!m, 'Tanks has a size() to test');
+    const mk = (W, H) => new Function('E', 'box', (m ? m[0] : '') + '; return size();')({ W: E.W, H: E.H }, { getBoundingClientRect: () => ({ width: W, height: H }) });
+    const tall = m ? mk(366, 480) : null, wide = m ? mk(800, 420) : null, huge = m ? mk(366, 2000) : null;
+    ok(tall && tall.w === 366 && tall.h === 480, 'in a tall slot the view keeps the full width and takes the full height (' + JSON.stringify(tall) + ')');
+    ok(huge && huge.w === 366 && huge.h === Math.round(366 * 900 / E.W), 'the view grows to at most 640 x 900 world units (' + JSON.stringify(huge) + ')');
+    ok(wide && wide.h === 420 && wide.w === Math.floor(420 * E.W / E.H), 'in a wide slot the field is its own 640 x 440 (' + JSON.stringify(wide) + ')');
+    ok(/g\.scale\(k, k\); g\.translate\(0, up\);/.test(html) && /up = Math\.max\(0, h \/ k - E\.H\)/.test(html), 'the extra height is drawn as sky above the world, which keeps its coordinates');
+    ok(/\.tk-wrap > \.ch-fit \{ --fit-ar: calc\(640 \/ 900\); \}/.test(html) && /@container game \(min-aspect-ratio: 5 \/ 4\) \{ \.tk-wrap > \.ch-fit \{ --fit-ar: calc\(640 \/ 440\); \} \}/.test(html) && /\.ch-nocq \.ch-gamemain\.ch-wide \.tk-wrap > \.ch-fit \{ --fit-ar: calc\(640 \/ 440\); \}/.test(html), 'the slot may be tall when stacked and is 640 x 440 beside the side column, with or without container queries');
+    ok(/\.tk-players \{ container-type: inline-size;/.test(html) && /@container \(max-width: 340px\) \{\s*\.tk-player \{ flex-wrap: wrap;/.test(html), 'in the narrow side column the shot count moves under the name instead of squeezing it');
+  }
   ok(Date.now() - t0 < 15000, 'the Tanks tests finish in under 15 s (' + (Date.now() - t0) + ' ms)');
 }
 
