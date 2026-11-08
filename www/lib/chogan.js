@@ -1984,17 +1984,33 @@
   // تمام‌صفحه به کارش می‌آید، پس فقط وقتی پنهان است که از قبل تمام‌صفحه باشد
   // یا داخل اپ اندروید (#108).
   Chogan.fullscreen = {
+    // In the Android app the WebView has no Fullscreen API, so the app's own bridge hides
+    // the system bars instead (#715). Older APKs have no setImmersive and keep no button.
+    native: function () {
+      var b = global.ChoganBars;
+      return global.Capacitor && b && typeof b.setImmersive === 'function' ? b : null;
+    },
     available: function () {
       try {
-        if (global.Capacitor) return false;
+        if (global.Capacitor) return !!(global.ChoganBars && typeof global.ChoganBars.setImmersive === 'function');
         if (global.matchMedia && global.matchMedia('(display-mode: fullscreen)').matches) return false;
         var e = document.documentElement;
         return !!(document.fullscreenEnabled && e.requestFullscreen);
       } catch (e) { return false; }
     },
-    on: function () { return !!document.fullscreenElement; },
+    on: function () {
+      var b = Chogan.fullscreen.native();
+      if (b) { try { return !!b.isImmersive(); } catch (e) { return false; } }
+      return !!document.fullscreenElement;
+    },
     toggle: function () {
       try {
+        var b = Chogan.fullscreen.native();
+        if (b) {
+          b.setImmersive(!b.isImmersive());
+          document.dispatchEvent(new Event('fullscreenchange'));
+          return Promise.resolve();
+        }
         if (document.fullscreenElement) return document.exitFullscreen();
         return document.documentElement.requestFullscreen({ navigationUI: 'hide' });
       } catch (e) { return Promise.reject(e); }
@@ -2040,7 +2056,8 @@
         else global.sessionStorage.removeItem(KEY);
       } catch (e) { /* storage blocked: fullscreen just won't carry over */ }
     }
-    if (!Chogan.fullscreen.available()) return;
+    // The app keeps immersive mode itself from page to page, so nothing to carry over there
+    if (!Chogan.fullscreen.available() || Chogan.fullscreen.native()) return;
     document.addEventListener('fullscreenchange', function () {
       if (!leaving) remember(Chogan.fullscreen.on());
     });

@@ -83,4 +83,11 @@ public class MainActivity extends BridgeActivity {
         // SystemBars repaints the bars from the device's night mode here; the page's theme wins
         if (bars != null) bars.reapply();
     }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        // Coming back from another app, a dialog or the keyboard can leave the bars shown (#715)
+        if (hasFocus && bars != null) bars.reapply();
+    }
 }
