@@ -212,6 +212,20 @@ module.exports = function (T) {
     const near = list.filter((g) => g.id !== 'numberdrop').map((g) => [g.id, dE(g.color, gm.color)]).sort((x, y) => x[1] - y[1])[0];
     ok(near[1] >= 15 && 1.05 / (lumC(gm.color) + 0.05) >= 4.5 && html.indexOf("accent: '" + gm.color + "'") > 0,
       'the accent differs from every other game by ΔE ≥ 15 (nearest ' + near[0] + ', ' + near[1].toFixed(1) + '), keeps white text at 4.5:1 and matches the page');
+    // #741: the highlighted band was 0.75 units left of its blocks, and the drop zones ignored it
+    const units = (re) => (html.match(re) || []).slice(1).map(Number);
+    const [bandW, bandL, bandS] = units(/\.nd-col \{[^}]*?width: calc\(var\(--u\) \* ([\d.]+)\);\s*left: calc\(var\(--u\) \* \(([\d.]+) \+ var\(--c\) \* ([\d.]+)\)\)/);
+    const [cellW, cellL, cellS] = units(/\.nd-cell, \.nd-tile \{[^}]*?width: calc\(var\(--u\) \* ([\d.]+)\);[^}]*?left: calc\(var\(--u\) \* \(([\d.]+) \+ var\(--c\) \* ([\d.]+)\)\)/);
+    ok([bandL, bandS, bandW, cellW, cellL, cellS].every((v) => v > 0), 'the band and block sizes are read from the page');
+    ok(bandS === cellS && Math.abs((cellL - bandL) - (bandL + bandW - (cellL + cellW))) < 1e-9,
+      'the column band leaves the same space on both sides of its blocks (' + (cellL - bandL) + ' and ' + (bandL + bandW - cellL - cellW) + ' units)');
+    const colSrc = (html.match(/function colAt\(x\) \{[\s\S]*?\n {2}\}/) || [''])[0];
+    ok(colSrc.length > 0, 'the page has a colAt function');
+    const colAt = new Function('board', 'COLS', colSrc + '; return colAt;')({ getBoundingClientRect: () => ({ left: 40, width: 300 }) }, C5);
+    const picks = [];
+    for (let c = 0; c < C5; c++) [0.02, 0.5, 0.98].forEach((f) => picks.push(colAt(40 + 3 * (bandL + c * bandS + bandW * f)) === c));
+    ok(picks.length === 15 && picks.every(Boolean), 'a press anywhere inside a band picks that band\'s column');
+    ok(colAt(0) === 0 && colAt(1000) === C5 - 1, 'a press beyond the edge stays on the first or last column');
     ok(Date.now() - t0 < 3000, 'the Number Drop tests finish in under 3 s (' + (Date.now() - t0) + ' ms)');
   }
   return { testNumberDrop };
