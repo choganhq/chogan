@@ -2889,10 +2889,13 @@
   ui.segmented = function (options, value, onChange) {
     var wrap = el('div', { class: 'ch-seg', role: 'tablist' });
     options.forEach(function (o) {
+      // an option may show a drawing instead of text (Football's formations, #713, where
+      // "3-1" would read backwards in a right-to-left line); its title names it
       var b = el('button', {
-        type: 'button', role: 'tab', text: o.label,
+        type: 'button', role: 'tab', text: o.node ? null : o.label,
         'aria-selected': o.value === value ? 'true' : 'false'
-      });
+      }, o.node ? [o.node] : null);
+      if (o.node && o.title) { b.setAttribute('aria-label', o.title); b.title = o.title; }
       b.addEventListener('click', function () {
         $$('button', wrap).forEach(function (x) { x.setAttribute('aria-selected', 'false'); });
         b.setAttribute('aria-selected', 'true');

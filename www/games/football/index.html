@@ -27,6 +27,9 @@
   .fb-player__score { font-size: var(--fs-lg); font-weight: 800; font-variant-numeric: tabular-nums; min-width: 2ch; text-align: center; }
   .fb-status { min-height: 2.8em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
   .fb-gear .ch-icon { pointer-events: none; }
+  .fb-formrow { flex-wrap: wrap; row-gap: var(--s-2); }
+  .fb-forms button { padding: 4px 8px; }
+  .fb-formicon { display: block; line-height: 0; }
   .fb-wrap { user-select: none; -webkit-user-select: none; }
 </style>
 </head>
@@ -65,13 +68,24 @@ function FootballEngineFactory(Cue) {
   // round. The team that kicks off has its centre forward behind the ball.
   var BASE = [[50, 164], [28, 142], [72, 142], [24, 111], [76, 111]];
   var KICK = [[50, 164], [28, 142], [72, 142], [50, 102], [20, 107]];
+  // Formations behind the gear (#713, a friend's request): the bottom team's places for
+  // each, and for the kick-off the one disc that steps up behind the ball. '2-2' is the
+  // classic line-up above; the daily match and the bot always play it.
+  var FORMS = {
+    '2-2': { base: BASE, kick: KICK },
+    '1-2-1': { base: [[50, 164], [50, 143], [22, 125], [78, 125], [50, 110]], kick: [[50, 164], [50, 143], [22, 125], [78, 125], [50, 102]] },
+    '3-1': { base: [[50, 164], [22, 143], [50, 146], [78, 143], [50, 112]], kick: [[50, 164], [22, 143], [50, 146], [78, 143], [50, 102]] },
+    '1-3': { base: [[50, 164], [50, 140], [18, 112], [50, 111], [82, 112]], kick: [[50, 164], [50, 140], [18, 112], [50, 102], [82, 112]] }
+  };
+  var FORM_IDS = ['2-2', '1-2-1', '3-1', '1-3'];
+  function formOf(f) { return FORM_IDS.indexOf(f) >= 0 ? f : '2-2'; }
 
   function teamOf(id) { return id === 0 ? -1 : (id <= 5 ? 0 : 1); }
   function body(id, x, y) { return id === 0 ? { id: 0, x: x, y: y, vx: 0, vy: 0, inPlay: true, r: RB, m: MB } : { id: id, x: x, y: y, vx: 0, vy: 0, inPlay: true, r: RD, m: MD }; }
-  function lineupBodies(kicker) {
+  function lineupBodies(kicker, form) {
     var b = [body(0, W / 2, L / 2)];
     for (var t = 0; t < 2; t++) {
-      var P = t === kicker ? KICK : BASE;
+      var F = FORMS[formOf(form && form[t])], P = t === kicker ? F.kick : F.base;
       for (var i = 0; i < 5; i++) {
         var x = P[i][0], y = P[i][1];
         if (t === 1) { x = W - x; y = L - y; }
@@ -83,7 +97,8 @@ function FootballEngineFactory(Cue) {
   function match(o) {
     o = o || {};
     var k = o.kicker === 1 ? 1 : 0;
-    return { b: lineupBodies(k), score: [0, 0], turn: k, turns: 0, winTo: WIN_TO.indexOf(o.winTo) >= 0 ? o.winTo : 3, maxTurns: MAX_TURNS, golden: false, winner: -1 };
+    var form = [formOf(o.form && o.form[0]), formOf(o.form && o.form[1])];
+    return { b: lineupBodies(k, form), form: form, score: [0, 0], turn: k, turns: 0, winTo: WIN_TO.indexOf(o.winTo) >= 0 ? o.winTo : 3, maxTurns: MAX_TURNS, golden: false, winner: -1 };
   }
   function discs(M, t) { return M.b.filter(function (b) { return teamOf(b.id) === t; }); }
   function byId(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
@@ -135,7 +150,7 @@ function FootballEngineFactory(Cue) {
     if (s.goal >= 0) {
       M.score[s.goal]++;
       if (M.golden || M.score[s.goal] >= M.winTo) M.winner = s.goal;
-      else { M.b = lineupBodies(1 - s.goal); M.turn = 1 - s.goal; }
+      else { M.b = lineupBodies(1 - s.goal, M.form); M.turn = 1 - s.goal; }
     } else M.turn = 1 - M.turn;
     if (M.winner < 0 && !M.golden && M.turns >= M.maxTurns) {
       if (M.score[0] !== M.score[1]) M.winner = M.score[0] > M.score[1] ? 0 : 1;
@@ -255,7 +270,7 @@ function FootballEngineFactory(Cue) {
 
   // Saved only at rest, between flicks
   function snapshot(M) {
-    return { b: M.b.map(function (b) { return [b.x, b.y]; }), score: M.score.slice(), turn: M.turn, turns: M.turns, winTo: M.winTo, golden: M.golden };
+    return { b: M.b.map(function (b) { return [b.x, b.y]; }), score: M.score.slice(), turn: M.turn, turns: M.turns, winTo: M.winTo, golden: M.golden, form: M.form ? M.form.slice() : ['2-2', '2-2'] };
   }
   function restore(o) {
     if (!o || typeof o !== 'object' || WIN_TO.indexOf(o.winTo) < 0 || (o.turn !== 0 && o.turn !== 1) || typeof o.golden !== 'boolean') return null;
@@ -269,12 +284,14 @@ function FootballEngineFactory(Cue) {
       if (p[0] < r - 1e-6 || p[0] > W - r + 1e-6 || p[1] < -D || p[1] > L + D) return null;
       B.push(body(i, p[0], p[1]));
     }
-    return { b: B, score: o.score.slice(), turn: o.turn, turns: o.turns, winTo: o.winTo, maxTurns: MAX_TURNS, golden: o.golden, winner: -1 };
+    // saves from before #713 have no formation: the classic one
+    var form = Array.isArray(o.form) ? [formOf(o.form[0]), formOf(o.form[1])] : ['2-2', '2-2'];
+    return { b: B, form: form, score: o.score.slice(), turn: o.turn, turns: o.turns, winTo: o.winTo, maxTurns: MAX_TURNS, golden: o.golden, winner: -1 };
   }
 
   return {
     Cue: Cue, T: T, W: W, L: L, D: D, MOUTH: MOUTH, G0: G0, G1: G1, RD: RD, RB: RB, MD: MD, MB: MB, SEGS: SEGS, PULL: PULL,
-    WIN_TO: WIN_TO, MAX_TURNS: MAX_TURNS, AFTER_GOAL: AFTER_GOAL, LEVELS: LEVELS, BASE: BASE, KICK: KICK,
+    WIN_TO: WIN_TO, MAX_TURNS: MAX_TURNS, AFTER_GOAL: AFTER_GOAL, LEVELS: LEVELS, BASE: BASE, KICK: KICK, FORMS: FORMS, FORM_IDS: FORM_IDS,
     teamOf: teamOf, match: match, lineup: lineupBodies, discs: discs, byId: byId, powerOf: powerOf, flick: flick, step: step, run: run,
     resolve: resolve, travel: travel, powerFor: powerFor, threat: threat, choose: choose, snapshot: snapshot, restore: restore
   };
@@ -303,7 +320,7 @@ if (typeof module !== 'undefined') module.exports = FootballEngineFactory;
         fbPitch: 'زمین فوتبال دکمه‌ای از بالا', fbVsBot: 'مقابل ربات', fbPeople: 'دو نفره', fbBot: 'ربات', fbPlayerN: 'بازیکن {n}', fbNew: 'مسابقه‌ی تازه',
         fbFirstTo: 'تا {n} گل', fbTurnOf: 'نوبت {n} از {m}', fbGolden: 'گل طلایی', fbGoalBanner: 'گل!', fbGoalOf: 'گل برای {n}!', fbOwnGoal: 'گل به خودی! امتیاز برای {n}',
         fbWon: '{n} برد', fbYour: 'نوبت توست: از یکی از مهره‌هایت عقب بکش و رها کن.', fbTurnName: 'نوبت {n}: از یک مهره عقب بکش و رها کن.', fbBotTurn: 'ربات نشانه می‌گیرد…',
-        fbGoldenNote: 'نوبت‌ها تمام شد و بازی مساوی است: گل بعدی برنده است.', fbGoals: 'گل برای بردن', fbNext: 'از مسابقه‌ی بعد', fbDaily: 'فوتبال روزانه', fbScore: 'نتیجه', fbFlicks: 'ضربه‌ها',
+        fbGoldenNote: 'نوبت‌ها تمام شد و بازی مساوی است: گل بعدی برنده است.', fbGoals: 'گل برای بردن', fbForm: 'چیدمان تیم', fbNextKick: 'از شروع بعدی', fbNext: 'از مسابقه‌ی بعد', fbDaily: 'فوتبال روزانه', fbScore: 'نتیجه', fbFlicks: 'ضربه‌ها',
         fbKPick: 'انتخاب مهره', fbKAim: 'چرخاندن جهت (با Shift آرام‌تر)', fbKPower: 'قدرت ضربه', fbKShoot: 'ضربه',
         fbRules: 'زمین را از بالا می‌بینی؛ مهره‌های قرمز مال تو هستند و به دروازه‌ی حریف حمله می‌کنند. در نوبتت از یکی از پنج مهره‌ات عقب بکش و رها کن؛ هرچه بیشتر بکشی، ضربه محکم‌تر است. مهره‌ها و توپ به هم و به دیواره‌ها می‌خورند و برمی‌گردند. توپ وقتی گل است که بیش از نیمی از آن از خط دروازه میان دو تیرک رد شود. نوبت وقتی عوض می‌شود که همه چیز بایستد. بعد از هر گل هر دو تیم سر جایشان برمی‌گردند و تیمی که گل خورده شروع می‌کند. اول سه گل برنده است (پنج گل از دکمه‌ی چرخ‌دنده). بعد از چهل ضربه، تیم جلوتر می‌برد و اگر مساوی باشد گل بعدی برنده است. چالش روزانه مسابقه‌ای با ربات متوسط است.',
         fbTutTitle1: 'هدف', fbTutText1: 'توپ سفید را به دروازه‌ی حریف بفرست و نگذار به دروازه‌ی خودت برود. اول سه گل.',
@@ -314,7 +331,7 @@ if (typeof module !== 'undefined') module.exports = FootballEngineFactory;
         fbPitch: 'Button football pitch seen from above', fbVsBot: 'Against the bot', fbPeople: 'Two players', fbBot: 'Bot', fbPlayerN: 'Player {n}', fbNew: 'New match',
         fbFirstTo: 'First to {n}', fbTurnOf: 'Turn {n} of {m}', fbGolden: 'Golden goal', fbGoalBanner: 'GOAL!', fbGoalOf: 'Goal for {n}!', fbOwnGoal: 'Own goal! A goal for {n}',
         fbWon: '{n} wins', fbYour: 'Your turn: pull back from one of your discs and let go.', fbTurnName: '{n} to play: pull back from a disc and let go.', fbBotTurn: 'The bot is aiming…',
-        fbGoldenNote: 'The turns are up and the score is level: the next goal wins.', fbGoals: 'Goals to win', fbNext: 'From the next match', fbDaily: 'Daily Football', fbScore: 'Score', fbFlicks: 'Flicks',
+        fbGoldenNote: 'The turns are up and the score is level: the next goal wins.', fbGoals: 'Goals to win', fbForm: 'Formation', fbNextKick: 'From the next kick-off', fbNext: 'From the next match', fbDaily: 'Daily Football', fbScore: 'Score', fbFlicks: 'Flicks',
         fbKPick: 'Pick a disc', fbKAim: 'Turn the aim (finer with Shift)', fbKPower: 'Power', fbKShoot: 'Flick',
         fbRules: 'You see the pitch from above: your red discs attack the other team\'s goal. On your turn, pull back from one of your five discs and let go; the further you pull, the harder the flick. Discs and the ball bounce off each other and off the boards. The ball is in once more than half of it is over the goal line between the posts. The turn passes when everything has stopped. After a goal both teams line up again and the team that let it in kicks off. First to three goals wins (five behind the gear). After forty flicks the team ahead wins, and if the score is level the next goal wins. The daily challenge is a match against the medium bot.',
         fbTutTitle1: 'The aim', fbTutText1: 'Send the white ball into the other goal and keep it out of yours. First to three.',
@@ -325,7 +342,7 @@ if (typeof module !== 'undefined') module.exports = FootballEngineFactory;
         fbPitch: 'Boisko do piłkarzyków guzikowych widziane z góry', fbVsBot: 'Przeciwko botowi', fbPeople: 'Dwóch graczy', fbBot: 'Bot', fbPlayerN: 'Gracz {n}', fbNew: 'Nowy mecz',
         fbFirstTo: 'Do {n} goli', fbTurnOf: 'Ruch {n} z {m}', fbGolden: 'Złoty gol', fbGoalBanner: 'GOL!', fbGoalOf: 'Gol dla: {n}!', fbOwnGoal: 'Samobój! Gol dla: {n}',
         fbWon: '{n} wygrywa', fbYour: 'Twój ruch: odciągnij jeden ze swoich krążków i puść.', fbTurnName: 'Ruch: {n}. Odciągnij krążek i puść.', fbBotTurn: 'Bot celuje…',
-        fbGoldenNote: 'Ruchy się skończyły, a wynik jest remisowy: następny gol wygrywa.', fbGoals: 'Gole do wygranej', fbNext: 'Od następnego meczu', fbDaily: 'Codzienne piłkarzyki', fbScore: 'Wynik', fbFlicks: 'Pstryknięcia',
+        fbGoldenNote: 'Ruchy się skończyły, a wynik jest remisowy: następny gol wygrywa.', fbGoals: 'Gole do wygranej', fbForm: 'Ustawienie', fbNextKick: 'Od następnego rozpoczęcia', fbNext: 'Od następnego meczu', fbDaily: 'Codzienne piłkarzyki', fbScore: 'Wynik', fbFlicks: 'Pstryknięcia',
         fbKPick: 'Wybór krążka', fbKAim: 'Obrót celownika (z Shift dokładniej)', fbKPower: 'Siła', fbKShoot: 'Pstryknięcie',
         fbRules: 'Widzisz boisko z góry: Twoje czerwone krążki atakują bramkę rywala. W swoim ruchu odciągnij jeden z pięciu krążków i puść; im dalej odciągniesz, tym mocniejsze pstryknięcie. Krążki i piłka odbijają się od siebie i od band. Gol jest wtedy, gdy ponad połowa piłki przekroczy linię bramkową między słupkami. Ruch przechodzi na rywala, gdy wszystko się zatrzyma. Po golu obie drużyny wracają na pozycje, a rozpoczyna drużyna, która straciła gola. Wygrywa ten, kto pierwszy zdobędzie trzy gole (pięć w ustawieniach pod zębatką). Po czterdziestu pstryknięciach wygrywa drużyna prowadząca, a przy remisie wygrywa następny gol. Codzienne wyzwanie to mecz z botem na średnim poziomie.',
         fbTutTitle1: 'Cel gry', fbTutText1: 'Wbij białą piłkę do bramki rywala i nie wpuść jej do swojej. Gra do trzech goli.',
@@ -336,7 +353,7 @@ if (typeof module !== 'undefined') module.exports = FootballEngineFactory;
         fbPitch: '俯视的按钮足球场', fbVsBot: '对战电脑', fbPeople: '双人', fbBot: '电脑', fbPlayerN: '玩家 {n}', fbNew: '新比赛',
         fbFirstTo: '先进 {n} 球', fbTurnOf: '第 {n} / {m} 轮', fbGolden: '金球', fbGoalBanner: '进球！', fbGoalOf: '{n} 进球！', fbOwnGoal: '乌龙球！{n} 得分',
         fbWon: '{n} 获胜', fbYour: '轮到你：按住一枚自己的棋子向后拉，然后松开。', fbTurnName: '轮到 {n}：按住一枚棋子向后拉，然后松开。', fbBotTurn: '电脑正在瞄准…',
-        fbGoldenNote: '回合用完且比分持平：下一个进球获胜。', fbGoals: '获胜进球数', fbNext: '从下一场开始', fbDaily: '每日足球', fbScore: '比分', fbFlicks: '弹射次数',
+        fbGoldenNote: '回合用完且比分持平：下一个进球获胜。', fbGoals: '获胜进球数', fbForm: '阵型', fbNextKick: '从下一次开球开始', fbNext: '从下一场开始', fbDaily: '每日足球', fbScore: '比分', fbFlicks: '弹射次数',
         fbKPick: '选择棋子', fbKAim: '转动方向（按住 Shift 更精细）', fbKPower: '力度', fbKShoot: '弹射',
         fbRules: '从上方俯视球场：红色棋子是你的，进攻对方球门。轮到你时，按住五枚棋子之一向后拉再松开；拉得越远，弹得越重。棋子和球会相互碰撞，也会从边框弹回。球有一半以上越过两门柱之间的球门线就算进球。所有东西都停下后才换人。进球后双方回到开球站位，由失球的一方开球。先进三球者获胜（齿轮里可改为五球）。四十次弹射后领先的一方获胜；若比分持平，下一个进球获胜。每日挑战是与中等电脑的比赛。',
         fbTutTitle1: '目标', fbTutText1: '把白球送进对方球门，别让它进你的球门。先进三球。',
@@ -347,7 +364,7 @@ if (typeof module !== 'undefined') module.exports = FootballEngineFactory;
         fbPitch: 'Knopffußballfeld von oben', fbVsBot: 'Gegen den Bot', fbPeople: 'Zwei Spieler', fbBot: 'Bot', fbPlayerN: 'Spieler {n}', fbNew: 'Neues Spiel',
         fbFirstTo: 'Bis {n} Tore', fbTurnOf: 'Zug {n} von {m}', fbGolden: 'Golden Goal', fbGoalBanner: 'TOR!', fbGoalOf: 'Tor für {n}!', fbOwnGoal: 'Eigentor! Ein Tor für {n}',
         fbWon: 'Sieg: {n}', fbYour: 'Du bist dran: Zieh an einer deiner Scheiben zurück und lass los.', fbTurnName: 'Am Zug: {n}. Zieh an einer Scheibe zurück und lass los.', fbBotTurn: 'Der Bot zielt …',
-        fbGoldenNote: 'Die Züge sind um und es steht unentschieden: Das nächste Tor gewinnt.', fbGoals: 'Tore zum Sieg', fbNext: 'Ab dem nächsten Spiel', fbDaily: 'Tages-Knopffußball', fbScore: 'Ergebnis', fbFlicks: 'Schnipser',
+        fbGoldenNote: 'Die Züge sind um und es steht unentschieden: Das nächste Tor gewinnt.', fbGoals: 'Tore zum Sieg', fbForm: 'Aufstellung', fbNextKick: 'Ab dem nächsten Anstoß', fbNext: 'Ab dem nächsten Spiel', fbDaily: 'Tages-Knopffußball', fbScore: 'Ergebnis', fbFlicks: 'Schnipser',
         fbKPick: 'Scheibe wählen', fbKAim: 'Richtung drehen (mit Shift feiner)', fbKPower: 'Kraft', fbKShoot: 'Schnippen',
         fbRules: 'Du siehst das Feld von oben: Deine roten Scheiben greifen das gegnerische Tor an. Zieh in deinem Zug an einer deiner fünf Scheiben zurück und lass los; je weiter du ziehst, desto fester der Schnipser. Scheiben und Ball prallen voneinander und von den Banden ab. Ein Tor zählt, sobald mehr als der halbe Ball zwischen den Pfosten über der Torlinie ist. Der Zug wechselt, wenn alles stillsteht. Nach einem Tor stellen sich beide Teams neu auf, und wer das Tor kassiert hat, stößt an. Wer zuerst drei Tore hat, gewinnt (fünf über das Zahnrad). Nach vierzig Schnipsern gewinnt, wer vorn liegt; bei Gleichstand entscheidet das nächste Tor. Die Tagesaufgabe ist ein Spiel gegen den mittleren Bot.',
         fbTutTitle1: 'Das Ziel', fbTutText1: 'Bring den weißen Ball ins gegnerische Tor und halte ihn aus deinem raus. Zuerst drei.',
@@ -358,7 +375,7 @@ if (typeof module !== 'undefined') module.exports = FootballEngineFactory;
         fbPitch: 'Campo de fútbol de chapas visto desde arriba', fbVsBot: 'Contra el bot', fbPeople: 'Dos jugadores', fbBot: 'Bot', fbPlayerN: 'Jugador {n}', fbNew: 'Nueva partida',
         fbFirstTo: 'A {n} goles', fbTurnOf: 'Turno {n} de {m}', fbGolden: 'Gol de oro', fbGoalBanner: '¡GOL!', fbGoalOf: '¡Gol para {n}!', fbOwnGoal: '¡Gol en propia puerta! Gol para {n}',
         fbWon: 'Gana {n}', fbYour: 'Te toca: tira hacia atrás de una de tus chapas y suelta.', fbTurnName: 'Le toca a {n}: tira hacia atrás de una chapa y suelta.', fbBotTurn: 'El bot está apuntando…',
-        fbGoldenNote: 'Se acabaron los turnos y van empatados: el próximo gol gana.', fbGoals: 'Goles para ganar', fbNext: 'Desde la próxima partida', fbDaily: 'Fútbol diario', fbScore: 'Resultado', fbFlicks: 'Tiros',
+        fbGoldenNote: 'Se acabaron los turnos y van empatados: el próximo gol gana.', fbGoals: 'Goles para ganar', fbForm: 'Formación', fbNextKick: 'Desde el próximo saque', fbNext: 'Desde la próxima partida', fbDaily: 'Fútbol diario', fbScore: 'Resultado', fbFlicks: 'Tiros',
         fbKPick: 'Elegir chapa', fbKAim: 'Girar la dirección (más fino con Shift)', fbKPower: 'Fuerza', fbKShoot: 'Tirar',
         fbRules: 'Ves el campo desde arriba: tus chapas rojas atacan la portería rival. En tu turno, tira hacia atrás de una de tus cinco chapas y suelta; cuanto más tires, más fuerte sale. Las chapas y el balón rebotan entre sí y en las bandas. Es gol cuando más de la mitad del balón cruza la línea entre los postes. El turno pasa cuando todo se ha parado. Tras un gol, los dos equipos vuelven a su sitio y saca el que lo recibió. Gana quien marque antes tres goles (cinco desde el engranaje). Tras cuarenta tiros gana el que va por delante; si van empatados, el próximo gol gana. El reto diario es una partida contra el bot medio.',
         fbTutTitle1: 'El objetivo', fbTutText1: 'Mete el balón blanco en la portería rival y no dejes que entre en la tuya. Gana quien llegue a tres.',
@@ -375,6 +392,7 @@ if (typeof module !== 'undefined') module.exports = FootballEngineFactory;
   if (prefs.mode !== 'bot' && prefs.mode !== 'people') prefs.mode = 'bot';
   if (LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
   if (E.WIN_TO.indexOf(prefs.winTo) < 0) prefs.winTo = 3;
+  if (E.FORM_IDS.indexOf(prefs.form) < 0) prefs.form = '2-2';
 
   // G: the match. shot: the flick on the move. drag: a finger pulling a disc back.
   var G = null, shot = null, drag = null, sel = -1, kbAim = 0, kbPower = 0.6, kbOn = false, botAim = null, botTimer = 0;
@@ -401,7 +419,7 @@ if (typeof module !== 'undefined') module.exports = FootballEngineFactory;
   function newGame(o) {
     var daily = o.daily || null;
     G = { mode: daily ? 'bot' : o.mode, level: daily ? 'medium' : o.level, daily: daily, startedAt: Date.now() };
-    G.M = E.match({ kicker: 0, winTo: daily ? 3 : o.winTo });
+    G.M = E.match({ kicker: 0, winTo: daily ? 3 : o.winTo, form: daily ? null : forms() });
     if (!daily) { prefs.mode = o.mode; prefs.level = o.level; ctx.store.set('prefs', prefs); }
     reset();
   }
@@ -412,6 +430,8 @@ if (typeof module !== 'undefined') module.exports = FootballEngineFactory;
   }
   function current() { return { mode: G.mode, level: G.level, winTo: prefs.winTo }; }
   function fromPrefs() { return { mode: prefs.mode, level: prefs.level, winTo: prefs.winTo }; }
+  // the player's formation; the bot keeps the classic one, two players share the choice
+  function forms() { return [prefs.form, G.mode === 'bot' ? '2-2' : prefs.form]; }
   function isBot(t) { return G.mode === 'bot' && t === 1; }
   function pname(t) {
     if (t === 0) return G.mode === 'people' ? C.t('fbPlayerN', { n: C.num(1) }) : (C.state.profile.name || C.t('you'));
@@ -574,12 +594,42 @@ if (typeof module !== 'undefined') module.exports = FootballEngineFactory;
     var seg = C.ui.segmented(E.WIN_TO.map(function (n) { return { value: String(n), label: C.num(n) }; }), String(prefs.winTo), function (v) {
       prefs.winTo = +v === 5 ? 5 : 3; ctx.store.set('prefs', prefs); sync();
     });
+    // A new formation lines the team up at once while nobody has flicked yet; later it
+    // waits for the next kick-off. The daily match keeps the classic one.
+    var noteF = el('p', { class: 'ch-xs ch-dim' });
+    function syncForm(changed) {
+      if (!G || ended) { noteF.textContent = ''; return; }
+      if (G.daily) { noteF.textContent = prefs.form === '2-2' ? '' : C.t('fbNext'); return; }
+      if (!changed) return;
+      var want = forms();
+      G.M.form = want;
+      if (G.M.turns === 0 && !shot && !drag && !botAim) { G.M.b = E.lineup(G.M.turn, want); noteF.textContent = ''; render(); }
+      else noteF.textContent = C.t('fbNextKick');
+      save();
+    }
+    var segF = C.ui.segmented(E.FORM_IDS.map(function (f) {
+      return { value: f, node: formIcon(f), title: f.replace(/\d/g, function (d) { return C.num(+d); }) };
+    }), prefs.form, function (v) { prefs.form = E.FORM_IDS.indexOf(v) >= 0 ? v : '2-2'; ctx.store.set('prefs', prefs); syncForm(true); });
+    segF.classList.add('fb-forms');
     C.ui.modal({
       title: C.t('settings'),
-      body: [el('div', { class: 'ch-list' }, [el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('fbGoals') }), seg])]), note],
+      body: [el('div', { class: 'ch-list' }, [
+        el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('fbGoals') }), seg]),
+        el('div', { class: 'ch-item fb-formrow' }, [el('div', { class: 'ch-item__label', text: C.t('fbForm') }), segF])
+      ]), note, noteF],
       actions: [{ label: C.t('done'), kind: 'primary' }]
     });
-    sync();
+    sync(); syncForm(false);
+  }
+  // a formation as the player sees it: their half of the pitch, their goal at the bottom
+  function formIcon(f) {
+    var P = E.FORMS[f].base, y0 = E.L / 2, h = E.L - y0 + E.D;
+    var dots = P.map(function (p) { return '<circle cx="' + p[0] + '" cy="' + (p[1] - y0) + '" r="7.5" fill="currentColor"/>'; }).join('');
+    return el('span', { class: 'fb-formicon', 'aria-hidden': 'true', html:
+      '<svg viewBox="-4 -4 ' + (E.W + 8) + ' ' + (h + 8) + '" width="40" height="36">' +
+      '<rect x="0" y="0" width="' + E.W + '" height="' + (E.L - y0) + '" fill="none" stroke="currentColor" stroke-opacity=".35" stroke-width="3"/>' +
+      '<rect x="' + E.G0 + '" y="' + (E.L - y0) + '" width="' + E.MOUTH + '" height="' + E.D + '" fill="none" stroke="currentColor" stroke-opacity=".35" stroke-width="3"/>' +
+      dots + '</svg>' });
   }
 
   /* --------------------------------------------------------------- draw */
