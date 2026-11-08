@@ -11333,6 +11333,34 @@ function testFootball() {
   ok(GM.b.map((b) => b.id + ':' + b.x + ',' + b.y).join(' ') === lineup1 && GM.b.every((b) => b.vx === 0 && b.vy === 0), 'after a goal both teams stand in the kick-off line-up again, the ball on the spot');
   const kf = E.byId(GM.b, 9), nf = E.byId(GM.b, 4);
   ok(Math.abs(kf.x - E.W / 2) < 1e-9 && kf.y < E.L / 2 && Math.hypot(kf.x - GM.b[0].x, kf.y - GM.b[0].y) < 15 && Math.hypot(nf.x - GM.b[0].x, nf.y - GM.b[0].y) > 20, 'the kicking team has its centre forward behind the ball; the other team stands off');
+  // Formations behind the gear (#713): each stands in its own half, apart and on the
+  // pitch; at kick-off one disc stands behind the ball and the other team stands off
+  ok(Array.isArray(E.FORM_IDS) && E.FORM_IDS.length >= 3 && E.FORM_IDS[0] === '2-2', 'Football offers several formations, the classic 2-2 first');
+  for (const f of (E.FORM_IDS || [])) {
+    for (const kicker of [0, 1]) {
+      const B = E.lineup(kicker, [f, f]), ball = B[0];
+      const discsOk = B.slice(1).every((d) => d.x >= d.r && d.x <= E.W - d.r && (E.teamOf(d.id) === 0 ? d.y > E.L / 2 : d.y < E.L / 2));
+      let apart = true;
+      for (let i = 1; i < 11; i++) for (let j = i + 1; j < 11; j++) if (Math.hypot(B[i].x - B[j].x, B[i].y - B[j].y) < 2 * E.RD + 2) apart = false;
+      const near = (t) => B.filter((d) => E.teamOf(d.id) === t && Math.hypot(d.x - ball.x, d.y - ball.y) < 20).length;
+      ok(discsOk && apart && near(kicker) === 1 && near(1 - kicker) === 0, 'formation ' + f + ', kick-off by team ' + kicker + ': every disc in its own half and apart, one kicker by the ball, the others stand off');
+    }
+  }
+  if (E.FORM_IDS) {
+    const FM = E.match({ kicker: 0, form: ['1-3', '3-1'] });
+    const fp = (t) => E.discs(FM, t).map((d) => t === 0 ? [d.x, d.y] : [E.W - d.x, E.L - d.y]);
+    ok(JSON.stringify(fp(0)) === JSON.stringify(E.FORMS['1-3'].kick) && JSON.stringify(fp(1)) === JSON.stringify(E.FORMS['3-1'].base), 'a match lines each team up in its own formation');
+    const FG = setup([ballAt(50, 8), disc(1, 50, 22)].concat(E.lineup(0).slice(2, 6)));
+    FG.form = ['1-3', '3-1'];
+    E.resolve(FG, E.run(E.flick(FG, 1, -Math.PI / 2, 0.5)));
+    ok(JSON.stringify(E.discs(FG, 1).map((d) => [E.W - d.x, E.L - d.y])) === JSON.stringify(E.FORMS['3-1'].kick), 'after a goal the teams line up again in their formations');
+    const back = E.restore(JSON.parse(JSON.stringify(E.snapshot(FM))));
+    ok(back && back.form.join() === '1-3,3-1', 'a saved match keeps its formations');
+    const old = E.snapshot(FM); delete old.form;
+    const oldBack = E.restore(old);
+    ok(oldBack && oldBack.form.join() === '2-2,2-2', 'a save from before formations restores with the classic one');
+    ok(E.match({ form: ['x', null] }).form.join() === '2-2,2-2', 'an unknown formation falls back to the classic one');
+  }
   // an own goal counts for the other team
   const OG = setup([ballAt(50, 140), disc(2, 50, 125)].concat(E.lineup(0).slice(3, 8)));
   const os = E.run(E.flick(OG, 2, Math.PI / 2, 0.6)), oe = E.resolve(OG, os);
@@ -12290,6 +12318,20 @@ function testTanks() {
   ok(['tnk-win', 'tnk-hard', 'tnk-big'].every((id) => new RegExp("\\{ id: '" + id + "',[^\\n]*dde: '[^\\n]*des: '").test(core) && html.indexOf("unlock('" + id + "')") > 0), 'the three Tanks awards exist in every language and are unlocked');
   // #510: the field is drawn left to right in every language, so the step buttons must not follow RTL
   ok(/el\('span', \{ class: 'tk-steps', dir: 'ltr' \}, \[stepBtn\(-1, 'moveL', '◀'\), stepBtn\(1, 'moveR', '▶'\)\]\)/.test(html), 'the step buttons sit in a left-to-right group, ◀ (left) first, in every language');
+  // #714: on a tall phone the field was a 640 x 440 box with empty space above and below;
+  // a taller slot now becomes sky above the same world, never a different world
+  {
+    const m = html.match(/(var VIEW_H = \d+;[^\n]*\n)?  function size\(\) \{[\s\S]*?\n  \}\n/);
+    ok(!!m, 'Tanks has a size() to test');
+    const mk = (W, H) => new Function('E', 'box', (m ? m[0] : '') + '; return size();')({ W: E.W, H: E.H }, { getBoundingClientRect: () => ({ width: W, height: H }) });
+    const tall = m ? mk(366, 480) : null, wide = m ? mk(800, 420) : null, huge = m ? mk(366, 2000) : null;
+    ok(tall && tall.w === 366 && tall.h === 480, 'in a tall slot the view keeps the full width and takes the full height (' + JSON.stringify(tall) + ')');
+    ok(huge && huge.w === 366 && huge.h === Math.round(366 * 900 / E.W), 'the view grows to at most 640 x 900 world units (' + JSON.stringify(huge) + ')');
+    ok(wide && wide.h === 420 && wide.w === Math.floor(420 * E.W / E.H), 'in a wide slot the field is its own 640 x 440 (' + JSON.stringify(wide) + ')');
+    ok(/g\.scale\(k, k\); g\.translate\(0, up\);/.test(html) && /up = Math\.max\(0, h \/ k - E\.H\)/.test(html), 'the extra height is drawn as sky above the world, which keeps its coordinates');
+    ok(/\.tk-wrap > \.ch-fit \{ --fit-ar: calc\(640 \/ 900\); \}/.test(html) && /@container game \(min-aspect-ratio: 5 \/ 4\) \{ \.tk-wrap > \.ch-fit \{ --fit-ar: calc\(640 \/ 440\); \} \}/.test(html) && /\.ch-nocq \.ch-gamemain\.ch-wide \.tk-wrap > \.ch-fit \{ --fit-ar: calc\(640 \/ 440\); \}/.test(html), 'the slot may be tall when stacked and is 640 x 440 beside the side column, with or without container queries');
+    ok(/\.tk-players \{ container-type: inline-size;/.test(html) && /@container \(max-width: 340px\) \{\s*\.tk-player \{ flex-wrap: wrap;/.test(html), 'in the narrow side column the shot count moves under the name instead of squeezing it');
+  }
   ok(Date.now() - t0 < 15000, 'the Tanks tests finish in under 15 s (' + (Date.now() - t0) + ' ms)');
 }
 

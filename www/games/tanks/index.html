@@ -8,12 +8,17 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../../lib/chogan.css">
 <style>
-  .tk-wrap > .ch-fit { --fit-ar: calc(640 / 440); }
+  /* stacked on a tall screen the slot may be as tall as 640 x 900 and the field gets
+     more sky above it, not empty bands around a square field (#714); beside the
+     side column it keeps the field's own 640 x 440 */
+  .tk-wrap > .ch-fit { --fit-ar: calc(640 / 900); }
+  @container game (min-aspect-ratio: 5 / 4) { .tk-wrap > .ch-fit { --fit-ar: calc(640 / 440); } }
+  .ch-nocq .ch-gamemain.ch-wide .tk-wrap > .ch-fit { --fit-ar: calc(640 / 440); }
   .ch-fit > .tk-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
   /* a battlefield is a physical thing: the left tank stays on the left in Persian too */
   .tk-canvas { display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; }
   .tk-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
-  .tk-players { display: flex; justify-content: space-between; gap: var(--s-2); width: 100%; max-width: 640px; direction: ltr; }
+  .tk-players { container-type: inline-size; display: flex; justify-content: space-between; gap: var(--s-2); width: 100%; max-width: 640px; direction: ltr; }
   .tk-player { flex: 1; display: flex; align-items: center; gap: var(--s-2); padding: 6px 10px; border-radius: var(--r-md); background: var(--c-surface-2); font-weight: 700; min-width: 0; }
   .tk-player:last-child { flex-direction: row-reverse; }
   .tk-player--on { box-shadow: inset 0 0 0 2px var(--game); }
@@ -22,7 +27,16 @@
   .tk-player:last-child .tk-player__name { text-align: end; }
   .tk-player__score { font-weight: 800; font-variant-numeric: tabular-nums; }
   .tk-player__shots { font-size: var(--fs-xs); color: var(--c-text-dim); font-variant-numeric: tabular-nums; }
-  .tk-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+  /* in the side column of a turned phone the cards are narrow: the shot count moves under
+     the name, where the name had been squeezed to one letter */
+  @container (max-width: 340px) {
+    .tk-player { flex-wrap: wrap; row-gap: 0; }
+    .tk-player__shots { order: 9; flex-basis: 100%; text-align: start; }
+    .tk-player:last-child .tk-player__shots { text-align: end; }
+  }
+  /* two lines kept: "your turn — drag…" wraps on a phone, "the bot thinks" does not, and
+     the board under it grew and shrank every turn */
+  .tk-status { line-height: 1.35; min-height: 2.7em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
   .tk-arms { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
   .tk-steps { display: flex; gap: 6px; }
   .tk-arm { font: inherit; font-size: var(--fs-xs); font-weight: 700; min-height: 36px; padding: 0 10px; border-radius: 999px; border: 2px solid transparent;
@@ -587,12 +601,14 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
   }
 
   function paint(g, w, h, now, card) {
-    var M = G.M, P = palette(), k = w / E.W;
+    var M = G.M, P = palette(), k = w / E.W, up = Math.max(0, h / k - E.H);
     var sky = g.createLinearGradient(0, 0, 0, h);
     sky.addColorStop(0, P.sky0); sky.addColorStop(1, P.sky1);
     g.fillStyle = sky; g.fillRect(0, 0, w, h);
-    g.save(); g.scale(k, k);
-    if (P.star) { g.fillStyle = P.star; for (var s = 0; s < 30; s++) g.fillRect((s * 97) % E.W, (s * 53) % 160, 1.5, 1.5); }
+    // a taller view is only more sky: the world, the ground and every shot keep their
+    // coordinates, so the physics and the bot are the same at every screen shape (#714)
+    g.save(); g.scale(k, k); g.translate(0, up);
+    if (P.star) { g.fillStyle = P.star; for (var s = 0; s < 30; s++) g.fillRect((s * 97) % E.W, (s * 53) % (160 + up) - up, 1.5, 1.5); }
     // the ground: the terrain heights, with a band of grass on top
     // the ground changes when a shot lands, not while it flies
     var hh = M.h;
@@ -660,10 +676,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
     g.restore();
   }
 
+  var VIEW_H = 900;                     // the tallest view, in world units, matching --fit-ar
   function size() {
     var r = box.getBoundingClientRect(), w = Math.floor(Math.min(r.width, r.height * E.W / E.H));
     w = Math.max(160, w || 0);
-    return { w: w, h: Math.round(w * E.H / E.W) };
+    // whatever height the slot has beyond the field's own becomes sky, up to VIEW_H
+    var h = Math.min(Math.floor(r.height) || 0, Math.round(w * VIEW_H / E.W));
+    return { w: w, h: Math.max(Math.round(w * E.H / E.W), h) };
   }
   function draw() {
     if (!G) return;
@@ -726,10 +745,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
     status.textContent = flight ? '…' : (msg && (G.phase !== 'aim' || G.done) ? msg : who + how);
   }
   // the weapons with what is left of each, and the two step buttons with the moves left
+  // Outside the player's own aim (the bot's turn, a shot in flight, the end) the row is
+  // only hidden, never removed: removing it let the board grow and shrink every turn.
   function renderArms() {
     arms.innerHTML = '';
-    if (!G || G.done || isBot(G.M.turn) || G.phase !== 'aim') return;
+    if (!G) return;
     var seat = G.M.turn;
+    arms.style.visibility = canShow() ? '' : 'hidden';
     E.ORDER.forEach(function (a) {
       var n = E.left(G.M, seat, a), b = el('button', { class: 'tk-arm' + (a === arm ? ' tk-arm--on' : ''), type: 'button' },
         [el('span', { text: C.t(a) }), a === 'shell' ? null : el('b', { text: C.num(n) })].filter(Boolean));
@@ -775,7 +797,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
   }
   function renderPad() {
     pad.innerHTML = '';
-    if (!G || prefs.control !== 'nums' || G.done || isBot(G.M.turn) || G.phase !== 'aim') return;
+    if (!G || prefs.control !== 'nums') return;
+    pad.style.visibility = canShow() ? '' : 'hidden';
     pad.appendChild(dial('angle', 0, 90));
     pad.appendChild(dial('power', 1, 100));
     var go = el('button', { class: 'ch-btn ch-btn--primary', type: 'button', text: C.t('fireIt') });
@@ -790,6 +813,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
 
   /* -------------------------------------------------------------- input */
 
+  function canShow() { return G && !G.done && G.phase === 'aim' && !isBot(G.M.turn); }
   function canAim() { return G && !G.done && G.phase === 'aim' && !isBot(G.M.turn) && !document.querySelector('.ch-scrim'); }
   // A slingshot, as in Gorillas: the pull sets the shot, the other way; a full pull is
   // 40% of the field's width
