@@ -77,6 +77,41 @@ module.exports = function (T) {
     await s.cloud.push();
     ok(s.calls.save.length === 2, 'a failed save is tried again on the next hide, though nothing changed');
 
+    // A later sign-in from the profile (#705): the player declined at launch, then taps "Sign in"
+    s = setup({ signedIn: false });
+    ok(typeof s.cloud.signIn === 'function', 'the cloud offers signIn() for a player who declined at launch');
+    if (typeof s.cloud.signIn === 'function') {
+      await s.cloud.ready;
+      let late = { authenticated: true, name: 'Hossein', id: 'p1' };
+      const P2 = { status: () => Promise.resolve({ authenticated: false }), signIn: () => Promise.resolve(late),
+        load: () => Promise.resolve({ data: snap({ 'chogan.app.coins': '77' }) }), save: () => Promise.resolve({}) };
+      const ls2 = {}; let reloads = 0;
+      const c2 = sb.makeCloud(P2, { fresh: true, keys: () => Object.keys(ls2), get: (k) => ls2[k], set: (k, v) => { ls2[k] = v; }, reload: () => { reloads++; } });
+      await c2.ready;
+      const who = await c2.signIn();
+      ok(who.authenticated && who.name === 'Hossein' && c2.player().name === 'Hossein', 'signIn() resolves to the signed-in player and player() reports the name');
+      ok(ls2['chogan.app.coins'] === '77' && reloads === 1, 'a fresh install that signs in later still gets its cloud copy back');
+      const P3 = Object.assign({}, P2, { load: () => Promise.resolve({ data: null }) });
+      const ls3 = { 'chogan.app.coins': '5' }; const saves3 = [];
+      P3.save = (x) => { saves3.push(x); return Promise.resolve({}); };
+      const c3 = sb.makeCloud(P3, { fresh: false, keys: () => Object.keys(ls3), get: (k) => ls3[k], set: (k, v) => { ls3[k] = v; }, reload: () => {} });
+      await c3.ready;
+      ok((await c3.push()) === false, 'before signing in, nothing is saved');
+      await c3.signIn();
+      ok((await c3.push()) === true && saves3.length === 1, 'after a later sign-in, the next hide saves');
+      late = { authenticated: false };
+      const c4 = sb.makeCloud(Object.assign({}, P2, { signIn: () => Promise.resolve(late) }), { fresh: true, keys: () => [], get: () => null, set: () => {}, reload: () => {} });
+      await c4.ready;
+      ok((await c4.signIn()).authenticated === false, 'a declined sign-in resolves to a signed-out player, not an error');
+    }
+
+    // The Plus profile shows the Play Games name and state (#705)
+    const page = fs.readFileSync(path.join(ROOT, 'www/index.html'), 'utf8');
+    const prof = page.slice(page.indexOf('  function viewProfile() {'), page.indexOf('  function viewProfile() {') + 6000);
+    ok(/C\.cloud\.ready\.then/.test(prof) && /C\.cloud\.player\(\)/.test(prof), 'the profile reads the Play Games player once the cloud is ready');
+    ok(/C\.t\('playIn'/.test(prof) && /C\.t\('playOut'\)/.test(prof) && /C\.cloud\.signIn\(\)/.test(prof), 'the profile shows signed in / not signed in and offers sign-in');
+    ok(/!C\.state\.profile\.name && p\.name/.test(prof), 'a typed name wins over the Play Games name');
+
     // Wiring: only Chogan Plus with the plugin, and FRESH is read before any write
     ok(/var gamesPlugin = PLUS && global\.Capacitor && global\.Capacitor\.Plugins && global\.Capacitor\.Plugins\.ChoganGames;/.test(core),
       'the cloud is created only in Chogan Plus with the ChoganGames plugin (never on the web, the PWA or F-Droid)');

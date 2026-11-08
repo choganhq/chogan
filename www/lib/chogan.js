@@ -311,6 +311,7 @@
       bronze: 'برنز', silver: 'نقره', gold: 'طلا', diamond: 'الماس', legend: 'افسانه',
       seasonEnds: 'پایان فصل', days: 'روز', hours: 'ساعت', minutes: 'دقیقه',
       rank: 'رتبه', points: 'امتیاز', you: 'تو',
+      playIn: 'پلی گیمز: {name}', playOut: 'پلی گیمز: وارد نشده‌ای', playSignIn: 'ورود',
       offlineRivals: 'حریف‌های آفلاین، ساخته‌شده روی همین دستگاه',
       streak: 'پیوستگی', dayStreak: 'روز پیوسته', locked: 'قفل',
       unlockedAt: 'باز شد', totalPlays: 'بازی', playTime: 'زمان بازی', thisWeek: 'این هفته', lastWeek: 'هفته‌ی قبل', weekWins: 'برد', weekDays: 'روز بازی', weekGames: 'بازی‌های مختلف',
@@ -354,6 +355,7 @@
       bronze: 'Bronze', silver: 'Silver', gold: 'Gold', diamond: 'Diamond', legend: 'Legend',
       seasonEnds: 'Season ends in', days: 'd', hours: 'h', minutes: 'm',
       rank: 'Rank', points: 'Points', you: 'You',
+      playIn: 'Play Games: {name}', playOut: 'Play Games: not signed in', playSignIn: 'Sign in',
       offlineRivals: 'Offline rivals, generated on this device',
       streak: 'Streak', dayStreak: 'day streak', locked: 'Locked',
       unlockedAt: 'Unlocked', totalPlays: 'Games', playTime: 'Play time', thisWeek: 'This week', lastWeek: 'Last week', weekWins: 'Wins', weekDays: 'Days played', weekGames: 'Different games',
@@ -397,6 +399,7 @@
       bronze: 'Brąz', silver: 'Srebro', gold: 'Złoto', diamond: 'Diament', legend: 'Legenda',
       seasonEnds: 'Koniec sezonu za', days: 'd', hours: 'g', minutes: 'm',
       rank: 'Miejsce', points: 'Punkty', you: 'Ty',
+      playIn: 'Play Games: {name}', playOut: 'Play Games: nie zalogowano', playSignIn: 'Zaloguj',
       offlineRivals: 'Przeciwnicy offline, generowani na tym urządzeniu',
       streak: 'Seria', dayStreak: 'dni z rzędu', locked: 'Zablokowane',
       unlockedAt: 'Odblokowano', totalPlays: 'Rozegrane gry', playTime: 'Czas gry', thisWeek: 'Ten tydzień', lastWeek: 'Poprzedni tydzień', weekWins: 'Wygrane', weekDays: 'Dni gry', weekGames: 'Różne gry',
@@ -440,6 +443,7 @@
       bronze: '青铜', silver: '白银', gold: '黄金', diamond: '钻石', legend: '传奇',
       seasonEnds: '赛季结束还有', days: '天', hours: '时', minutes: '分',
       rank: '排名', points: '积分', you: '你',
+      playIn: 'Play 游戏：{name}', playOut: 'Play 游戏：未登录', playSignIn: '登录',
       offlineRivals: '离线对手，在本机生成',
       streak: '连续', dayStreak: '天连续', locked: '未解锁',
       unlockedAt: '解锁于', totalPlays: '局数', playTime: '游戏时长', thisWeek: '本周', lastWeek: '上周', weekWins: '胜局', weekDays: '游戏天数', weekGames: '玩过的游戏',
@@ -483,6 +487,7 @@
       bronze: 'Bronze', silver: 'Silber', gold: 'Gold', diamond: 'Diamant', legend: 'Legende',
       seasonEnds: 'Saison endet in', days: 'T', hours: 'Std', minutes: 'Min',
       rank: 'Platz', points: 'Punkte', you: 'Du',
+      playIn: 'Play Spiele: {name}', playOut: 'Play Spiele: nicht angemeldet', playSignIn: 'Anmelden',
       offlineRivals: 'Offline-Gegner, auf diesem Gerät erzeugt',
       streak: 'Serie', dayStreak: 'Tage in Folge', locked: 'Gesperrt',
       unlockedAt: 'Freigeschaltet', totalPlays: 'Spiele', playTime: 'Spielzeit', thisWeek: 'Diese Woche', lastWeek: 'Letzte Woche', weekWins: 'Siege', weekDays: 'Spieltage', weekGames: 'Verschiedene Spiele',
@@ -526,6 +531,7 @@
       bronze: 'Bronce', silver: 'Plata', gold: 'Oro', diamond: 'Diamante', legend: 'Leyenda',
       seasonEnds: 'La temporada termina en', days: 'd', hours: 'h', minutes: 'min',
       rank: 'Puesto', points: 'Puntos', you: 'Tú',
+      playIn: 'Play Juegos: {name}', playOut: 'Play Juegos: sin sesión', playSignIn: 'Entrar',
       offlineRivals: 'Rivales sin conexión, creados en este dispositivo',
       streak: 'Racha', dayStreak: 'días seguidos', locked: 'Bloqueado',
       unlockedAt: 'Desbloqueado', totalPlays: 'Partidas', playTime: 'Tiempo de juego', thisWeek: 'Esta semana', lastWeek: 'Semana pasada', weekWins: 'Victorias', weekDays: 'Días jugados', weekGames: 'Juegos distintos',
@@ -3622,7 +3628,9 @@
       }
       return JSON.stringify({ v: 1, keys: keys });
     }
-    var ready = Promise.resolve().then(function () { return P.status(); }).then(function (s) {
+    // The same rule at launch and after a later sign-in from the profile: only an install
+    // that had no progress when it opened takes the cloud copy.
+    function sync(s) {
       player = s || player;
       if (!player.authenticated || !io.fresh) return 'kept';
       return P.load({ name: CLOUD_NAME }).then(function (r) {
@@ -3637,14 +3645,24 @@
         io.reload();
         return 'restored';
       });
-    }).catch(function () { return 'failed'; }).then(function (how) {
+    }
+    function done(how) {
       // After a restore the page reloads; this copy must not save the old state over it
       settled = how !== 'restored';
       return how;
-    });
+    }
+    var ready = Promise.resolve().then(function () { return P.status(); }).then(sync)
+      .catch(function () { return 'failed'; }).then(done);
     return {
       ready: ready,
       player: function () { return player; },
+      // A player who declined Play's prompt at launch saw "You" and no way in (#705)
+      signIn: function () {
+        return ready.then(function () {
+          settled = false;
+          return Promise.resolve(P.signIn()).then(sync);
+        }).catch(function () { return 'failed'; }).then(done).then(function () { return player; });
+      },
       push: function () {
         if (!settled || !player.authenticated) return Promise.resolve(false);
         var snap = snapshot();
