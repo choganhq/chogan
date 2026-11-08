@@ -819,6 +819,36 @@
       el('div', { class: 'ch-bar' }, [el('div', { class: 'ch-bar__fill', style: { width: pct + '%' } })])
     ]));
 
+    // Chogan Plus: the owner chose real players over generated rivals here (#707). The
+    // tier and its thresholds stay local; the table is Play's weekly leaderboard.
+    if (C.cloud) {
+      var play = el('div', { class: 'ch-card ch-league-play' });
+      var showBoard = function (p) {
+        play.textContent = '';
+        play.appendChild(el('div', { class: 'ch-section__head' }, [
+          el('h2', { style: { 'font-size': 'var(--fs-md)' }, text: C.t('playBoard') })
+        ]));
+        if (p && p.authenticated) {
+          C.cloud.score(lg.points);
+          play.appendChild(el('p', { class: 'ch-sm ch-dim', style: { 'margin-bottom': 'var(--s-3)' }, text: C.t('playBoardIn') }));
+          play.appendChild(el('button', { class: 'ch-btn ch-btn--primary ch-btn--block', type: 'button', onclick: function () {
+            C.feedback('select');
+            C.cloud.board();
+          } }, [C.icon('trophy', 18), el('span', { text: C.t('playBoard') })]));
+        } else {
+          play.appendChild(el('p', { class: 'ch-sm ch-dim', style: { 'margin-bottom': 'var(--s-3)' }, text: C.t('playBoardOut') }));
+          play.appendChild(el('button', { class: 'ch-btn ch-btn--soft ch-btn--block', type: 'button', text: C.t('playSignIn'), onclick: function () {
+            this.disabled = true;
+            C.cloud.signIn().then(showBoard);
+          } }));
+        }
+      };
+      showBoard(null);
+      C.cloud.ready.then(function () { showBoard(C.cloud.player()); });
+      page.appendChild(play);
+      return page;
+    }
+
     var rows = C.league.table();
     var list = el('div', { class: 'ch-card' });
     list.appendChild(el('div', { class: 'ch-section__head' }, [

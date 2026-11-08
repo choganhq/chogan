@@ -112,6 +112,36 @@ module.exports = function (T) {
     ok(/C\.t\('playIn'/.test(prof) && /C\.t\('playOut'\)/.test(prof) && /C\.cloud\.signIn\(\)/.test(prof), 'the profile shows signed in / not signed in and offers sign-in');
     ok(/!C\.state\.profile\.name && p\.name/.test(prof), 'a typed name wins over the Play Games name');
 
+    // The Plus league is Play's weekly leaderboard, not generated rivals (#707)
+    {
+      const sent = []; let shown = 0;
+      const mk = (auth, extra) => sb.makeCloud(Object.assign({ status: () => Promise.resolve({ authenticated: auth, name: 'T' }),
+        load: () => Promise.resolve({ data: null }), save: () => Promise.resolve({}),
+        submitScore: (x) => { sent.push(x); return Promise.resolve(); },
+        showLeaderboard: () => { shown++; return Promise.resolve(); } }, extra || {}),
+        { fresh: false, keys: () => [], get: () => null, set: () => {}, reload: () => {} });
+      const c = mk(true);
+      ok(typeof c.score === 'function' && typeof c.board === 'function', 'the cloud offers score() and board() for the league');
+      if (typeof c.score === 'function' && typeof c.board === 'function') {
+        await c.ready;
+        ok((await c.score(120.4)) === true && sent.length === 1 && sent[0].score === 120 && !('leaderboard' in sent[0]), 'a signed-in player\'s weekly points are sent as a whole number, the id left to the native side');
+        ok((await c.score(0)) === false && sent.length === 1, 'zero points send nothing');
+        ok((await c.board()) === true && shown === 1, 'board() opens Play\'s leaderboard');
+        const out = mk(false); await out.ready;
+        ok((await out.score(50)) === false && (await out.board()) === false && sent.length === 1 && shown === 1, 'a signed-out player sends nothing and opens nothing');
+        const bad = mk(true, { submitScore: () => Promise.reject(new Error('offline')) }); await bad.ready;
+        ok((await bad.score(5)) === false, 'a failed submit is false, not an error');
+      }
+      ok(/if \(points && Chogan\.cloud\) Chogan\.cloud\.score\(state\.league\.points\)/.test(core), 'every league gain sends the week\'s total in Plus');
+      const lv = page.slice(page.indexOf('  function viewLeague() {'), page.indexOf('  /* ------------------------------------------------------ دستاوردها */'));
+      const plusAt = lv.indexOf('if (C.cloud) {'), tableAt = lv.indexOf('C.league.table()');
+      ok(plusAt > 0 && tableAt > plusAt && /C\.cloud\.board\(\)/.test(lv) && /return page;\s*\}\s*\n\s*var rows = C\.league\.table\(\)/.test(lv),
+        'in Plus the league view returns before the generated table and offers Play\'s board instead');
+      const fa = core.slice(core.indexOf('playIn:'), core.indexOf('playIn:') + 600);
+      ok((core.match(/\bplayBoard: '[^']+', playBoardIn: '[^']+', playBoardOut: '[^']+'/g) || []).length === T.LOCALE_CODES.length && fa.indexOf('playBoard:') > 0,
+        'the league texts exist in every language');
+    }
+
     // Wiring: only Chogan Plus with the plugin, and FRESH is read before any write
     ok(/var gamesPlugin = PLUS && global\.Capacitor && global\.Capacitor\.Plugins && global\.Capacitor\.Plugins\.ChoganGames;/.test(core),
       'the cloud is created only in Chogan Plus with the ChoganGames plugin (never on the web, the PWA or F-Droid)');
