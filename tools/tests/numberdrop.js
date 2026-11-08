@@ -152,6 +152,20 @@ module.exports = function (T) {
     ok(/\.animate\(/.test(html) && /reduceMotion\(\)/.test(html) && /continued: cont/.test(html) && /againLabel: C\.t\('keepGoing'\)/.test(html) && /document\.fonts\.ready/.test(html) && /ui\.shake\(/.test(html),
       'blocks fall and pop (not in reduced motion), a full column shakes, the goal offers to keep going, and the board refits after fonts load');
     ok(/ch-fit/.test(html) && /--fit-ar/.test(html) && /ch-split/.test(html), 'the board uses the core layout');
+    // #736: a width of its own on the slot's child beat the core's, and the cells ran under the score cards
+    const boxRule = (html.match(/\.ch-fit > \.nd-box \{([^}]*)\}/) || [])[1];
+    const boardRule = (html.match(/\.nd-board \{([^}]*)\}/) || [])[1];
+    const curRule = (html.match(/\.nd-cur \{([^}]*)\}/) || [])[1];
+    ok(boxRule !== undefined && !/(^|[\s;])(width|height)\s*:/.test(boxRule), 'the board slot takes its size from the core rule, never its own (#736)');
+    ok(boardRule !== undefined && /aspect-ratio: 200 \/ 317/.test(boardRule) && !/max-height/.test(boardRule), 'the board keeps its shape, so its cells stay inside it (#736)');
+    // #736: the fallback for WebViews without container queries read calc(w / h) as NaN
+    const ratioSrc = (core.match(/ui\.fitRatio = (function \(v\) \{[\s\S]*?\n  \});/) || [])[1];
+    ok(!!ratioSrc, 'the core has a reader for a board shape (#736)');
+    const fitRatio = ratioSrc ? new Function('return ' + ratioSrc)() : () => NaN;
+    ok(Math.abs(fitRatio('calc(200 / 317)') - 200 / 317) < 1e-9 && Math.abs(fitRatio(' calc(6.8 / 7.8)') - 6.8 / 7.8) < 1e-9, 'a shape written as calc(w / h) is read as w / h (#736)');
+    ok(fitRatio('0.64') === 0.64 && fitRatio('') === 1, 'a plain number is kept and a missing shape is square (#736)');
+    ok(/var ar = ui\.fitRatio\(/.test(core), 'the fallback reads the shape through it (#736)');
+    ok(curRule !== undefined && /margin-top: calc\(var\(--u\) \* -1\.5\)/.test(curRule), 'the waiting block keeps a gap above the board (#736)');
     // strings: every language, the same keys, none named like a core key
     const sm = html.match(/strings: \{\n([\s\S]*?)\n {4}\}\n {2}\}\);/);
     const langs = {};
