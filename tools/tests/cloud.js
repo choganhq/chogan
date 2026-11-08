@@ -110,7 +110,8 @@ module.exports = function (T) {
     const prof = page.slice(page.indexOf('  function viewProfile() {'), page.indexOf('  function viewProfile() {') + 6000);
     ok(/C\.cloud\.ready\.then/.test(prof) && /C\.cloud\.player\(\)/.test(prof), 'the profile reads the Play Games player once the cloud is ready');
     ok(/C\.t\('playIn'/.test(prof) && /C\.t\('playOut'\)/.test(prof) && /C\.cloud\.signIn\(\)/.test(prof), 'the profile shows signed in / not signed in and offers sign-in');
-    ok(/!C\.state\.profile\.name && p\.name/.test(prof), 'a typed name wins over the Play Games name');
+    // #731 reversed the #705 rule "a typed name wins": signed in, the Play name is the name (tools/tests/plus-profile.js)
+    ok(/if \(p\.name\) nameLine\.textContent = p\.name;/.test(prof), 'the profile shows the Play Games name when signed in');
 
     // The Plus league is Play's weekly leaderboard, not generated rivals (#707)
     {

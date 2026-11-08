@@ -839,10 +839,30 @@
         if (p && p.authenticated) {
           C.cloud.score(lg.points);
           play.appendChild(el('p', { class: 'ch-sm ch-dim', style: { 'margin-bottom': 'var(--s-3)' }, text: C.t('playBoardIn') }));
+          // chogan-plus#20: the rows themselves; Play's own screen stays behind "See all".
+          // Until they arrive (or on an older Plus without them) the box stays empty.
+          var table = el('div', { class: 'ch-league-top', style: { 'margin-bottom': 'var(--s-3)' } });
+          play.appendChild(table);
+          var label = el('span', { text: C.t('playBoard') });
           play.appendChild(el('button', { class: 'ch-btn ch-btn--primary ch-btn--block', type: 'button', onclick: function () {
             C.feedback('select');
             C.cloud.board();
-          } }, [C.icon('trophy', 18), el('span', { text: C.t('playBoard') })]));
+          } }, [C.icon('trophy', 18), label]));
+          C.cloud.top().then(function (rows) {
+            if (!rows) return;
+            label.textContent = C.t('playSeeAll');
+            if (!rows.length) { table.appendChild(el('p', { class: 'ch-sm ch-dim', text: C.t('playBoardEmpty') })); return; }
+            rows.forEach(function (r, i) {
+              // the player's own row under a top it is not in, after a gap
+              if (i && r.rank > rows[i - 1].rank + 1) table.appendChild(el('div', { class: 'ch-rank ch-rank--gap', 'aria-hidden': 'true', text: '⋯' }));
+              table.appendChild(el('div', { class: 'ch-rank' + (r.me ? ' ch-rank--me' : '') }, [
+                el('div', { class: 'ch-rank__n', text: C.num(r.rank) }),
+                // <bdi>: a name in another script keeps its own order, yet lines up with the page
+                el('div', { class: 'ch-rank__name' }, [el('bdi', { text: r.name || (r.me ? C.t('you') : '—') })]),
+                el('div', { class: 'ch-rank__pts', text: C.num(r.score) })
+              ]));
+            });
+          });
         } else {
           play.appendChild(el('p', { class: 'ch-sm ch-dim', style: { 'margin-bottom': 'var(--s-3)' }, text: C.t('playBoardOut') }));
           play.appendChild(el('button', { class: 'ch-btn ch-btn--soft ch-btn--block', type: 'button', text: C.t('playSignIn'), onclick: function () {
@@ -965,16 +985,20 @@
     countryInput.addEventListener('change', saveProfile);
 
     var nameLine = el('div', { class: 'ch-bold', text: C.state.profile.name || C.t('you') });
-    var whoBox = el('div', { class: 'ch-grow' }, [nameLine, el('div', { class: 'ch-xs ch-faint', text: C.state.profile.uid })]);
+    // The local id means nothing in Chogan Plus, where progress lives in Play's Saved Games (#731)
+    var whoBox = el('div', { class: 'ch-grow' }, C.cloud ? [nameLine] : [nameLine, el('div', { class: 'ch-xs ch-faint', text: C.state.profile.uid })]);
     // Chogan Plus: a player signed in to Play Games still read «تو» here, because nothing
-    // read the name the plugin reports (#705). A typed name still wins.
+    // read the name the plugin reports (#705). Signed in, the Play name is the name: it is the
+    // one the league table shows, so a second name field beside it only confused (#731).
+    // There is no sign-out: Play Games Services v2 has no sign-out API.
     if (C.cloud) {
       var playLine = el('div', { class: 'ch-xs ch-faint ch-play' });
       whoBox.appendChild(playLine);
       var showPlay = function (p) {
         playLine.textContent = '';
+        nameInput.hidden = !!(p && p.authenticated && p.name);
         if (p && p.authenticated) {
-          if (!C.state.profile.name && p.name) nameLine.textContent = p.name;
+          if (p.name) nameLine.textContent = p.name;
           playLine.appendChild(document.createTextNode(C.t('playIn', { name: p.name || '' })));
         } else {
           playLine.appendChild(el('div', { text: C.t('playOut') }));
