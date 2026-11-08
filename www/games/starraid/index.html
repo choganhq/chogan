@@ -19,6 +19,15 @@
   .sr-lives { display: flex; gap: 3px; align-items: center; min-height: 1.3em; direction: ltr; }
   .sr-lives svg { display: block; }
   .sr-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+  .sr-pill--ships { flex: 1.4; }
+  .sr-gear .ch-icon { pointer-events: none; }
+  .sr-stages { display: flex; flex-direction: column; gap: 6px; margin-bottom: var(--s-3); }
+  .sr-stage { display: flex; align-items: center; gap: var(--s-2); width: 100%; padding: 8px 12px; border: 1px solid var(--c-border, transparent); border-radius: var(--r-md); background: var(--c-surface-2); color: var(--c-text); font: inherit; text-align: start; cursor: pointer; }
+  .sr-stage:disabled { opacity: .45; cursor: default; }
+  .sr-stage.is-on { outline: 2px solid var(--game, var(--c-accent)); outline-offset: -2px; }
+  .sr-stage__n { min-width: 1.6em; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--c-text-dim); }
+  .sr-stage__name { flex: 1; font-weight: 700; min-width: 0; }
+  .sr-stage__best { font-size: var(--fs-sm); color: var(--c-text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .sr-wrap { touch-action: none; user-select: none; -webkit-user-select: none; }
 </style>
 </head>
@@ -31,26 +40,38 @@ function StarRaidEngineFactory() {
   'use strict';
 
   // The sky is 360 × 640 units, y down; the player's ship flies along a line near the
-  // bottom. The run advances in fixed steps of 1/60 s, so a frame rate never changes
-  // the game, and every chance is drawn from the run's own seeded generator (kept in
-  // the state), so a saved run goes on exactly as it would have and a bot can be
-  // tested against the very rules the page plays.
+  // bottom. A run is one stage of five waves. It advances in fixed steps of 1/60 s, so
+  // a frame rate never changes the game, and every chance is drawn from the run's own
+  // seeded generator (kept in the state), so a saved run goes on exactly as it would
+  // have and a bot can be tested against the very rules the page plays.
   var W = 360, H = 640, DT = 1 / 60;
   var PY = H - 72, PR = 10;             // the ship's line and its hit radius
   var PSPEED = 540, KSPEED = 330;       // top speed after a finger, speed on the keys
   var BV = 540, COOL = 0.22, EBR = 4;   // own shot speed, time between shots, enemy shot radius
-  var PBMAX = 2;                        // own shots in the air at once: a miss costs time, so aim matters
-  var LIVES = 3, WAVES = 11, GAP = 2.2, DEAD = 1.3, INV = 2.2;
+  var PBMAX = 2;                        // volleys in the air at once: a miss costs time, so aim matters
+  var LIVES = 3, MAXL = 5, STAGES = 9, WAVES = 5, DAILY_STAGE = 5;
+  var GAP = 2.2, INTRO = 2.6, DEAD = 1.3, INV = 2.2, SHIELD_INV = 1;
+  var WLMAX = 3, RFMAX = 3;             // weapon: single, double, triple; rapid fire levels
+  var DROPP = 0.08, DROPV = 130;        // a raider's chance to drop a pick-up, and its fall speed
   var KIND = {
     s: { hp: 1, pts: 10, r: 12 },       // scout
     w: { hp: 1, pts: 20, r: 13 },       // winged raider
     b: { hp: 2, pts: 40, r: 14 },       // armoured raider, two hits
-    k: { hp: 18, pts: 600, r: 28, boss: true } // the flagship of the last wave
+    k: { hp: 14, pts: 400, r: 28, boss: true } // the flagship of a stage's last wave; hp, size and points grow by stage
   };
-  // Ten formations, eight columns wide, top row first. A run plays all ten in an
-  // order drawn from its seed (the daily run's order is the day's), then the short
-  // final wave with the flagship.
+  // Pick-ups: W weapon (+1 barrel), R rapid fire, S shield, L an extra ship, P points
+  // (what falls when every upgrade is already full)
+  var DROPS = { W: 1, R: 1, S: 1, L: 1, P: 1 };
+  // Formations, eight columns wide, top row first. The first seven are light, for
+  // the early stages; a wave takes one whose weight is near its difficulty.
   var TEMPLATES = [
+    ['..ssss..', '.ssssss.'],
+    ['.ss..ss.', 'ssssssss'],
+    ['..wwww..', '.ssssss.'],
+    ['.w.ww.w.', 'ssssssss'],
+    ['.wwwwww.', '.ssssss.'],
+    ['..wwww..', 'ssssssss', '..ssss..'],
+    ['...bb...', '.wwwwww.', '.ssssss.'],
     ['..wwww..', 'ssssssss', '.ssssss.'],
     ['b..bb..b', 'wwwwwwww', 'ss.ss.ss'],
     ['.wwwwww.', 'w.ssss.w', 'ssssssss'],
@@ -62,11 +83,15 @@ function StarRaidEngineFactory() {
     ['.bbbbbb.', 'w......w', 'wwssssww'],
     ['bwwbbwwb', '.s.ss.s.', 'ssssssss']
   ];
-  var FINAL = [{ k: 'k', c: 3.5, r: 0.3 }, { k: 'w', c: 0, r: 1.6 }, { k: 'w', c: 1, r: 1.6 }, { k: 'w', c: 6, r: 1.6 }, { k: 'w', c: 7, r: 1.6 },
-    { k: 's', c: 2, r: 2.6 }, { k: 's', c: 3, r: 2.6 }, { k: 's', c: 4, r: 2.6 }, { k: 's', c: 5, r: 2.6 }];
+  var WEIGHT = TEMPLATES.map(function (T) {
+    var n = 0;
+    T.forEach(function (row) { for (var c = 0; c < row.length; c++) n += row[c] === 's' ? 1 : row[c] === 'w' ? 1.5 : row[c] === 'b' ? 2.5 : 0; });
+    return n;
+  });
   var STATES = { wait: 1, enter: 1, form: 1, dive: 1, back: 1 };
 
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function isInt(x, a, b) { return typeof x === 'number' && Math.floor(x) === x && x >= a && x <= b; }
   function rnd(S) {
     var t = (S.rs = (S.rs + 0x6D2B79F5) | 0);
     t = Math.imul(t ^ (t >>> 15), t | 1);
@@ -74,50 +99,102 @@ function StarRaidEngineFactory() {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   }
 
-  // How hard the current wave is, 0 on the first and 1 from the tenth: a wave's
-  // place in the run sets the pace, its formation only sets the shape
-  function lv(S) { return clamp((S.wave - 1) / 9, 0, 1); }
-  function diveGap(S) { return (3.2 - 1.7 * lv(S)) * (S.foes.length <= 3 ? 0.55 : 1); }
-  function maxDivers(S) { return 1 + Math.floor(lv(S) * 2.5); }
-  function fireGap(S) { return 1.7 - 0.85 * lv(S); }
-  function ebV(S) { return 210 + 90 * lv(S); }
-  function diveV(S) { return 190 + 110 * lv(S); }
+  // How hard a wave is: one number from 0 (stage 1, wave 1) to 1 (stage 9, wave 5),
+  // so waves get harder inside a stage and every stage starts above the last one's start.
+  function diff(stage, wave) { return clamp(((stage - 1) * WAVES + (clamp(wave, 1, WAVES) - 1)) / (STAGES * WAVES - 1), 0, 1); }
+  // Everything the difficulty drives. x runs from -0.35 to 1.15: the first wave of the
+  // campaign is gentler than the old single run's first, and the ninth stage is harder
+  // than its last.
+  function knobs(stage, wave) {
+    var x = -0.35 + 1.5 * diff(stage, wave);
+    return {
+      x: x,
+      diveGap: 3.2 - 1.7 * x,                       // seconds between dives
+      divers: Math.max(1, 1 + Math.floor(x * 2.5)), // raiders diving at once
+      fireGap: 1.7 - 0.85 * x,                      // seconds between shots from the formation
+      volley: x > 0.85 ? 2 : 1,                     // raiders that fire together
+      shotV: 210 + 90 * x,                          // enemy shot speed
+      diveV: 190 + 110 * x,                         // dive speed
+      diveShots: x < 0.3 ? 1 : x < 1 ? 2 : 3,       // shots a diver fires on the way down
+      weight: 10 + 24 * diff(stage, wave)           // formation size, in scout units
+    };
+  }
+  function K(S) { return knobs(S.stage, S.wave); }
+  function lv(S) { return diff(S.stage, S.wave); }
+
+  // The flagship of each stage: tougher, bigger and with a wider attack each time
+  function bossHp(stage) { return 10 + 4 * stage; }
+  function bossR(stage) { return 24 + stage; }
+  function bossPts(stage) { return 300 + 100 * stage; }
+  function bossFan(stage) { return [1, 1, 3, 3, 5, 5, 5, 7, 7][stage - 1]; }
+  function bossGap(stage) { return 2.3 - 0.12 * stage; }
+  function bossSweep(stage) { return stage >= 8 ? 10 : stage >= 6 ? 7 : 0; }
+  function rad(S, f) { return KIND[f.k].boss ? bossR(S.stage) : KIND[f.k].r; }
+  function bossWave(stage) {
+    var L = [{ k: 'k', c: 3.5, r: 0.3 }];
+    if (stage <= 1) [2, 5].forEach(function (c) { L.push({ k: 's', c: c, r: 1.6 }); });
+    else [0, 1, 6, 7].forEach(function (c) { L.push({ k: stage >= 4 && (c === 0 || c === 7) ? 'b' : 'w', c: c, r: 1.6 }); });
+    [2, 3, 4, 5].forEach(function (c) { L.push({ k: 's', c: c, r: 2.6 }); });
+    if (stage >= 7) [0, 1, 6, 7].forEach(function (c) { L.push({ k: 's', c: c, r: 2.6 }); });
+    return L;
+  }
 
   function sway(S) { return 24 * Math.sin(S.t * 0.85); }
   function slot(S, f) { return { x: W / 2 + (f.c - 3.5) * 36 + sway(S), y: 84 + f.r * 34 }; }
 
-  function newRun(seed) {
+  // A kit: the upgrades and ships a stage starts with
+  function normKit(k) {
+    k = k || {};
+    return { wl: clamp(Math.floor(+k.wl) || 1, 1, WLMAX), rf: clamp(Math.floor(+k.rf) || 0, 0, RFMAX), sh: k.sh ? 1 : 0, lives: clamp(Math.floor(+k.lives) || LIVES, LIVES, MAXL) };
+  }
+  function kitAfter(S) { return normKit({ wl: S.up.wl, rf: S.up.rf, sh: S.up.sh, lives: S.lives }); }
+
+  // o: { stage: 1–9, kit: the upgrades carried in, daily: true for the day's stage,
+  // which always plays stage 5's numbers with a fresh ship }
+  function newRun(seed, o) {
+    o = o || {};
     seed = (seed >>> 0) || 1;
-    var S = {
-      v: 1, seed: seed, rs: seed | 0, t: 0, wave: 0, phase: 'gap', timer: 0.8, lives: LIVES,
-      score: 0, kills: 0, shots: 0, hits: 0, clean: 0, streak: 0, top: 0, lost: false, bonus: 0, won: false, over: false,
-      p: { x: W / 2, cd: 0, dead: 0, inv: 0 }, pb: [], eb: [], foes: [], diveT: 0, fireT: 0, bossT: 0, order: []
+    var daily = !!o.daily, stage = daily ? DAILY_STAGE : clamp(Math.floor(+o.stage) || 1, 1, STAGES);
+    var kit = normKit(daily ? null : o.kit);
+    return {
+      v: 2, seed: seed, rs: seed | 0, stage: stage, daily: daily, kit: kit, up: { wl: kit.wl, rf: kit.rf, sh: kit.sh },
+      t: 0, wave: 0, phase: 'gap', timer: INTRO, lives: kit.lives,
+      score: 0, kills: 0, shots: 0, hits: 0, picks: 0, clean: 0, streak: 0, top: 0, lost: false, bonus: 0, won: false, over: false,
+      p: { x: W / 2, cd: 0, dead: 0, inv: 0 }, pb: [], eb: [], foes: [], drops: [], used: [], vol: 0,
+      diveT: 0, fireT: 0, bossT: 0, bossN: 0, burst: 0, burstT: 0, burstA: 0, burstD: 0
     };
-    var o = [];
-    for (var i = 0; i < TEMPLATES.length; i++) o.push(i);
-    for (var j = o.length - 1; j > 0; j--) { var k = Math.floor(rnd(S) * (j + 1)), x = o[j]; o[j] = o[k]; o[k] = x; }
-    S.order = o;
-    return S;
+  }
+
+  // A formation whose weight is near the wave's difficulty, one of the nearest three
+  // not yet flown in this stage, so two runs of a stage differ
+  function pick(S) {
+    var want = K(S).weight + (rnd(S) - 0.5) * 3, c = [];
+    for (var i = 0; i < TEMPLATES.length; i++) if (S.used.indexOf(i) < 0) c.push(i);
+    c.sort(function (a, b) { return Math.abs(WEIGHT[a] - want) - Math.abs(WEIGHT[b] - want) || a - b; });
+    var n = c[Math.floor(rnd(S) * Math.min(3, c.length))];
+    S.used.push(n);
+    return n;
   }
 
   function startWave(S) {
     S.wave++;
     var list = [];
     if (S.wave < WAVES) {
-      var T = TEMPLATES[S.order[S.wave - 1]];
+      var T = TEMPLATES[pick(S)];
       for (var r = 0; r < T.length; r++) for (var c = 0; c < 8; c++) if (KIND[T[r][c]]) list.push({ k: T[r][c], c: c, r: r });
-    } else list = FINAL.map(function (f) { return { k: f.k, c: f.c, r: f.r }; });
+    } else list = bossWave(S.stage);
     // rows fly in one after another, each half from its own side of the sky
     S.foes = list.map(function (f, i) {
-      var side = f.c < 3.5 ? -1 : 1, s = slot(S, f);
+      var side = f.c < 3.5 ? -1 : 1, s = slot(S, f), hp = KIND[f.k].boss ? bossHp(S.stage) : KIND[f.k].hp;
       return {
-        id: S.wave * 100 + i, k: f.k, c: f.c, r: f.r, hp: KIND[f.k].hp, st: 'wait',
+        id: S.wave * 100 + i, k: f.k, c: f.c, r: f.r, hp: hp, hpMax: hp, st: 'wait',
         d: 0.2 + Math.floor(f.r) * 0.55 + Math.abs(f.c - 3.5) * 0.07,
         x: clamp(s.x + side * 160, -40, W + 40), y: -30, vx: 0, vy: 0, side: side, dt: 0, sh: 0, shootY: 0, fl: 0
       };
     });
     S.pb = []; S.eb = []; S.lost = false; S.bonus = 0;
-    S.diveT = diveGap(S) + 1.6; S.fireT = fireGap(S) + 1.2; S.bossT = 2;
+    var k = K(S);
+    S.diveT = k.diveGap + 1.6; S.fireT = k.fireGap + 1.2; S.bossT = 2; S.bossN = 0; S.burst = 0;
     S.phase = 'play';
   }
 
@@ -127,19 +204,70 @@ function StarRaidEngineFactory() {
     enemyShot(S, f.x, f.y + 10, dx / d * speed, Math.max(0.5, dy / d) * speed);
   }
 
-  function kill(S, f, ev) {
-    var pts = KIND[f.k].pts * (f.st === 'dive' ? 2 : 1);
+  // A downed raider sometimes leaves a pick-up, a flagship always does. What would
+  // help is likelier, and a kind that is already full does not fall.
+  function drop(S, f, ev) {
+    var boss = KIND[f.k].boss;
+    if (!boss && rnd(S) >= DROPP) return;
+    var u = S.up, w = [];
+    if (u.wl < WLMAX) w.push(['W', boss ? 4 : 3]);
+    if (u.rf < RFMAX) w.push(['R', 3]);
+    if (!u.sh) w.push(['S', 2]);
+    if (S.lives < MAXL) w.push(['L', boss ? 2 : 0.7]);
+    if (!w.length) w.push(['P', 1]);
+    var sum = 0, i;
+    for (i = 0; i < w.length; i++) sum += w[i][1];
+    var r = rnd(S) * sum, k = w[w.length - 1][0];
+    for (i = 0; i < w.length; i++) { r -= w[i][1]; if (r < 0) { k = w[i][0]; break; } }
+    S.drops.push({ x: clamp(f.x, 16, W - 16), y: f.y, k: k });
+    ev.push({ e: 'drop', k: k, x: f.x, y: f.y });
+  }
+  function take(S, kind, ev) {
+    var u = S.up;
+    if (kind === 'W' && u.wl < WLMAX) u.wl++;
+    else if (kind === 'R' && u.rf < RFMAX) u.rf++;
+    else if (kind === 'S' && !u.sh) u.sh = 1;
+    else if (kind === 'L' && S.lives < MAXL) S.lives++;
+    else { kind = 'P'; S.score += 250; }
+    S.picks++;
+    ev.push({ e: 'pick', k: kind, x: S.p.x, y: PY });
+  }
+
+  function kill(S, f, ev, shot) {
+    var boss = KIND[f.k].boss, pts = boss ? bossPts(S.stage) : KIND[f.k].pts * (f.st === 'dive' ? 2 : 1);
     S.score += pts; S.kills++;
     S.foes.splice(S.foes.indexOf(f), 1);
     ev.push({ e: 'kill', k: f.k, x: f.x, y: f.y, pts: pts });
+    if (shot) drop(S, f, ev);
   }
 
   function die(S, ev) {
     var p = S.p;
     S.lives--; S.lost = true; S.streak = 0;
+    S.up.wl = Math.max(1, S.up.wl - 1);
     p.dead = DEAD; p.inv = 0; S.eb = [];
     ev.push({ e: 'die', x: p.x, y: PY });
     if (S.lives <= 0) { S.over = true; S.phase = 'over'; ev.push({ e: 'over' }); }
+  }
+  // A shield takes the hit in place of the ship
+  function hurt(S, ev) {
+    if (S.up.sh) { S.up.sh = 0; S.p.inv = SHIELD_INV; ev.push({ e: 'shield', x: S.p.x, y: PY }); return; }
+    die(S, ev);
+  }
+
+  function volleys(S) {
+    var seen = [];
+    for (var i = 0; i < S.pb.length; i++) if (seen.indexOf(S.pb[i].g) < 0) seen.push(S.pb[i].g);
+    return seen.length;
+  }
+  function cooldown(S) { return COOL * (1 - 0.15 * S.up.rf); }
+  function maxVolleys(S) { return PBMAX + Math.floor((S.up.rf + 1) / 2); }
+  function fire(S) {
+    var x = S.p.x, y = PY - 18, g = ++S.vol, wl = S.up.wl;
+    if (wl === 1) S.pb.push({ x: x, y: y, vx: 0, g: g });
+    else if (wl === 2) { S.pb.push({ x: x - 6, y: y, vx: 0, g: g }); S.pb.push({ x: x + 6, y: y, vx: 0, g: g }); }
+    else { S.pb.push({ x: x, y: y, vx: 0, g: g }); S.pb.push({ x: x - 8, y: y + 4, vx: -100, g: g }); S.pb.push({ x: x + 8, y: y + 4, vx: 100, g: g }); }
+    S.shots += wl;
   }
 
   // inp: { x: where the ship should go (sky units) or null, dir: -1, 0 or 1 from the
@@ -150,11 +278,20 @@ function StarRaidEngineFactory() {
     if (S.over) return ev;
     inp = inp || {};
     S.t += DT;
-    var p = S.p, i, f;
+    var p = S.p, i, f, k = K(S);
 
     if (S.phase === 'gap') {
       S.timer -= DT;
-      if (S.timer <= 0) { startWave(S); ev.push({ e: 'wave', n: S.wave }); }
+      if (S.timer <= 0) {
+        if (S.wave < WAVES) { startWave(S); k = K(S); ev.push({ e: 'wave', n: S.wave }); }
+        // the stage ends once the flagship's pick-up is caught or gone
+        else if (!S.drops.length || S.timer < -6) {
+          var lb = 300 * S.lives;
+          S.score += lb; S.won = true; S.over = true; S.phase = 'over';
+          ev.push({ e: 'win', n: lb });
+          return ev;
+        }
+      }
     }
 
     // the ship
@@ -168,22 +305,30 @@ function StarRaidEngineFactory() {
       else if (typeof inp.x === 'number' && isFinite(inp.x)) { var dx = inp.x - p.x, m = PSPEED * DT; p.x += clamp(dx, -m, m); }
       p.x = clamp(p.x, 18, W - 18);
       p.cd = Math.max(0, p.cd - DT);
-      if (inp.fire && p.cd <= 0 && S.phase === 'play' && S.pb.length < PBMAX) { S.pb.push({ x: p.x, y: PY - 18 }); p.cd = COOL; S.shots++; ev.push({ e: 'shot' }); }
+      if (inp.fire && p.cd <= 0 && S.phase === 'play' && volleys(S) < maxVolleys(S)) { fire(S); p.cd = cooldown(S); ev.push({ e: 'shot' }); }
+    }
+
+    // pick-ups fall, and the ship catches one by touching it
+    for (i = S.drops.length - 1; i >= 0; i--) {
+      var d = S.drops[i];
+      d.y += DROPV * DT;
+      if (p.dead === 0 && Math.abs(d.x - p.x) < 22 && Math.abs(d.y - PY) < 22) { S.drops.splice(i, 1); take(S, d.k, ev); continue; }
+      if (d.y > H + 20) S.drops.splice(i, 1);
     }
 
     // own shots
     for (i = S.pb.length - 1; i >= 0; i--) {
       var b = S.pb[i];
-      b.y -= BV * DT;
-      if (b.y < -20) { S.pb.splice(i, 1); continue; }
+      b.y -= BV * DT; b.x += b.vx * DT;
+      if (b.y < -20 || b.x < -10 || b.x > W + 10) { S.pb.splice(i, 1); continue; }
       for (var j = 0; j < S.foes.length; j++) {
         f = S.foes[j];
         if (f.st === 'wait') continue;
-        var R = KIND[f.k].r;
-        if (Math.abs(b.x - f.x) < R + 2 && Math.abs(b.y - f.y) < R + 6) {
+        var R = rad(S, f);
+        if (Math.abs(b.x - f.x) < R + 2 && Math.abs(b.y - f.y) < (KIND[f.k].boss ? R * 0.55 : R) + 6) {
           S.pb.splice(i, 1); S.hits++;
           f.hp--; f.fl = 0.12;
-          if (f.hp <= 0) kill(S, f, ev);
+          if (f.hp <= 0) kill(S, f, ev, true);
           else ev.push({ e: 'hit', k: f.k, x: f.x, y: f.y });
           break;
         }
@@ -218,19 +363,19 @@ function StarRaidEngineFactory() {
         f.dt += DT;
         if (f.dt < 0.4) { f.vx = f.side * 110; f.vy = -90; }
         else {
-          f.vy = Math.min(diveV(S), f.vy + 620 * DT);
+          f.vy = Math.min(k.diveV, f.vy + 620 * DT);
           if (f.y < PY - 60 && p.dead === 0) f.vx = clamp(f.vx + clamp((p.x - f.x) * 4, -420, 420) * DT, -160, 160);
         }
         f.x += f.vx * DT; f.y += f.vy * DT;
         if (f.x < 12 || f.x > W - 12) { f.x = clamp(f.x, 12, W - 12); f.vx = -f.vx; }
-        if (f.sh > 0 && f.y > f.shootY && f.vy > 0 && p.dead === 0) { aimed(S, f, ebV(S) * 1.1); f.sh--; f.shootY += 110; ev.push({ e: 'eshot' }); }
+        if (f.sh > 0 && f.y > f.shootY && f.vy > 0 && p.dead === 0) { aimed(S, f, k.shotV * 1.1); f.sh--; f.shootY += 110; ev.push({ e: 'eshot' }); }
         // a diver that misses goes out at the bottom and comes back in at the top
         if (f.y > H + 30) { f.y = -30; f.x = s.x; f.st = 'back'; }
       }
-      // ramming the ship costs a life, and the raider too
-      if (p.dead === 0 && p.inv === 0 && S.phase === 'play' && f.st !== 'wait' && Math.hypot(f.x - p.x, f.y - PY) < KIND[f.k].r + PR - 2) {
-        kill(S, f, ev);
-        die(S, ev);
+      // ramming the ship costs a life (or the shield), and the raider too
+      if (p.dead === 0 && p.inv === 0 && S.phase === 'play' && f.st !== 'wait' && Math.hypot(f.x - p.x, f.y - PY) < rad(S, f) + PR - 2) {
+        kill(S, f, ev, false);
+        hurt(S, ev);
         if (S.over) return ev;
       }
     }
@@ -240,39 +385,58 @@ function StarRaidEngineFactory() {
       S.diveT -= DT;
       if (S.diveT <= 0) {
         var ready = S.foes.filter(function (x) { return x.st === 'form' && !KIND[x.k].boss; });
-        if (ready.length && divers < maxDivers(S)) {
+        if (ready.length && divers < k.divers) {
           f = ready[Math.floor(rnd(S) * ready.length)];
           f.st = 'dive'; f.dt = 0; f.side = f.x < p.x ? -1 : 1; f.vx = 0; f.vy = -90;
-          f.sh = lv(S) < 0.3 ? 1 : 2; f.shootY = 170 + rnd(S) * 90;
+          f.sh = k.diveShots; f.shootY = 170 + rnd(S) * 90;
           ev.push({ e: 'dive', k: f.k });
         }
-        S.diveT = diveGap(S) + rnd(S) * 0.8;
+        S.diveT = k.diveGap * (S.foes.length <= 3 ? 0.55 : 1) + rnd(S) * 0.8;
       }
       // shots from the formation: only the lowest raider of a column fires
       S.fireT -= DT;
       if (S.fireT <= 0) {
-        S.fireT = fireGap(S) * (0.7 + rnd(S) * 0.6);
+        S.fireT = k.fireGap * (0.7 + rnd(S) * 0.6);
         var low = S.foes.filter(function (x) {
           if (x.st !== 'form' || KIND[x.k].boss) return false;
           for (var q = 0; q < S.foes.length; q++) { var o = S.foes[q]; if (o !== x && o.st === 'form' && Math.abs(o.c - x.c) < 0.5 && o.r > x.r) return false; }
           return true;
         });
-        if (low.length) {
-          f = low[Math.floor(rnd(S) * low.length)];
-          enemyShot(S, f.x, f.y + 10, clamp((p.x - f.x) * 0.25, -60, 60), ebV(S));
+        for (var vn = 0; vn < k.volley && low.length; vn++) {
+          f = low.splice(Math.floor(rnd(S) * low.length), 1)[0];
+          enemyShot(S, f.x, f.y + 10, clamp((p.x - f.x) * 0.25, -60, 60), k.shotV);
           ev.push({ e: 'eshot' });
         }
       }
-      // the flagship fires a fan of three
+      // the flagship: an aimed shot or a fan, and from stage 6 every other attack
+      // is a burst that sweeps across the sky
       var boss = null;
       for (i = 0; i < S.foes.length; i++) if (KIND[S.foes[i].k].boss && S.foes[i].st === 'form') boss = S.foes[i];
       if (boss) {
-        S.bossT -= DT;
-        if (S.bossT <= 0) {
-          S.bossT = 1.5 + rnd(S) * 0.5;
-          var a0 = Math.atan2(p.x - boss.x, PY - boss.y), v = ebV(S);
-          for (var n = -1; n <= 1; n++) { var a = a0 + n * 0.28; enemyShot(S, boss.x, boss.y + 16, Math.sin(a) * v, Math.cos(a) * v); }
-          ev.push({ e: 'eshot' });
+        var v = k.shotV;
+        if (S.burst > 0) {
+          S.burstT -= DT;
+          if (S.burstT <= 0) {
+            S.burstT = 0.07; S.burst--;
+            enemyShot(S, boss.x, boss.y + 16, Math.sin(S.burstA) * v, Math.cos(S.burstA) * v);
+            S.burstA += S.burstD;
+            ev.push({ e: 'eshot' });
+          }
+        } else {
+          S.bossT -= DT;
+          if (S.bossT <= 0) {
+            S.bossN++;
+            S.bossT = bossGap(S.stage) + rnd(S) * 0.5;
+            var sw = bossSweep(S.stage);
+            if (sw && S.bossN % 2 === 0) {
+              var side = rnd(S) < 0.5 ? -1 : 1;
+              S.burst = sw; S.burstT = 0; S.burstA = side * 0.7; S.burstD = -side * 1.4 / (sw - 1);
+            } else {
+              var a0 = Math.atan2(p.x - boss.x, PY - boss.y), fan = bossFan(S.stage), half = (fan - 1) / 2;
+              for (var n = -half; n <= half; n++) { var a = a0 + n * (fan > 5 ? 0.22 : 0.28); enemyShot(S, boss.x, boss.y + 16, Math.sin(a) * v, Math.cos(a) * v); }
+              ev.push({ e: 'eshot' });
+            }
+          }
         }
       }
     }
@@ -284,7 +448,7 @@ function StarRaidEngineFactory() {
       if (e.y > H + 10 || e.x < -10 || e.x > W + 10) { S.eb.splice(i, 1); continue; }
       if (p.dead === 0 && p.inv === 0 && S.phase === 'play' && Math.hypot(e.x - p.x, e.y - PY) < PR + EBR) {
         S.eb.splice(i, 1);
-        die(S, ev);
+        hurt(S, ev);
         if (S.over) return ev;
         break;
       }
@@ -292,14 +456,10 @@ function StarRaidEngineFactory() {
 
     // the wave is cleared
     if (S.phase === 'play' && S.foes.length === 0) {
-      if (!S.lost) { S.bonus = 100 * S.wave; S.score += S.bonus; S.clean++; S.streak++; S.top = Math.max(S.top, S.streak); ev.push({ e: 'clean', n: S.bonus }); }
+      if (!S.lost) { S.bonus = 50 * (S.stage + S.wave); S.score += S.bonus; S.clean++; S.streak++; S.top = Math.max(S.top, S.streak); ev.push({ e: 'clean', n: S.bonus }); }
       ev.push({ e: 'cleared', n: S.wave });
-      S.eb = []; S.pb = [];
-      if (S.wave >= WAVES) {
-        var lb = 500 * S.lives;
-        S.score += lb; S.won = true; S.over = true; S.phase = 'over';
-        ev.push({ e: 'win', n: lb });
-      } else { S.phase = 'gap'; S.timer = GAP; }
+      S.eb = []; S.pb = []; S.burst = 0;
+      S.phase = 'gap'; S.timer = S.wave >= WAVES ? 1.2 : GAP;
     }
     return ev;
   }
@@ -309,27 +469,35 @@ function StarRaidEngineFactory() {
   function clone(S) { return JSON.parse(JSON.stringify(S)); }
   function snapshot(S) { return clone(S); }
 
-  // A saved run comes back only if every part of it makes sense
+  // A saved run comes back only if every part of it makes sense; a save from before
+  // the stages (v 1) does not, and the page then starts afresh
   function restore(o) {
     try {
-      if (!o || o.v !== 1 || typeof o !== 'object') return null;
+      if (!o || typeof o !== 'object' || o.v !== 2) return null;
       var num = function (x) { return typeof x === 'number' && isFinite(x); };
-      if (!['t', 'wave', 'timer', 'lives', 'score', 'kills', 'shots', 'hits', 'clean', 'streak', 'top', 'rs', 'seed', 'diveT', 'fireT', 'bossT'].every(function (k) { return num(o[k]); })) return null;
-      if (o.wave < 0 || o.wave > WAVES || o.lives < 1 || o.lives > LIVES || o.score < 0 || o.over) return null;
+      var kitOk = function (q) { return q && JSON.stringify(normKit(q)) === JSON.stringify({ wl: q.wl, rf: q.rf, sh: q.sh, lives: q.lives }); };
+      if (!['t', 'timer', 'score', 'kills', 'shots', 'hits', 'picks', 'clean', 'streak', 'top', 'rs', 'seed', 'vol', 'diveT', 'fireT', 'bossT', 'bossN', 'burst', 'burstT', 'burstA', 'burstD', 'bonus'].every(function (k) { return num(o[k]); })) return null;
+      if (!isInt(o.stage, 1, STAGES) || !isInt(o.wave, 0, WAVES) || !isInt(o.lives, 1, MAXL) || o.score < 0 || o.over || o.won) return null;
+      if (typeof o.daily !== 'boolean' || (o.daily && o.stage !== DAILY_STAGE) || typeof o.lost !== 'boolean') return null;
       if (o.phase !== 'play' && o.phase !== 'gap') return null;
+      if (!o.up || !isInt(o.up.wl, 1, WLMAX) || !isInt(o.up.rf, 0, RFMAX) || (o.up.sh !== 0 && o.up.sh !== 1) || !kitOk(o.kit)) return null;
       if (!o.p || !num(o.p.x) || !num(o.p.cd) || !num(o.p.dead) || !num(o.p.inv)) return null;
-      if (!Array.isArray(o.order) || o.order.length !== TEMPLATES.length || o.order.slice().sort(function (a, b) { return a - b; }).join() !== TEMPLATES.map(function (_, i) { return i; }).join()) return null;
-      if (!Array.isArray(o.pb) || !Array.isArray(o.eb) || !Array.isArray(o.foes)) return null;
-      if (!o.pb.every(function (b) { return b && num(b.x) && num(b.y); })) return null;
+      if (!Array.isArray(o.used) || o.used.length > WAVES - 1 || !o.used.every(function (n, i) { return isInt(n, 0, TEMPLATES.length - 1) && o.used.indexOf(n) === i; })) return null;
+      if (!Array.isArray(o.pb) || !Array.isArray(o.eb) || !Array.isArray(o.foes) || !Array.isArray(o.drops)) return null;
+      if (!o.pb.every(function (b) { return b && num(b.x) && num(b.y) && num(b.vx) && num(b.g); })) return null;
       if (!o.eb.every(function (b) { return b && num(b.x) && num(b.y) && num(b.vx) && num(b.vy); })) return null;
-      if (!o.foes.every(function (f) { return f && KIND[f.k] && STATES[f.st] && ['x', 'y', 'c', 'r', 'hp', 'd', 'vx', 'vy', 'dt', 'sh', 'shootY', 'fl', 'side'].every(function (k) { return num(f[k]); }) && f.hp >= 1; })) return null;
+      if (!o.drops.every(function (d) { return d && num(d.x) && num(d.y) && DROPS[d.k] === 1; })) return null;
+      if (!o.foes.every(function (f) { return f && KIND[f.k] && STATES[f.st] && ['x', 'y', 'c', 'r', 'hp', 'hpMax', 'd', 'vx', 'vy', 'dt', 'sh', 'shootY', 'fl', 'side', 'id'].every(function (k) { return num(f[k]); }) && f.hp >= 1 && f.hp <= f.hpMax; })) return null;
       return clone(o);
     } catch (er) { return null; }
   }
 
   var api = {
-    W: W, H: H, DT: DT, PY: PY, PR: PR, LIVES: LIVES, WAVES: WAVES, KIND: KIND, TEMPLATES: TEMPLATES, COOL: COOL,
-    newRun: newRun, step: step, score: score, cleared: cleared, clone: clone, snapshot: snapshot, restore: restore, slot: slot, level: lv
+    W: W, H: H, DT: DT, PY: PY, PR: PR, LIVES: LIVES, MAXL: MAXL, STAGES: STAGES, WAVES: WAVES, DAILY_STAGE: DAILY_STAGE,
+    WLMAX: WLMAX, RFMAX: RFMAX, KIND: KIND, DROPS: DROPS, TEMPLATES: TEMPLATES, WEIGHT: WEIGHT, COOL: COOL,
+    newRun: newRun, step: step, score: score, cleared: cleared, clone: clone, snapshot: snapshot, restore: restore, slot: slot,
+    level: lv, diff: diff, knobs: knobs, bossHp: bossHp, bossR: bossR, bossFan: bossFan, bossWave: bossWave, rad: rad,
+    normKit: normKit, kitAfter: kitAfter, cooldown: cooldown, maxVolleys: maxVolleys
   };
   if (typeof self !== 'undefined') self.StarRaidEngine = api;
   return api;
@@ -348,104 +516,197 @@ if (typeof module !== 'undefined' && module.exports) module.exports = StarRaidEn
     mood: 'tower-defence',
     strings: {
       fa: {
-        field: 'آسمان شب و مهاجم‌ها', srScore: 'امتیاز', srWave: 'موج', srLives: 'سفینه‌ها', waveN: 'موج {n}', finalWave: 'موج آخر',
-        cleanN: 'بی‌آسیب +{n}', how: 'انگشتت را هرجا بکش؛ سفینه دنبالش می‌رود و خودش شلیک می‌کند.', tapGo: 'بزن تا ادامه بدهی',
-        newRun: 'یورش تازه', dailySr: 'یورش روزانه', bestN: 'بهترین {n}', scoreN: 'امتیاز {n}', downed: 'مهاجم‌های زده‌شده', wavesDone: 'موج‌های پاک‌شده',
-        accuracy: 'دقت', victory: 'آسمان پاک شد', shotDown: 'سفینه‌هایت تمام شد', kMove: 'جابه‌جایی سفینه', kFire: 'شلیک (نگه دار)', kGo: 'ادامه بعد از توقف',
-        rules: 'مهاجم‌ها دسته‌دسته از بالا می‌آیند، در صف تاب می‌خورند و گاهی یکی به سمت سفینه‌ات شیرجه می‌زند و از بالا برمی‌گردد. ده موج و یک موج کوتاه آخر با ناو فرماندهی داری. سه سفینه داری؛ هر تیر یا برخورد یکی را می‌گیرد. هر مهاجم امتیاز دارد و مهاجمی که در حال شیرجه زده شود دو برابر. موجی که بی‌آسیب تمام شود جایزه دارد. چالش روزانه برای همه همان ترتیب موج‌هاست.',
-        tutTitle1: 'آسمان را پاک کن', tutText1: 'یازده موج مهاجم می‌آیند. همه را بزن تا یورش تمام شود؛ سه سفینه داری.',
+        field: 'آسمان شب و مهاجم‌ها', srScore: 'امتیاز', srStage: 'مرحله', srWave: 'موج', srLives: 'سفینه‌ها', waveN: 'موج {n}', stageN: 'مرحله‌ی {n}',
+        bossWave: 'ناو فرماندهی در راه است', stageClear: 'مرحله تمام شد', cleanN: 'بی‌آسیب +{n}',
+        how: 'انگشتت را هرجا بکش؛ سفینه دنبالش می‌رود و خودش شلیک می‌کند.', tapGo: 'بزن تا ادامه بدهی',
+        dailySr: 'یورش روزانه', bestN: 'بهترین {n}', scoreN: 'امتیاز {n}', downed: 'مهاجم‌های زده‌شده', wavesDone: 'موج‌های پاک‌شده',
+        accuracy: 'دقت', victory: 'آسمان پاک شد', shotDown: 'سفینه‌هایت تمام شد', stageDone: 'مرحله‌ی {n} تمام شد',
+        nextStage: 'مرحله‌ی بعد', retryStage: 'دوباره همین مرحله', restartStage: 'شروع دوباره‌ی مرحله',
+        startOver: 'از اول، از مرحله‌ی ۱', startOverWarn: 'با یک سفینه‌ی ساده به مرحله‌ی ۱ برمی‌گردی. مرحله‌های باز، بهترین امتیازها و ارتقاها پاک می‌شوند.',
+        stagesT: 'مرحله‌ها', locked: 'قفل', stageBest: 'بهترین این مرحله',
+        st1: 'مدار ماه', st2: 'مریخ سرخ', st3: 'کمربند سیارک‌ها', st4: 'توفان مشتری', st5: 'حلقه‌های زحل', st6: 'سحابی تاریک', st7: 'ستاره‌ی نوترونی', st8: 'ابرنواختر', st9: 'سیاه‌چاله',
+        pkW: 'سلاح قوی‌تر', pkR: 'شلیک تندتر', pkS: 'سپر', pkL: 'سفینه‌ی اضافه', pkP: 'امتیاز +{n}',
+        kMove: 'جابه‌جایی سفینه', kFire: 'شلیک (نگه دار)', kGo: 'ادامه بعد از توقف',
+        rules: 'مهاجم‌ها دسته‌دسته از بالا می‌آیند، در صف تاب می‌خورند و گاهی یکی به سمت سفینه‌ات شیرجه می‌زند. سفر نُه مرحله دارد، از مدار ماه تا سیاه‌چاله، و هر مرحله پنج موج که کم‌کم سخت‌تر می‌شوند؛ موج پنجم ناو فرماندهی است. هر مرحله از قبلی سخت‌تر است. مهاجم زده‌شده گاهی جایزه‌ای می‌اندازد و ناو فرماندهی همیشه؛ زیرش برو تا بگیری: سلاح قوی‌تر (تا سه لوله)، شلیک تندتر، سپری که یک ضربه را می‌گیرد یا سفینه‌ی اضافه. هر سفینه‌ای که از دست بدهی سلاح را یک درجه پایین می‌آورد. ارتقاها با تو به مرحله‌ی بعد می‌آیند. اگر سفینه‌ها تمام شوند، همان مرحله را با همان چیزهایی که اولش داشتی دوباره بازی می‌کنی. با دکمه‌ی چرخ‌دنده مرحله‌ی بازشده‌ای را انتخاب کن یا همه‌چیز را از مرحله‌ی ۱ شروع کن. موجی که بی‌آسیب تمام شود جایزه دارد و مهاجمی که وسط شیرجه زده شود دو برابر امتیاز. یورش روزانه یک مرحله‌ی پنج‌موجی است، برای همه یکسان، با سفینه‌ی ساده.',
+        tutTitle1: 'آسمان را پاک کن', tutText1: 'نُه مرحله در پیش داری، هر کدام پنج موج. موج پنجم هر مرحله ناو فرماندهی است. سه سفینه داری.',
         tutTitle2: 'هرجا بکش', tutText2: 'انگشتت را هرجای صفحه بگذار و به چپ و راست بکش. سفینه همراهش می‌رود و تا انگشتت روی صفحه است شلیک می‌کند.',
-        tutTitle3: 'شیرجه‌ها', tutText3: 'بعضی مهاجم‌ها شیرجه می‌زنند و تیر می‌اندازند. کنار بکش، و اگر وسط شیرجه بزنی‌شان امتیاز دو برابر است.'
+        tutTitle3: 'شیرجه‌ها', tutText3: 'بعضی مهاجم‌ها شیرجه می‌زنند و تیر می‌اندازند. کنار بکش، و اگر وسط شیرجه بزنی‌شان امتیاز دو برابر است.',
+        tutTitle4: 'جایزه‌ها', tutText4: 'مهاجم زده‌شده گاهی جایزه‌ای می‌اندازد. زیرش برو تا بگیری: سلاح قوی‌تر، شلیک تندتر، سپر یا سفینه‌ی اضافه. ارتقاها با تو به مرحله‌ی بعد می‌آیند.'
       },
       en: {
-        field: 'Night sky with raiders', srScore: 'Score', srWave: 'Wave', srLives: 'Ships', waveN: 'Wave {n}', finalWave: 'Final wave',
-        cleanN: 'Unharmed +{n}', how: 'Drag anywhere; the ship follows your finger and fires on its own.', tapGo: 'Tap to go on',
-        newRun: 'New raid', dailySr: 'Daily raid', bestN: 'Best {n}', scoreN: 'Score {n}', downed: 'Raiders downed', wavesDone: 'Waves cleared',
-        accuracy: 'Accuracy', victory: 'The sky is clear', shotDown: 'Out of ships', kMove: 'Move the ship', kFire: 'Fire (hold)', kGo: 'Go on after a pause',
-        rules: 'Raiders arrive in groups from the top, sway in formation, and now and then one dives at your ship and comes back in from the top. There are ten waves and a short final wave with the flagship. You have three ships; a shot or a crash costs one. Every raider scores, and a raider hit during its dive scores double. A wave cleared without losing a ship earns a bonus. The daily run has the same wave order for everyone.',
-        tutTitle1: 'Clear the sky', tutText1: 'Eleven waves of raiders are coming. Shoot them all to end the raid; you have three ships.',
+        field: 'Night sky with raiders', srScore: 'Score', srStage: 'Stage', srWave: 'Wave', srLives: 'Ships', waveN: 'Wave {n}', stageN: 'Stage {n}',
+        bossWave: 'The flagship is coming', stageClear: 'Stage cleared', cleanN: 'Unharmed +{n}',
+        how: 'Drag anywhere; the ship follows your finger and fires on its own.', tapGo: 'Tap to go on',
+        dailySr: 'Daily raid', bestN: 'Best {n}', scoreN: 'Score {n}', downed: 'Raiders downed', wavesDone: 'Waves cleared',
+        accuracy: 'Accuracy', victory: 'The sky is clear', shotDown: 'Out of ships', stageDone: 'Stage {n} cleared',
+        nextStage: 'Next stage', retryStage: 'Play this stage again', restartStage: 'Restart the stage',
+        startOver: 'Start over from stage 1', startOverWarn: 'You go back to stage 1 with a plain ship. Unlocked stages, best scores and upgrades are cleared.',
+        stagesT: 'Stages', locked: 'Locked', stageBest: 'Best on this stage',
+        st1: 'Moon Orbit', st2: 'Red Mars', st3: 'Asteroid Belt', st4: 'Jupiter Storm', st5: 'Rings of Saturn', st6: 'Dark Nebula', st7: 'Neutron Star', st8: 'Supernova', st9: 'Black Hole',
+        pkW: 'Stronger weapon', pkR: 'Faster fire', pkS: 'Shield', pkL: 'Extra ship', pkP: 'Points +{n}',
+        kMove: 'Move the ship', kFire: 'Fire (hold)', kGo: 'Go on after a pause',
+        rules: 'Raiders arrive in groups from the top, sway in formation, and now and then one dives at your ship. The journey has nine stages, from Moon Orbit to the Black Hole, each of five waves that grow harder; the fifth wave is a flagship. Every stage is harder than the one before. A downed raider sometimes drops a pick-up, and a flagship always does; fly under it to catch it: a stronger weapon (up to three barrels), faster fire, a shield that takes one hit, or an extra ship. Every ship you lose takes your weapon down a level. Upgrades come with you to the next stage. If you run out of ships, you play the same stage again with what you had at its start. The gear button picks any unlocked stage or starts everything over from stage 1. A wave cleared without losing a ship earns a bonus, and a raider hit mid-dive scores double. The daily raid is one stage of five waves, the same for everyone, with a plain ship.',
+        tutTitle1: 'Clear the sky', tutText1: 'Nine stages lie ahead, five waves each. The fifth wave of every stage is a flagship. You have three ships.',
         tutTitle2: 'Drag anywhere', tutText2: 'Put a finger anywhere on the screen and slide left and right. The ship moves with it and fires while your finger is down.',
-        tutTitle3: 'Dives', tutText3: 'Some raiders dive and shoot. Slide out of the way, and hit them mid-dive for double points.'
+        tutTitle3: 'Dives', tutText3: 'Some raiders dive and shoot. Slide out of the way, and hit them mid-dive for double points.',
+        tutTitle4: 'Pick-ups', tutText4: 'A downed raider sometimes drops a pick-up. Fly under it to catch it: a stronger weapon, faster fire, a shield or an extra ship. Upgrades come with you to the next stage.'
       },
       pl: {
-        field: 'Nocne niebo z najeźdźcami', srScore: 'Wynik', srWave: 'Fala', srLives: 'Statki', waveN: 'Fala {n}', finalWave: 'Ostatnia fala',
-        cleanN: 'Bez strat +{n}', how: 'Przesuwaj palec w dowolnym miejscu; statek podąża za nim i sam strzela.', tapGo: 'Dotknij, aby kontynuować',
-        newRun: 'Nowy najazd', dailySr: 'Codzienny najazd', bestN: 'Rekord {n}', scoreN: 'Wynik {n}', downed: 'Zestrzeleni najeźdźcy', wavesDone: 'Odparte fale',
-        accuracy: 'Celność', victory: 'Niebo jest czyste', shotDown: 'Koniec statków', kMove: 'Ruch statku', kFire: 'Strzał (przytrzymaj)', kGo: 'Kontynuuj po pauzie',
-        rules: 'Najeźdźcy nadlatują grupami z góry, kołyszą się w szyku, a co jakiś czas jeden nurkuje na Twój statek i wraca od góry. Czeka Cię dziesięć fal i krótka ostatnia fala z okrętem flagowym. Masz trzy statki; każdy pocisk lub zderzenie zabiera jeden. Każdy najeźdźca daje punkty, a trafiony w trakcie nurkowania – podwójne. Fala odparta bez utraty statku daje premię. Codzienny najazd ma tę samą kolejność fal dla wszystkich.',
-        tutTitle1: 'Oczyść niebo', tutText1: 'Nadciąga jedenaście fal najeźdźców. Zestrzel wszystkich, aby zakończyć najazd; masz trzy statki.',
+        field: 'Nocne niebo z najeźdźcami', srScore: 'Wynik', srStage: 'Etap', srWave: 'Fala', srLives: 'Statki', waveN: 'Fala {n}', stageN: 'Etap {n}',
+        bossWave: 'Nadlatuje okręt flagowy', stageClear: 'Etap ukończony', cleanN: 'Bez strat +{n}',
+        how: 'Przesuwaj palec w dowolnym miejscu; statek podąża za nim i sam strzela.', tapGo: 'Dotknij, aby kontynuować',
+        dailySr: 'Codzienny najazd', bestN: 'Rekord {n}', scoreN: 'Wynik {n}', downed: 'Zestrzeleni najeźdźcy', wavesDone: 'Odparte fale',
+        accuracy: 'Celność', victory: 'Niebo jest czyste', shotDown: 'Koniec statków', stageDone: 'Etap {n} ukończony',
+        nextStage: 'Następny etap', retryStage: 'Zagraj ten etap ponownie', restartStage: 'Zacznij etap od nowa',
+        startOver: 'Zacznij od etapu 1', startOverWarn: 'Wracasz do etapu 1 ze zwykłym statkiem. Odblokowane etapy, rekordy i ulepszenia zostaną wyczyszczone.',
+        stagesT: 'Etapy', locked: 'Zablokowany', stageBest: 'Rekord etapu',
+        st1: 'Orbita Księżyca', st2: 'Czerwony Mars', st3: 'Pas planetoid', st4: 'Burza na Jowiszu', st5: 'Pierścienie Saturna', st6: 'Ciemna mgławica', st7: 'Gwiazda neutronowa', st8: 'Supernowa', st9: 'Czarna dziura',
+        pkW: 'Mocniejsza broń', pkR: 'Szybszy ogień', pkS: 'Tarcza', pkL: 'Dodatkowy statek', pkP: 'Punkty +{n}',
+        kMove: 'Ruch statku', kFire: 'Strzał (przytrzymaj)', kGo: 'Kontynuuj po pauzie',
+        rules: 'Najeźdźcy nadlatują grupami z góry, kołyszą się w szyku, a co jakiś czas jeden nurkuje na Twój statek. Podróż ma dziewięć etapów, od Orbity Księżyca po Czarną dziurę, a każdy z nich pięć coraz trudniejszych fal; piąta fala to okręt flagowy. Każdy etap jest trudniejszy od poprzedniego. Zestrzelony najeźdźca czasem zostawia bonus, a okręt flagowy zawsze; podleć pod niego, aby go złapać: mocniejsza broń (do trzech luf), szybszy ogień, tarcza na jedno trafienie albo dodatkowy statek. Każdy utracony statek obniża broń o jeden poziom. Ulepszenia przechodzą z Tobą do następnego etapu. Gdy skończą się statki, grasz ten sam etap jeszcze raz z tym, co miałeś na jego początku. Przycisk z kołem zębatym pozwala wybrać odblokowany etap albo zacząć wszystko od etapu 1. Fala odparta bez utraty statku daje premię, a najeźdźca trafiony w trakcie nurkowania – podwójne punkty. Codzienny najazd to jeden etap z pięcioma falami, taki sam dla wszystkich, ze zwykłym statkiem.',
+        tutTitle1: 'Oczyść niebo', tutText1: 'Przed Tobą dziewięć etapów po pięć fal. Piąta fala każdego etapu to okręt flagowy. Masz trzy statki.',
         tutTitle2: 'Przesuwaj gdziekolwiek', tutText2: 'Połóż palec w dowolnym miejscu ekranu i przesuwaj w lewo i w prawo. Statek podąża za nim i strzela, dopóki palec jest na ekranie.',
-        tutTitle3: 'Nurkowanie', tutText3: 'Niektórzy najeźdźcy nurkują i strzelają. Usuń się z drogi, a trafienie w trakcie nurkowania daje podwójne punkty.'
+        tutTitle3: 'Nurkowanie', tutText3: 'Niektórzy najeźdźcy nurkują i strzelają. Usuń się z drogi, a trafienie w trakcie nurkowania daje podwójne punkty.',
+        tutTitle4: 'Bonusy', tutText4: 'Zestrzelony najeźdźca czasem zostawia bonus. Podleć pod niego, aby go złapać: mocniejsza broń, szybszy ogień, tarcza albo dodatkowy statek. Ulepszenia przechodzą z Tobą do następnego etapu.'
       },
       zh: {
-        field: '夜空中的入侵者', srScore: '得分', srWave: '波次', srLives: '飞船', waveN: '第 {n} 波', finalWave: '最后一波',
-        cleanN: '无损 +{n}', how: '在任意位置拖动手指，飞船会跟着移动并自动射击。', tapGo: '点击继续',
-        newRun: '新的突袭', dailySr: '每日突袭', bestN: '最佳 {n}', scoreN: '得分 {n}', downed: '击落的入侵者', wavesDone: '清除的波次',
-        accuracy: '命中率', victory: '天空肃清了', shotDown: '飞船用完了', kMove: '移动飞船', kFire: '射击（按住）', kGo: '暂停后继续',
-        rules: '入侵者成群从上方飞来，在队形中摇摆，不时有一个俯冲向你的飞船，再从上方飞回。共有十波，外加有旗舰的简短最后一波。你有三艘飞船，每次被击中或相撞损失一艘。每个入侵者都有分数，在俯冲中击落得双倍。一波中没有损失飞船可获得奖励。每日突袭对所有人都是相同的波次顺序。',
-        tutTitle1: '肃清天空', tutText1: '十一波入侵者即将到来。全部击落即可结束突袭；你有三艘飞船。',
+        field: '夜空中的入侵者', srScore: '得分', srStage: '关卡', srWave: '波次', srLives: '飞船', waveN: '第 {n} 波', stageN: '第 {n} 关',
+        bossWave: '旗舰来袭', stageClear: '本关完成', cleanN: '无损 +{n}',
+        how: '在任意位置拖动手指，飞船会跟着移动并自动射击。', tapGo: '点击继续',
+        dailySr: '每日突袭', bestN: '最佳 {n}', scoreN: '得分 {n}', downed: '击落的入侵者', wavesDone: '清除的波次',
+        accuracy: '命中率', victory: '天空肃清了', shotDown: '飞船用完了', stageDone: '第 {n} 关完成',
+        nextStage: '下一关', retryStage: '再玩一次本关', restartStage: '重新开始本关',
+        startOver: '从第 1 关重新开始', startOverWarn: '你将带着普通飞船回到第 1 关。已解锁的关卡、最佳得分和升级都会清除。',
+        stagesT: '关卡', locked: '未解锁', stageBest: '本关最佳',
+        st1: '月球轨道', st2: '赤红火星', st3: '小行星带', st4: '木星风暴', st5: '土星光环', st6: '暗星云', st7: '中子星', st8: '超新星', st9: '黑洞',
+        pkW: '武器增强', pkR: '射速提升', pkS: '护盾', pkL: '额外飞船', pkP: '得分 +{n}',
+        kMove: '移动飞船', kFire: '射击（按住）', kGo: '暂停后继续',
+        rules: '入侵者成群从上方飞来，在队形中摇摆，不时有一个俯冲向你的飞船。旅程共九关，从月球轨道到黑洞，每关五波，越来越难；第五波是旗舰。每一关都比上一关更难。被击落的入侵者有时会掉落道具，旗舰一定会掉落；飞到它下方即可接住：武器增强（最多三管）、射速提升、可抵挡一次攻击的护盾，或额外飞船。每损失一艘飞船，武器降低一级。升级会带到下一关。飞船用完后，你会带着本关开始时的装备重玩本关。齿轮按钮可以选择已解锁的关卡，或从第 1 关全部重新开始。一波中没有损失飞船可获得奖励，在俯冲中击落入侵者得双倍分数。每日突袭是一关五波，所有人相同，使用普通飞船。',
+        tutTitle1: '肃清天空', tutText1: '前方共有九关，每关五波。每关第五波是旗舰。你有三艘飞船。',
         tutTitle2: '随处拖动', tutText2: '把手指放在屏幕任意位置并左右滑动。飞船会跟着移动，手指按住时持续射击。',
-        tutTitle3: '俯冲', tutText3: '有些入侵者会俯冲并射击。及时躲开，在俯冲中击中它们得双倍分数。'
+        tutTitle3: '俯冲', tutText3: '有些入侵者会俯冲并射击。及时躲开，在俯冲中击中它们得双倍分数。',
+        tutTitle4: '道具', tutText4: '被击落的入侵者有时会掉落道具。飞到它下方接住：武器增强、射速提升、护盾或额外飞船。升级会带到下一关。'
       },
       de: {
-        field: 'Nachthimmel mit Angreifern', srScore: 'Punkte', srWave: 'Welle', srLives: 'Schiffe', waveN: 'Welle {n}', finalWave: 'Letzte Welle',
-        cleanN: 'Unversehrt +{n}', how: 'Wisch irgendwo; das Schiff folgt deinem Finger und schießt von selbst.', tapGo: 'Tippe zum Weiterspielen',
-        newRun: 'Neuer Angriff', dailySr: 'Angriff des Tages', bestN: 'Bestwert {n}', scoreN: 'Punkte {n}', downed: 'Abgeschossene Angreifer', wavesDone: 'Geschaffte Wellen',
-        accuracy: 'Treffsicherheit', victory: 'Der Himmel ist frei', shotDown: 'Keine Schiffe mehr', kMove: 'Schiff bewegen', kFire: 'Schießen (halten)', kGo: 'Nach einer Pause weiter',
-        rules: 'Die Angreifer kommen in Gruppen von oben, schaukeln in Formation, und hin und wieder stürzt sich einer auf dein Schiff und kommt von oben zurück. Es gibt zehn Wellen und eine kurze letzte Welle mit dem Flaggschiff. Du hast drei Schiffe; ein Treffer oder Zusammenstoß kostet eines. Jeder Angreifer bringt Punkte, im Sturzflug getroffen doppelt. Eine Welle ohne Verlust bringt einen Bonus. Der Angriff des Tages hat für alle dieselbe Reihenfolge der Wellen.',
-        tutTitle1: 'Mach den Himmel frei', tutText1: 'Elf Wellen von Angreifern kommen. Schieß alle ab, um den Angriff zu beenden; du hast drei Schiffe.',
+        field: 'Nachthimmel mit Angreifern', srScore: 'Punkte', srStage: 'Etappe', srWave: 'Welle', srLives: 'Schiffe', waveN: 'Welle {n}', stageN: 'Etappe {n}',
+        bossWave: 'Das Flaggschiff kommt', stageClear: 'Etappe geschafft', cleanN: 'Unversehrt +{n}',
+        how: 'Wisch irgendwo; das Schiff folgt deinem Finger und schießt von selbst.', tapGo: 'Tippe zum Weiterspielen',
+        dailySr: 'Angriff des Tages', bestN: 'Bestwert {n}', scoreN: 'Punkte {n}', downed: 'Abgeschossene Angreifer', wavesDone: 'Geschaffte Wellen',
+        accuracy: 'Treffsicherheit', victory: 'Der Himmel ist frei', shotDown: 'Keine Schiffe mehr', stageDone: 'Etappe {n} geschafft',
+        nextStage: 'Nächste Etappe', retryStage: 'Diese Etappe nochmal', restartStage: 'Etappe neu starten',
+        startOver: 'Neu ab Etappe 1', startOverWarn: 'Du gehst mit einem einfachen Schiff zurück zu Etappe 1. Freigeschaltete Etappen, Bestwerte und Upgrades werden gelöscht.',
+        stagesT: 'Etappen', locked: 'Gesperrt', stageBest: 'Bestwert der Etappe',
+        st1: 'Mondumlaufbahn', st2: 'Roter Mars', st3: 'Asteroidengürtel', st4: 'Jupitersturm', st5: 'Saturnringe', st6: 'Dunkelnebel', st7: 'Neutronenstern', st8: 'Supernova', st9: 'Schwarzes Loch',
+        pkW: 'Stärkere Waffe', pkR: 'Schnelleres Feuer', pkS: 'Schild', pkL: 'Extraschiff', pkP: 'Punkte +{n}',
+        kMove: 'Schiff bewegen', kFire: 'Schießen (halten)', kGo: 'Nach einer Pause weiter',
+        rules: 'Die Angreifer kommen in Gruppen von oben, schaukeln in Formation, und hin und wieder stürzt sich einer auf dein Schiff. Die Reise hat neun Etappen, von der Mondumlaufbahn bis zum Schwarzen Loch, jede mit fünf Wellen, die schwerer werden; die fünfte ist ein Flaggschiff. Jede Etappe ist schwerer als die vorige. Ein abgeschossener Angreifer lässt manchmal ein Extra fallen, ein Flaggschiff immer; flieg darunter, um es zu fangen: eine stärkere Waffe (bis zu drei Rohre), schnelleres Feuer, ein Schild für einen Treffer oder ein Extraschiff. Jedes verlorene Schiff senkt die Waffe um eine Stufe. Upgrades nimmst du in die nächste Etappe mit. Sind alle Schiffe weg, spielst du dieselbe Etappe noch einmal mit dem, was du zu ihrem Beginn hattest. Mit dem Zahnrad wählst du eine freigeschaltete Etappe oder fängst alles ab Etappe 1 neu an. Eine Welle ohne Verlust bringt einen Bonus, im Sturzflug getroffene Angreifer zählen doppelt. Der Angriff des Tages ist eine Etappe mit fünf Wellen, für alle gleich, mit einem einfachen Schiff.',
+        tutTitle1: 'Mach den Himmel frei', tutText1: 'Neun Etappen liegen vor dir, jede mit fünf Wellen. Die fünfte Welle jeder Etappe ist ein Flaggschiff. Du hast drei Schiffe.',
         tutTitle2: 'Wisch irgendwo', tutText2: 'Leg einen Finger irgendwo auf den Bildschirm und wisch nach links und rechts. Das Schiff folgt und schießt, solange der Finger unten ist.',
-        tutTitle3: 'Sturzflüge', tutText3: 'Manche Angreifer stürzen herab und schießen. Weich aus – und triffst du sie im Sturzflug, gibt es doppelte Punkte.'
+        tutTitle3: 'Sturzflüge', tutText3: 'Manche Angreifer stürzen herab und schießen. Weich aus – und triffst du sie im Sturzflug, gibt es doppelte Punkte.',
+        tutTitle4: 'Extras', tutText4: 'Ein abgeschossener Angreifer lässt manchmal ein Extra fallen. Flieg darunter, um es zu fangen: stärkere Waffe, schnelleres Feuer, Schild oder Extraschiff. Upgrades nimmst du in die nächste Etappe mit.'
       },
       es: {
-        field: 'Cielo nocturno con invasores', srScore: 'Puntos', srWave: 'Oleada', srLives: 'Naves', waveN: 'Oleada {n}', finalWave: 'Última oleada',
-        cleanN: 'Sin daños +{n}', how: 'Desliza el dedo por cualquier sitio; la nave lo sigue y dispara sola.', tapGo: 'Toca para seguir',
-        newRun: 'Nuevo asalto', dailySr: 'Asalto diario', bestN: 'Récord {n}', scoreN: 'Puntos {n}', downed: 'Invasores derribados', wavesDone: 'Oleadas superadas',
-        accuracy: 'Puntería', victory: 'El cielo está despejado', shotDown: 'Sin naves', kMove: 'Mover la nave', kFire: 'Disparar (mantener)', kGo: 'Seguir tras una pausa',
-        rules: 'Los invasores llegan en grupos desde arriba, se balancean en formación y, de vez en cuando, uno se lanza en picado hacia tu nave y vuelve a entrar por arriba. Hay diez oleadas y una última oleada corta con la nave insignia. Tienes tres naves; un disparo o un choque te cuesta una. Cada invasor da puntos, y si lo derribas en picado, el doble. Una oleada superada sin perder ninguna nave da una bonificación. El asalto diario tiene el mismo orden de oleadas para todos.',
-        tutTitle1: 'Despeja el cielo', tutText1: 'Llegan once oleadas de invasores. Derríbalos a todos para terminar el asalto; tienes tres naves.',
+        field: 'Cielo nocturno con invasores', srScore: 'Puntos', srStage: 'Fase', srWave: 'Oleada', srLives: 'Naves', waveN: 'Oleada {n}', stageN: 'Fase {n}',
+        bossWave: 'Llega la nave insignia', stageClear: 'Fase superada', cleanN: 'Sin daños +{n}',
+        how: 'Desliza el dedo por cualquier sitio; la nave lo sigue y dispara sola.', tapGo: 'Toca para seguir',
+        dailySr: 'Asalto diario', bestN: 'Récord {n}', scoreN: 'Puntos {n}', downed: 'Invasores derribados', wavesDone: 'Oleadas superadas',
+        accuracy: 'Puntería', victory: 'El cielo está despejado', shotDown: 'Sin naves', stageDone: 'Fase {n} superada',
+        nextStage: 'Siguiente fase', retryStage: 'Jugar otra vez esta fase', restartStage: 'Reiniciar la fase',
+        startOver: 'Empezar de nuevo en la fase 1', startOverWarn: 'Vuelves a la fase 1 con una nave sencilla. Se borran las fases desbloqueadas, los récords y las mejoras.',
+        stagesT: 'Fases', locked: 'Bloqueada', stageBest: 'Récord de la fase',
+        st1: 'Órbita lunar', st2: 'Marte rojo', st3: 'Cinturón de asteroides', st4: 'Tormenta de Júpiter', st5: 'Anillos de Saturno', st6: 'Nebulosa oscura', st7: 'Estrella de neutrones', st8: 'Supernova', st9: 'Agujero negro',
+        pkW: 'Arma más fuerte', pkR: 'Disparo más rápido', pkS: 'Escudo', pkL: 'Nave extra', pkP: 'Puntos +{n}',
+        kMove: 'Mover la nave', kFire: 'Disparar (mantener)', kGo: 'Seguir tras una pausa',
+        rules: 'Los invasores llegan en grupos desde arriba, se balancean en formación y, de vez en cuando, uno se lanza en picado hacia tu nave. El viaje tiene nueve fases, de la Órbita lunar al Agujero negro, cada una con cinco oleadas cada vez más duras; la quinta es una nave insignia. Cada fase es más difícil que la anterior. Un invasor derribado a veces suelta un premio, y una nave insignia siempre; ponte debajo para atraparlo: un arma más fuerte (hasta tres cañones), disparo más rápido, un escudo que aguanta un golpe o una nave extra. Cada nave que pierdes baja tu arma un nivel. Las mejoras te acompañan a la siguiente fase. Si te quedas sin naves, juegas la misma fase otra vez con lo que tenías al empezarla. El botón del engranaje elige una fase desbloqueada o empieza todo de nuevo en la fase 1. Una oleada superada sin perder naves da una bonificación, y un invasor derribado en picado vale el doble. El asalto diario es una fase de cinco oleadas, igual para todos, con una nave sencilla.',
+        tutTitle1: 'Despeja el cielo', tutText1: 'Te esperan nueve fases de cinco oleadas. La quinta oleada de cada fase es una nave insignia. Tienes tres naves.',
         tutTitle2: 'Desliza donde quieras', tutText2: 'Pon un dedo en cualquier parte de la pantalla y deslízalo a izquierda y derecha. La nave lo sigue y dispara mientras tu dedo esté apoyado.',
-        tutTitle3: 'Picados', tutText3: 'Algunos invasores se lanzan en picado y disparan. Apártate, y derríbalos en pleno picado para ganar el doble.'
+        tutTitle3: 'Picados', tutText3: 'Algunos invasores se lanzan en picado y disparan. Apártate, y derríbalos en pleno picado para ganar el doble.',
+        tutTitle4: 'Premios', tutText4: 'Un invasor derribado a veces suelta un premio. Ponte debajo para atraparlo: arma más fuerte, disparo más rápido, escudo o nave extra. Las mejoras te acompañan a la siguiente fase.'
       }
     }
   });
 
   var params = new URLSearchParams(location.search);
   var dailyDate = params.get('daily');
+  // the stage names for the shared text, which is always Persian like the other games'
+  var FA_STAGES = ['مدار ماه', 'مریخ سرخ', 'کمربند سیارک‌ها', 'توفان مشتری', 'حلقه‌های زحل', 'سحابی تاریک', 'ستاره‌ی نوترونی', 'ابرنواختر', 'سیاه‌چاله'];
+  function stName(n) {
+    // literal keys, so the string check can see every one
+    return [C.t('st1'), C.t('st2'), C.t('st3'), C.t('st4'), C.t('st5'), C.t('st6'), C.t('st7'), C.t('st8'), C.t('st9')][n - 1];
+  }
+
+  /* ---------------------------------------------------------- campaign */
+
+  // The campaign lives beside the run's save: the highest stage open, the stage to
+  // play next, each stage's best score, and the kit each open stage starts with (what
+  // the ship carried out of the stage before). Losing a stage replays it with that kit.
+  function freshCamp() { return { v: 1, unlocked: 1, cur: 1, best: [0, 0, 0, 0, 0, 0, 0, 0, 0], kits: {}, done: false }; }
+  function loadCamp() {
+    var o = ctx.store.get('camp', null), c = freshCamp(), i;
+    if (!o || typeof o !== 'object' || o.v !== 1) return c;
+    var isInt = function (x, a, b) { return typeof x === 'number' && Math.floor(x) === x && x >= a && x <= b; };
+    if (!isInt(o.unlocked, 1, E.STAGES)) return c;
+    c.unlocked = o.unlocked;
+    c.cur = isInt(o.cur, 1, c.unlocked) ? o.cur : c.unlocked;
+    if (Array.isArray(o.best)) for (i = 0; i < E.STAGES; i++) c.best[i] = isInt(o.best[i], 0, 1e9) ? o.best[i] : 0;
+    if (o.kits && typeof o.kits === 'object') for (i = 2; i <= c.unlocked; i++) if (o.kits[i]) c.kits[i] = E.normKit(o.kits[i]);
+    c.done = o.done === true;
+    return c;
+  }
+  function saveCamp() { ctx.store.set('camp', camp); }
+  function kitFor(n) { return n > 1 && camp.kits[n] ? E.normKit(camp.kits[n]) : E.normKit(); }
+  var camp = loadCamp();
 
   // S: the run. waiting: held until a tap or a key, after a return from the
   // background or a restored save, so nobody is dropped straight into enemy fire
   var S = null, raf = 0, last = 0, acc = 0, paused = false, waiting = false, ended = false, startedAt = 0, touched = false;
-  var sparks = [], hudKey = '';
+  var sparks = [], labels = [], hudKey = '';
 
   var cv = el('canvas', { class: 'sr-canvas', role: 'img', 'aria-label': C.t('field') });
   var box = el('div', { class: 'sr-box' }, [cv]);
   var top = el('div', { class: 'sr-top ch-above' });
-  var vScore = el('span', { class: 'sr-pill__value', text: '0' }), vWave = el('span', { class: 'sr-pill__value', text: '0' }), vLives = el('span', { class: 'sr-lives' });
+  var vScore = el('span', { class: 'sr-pill__value', text: '0' }), vStage = el('span', { class: 'sr-pill__value', text: '1' });
+  var vWave = el('span', { class: 'sr-pill__value', text: '0' }), vLives = el('span', { class: 'sr-lives' });
+  var stagePill = el('div', { class: 'sr-pill' }, [el('span', { class: 'sr-pill__label', text: C.t('srStage') }), vStage]);
   var hud = el('div', { class: 'sr-hud ch-above' }, [
     el('div', { class: 'sr-pill' }, [el('span', { class: 'sr-pill__label', text: C.t('srScore') }), vScore]),
+    stagePill,
     el('div', { class: 'sr-pill' }, [el('span', { class: 'sr-pill__label', text: C.t('srWave') }), vWave]),
-    el('div', { class: 'sr-pill' }, [el('span', { class: 'sr-pill__label', text: C.t('srLives') }), vLives])
+    el('div', { class: 'sr-pill sr-pill--ships' }, [el('span', { class: 'sr-pill__label', text: C.t('srLives') }), vLives])
   ]);
+  if (dailyDate) stagePill.hidden = true;
   var status = el('div', { class: 'sr-status', role: 'status', 'aria-live': 'polite' });
   var wrap = el('div', { class: 'sr-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, hud, status])]);
 
   ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
-  ctx.button({ icon: 'refresh', label: C.t('newRun'), onClick: askNew });
+  ctx.button({ icon: 'refresh', label: C.t('restartStage'), onClick: askNew });
   ctx.main.appendChild(wrap);
   ctx.mount();
 
   /* ------------------------------------------------------------ setup */
 
-  function newRun() {
-    var seed = dailyDate ? C.daily('starraid', dailyDate).seed : Math.floor(Math.random() * 4294967295);
-    S = E.newRun(seed);
-    ended = false; waiting = false; acc = 0; last = 0; sparks = []; startedAt = Date.now();
+  function newRun(stage) {
+    if (dailyDate) S = E.newRun(C.daily('starraid', dailyDate).seed, { daily: true });
+    else {
+      stage = Math.max(1, Math.min(camp.unlocked, stage || camp.cur));
+      if (camp.cur !== stage) { camp.cur = stage; saveCamp(); }
+      S = E.newRun(Math.floor(Math.random() * 4294967295), { stage: stage, kit: kitFor(stage) });
+    }
+    ended = false; waiting = false; acc = 0; last = 0; sparks = []; labels = []; startedAt = Date.now();
     render(); kick();
   }
-  function askNew() {
-    if (!S || ended || S.wave === 0) { newRun(); return; }
-    C.ui.confirm({ title: C.t('newRun'), body: C.t('resetWarn'), onOk: function () { ctx.clearSave(); newRun(); } });
+  function running() { return S && !ended && !S.over && S.wave > 0; }
+  // a run under way is never thrown away without asking
+  function guarded(title, go) {
+    if (!running()) { go(); return; }
+    C.ui.confirm({ title: title, body: C.t('resetWarn'), onOk: function () { ctx.clearSave(); go(); } });
+  }
+  function askNew() { guarded(C.t('restartStage'), function () { newRun(S ? S.stage : camp.cur); }); }
+  function startOver() {
+    camp = freshCamp(); saveCamp(); ctx.clearSave(); newRun(1);
+  }
+  function askStartOver(onCancel) {
+    C.ui.confirm({ title: C.t('startOver'), body: C.t('startOverWarn'), okLabel: C.t('startOver'), danger: true, onOk: startOver, onCancel: onCancel });
   }
 
   /* -------------------------------------------------------------- loop */
@@ -468,14 +729,21 @@ if (typeof module !== 'undefined' && module.exports) module.exports = StarRaidEn
     }
     if (ev.length) events(ev);
     draw();
-    if (S.over && !ended) { ended = true; ctx.clearSave(); renderHud(); setTimeout(finish, C.ui.reduceMotion() ? 250 : 1200); }
+    // the campaign is written at once, so leaving during the result's delay keeps it
+    if (S.over && !ended) { ended = true; ctx.clearSave(); record(); renderHud(); setTimeout(finish, C.ui.reduceMotion() ? 250 : 1200); }
     // nothing moves behind a dialog or while the app is away: stop asking for frames
-    if (!document.hidden && !paused && (!ended || sparks.length)) raf = requestAnimationFrame(tick);
+    if (!document.hidden && !paused && (!ended || sparks.length || labels.length)) raf = requestAnimationFrame(tick);
   }
   function kick() { if (!raf) raf = requestAnimationFrame(tick); }
 
   var COLORS = { s: '#2FD3A6', w: '#FF5FA2', b: '#FFB23F', k: '#A66BFF' };
+  // pick-ups: a colour each, kept apart from the raiders' and the shots'
+  var DROP_COL = { W: '#FF9F43', R: '#3FE0FF', S: '#5BE37D', L: '#FF7AC8', P: '#FFD166' };
   function spark(x, y, col, big) { sparks.push({ x: x, y: y, col: col, t0: performance.now(), big: !!big }); }
+  function pickLabel(kind) {
+    var txt = kind === 'W' ? C.t('pkW') : kind === 'R' ? C.t('pkR') : kind === 'S' ? C.t('pkS') : kind === 'L' ? C.t('pkL') : C.t('pkP', { n: C.num(250) });
+    labels.push({ x: S.p.x, y: E.PY - 34, txt: txt, col: DROP_COL[kind], t0: performance.now() });
+  }
 
   function events(ev) {
     var shot = false, save = false;
@@ -484,6 +752,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = StarRaidEn
       if (e.e === 'shot') shot = true;
       else if (e.e === 'hit') { C.audio.sfx('hit'); spark(e.x, e.y, COLORS[e.k], false); }
       else if (e.e === 'kill') { C.audio.sfx(E.KIND[e.k].boss ? 'boom' : 'pop'); spark(e.x, e.y, COLORS[e.k], true); }
+      else if (e.e === 'pick') { C.audio.sfx('unlock'); C.feedback('good'); spark(e.x, e.y, DROP_COL[e.k], true); pickLabel(e.k); save = true; }
+      else if (e.e === 'shield') { C.audio.sfx('thud'); spark(e.x, e.y, DROP_COL.S, true); save = true; }
       else if (e.e === 'die') { C.audio.sfx('boom'); C.feedback('bad'); spark(e.x, e.y, '#7FA6FF', true); save = true; }
       else if (e.e === 'clean') C.audio.sfx('coin');
       else if (e.e === 'cleared') { C.feedback('good'); save = true; }
@@ -496,45 +766,65 @@ if (typeof module !== 'undefined' && module.exports) module.exports = StarRaidEn
 
   /* ------------------------------------------------------------ result */
 
+  function record() {
+    if (dailyDate || !S) return;
+    var st = S.stage, n = E.score(S);
+    if (n > camp.best[st - 1]) camp.best[st - 1] = n;
+    if (S.won) {
+      if (st < E.STAGES) { camp.unlocked = Math.max(camp.unlocked, st + 1); camp.kits[st + 1] = E.kitAfter(S); camp.cur = st + 1; }
+      else camp.done = true;
+    }
+    saveCamp();
+  }
+
   function finish() {
-    var n = E.score(S), won = S.won, note = null, waves = E.cleared(S);
-    var coins = won ? 24 : Math.max(2, Math.round(waves * 1.6)), points = won ? 90 : Math.max(3, waves * 7);
-    if (won) C.achievements.unlock('sr-win');
+    var n = E.score(S), won = S.won, note = null, waves = E.cleared(S), st = S.stage, lastStage = st >= E.STAGES;
+    var coins = won ? 8 + 2 * st : Math.max(2, Math.round(waves * 1.6)), points = won ? 25 + 8 * st : Math.max(3, waves * 6);
+    if (won && !dailyDate && lastStage) C.achievements.unlock('sr-win');
     if (S.top >= 3) C.achievements.unlock('sr-clean');
-    var lines = [
+    var lines = [];
+    if (!dailyDate) lines.push({ label: C.t('srStage'), value: C.num(st) + ' · ' + stName(st) });
+    lines.push(
       { label: C.t('wavesDone'), value: C.num(waves) + ' / ' + C.num(E.WAVES) },
       { label: C.t('downed'), value: C.num(S.kills) },
       { label: C.t('accuracy'), value: C.num(S.shots ? Math.round(S.hits / S.shots * 100) : 0) + (C.isRtl() ? '٪' : '%') }
-    ];
+    );
     if (dailyDate) {
-      if (S.wave >= 6 || won) C.achievements.unlock('sr-daily');
+      if (waves >= 4 || won) C.achievements.unlock('sr-daily');
+      coins = won ? 20 : coins; points = won ? 70 : points;
       if (!C.stats.daily('starraid', dailyDate, { label: C.t('scoreN', { n: C.num(n) }), win: won })) { coins = Math.max(1, Math.round(coins * 0.2)); points = Math.max(1, Math.round(points * 0.2)); }
     } else {
       if (C.stats.best('starraid', 'score', n) && n > 0) note = C.t('bestN', { n: C.num(n) });
-      lines.push({ label: C.t('best'), value: C.num(C.stats.getBest('starraid', 'score') || n) });
+      lines.push({ label: C.t('stageBest'), value: C.num(camp.best[st - 1] || n) });
     }
+    var title = won ? (dailyDate || lastStage ? C.t('victory') : C.t('stageDone', { n: C.num(st) })) : C.t('shotDown');
+    var again, againLabel;
+    if (dailyDate) { againLabel = C.t('retryStage'); again = function () { newRun(); }; }
+    else if (!won) { againLabel = C.t('retryStage'); again = function () { newRun(st); }; }
+    else if (!lastStage) { againLabel = C.t('nextStage'); again = function () { newRun(st + 1); }; }
+    else { againLabel = C.t('startOver'); again = function () { askStartOver(function () { newRun(st); }); }; }
     var shot = E.clone(S);
     ctx.finish({
       won: won,
-      title: won ? C.t('victory') : C.t('shotDown'),
+      title: title,
       note: note, timeMs: Date.now() - startedAt, coins: coins, points: points,
       lines: [{ label: C.t('srScore'), value: C.num(n) }].concat(lines),
-      shareText: 'چوگان · یورش' + (dailyDate ? ('\nروزانه ' + dailyDate) : '') + '\nامتیاز ' + n + ' · موج ' + waves + ' از ' + E.WAVES,
+      shareText: 'چوگان · یورش' + (dailyDate ? ('\nروزانه ' + dailyDate) : ('\nمرحله‌ی ' + st + ' · ' + FA_STAGES[st - 1])) + '\nامتیاز ' + n + ' · موج ' + waves + ' از ' + E.WAVES,
       paint: function (g, w, h) {
         var k = Math.min(w / E.W, h / E.H);
         g.save(); g.translate((w - E.W * k) / 2, (h - E.H * k) / 2); g.scale(k, k);
         paint(g, shot, 0);
         g.restore();
       },
-      againLabel: C.t('newRun'),
-      onAgain: function () { newRun(); }
+      againLabel: againLabel,
+      onAgain: again
     });
   }
 
   /* ------------------------------------------------------------- saves */
 
-  // A run in progress is saved at every wave and every lost ship, and when the app
-  // goes away; it comes back waiting for a tap
+  // A run in progress is saved at every wave, pick-up and lost ship, and when the
+  // app goes away; it comes back waiting for a tap
   ctx.autosave(function () {
     if (!S || S.over || ended || S.wave === 0) return { inProgress: false };
     return { s: E.snapshot(S), daily: dailyDate || null, elapsed: Date.now() - startedAt };
@@ -542,9 +832,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = StarRaidEn
   function restore(sv) {
     if (!sv || !sv.s || (sv.daily || null) !== (dailyDate || null)) return false;
     var R = E.restore(sv.s);
-    if (!R) return false;
+    // a save from before the stages is refused by the engine; a stage the campaign
+    // has not opened (a cleared campaign, an edited save) is refused here
+    if (!R || R.daily !== !!dailyDate || (!R.daily && R.stage > camp.unlocked)) return false;
     S = R; startedAt = Date.now() - (+sv.elapsed || 0);
-    ended = false; waiting = true; acc = 0; last = 0; sparks = [];
+    if (!dailyDate && camp.cur !== S.stage) { camp.cur = S.stage; saveCamp(); }
+    ended = false; waiting = true; acc = 0; last = 0; sparks = []; labels = [];
     render(); kick();
     return true;
   }
@@ -660,6 +953,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = StarRaidEn
     g.restore();
   }
 
+  function fitText(g, txt, max) {
+    var w = g.measureText(txt).width;
+    if (w > max) { var k = max / w; g.save(); g.scale(k, 1); return k; }
+    return 0;
+  }
   function paint(g, R, now) {
     var P = palette(), W = E.W, H = E.H, t = R.t, i;
     var grd = g.createLinearGradient(0, 0, 0, H);
@@ -673,6 +971,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = StarRaidEn
     }
     g.globalAlpha = 1;
 
+    // pick-ups, behind the shots so a shot is never hidden
+    for (i = 0; i < R.drops.length; i++) pickup(g, R.drops[i].x, R.drops[i].y, R.drops[i].k, t, 11);
+
     // enemy shots: an orange core in a soft halo
     for (i = 0; i < R.eb.length; i++) {
       var b = R.eb[i];
@@ -683,10 +984,22 @@ if (typeof module !== 'undefined' && module.exports) module.exports = StarRaidEn
     g.fillStyle = '#9FF3FF';
     for (i = 0; i < R.pb.length; i++) { C.rrect(g, R.pb[i].x - 1.6, R.pb[i].y - 7, 3.2, 14, 1.6); g.fill(); }
 
-    for (i = 0; i < R.foes.length; i++) if (R.foes[i].st !== 'wait') raider(g, R.foes[i], t);
+    for (i = 0; i < R.foes.length; i++) if (R.foes[i].st !== 'wait') raider(g, R.foes[i], t, R);
 
     var p = R.p;
-    if (!(R.over && !R.won) && p.dead <= 0 && !(p.inv > 0 && Math.floor(t * 10) % 2)) ship(g, p.x, E.PY, t);
+    if (!(R.over && !R.won) && p.dead <= 0 && !(p.inv > 0 && Math.floor(t * 10) % 2)) {
+      ship(g, p.x, E.PY, t, R.up.wl);
+      if (R.up.sh) {
+        g.strokeStyle = DROP_COL.S; g.lineWidth = 2; g.globalAlpha = 0.55 + 0.25 * Math.sin(t * 5);
+        g.beginPath(); g.arc(p.x, E.PY - 3, 25, 0, Math.PI * 2); g.stroke(); g.globalAlpha = 1;
+      }
+    }
+
+    // what the ship carries, small in the corner
+    var cx = 16;
+    if (R.up.wl > 1) { pickup(g, cx, H - 16, 'W', 0, 8); chipText(g, '×' + C.num(R.up.wl), cx + 11, H - 16); cx += 44; }
+    if (R.up.rf > 0) { pickup(g, cx, H - 16, 'R', 0, 8); chipText(g, '×' + C.num(R.up.rf), cx + 11, H - 16); cx += 44; }
+    if (R.up.sh) pickup(g, cx, H - 16, 'S', 0, 8);
 
     // sparks of a hit or a downed raider live in page time, outside the engine
     if (now) {
@@ -701,21 +1014,72 @@ if (typeof module !== 'undefined' && module.exports) module.exports = StarRaidEn
         if (s.big) for (var q = 0; q < 8; q++) { var an = q * Math.PI / 4 + 0.3; g.fillRect(s.x + Math.cos(an) * rr * 1.3 - 1.5, s.y + Math.sin(an) * rr * 1.3 - 1.5, 3, 3); }
         g.globalAlpha = 1;
       }
+      var lf = getComputedStyle(document.body).fontFamily || 'sans-serif';
+      for (i = labels.length - 1; i >= 0; i--) {
+        var L = labels[i], la = (now - L.t0) / 1100;
+        if (la >= 1) { labels.splice(i, 1); continue; }
+        g.globalAlpha = la < 0.7 ? 1 : (1 - la) / 0.3;
+        g.font = '800 16px ' + lf; g.textAlign = 'center'; g.textBaseline = 'middle';
+        var lx = Math.max(70, Math.min(W - 70, L.x));
+        g.lineWidth = 4; g.strokeStyle = 'rgba(5,10,30,.85)'; g.strokeText(L.txt, lx, L.y - 40 * la);
+        g.fillStyle = L.col; g.fillText(L.txt, lx, L.y - 40 * la);
+        g.globalAlpha = 1;
+      }
     }
 
-    // the wave's name between waves, and the bonus of an unharmed wave
+    // between waves: the stage's name before its first wave, a warning before the
+    // flagship, the stage's end after it, and the bonus of an unharmed wave
     if (R.phase === 'gap') {
-      var font = getComputedStyle(document.body).fontFamily || 'sans-serif';
+      var font = getComputedStyle(document.body).fontFamily || 'sans-serif', cy = H * 0.42, k;
       g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillStyle = P.text; g.font = '800 30px ' + font;
       var next = R.wave + 1;
-      g.fillText(next >= E.WAVES ? C.t('finalWave') : C.t('waveN', { n: C.num(next) }), W / 2, H * 0.42);
-      if (R.bonus) { g.fillStyle = '#FFD166'; g.font = '700 18px ' + font; g.fillText(C.t('cleanN', { n: C.num(R.bonus) }), W / 2, H * 0.42 + 38); }
+      if (R.wave === 0) {
+        g.fillStyle = P.dim; g.font = '700 18px ' + font;
+        g.fillText(R.daily ? C.num(dailyDate || '') : C.t('stageN', { n: C.num(R.stage) }), W / 2, cy - 38);
+        g.fillStyle = P.text; g.font = '800 32px ' + font;
+        var big = R.daily ? C.t('dailySr') : stName(R.stage);
+        k = fitText(g, big, 320);
+        if (k) { g.fillText(big, W / 2 / k, cy); g.restore(); } else g.fillText(big, W / 2, cy);
+        g.fillStyle = P.dim; g.font = '700 18px ' + font;
+        g.fillText(C.t('waveN', { n: C.num(1) }), W / 2, cy + 38);
+      } else if (R.wave < E.WAVES) {
+        g.fillStyle = P.text; g.font = '800 30px ' + font;
+        g.fillText(C.t('waveN', { n: C.num(next) }), W / 2, cy);
+        if (next === E.WAVES) { g.fillStyle = '#FF8FB1'; g.font = '700 18px ' + font; g.fillText(C.t('bossWave'), W / 2, cy - 38); }
+      } else {
+        g.fillStyle = P.text; g.font = '800 30px ' + font;
+        g.fillText(C.t('stageClear'), W / 2, cy);
+      }
+      if (R.bonus) { g.fillStyle = '#FFD166'; g.font = '700 18px ' + font; g.fillText(C.t('cleanN', { n: C.num(R.bonus) }), W / 2, cy + (R.wave === 0 ? 76 : 38)); }
     }
   }
+  function chipText(g, txt, x, y) {
+    g.font = '800 13px ' + (getComputedStyle(document.body).fontFamily || 'sans-serif');
+    g.textAlign = 'left'; g.textBaseline = 'middle'; g.fillStyle = '#FFFFFF';
+    g.fillText(txt, x, y + 1);
+  }
 
-  // The player's ship: a pale hull between two blue wings, with an engine flame
-  function ship(g, x, y, t) {
+  // A pick-up: a coloured disc with a dark sign of what it gives, and a ring that
+  // pulses so it reads as something to catch, not a shot to dodge
+  function pickup(g, x, y, kind, t, r) {
+    var col = DROP_COL[kind];
+    g.save(); g.translate(x, y);
+    if (t) { g.strokeStyle = col; g.lineWidth = 1.5; g.globalAlpha = 0.5 + 0.4 * Math.sin(t * 6); g.beginPath(); g.arc(0, 0, r + 4 + 1.5 * Math.sin(t * 6), 0, Math.PI * 2); g.stroke(); g.globalAlpha = 1; }
+    g.fillStyle = col; g.beginPath(); g.arc(0, 0, r, 0, Math.PI * 2); g.fill();
+    var s = r / 11;
+    g.scale(s, s);
+    g.fillStyle = '#0B1438'; g.strokeStyle = '#0B1438'; g.lineWidth = 2.2; g.lineCap = 'round'; g.lineJoin = 'round';
+    if (kind === 'W') { g.beginPath(); g.moveTo(0, 5); g.lineTo(0, -6); g.moveTo(-2, 5); g.lineTo(-6, -4); g.moveTo(2, 5); g.lineTo(6, -4); g.stroke(); }
+    else if (kind === 'R') { g.beginPath(); g.moveTo(-5, 1); g.lineTo(0, -4); g.lineTo(5, 1); g.moveTo(-5, 6); g.lineTo(0, 1); g.lineTo(5, 6); g.stroke(); }
+    else if (kind === 'S') { g.beginPath(); g.moveTo(0, -6); g.lineTo(6, -3.5); g.quadraticCurveTo(6, 4, 0, 7); g.quadraticCurveTo(-6, 4, -6, -3.5); g.closePath(); g.fill(); }
+    else if (kind === 'L') { g.beginPath(); g.moveTo(0, -7); g.lineTo(6.5, 5); g.lineTo(0, 2.5); g.lineTo(-6.5, 5); g.closePath(); g.fill(); }
+    else { g.beginPath(); for (var i = 0; i < 10; i++) { var a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? 2.8 : 6.5; if (i) g.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); else g.moveTo(Math.cos(a) * rr, Math.sin(a) * rr); } g.closePath(); g.fill(); }
+    g.restore();
+  }
+
+  // The player's ship: a pale hull between two blue wings, with an engine flame;
+  // the weapon's extra barrels show on the wings
+  function ship(g, x, y, t, wl) {
     g.save(); g.translate(x, y);
     var fl = 7 + 3 * Math.sin(t * 38);
     g.fillStyle = '#FF9F43'; g.beginPath(); g.moveTo(-5, 11); g.lineTo(0, 11 + fl); g.lineTo(5, 11); g.closePath(); g.fill();
@@ -723,16 +1087,23 @@ if (typeof module !== 'undefined' && module.exports) module.exports = StarRaidEn
     g.fillStyle = '#3D6BFF';
     g.beginPath(); g.moveTo(0, -12); g.lineTo(17, 9); g.lineTo(11, 13); g.lineTo(0, 7); g.lineTo(-11, 13); g.lineTo(-17, 9); g.closePath(); g.fill();
     g.fillStyle = '#7FD3FF'; g.fillRect(-17, 2, 3, 9); g.fillRect(14, 2, 3, 9);
+    if (wl >= 2) { g.fillStyle = '#9FF3FF'; g.fillRect(-8, -6, 2.4, 9); g.fillRect(5.6, -6, 2.4, 9); }
     g.fillStyle = '#EEF2FF';
     g.beginPath(); g.moveTo(0, -20); g.quadraticCurveTo(7, -6, 6, 12); g.lineTo(-6, 12); g.quadraticCurveTo(-7, -6, 0, -20); g.closePath(); g.fill();
     g.fillStyle = '#133DE7'; g.beginPath(); g.ellipse(0, -5, 2.8, 5.5, 0, 0, Math.PI * 2); g.fill();
     g.restore();
   }
 
+  // each stage's flagship has its own hull colour, from a pale moon grey to the red
+  // of the supernova and the black of the hole
+  var BOSS = [
+    ['#8C93B8', '#C9CFEA'], ['#9C3B2E', '#E0664F'], ['#6B5A47', '#B08E68'], ['#8A5A2B', '#E3A15A'], ['#7A6A32', '#D8C27A'],
+    ['#3B2A78', '#7D63D8'], ['#2D6A8A', '#7FD8FF'], ['#8A2440', '#FF6A5C'], ['#1A1426', '#5B4C7A']
+  ];
   // Raiders face down, at the player: a round scout with feelers, a winged raider
   // that beats its wings, an armoured hexagon that cracks on the first hit, and the
-  // flagship of the last wave with its armour shown as a bar
-  function raider(g, f, t) {
+  // flagship of a stage's last wave with its armour shown as a bar
+  function raider(g, f, t, R) {
     var shape = f.k, col = COLORS[shape], ph = t * 7 + f.id;
     g.save(); g.translate(f.x, f.y);
     if (f.st === 'dive') g.rotate(Math.max(-0.5, Math.min(0.5, -f.vx / 300)));
@@ -756,15 +1127,18 @@ if (typeof module !== 'undefined' && module.exports) module.exports = StarRaidEn
       g.fillStyle = '#FFE3A8'; g.beginPath(); g.arc(0, 1, 3, 0, Math.PI * 2); g.fill();
       if (f.hp < 2) { g.strokeStyle = '#3A2000'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(-10, -6); g.lineTo(-4, -2); g.lineTo(-7, 4); g.moveTo(9, 5); g.lineTo(4, 2); g.stroke(); }
     } else {
-      g.fillStyle = '#5B2CA8'; g.beginPath(); g.ellipse(0, 4, 34, 13, 0, 0, Math.PI * 2); g.fill();
-      g.fillStyle = col; g.beginPath(); g.ellipse(0, 0, 30, 11, 0, 0, Math.PI * 2); g.fill();
+      var bc = BOSS[R.stage - 1] || BOSS[0], sc = E.rad(R, f) / 28;
+      g.save(); g.scale(sc, sc);
+      g.fillStyle = bc[0]; g.beginPath(); g.ellipse(0, 4, 34, 13, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = bc[1]; g.beginPath(); g.ellipse(0, 0, 30, 11, 0, 0, Math.PI * 2); g.fill();
       g.fillStyle = '#FF5D8F'; g.beginPath(); g.ellipse(0, -6, 12, 9, 0, Math.PI, 0); g.fill();
       for (var n = -2; n <= 2; n++) { g.fillStyle = Math.floor(t * 4 + n) % 2 ? '#FFE08A' : '#2A0F5C'; g.beginPath(); g.arc(n * 11, 4, 2.4, 0, Math.PI * 2); g.fill(); }
-      var hpw = 50 * f.hp / E.KIND.k.hp;
-      g.fillStyle = 'rgba(255,255,255,.25)'; g.fillRect(-25, -24, 50, 4);
-      g.fillStyle = '#FF5D8F'; g.fillRect(-25, -24, hpw, 4);
+      g.restore();
+      var bw = 56 * sc, hpw = bw * f.hp / f.hpMax, by = -14 * sc - 12;
+      g.fillStyle = 'rgba(255,255,255,.25)'; g.fillRect(-bw / 2, by, bw, 4);
+      g.fillStyle = '#FF5D8F'; g.fillRect(-bw / 2, by, hpw, 4);
     }
-    if (f.fl > 0) { g.globalAlpha = 0.6; g.fillStyle = '#FFFFFF'; g.beginPath(); g.arc(0, 0, E.KIND[f.k].r * 0.8, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1; }
+    if (f.fl > 0) { g.globalAlpha = 0.6; g.fillStyle = '#FFFFFF'; g.beginPath(); g.arc(0, 0, E.rad(R, f) * 0.8, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1; }
     g.restore();
   }
   function hex(g, r) {
@@ -775,31 +1149,56 @@ if (typeof module !== 'undefined' && module.exports) module.exports = StarRaidEn
 
   /* ----------------------------------------------------------------- ui */
 
-  var SHIP_SVG = '<svg viewBox="-18 -21 36 36" width="16" height="16" aria-hidden="true"><path d="M0 -12 L17 9 L11 13 L0 7 L-11 13 L-17 9Z" fill="#3D6BFF"/><path d="M0 -20 Q7 -6 6 12 L-6 12 Q-7 -6 0 -20Z" fill="currentColor"/></svg>';
+  var SHIP_SVG = '<svg viewBox="-18 -21 36 36" width="15" height="15" aria-hidden="true"><path d="M0 -12 L17 9 L11 13 L0 7 L-11 13 L-17 9Z" fill="#3D6BFF"/><path d="M0 -20 Q7 -6 6 12 L-6 12 Q-7 -6 0 -20Z" fill="currentColor"/></svg>';
   function renderHud() {
     if (!S) return;
-    var key = S.score + '|' + S.wave + '|' + S.lives;
+    var key = S.score + '|' + S.wave + '|' + S.lives + '|' + S.stage;
     if (key === hudKey) return;
     hudKey = key;
     vScore.textContent = C.num(S.score);
+    vStage.textContent = C.num(S.stage) + '/' + C.num(E.STAGES);
     vWave.textContent = C.num(Math.max(1, S.wave)) + '/' + C.num(E.WAVES);
-    var h = '';
-    for (var i = 0; i < E.LIVES; i++) h += '<span style="opacity:' + (i < S.lives ? 1 : 0.2) + '">' + SHIP_SVG + '</span>';
+    var h = '', slots = Math.max(E.LIVES, S.lives);
+    for (var i = 0; i < slots; i++) h += '<span style="opacity:' + (i < S.lives ? 1 : 0.2) + '">' + SHIP_SVG + '</span>';
     vLives.innerHTML = h;
     vLives.setAttribute('aria-label', C.num(S.lives));
   }
   function renderTop() {
     top.innerHTML = '';
-    if (dailyDate) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailySr') + ' — ' + C.num(dailyDate) })]));
-    else {
-      var b = C.stats.getBest('starraid', 'score');
-      if (b) top.appendChild(el('span', { class: 'ch-badge' }, [C.icon('trophy', 14), el('span', { text: C.t('bestN', { n: C.num(b) }) })]));
-    }
+    if (dailyDate) { top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailySr') + ' — ' + C.num(dailyDate) })])); return; }
+    top.appendChild(el('span', { class: 'ch-badge ch-badge--accent', text: stName(S.stage) }));
+    var b = camp.best[S.stage - 1];
+    if (b) top.appendChild(el('span', { class: 'ch-badge' }, [C.icon('trophy', 14), el('span', { text: C.t('bestN', { n: C.num(b) }) })]));
+    var gear = el('button', { class: 'ch-iconbtn sr-gear', type: 'button', 'aria-label': C.t('stagesT'), title: C.t('stagesT') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', showStages);
+    top.appendChild(gear);
   }
   function renderStatus() {
     status.textContent = waiting ? C.t('tapGo') : (!touched ? C.t('how') : '');
   }
   function render() { hudKey = ''; renderTop(); renderHud(); renderStatus(); draw(); }
+
+  // The stage picker: every open stage with its best score, the locked ones greyed,
+  // and the way back to stage 1 behind a warning
+  function showStages() {
+    var m, list = el('div', { class: 'sr-stages' });
+    for (var i = 1; i <= E.STAGES; i++) (function (n) {
+      var open = n <= camp.unlocked, best = camp.best[n - 1];
+      var b = el('button', { class: 'sr-stage' + (S && n === S.stage ? ' is-on' : ''), type: 'button', disabled: !open, 'aria-current': S && n === S.stage ? 'true' : null }, [
+        el('span', { class: 'sr-stage__n', text: C.num(n) }),
+        el('span', { class: 'sr-stage__name', text: stName(n) }),
+        el('span', { class: 'sr-stage__best', text: open ? (best ? C.num(best) : '') : C.t('locked') })
+      ]);
+      b.addEventListener('click', function () {
+        m.close();
+        guarded(C.t('stageN', { n: C.num(n) }), function () { ctx.clearSave(); newRun(n); });
+      });
+      list.appendChild(b);
+    })(i);
+    var reset = el('button', { class: 'ch-btn ch-btn--danger ch-btn--block sr-reset', type: 'button', text: C.t('startOver') });
+    reset.addEventListener('click', function () { m.close(); askStartOver(); });
+    m = C.ui.modal({ title: C.t('stagesT'), body: [list, reset], actions: [{ label: C.t('done'), kind: 'primary' }] });
+  }
 
   /* --------------------------------------------------------------- help */
 
@@ -821,8 +1220,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = StarRaidEn
     var shipAt = function (x, y) { return '<g transform="translate(' + x + ' ' + y + ') scale(.7)"><path d="M0 -12 L17 9 L11 13 L0 7 L-11 13 L-17 9Z" fill="#3D6BFF"/><path d="M0 -20 Q7 -6 6 12 L-6 12 Q-7 -6 0 -20Z" fill="#EEF2FF"/></g>'; };
     var scout = function (x, y) { return '<circle cx="' + x + '" cy="' + y + '" r="6" fill="#2FD3A6"/>'; };
     var wing = function (x, y) { return '<path d="M' + x + ' ' + (y - 3) + ' l-10 -4 l2 9 l8 2 l8 -2 l2 -9z" fill="#FF5FA2"/>'; };
+    var disc = function (x, y, k) { return '<circle cx="' + x + '" cy="' + y + '" r="8" fill="' + DROP_COL[k] + '"/><circle cx="' + x + '" cy="' + y + '" r="11" fill="none" stroke="' + DROP_COL[k] + '" stroke-width="1.2" opacity=".6"/>'; };
     if (kind === 1) {
-      for (var c = 0; c < 6; c++) { s += wing(45 + c * 22, 22) + scout(45 + c * 22, 42); }
+      s += '<ellipse cx="100" cy="24" rx="22" ry="8" fill="#A66BFF"/><path d="M90 20 a10 7 0 0 1 20 0z" fill="#FF5D8F"/>';
+      for (var c = 0; c < 4; c++) s += wing(40 + c * 40 - (c > 1 ? -0 : 0), 46);
       s += '<rect x="99" y="62" width="2" height="9" rx="1" fill="#9FF3FF"/>' + shipAt(100, 92);
     }
     if (kind === 2) {
@@ -834,24 +1235,29 @@ if (typeof module !== 'undefined' && module.exports) module.exports = StarRaidEn
       s += wing(130, 60) + '<path d="M150 20 Q 160 40 132 56" fill="none" stroke="#FF5FA2" stroke-width="1.5" stroke-dasharray="3 3"/>' +
         '<circle cx="120" cy="78" r="3" fill="#FFC46B"/>' + shipAt(80, 92) + '<path d="M96 92 L64 92" stroke="#fff" stroke-width="1.5" stroke-dasharray="3 3"/>';
     }
+    if (kind === 4) {
+      s += disc(40, 30, 'W') + disc(80, 22, 'R') + disc(120, 34, 'S') + disc(160, 24, 'L') + disc(100, 66, 'W') +
+        '<path d="M100 76 L100 82" stroke="#fff" stroke-width="1.5" stroke-dasharray="2 2"/>' + shipAt(100, 94);
+    }
     return s + '</svg>';
   }
   var TUT = [
     { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
     { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
-    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) },
+    { title: C.t('tutTitle4'), text: C.t('tutText4'), art: tArt(4) }
   ];
 
   /* -------------------------------------------------------------- start */
 
   var saved = ctx.loadSave();
-  if (!restore(saved)) newRun();
+  if (!restore(saved)) { if (saved) ctx.clearSave(); newRun(); }
   if (dailyDate && C.stats.dailyDone('starraid', dailyDate)) {
     var rec = C.stats.dailyOf(dailyDate).starraid;
     C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
   }
   ctx.tutorialIfNew(TUT);
-  // the wave names are drawn in the app's font, which may arrive after the first frame
+  // the stage names are drawn in the app's font, which may arrive after the first frame
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { draw(); });
 })();
 </script>
