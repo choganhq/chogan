@@ -34,7 +34,9 @@
     .tk-player__shots { order: 9; flex-basis: 100%; text-align: start; }
     .tk-player:last-child .tk-player__shots { text-align: end; }
   }
-  .tk-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+  /* two lines kept: "your turn — drag…" wraps on a phone, "the bot thinks" does not, and
+     the board under it grew and shrank every turn */
+  .tk-status { line-height: 1.35; min-height: 2.7em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
   .tk-arms { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
   .tk-steps { display: flex; gap: 6px; }
   .tk-arm { font: inherit; font-size: var(--fs-xs); font-weight: 700; min-height: 36px; padding: 0 10px; border-radius: 999px; border: 2px solid transparent;
@@ -743,10 +745,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
     status.textContent = flight ? '…' : (msg && (G.phase !== 'aim' || G.done) ? msg : who + how);
   }
   // the weapons with what is left of each, and the two step buttons with the moves left
+  // Outside the player's own aim (the bot's turn, a shot in flight, the end) the row is
+  // only hidden, never removed: removing it let the board grow and shrink every turn.
   function renderArms() {
     arms.innerHTML = '';
-    if (!G || G.done || isBot(G.M.turn) || G.phase !== 'aim') return;
+    if (!G) return;
     var seat = G.M.turn;
+    arms.style.visibility = canShow() ? '' : 'hidden';
     E.ORDER.forEach(function (a) {
       var n = E.left(G.M, seat, a), b = el('button', { class: 'tk-arm' + (a === arm ? ' tk-arm--on' : ''), type: 'button' },
         [el('span', { text: C.t(a) }), a === 'shell' ? null : el('b', { text: C.num(n) })].filter(Boolean));
@@ -792,7 +797,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
   }
   function renderPad() {
     pad.innerHTML = '';
-    if (!G || prefs.control !== 'nums' || G.done || isBot(G.M.turn) || G.phase !== 'aim') return;
+    if (!G || prefs.control !== 'nums') return;
+    pad.style.visibility = canShow() ? '' : 'hidden';
     pad.appendChild(dial('angle', 0, 90));
     pad.appendChild(dial('power', 1, 100));
     var go = el('button', { class: 'ch-btn ch-btn--primary', type: 'button', text: C.t('fireIt') });
@@ -807,6 +813,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
 
   /* -------------------------------------------------------------- input */
 
+  function canShow() { return G && !G.done && G.phase === 'aim' && !isBot(G.M.turn); }
   function canAim() { return G && !G.done && G.phase === 'aim' && !isBot(G.M.turn) && !document.querySelector('.ch-scrim'); }
   // A slingshot, as in Gorillas: the pull sets the shot, the other way; a full pull is
   // 40% of the field's width
