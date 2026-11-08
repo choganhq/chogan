@@ -920,13 +920,33 @@
     nameInput.addEventListener('change', saveProfile);
     countryInput.addEventListener('change', saveProfile);
 
+    var nameLine = el('div', { class: 'ch-bold', text: C.state.profile.name || C.t('you') });
+    var whoBox = el('div', { class: 'ch-grow' }, [nameLine, el('div', { class: 'ch-xs ch-faint', text: C.state.profile.uid })]);
+    // Chogan Plus: a player signed in to Play Games still read «تو» here, because nothing
+    // read the name the plugin reports (#705). A typed name still wins.
+    if (C.cloud) {
+      var playLine = el('div', { class: 'ch-xs ch-faint ch-play' });
+      whoBox.appendChild(playLine);
+      var showPlay = function (p) {
+        playLine.textContent = '';
+        if (p && p.authenticated) {
+          if (!C.state.profile.name && p.name) nameLine.textContent = p.name;
+          playLine.appendChild(document.createTextNode(C.t('playIn', { name: p.name || '' })));
+        } else {
+          playLine.appendChild(el('div', { text: C.t('playOut') }));
+          playLine.appendChild(el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', style: { 'margin-top': 'var(--s-1)' }, text: C.t('playSignIn'), onclick: function () {
+            this.disabled = true;
+            C.cloud.signIn().then(showPlay);
+          } }));
+        }
+      };
+      C.cloud.ready.then(function () { showPlay(C.cloud.player()); });
+    }
+
     page.appendChild(el('div', { class: 'ch-card', style: { 'margin-bottom': 'var(--s-4)' } }, [
       el('div', { class: 'ch-row', style: { 'margin-bottom': 'var(--s-3)' } }, [
         el('div', { style: { width: '56px', height: '56px', flex: '0 0 56px' }, html: C.mascot(C.state.settings.mascot || 'fox', 56) }),
-        el('div', { class: 'ch-grow' }, [
-          el('div', { class: 'ch-bold', text: C.state.profile.name || C.t('you') }),
-          el('div', { class: 'ch-xs ch-faint', text: C.state.profile.uid })
-        ])
+        whoBox
       ]),
       // Stacked: beside the name, a long country name was cut off («Vereinig…», #293)
       el('div', { class: 'ch-col', style: { gap: 'var(--s-2)' } }, [nameInput, countryInput])
