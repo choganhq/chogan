@@ -3046,6 +3046,12 @@
   ui.hasContainerQueries = function () {
     return !!(window.CSS && CSS.supports && CSS.supports('width', '1cqw'));
   };
+  // Most games write the board's shape as calc(w / h). parseFloat reads that as NaN, so the
+  // fallback sized those boards as squares and they ran over the rows below them (#736)
+  ui.fitRatio = function (v) {
+    var s = String(v).trim(), m = /^calc\(\s*([\d.]+)\s*\/\s*([\d.]+)\s*\)$/.exec(s);
+    return (m ? +m[1] / +m[2] : parseFloat(s)) || 1;
+  };
   ui.fitFallback = function (main) {
     if (ui.hasContainerQueries() || !main) return null;
     document.documentElement.classList.add('ch-nocq');
@@ -3060,7 +3066,7 @@
       var wide = W >= H * 1.25;                              // the @container game (min-aspect-ratio: 5 / 4) of chogan.css
       main.classList.toggle('ch-wide', wide);
       Array.prototype.forEach.call(main.querySelectorAll('.ch-fit'), function (fit) {
-        var ar = parseFloat(getComputedStyle(fit).getPropertyValue('--fit-ar')) || 1;
+        var ar = ui.fitRatio(getComputedStyle(fit).getPropertyValue('--fit-ar'));
         var split = fit.parentNode && fit.parentNode.classList.contains('ch-split') ? fit.parentNode : null;
         var side = split && split.querySelector(':scope > .ch-side');
         if (split && wide) {
