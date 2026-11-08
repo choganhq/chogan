@@ -20,6 +20,10 @@ module.exports = function (T) {
     const recentMax = +((core.match(/var RECENT_MAX = (\d+);/) || [])[1] || 0);
     const games = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games;
     ok(games.length > 0 && recentMax >= games.length * 2, 'the recent list keeps room for every game (' + recentMax + ' for ' + games.length + ')');
+    // #720: every game carries the date of its last visible change, never before it was added nor in the future
+    const today = new Date(Date.now() + 14 * 3600e3).toISOString().slice(0, 10);
+    const badUpd = games.filter((g) => !/^\d{4}-\d{2}-\d{2}$/.test(g.updated || '') || g.updated < g.added || g.updated > today).map((g) => g.id + ' ' + g.updated);
+    ok(!badUpd.length, 'every game in games.json has an `updated` date between its `added` date and today' + (badUpd.length ? ' (' + badUpd.join(', ') + ')' : ''));
     ok(/ch-section--pinned/.test(home), 'the home page keeps its pinned section');
 
     // #687: the removed rows, badge and pin button stay removed
@@ -28,7 +32,7 @@ module.exports = function (T) {
     ok(!/C\.t\('newBadge'\)/.test(home), 'tiles carry no "new" badge');
     ok(!/ch-game__pin/.test(home) && !/\.ch-game__pin/.test(css), 'tiles carry no pin button');
 
-    const keys = ['pinned', 'pin', 'unpin', 'pinHint', 'sortLabel', 'sortDefault', 'sortName', 'sortRecent', 'sortNew'];
+    const keys = ['pinned', 'pin', 'unpin', 'pinHint', 'sortLabel', 'sortDefault', 'sortName', 'sortRecent', 'sortNew', 'sortUpdated'];
     const missing = [];
     for (const k of keys) { const n = (home.match(new RegExp('[ ,{]' + k + ": '", 'g')) || []).length; if (n !== LOCALE_CODES.length) missing.push(k + ' ' + n); }
     ok(!missing.length, 'pin and sort strings exist in every language' + (missing.length ? ' (' + missing.join(', ') + ')' : ''));
@@ -44,6 +48,11 @@ module.exports = function (T) {
       ok(sb.run('name') === 'a,b,c,d,e', 'Name sorts by the shown name, ignoring case (' + sb.run('name') + ')');
       ok(sb.run('recent') === 'e,b,c,a,d', 'Last played puts recent games first, the rest in catalogue order (' + sb.run('recent') + ')');
       ok(sb.run('new') === 'd,a,b,c,e', 'Newest goes by date added, a later entry winning a tie (' + sb.run('new') + ')');
+      // #720: by the last visible change; a game without `updated` counts from `added`, and a tie keeps the catalogue order
+      Object.assign(G[0], { updated: '2026-04-01' }); Object.assign(G[2], { updated: '2026-03-01' }); Object.assign(G[4], { updated: '2026-02-15' });
+      ok(sb.run('updated') === 'c,a,b,d,e', 'Recently updated goes by the latest change (' + sb.run('updated') + ')');
+      G[1].updated = '2026-05-01';
+      ok(sb.run('updated') === 'a,c,b,d,e', 'a newly updated game moves to the top (' + sb.run('updated') + ')');
       ok(sb.run('nonsense') === 'c,a,b,d,e', 'an unknown sort falls back to the catalogue order');
     }
     ok(/C\.state\.settings\.gameSort = sort;\s*C\.store\.set\('settings', C\.state\.settings\);/.test(home) &&
