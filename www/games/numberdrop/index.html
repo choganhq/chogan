@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>عددریز — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* One colour pair per block value: background and ink, at least 4.5:1 in both themes
+     (tools/tests/numberdrop.js reads these blocks and checks every pair) */
+  :root {
+    --nd-2: #E3F1FB; --nd-2-i: #123A5C;
+    --nd-4: #C4E1F6; --nd-4-i: #0F3452;
+    --nd-8: #A9E3D3; --nd-8-i: #0B3B2E;
+    --nd-16: #74CDAB; --nd-16-i: #06301F;
+    --nd-32: #FFE08A; --nd-32-i: #4A3500;
+    --nd-64: #FFB870; --nd-64-i: #4A2200;
+    --nd-128: #FF9A92; --nd-128-i: #4A0A0A;
+    --nd-256: #E40072; --nd-256-i: #FFFFFF;
+    --nd-512: #8A3FCC; --nd-512-i: #FFFFFF;
+    --nd-1024: #2F50CC; --nd-1024-i: #FFFFFF;
+    --nd-2048: #0B7A61; --nd-2048-i: #FFFFFF;
+    --nd-big: #232B4A; --nd-big-i: #FFFFFF;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --nd-2: #2B4760; --nd-2-i: #E8F3FC;
+      --nd-4: #375B7C; --nd-4-i: #F0F7FD;
+      --nd-8: #2C6A59; --nd-8-i: #EAFBF5;
+      --nd-16: #4FAE8C; --nd-16-i: #04231A;
+      --nd-32: #D9B84E; --nd-32-i: #2E2100;
+      --nd-64: #E0893F; --nd-64-i: #261000;
+      --nd-128: #E06A62; --nd-128-i: #1E0202;
+      --nd-256: #E40072; --nd-256-i: #FFFFFF;
+      --nd-512: #8A3FCC; --nd-512-i: #FFFFFF;
+      --nd-1024: #4562D6; --nd-1024-i: #FFFFFF;
+      --nd-2048: #0B7A61; --nd-2048-i: #FFFFFF;
+      --nd-big: #4B3B8F; --nd-big-i: #FFFFFF;
+    }
+  }
+  :root[data-theme="dark"] {
+    --nd-2: #2B4760; --nd-2-i: #E8F3FC;
+    --nd-4: #375B7C; --nd-4-i: #F0F7FD;
+    --nd-8: #2C6A59; --nd-8-i: #EAFBF5;
+    --nd-16: #4FAE8C; --nd-16-i: #04231A;
+    --nd-32: #D9B84E; --nd-32-i: #2E2100;
+    --nd-64: #E0893F; --nd-64-i: #261000;
+    --nd-128: #E06A62; --nd-128-i: #1E0202;
+    --nd-256: #E40072; --nd-256-i: #FFFFFF;
+    --nd-512: #8A3FCC; --nd-512-i: #FFFFFF;
+    --nd-1024: #4562D6; --nd-1024-i: #FFFFFF;
+    --nd-2048: #0B7A61; --nd-2048-i: #FFFFFF;
+    --nd-big: #4B3B8F; --nd-big-i: #FFFFFF;
+  }
+  /* 5 columns of 17 units with 2.5-unit gaps make 100 units across; a lane for the
+     falling block plus 7 rows make 158.5 down */
+  .nd-wrap > .ch-fit { --fit-ar: calc(200 / 317); }
+  .ch-fit > .nd-box { width: 100%; height: 100%; display: grid; place-items: center; }
+  /* the columns are the same on screen in every language, so the board never follows the page's direction */
+  .nd-board { --u: 3px; position: relative; direction: ltr; width: 100%; aspect-ratio: 200 / 317; max-width: 100%; max-height: 100%;
+    touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer; }
+  .nd-board:focus-visible { outline: 3px solid var(--c-accent); outline-offset: 3px; border-radius: 6%; }
+  .nd-well { position: absolute; left: 0; right: 0; top: calc(var(--u) * 19.5); bottom: 0; border-radius: calc(var(--u) * 5);
+    background: var(--c-surface-2); }
+  .nd-col { position: absolute; top: calc(var(--u) * 19.5); bottom: 0; width: calc(var(--u) * 19.5);
+    left: calc(var(--u) * (0.5 + var(--c) * 19.5)); border-radius: calc(var(--u) * 4); background: transparent; transition: background .12s; }
+  .nd-col.is-hover { background: color-mix(in srgb, var(--game, var(--c-accent)) 16%, transparent); }
+  .nd-cell, .nd-tile { position: absolute; width: calc(var(--u) * 17); height: calc(var(--u) * 17);
+    left: calc(var(--u) * (2.5 + var(--c) * 19.5)); top: calc(var(--u) * (2.5 + (var(--r) + 1) * 19.5));
+    border-radius: 16%; box-sizing: border-box; }
+  .nd-cell { background: var(--c-surface); opacity: .6; }
+  .nd-tile { display: grid; place-items: center; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1;
+    font-size: calc(var(--u) * 17 * var(--k, .46)); box-shadow: var(--sh-1); will-change: transform; z-index: 1; }
+  .nd-d3 { --k: .38; } .nd-d4 { --k: .30; } .nd-d5 { --k: .25; } .nd-d6 { --k: .21; }
+  .nd-ghost { z-index: 0; }
+  .nd-cur { z-index: 2; transition: left .09s ease-out; }
+  .nd-v2 { background: var(--nd-2); color: var(--nd-2-i); }
+  .nd-v4 { background: var(--nd-4); color: var(--nd-4-i); }
+  .nd-v8 { background: var(--nd-8); color: var(--nd-8-i); }
+  .nd-v16 { background: var(--nd-16); color: var(--nd-16-i); }
+  .nd-v32 { background: var(--nd-32); color: var(--nd-32-i); }
+  .nd-v64 { background: var(--nd-64); color: var(--nd-64-i); }
+  .nd-v128 { background: var(--nd-128); color: var(--nd-128-i); }
+  .nd-v256 { background: var(--nd-256); color: var(--nd-256-i); }
+  .nd-v512 { background: var(--nd-512); color: var(--nd-512-i); }
+  .nd-v1024 { background: var(--nd-1024); color: var(--nd-1024-i); }
+  .nd-v2048 { background: var(--nd-2048); color: var(--nd-2048-i); }
+  .nd-vbig { background: var(--nd-big); color: var(--nd-big-i); }
+  .nd-side { align-items: center; }
+  .nd-scores { display: flex; gap: var(--s-2); justify-content: center; flex-wrap: wrap; }
+  .nd-score { position: relative; min-width: 84px; padding: var(--s-2) var(--s-3); border-radius: var(--r-md, 14px);
+    background: var(--c-surface); box-shadow: var(--sh-1); text-align: center; }
+  .nd-score__l { font-size: .8rem; color: var(--c-text-dim); font-weight: 700; }
+  .nd-score__v { font-size: 1.35rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--c-text); }
+  .nd-next { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .nd-chip { width: 2.2rem; height: 2.2rem; border-radius: 22%; display: grid; place-items: center; font-weight: 800;
+    font-variant-numeric: tabular-nums; font-size: 1rem; line-height: 1; margin-top: 2px; }
+  .nd-gain { position: absolute; inset-inline: 0; top: 0; font-weight: 800; color: var(--game-text, var(--c-accent)); pointer-events: none; }
+  .nd-top { display: flex; justify-content: center; }
+  .nd-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function NumberDropEngineFactory() {
+  'use strict';
+
+  var COLS = 5, ROWS = 7, N = COLS * ROWS, GOAL = 2048;
+
+  // A small seeded generator whose whole state is one integer, so a saved game (and the
+  // daily game) goes on drawing exactly the blocks it would have drawn
+  function rand(S) {
+    var t = (S.seed = (S.seed + 0x6D2B79F5) | 0);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  function maxTile(g) { var m = 0; for (var i = 0; i < g.length; i++) if (g[i] > m) m = g[i]; return m; }
+
+  // The largest block that can come next grows with the board: 8 at first, 16 from a 128,
+  // 32 from a 256, 64 from a 512. Smaller blocks are more likely, so a board can always be worked down.
+  function capExp(g) {
+    var m = maxTile(g);
+    var e = m ? Math.round(Math.log2(m)) - 3 : 3;
+    return Math.max(3, Math.min(6, e));
+  }
+  function pick(S) {
+    var top = capExp(S.g), total = 0, e;
+    for (e = 1; e <= top; e++) total += top + 1 - e;
+    var x = rand(S) * total;
+    for (e = 1; e <= top; e++) { x -= top + 1 - e; if (x < 0) return Math.pow(2, e); }
+    return 2;
+  }
+
+  function newGame(seed) {
+    var S = { g: new Array(N).fill(0), cur: 2, next: 2, score: 0, drops: 0, seed: seed | 0, won: false };
+    S.cur = pick(S); S.next = pick(S);
+    return S;
+  }
+
+  // Columns are always packed to the bottom, so the landing cell is the lowest empty one
+  function landRow(g, c) {
+    for (var r = ROWS - 1; r >= 0; r--) if (!g[r * COLS + c]) return r;
+    return -1;
+  }
+
+  function neighbours(i) {
+    var r = Math.floor(i / COLS), c = i % COLS, out = [];
+    if (c > 0) out.push(i - 1);
+    if (c < COLS - 1) out.push(i + 1);
+    if (r < ROWS - 1) out.push(i + COLS);
+    if (r > 0) out.push(i - COLS);
+    return out;
+  }
+
+  // Close every gap left by a merge; returns the blocks that fell
+  function gravity(g) {
+    var falls = [];
+    for (var c = 0; c < COLS; c++) {
+      var w = ROWS - 1;
+      for (var r = ROWS - 1; r >= 0; r--) {
+        var i = r * COLS + c;
+        if (!g[i]) continue;
+        if (r !== w) { var to = w * COLS + c; g[to] = g[i]; g[i] = 0; falls.push({ from: i, to: to, v: g[to] }); }
+        w--;
+      }
+    }
+    return falls;
+  }
+
+  // A block merges with every orthogonal neighbour of its own value at once: n neighbours
+  // make value × 2^n where it stands. The gaps close, and every block that merged or moved
+  // looks again, until nothing is left to merge (the cascade).
+  function resolve(g, at) {
+    var steps = [], gain = 0, active = [at], guard = 0;
+    while (active.length && guard++ < 200) {
+      var found = -1, same = null;
+      for (var k = 0; k < active.length && found < 0; k++) {
+        var i = active[k];
+        if (!g[i]) continue;
+        var nb = neighbours(i).filter(function (j) { return g[j] === g[i]; });
+        if (nb.length) { found = i; same = nb; }
+      }
+      if (found < 0) break;
+      var old = g[found], v = old * Math.pow(2, same.length);
+      g[found] = v; gain += v;
+      same.forEach(function (j) { g[j] = 0; });
+      var falls = gravity(g), moved = {};
+      falls.forEach(function (f) { moved[f.from] = f.to; });
+      var to = found in moved ? moved[found] : found;
+      var next = [to];
+      active.forEach(function (a) {
+        if (a === found || same.indexOf(a) >= 0) return;
+        var p = a in moved ? moved[a] : a;
+        if (g[p] && next.indexOf(p) < 0) next.push(p);
+      });
+      falls.forEach(function (f) { if (next.indexOf(f.to) < 0) next.push(f.to); });
+      active = next;
+      steps.push({ at: found, to: to, from: same, old: old, v: v, falls: falls, g: g.slice() });
+    }
+    return { steps: steps, gain: gain };
+  }
+
+  function isOver(g) { for (var c = 0; c < COLS; c++) if (!g[c]) return false; return true; }
+
+  // One turn: null when the column is full (nothing changes, no block is used)
+  function drop(S, c) {
+    if (!(c >= 0 && c < COLS)) return null;
+    var r = landRow(S.g, c);
+    if (r < 0) return null;
+    var hadGoal = maxTile(S.g) >= GOAL, at = r * COLS + c, v = S.cur;
+    S.g[at] = v;
+    var placed = S.g.slice();
+    var res = resolve(S.g, at);
+    S.score += res.gain; S.drops++;
+    S.cur = S.next; S.next = pick(S);
+    return { at: at, row: r, col: c, v: v, placed: placed, steps: res.steps, gain: res.gain,
+      reached: !hadGoal && maxTile(S.g) >= GOAL, over: isOver(S.g) };
+  }
+
+  function pow2(v) { return typeof v === 'number' && v >= 2 && v <= 1048576 && (v & (v - 1)) === 0; }
+  function packed(g) {
+    for (var i = 0; i < N - COLS; i++) if (g[i] && !g[i + COLS]) return false;
+    return true;
+  }
+  function valid(s) {
+    if (!s || !Array.isArray(s.g) || s.g.length !== N) return false;
+    for (var i = 0; i < N; i++) if (s.g[i] !== 0 && !pow2(s.g[i])) return false;
+    return packed(s.g) && !isOver(s.g) && pow2(s.cur) && s.cur <= 64 && pow2(s.next) && s.next <= 64 &&
+      Number.isInteger(s.score) && s.score >= 0 && Number.isInteger(s.drops) && s.drops >= 0 && Number.isInteger(s.seed);
+  }
+
+  return { COLS: COLS, ROWS: ROWS, GOAL: GOAL, rand: rand, pick: pick, capExp: capExp, newGame: newGame, landRow: landRow,
+    gravity: gravity, resolve: resolve, drop: drop, isOver: isOver, maxTile: maxTile, packed: packed, valid: valid };
+}
+if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = NumberDropEngineFactory();
+  var COLS = E.COLS, ROWS = E.ROWS, GOAL = E.GOAL;
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'numberdrop',
+    name: { fa: 'عددریز', en: 'Number Drop', zh: '数字掉落', de: 'Zahlenfall', es: 'Caída de números', pl: 'Spadające liczby' },
+    accent: '#E40072',
+    mood: 'menu',
+    strings: {
+      fa: {
+        board: 'ستون‌های عدد', boardN: 'امتیاز {s}، بزرگ‌ترین عدد {m}، بلوک بعدی {n}', dailyNd: 'عددریز روزانه', scoreN: 'امتیاز {s}',
+        keepGoing: 'ادامه بده', reachedT: 'به {g} رسیدی!', reachedNote: 'می‌توانی ادامه بدهی و رکورد امتیازت را بالا ببری.',
+        overT: 'ستون‌ها پر شد', maxTileL: 'بزرگ‌ترین عدد', dropsL: 'بلوک', newBest: 'رکورد تازه!', goalN: 'هدف: عدد {g}', chaseN: 'حالا برای رکورد امتیاز',
+        nextL: 'بعدی', fullCol: 'این ستون پر است', chainN: 'زنجیره‌ی {n}تایی!',
+        kMove: 'جابه‌جا کردن بلوک', kDrop: 'انداختن بلوک', kNew: 'بازی تازه',
+        rules: 'روی یک ستون بزن، یا انگشتت را روی ستون‌ها بکش و رها کن؛ بلوک تا پایین‌ترین خانه‌ی خالی آن ستون می‌افتد. بلوکی که فرود بیاید با همه‌ی همسایه‌های هم‌عددش در چپ و راست و بالا و پایین یکی می‌شود: یک همسایه عدد را دو برابر می‌کند، دو همسایه چهار برابر و سه همسایه هشت برابر. بعد بلوک‌ها پایین می‌افتند و اگر باز جفتی پیدا شود، زنجیره ادامه پیدا می‌کند. امتیاز، جمع عددهای ساخته‌شده است. بلوک بعدی را از پیش می‌بینی. به {g} برسی بُرده‌ای و می‌توانی برای رکورد ادامه بدهی. ستون پر بلوک نمی‌گیرد؛ وقتی همه‌ی ستون‌ها پر شوند، بازی تمام است. برگشت به عقب ندارد.',
+        tutTitle1: 'یک ستون انتخاب کن', tutText1: 'روی ستون بزن یا بکش و رها کن؛ بلوک تا پایین می‌افتد.',
+        tutTitle2: 'هم‌عددها یکی می‌شوند', tutText2: 'با یک همسایه‌ی هم‌عدد دو برابر، با دو همسایه چهار برابر. بعد زنجیره‌ها راه می‌افتند.',
+        tutTitle3: 'تا {g}', tutText3: 'به {g} برس. اگر همه‌ی ستون‌ها پر شوند، بازی تمام است.'
+      },
+      en: {
+        board: 'Number columns', boardN: 'Score {s}, biggest number {m}, next block {n}', dailyNd: 'Daily Number Drop', scoreN: 'Score {s}',
+        keepGoing: 'Keep going', reachedT: 'You made {g}!', reachedNote: 'You can keep going and push your best score higher.',
+        overT: 'The columns are full', maxTileL: 'Biggest number', dropsL: 'Blocks', newBest: 'New best!', goalN: 'Goal: make {g}', chaseN: 'Now going for a best score',
+        nextL: 'Next', fullCol: 'That column is full', chainN: 'Chain of {n}!',
+        kMove: 'Move the block', kDrop: 'Drop the block', kNew: 'New game',
+        rules: 'Tap a column, or drag across the columns and let go; the block falls to the lowest empty cell of that column. A block that lands merges with every neighbour of the same number to its left, right, above and below: one neighbour doubles it, two make it four times, three make it eight times. Then the blocks fall, and if a new pair meets, the chain goes on. Your score is the sum of the numbers you make. You can see the next block in advance. Make {g} to win, then keep going for a best score if you like. A full column takes no block; when every column is full, the game is over. There is no undo.',
+        tutTitle1: 'Pick a column', tutText1: 'Tap a column, or drag and let go; the block falls to the bottom.',
+        tutTitle2: 'Equal numbers merge', tutText2: 'One equal neighbour doubles it, two make it four times. Then chains set off.',
+        tutTitle3: 'Up to {g}', tutText3: 'Make {g}. When every column is full, the game is over.'
+      },
+      pl: {
+        board: 'Kolumny liczb', boardN: 'Wynik {s}, największa liczba {m}, następny klocek {n}', dailyNd: 'Codzienne Spadające liczby', scoreN: 'Wynik {s}',
+        keepGoing: 'Graj dalej', reachedT: 'Masz {g}!', reachedNote: 'Możesz grać dalej i poprawić swój rekord.',
+        overT: 'Kolumny są pełne', maxTileL: 'Największa liczba', dropsL: 'Klocki', newBest: 'Nowy rekord!', goalN: 'Cel: zrób {g}', chaseN: 'Teraz walka o rekord',
+        nextL: 'Następny', fullCol: 'Ta kolumna jest pełna', chainN: 'Łańcuch {n}!',
+        kMove: 'Przesuń klocek', kDrop: 'Upuść klocek', kNew: 'Nowa gra',
+        rules: 'Stuknij kolumnę albo przeciągnij palcem po kolumnach i puść; klocek spada na najniższe wolne pole tej kolumny. Klocek, który wyląduje, łączy się ze wszystkimi sąsiadami o tej samej liczbie po lewej, prawej, nad i pod nim: jeden sąsiad podwaja liczbę, dwóch daje cztery razy więcej, trzech osiem razy. Potem klocki opadają, a jeśli spotka się nowa para, łańcuch trwa dalej. Wynik to suma utworzonych liczb. Następny klocek widać z góry. Zrób {g}, aby wygrać, a potem możesz grać dalej o rekord. Pełna kolumna nie przyjmie klocka; gdy wszystkie kolumny są pełne, gra się kończy. Nie ma cofania.',
+        tutTitle1: 'Wybierz kolumnę', tutText1: 'Stuknij kolumnę albo przeciągnij i puść; klocek spada na dół.',
+        tutTitle2: 'Równe liczby się łączą', tutText2: 'Jeden równy sąsiad podwaja, dwóch daje cztery razy więcej. Potem ruszają łańcuchy.',
+        tutTitle3: 'Aż do {g}', tutText3: 'Zrób {g}. Gdy wszystkie kolumny są pełne, gra się kończy.'
+      },
+      zh: {
+        board: '数字列', boardN: '分数 {s}，最大数字 {m}，下一块 {n}', dailyNd: '每日数字掉落', scoreN: '分数 {s}',
+        keepGoing: '继续', reachedT: '你合成了 {g}！', reachedNote: '你可以继续玩，刷新最高分。',
+        overT: '所有列都满了', maxTileL: '最大数字', dropsL: '方块数', newBest: '新纪录！', goalN: '目标：合成 {g}', chaseN: '现在冲击最高分',
+        nextL: '下一块', fullCol: '这一列满了', chainN: '{n} 连锁！',
+        kMove: '移动方块', kDrop: '放下方块', kNew: '新游戏',
+        rules: '点一列，或在各列上拖动后松开；方块会落到那一列最低的空格。落下的方块会和左、右、上、下所有相同数字的邻居一起合成：一个邻居让数字翻倍，两个变成四倍，三个变成八倍。然后方块下落，如果又有相同的碰到一起，连锁继续。分数是合成出的数字之和。下一块会提前显示。合成 {g} 就赢了，之后可以继续冲击最高分。满了的列放不进方块；所有列都满了，游戏结束。不能悔棋。',
+        tutTitle1: '选一列', tutText1: '点一列，或拖动后松开；方块落到底部。',
+        tutTitle2: '相同数字合成', tutText2: '一个相同邻居翻倍，两个变成四倍。然后连锁开始。',
+        tutTitle3: '直到 {g}', tutText3: '合成 {g}。所有列都满了，游戏结束。'
+      },
+      de: {
+        board: 'Zahlenspalten', boardN: 'Punkte {s}, größte Zahl {m}, nächster Block {n}', dailyNd: 'Zahlenfall des Tages', scoreN: 'Punkte {s}',
+        keepGoing: 'Weiterspielen', reachedT: 'Du hast {g} geschafft!', reachedNote: 'Du kannst weiterspielen und deinen Rekord steigern.',
+        overT: 'Die Spalten sind voll', maxTileL: 'Größte Zahl', dropsL: 'Blöcke', newBest: 'Neuer Rekord!', goalN: 'Ziel: {g} bilden', chaseN: 'Jetzt geht es um den Rekord',
+        nextL: 'Nächster', fullCol: 'Diese Spalte ist voll', chainN: 'Kette aus {n}!',
+        kMove: 'Block verschieben', kDrop: 'Block fallen lassen', kNew: 'Neues Spiel',
+        rules: 'Tippe auf eine Spalte oder zieh über die Spalten und lass los; der Block fällt auf das unterste freie Feld der Spalte. Ein gelandeter Block verschmilzt mit allen Nachbarn derselben Zahl links, rechts, oben und unten: ein Nachbar verdoppelt ihn, zwei vervierfachen, drei verachtfachen ihn. Danach fallen die Blöcke nach, und trifft sich ein neues Paar, geht die Kette weiter. Deine Punkte sind die Summe der gebildeten Zahlen. Den nächsten Block siehst du vorher. Mit {g} gewinnst du, danach kannst du um den Rekord weiterspielen. Eine volle Spalte nimmt keinen Block; sind alle Spalten voll, ist das Spiel vorbei. Rückgängig gibt es nicht.',
+        tutTitle1: 'Wähl eine Spalte', tutText1: 'Tippe auf eine Spalte oder zieh und lass los; der Block fällt nach unten.',
+        tutTitle2: 'Gleiche Zahlen verschmelzen', tutText2: 'Ein gleicher Nachbar verdoppelt, zwei vervierfachen. Dann laufen Ketten an.',
+        tutTitle3: 'Bis {g}', tutText3: 'Bilde {g}. Sind alle Spalten voll, ist das Spiel vorbei.'
+      },
+      es: {
+        board: 'Columnas de números', boardN: 'Puntos {s}, número mayor {m}, siguiente bloque {n}', dailyNd: 'Caída de números diaria', scoreN: 'Puntos {s}',
+        keepGoing: 'Seguir', reachedT: '¡Llegaste a {g}!', reachedNote: 'Puedes seguir jugando y subir tu récord.',
+        overT: 'Las columnas están llenas', maxTileL: 'Número mayor', dropsL: 'Bloques', newBest: '¡Nuevo récord!', goalN: 'Meta: formar {g}', chaseN: 'Ahora a por el récord',
+        nextL: 'Siguiente', fullCol: 'Esa columna está llena', chainN: '¡Cadena de {n}!',
+        kMove: 'Mover el bloque', kDrop: 'Soltar el bloque', kNew: 'Partida nueva',
+        rules: 'Toca una columna, o arrastra por las columnas y suelta; el bloque cae a la casilla libre más baja de esa columna. Un bloque que cae se une con todos los vecinos del mismo número a su izquierda, derecha, arriba y abajo: un vecino lo dobla, dos lo multiplican por cuatro, tres por ocho. Luego los bloques caen y, si se encuentra un par nuevo, la cadena sigue. Tus puntos son la suma de los números que formas. Ves el siguiente bloque de antemano. Forma {g} para ganar y, si quieres, sigue a por el récord. Una columna llena no admite bloques; cuando todas están llenas, la partida termina. No se puede deshacer.',
+        tutTitle1: 'Elige una columna', tutText1: 'Toca una columna, o arrastra y suelta; el bloque cae hasta abajo.',
+        tutTitle2: 'Los iguales se unen', tutText2: 'Un vecino igual lo dobla, dos lo multiplican por cuatro. Luego arrancan las cadenas.',
+        tutTitle3: 'Hasta {g}', tutText3: 'Forma {g}. Cuando todas las columnas están llenas, la partida termina.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var FALL_MS = 26, STEP_MS = 170;
+
+  var S = null, startedAt = 0, ended = false, paused = false, winScore = 0, wonAt = 0, hover = 2;
+
+  var board = el('div', { class: 'nd-board', role: 'application', tabindex: '0', 'aria-label': C.t('board') });
+  var box = el('div', { class: 'nd-box' }, [board]);
+  var top = el('div', { class: 'nd-top ch-above' });
+  var scoreV = el('div', { class: 'nd-score__v', text: '0' }), bestV = el('div', { class: 'nd-score__v', text: '0' });
+  var scoreBox = el('div', { class: 'nd-score' }, [el('div', { class: 'nd-score__l', text: C.t('score') }), scoreV]);
+  var bestBox = el('div', { class: 'nd-score' }, [el('div', { class: 'nd-score__l', text: C.t('best') }), bestV]);
+  var nextChip = el('div', { class: 'nd-chip nd-v2', text: '2' });
+  var nextBox = el('div', { class: 'nd-score nd-next' }, [el('div', { class: 'nd-score__l', text: C.t('nextL') }), nextChip]);
+  var status = el('div', { class: 'nd-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'nd-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]),
+    el('div', { class: 'ch-side nd-side' }, [top, el('div', { class: 'nd-scores' }, [scoreBox, nextBox, bestBox]), status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  if (!dailyDate) ctx.button({ icon: 'refresh', label: C.t('newGame'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  board.appendChild(el('div', { class: 'nd-well' }));
+  var cols = [];
+  for (var cc = 0; cc < COLS; cc++) { var colEl = el('div', { class: 'nd-col', style: { '--c': cc } }); cols.push(colEl); board.appendChild(colEl); }
+  for (var ci = 0; ci < COLS * ROWS; ci++) board.appendChild(el('div', { class: 'nd-cell', style: { '--c': ci % COLS, '--r': Math.floor(ci / COLS) } }));
+  var layer = el('div', { 'aria-hidden': 'true' });
+  board.appendChild(layer);
+  var curNode = el('div', { class: 'nd-tile nd-cur', 'aria-hidden': 'true' });
+  board.appendChild(curNode);
+
+  /* ------------------------------------------------------------- game */
+
+  function seedFor() {
+    var r = dailyDate ? C.daily('numberdrop', dailyDate).rng : Math.random;
+    return Math.floor(r() * 4294967296) | 0;
+  }
+  function newGame() {
+    stopAnim();
+    S = E.newGame(seedFor());
+    S.daily = dailyDate || null;
+    startedAt = Date.now(); ended = false; paused = false; winScore = 0; wonAt = 0;
+    paint(S.g);
+    render();
+    save();
+  }
+  function askNew() {
+    if (S && !ended && S.drops > 0) C.ui.confirm({ title: C.t('newGame'), body: C.t('resetWarn'), onOk: newGame });
+    else newGame();
+  }
+
+  function best() { return C.stats.getBest('numberdrop', 'score') || 0; }
+
+  function dropAt(c) {
+    if (!S || ended || paused) return;
+    // a new drop never waits for the last one's animation: it jumps to the end first
+    stopAnim();
+    var t = E.drop(S, c);
+    if (!t) { C.feedback('bad'); C.ui.shake(cols[c] || board); status.textContent = C.t('fullCol'); return; }
+    C.feedback(t.gain ? 'place' : 'tap');
+    if (t.gain) floatGain(t.gain);
+    C.stats.best('numberdrop', 'score', S.score);
+    C.stats.best('numberdrop', 'tile', E.maxTile(S.g));
+    if (t.steps.length >= 4) C.achievements.unlock('nd-chain');
+    if (S.daily && E.maxTile(S.g) >= 512) C.achievements.unlock('nd-daily');
+    play(t);
+    render(t);
+    if (t.reached && !S.won) { save(); win(); return; }
+    if (t.over) { over(); return; }
+    save();
+  }
+
+  function rewards() {
+    var m = E.maxTile(S.g), lg = m ? Math.log2(m) : 1;
+    return { coins: Math.max(1, Math.round(lg * 2 - 8)), points: Math.max(1, Math.min(160, Math.round(S.score / 100))), m: m };
+  }
+
+  // Reaching the goal is a win, counted once; keeping going afterwards is the same game
+  // chasing a score, so its end is reported as a continuation (not a second play)
+  function win() {
+    paused = true; S.won = true; winScore = S.score; wonAt = Date.now() - startedAt;
+    C.achievements.unlock('nd-2048');
+    var rw = rewards();
+    if (S.daily && !C.stats.daily('numberdrop', S.daily, { label: C.t('scoreN', { s: C.num(S.score) }), win: true })) {
+      rw.coins = Math.round(rw.coins * 0.2); rw.points = Math.round(rw.points * 0.2);
+    }
+    setTimeout(function () {
+      ctx.finish({
+        won: true, title: C.t('reachedT', { g: C.num(GOAL) }), note: C.t('reachedNote'), timeMs: wonAt, coins: rw.coins, points: rw.points,
+        lines: lines(), shareText: share(),
+        againLabel: C.t('keepGoing'), onAgain: keepGoing
+      });
+      // finish clears the save; the game goes on, so it is written again
+      save();
+    }, C.ui.reduceMotion() ? 150 : animLeft() + 300);
+  }
+  function keepGoing() {
+    paused = false;
+    C.feedback('select');
+    render();
+    board.focus({ preventScroll: true });
+  }
+
+  function over() {
+    ended = true;
+    var rw = rewards(), cont = S.won;
+    if (cont) {
+      // only what was earned after the goal
+      rw.coins = Math.max(0, Math.round((Math.log2(rw.m) - 11) * 5));
+      rw.points = Math.max(0, Math.min(100, Math.round((S.score - winScore) / 200)));
+    } else if (S.daily && !C.stats.daily('numberdrop', S.daily, { label: C.t('scoreN', { s: C.num(S.score) }), win: false })) {
+      rw.coins = Math.round(rw.coins * 0.2); rw.points = Math.round(rw.points * 0.2);
+    }
+    var isBest = S.score > 0 && S.score >= best();
+    ctx.clearSave();
+    curNode.style.visibility = 'hidden';
+    setTimeout(function () {
+      C.feedback('bad');
+      ctx.finish({
+        won: false, continued: cont, title: C.t('overT'), note: isBest ? C.t('newBest') : null,
+        timeMs: Date.now() - startedAt, coins: rw.coins, points: rw.points,
+        lines: lines(), shareText: share(),
+        againLabel: S.daily ? null : C.t('newGame'), onAgain: S.daily ? null : newGame
+      });
+    }, C.ui.reduceMotion() ? 200 : animLeft() + 500);
+  }
+
+  function lines() {
+    var out = [];
+    if (S.daily) out.push({ label: C.t('daily'), value: C.num(S.daily) });
+    out.push({ label: C.t('score'), value: C.num(S.score) });
+    out.push({ label: C.t('best'), value: C.num(Math.max(best(), S.score)) });
+    out.push({ label: C.t('maxTileL'), value: C.num(E.maxTile(S.g)) });
+    out.push({ label: C.t('dropsL'), value: C.num(S.drops) });
+    return out;
+  }
+  function share() {
+    return 'چوگان · عددریز' + (S.daily ? '\nروزانه ' + S.daily : '') + '\n' + S.score + ' · ' + E.maxTile(S.g);
+  }
+
+  /* --------------------------------------------------------------- view */
+
+  function cls(v) { return 'nd-tile ' + (v <= GOAL ? 'nd-v' + v : 'nd-vbig') + (String(v).length > 2 ? ' nd-d' + String(v).length : ''); }
+  function tile(i, v, ghost) {
+    return el('div', { class: cls(v) + (ghost ? ' nd-ghost' : ''), style: { '--c': i % COLS, '--r': Math.floor(i / COLS) }, text: C.num(v) });
+  }
+  function paint(g) {
+    layer.innerHTML = '';
+    var nodes = {};
+    for (var i = 0; i < g.length; i++) if (g[i]) { nodes[i] = tile(i, g[i]); layer.appendChild(nodes[i]); }
+    return nodes;
+  }
+  function unit() { return parseFloat(board.style.getPropertyValue('--u')) || board.getBoundingClientRect().width / 100 || 3; }
+
+  // The turn plays as a short film: the block falls, then each merge of the cascade in
+  // turn. The state is already final; a new drop stops the film and paints the end.
+  var timers = [], animEnd = 0;
+  function stopAnim() {
+    timers.forEach(clearTimeout); timers = [];
+    if (animEnd && S) { animEnd = 0; paint(S.g); }
+  }
+  function animLeft() { return Math.max(0, animEnd - Date.now()); }
+  function play(t) {
+    if (C.ui.reduceMotion()) { paint(S.g); return; }
+    var step = unit() * 19.5;
+    var fall = Math.round(70 + FALL_MS * (t.row + 1));
+    var nodes = paint(t.placed);
+    var n = nodes[t.at];
+    if (n) n.animate([{ transform: 'translateY(' + (-(t.row + 1) * step).toFixed(1) + 'px)' }, { transform: 'translateY(0)' },
+      { transform: 'translateY(0) scale(1.06, .92)', offset: .92 }, { transform: 'none' }], { duration: fall + 40, easing: 'ease-in' });
+    var at = fall + 30;
+    t.steps.forEach(function (s, k) {
+      timers.push(setTimeout(function () { mergeFrame(s, k, step); }, at));
+      at += STEP_MS + 30;
+    });
+    animEnd = Date.now() + at;
+    timers.push(setTimeout(function () { animEnd = 0; timers = []; }, at));
+  }
+  function mergeFrame(s, k, step) {
+    var nodes = paint(s.g);
+    // the absorbed neighbours slide into the cell that took them, under the new number
+    s.from.forEach(function (j) {
+      var gh = tile(j, s.old, true);
+      layer.insertBefore(gh, layer.firstChild);
+      var dx = (s.at % COLS - j % COLS) * step, dy = (Math.floor(s.at / COLS) - Math.floor(j / COLS)) * step;
+      gh.animate([{ transform: 'none', opacity: 1 }, { transform: 'translate(' + dx + 'px,' + dy + 'px) scale(.7)', opacity: 0 }],
+        { duration: STEP_MS * 0.6, easing: 'ease-in', fill: 'forwards' }).onfinish = function () { if (gh.parentNode) gh.parentNode.removeChild(gh); };
+    });
+    var moved = {};
+    s.falls.forEach(function (f) { moved[f.to] = f.from; });
+    Object.keys(nodes).forEach(function (key) {
+      var i = +key, node = nodes[i];
+      if (i === s.to) {
+        var dyM = (Math.floor(s.at / COLS) - Math.floor(i / COLS)) * step;
+        node.animate([{ transform: 'translateY(' + dyM + 'px) scale(.5)', opacity: .3 },
+          { transform: 'translateY(' + dyM + 'px) scale(1.18)', opacity: 1, offset: .4 },
+          { transform: 'translateY(' + dyM + 'px) scale(1)', offset: .6 }, { transform: 'none' }], { duration: STEP_MS, easing: 'ease-out' });
+        if (k > 0 || s.v >= 64) C.ui.burst(node, { colors: [getComputedStyle(node).backgroundColor, '#FFFFFF'], count: Math.min(24, 6 + k * 5), speed: 160, life: 420, size: 3 });
+      } else if (i in moved) {
+        var dy = (Math.floor(moved[i] / COLS) - Math.floor(i / COLS)) * step;
+        node.animate([{ transform: 'translateY(' + dy + 'px)' }, { transform: 'translateY(' + dy + 'px)', offset: .4 }, { transform: 'none' }],
+          { duration: STEP_MS, easing: 'ease-in' });
+      }
+    });
+    if (k > 0) status.textContent = C.t('chainN', { n: C.num(k + 1) });
+  }
+  function floatGain(g) {
+    if (C.ui.reduceMotion()) return;
+    var f = el('div', { class: 'nd-gain', text: '+' + C.num(g) });
+    scoreBox.appendChild(f);
+    f.animate([{ transform: 'translateY(0)', opacity: 1 }, { transform: 'translateY(-28px)', opacity: 0 }], { duration: 650, easing: 'ease-out' })
+      .onfinish = function () { if (f.parentNode) f.parentNode.removeChild(f); };
+  }
+  function setHover(c) {
+    hover = Math.max(0, Math.min(COLS - 1, c));
+    cols.forEach(function (n, k) { n.classList.toggle('is-hover', k === hover); });
+    curNode.style.setProperty('--c', hover);
+  }
+  function render(t) {
+    scoreV.textContent = C.num(S.score);
+    bestV.textContent = C.num(Math.max(best(), S.score));
+    curNode.className = cls(S.cur) + ' nd-cur';
+    curNode.textContent = C.num(S.cur);
+    curNode.style.setProperty('--r', -1);
+    curNode.style.visibility = ended ? 'hidden' : '';
+    nextChip.className = 'nd-chip ' + (S.next <= GOAL ? 'nd-v' + S.next : 'nd-vbig');
+    nextChip.textContent = C.num(S.next);
+    setHover(hover);
+    if (t && !C.ui.reduceMotion()) curNode.animate([{ opacity: 0, transform: 'scale(.6)' }, { opacity: 1, transform: 'none' }], { duration: 160, easing: 'ease-out' });
+    board.setAttribute('aria-label', C.t('board') + ' — ' + C.t('boardN', { s: C.num(S.score), m: C.num(E.maxTile(S.g)), n: C.num(S.next) }));
+    top.innerHTML = '';
+    if (S.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyNd') + ' — ' + C.num(S.daily) })]));
+    status.textContent = S.won ? C.t('chaseN') : C.t('goalN', { g: C.num(GOAL) });
+  }
+  // the board is laid out in units of a hundredth of its width; measured rather than set in
+  // cq units, which the Android WebViews before Chrome 105 drop (#611)
+  var lastW = 0;
+  function fit() {
+    var w = board.getBoundingClientRect().width;
+    if (w && w !== lastW) { lastW = w; board.style.setProperty('--u', (w / 100).toFixed(3) + 'px'); }
+  }
+  if (window.ResizeObserver) new ResizeObserver(fit).observe(board); else window.addEventListener('resize', fit);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { lastW = 0; fit(); });
+
+  /* -------------------------------------------------------------- input */
+
+  // The finger picks a column while it is down (the block follows it) and drops on release;
+  // a tap is a press and release on the same column. The column is read against the board
+  // as it is drawn now, never a size measured earlier.
+  var pid = null;
+  function colAt(x) {
+    var r = board.getBoundingClientRect();
+    return Math.max(0, Math.min(COLS - 1, Math.floor((x - r.left) / (r.width / COLS))));
+  }
+  board.addEventListener('pointerdown', function (e) {
+    if (pid !== null || !S || ended || paused) return;
+    pid = e.pointerId;
+    try { board.setPointerCapture(pid); } catch (err) { /* already released */ }
+    setHover(colAt(e.clientX));
+  });
+  board.addEventListener('pointermove', function (e) {
+    if (e.pointerId === pid) { var c = colAt(e.clientX); if (c !== hover) setHover(c); }
+    else if (pid === null && e.pointerType === 'mouse' && S && !ended && !paused) { var m = colAt(e.clientX); if (m !== hover) setHover(m); }
+  });
+  board.addEventListener('pointerup', function (e) {
+    if (e.pointerId !== pid) return;
+    pid = null;
+    setHover(colAt(e.clientX));
+    dropAt(hover);
+  });
+  board.addEventListener('pointercancel', function (e) { if (e.pointerId === pid) pid = null; });
+
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim') || e.ctrlKey || e.metaKey || e.altKey || !S) return;
+    if (e.key === 'ArrowLeft' || C.keyIs(e, 'a')) { e.preventDefault(); if (!ended && !paused) setHover(hover - 1); return; }
+    if (e.key === 'ArrowRight' || C.keyIs(e, 'd')) { e.preventDefault(); if (!ended && !paused) setHover(hover + 1); return; }
+    if (e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowDown' || C.keyIs(e, 's')) { e.preventDefault(); if (!e.repeat) dropAt(hover); return; }
+    if (/^[1-5]$/.test(e.key)) { e.preventDefault(); setHover(+e.key - 1); dropAt(hover); return; }
+    if (C.keyIs(e, 'n') && !dailyDate) { e.preventDefault(); askNew(); }
+  });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    var keys = [kb('← →', C.t('kMove')), kb(C.num(1) + '–' + C.num(5), C.t('kDrop')), kb('Space · Enter · ↓', C.t('kDrop'))];
+    if (!dailyDate) keys.push(kb('N', C.t('kNew')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules', { g: C.num(GOAL) }) }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, keys)
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // the bottom four rows of the board for the tutorial: blocks as [col, row from the bottom, value],
+  // a falling block above one column, and an arrow. Colours are the board's own variables,
+  // so the picture follows the theme of the dialog.
+  function tArt(blocks, fallCol, fallV) {
+    var s = '<svg viewBox="0 0 200 130" width="100%" font-family="sans-serif" font-weight="800" text-anchor="middle">';
+    s += '<rect x="45" y="30" width="110" height="96" rx="10" fill="var(--c-surface-2)"/>';
+    var X = function (c) { return 49 + c * 21; }, Y = function (r) { return 105 - r * 23; };
+    for (var c = 0; c < 5; c++) for (var r = 0; r < 4; r++) s += '<rect x="' + X(c) + '" y="' + Y(r) + '" width="18" height="18" rx="3" fill="var(--c-surface)" opacity=".6"/>';
+    var blk = function (x, y, v) {
+      return '<rect x="' + x + '" y="' + y + '" width="18" height="18" rx="3" fill="var(--nd-' + v + ')"/>' +
+        '<text x="' + (x + 9) + '" y="' + (y + 13) + '" font-size="' + (v > 99 ? 7 : 10) + '" fill="var(--nd-' + v + '-i)">' + C.num(v) + '</text>';
+    };
+    blocks.forEach(function (b) { s += blk(X(b[0]), Y(b[1]), b[2]); });
+    if (fallV) {
+      s += blk(X(fallCol), 4, fallV);
+      s += '<path d="M' + (X(fallCol) + 9) + ' 26v8m-4-4 4 4 4-4" stroke="#E40072" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>';
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt([[0, 0, 4], [1, 0, 8], [3, 0, 2], [3, 1, 16]], 2, 4) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt([[1, 0, 8], [2, 0, 4], [3, 0, 8], [2, 1, 8]], 2, 8) },
+    { title: C.t('tutTitle3', { g: C.num(GOAL) }), text: C.t('tutText3', { g: C.num(GOAL) }), art: tArt([[0, 0, 2048], [1, 0, 64], [2, 0, 8], [0, 1, 4], [1, 1, 2]], 0, 0) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // saved after every drop; the daily game has its own slot
+  ctx.autosave(function () {
+    if (!S || ended) return { inProgress: false };
+    return { g: S.g, cur: S.cur, next: S.next, score: S.score, drops: S.drops, seed: S.seed, won: S.won, daily: S.daily,
+      winScore: winScore, elapsed: Date.now() - startedAt };
+  });
+  function save() { ctx.save(); }
+  fit();
+  var saved = ctx.loadSave();
+  if (saved && E.valid(saved) && (saved.daily || null) === (dailyDate || null)) {
+    S = { g: saved.g.slice(), cur: saved.cur, next: saved.next, score: saved.score, drops: saved.drops, seed: saved.seed,
+      won: !!saved.won, daily: saved.daily || null };
+    winScore = saved.winScore || 0;
+    startedAt = Date.now() - (saved.elapsed || 0);
+    paint(S.g);
+    render();
+  } else newGame();
+  if (dailyDate && C.stats.dailyDone('numberdrop', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).numberdrop;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
