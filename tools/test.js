@@ -11307,9 +11307,17 @@ function testFootball() {
   }
   ok(runs > 400 && inside, 'no body ever leaves the pitch or its goal boxes (' + runs + ' random flicks)');
 
-  // A goal counts only when the whole ball is over the line between the posts
-  const part = roll(E.W / 2, 20, -Math.PI / 2, E.powerFor(21.5));
-  ok(part.goal === -1 && part.balls[0].y < 0 && part.balls[0].y > -E.RB, 'a ball that stops partly over the line is no goal (centre at y ' + part.balls[0].y.toFixed(2) + ')');
+  // A goal counts once the ball's centre is over the line between the posts: a ball resting
+  // half inside the net was no goal, and the owner saw it as one (2026-11-08)
+  let half = null, short = null;
+  for (let p = 18; p <= 26 && !(half && short); p += 0.02) {
+    const s = roll(E.W / 2, 20, -Math.PI / 2, E.powerFor(p)), y = s.balls[0].y;
+    if (!half && y < 0 && y > -E.RB) half = s;
+    if (!short && y > 0 && y < E.RB) short = s;
+  }
+  ok(half && short, 'the scan finds a ball stopping half over the line and one stopping just short of halfway');
+  ok(half && half.goal === 0, 'a ball that stops with its centre over the line is a goal (centre at y ' + (half ? half.balls[0].y.toFixed(2) : '?') + ')');
+  ok(short && short.goal === -1, 'a ball that stops with less than half over the line is no goal (centre at y ' + (short ? short.balls[0].y.toFixed(2) : '?') + ')');
   const full = roll(E.W / 2, 20, -Math.PI / 2, E.powerFor(25));
   ok(full.goal === 0 && full.balls[0].y < -E.RB, 'a ball that crosses the line whole is a goal for the team attacking that end');
   const low = roll(E.W / 2, E.L - 20, Math.PI / 2, E.powerFor(30));
