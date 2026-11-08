@@ -50,11 +50,17 @@ module.exports = function (T) {
       // Most played: more plays first; a tie (and never played) falls back to Last played, then the catalogue
       ok(sb.run('played') === 'd,b,a,e,c', 'Most played goes by finished rounds, ties by last played (' + sb.run('played') + ')');
       ok(sb.run('new') === 'd,a,b,c,e', 'Newest goes by date added, a later entry winning a tie (' + sb.run('new') + ')');
-      // #720: by the last visible change; a game without `updated` counts from `added`, and a tie keeps the catalogue order
+      // #720: by the last visible change; a game without `updated` counts from `added` (so it is new that day and leads a tie, #738); other ties keep the catalogue order
       Object.assign(G[0], { updated: '2026-04-01' }); Object.assign(G[2], { updated: '2026-03-01' }); Object.assign(G[4], { updated: '2026-02-15' });
-      ok(sb.run('updated') === 'c,a,b,d,e', 'Recently updated goes by the latest change (' + sb.run('updated') + ')');
+      ok(sb.run('updated') === 'c,a,d,b,e', 'Recently updated goes by the latest change (' + sb.run('updated') + ')');
       G[1].updated = '2026-05-01';
-      ok(sb.run('updated') === 'a,c,b,d,e', 'a newly updated game moves to the top (' + sb.run('updated') + ')');
+      ok(sb.run('updated') === 'a,c,d,b,e', 'a newly updated game moves to the top (' + sb.run('updated') + ')');
+      // #738: a game added on the tied date leads, though it sits later in the catalogue
+      // (Number Drop came 4th on its release day, behind three games updated that day).
+      const N = [['u', 'U', '2026-01-01', '2026-06-01'], ['v', 'V', '2026-01-01', '2026-05-01'], ['n', 'N', '2026-06-01', '2026-06-01']].map((x) => ({ id: x[0], name: x[1], added: x[2], updated: x[3] }));
+      sb.GAMES_IN = N;
+      ok(sb.run('updated') === 'n,u,v', 'a game added that day leads a Recently updated tie (' + sb.run('updated') + ')');
+      sb.GAMES_IN = G;
       ok(sb.run('nonsense') === 'c,a,b,d,e', 'an unknown sort falls back to the catalogue order');
     }
     ok(/C\.state\.settings\.gameSort = sort;\s*C\.store\.set\('settings', C\.state\.settings\);/.test(home) &&
