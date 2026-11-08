@@ -6,6 +6,7 @@ import android.view.Window;
 import android.webkit.JavascriptInterface;
 
 import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 
 /**
@@ -27,6 +28,9 @@ public class BarsBridge {
 
     private final Activity activity;
     private Boolean dark = null;
+    // Fullscreen in the app (#715): the WebView has no Fullscreen API, so the page asks for
+    // immersive mode here. It belongs to the activity, so it lasts from page to page.
+    private volatile boolean immersive = false;
 
     public BarsBridge(Activity activity) {
         this.activity = activity;
@@ -38,9 +42,36 @@ public class BarsBridge {
         activity.runOnUiThread(this::apply);
     }
 
-    /** Applies the last theme again: SystemBars resets the bars on a configuration change. */
+    @JavascriptInterface
+    public void setImmersive(boolean on) {
+        immersive = on;
+        activity.runOnUiThread(this::applyImmersive);
+    }
+
+    @JavascriptInterface
+    public boolean isImmersive() {
+        return immersive;
+    }
+
+    /**
+     * Applies the last theme and fullscreen again: SystemBars resets the bars on a
+     * configuration change, and a dialog or the keyboard can bring them back.
+     */
     void reapply() {
         if (dark != null) apply();
+        if (immersive) applyImmersive();
+    }
+
+    private void applyImmersive() {
+        Window window = activity.getWindow();
+        WindowInsetsControllerCompat bars = WindowCompat.getInsetsController(window, window.getDecorView());
+        if (immersive) {
+            // A swipe from the edge shows the bars for a moment; they hide again by themselves
+            bars.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            bars.hide(WindowInsetsCompat.Type.systemBars());
+        } else {
+            bars.show(WindowInsetsCompat.Type.systemBars());
+        }
     }
 
     @SuppressWarnings("deprecation")
