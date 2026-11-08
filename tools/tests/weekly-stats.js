@@ -60,7 +60,17 @@ module.exports = function (T) {
     const css = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8');
     ok(/class: 'ch-stats ch-stats--4' \}/.test(page) && /\.ch-stats--4 \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/.test(css) && /\.ch-stats--4 \{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\); \}/.test(css),
       'the four profile totals sit two by two on a phone and in one row when wide');
-    for (const k of ['thisWeek', 'lastWeek', 'weekWins', 'weekDays', 'weekGames']) {
+    // The week table's play time: the unit is in the label and the cells are bare minutes,
+    // even past an hour (the owner's screenshot read «۵۹ دقیقه» beside «۰ دقیقه»)
+    const rowsSrc = (page.match(/    var rows = \[\n[\s\S]*?\n    \];/) || [''])[0];
+    ok(rowsSrc.length > 0, 'the week table has its rows');
+    if (rowsSrc) {
+      const sb = { C: { num: (n) => String(n), duration: (ms) => Math.round(ms / 60000) + ' minutes', stats: {} }, a: { plays: 1, timeMs: 125 * 60000, wins: 0, days: 1, games: 1 }, b: { plays: 0, timeMs: 59 * 60000, wins: 0, days: 0, games: 0 } };
+      vm.runInNewContext(rowsSrc + ';this.rows = rows;', sb);
+      const t = sb.rows.find((r) => /[Tt]ime|Minutes/.test(r[0])) || [];
+      ok(t[0] === 'weekMinutes' && t[1] === '125' && t[2] === '59', 'the week table shows play time as bare minutes under a label with the unit (' + t.join(' | ') + ')');
+    }
+    for (const k of ['thisWeek', 'lastWeek', 'weekMinutes', 'weekWins', 'weekDays', 'weekGames']) {
       const n = (core.match(new RegExp('\\b' + k + ": '[^']+'", 'g')) || []).length;
       ok(n === T.LOCALE_CODES.length, k + ' is in all ' + T.LOCALE_CODES.length + ' languages (' + n + ')');
     }
