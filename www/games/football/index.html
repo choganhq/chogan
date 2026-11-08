@@ -10,9 +10,9 @@
 <style>
   /* the pitch stands upright in a tall game area and lies on its side in a wide one,
      where the side column sits beside it */
-  .fb-wrap > .ch-fit { --fit-ar: calc(108 / 176); }
+  .fb-wrap > .ch-fit { --fit-ar: calc(106 / 199); }
   @container game (min-aspect-ratio: 5 / 4) {
-    .fb-wrap > .ch-fit { --fit-ar: calc(176 / 108); }
+    .fb-wrap > .ch-fit { --fit-ar: calc(199 / 106); }
   }
   .ch-fit > .fb-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
   .fb-canvas { display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; user-select: none; -webkit-user-select: none; }
@@ -46,7 +46,7 @@ function FootballEngineFactory(Cue) {
   Cue = Cue || (typeof self !== 'undefined' && self.ChoganCue) || null;
   if (!Cue) throw new Error('lib/cue.js is not loaded');
 
-  var W = 100, L = 150, D = 9, MOUTH = 32, RD = 7, RB = 3.8, MD = 2, MB = 1;
+  var W = 100, L = 175, D = 9, MOUTH = 32, RD = 5.5, RB = 3, MD = 2, MB = 1;
   var G0 = W / 2 - MOUTH / 2, G1 = W / 2 + MOUTH / 2;
   // the boards: both sides, each end line either side of its mouth, and the goal boxes
   var SEGS = [
@@ -54,7 +54,7 @@ function FootballEngineFactory(Cue) {
     [0, 0, G0, 0], [G1, 0, W, 0], [G0, 0, G0, -D], [G0, -D, G1, -D], [G1, -D, G1, 0],
     [0, L, G0, L], [G1, L, W, L], [G0, L, G0, L + D], [G0, L + D, G1, L + D], [G1, L + D, G1, L]
   ];
-  var T = Cue.walls({ segs: SEGS, length: L, width: W, radius: RD, ball: 0.88, cushion: 0.7, cushionSlide: 0.95, rollA: 40, rollB: 2.4, minSpeed: 2.5, maxSpeed: 420 });
+  var T = Cue.walls({ segs: SEGS, length: L, width: W, radius: RD, ball: 0.88, cushion: 0.7, cushionSlide: 0.95, rollA: 40, rollB: 2.4, minSpeed: 2.5, maxSpeed: 460 });
   var WIN_TO = [3, 5], MAX_TURNS = 40;
   // after a goal the ball runs on into the net this long, then everything stops
   var AFTER_GOAL = Math.round(0.7 / Cue.DT);
@@ -63,8 +63,8 @@ function FootballEngineFactory(Cue) {
 
   // The bottom team's places, the goalkeeper first; the top team's are the same turned
   // round. The team that kicks off has its centre forward behind the ball.
-  var BASE = [[50, 141], [28, 122], [72, 122], [24, 95], [76, 95]];
-  var KICK = [[50, 141], [28, 122], [72, 122], [50, 87], [20, 92]];
+  var BASE = [[50, 164], [28, 142], [72, 142], [24, 111], [76, 111]];
+  var KICK = [[50, 164], [28, 142], [72, 142], [50, 102], [20, 107]];
 
   function teamOf(id) { return id === 0 ? -1 : (id <= 5 ? 0 : 1); }
   function body(id, x, y) { return id === 0 ? { id: 0, x: x, y: y, vx: 0, vy: 0, inPlay: true, r: RB, m: MB } : { id: id, x: x, y: y, vx: 0, vy: 0, inPlay: true, r: RD, m: MD }; }
@@ -110,11 +110,12 @@ function FootballEngineFactory(Cue) {
       if (b.y < lo) { b.y = lo; b.vy = Math.abs(b.vy) * 0.5; }
       else if (b.y > hi) { b.y = hi; b.vy = -Math.abs(b.vy) * 0.5; }
     }
-    // a goal only when the whole ball is over the line between the posts
+    // a goal once the ball's centre is over the line between the posts: a ball resting
+    // half inside the net read as a goal to players but did not count (owner, 2026-11-08)
     var ball = B[0];
     if (s.goal < 0) {
-      if (ball.y < -RB && ball.x > G0 && ball.x < G1) { s.goal = 0; s.goalAt = s.ticks; }
-      else if (ball.y > L + RB && ball.x > G0 && ball.x < G1) { s.goal = 1; s.goalAt = s.ticks; }
+      if (ball.y < 0 && ball.x > G0 && ball.x < G1) { s.goal = 0; s.goalAt = s.ticks; }
+      else if (ball.y > L && ball.x > G0 && ball.x < G1) { s.goal = 1; s.goalAt = s.ticks; }
     }
     if (s.goal >= 0 && (s.quick || s.ticks - s.goalAt >= AFTER_GOAL)) {
       for (i = 0; i < B.length; i++) { B[i].vx = 0; B[i].vy = 0; }
@@ -304,7 +305,7 @@ if (typeof module !== 'undefined') module.exports = FootballEngineFactory;
         fbWon: '{n} برد', fbYour: 'نوبت توست: از یکی از مهره‌هایت عقب بکش و رها کن.', fbTurnName: 'نوبت {n}: از یک مهره عقب بکش و رها کن.', fbBotTurn: 'ربات نشانه می‌گیرد…',
         fbGoldenNote: 'نوبت‌ها تمام شد و بازی مساوی است: گل بعدی برنده است.', fbGoals: 'گل برای بردن', fbNext: 'از مسابقه‌ی بعد', fbDaily: 'فوتبال روزانه', fbScore: 'نتیجه', fbFlicks: 'ضربه‌ها',
         fbKPick: 'انتخاب مهره', fbKAim: 'چرخاندن جهت (با Shift آرام‌تر)', fbKPower: 'قدرت ضربه', fbKShoot: 'ضربه',
-        fbRules: 'زمین را از بالا می‌بینی؛ مهره‌های قرمز مال تو هستند و به دروازه‌ی حریف حمله می‌کنند. در نوبتت از یکی از پنج مهره‌ات عقب بکش و رها کن؛ هرچه بیشتر بکشی، ضربه محکم‌تر است. مهره‌ها و توپ به هم و به دیواره‌ها می‌خورند و برمی‌گردند. توپ وقتی گل است که کاملاً از خط دروازه میان دو تیرک رد شود. نوبت وقتی عوض می‌شود که همه چیز بایستد. بعد از هر گل هر دو تیم سر جایشان برمی‌گردند و تیمی که گل خورده شروع می‌کند. اول سه گل برنده است (پنج گل از دکمه‌ی چرخ‌دنده). بعد از چهل ضربه، تیم جلوتر می‌برد و اگر مساوی باشد گل بعدی برنده است. چالش روزانه مسابقه‌ای با ربات متوسط است.',
+        fbRules: 'زمین را از بالا می‌بینی؛ مهره‌های قرمز مال تو هستند و به دروازه‌ی حریف حمله می‌کنند. در نوبتت از یکی از پنج مهره‌ات عقب بکش و رها کن؛ هرچه بیشتر بکشی، ضربه محکم‌تر است. مهره‌ها و توپ به هم و به دیواره‌ها می‌خورند و برمی‌گردند. توپ وقتی گل است که بیش از نیمی از آن از خط دروازه میان دو تیرک رد شود. نوبت وقتی عوض می‌شود که همه چیز بایستد. بعد از هر گل هر دو تیم سر جایشان برمی‌گردند و تیمی که گل خورده شروع می‌کند. اول سه گل برنده است (پنج گل از دکمه‌ی چرخ‌دنده). بعد از چهل ضربه، تیم جلوتر می‌برد و اگر مساوی باشد گل بعدی برنده است. چالش روزانه مسابقه‌ای با ربات متوسط است.',
         fbTutTitle1: 'هدف', fbTutText1: 'توپ سفید را به دروازه‌ی حریف بفرست و نگذار به دروازه‌ی خودت برود. اول سه گل.',
         fbTutTitle2: 'ضربه', fbTutText2: 'انگشتت را روی یکی از مهره‌های قرمزت بگذار، به عقب بکش و رها کن. مهره به سمت مخالف کشیدن می‌رود.',
         fbTutTitle3: 'نوبت', fbTutText3: 'هر نوبت یک ضربه. وقتی همه چیز ایستاد نوبت حریف است. از دیواره‌ها هم می‌شود کمانه زد.'
@@ -315,7 +316,7 @@ if (typeof module !== 'undefined') module.exports = FootballEngineFactory;
         fbWon: '{n} wins', fbYour: 'Your turn: pull back from one of your discs and let go.', fbTurnName: '{n} to play: pull back from a disc and let go.', fbBotTurn: 'The bot is aiming…',
         fbGoldenNote: 'The turns are up and the score is level: the next goal wins.', fbGoals: 'Goals to win', fbNext: 'From the next match', fbDaily: 'Daily Football', fbScore: 'Score', fbFlicks: 'Flicks',
         fbKPick: 'Pick a disc', fbKAim: 'Turn the aim (finer with Shift)', fbKPower: 'Power', fbKShoot: 'Flick',
-        fbRules: 'You see the pitch from above: your red discs attack the other team\'s goal. On your turn, pull back from one of your five discs and let go; the further you pull, the harder the flick. Discs and the ball bounce off each other and off the boards. The ball is in only when all of it is over the goal line between the posts. The turn passes when everything has stopped. After a goal both teams line up again and the team that let it in kicks off. First to three goals wins (five behind the gear). After forty flicks the team ahead wins, and if the score is level the next goal wins. The daily challenge is a match against the medium bot.',
+        fbRules: 'You see the pitch from above: your red discs attack the other team\'s goal. On your turn, pull back from one of your five discs and let go; the further you pull, the harder the flick. Discs and the ball bounce off each other and off the boards. The ball is in once more than half of it is over the goal line between the posts. The turn passes when everything has stopped. After a goal both teams line up again and the team that let it in kicks off. First to three goals wins (five behind the gear). After forty flicks the team ahead wins, and if the score is level the next goal wins. The daily challenge is a match against the medium bot.',
         fbTutTitle1: 'The aim', fbTutText1: 'Send the white ball into the other goal and keep it out of yours. First to three.',
         fbTutTitle2: 'The flick', fbTutText2: 'Put your finger on one of your red discs, pull back and let go. The disc flies the other way.',
         fbTutTitle3: 'Turns', fbTutText3: 'One flick a turn. When everything stops, it is the other side\'s turn. Bank it off the boards, too.'
@@ -326,7 +327,7 @@ if (typeof module !== 'undefined') module.exports = FootballEngineFactory;
         fbWon: '{n} wygrywa', fbYour: 'Twój ruch: odciągnij jeden ze swoich krążków i puść.', fbTurnName: 'Ruch: {n}. Odciągnij krążek i puść.', fbBotTurn: 'Bot celuje…',
         fbGoldenNote: 'Ruchy się skończyły, a wynik jest remisowy: następny gol wygrywa.', fbGoals: 'Gole do wygranej', fbNext: 'Od następnego meczu', fbDaily: 'Codzienne piłkarzyki', fbScore: 'Wynik', fbFlicks: 'Pstryknięcia',
         fbKPick: 'Wybór krążka', fbKAim: 'Obrót celownika (z Shift dokładniej)', fbKPower: 'Siła', fbKShoot: 'Pstryknięcie',
-        fbRules: 'Widzisz boisko z góry: Twoje czerwone krążki atakują bramkę rywala. W swoim ruchu odciągnij jeden z pięciu krążków i puść; im dalej odciągniesz, tym mocniejsze pstryknięcie. Krążki i piłka odbijają się od siebie i od band. Gol jest wtedy, gdy cała piłka przekroczy linię bramkową między słupkami. Ruch przechodzi na rywala, gdy wszystko się zatrzyma. Po golu obie drużyny wracają na pozycje, a rozpoczyna drużyna, która straciła gola. Wygrywa ten, kto pierwszy zdobędzie trzy gole (pięć w ustawieniach pod zębatką). Po czterdziestu pstryknięciach wygrywa drużyna prowadząca, a przy remisie wygrywa następny gol. Codzienne wyzwanie to mecz z botem na średnim poziomie.',
+        fbRules: 'Widzisz boisko z góry: Twoje czerwone krążki atakują bramkę rywala. W swoim ruchu odciągnij jeden z pięciu krążków i puść; im dalej odciągniesz, tym mocniejsze pstryknięcie. Krążki i piłka odbijają się od siebie i od band. Gol jest wtedy, gdy ponad połowa piłki przekroczy linię bramkową między słupkami. Ruch przechodzi na rywala, gdy wszystko się zatrzyma. Po golu obie drużyny wracają na pozycje, a rozpoczyna drużyna, która straciła gola. Wygrywa ten, kto pierwszy zdobędzie trzy gole (pięć w ustawieniach pod zębatką). Po czterdziestu pstryknięciach wygrywa drużyna prowadząca, a przy remisie wygrywa następny gol. Codzienne wyzwanie to mecz z botem na średnim poziomie.',
         fbTutTitle1: 'Cel gry', fbTutText1: 'Wbij białą piłkę do bramki rywala i nie wpuść jej do swojej. Gra do trzech goli.',
         fbTutTitle2: 'Pstryknięcie', fbTutText2: 'Połóż palec na jednym z czerwonych krążków, odciągnij i puść. Krążek poleci w przeciwną stronę.',
         fbTutTitle3: 'Ruchy', fbTutText3: 'Jedno pstryknięcie na ruch. Gdy wszystko stanie, ruch ma rywal. Możesz też odbijać od band.'
@@ -337,7 +338,7 @@ if (typeof module !== 'undefined') module.exports = FootballEngineFactory;
         fbWon: '{n} 获胜', fbYour: '轮到你：按住一枚自己的棋子向后拉，然后松开。', fbTurnName: '轮到 {n}：按住一枚棋子向后拉，然后松开。', fbBotTurn: '电脑正在瞄准…',
         fbGoldenNote: '回合用完且比分持平：下一个进球获胜。', fbGoals: '获胜进球数', fbNext: '从下一场开始', fbDaily: '每日足球', fbScore: '比分', fbFlicks: '弹射次数',
         fbKPick: '选择棋子', fbKAim: '转动方向（按住 Shift 更精细）', fbKPower: '力度', fbKShoot: '弹射',
-        fbRules: '从上方俯视球场：红色棋子是你的，进攻对方球门。轮到你时，按住五枚棋子之一向后拉再松开；拉得越远，弹得越重。棋子和球会相互碰撞，也会从边框弹回。整个球越过两门柱之间的球门线才算进球。所有东西都停下后才换人。进球后双方回到开球站位，由失球的一方开球。先进三球者获胜（齿轮里可改为五球）。四十次弹射后领先的一方获胜；若比分持平，下一个进球获胜。每日挑战是与中等电脑的比赛。',
+        fbRules: '从上方俯视球场：红色棋子是你的，进攻对方球门。轮到你时，按住五枚棋子之一向后拉再松开；拉得越远，弹得越重。棋子和球会相互碰撞，也会从边框弹回。球有一半以上越过两门柱之间的球门线就算进球。所有东西都停下后才换人。进球后双方回到开球站位，由失球的一方开球。先进三球者获胜（齿轮里可改为五球）。四十次弹射后领先的一方获胜；若比分持平，下一个进球获胜。每日挑战是与中等电脑的比赛。',
         fbTutTitle1: '目标', fbTutText1: '把白球送进对方球门，别让它进你的球门。先进三球。',
         fbTutTitle2: '弹射', fbTutText2: '手指按住一枚红色棋子，向后拉再松开。棋子会朝相反方向飞出。',
         fbTutTitle3: '回合', fbTutText3: '每回合弹一次。所有东西停下后轮到对方。也可以借边框反弹。'
@@ -348,7 +349,7 @@ if (typeof module !== 'undefined') module.exports = FootballEngineFactory;
         fbWon: 'Sieg: {n}', fbYour: 'Du bist dran: Zieh an einer deiner Scheiben zurück und lass los.', fbTurnName: 'Am Zug: {n}. Zieh an einer Scheibe zurück und lass los.', fbBotTurn: 'Der Bot zielt …',
         fbGoldenNote: 'Die Züge sind um und es steht unentschieden: Das nächste Tor gewinnt.', fbGoals: 'Tore zum Sieg', fbNext: 'Ab dem nächsten Spiel', fbDaily: 'Tages-Knopffußball', fbScore: 'Ergebnis', fbFlicks: 'Schnipser',
         fbKPick: 'Scheibe wählen', fbKAim: 'Richtung drehen (mit Shift feiner)', fbKPower: 'Kraft', fbKShoot: 'Schnippen',
-        fbRules: 'Du siehst das Feld von oben: Deine roten Scheiben greifen das gegnerische Tor an. Zieh in deinem Zug an einer deiner fünf Scheiben zurück und lass los; je weiter du ziehst, desto fester der Schnipser. Scheiben und Ball prallen voneinander und von den Banden ab. Ein Tor zählt erst, wenn der ganze Ball zwischen den Pfosten über der Torlinie ist. Der Zug wechselt, wenn alles stillsteht. Nach einem Tor stellen sich beide Teams neu auf, und wer das Tor kassiert hat, stößt an. Wer zuerst drei Tore hat, gewinnt (fünf über das Zahnrad). Nach vierzig Schnipsern gewinnt, wer vorn liegt; bei Gleichstand entscheidet das nächste Tor. Die Tagesaufgabe ist ein Spiel gegen den mittleren Bot.',
+        fbRules: 'Du siehst das Feld von oben: Deine roten Scheiben greifen das gegnerische Tor an. Zieh in deinem Zug an einer deiner fünf Scheiben zurück und lass los; je weiter du ziehst, desto fester der Schnipser. Scheiben und Ball prallen voneinander und von den Banden ab. Ein Tor zählt, sobald mehr als der halbe Ball zwischen den Pfosten über der Torlinie ist. Der Zug wechselt, wenn alles stillsteht. Nach einem Tor stellen sich beide Teams neu auf, und wer das Tor kassiert hat, stößt an. Wer zuerst drei Tore hat, gewinnt (fünf über das Zahnrad). Nach vierzig Schnipsern gewinnt, wer vorn liegt; bei Gleichstand entscheidet das nächste Tor. Die Tagesaufgabe ist ein Spiel gegen den mittleren Bot.',
         fbTutTitle1: 'Das Ziel', fbTutText1: 'Bring den weißen Ball ins gegnerische Tor und halte ihn aus deinem raus. Zuerst drei.',
         fbTutTitle2: 'Der Schnipser', fbTutText2: 'Leg den Finger auf eine deiner roten Scheiben, zieh zurück und lass los. Die Scheibe fliegt in die Gegenrichtung.',
         fbTutTitle3: 'Die Züge', fbTutText3: 'Ein Schnipser pro Zug. Steht alles still, ist die andere Seite dran. Über die Bande geht es auch.'
@@ -359,7 +360,7 @@ if (typeof module !== 'undefined') module.exports = FootballEngineFactory;
         fbWon: 'Gana {n}', fbYour: 'Te toca: tira hacia atrás de una de tus chapas y suelta.', fbTurnName: 'Le toca a {n}: tira hacia atrás de una chapa y suelta.', fbBotTurn: 'El bot está apuntando…',
         fbGoldenNote: 'Se acabaron los turnos y van empatados: el próximo gol gana.', fbGoals: 'Goles para ganar', fbNext: 'Desde la próxima partida', fbDaily: 'Fútbol diario', fbScore: 'Resultado', fbFlicks: 'Tiros',
         fbKPick: 'Elegir chapa', fbKAim: 'Girar la dirección (más fino con Shift)', fbKPower: 'Fuerza', fbKShoot: 'Tirar',
-        fbRules: 'Ves el campo desde arriba: tus chapas rojas atacan la portería rival. En tu turno, tira hacia atrás de una de tus cinco chapas y suelta; cuanto más tires, más fuerte sale. Las chapas y el balón rebotan entre sí y en las bandas. Es gol solo cuando todo el balón cruza la línea entre los postes. El turno pasa cuando todo se ha parado. Tras un gol, los dos equipos vuelven a su sitio y saca el que lo recibió. Gana quien marque antes tres goles (cinco desde el engranaje). Tras cuarenta tiros gana el que va por delante; si van empatados, el próximo gol gana. El reto diario es una partida contra el bot medio.',
+        fbRules: 'Ves el campo desde arriba: tus chapas rojas atacan la portería rival. En tu turno, tira hacia atrás de una de tus cinco chapas y suelta; cuanto más tires, más fuerte sale. Las chapas y el balón rebotan entre sí y en las bandas. Es gol cuando más de la mitad del balón cruza la línea entre los postes. El turno pasa cuando todo se ha parado. Tras un gol, los dos equipos vuelven a su sitio y saca el que lo recibió. Gana quien marque antes tres goles (cinco desde el engranaje). Tras cuarenta tiros gana el que va por delante; si van empatados, el próximo gol gana. El reto diario es una partida contra el bot medio.',
         fbTutTitle1: 'El objetivo', fbTutText1: 'Mete el balón blanco en la portería rival y no dejes que entre en la tuya. Gana quien llegue a tres.',
         fbTutTitle2: 'El tiro', fbTutText2: 'Pon el dedo en una de tus chapas rojas, tira hacia atrás y suelta. La chapa sale hacia el otro lado.',
         fbTutTitle3: 'Los turnos', fbTutText3: 'Un tiro por turno. Cuando todo se para, le toca al otro. También puedes rebotar en las bandas.'
