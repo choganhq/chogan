@@ -11312,7 +11312,7 @@ function testFootball() {
   ok(part.goal === -1 && part.balls[0].y < 0 && part.balls[0].y > -E.RB, 'a ball that stops partly over the line is no goal (centre at y ' + part.balls[0].y.toFixed(2) + ')');
   const full = roll(E.W / 2, 20, -Math.PI / 2, E.powerFor(25));
   ok(full.goal === 0 && full.balls[0].y < -E.RB, 'a ball that crosses the line whole is a goal for the team attacking that end');
-  const low = roll(E.W / 2, 130, Math.PI / 2, E.powerFor(30));
+  const low = roll(E.W / 2, E.L - 20, Math.PI / 2, E.powerFor(30));
   ok(low.goal === 1, 'and at the other end, a goal for the top team');
 
   // After a goal: the score, both teams back in line-up, and the team that let it in kicks off
