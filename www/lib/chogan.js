@@ -313,7 +313,7 @@
       rank: 'رتبه', points: 'امتیاز', you: 'تو',
       playIn: 'پلی گیمز: {name}', playOut: 'پلی گیمز: وارد نشده‌ای', playSignIn: 'ورود',
       offlineRivals: 'حریف‌های آفلاین، ساخته‌شده روی همین دستگاه',
-      playBoard: 'جدول هفته', playBoardIn: 'بازیکن‌های واقعی در پلی گیمز. امتیاز این هفته‌ات آن‌جا فرستاده می‌شود.', playBoardOut: 'برای دیدن بازیکن‌های واقعی وارد پلی گیمز شو.',
+      playBoard: 'جدول هفته', playBoardIn: 'بازیکن‌های واقعی در پلی گیمز. امتیاز این هفته‌ات آن‌جا فرستاده می‌شود.', playBoardOut: 'برای دیدن بازیکن‌های واقعی وارد پلی گیمز شو.', playSeeAll: 'همه در پلی گیمز', playBoardEmpty: 'هنوز کسی این هفته امتیاز نگرفته.',
       streak: 'پیوستگی', dayStreak: 'روز پیوسته', locked: 'قفل',
       unlockedAt: 'باز شد', totalPlays: 'بازی', playTime: 'زمان بازی', thisWeek: 'این هفته', lastWeek: 'هفته‌ی قبل', weekMinutes: 'زمان بازی (دقیقه)', weekWins: 'برد', weekDays: 'روز بازی', weekGames: 'بازی‌های مختلف',
       language: 'زبان', theme: 'تم', themeAuto: 'خودکار', themeLight: 'روشن', themeDark: 'تاریک',
@@ -358,7 +358,7 @@
       rank: 'Rank', points: 'Points', you: 'You',
       playIn: 'Play Games: {name}', playOut: 'Play Games: not signed in', playSignIn: 'Sign in',
       offlineRivals: 'Offline rivals, generated on this device',
-      playBoard: 'Weekly leaderboard', playBoardIn: 'Real players on Google Play Games. Your points this week are sent there.', playBoardOut: 'Sign in to Play Games to see real players.',
+      playBoard: 'Weekly leaderboard', playBoardIn: 'Real players on Google Play Games. Your points this week are sent there.', playBoardOut: 'Sign in to Play Games to see real players.', playSeeAll: 'See all in Play Games', playBoardEmpty: 'No scores yet this week.',
       streak: 'Streak', dayStreak: 'day streak', locked: 'Locked',
       unlockedAt: 'Unlocked', totalPlays: 'Games', playTime: 'Play time', thisWeek: 'This week', lastWeek: 'Last week', weekMinutes: 'Play time (min)', weekWins: 'Wins', weekDays: 'Days played', weekGames: 'Different games',
       language: 'Language', theme: 'Theme', themeAuto: 'Auto', themeLight: 'Light', themeDark: 'Dark',
@@ -403,7 +403,7 @@
       rank: 'Miejsce', points: 'Punkty', you: 'Ty',
       playIn: 'Play Games: {name}', playOut: 'Play Games: nie zalogowano', playSignIn: 'Zaloguj',
       offlineRivals: 'Przeciwnicy offline, generowani na tym urządzeniu',
-      playBoard: 'Ranking tygodnia', playBoardIn: 'Prawdziwi gracze w Grach Google Play. Twoje punkty z tego tygodnia trafiają tam.', playBoardOut: 'Zaloguj się do Gier Play, aby zobaczyć prawdziwych graczy.',
+      playBoard: 'Ranking tygodnia', playBoardIn: 'Prawdziwi gracze w Grach Google Play. Twoje punkty z tego tygodnia trafiają tam.', playBoardOut: 'Zaloguj się do Gier Play, aby zobaczyć prawdziwych graczy.', playSeeAll: 'Wszyscy w Grach Play', playBoardEmpty: 'W tym tygodniu nikt jeszcze nie ma punktów.',
       streak: 'Seria', dayStreak: 'dni z rzędu', locked: 'Zablokowane',
       unlockedAt: 'Odblokowano', totalPlays: 'Rozegrane gry', playTime: 'Czas gry', thisWeek: 'Ten tydzień', lastWeek: 'Poprzedni tydzień', weekMinutes: 'Czas gry (min)', weekWins: 'Wygrane', weekDays: 'Dni gry', weekGames: 'Różne gry',
       language: 'Język', theme: 'Motyw', themeAuto: 'Automatyczny', themeLight: 'Jasny', themeDark: 'Ciemny',
@@ -448,7 +448,7 @@
       rank: '排名', points: '积分', you: '你',
       playIn: 'Play 游戏：{name}', playOut: 'Play 游戏：未登录', playSignIn: '登录',
       offlineRivals: '离线对手，在本机生成',
-      playBoard: '每周排行榜', playBoardIn: 'Google Play 游戏上的真实玩家。你本周的积分会提交到那里。', playBoardOut: '登录 Play 游戏即可看到真实玩家。',
+      playBoard: '每周排行榜', playBoardIn: 'Google Play 游戏上的真实玩家。你本周的积分会提交到那里。', playBoardOut: '登录 Play 游戏即可看到真实玩家。', playSeeAll: '在 Play 游戏中查看全部', playBoardEmpty: '本周还没有人得分。',
       streak: '连续', dayStreak: '天连续', locked: '未解锁',
       unlockedAt: '解锁于', totalPlays: '局数', playTime: '游戏时长', thisWeek: '本周', lastWeek: '上周', weekMinutes: '游戏时长（分钟）', weekWins: '胜局', weekDays: '游戏天数', weekGames: '玩过的游戏',
       language: '语言', theme: '主题', themeAuto: '自动', themeLight: '浅色', themeDark: '深色',
@@ -493,7 +493,7 @@
       rank: 'Platz', points: 'Punkte', you: 'Du',
       playIn: 'Play Spiele: {name}', playOut: 'Play Spiele: nicht angemeldet', playSignIn: 'Anmelden',
       offlineRivals: 'Offline-Gegner, auf diesem Gerät erzeugt',
-      playBoard: 'Wochenrangliste', playBoardIn: 'Echte Spieler in Google Play Spiele. Deine Punkte dieser Woche werden dorthin gesendet.', playBoardOut: 'Melde dich bei Play Spiele an, um echte Spieler zu sehen.',
+      playBoard: 'Wochenrangliste', playBoardIn: 'Echte Spieler in Google Play Spiele. Deine Punkte dieser Woche werden dorthin gesendet.', playBoardOut: 'Melde dich bei Play Spiele an, um echte Spieler zu sehen.', playSeeAll: 'Alle in Play Spiele', playBoardEmpty: 'Diese Woche noch keine Punkte.',
       streak: 'Serie', dayStreak: 'Tage in Folge', locked: 'Gesperrt',
       unlockedAt: 'Freigeschaltet', totalPlays: 'Spiele', playTime: 'Spielzeit', thisWeek: 'Diese Woche', lastWeek: 'Letzte Woche', weekMinutes: 'Spielzeit (Min.)', weekWins: 'Siege', weekDays: 'Spieltage', weekGames: 'Verschiedene Spiele',
       language: 'Sprache', theme: 'Design', themeAuto: 'Auto', themeLight: 'Hell', themeDark: 'Dunkel',
@@ -538,7 +538,7 @@
       rank: 'Puesto', points: 'Puntos', you: 'Tú',
       playIn: 'Play Juegos: {name}', playOut: 'Play Juegos: sin sesión', playSignIn: 'Entrar',
       offlineRivals: 'Rivales sin conexión, creados en este dispositivo',
-      playBoard: 'Clasificación semanal', playBoardIn: 'Jugadores reales en Google Play Juegos. Tus puntos de esta semana se envían allí.', playBoardOut: 'Entra en Play Juegos para ver a jugadores reales.',
+      playBoard: 'Clasificación semanal', playBoardIn: 'Jugadores reales en Google Play Juegos. Tus puntos de esta semana se envían allí.', playBoardOut: 'Entra en Play Juegos para ver a jugadores reales.', playSeeAll: 'Ver todos en Play Juegos', playBoardEmpty: 'Aún no hay puntos esta semana.',
       streak: 'Racha', dayStreak: 'días seguidos', locked: 'Bloqueado',
       unlockedAt: 'Desbloqueado', totalPlays: 'Partidas', playTime: 'Tiempo de juego', thisWeek: 'Esta semana', lastWeek: 'Semana pasada', weekMinutes: 'Tiempo de juego (min)', weekWins: 'Victorias', weekDays: 'Días jugados', weekGames: 'Juegos distintos',
       language: 'Idioma', theme: 'Tema', themeAuto: 'Auto', themeLight: 'Claro', themeDark: 'Oscuro',
@@ -3679,6 +3679,28 @@
         if (!player.authenticated || !P.submitScore || !(n > 0)) return Promise.resolve(false);
         return Promise.resolve().then(function () { return P.submitScore({ score: Math.round(n) }); })
           .then(function () { return true; }, function () { return false; });
+      },
+      // chogan-plus#20: the owner wanted the table on the league page itself, not only behind
+      // Play's own screen. Resolves to rows [{rank, name, score, me}] (the player's own row
+      // added under the top when it is not in it), or null when there is nothing to show:
+      // signed out, an older Plus without loadScores, or Play failing (offline).
+      top: function () {
+        if (!player.authenticated || !P.loadScores) return Promise.resolve(null);
+        function row(x, me) {
+          if (!x || typeof x !== 'object') return null;
+          var rank = Math.floor(+x.rank), score = Math.floor(+x.score);
+          if (!(rank >= 1) || !(score >= 0)) return null;
+          var name = typeof x.name === 'string' ? x.name.trim().slice(0, 40) : '';
+          return { rank: rank, name: name, score: score, me: !!(me || x.me) };
+        }
+        return Promise.resolve().then(function () { return P.loadScores({ max: 10 }); }).then(function (r) {
+          var rows = [], list = r && Array.isArray(r.rows) ? r.rows : [];
+          for (var i = 0; i < list.length; i++) { var x = row(list[i]); if (x) rows.push(x); }
+          rows.sort(function (a, b) { return a.rank - b.rank; });
+          var mine = row(r && r.me, true);
+          if (mine && !rows.some(function (x) { return x.me; })) rows.push(mine);
+          return rows;
+        }, function () { return null; });
       },
       board: function () {
         if (!player.authenticated || !P.showLeaderboard) return Promise.resolve(false);
