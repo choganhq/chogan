@@ -1372,10 +1372,37 @@
   var wStep = 0;
   var wHost = null;
 
+  // A title wrapped onto two lines on a 390px phone ("Welcome to Chogan Plus", #704);
+  // the CSS keeps it on one line and this shrinks it just enough to fit, never above 32px.
+  function fitWelcomeHeads() {
+    if (!wHost) return;
+    var hs = wHost.querySelectorAll('h1');
+    for (var i = 0; i < hs.length; i++) {
+      var h = hs[i];
+      h.style.fontSize = '';
+      // Width is not exactly proportional to size (Persian joins and hinting left a
+      // 320px title 3px too wide after one pass), so shrink until it fits.
+      for (var n = 0; n < 4; n++) {
+        var w = h.clientWidth, s = h.scrollWidth;
+        if (!w || s <= w) break;
+        var px = parseFloat(getComputedStyle(h).fontSize);
+        var next = Math.max(14, Math.floor(px * w / s * 10) / 10 - (n ? 0.5 : 0));
+        h.style.fontSize = next + 'px';
+        if (next === 14) break;
+      }
+    }
+  }
+  addEventListener('resize', fitWelcomeHeads);
+  // fonts.ready can settle before Vazirmatn is even requested, so a Persian title fitted
+  // in the fallback font stayed 8px too wide at 320px; refit whenever a face finishes.
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitWelcomeHeads);
+  if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', fitWelcomeHeads);
+
   function drawWelcome() {
     if (!wHost) return;
     wHost.innerHTML = '';
     wHost.appendChild(WELCOME_STEPS[wStep]());
+    fitWelcomeHeads();
 
     var last = wStep === WELCOME_STEPS.length - 1;
     var dots = el('div', { class: 'ch-tut__dots' });
