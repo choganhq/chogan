@@ -24,6 +24,10 @@
   .wg-boost .ch-icon { pointer-events: none; }
   .wg-gear .ch-icon { pointer-events: none; }
   .wg-note { margin-top: var(--s-2); font-size: var(--fs-sm); }
+  /* the light arena (#740): the boost button's white ring would vanish on the pale floor */
+  .wg-box.wg-light { background: #DDD2BF; }
+  .wg-light .wg-boost { border-color: rgba(58,42,24,.4); background: rgba(58,42,24,.08); color: #3A2A18; }
+  .wg-light .wg-boost.is-on { background: var(--game); border-color: #fff; color: #fff; }
   /* on a phone on its side the top row would take a third of the height: it floats
      over the top of the arena instead, between the length and the edge */
   @media (max-height: 520px) {
@@ -413,12 +417,40 @@ if (typeof module !== 'undefined' && module.exports) module.exports = WrigglersE
   var LEVELS = ['easy', 'medium', 'hard'];
   // the daily arena counts as won from this length
   var DAILY_WIN = 120;
-  // the arena is dark in both themes: glowing food reads best on a night floor
-  var PLAYER = '#FF4FB8';
-  var BOTC = ['#4FD1FF', '#7CFF6B', '#FFD24F', '#FF8A3D', '#B98CFF', '#4FFFC8', '#FF6B6B', '#9EC1FF'];
-  var FOODC = ['#FF5C7A', '#FFB84D', '#FFE74D', '#7CFF6B', '#4FFFC8', '#4FD1FF', '#9E8CFF', '#FF7AF0'];
+  // The arena follows the app's theme (#740). The dark colours glow on a night floor and
+  // none of them reads on a pale one, so the light theme has a set of its own: every snake,
+  // food and wall colour keeps at least 3:1 against both shades of the light floor.
+  var THEMES = {
+    dark: {
+      player: '#FF4FB8',
+      bots: ['#4FD1FF', '#7CFF6B', '#FFD24F', '#FF8A3D', '#B98CFF', '#4FFFC8', '#FF6B6B', '#9EC1FF'],
+      food: ['#FF5C7A', '#FFB84D', '#FFE74D', '#7CFF6B', '#4FFFC8', '#4FD1FF', '#9E8CFF', '#FF7AF0'],
+      floor: '#0E1224', scale: '#131936', scaleLine: 'rgba(150,170,255,.07)', out: '#05060C',
+      wall: '#FF3B5C', wallGlow: 'rgba(255,59,92,.12)', glow: 0.22,
+      text: 'rgba(255,255,255,.95)', dim: 'rgba(255,255,255,.65)',
+      mapFill: 'rgba(255,255,255,.07)', mapLine: 'rgba(255,90,120,.6)', mapBot: 'rgba(255,255,255,.5)',
+      ring: 'rgba(255,255,255,.4)', knob: 'rgba(255,255,255,.55)', scrim: 'rgba(5,6,12,.45)', scrimText: '#FFFFFF'
+    },
+    light: {
+      player: '#C4127E',
+      bots: ['#0A72B5', '#2A7D2E', '#96650A', '#C24E0E', '#7A45C9', '#0B7F6E', '#C7303F', '#4466AE'],
+      food: ['#D92B55', '#B5650A', '#8A7400', '#2F8A2F', '#0A8570', '#0A7FC2', '#6A52D9', '#C22AB0'],
+      floor: '#F4EEE2', scale: '#ECE3D2', scaleLine: 'rgba(120,90,50,.1)', out: '#DDD2BF',
+      wall: '#C81E3F', wallGlow: 'rgba(200,30,63,.12)', glow: 0.3,
+      text: 'rgba(42,30,16,.95)', dim: 'rgba(42,30,16,.7)',
+      mapFill: 'rgba(58,42,24,.08)', mapLine: 'rgba(200,30,63,.6)', mapBot: 'rgba(58,42,24,.55)',
+      ring: 'rgba(58,42,24,.4)', knob: 'rgba(58,42,24,.5)', scrim: 'rgba(244,238,226,.65)', scrimText: '#2A1E10'
+    }
+  };
 
   C.boot({});
+  function isDark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return !!(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+  }
+  var P = isDark() ? THEMES.dark : THEMES.light;
   var ctx = C.game({
     id: 'wrigglers',
     name: { fa: 'مارها', en: 'Wrigglers', zh: '扭扭蛇', de: 'Schlängler', es: 'Serpenteo', pl: 'Węże' },
@@ -502,7 +534,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = WrigglersE
 
   var cv = el('canvas', { class: 'wg-canvas', role: 'img', 'aria-label': C.t('arena') });
   var boostBtn = el('button', { class: 'wg-boost', type: 'button', 'aria-label': C.t('boost'), title: C.t('boost') }, [C.icon('bolt', 30)]);
-  var box = el('div', { class: 'wg-box' }, [cv, boostBtn]);
+  var box = el('div', { class: 'wg-box' + (P === THEMES.light ? ' wg-light' : '') }, [cv, boostBtn]);
   var top = el('div', { class: 'wg-top' });
   var wrap = el('div', { class: 'wg-wrap' }, [top, box]);
 
@@ -714,12 +746,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = WrigglersE
   var tile = null;
   function floorPattern(g) {
     if (tile) return tile;
-    // scales on a dark floor, drawn once into a tile at twice the size and repeated
+    // scales on the floor, drawn once into a tile at twice the size and repeated
     var c = document.createElement('canvas'), n = 128;
     c.width = n; c.height = n;
     var t = c.getContext('2d');
-    t.fillStyle = '#0E1224'; t.fillRect(0, 0, n, n);
-    t.fillStyle = '#131936'; t.strokeStyle = 'rgba(150,170,255,.07)'; t.lineWidth = 3;
+    t.fillStyle = P.floor; t.fillRect(0, 0, n, n);
+    t.fillStyle = P.scale; t.strokeStyle = P.scaleLine; t.lineWidth = 3;
     [[64, 64], [0, 0], [n, 0], [0, n], [n, n]].forEach(function (q) { t.beginPath(); t.arc(q[0], q[1], 40, 0, Math.PI * 2); t.fill(); t.stroke(); });
     var pat = g.createPattern(c, 'repeat');
     if (pat && pat.setTransform && window.DOMMatrix) pat.setTransform(new DOMMatrix([0.5, 0, 0, 0.5, 0, 0]));
@@ -730,12 +762,26 @@ if (typeof module !== 'undefined' && module.exports) module.exports = WrigglersE
     var v = [1, 3, 5].map(function (i) { return parseInt(hex.slice(i, i + 2), 16); });
     return 'rgb(' + v.map(function (c) { return Math.round(c + (255 - c) * a); }).join(',') + ')';
   }
-  var LIGHT = {}, PALE = {};
-  BOTC.concat([PLAYER]).forEach(function (c) { LIGHT[c] = lighten(c, 0.3); PALE[c] = lighten(c, 0.6); });
-  var buckets = FOODC.map(function () { return []; });
+  function darken(hex, a) {
+    var v = [1, 3, 5].map(function (i) { return parseInt(hex.slice(i, i + 2), 16); });
+    return 'rgb(' + v.map(function (c) { return Math.round(c * (1 - a)); }).join(',') + ')';
+  }
+  // the stripe down a snake's back, and its outline: pale on the night floor, deep on the light one
+  var STRIPE = {}, EDGE = {};
+  THEMES.dark.bots.concat([THEMES.dark.player]).forEach(function (c) { STRIPE[c] = lighten(c, 0.3); EDGE[c] = lighten(c, 0.6); });
+  THEMES.light.bots.concat([THEMES.light.player]).forEach(function (c) { STRIPE[c] = lighten(c, 0.3); EDGE[c] = darken(c, 0.35); });
+  var buckets = P.food.map(function () { return []; });
+  // "auto" can change while a run is on screen, so the theme is read on every draw
+  function syncTheme() {
+    var T = isDark() ? THEMES.dark : THEMES.light;
+    if (T === P) return;
+    P = T; tile = null;
+    box.classList.toggle('wg-light', P === THEMES.light);
+  }
 
   function draw() {
     if (!S) return;
+    syncTheme();
     var Z = box.getBoundingClientRect(), w = Math.max(60, Math.round(Z.width)), h = Math.max(60, Math.round(Z.height));
     var dpr = Math.min(2, window.devicePixelRatio || 1), W = Math.round(w * dpr), H = Math.round(h * dpr);
     // both sides, every draw: a new canvas is 300×150 (#359) and a turned phone changes both (#474)
@@ -746,18 +792,18 @@ if (typeof module !== 'undefined' && module.exports) module.exports = WrigglersE
     if (pl.alive) { var hd = headAt(); cam.x = hd.x; cam.y = hd.y; viewU += (target() - viewU) * 0.05; }
     var k = scale(w, h);
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.fillStyle = '#05060C'; g.fillRect(0, 0, w, h);
+    g.fillStyle = P.out; g.fillRect(0, 0, w, h);
     g.setTransform(dpr * k, 0, 0, dpr * k, dpr * (w / 2 - cam.x * k), dpr * (h / 2 - cam.y * k));
     var x0 = cam.x - w / 2 / k - 40, x1 = cam.x + w / 2 / k + 40, y0 = cam.y - h / 2 / k - 40, y1 = cam.y + h / 2 / k + 40;
     // the floor and its soft red wall
     g.beginPath(); g.arc(0, 0, E.R, 0, Math.PI * 2);
     g.fillStyle = floorPattern(g); g.fill();
-    g.strokeStyle = 'rgba(255,59,92,.12)'; g.lineWidth = 60; g.beginPath(); g.arc(0, 0, E.R - 30, 0, Math.PI * 2); g.stroke();
-    g.strokeStyle = '#FF3B5C'; g.lineWidth = 6; g.beginPath(); g.arc(0, 0, E.R, 0, Math.PI * 2); g.stroke();
+    g.strokeStyle = P.wallGlow; g.lineWidth = 60; g.beginPath(); g.arc(0, 0, E.R - 30, 0, Math.PI * 2); g.stroke();
+    g.strokeStyle = P.wall; g.lineWidth = 6; g.beginPath(); g.arc(0, 0, E.R, 0, Math.PI * 2); g.stroke();
     drawFood(g, x0, x1, y0, y1, now);
     for (var i = S.snakes.length - 1; i >= 0; i--) {
       var s = S.snakes[i];
-      if (s.alive) drawSnake(g, s, i === 0 ? PLAYER : BOTC[s.col % BOTC.length], x0, x1, y0, y1);
+      if (s.alive) drawSnake(g, s, i === 0 ? P.player : P.bots[s.col % P.bots.length], x0, x1, y0, y1);
     }
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     hud(g, w, h);
@@ -771,9 +817,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = WrigglersE
     for (c = 0; c < buckets.length; c++) {
       var b = buckets[c];
       if (!b.length) continue;
-      g.fillStyle = FOODC[c];
+      g.fillStyle = P.food[c];
       // the glow: a larger faint disc that breathes, one path for the colour
-      g.globalAlpha = 0.22; g.beginPath();
+      g.globalAlpha = P.glow; g.beginPath();
       for (i = 0; i < b.length; i++) { f = b[i]; var r = (2.5 + Math.min(6, f.v * 1.6)) * (2.1 + 0.25 * Math.sin(tm * 3 + f.x * 0.07 + f.y * 0.05)); g.moveTo(f.x + r, f.y); g.arc(f.x, f.y, r, 0, Math.PI * 2); }
       g.fill();
       g.globalAlpha = 1; g.beginPath();
@@ -797,10 +843,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = WrigglersE
     }
     g.lineCap = 'round'; g.lineJoin = 'round';
     if (s.boost) { g.globalAlpha = 0.28; g.strokeStyle = col; g.lineWidth = r * 2 + 12; g.stroke(); g.globalAlpha = 1; }
-    g.strokeStyle = PALE[col]; g.lineWidth = r * 2 + 2.5; g.stroke();
+    g.strokeStyle = EDGE[col]; g.lineWidth = r * 2 + 2.5; g.stroke();
     g.strokeStyle = col; g.lineWidth = r * 2; g.stroke();
     g.setLineDash([E.SP * 1.4, E.SP * 2.2]);
-    g.strokeStyle = LIGHT[col]; g.lineWidth = r * 1.1; g.stroke();
+    g.strokeStyle = STRIPE[col]; g.lineWidth = r * 1.1; g.stroke();
     g.setLineDash([]);
     // the head, and eyes that look where it goes
     var hx = bn ? ba[0] + (p[0] - ba[0]) * al : p[0], hy = bn ? ba[1] + (p[1] - ba[1]) * al : p[1];
@@ -819,15 +865,15 @@ if (typeof module !== 'undefined' && module.exports) module.exports = WrigglersE
     var font = getComputedStyle(document.body).fontFamily || 'sans-serif', pl = S.snakes[0];
     var big = Math.round(Math.max(18, Math.min(26, w / 18)));
     g.textBaseline = 'top'; g.textAlign = 'left';
-    g.fillStyle = 'rgba(255,255,255,.95)'; g.font = '800 ' + big + 'px ' + font;
+    g.fillStyle = P.text; g.font = '800 ' + big + 'px ' + font;
     g.fillText(C.t('lenN', { n: C.num(Math.floor(pl.alive ? pl.len : E.score(S))) }), 14, 12);
     var best = dailyDate ? dailyBest() : (C.stats.getBest('wrigglers', S.level) || 0);
-    if (best) { g.fillStyle = 'rgba(255,255,255,.65)'; g.font = '700 ' + Math.round(big * 0.6) + 'px ' + font; g.fillText(C.t(dailyDate ? 'bestToday' : 'bestN', { n: C.num(best) }), 14, 16 + big); }
+    if (best) { g.fillStyle = P.dim; g.font = '700 ' + Math.round(big * 0.6) + 'px ' + font; g.fillText(C.t(dailyDate ? 'bestToday' : 'bestN', { n: C.num(best) }), 14, 16 + big); }
     // the mini-map: the arena, the other heads, and you
     var mr = Math.round(Math.max(30, Math.min(52, Math.min(w, h) * 0.1))), mx = 14 + mr, my = h - 14 - mr, q = mr / E.R;
-    g.fillStyle = 'rgba(255,255,255,.07)'; g.strokeStyle = 'rgba(255,90,120,.6)'; g.lineWidth = 1.5;
+    g.fillStyle = P.mapFill; g.strokeStyle = P.mapLine; g.lineWidth = 1.5;
     g.beginPath(); g.arc(mx, my, mr, 0, Math.PI * 2); g.fill(); g.stroke();
-    g.fillStyle = 'rgba(255,255,255,.5)'; g.beginPath();
+    g.fillStyle = P.mapBot; g.beginPath();
     for (var i = 1; i < S.snakes.length; i++) {
       var s = S.snakes[i];
       if (!s.alive) continue;
@@ -835,17 +881,17 @@ if (typeof module !== 'undefined' && module.exports) module.exports = WrigglersE
       g.moveTo(mx + s.pts[0] * q + rr, my + s.pts[1] * q); g.arc(mx + s.pts[0] * q, my + s.pts[1] * q, rr, 0, Math.PI * 2);
     }
     g.fill();
-    g.fillStyle = PLAYER; g.beginPath(); g.arc(mx + cam.x * q, my + cam.y * q, 3.2, 0, Math.PI * 2); g.fill();
+    g.fillStyle = P.player; g.beginPath(); g.arc(mx + cam.x * q, my + cam.y * q, 3.2, 0, Math.PI * 2); g.fill();
     // the steering ring where the finger went down
     if (steer.id !== null) {
-      g.strokeStyle = 'rgba(255,255,255,.4)'; g.lineWidth = 2;
+      g.strokeStyle = P.ring; g.lineWidth = 2;
       g.beginPath(); g.arc(steer.x0, steer.y0, 36, 0, Math.PI * 2); g.stroke();
       var dx = steer.x - steer.x0, dy = steer.y - steer.y0, d = Math.sqrt(dx * dx + dy * dy) || 1, m = Math.min(d, 36);
-      g.fillStyle = 'rgba(255,255,255,.55)'; g.beginPath(); g.arc(steer.x0 + dx / d * m, steer.y0 + dy / d * m, 11, 0, Math.PI * 2); g.fill();
+      g.fillStyle = P.knob; g.beginPath(); g.arc(steer.x0 + dx / d * m, steer.y0 + dy / d * m, 11, 0, Math.PI * 2); g.fill();
     }
     if (waiting) {
-      g.fillStyle = 'rgba(5,6,12,.45)'; g.fillRect(0, 0, w, h);
-      g.fillStyle = '#FFFFFF'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '800 ' + big + 'px ' + font;
+      g.fillStyle = P.scrim; g.fillRect(0, 0, w, h);
+      g.fillStyle = P.scrimText; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '800 ' + big + 'px ' + font;
       // above the middle, where the player's own head is not
       g.fillText(C.t('tapGo'), w / 2, h * 0.36);
     }
@@ -853,14 +899,14 @@ if (typeof module !== 'undefined' && module.exports) module.exports = WrigglersE
 
   // the share card: the snake as it was when it crashed, on the arena floor
   function paintShare(g, w, h, body) {
-    g.fillStyle = '#0E1224'; C.rrect(g, 0, 0, w, h, 18); g.fill();
+    g.fillStyle = P.floor; C.rrect(g, 0, 0, w, h, 18); g.fill();
     var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, i;
     for (i = 0; i < body.length; i += 2) { minX = Math.min(minX, body[i]); maxX = Math.max(maxX, body[i]); minY = Math.min(minY, body[i + 1]); maxY = Math.max(maxY, body[i + 1]); }
     var k = Math.min((w - 40) / Math.max(40, maxX - minX), (h - 40) / Math.max(40, maxY - minY), 2.5);
     g.save();
     g.translate(w / 2 - (minX + maxX) / 2 * k, h / 2 - (minY + maxY) / 2 * k); g.scale(k, k);
     var fake = { pts: body, len: S.snakes[0].len, ang: S.snakes[0].ang, boost: false };
-    drawSnake(g, fake, PLAYER, -1e9, 1e9, -1e9, 1e9);
+    drawSnake(g, fake, P.player, -1e9, 1e9, -1e9, 1e9);
     g.restore();
   }
 
@@ -914,11 +960,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = WrigglersE
   }
   function tDot(x, y, c) { return '<circle cx="' + x + '" cy="' + y + '" r="8" fill="' + c + '" opacity=".25"/><circle cx="' + x + '" cy="' + y + '" r="3.5" fill="' + c + '"/>'; }
   function tArt(kind) {
-    var s = '<svg viewBox="0 0 200 110" width="100%" direction="ltr"><rect width="200" height="110" rx="10" fill="#0E1224"/>';
-    if (kind === 1) s += tSnake('M20 80 Q50 40 80 70 T130 55', PLAYER, 12) + '<circle cx="130" cy="55" r="7" fill="' + PLAYER + '"/><circle cx="133" cy="51" r="2.6" fill="#fff"/><circle cx="133" cy="59" r="2.6" fill="#fff"/>' + tDot(152, 50, '#FFE74D') + tDot(170, 64, '#4FD1FF') + tDot(160, 30, '#7CFF6B') + tDot(182, 40, '#FF7AF0');
-    if (kind === 2) s += tSnake('M20 90 Q40 60 70 60', PLAYER, 10) + '<circle cx="120" cy="60" r="22" fill="none" stroke="rgba(255,255,255,.5)" stroke-width="2"/><circle cx="136" cy="46" r="7" fill="rgba(255,255,255,.7)"/><path d="M80 52 l10 -6 -2 11" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>' +
+    var F = P.food, me = P.player;
+    var s = '<svg viewBox="0 0 200 110" width="100%" direction="ltr"><rect width="200" height="110" rx="10" fill="' + P.floor + '"/>';
+    if (kind === 1) s += tSnake('M20 80 Q50 40 80 70 T130 55', me, 12) + '<circle cx="130" cy="55" r="7" fill="' + me + '"/><circle cx="133" cy="51" r="2.6" fill="#fff"/><circle cx="133" cy="59" r="2.6" fill="#fff"/>' + tDot(152, 50, F[2]) + tDot(170, 64, F[5]) + tDot(160, 30, F[3]) + tDot(182, 40, F[7]);
+    if (kind === 2) s += tSnake('M20 90 Q40 60 70 60', me, 10) + '<circle cx="120" cy="60" r="22" fill="none" stroke="' + P.ring + '" stroke-width="2"/><circle cx="136" cy="46" r="7" fill="' + P.knob + '"/><path d="M80 52 l10 -6 -2 11" fill="none" stroke="' + P.text + '" stroke-width="2.5" stroke-linecap="round"/>' +
       '<circle cx="176" cy="84" r="16" fill="#C84000" stroke="#fff" stroke-width="2"/><path d="M178 74 l-7 11 h6 l-3 9 8 -12 h-6 z" fill="#fff"/>';
-    if (kind === 3) s += tSnake('M15 30 Q70 30 100 60 T190 80', '#4FD1FF', 12) + tSnake('M80 100 Q90 85 98 66', PLAYER, 10) + '<path d="M92 56 l12 12 M104 56 l-12 12" stroke="#FF3B5C" stroke-width="3" stroke-linecap="round"/>' + tDot(30, 80, '#FFB84D') + tDot(45, 92, '#FFB84D') + tDot(20, 66, '#FFB84D');
+    if (kind === 3) s += tSnake('M15 30 Q70 30 100 60 T190 80', P.bots[0], 12) + tSnake('M80 100 Q90 85 98 66', me, 10) + '<path d="M92 56 l12 12 M104 56 l-12 12" stroke="' + P.wall + '" stroke-width="3" stroke-linecap="round"/>' + tDot(30, 80, F[1]) + tDot(45, 92, F[1]) + tDot(20, 66, F[1]);
     return s + '</svg>';
   }
   var TUT = [
