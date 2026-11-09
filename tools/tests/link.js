@@ -1,6 +1,6 @@
 'use strict';
 module.exports = function (T) {
-  const { ok, head, fs, path, vm, ROOT } = T;
+  const { ok, head, fs, path, vm, ROOT, LOCALE_CODES } = T;
   // Two phones over Nearby (choganhq/chogan-plus#4). The link itself is plain JavaScript in
   // the core; here two copies talk through a fake transport that can drop the connection,
   // so a lost move, a duplicate and a version mismatch are all exercised without phones.
@@ -84,6 +84,21 @@ module.exports = function (T) {
     E0.open({ role: 'host', game: 'reversi', version: '1', onStatus: (s, info) => es.push([s, info && info.message]) });
     net3.ends[0].cb({ type: 'error', message: 'permission' });
     ok(E0.status === 'error' && JSON.stringify(es[es.length - 1]) === '["error","permission"]', 'a native error shows as status error with its message');
+
+    // #744: the page must tell a refused permission, Bluetooth off and any other Nearby failure
+    // apart; one message for all three sent a player with Bluetooth on hunting for a permission.
+    const why = [];
+    const net4 = pair();
+    const E2 = sb.makeLink(() => net4.ends[0].t);
+    E2.open({ role: 'guest', game: 'reversi', version: '1', onStatus: (s, info) => { if (s === 'error') why.push(info); } });
+    ['permission', 'bluetooth', '8007: STATUS_BLUETOOTH_ERROR', 'boom'].forEach((m) => net4.ends[0].cb({ type: 'error', message: m }));
+    const got = why.map((i) => (i && i.reason) + '/' + (i && i.code));
+    ok(got.join() === 'permission/,bluetooth/,other/8007,other/', 'a native error carries its reason and Nearby code (' + got.join() + ')');
+    // Reversi shows each reason in its own words, in every language
+    const rvs = fs.readFileSync(path.join(ROOT, 'www/games/reversi/index.html'), 'utf8');
+    const miss = ['linkPermission', 'linkBluetooth', 'linkError'].filter((k) => (rvs.match(new RegExp('[ ,{]' + k + ": '", 'g')) || []).length !== LOCALE_CODES.length);
+    ok(!miss.length, 'Reversi has a message for each link failure in every language' + (miss.length ? ' (' + miss.join(', ') + ')' : ''));
+    ok(/why\.reason === 'permission'\) return C\.t\('linkPermission'\)/.test(rvs) && /why\.reason === 'bluetooth'\) return C\.t\('linkBluetooth'\)/.test(rvs) && /why\.code \? ' \(' \+ why\.code \+ '\)'/.test(rvs), 'Reversi picks the message by reason and shows the code of any other failure');
 
     // #693: the hint is a sentence inside .ch-badge, which never wraps, so on a phone it ran off
     // both edges. Its own rule must let it wrap; the Playwright proof in the PR measured the box.

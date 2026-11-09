@@ -3580,8 +3580,12 @@
         peer = null; said = false;
         set('lost');
       } else if (ev.type === 'error') {
-        // No permission, Bluetooth off, Play Services missing: the page says why
-        set('error', { message: String(ev.message || '') });
+        // #744: one message for every failure sent a player with Bluetooth on hunting for a
+        // permission (and the other way round). The plugin names the two a player can fix
+        // ("permission", "bluetooth"); anything else is a Nearby ApiException, "<code>: …",
+        // whose code the page shows so a report can name it.
+        var msg = String(ev.message || ''), code = (msg.match(/^\s*(\d+)/) || [])[1] || '';
+        set('error', { message: msg, reason: msg === 'permission' || msg === 'bluetooth' ? msg : 'other', code: code });
       } else if (ev.type === 'message') {
         var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
         if (!m || typeof m !== 'object') return;
