@@ -454,7 +454,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ReversiEng
       S.link = was && was.mode === 'net' ? was.link : 'idle';
       S.peerName = was && was.mode === 'net' ? was.peerName : '';
       S.linkWhy = was && was.mode === 'net' ? was.linkWhy : null;
+      // #752: both phones count their boards, so a resync after a restart knows which is newer
+      S.g = was && was.mode === 'net' ? (was.g | 0) + 1 : 0;
     } else if (was && was.mode === 'net') {
+      wantLink = null;
       C.link.close();
     }
     if (daily) {
@@ -619,26 +622,57 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ReversiEng
     if (why.reason === 'bluetooth') return C.t('linkBluetooth');
     return C.t(LINK_TEXT[S.link] || 'linkPick') + (S.link === 'error' && why.code ? ' (' + why.code + ')' : '');
   }
+  var wantLink = null;
   function openLink(role) {
     S.side = role === 'host' ? 1 : 2;
     S.link = 'idle';
+    wantLink = role;
     C.link.open({
       role: role, game: 'reversi', version: C.version, name: C.state.profile.name || '',
       onStatus: function (st, info) {
         if (!S || S.mode !== 'net') return;
+        if (st === 'mismatch') wantLink = null;
         S.link = st;
         S.linkWhy = st === 'error' ? info : null;
-        if (st === 'connected') C.link.send({ t: 'name', name: C.state.profile.name || '' });
+        if (st === 'connected') {
+          C.link.send({ t: 'name', name: C.state.profile.name || '' });
+          // #752: after an app switch either phone may have restarted or missed a move;
+          // each says where its board is and the one behind catches up
+          C.link.send({ t: 'sync', g: S.g | 0, moves: S.history.map(function (h) { return h.i; }) });
+        }
         render();
       },
       onMessage: onNet
     });
     render();
   }
+  // The newer board wins: a later game, else the longer of two move lists that agree; if
+  // they disagree (a move lost both ways), the host's board stands.
+  function onSync(d) {
+    var theirs = Array.isArray(d.moves) ? d.moves : [], g = d.g | 0, mine = S.history.map(function (h) { return h.i; });
+    if (g < (S.g | 0)) return;
+    var take = g > (S.g | 0);
+    if (!take) {
+      var same = true;
+      for (var k = 0; k < Math.min(mine.length, theirs.length); k++) if (mine[k] !== theirs[k]) same = false;
+      take = same ? theirs.length > mine.length : S.side === 2;
+    }
+    if (!take) return;
+    var st = E.newState('2p'), T = { board: st.board, turn: st.turn, history: [] };
+    for (var j = 0; j < theirs.length; j++) {
+      if (!(theirs[j] >= 0 && theirs[j] < 64) || !E.applyMove(T, theirs[j])) return;
+    }
+    anim = null;
+    S.board = T.board; S.turn = T.turn; S.history = T.history; S.g = g;
+    S.done = false; S.last = theirs.length ? theirs[theirs.length - 1] : -1;
+    render(); drawPlayers(); draw(); save();
+    if (E.isOver(S.board)) finish();
+  }
   function onNet(d) {
     if (!S || S.mode !== 'net' || !d) return;
     if (d.t === 'name') { S.peerName = String(d.name || '').slice(0, 16); drawPlayers(); }
     else if (d.t === 'new') newGame('net', S.level);
+    else if (d.t === 'sync') onSync(d);
     else if (d.t === 'move') {
       if (S.done || S.turn === S.side || d.n !== S.history.length) return;
       if (!(d.i >= 0 && d.i < 64) || !E.flipsFor(S.board, d.i, S.turn).length) return;
@@ -646,6 +680,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ReversiEng
     }
   }
   window.addEventListener('pagehide', function () { if (S && S.mode === 'net') C.link.close(); });
+  // If the page was hidden long enough for the link to be closed, coming back reopens it
+  C.onResume(function () {
+    if (S && S.mode === 'net' && wantLink && C.link.status === 'idle') openLink(wantLink);
+  });
 
   function render() {
     top.innerHTML = '';
@@ -862,13 +900,16 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ReversiEng
   /* --------------------------------------------------------- ذخیره */
 
   ctx.autosave(function () {
-    // A two-phone game cannot be resumed alone, so it is never kept
-    if (!S || S.done || !S.history.length || S.mode === 'net') return { inProgress: false };
+    // #752: a two-phone game is kept too, with its role, because Android may kill the app
+    // during a switch; the reopened game reconnects and resyncs with the other phone
+    if (!S || S.done || !S.history.length || (S.mode === 'net' && !S.side)) return { inProgress: false };
     return {
       s: {
         mode: S.mode, level: S.level, daily: S.daily,
         board: S.board, turn: S.turn, history: S.history, last: S.last,
-        elapsed: Date.now() - S.startedAt
+        elapsed: Date.now() - S.startedAt,
+        side: S.mode === 'net' ? S.side : undefined, g: S.mode === 'net' ? S.g | 0 : undefined,
+        peerName: S.mode === 'net' ? S.peerName || '' : undefined
       },
       prefs: prefs
     };
@@ -881,9 +922,16 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ReversiEng
       board: v.board, turn: v.turn, history: v.history, last: typeof v.last === 'number' ? v.last : -1,
       done: false, startedAt: Date.now() - (v.elapsed || 0)
     };
+    // A two-phone game needs the link: without Chogan Plus's plugin it goes on as one phone
+    if (v.mode === 'net') {
+      if (C.link.available() && (v.side === 1 || v.side === 2)) {
+        S.side = v.side; S.g = v.g | 0; S.peerName = String(v.peerName || ''); S.link = 'idle'; S.linkWhy = null;
+      } else S.mode = '2p';
+    }
     render();
     // اگر صفحه درست بعد از حرکت آخر بسته شده بود، دست تمام‌شده باید نتیجه بگیرد نه قفل بماند
     if (E.isOver(S.board)) finish(); else maybeAi();
+    if (S.mode === 'net' && !S.done) openLink(S.side === 1 ? 'host' : 'guest');
   }
   function validSave(sv) {
     return !!(sv && sv.s && Array.isArray(sv.s.board) && sv.s.board.length === 64 &&

@@ -66,6 +66,24 @@ module.exports = function (T) {
     net.ends[1].cb({ type: 'message', id: 'pX', data: JSON.stringify({ k: 'data', n: 3, d: { i: 5 } }) });
     ok(got1.length === 2, 'a message from another endpoint is ignored');
 
+    // #752: Android kills a backgrounded app on a small phone, and the reopened game opens
+    // the link again from zero. The other side must notice the new session instead of
+    // waiting for the old numbering, and must not replay the old session's messages.
+    net.drop();
+    const R1 = sb.makeLink(() => net.ends[1].t), gotR = [];
+    R1.open({ role: 'guest', game: 'reversi', version: '1', onMessage: (d) => gotR.push(d) });
+    const before0 = got0.length;
+    const prevStatus = L0.status;
+    net.connect();
+    ok(prevStatus === 'lost' && L0.status === 'connected' && R1.status === 'connected', 'a restarted side reconnects (' + prevStatus + ' → ' + L0.status + '/' + R1.status + ')');
+    ok(gotR.length === 0, 'the old session\'s messages are not replayed to a restarted side (' + JSON.stringify(gotR) + ')');
+    L0.send({ i: 44 }); R1.send({ i: 45 });
+    ok(JSON.stringify(gotR) === '[{"i":44}]', 'after a restart the other side\'s next message arrives (' + JSON.stringify(gotR) + ')');
+    ok(JSON.stringify(got0.slice(before0)) === '[{"i":45}]', 'after a restart the restarted side\'s message arrives (' + JSON.stringify(got0.slice(before0)) + ')');
+    // and an ordinary drop after that still resends what was missed
+    net.drop(); R1.send({ i: 46 }); net.connect();
+    ok(JSON.stringify(got0.slice(before0)) === '[{"i":45},{"i":46}]', 'a later drop still resends the missed message');
+
     L0.close();
     ok(net.ends[0].stopped && L0.status === 'idle', 'close stops the transport');
 
