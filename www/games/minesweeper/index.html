@@ -62,7 +62,9 @@
   .ms-cell--wrong { background: var(--c-bad-soft); color: var(--c-bad); }
   .ms-cell--hint { outline: 3px solid var(--c-good); outline-offset: -3px; }
   .ms-cell--cursor { outline: 3px solid var(--game); outline-offset: -3px; }
-  .ms-cell svg { width: 68%; height: 68%; }
+  /* the press lands on the button itself, so nothing inside it can be swapped out from under
+     a finger: Chrome sends no click when the element a press began on has gone (#750) */
+  .ms-cell svg { width: 68%; height: 68%; pointer-events: none; }
   .ms-n1 { color: #4C7DBE; } .ms-n2 { color: #4A8A5C; } .ms-n3 { color: #C8574B; }
   .ms-n4 { color: #6A4FA3; } .ms-n5 { color: #B06B2E; } .ms-n6 { color: #2D8C97; }
   .ms-n7 { color: #6A6A6A; } .ms-n8 { color: #9A2F2F; }
@@ -413,7 +415,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
   var dailyDate = params.get('daily');
   var prefs = ctx.store.get('prefs', { size: 'small', custom: { rows: 12, cols: 12, mines: 24 } });
 
-  var S = null, cells = [], timerId = null, flagMode = false, cursor = 0, lastAt = -1, pressTimer = null, longFired = false;
+  var S = null, cells = [], timerId = null, flagMode = false, cursor = 0, lastAt = -1;
+  // what each cell shows now, so paint() can leave an unchanged cell alone (#750)
+  var shownCls = [], shownBody = [];
   // how long a press must last to flag, on the screen and on Space or Enter alike (#346)
   var LONG_MS = 420, keyHold = null;
 
@@ -514,10 +518,16 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
     var sp = S.spec;
     board.innerHTML = '';
     cells = [];
+    shownCls = [];
+    shownBody = [];
     board.style.setProperty('--cols', sp.cols);
     sizeCells();
     for (var i = 0; i < sp.rows * sp.cols; i++) {
       (function (idx) {
+        // Each cell has its own press. With one shared timer a second finger overwrote the
+        // first press's timer, which then could not be cancelled and flagged its cell
+        // a moment later, unasked (#750).
+        var pressTimer = null, longFired = false;
         var b = el('button', { class: 'ms-cell', type: 'button', role: 'gridcell' });
         // Tab and the arrows used to select two different cells, and Enter opened the
         // tabbed one (#331): focus and the cursor are now always the same cell
@@ -526,6 +536,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
         });
         b.addEventListener('pointerdown', function (e) {
           longFired = false;
+          clearTimeout(pressTimer);
           if (e.pointerType !== 'mouse') {
             pressTimer = setTimeout(function () { longFired = true; toggleFlag(idx); }, LONG_MS);
           }
@@ -632,26 +643,37 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
     paint();
   }
 
+  // Writes only what changed. It used to rebuild every cell, up to 480 of them on each tap,
+  // and focus moving to a new cell repainted too, so tapping a flag beside the last cell
+  // replaced that flag mid-tap and the click was lost (#750).
   function paint() {
     var sp = S.spec;
     for (var i = 0; i < sp.rows * sp.cols; i++) {
       var b = cells[i];
       if (!b) continue;
-      var cls = 'ms-cell';
-      b.innerHTML = '';
+      var cls = 'ms-cell', body = '';
       if (S.revealed[i]) {
         cls += ' ms-cell--open';
         var v = S.num ? S.num[i] : 0;
-        if (v > 0 && v < 9) { cls += ' ms-n' + v; b.textContent = C.num(v); }
-        if (S.mine && S.mine[i]) { cls += ' ms-cell--mine'; b.appendChild(C.icon('mine', 18)); }
+        if (v > 0 && v < 9) { cls += ' ms-n' + v; body = C.num(v); }
+        if (S.mine && S.mine[i]) { cls += ' ms-cell--mine'; body = 'mine'; }
       } else if (S.flagged[i]) {
         cls += ' ms-cell--flag';
-        b.appendChild(C.icon('flag', 18));
+        body = 'flag';
         if (S.done && S.mine && !S.mine[i]) cls += ' ms-cell--wrong';
       }
       if (i === cursor && document.documentElement.dataset.kb === '1') cls += ' ms-cell--cursor';
-      b.className = cls;
-      b.tabIndex = i === cursor ? 0 : -1;
+      if (body !== shownBody[i]) {
+        shownBody[i] = body;
+        if (body === 'mine' || body === 'flag') {
+          b.textContent = '';
+          b.appendChild(C.icon(body, 18));
+        } else {
+          b.textContent = body;
+        }
+      }
+      if (cls !== shownCls[i]) { shownCls[i] = cls; b.className = cls; }
+      if ((b.tabIndex === 0) !== (i === cursor)) b.tabIndex = i === cursor ? 0 : -1;
     }
     ctx.setStat('mines', Math.max(0, sp.mines - S.flags));
   }
@@ -687,18 +709,24 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
     return order;
   }
 
+  // Only the cells around the finger pop; the rest of a big opening just fades open. Every
+  // cell of it animating at once took about a second of main-thread time on a slowed phone
+  // (#750), and past this many the stagger had already run out, so they only popped together.
+  var MAX_POP = 48;
   function animate(order) {
     paint();
     if (C.ui.reduceMotion() || order.length < 2) return;
-    for (var k = 0; k < order.length; k++) {
+    var popped = [];
+    for (var k = 0; k < order.length && k < MAX_POP; k++) {
       var b = cells[order[k]];
       if (!b) continue;
       b.classList.add('ms-pop');
-      b.style.animationDelay = Math.min(k * 9, 420) + 'ms';
-      (function (node) {
-        setTimeout(function () { node.classList.remove('ms-pop'); node.style.animationDelay = ''; }, 700);
-      })(b);
+      b.style.animationDelay = k * 9 + 'ms';
+      popped.push(b);
     }
+    setTimeout(function () {
+      popped.forEach(function (node) { node.classList.remove('ms-pop'); node.style.animationDelay = ''; });
+    }, 700);
   }
 
   function chord(idx) {
