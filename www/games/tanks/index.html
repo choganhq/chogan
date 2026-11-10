@@ -49,6 +49,8 @@
   .tk-dial__val { min-width: 4.2ch; text-align: center; font-weight: 800; font-variant-numeric: tabular-nums; }
   .tk-dial__lbl { font-size: var(--fs-xs); color: var(--c-text-dim); }
   .tk-gear .ch-icon { pointer-events: none; }
+  /* the two-phone link state can be a long sentence (the permission path): let it wrap */
+  .tk-top .tk-link { white-space: normal; text-align: center; max-width: 100%; line-height: 1.4; padding: 4px 12px; border-radius: var(--r-md); }
 </style>
 </head>
 <body>
@@ -254,15 +256,41 @@ function TanksEngineFactory() {
       power: Math.max(5, Math.min(100, Math.round((best.power + gauss(rnd) * sp.p) * 10) / 10)) };
   }
 
-  function validMatch(M) {
+  // ended: a two-phone sync may carry the finished match, which a save never does
+  function validMatch(M, ended) {
     if (!M || !Array.isArray(M.h) || M.h.length !== W + 1 || !Array.isArray(M.tanks) || M.tanks.length !== 2) return false;
     if (!Array.isArray(M.score) || !Array.isArray(M.shots) || !Array.isArray(M.moves) || !Array.isArray(M.ammo) || !(M.turn === 0 || M.turn === 1)) return false;
-    if (over(M) || M.shots.some(function (s) { return s < 0 || s > SHOTS; }) || Math.abs(M.wind) > WIND) return false;
+    if ((!ended && over(M)) || M.shots.some(function (s) { return s < 0 || s > SHOTS; }) || Math.abs(M.wind) > WIND) return false;
     return M.h.every(function (v) { return typeof v === 'number' && v >= 0 && v <= H; }) && M.tanks.every(function (t) { return t.x >= 0 && t.x <= W; });
   }
 
+  /* Two phones (#754): each phone runs the same shots on the same field, so only a turn's
+     input travels. Everything a match holds is a whole number (heights, places, points,
+     wind), so a 32-bit FNV-1a over it is a cheap check that the two phones still agree. */
+  function digest(M) {
+    var x = 0x811c9dc5;
+    function add(v) { v = v | 0; for (var k = 0; k < 32; k += 8) { x ^= (v >>> k) & 255; x = Math.imul(x, 16777619) >>> 0; } }
+    M.h.forEach(add);
+    add(M.tanks[0].x); add(M.tanks[1].x);
+    M.score.forEach(add); M.shots.forEach(add); M.moves.forEach(add);
+    for (var s = 0; s < 2; s++) ORDER.forEach(function (a) { add(M.ammo[s][a]); });
+    add(M.turn); add(M.wind); add(M.n);
+    return ('0000000' + x.toString(16)).slice(-8);
+  }
+  // Which match stands when the two phones compare (on every connect, and after a
+  // mismatch): a later match, else the one with more shots fired; at the same shot a
+  // different field or digest means one phone went wrong, and the host's stands.
+  // 'take': adopt theirs; 'tell': they are behind, answer with ours; 'keep': nothing to do.
+  function syncPick(mine, theirs, guest) {
+    if ((theirs.g | 0) !== (mine.g | 0)) return (theirs.g | 0) > (mine.g | 0) ? 'take' : 'tell';
+    if ((theirs.n | 0) !== (mine.n | 0)) return (theirs.n | 0) > (mine.n | 0) ? 'take' : 'tell';
+    if (theirs.seed !== mine.seed || theirs.sum !== mine.sum) return guest ? 'take' : 'keep';
+    return 'keep';
+  }
+
   return { W: W, H: H, TW: TW, TH: TH, WIND: WIND, SHOTS: SHOTS, MOVES: MOVES, ARMS: ARMS, ORDER: ORDER, SPREAD: SPREAD, terrain: terrain, groundY: groundY,
-    tankY: tankY, match: match, left: left, simulate: simulate, fire: fire, over: over, winner: winner, move: move, hand: hand, dig: dig, build: build, aim: aim, botPlan: botPlan, validMatch: validMatch };
+    tankY: tankY, match: match, left: left, simulate: simulate, fire: fire, over: over, winner: winner, move: move, hand: hand, dig: dig, build: build, aim: aim, botPlan: botPlan, validMatch: validMatch,
+    digest: digest, syncPick: syncPick };
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngineFactory;
 /* ==== ENGINE END ==== */
@@ -295,7 +323,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
         rules: 'دو تانک روی تپه‌ها به نوبت شلیک می‌کنند؛ هر کدام ده شلیک دارد. زاویه و قدرت را تو تعیین می‌کنی؛ جاذبه گلوله را پایین می‌کشد و باد، که هر نوبت عوض می‌شود، آن را به چپ یا راست می‌برد. هر انفجار زمین را می‌کند و خاک بالایش پایین می‌ریزد. امتیاز همان آسیبی است که به تانک حریف می‌زنی؛ آسیب به خودت امتیاز حریف می‌شود. موشک‌ها: گلوله‌ی معمولی، سنگین با انفجار بزرگ، سه‌تایی که بادبزنی پخش می‌شود، غلتان که در سراشیبی می‌غلتد و بعد منفجر می‌شود، و خاک که تپه‌ای برای پناه می‌سازد. در هر مسابقه چهار بار می‌توانی تانکت را یک قدم جابه‌جا کنی. بعد از بیست شلیک، امتیاز بیشتر برنده است. نشانه‌گیری را از چرخ‌دنده عوض کن: کشیدن یا عدد.',
         tutTitle1: 'هدف', tutText1: 'به تانک حریف شلیک کن؛ هر آسیب امتیاز توست. بعد از ده شلیک هر نفر، امتیاز بیشتر می‌برد.',
         tutTitle2: 'نشانه بگیر', tutText2: 'از هر جای میدان بگیر و به عقب بکش، مثل فلاخن؛ زاویه و قدرت کنار پیکان نوشته می‌شود. باد را پایین صفحه ببین.',
-        tutTitle3: 'موشک و حرکت', tutText3: 'موشک را از ردیف زیر میدان انتخاب کن. با دکمه‌های قدم، تا چهار بار تانکت را جابه‌جا کن.'
+        tutTitle3: 'موشک و حرکت', tutText3: 'موشک را از ردیف زیر میدان انتخاب کن. با دکمه‌های قدم، تا چهار بار تانکت را جابه‌جا کن.',
+        twoPhones: 'دو گوشی', hostGame: 'میزبان', joinGame: 'مهمان', rival: 'حریف', linkSearching: 'در جست‌وجوی گوشی دیگر…', linkConnected: 'وصل شد',
+        linkLost: 'اتصال قطع شد؛ دوباره دنبالش می‌گردد…', linkMismatch: 'نسخه‌ی دو گوشی یکی نیست؛ هر دو را به‌روز کن', linkError: 'اتصال راه نیفتاد؛ دوباره امتحان کن',
+        linkPermission: 'اجازه‌ی «دستگاه‌های نزدیک» داده نشده: تنظیمات ← برنامه‌ها ← چوگان پلاس ← اجازه‌ها', linkBluetooth: 'بلوتوث خاموش است؛ روشنش کن و دوباره امتحان کن',
+        linkPick: 'یک گوشی میزبان شود و دیگری مهمان. میزبان تانک چپ است و اول شلیک می‌کند.'
       },
       en: {
         field: 'A field and two tanks', vsBot: 'Against the bot', people: 'Two players', bot: 'Bot', playerN: 'Player {n}', newMatch: 'New match',
@@ -310,7 +342,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
         rules: 'Two tanks on the hills take turns firing; each has ten shots. You choose the angle and power; gravity pulls the shot down and the wind, which changes every turn, pushes it left or right. Every blast digs out the ground, and the earth above falls in. Your points are the damage you do to the other tank; damage to yourself scores for the other. Weapons: the plain shell, the heavy one with a big blast, the triple that fans out, the roller that runs downhill and then goes off, and dirt that builds a mound to hide behind. Four times a match you can move your tank a step. After twenty shots the higher score wins. Switch the aiming behind the gear: drag or numbers.',
         tutTitle1: 'The goal', tutText1: 'Fire at the other tank; every bit of damage is your points. After ten shots each, the higher score wins.',
         tutTitle2: 'Aim', tutText2: 'Grab anywhere on the field and pull back like a slingshot; the angle and power show by the arrow. Watch the wind at the bottom.',
-        tutTitle3: 'Weapons and moves', tutText3: 'Pick a weapon from the row under the field. The step buttons move your tank, four times a match.'
+        tutTitle3: 'Weapons and moves', tutText3: 'Pick a weapon from the row under the field. The step buttons move your tank, four times a match.',
+        twoPhones: 'Two phones', hostGame: 'Host', joinGame: 'Join', rival: 'Rival', linkSearching: 'Looking for the other phone…', linkConnected: 'Connected',
+        linkLost: 'Connection lost; looking again…', linkMismatch: 'The two phones run different versions; update both', linkError: 'Could not connect; try again',
+        linkPermission: 'The nearby devices permission is off: Settings → Apps → Chogan Plus → Permissions', linkBluetooth: 'Bluetooth is off; turn it on and try again',
+        linkPick: 'One phone hosts, the other joins. The host is the left tank and fires first.'
       },
       pl: {
         field: 'Pole bitwy i dwa czołgi', vsBot: 'Przeciwko botowi', people: 'Dwóch graczy', bot: 'Bot', playerN: 'Gracz {n}', newMatch: 'Nowy mecz',
@@ -325,7 +361,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
         rules: 'Dwa czołgi stojące na wzgórzach na zmianę oddają strzały; każdy ma do dyspozycji dziesięć strzałów. Wybierasz kąt i siłę; grawitacja ściąga pocisk w dół, a wiatr, który zmienia się w każdej turze, spycha go w lewo lub w prawo. Każdy wybuch niszczy i drąży podłoże, powodując osypywanie się ziemi. Twoje punkty to obrażenia zadane drugiemu czołgowi; obrażenia zadane samemu sobie trafiają na konto przeciwnika. Bronie: zwykły pocisk, ciężki pocisk o dużym polu rażenia, potrójny rozpadający się wachlarzowo, toczny, który stacza się ze zbocza przed wybuchem, oraz ziemny, tworzący nasyp chroniący przed ostrzałem. W trakcie meczu możesz przesunąć swój czołg o krok maksymalnie cztery razy. Po dwudziestu strzałach wygrywa gracz z wyższym wynikiem. Tryb celowania zmienisz pod ikoną koła zębatego: za pomocą przeciągania lub wpisywania liczb.',
         tutTitle1: 'Cel gry', tutText1: 'Strzelaj do drugiego czołgu; każde zadane obrażenie to punkty na Twoim koncie. Po dziesięciu strzałach każdego gracza wygrywa osoba z wyższym wynikiem.',
         tutTitle2: 'Celowanie', tutText2: 'Chwyć w dowolnym miejscu na polu bitwy i pociągnij jak z procy; kąt oraz siła wyświetlą się przy strzałce. Obserwuj wskaźnik wiatru na dole ekranu.',
-        tutTitle3: 'Bronie i ruch', tutText3: 'Wybierz broń z paska pod polem bitwy. Przyciski kroków pozwalają na przesunięcie czołgu – maksymalnie cztery razy na mecz.'
+        tutTitle3: 'Bronie i ruch', tutText3: 'Wybierz broń z paska pod polem bitwy. Przyciski kroków pozwalają na przesunięcie czołgu – maksymalnie cztery razy na mecz.',
+        twoPhones: 'Dwa telefony', hostGame: 'Gospodarz', joinGame: 'Dołącz', rival: 'Rywal', linkSearching: 'Szukam drugiego telefonu…', linkConnected: 'Połączono',
+        linkLost: 'Połączenie przerwane; szukam ponownie…', linkMismatch: 'Telefony mają różne wersje; zaktualizuj oba', linkError: 'Nie udało się połączyć; spróbuj ponownie',
+        linkPermission: 'Brak uprawnienia do urządzeń w pobliżu: Ustawienia → Aplikacje → Chogan Plus → Uprawnienia', linkBluetooth: 'Bluetooth jest wyłączony; włącz go i spróbuj ponownie',
+        linkPick: 'Jeden telefon jest gospodarzem, drugi dołącza. Gospodarz ma lewy czołg i strzela pierwszy.'
       },
       zh: {
         field: '战场和两辆坦克', vsBot: '对战电脑', people: '双人', bot: '电脑', playerN: '玩家 {n}', newMatch: '新比赛',
@@ -340,7 +380,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
         rules: '两辆坦克在山丘上轮流开火，每辆十发。角度和力度由你决定；重力把炮弹往下拉，每回合都会变化的风把它往左或往右吹。每次爆炸都会炸掉地面，上面的土会塌下来。你的得分就是你对对方坦克造成的伤害；伤到自己则算对方得分。武器：普通炮弹、爆炸范围大的重弹、扇形散开的三连发、沿下坡滚动后爆炸的滚弹，以及堆出掩护土丘的土堆。每场比赛你可以移动坦克四次，每次一步。二十发之后得分高者获胜。在齿轮里切换瞄准方式：拖动或数字。',
         tutTitle1: '目标', tutText1: '向对方坦克开火；造成的伤害就是你的得分。每人十发之后，得分高者获胜。',
         tutTitle2: '瞄准', tutText2: '在战场任意位置按住，像弹弓一样往后拉；箭头旁显示角度和力度。注意底部的风。',
-        tutTitle3: '武器和移动', tutText3: '在战场下方的一排里选择武器。用移动按钮移动坦克，每场四次。'
+        tutTitle3: '武器和移动', tutText3: '在战场下方的一排里选择武器。用移动按钮移动坦克，每场四次。',
+        twoPhones: '两部手机', hostGame: '主机', joinGame: '加入', rival: '对手', linkSearching: '正在寻找另一部手机…', linkConnected: '已连接',
+        linkLost: '连接已断开，正在重新寻找…', linkMismatch: '两部手机版本不同，请都更新', linkError: '无法连接，请重试',
+        linkPermission: '未授予“附近设备”权限：设置 → 应用 → Chogan Plus → 权限', linkBluetooth: '蓝牙已关闭，请打开后重试',
+        linkPick: '一部手机做主机，另一部加入。主机是左边的坦克，先开火。'
       },
       de: {
         field: 'Ein Feld und zwei Panzer', vsBot: 'Gegen den Bot', people: 'Zu zweit', bot: 'Bot', playerN: 'Spieler {n}', newMatch: 'Neues Spiel',
@@ -355,7 +399,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
         rules: 'Zwei Panzer auf den Hügeln schießen abwechselnd; jeder hat zehn Schuss. Du wählst Winkel und Kraft; die Schwerkraft zieht den Schuss nach unten, und der Wind, der jede Runde wechselt, schiebt ihn nach links oder rechts. Jede Explosion reißt den Boden auf, und die Erde darüber rutscht nach. Deine Punkte sind der Schaden am anderen Panzer; Schaden an dir selbst zählt für den anderen. Waffen: die normale Granate, die schwere mit großer Explosion, die dreifache, die sich auffächert, der Roller, der bergab rollt und dann losgeht, und Erde, die einen Hügel zum Schutz aufwirft. Viermal pro Spiel kannst du deinen Panzer einen Schritt bewegen. Nach zwanzig Schuss gewinnt die höhere Punktzahl. Das Zielen wechselst du hinter dem Zahnrad: Ziehen oder Zahlen.',
         tutTitle1: 'Das Ziel', tutText1: 'Schieß auf den anderen Panzer; jeder Schaden sind deine Punkte. Nach zehn Schuss pro Spieler gewinnt die höhere Punktzahl.',
         tutTitle2: 'Zielen', tutText2: 'Greif irgendwo ins Feld und zieh zurück wie eine Schleuder; Winkel und Kraft stehen am Pfeil. Achte unten auf den Wind.',
-        tutTitle3: 'Waffen und Züge', tutText3: 'Wähle eine Waffe in der Reihe unter dem Feld. Mit den Schritt-Tasten bewegst du deinen Panzer, viermal pro Spiel.'
+        tutTitle3: 'Waffen und Züge', tutText3: 'Wähle eine Waffe in der Reihe unter dem Feld. Mit den Schritt-Tasten bewegst du deinen Panzer, viermal pro Spiel.',
+        twoPhones: 'Zwei Handys', hostGame: 'Gastgeber', joinGame: 'Beitreten', rival: 'Gegner', linkSearching: 'Suche das andere Handy…', linkConnected: 'Verbunden',
+        linkLost: 'Verbindung verloren; suche erneut…', linkMismatch: 'Die Handys haben verschiedene Versionen; aktualisiere beide', linkError: 'Keine Verbindung; versuche es erneut',
+        linkPermission: 'Die Berechtigung „Geräte in der Nähe“ fehlt: Einstellungen → Apps → Chogan Plus → Berechtigungen', linkBluetooth: 'Bluetooth ist aus; schalte es ein und versuche es erneut',
+        linkPick: 'Ein Handy ist Gastgeber, das andere tritt bei. Der Gastgeber hat den linken Panzer und schießt zuerst.'
       },
       es: {
         field: 'Un campo y dos tanques', vsBot: 'Contra el bot', people: 'Dos jugadores', bot: 'Bot', playerN: 'Jugador {n}', newMatch: 'Nueva partida',
@@ -370,7 +418,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
         rules: 'Dos tanques en las colinas disparan por turnos; cada uno tiene diez disparos. Tú eliges el ángulo y la fuerza; la gravedad tira del disparo hacia abajo y el viento, que cambia cada turno, lo empuja a izquierda o derecha. Cada explosión excava el suelo y la tierra de encima se derrumba. Tus puntos son el daño que haces al otro tanque; el daño a ti mismo cuenta para el otro. Armas: el obús normal, el pesado con una gran explosión, el triple que se abre en abanico, el rodante que baja la pendiente y luego estalla, y la tierra, que levanta un montículo para cubrirse. Cuatro veces por partida puedes mover tu tanque un paso. Tras veinte disparos gana la puntuación más alta. Cambia la forma de apuntar tras el engranaje: arrastrar o números.',
         tutTitle1: 'El objetivo', tutText1: 'Dispara al otro tanque; cada daño son tus puntos. Tras diez disparos cada uno, gana la puntuación más alta.',
         tutTitle2: 'Apunta', tutText2: 'Agarra cualquier punto del campo y tira hacia atrás como un tirachinas; el ángulo y la fuerza aparecen junto a la flecha. Mira el viento abajo.',
-        tutTitle3: 'Armas y pasos', tutText3: 'Elige un arma en la fila bajo el campo. Los botones de paso mueven tu tanque, cuatro veces por partida.'
+        tutTitle3: 'Armas y pasos', tutText3: 'Elige un arma en la fila bajo el campo. Los botones de paso mueven tu tanque, cuatro veces por partida.',
+        twoPhones: 'Dos móviles', hostGame: 'Anfitrión', joinGame: 'Unirse', rival: 'Rival', linkSearching: 'Buscando el otro móvil…', linkConnected: 'Conectado',
+        linkLost: 'Conexión perdida; buscando de nuevo…', linkMismatch: 'Los móviles tienen versiones distintas; actualiza ambos', linkError: 'No se pudo conectar; vuelve a intentarlo',
+        linkPermission: 'Falta el permiso de dispositivos cercanos: Ajustes → Aplicaciones → Chogan Plus → Permisos', linkBluetooth: 'El Bluetooth está apagado; actívalo y vuelve a intentarlo',
+        linkPick: 'Un móvil es anfitrión y el otro se une. El anfitrión es el tanque de la izquierda y dispara primero.'
       }
     }
   });
@@ -403,28 +455,143 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
 
   /* ------------------------------------------------------------ setup */
 
+  // Two phones (#754) draw the field and every wind from the host's seed, so both phones
+  // play the same match from the shots alone
   function rngFor(tag) { return G.daily ? C.daily('tanks', G.daily + '|' + tag).rng : Math.random; }
+  // two phones (#754): both draw the field and the wind from the host's seed, never
+  // Math.random, or the same shot would land on two different fields
+  function seeded(tag) { return G.mode === 'net' ? C.daily('tanks', 'net|' + G.seed + '|' + tag).rng : rngFor(tag); }
+  function clone(M) { return JSON.parse(JSON.stringify(M)); }
 
   function newGame(o) {
     stop();
-    var daily = o.daily || null;
+    var daily = o.daily || null, was = G && G.mode === 'net' ? G : null;
+    if (was && o.mode !== 'net') { C.link.close(); wantLink = null; }
     G = { mode: daily ? 'bot' : o.mode, level: daily ? 'medium' : o.level, daily: daily, startedAt: Date.now(), done: false, phase: 'aim', best: 0 };
-    G.M = E.match(rngFor('field'));
-    if (!daily) { prefs.mode = o.mode; prefs.level = o.level; ctx.store.set('prefs', prefs); }
+    if (G.mode === 'net') {
+      // a new match carries the link over; g counts matches, so the newer one wins a sync
+      G.side = was ? was.side : null; G.link = was ? was.link : 'idle'; G.linkWhy = was ? was.linkWhy : null; G.peerName = was ? was.peerName : '';
+      G.g = was ? (was.g | 0) + 1 : 0;
+      G.seed = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+      G.sent = null; G.steps = []; G.inbox = null;
+    }
+    G.M = E.match(seeded('field'));
+    if (G.mode === 'net') G.M0 = clone(G.M);
+    // The two-phone mode is not remembered: the next visit may be in an app without it
+    if (!daily && G.mode !== 'net') { prefs.mode = o.mode; prefs.level = o.level; ctx.store.set('prefs', prefs); }
     flight = null; blasts = []; floaters = []; aiming = null; msg = ''; arm = 'shell';
     render();
     save();
+    if (G.mode === 'net' && G.link === 'connected') sendSync();
     startTurn();
   }
   function current() { return { mode: G.mode, level: G.level }; }
   function fromPrefs() { return { mode: prefs.mode, level: prefs.level }; }
 
   function isBot(seat) { return G.mode === 'bot' && seat === 1; }
+  // in two phones the other seat is played on the other phone
+  function isRemote(seat) { return G.mode === 'net' && seat !== G.side; }
   function stop() { if (timer) { clearTimeout(timer); timer = null; } }
   function later(fn, ms) { stop(); timer = setTimeout(function () { timer = null; fn(); }, ms); }
   function pname(seat) {
+    if (G.mode === 'net') return seat === G.side ? (C.state.profile.name || C.t('you')) : (G.peerName || C.t('rival'));
     if (seat === 0) return G.mode === 'people' ? C.t('playerN', { n: C.num(1) }) : (C.state.profile.name || C.t('you'));
     return isBot(seat) ? C.t('bot') : C.t('playerN', { n: C.num(2) });
+  }
+
+  /* -------------------------------------------- Two phones (Chogan Plus) */
+  // Only Chogan Plus has the Nearby plugin; elsewhere the option is never shown. The host
+  // is the left tank and fires first. A turn travels as its input only (steps, weapon,
+  // angle, power) with the shot number it was fired at and a digest of the match after it;
+  // the watching phone plays the same shot from the last match both agreed on (G.M0), and
+  // a digest that does not match asks for the host's match.
+  var LINK_TEXT = { searching: 'linkSearching', connected: 'linkConnected', lost: 'linkLost', mismatch: 'linkMismatch', error: 'linkError' };
+  // #744: a refused permission and Bluetooth switched off each say what to do; any other
+  // failure carries Nearby's status code, so a player's report can name it.
+  function linkText() {
+    if (G.side == null) return C.t('linkPick');
+    var why = G.link === 'error' && G.linkWhy || {};
+    if (why.reason === 'permission') return C.t('linkPermission');
+    if (why.reason === 'bluetooth') return C.t('linkBluetooth');
+    return C.t(LINK_TEXT[G.link] || 'linkPick') + (G.link === 'error' && why.code ? ' (' + why.code + ')' : '');
+  }
+  var wantLink = null;
+  function openLink(role) {
+    G.side = role === 'host' ? 0 : 1;
+    G.link = 'idle';
+    wantLink = role;
+    C.link.open({
+      role: role, game: 'tanks', version: C.version, name: C.state.profile.name || '',
+      onStatus: function (st, info) {
+        if (!G || G.mode !== 'net') return;
+        if (st === 'mismatch') wantLink = null;
+        G.link = st;
+        G.linkWhy = st === 'error' ? info : null;
+        if (st === 'connected') {
+          C.link.send({ t: 'name', name: C.state.profile.name || '' });
+          // #752: after an app switch either phone may have restarted or missed a turn;
+          // each says where its match is, with its own last shot, and the one behind catches up
+          sendSync();
+        }
+        render();
+      },
+      onMessage: onNet
+    });
+    // the side is only known now: a match begun before the choice had no seat of its own,
+    // so it waited for "the other phone" on both seats and the host could not aim, and the
+    // host kept no save until its first shot (a kill before it lost the match, #752)
+    save();
+    if (!flight) startTurn(); else render();
+  }
+  function sendSync() {
+    if (!G || G.mode !== 'net') return;
+    C.link.send({ t: 'sync', g: G.g | 0, seed: G.seed, n: G.M0.n, sum: E.digest(G.M0), M: G.M0, sent: G.sent });
+  }
+  function onNet(d) {
+    if (!G || G.mode !== 'net' || !d) return;
+    if (d.t === 'name') { G.peerName = String(d.name || '').slice(0, 16); renderPlayers(); }
+    else if (d.t === 'sync') onSync(d);
+    else if (d.t === 'turn') { if ((d.g | 0) === (G.g | 0)) { G.inbox = d; pump(); } }
+    else if (d.t === 'want') { if (G.side === 0) sendSync(); }
+  }
+  function onSync(d) {
+    var pick = E.syncPick({ g: G.g, n: G.M0.n, seed: G.seed, sum: E.digest(G.M0) }, d, G.side === 1);
+    if (pick === 'take') adopt(d);
+    else if (pick === 'tell') sendSync();
+    // their last shot, which a link restart may have dropped on the way here
+    var s = d.sent;
+    if (s && (s.g | 0) === (G.g | 0) && s.n === G.M0.n && G.M0.turn !== G.side && !flight) { G.inbox = s; pump(); }
+  }
+  function adopt(d) {
+    if (!E.validMatch(d.M, true)) return;
+    stop();
+    G.M0 = clone(d.M); G.M = clone(d.M); G.seed = String(d.seed || ''); G.g = d.g | 0;
+    G.steps = []; G.inbox = null; flight = null; aiming = null; msg = '';
+    // a sent shot the adopted match already holds, or never will, is no longer ours to repeat
+    if (G.sent && (G.sent.g !== G.g || G.sent.n < G.M0.n)) G.sent = null;
+    G.done = false;
+    if (E.over(G.M)) { G.done = true; G.phase = 'done'; render(); later(finish, 300); return; }
+    save(); render(); startTurn();
+  }
+  // plays the other phone's queued turn once nothing else is moving
+  function pump() {
+    var d = G && G.inbox;
+    if (!d || flight || G.done || timer) return;
+    G.inbox = null;
+    if (d.n < G.M0.n) return;
+    // this phone is behind: the other answers our match with its newer one
+    if (d.n > G.M0.n) { sendSync(); return; }
+    if (G.M0.turn === G.side) return;
+    applyTurn(d, G.M0.turn);
+  }
+  function applyTurn(d, seat) {
+    var M = clone(G.M0), steps = Array.isArray(d.m) ? d.m.slice(0, E.MOVES) : [];
+    steps.forEach(function (s) { E.move(M, seat, s > 0 ? 1 : -1); });
+    var angle = +d.angle, power = +d.power;
+    if (E.ORDER.indexOf(d.arm) < 0 || !(angle >= 0 && angle <= 90) || !(power >= 0 && power <= 100) || E.left(M, seat, d.arm) <= 0) return;
+    M.last[seat] = { angle: angle, power: power };
+    G.M = M; G.steps = steps;
+    shoot(seat, d.arm, angle, power, d.sum || null);
   }
 
   /* ------------------------------------------------------------- turns */
@@ -432,28 +599,40 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
   function startTurn() {
     if (!G || G.done) return;
     var seat = G.M.turn;
-    if (G.M.shots[seat] <= 0) { G.M.turn = 1 - seat; seat = G.M.turn; }
+    if (G.M.shots[seat] <= 0) { G.M.turn = 1 - seat; seat = G.M.turn; if (G.M0) G.M0.turn = seat; }
     if (E.left(G.M, seat, arm) <= 0) arm = 'shell';
-    G.phase = isBot(seat) ? 'busy' : 'aim';
+    G.phase = isBot(seat) || isRemote(seat) ? 'busy' : 'aim';
     render();
     if (isBot(seat)) later(botFire, C.ui.reduceMotion() ? 300 : 900);
+    if (G.mode === 'net') pump();
   }
 
   function botFire() {
     if (!G || G.done || !isBot(G.M.turn)) return;
-    var M = G.M, plan = E.botPlan(M, 1, G.level, rngFor('bot' + M.n));
+    var M = G.M, plan = E.botPlan(M, 1, G.level, seeded('bot' + M.n));
     M.last[1] = { angle: plan.angle, power: plan.power };
     shoot(1, plan.arm, plan.angle, plan.power);
   }
 
-  function shoot(who, a, angle, power) {
+  // sum: the digest the other phone reported after this shot (a two-phone turn played here)
+  function shoot(who, a, angle, power, sum) {
     var M = G.M;
     if (E.left(M, who, a) <= 0) return;
     G.phase = 'busy';
     msg = ''; aiming = null;
     var sim = E.simulate(M, who, a, angle, power);
     C.feedback('whoosh');
-    flight = { who: who, arm: a, sim: sim, t0: performance.now(), angle: angle, power: power };
+    flight = { who: who, arm: a, sim: sim, t0: performance.now(), angle: angle, power: power, sum: sum || null };
+    if (G.mode === 'net' && who === G.side && !sum) {
+      // my own turn: send it at once, with the digest of the match it leads to, so the
+      // other phone animates the same shot while this one does
+      var after = clone(M);
+      E.fire(after, who, a, angle, power, sim, seeded('wind' + M.n));
+      G.sent = { t: 'turn', g: G.g, n: M.n, m: G.steps.slice(), arm: a, angle: angle, power: power, sum: E.digest(after) };
+      flight.sum = G.sent.sum;
+      save();
+      C.link.send(G.sent);
+    }
     renderStatus(); renderPlayers(); renderArms(); renderPad();
     if (C.ui.reduceMotion()) { landed(); return; }
     kick();
@@ -462,8 +641,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
   function landed() {
     var f = flight, M = G.M;
     flight = null;
-    var r = E.fire(M, f.who, f.arm, f.angle, f.power, f.sim, rngFor('wind' + M.n));
+    var r = E.fire(M, f.who, f.arm, f.angle, f.power, f.sim, seeded('wind' + M.n));
     if (!r) return;
+    if (G.mode === 'net') {
+      // the two phones disagree after this shot: the host's match stands (#754)
+      if (f.sum && E.digest(M) !== f.sum) { if (G.side === 0) sendSync(); else C.link.send({ t: 'want' }); }
+      G.M0 = clone(M); G.steps = [];
+    }
     var now = performance.now();
     f.sim.blasts.forEach(function (b, i) {
       blasts.push({ x: b.x, y: b.y, r: b.r, t0: now + i * 80, dirt: b.arm === 'dirt' });
@@ -476,7 +660,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
     else if (r.dealt) msg = C.t('hitN', { n: C.num(r.dealt) });
     else if (self) msg = C.t('selfHit');
     else msg = C.t('missed');
-    if (f.who === 0 || G.mode === 'people') G.best = Math.max(G.best, r.dealt);
+    if (G.mode === 'net' ? f.who === G.side : (f.who === 0 || G.mode === 'people')) G.best = Math.max(G.best, r.dealt);
     if (f.sim.blasts.length) C.feedback(r.dealt >= 30 ? 'boom' : 'thud'); else C.feedback('tap');
     if (r.dealt) C.haptic('tap');
     kick();
@@ -495,7 +679,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
 
   function finish() {
     stop();
-    var M = G.M, w = E.winner(M), won = G.mode === 'people' ? null : w === 0;
+    var M = G.M, w = E.winner(M), net = G.mode === 'net';
+    var won = G.mode === 'people' ? null : (net ? (w < 0 ? null : w === G.side) : w === 0);
     var coins = 6, points = 15;
     if (G.mode === 'bot') {
       var base = { easy: 6, medium: 12, hard: 20 }[G.level];
@@ -506,7 +691,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
         if (G.level === 'hard') C.achievements.unlock('tnk-hard');
       }
     }
-    if (G.best >= 40) C.achievements.unlock('tnk-big');
+    // two phones give no awards: a match there can be settled by a friend's help (#754)
+    if (G.best >= 40 && !net) C.achievements.unlock('tnk-big');
     var label = C.num(M.score[0]) + '–' + C.num(M.score[1]);
     if (G.daily) {
       var first = C.stats.daily('tanks', G.daily, { label: label, win: won });
@@ -520,20 +706,43 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
       lines: [{ label: C.t('points'), value: label }, { label: C.t('best'), value: C.num(G.best) }],
       shareText: 'چوگان · تانک‌ها' + (G.daily ? ('\nروزانه ' + G.daily) : '') + '\n' + label,
       paint: cardPaint(),
-      onAgain: G.daily ? null : function () { newGame(current()); }
+      // in two phones the other phone may already have started the next match, which this
+      // phone then took over: again only closes the result there
+      onAgain: G.daily ? null : function () { if (net && G.mode === 'net' && !G.done) return; newGame(current()); }
     });
   }
 
   /* ------------------------------------------------------------- saves */
 
   ctx.autosave(function () {
-    if (!G || G.done || !G.M.n) return { inProgress: false };
+    if (!G || G.done) return { inProgress: false };
+    // #752: a two-phone match is saved with its side, even before the first shot, so a
+    // phone the system killed reopens the same match and asks the other where it is
+    if (G.mode === 'net') {
+      if (G.side == null) return { inProgress: false };
+      return { g: { mode: 'net', level: G.level, side: G.side, g: G.g | 0, seed: G.seed, M: G.M0, sent: G.sent, peerName: G.peerName || '', best: G.best, elapsed: Date.now() - G.startedAt } };
+    }
+    if (!G.M.n) return { inProgress: false };
     return { g: { mode: G.mode, level: G.level, daily: G.daily, M: G.M, best: G.best, elapsed: Date.now() - G.startedAt } };
   });
   function save() { ctx.save(); }
-  function validSave(sv) { var g = sv && sv.g; return !!(g && (g.mode === 'bot' || g.mode === 'people') && LEVELS.indexOf(g.level) >= 0 && E.validMatch(g.M)); }
+  function validSave(sv) {
+    var g = sv && sv.g;
+    if (g && g.mode === 'net') return (g.side === 0 || g.side === 1) && typeof g.seed === 'string' && LEVELS.indexOf(g.level) >= 0 && E.validMatch(g.M);
+    return !!(g && (g.mode === 'bot' || g.mode === 'people') && LEVELS.indexOf(g.level) >= 0 && E.validMatch(g.M));
+  }
   function restore(g) {
-    G = { mode: g.mode, level: g.level, daily: g.daily || null, M: g.M, best: g.best || 0, startedAt: Date.now() - (g.elapsed || 0), done: false, phase: 'aim' };
+    // without the link (a save carried to an app without it) the match goes on on one phone
+    var net = g.mode === 'net' && C.link.available();
+    G = { mode: g.mode === 'net' && !net ? 'people' : g.mode, level: g.level, daily: g.daily || null, M: g.M, best: g.best || 0, startedAt: Date.now() - (g.elapsed || 0), done: false, phase: 'aim' };
+    if (net) {
+      G.side = g.side; G.g = g.g | 0; G.seed = g.seed; G.M0 = clone(g.M); G.peerName = String(g.peerName || '').slice(0, 16);
+      G.sent = g.sent && g.sent.g === G.g && g.sent.n >= G.M0.n ? g.sent : null; G.steps = []; G.inbox = null; G.link = 'idle'; G.linkWhy = null;
+      openLink(G.side === 0 ? 'host' : 'guest');
+      // my shot was sent but the phone stopped before it landed: play it again here; the
+      // other phone has it already, or gets it with the next sync
+      if (G.sent && G.sent.n === G.M0.n && G.M0.turn === G.side) { render(); applyTurn(G.sent, G.side); return; }
+    }
     render();
     startTurn();
   }
@@ -548,7 +757,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
     var o = G ? current() : fromPrefs(), body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
     function rows() {
       body.innerHTML = '';
-      body.appendChild(C.ui.segmented([{ value: 'bot', label: C.t('vsBot') }, { value: 'people', label: C.t('people') }], o.mode, function (v) { o.mode = v; rows(); }));
+      var modes = [{ value: 'bot', label: C.t('vsBot') }, { value: 'people', label: C.t('people') }];
+      if (C.link.available() || o.mode === 'net') modes.push({ value: 'net', label: C.t('twoPhones') });
+      body.appendChild(C.ui.segmented(modes, o.mode, function (v) { o.mode = v; rows(); }));
       if (o.mode === 'bot') body.appendChild(C.ui.segmented(LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), o.level, function (v) { o.level = v; }));
       if (G && !G.done && G.M.n) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('resetWarn') }));
     }
@@ -722,10 +933,20 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
   function renderTop() {
     top.innerHTML = '';
     if (G.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyTk') + ' — ' + C.num(G.daily) })]));
-    else top.appendChild(el('button', { class: 'ch-badge ch-tap', type: 'button', onclick: askNew, text: G.mode === 'bot' ? C.t('vsBot') + ' · ' + C.t(G.level) : C.t('people') }));
+    else top.appendChild(el('button', { class: 'ch-badge ch-tap', type: 'button', onclick: askNew, text: G.mode === 'bot' ? C.t('vsBot') + ' · ' + C.t(G.level) : C.t(G.mode === 'net' ? 'twoPhones' : 'people') }));
+    if (G.mode === 'net') {
+      top.appendChild(C.ui.segmented([
+        { value: 'host', label: C.t('hostGame') }, { value: 'guest', label: C.t('joinGame') }
+      ], G.side == null ? '' : (G.side === 0 ? 'host' : 'guest'), function (v) {
+        if (G.side === (v === 'host' ? 0 : 1) && G.link !== 'mismatch' && G.link !== 'error' && G.link !== 'idle') return;
+        newGame({ mode: 'net', level: G.level });
+        openLink(v);
+      }));
+    }
     var gear = el('button', { class: 'ch-iconbtn tk-gear', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
     gear.addEventListener('click', showSettings);
     top.appendChild(gear);
+    if (G.mode === 'net') top.appendChild(el('span', { class: 'ch-badge tk-link', text: linkText() }));
   }
   function renderPlayers() {
     players.innerHTML = '';
@@ -740,8 +961,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
     }
   }
   function renderStatus() {
-    var seat = G.M.turn, who = isBot(seat) ? C.t('botThinks', { n: pname(seat) }) : (G.mode === 'people' ? C.t('turnOf', { n: pname(seat) }) : C.t('yourTurn'));
-    var how = G.phase === 'aim' ? ' — ' + C.t(prefs.control === 'nums' ? 'aimNums' : 'aimDrag') : '';
+    var seat = G.M.turn, who = isBot(seat) || isRemote(seat) ? C.t('botThinks', { n: pname(seat) }) : (G.mode === 'people' ? C.t('turnOf', { n: pname(seat) }) : C.t('yourTurn'));
+    var how = canShow() ? ' — ' + C.t(prefs.control === 'nums' ? 'aimNums' : 'aimDrag') : '';
     status.textContent = flight ? '…' : (msg && (G.phase !== 'aim' || G.done) ? msg : who + how);
   }
   // the weapons with what is left of each, and the two step buttons with the moves left
@@ -774,6 +995,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
   function stepTank(d) {
     if (!canAim()) return;
     if (!E.move(G.M, G.M.turn, d)) { C.feedback('bad'); msg = C.t('noMove'); renderStatus(); return; }
+    // two phones send the steps with the shot, and the other phone repeats them
+    if (G.mode === 'net') G.steps.push(d);
     C.feedback('tap');
     save(); render();
   }
@@ -813,8 +1036,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
 
   /* -------------------------------------------------------------- input */
 
-  function canShow() { return G && !G.done && G.phase === 'aim' && !isBot(G.M.turn); }
-  function canAim() { return G && !G.done && G.phase === 'aim' && !isBot(G.M.turn) && !document.querySelector('.ch-scrim'); }
+  // two phones: only on my own turn, and only while the other phone can hear the shot
+  function canShow() { return G && !G.done && G.phase === 'aim' && !isBot(G.M.turn) && (G.mode !== 'net' || (G.M.turn === G.side && G.link === 'connected')); }
+  function canAim() { return G && !G.done && G.phase === 'aim' && !isBot(G.M.turn) && (G.mode !== 'net' || (G.M.turn === G.side && G.link === 'connected')) && !document.querySelector('.ch-scrim'); }
   // A slingshot, as in Gorillas: the pull sets the shot, the other way; a full pull is
   // 40% of the field's width
   function pullAim(dx, dy) {
@@ -866,7 +1090,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
   if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { draw(); }); } catch (er) { /* old WebViews */ } }
   // A pause mid-flight lets that shot land when the game comes back
   C.onPause(function () { stop(); aiming = null; });
+  window.addEventListener('pagehide', function () { if (G && G.mode === 'net') C.link.close(); });
   C.onResume(function () {
+    // if the page was hidden long enough for the link to be closed, coming back reopens it
+    if (G && G.mode === 'net' && wantLink && C.link.status === 'idle') openLink(wantLink);
     if (!G || G.done) return;
     if (flight) { landed(); return; }
     startTurn();
