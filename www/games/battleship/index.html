@@ -10,6 +10,8 @@
 <style>
   .bs-wrap { width: 100%; display: flex; flex-direction: column; gap: var(--s-2); align-items: center; }
   .bs-top { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+  /* the link's state can be a long sentence (a permission path); it wraps instead of widening the bar */
+  .bs-top .bs-link { white-space: normal; text-align: center; max-width: 100%; line-height: 1.4; padding: 4px 12px; border-radius: var(--r-md); }
   .bs-status {
     min-height: 1.6em; margin: 0; text-align: center; font-weight: 700; font-size: var(--fs-sm);
     color: var(--c-text-dim);
@@ -340,11 +342,159 @@ function BattleshipEngineFactory() {
     return { i: idx, result: res.result, ship: res.ship };
   }
 
+  /* ---- Two phones (#755) ----
+     Each phone holds only its own fleet. The rival side ("foe") is only what the replies
+     said: the shots and the ships reported sunk, so the fleet cannot leak before the end.
+     The defender's phone answers every shot from its own board. Shots and replies are
+     numbered lists (out: my shots, inn: theirs at me), and the turn is worked out from
+     them, so a resync after an app switch exchanges lists, never a turn flag that could
+     disagree, and a shot is never applied twice. */
+  function netGame(myShips, again, first) {
+    var G = {
+      net: true, me: makeBoard(myShips), foe: { ships: [], shots: new Array(N * N).fill(0), sunk: [] },
+      again: !!again, first: first ? 'me' : 'ai', out: [], inn: [], shots: { me: 0, ai: 0 }, winner: null, turn: 'me'
+    };
+    G.turn = netTurn(G);
+    return G;
+  }
+
+  // 'me', 'ai' (the other phone shoots) or 'wait' (my shot has no reply yet)
+  function netTurn(G) {
+    var cur = G.first, a = 0, b = 0;
+    for (;;) {
+      var list = cur === 'me' ? G.out : G.inn, k = cur === 'me' ? a : b;
+      if (k >= list.length) return cur;
+      var r = list[k].r;
+      if (r == null) return 'wait';
+      if (cur === 'me') a++; else b++;
+      if (!G.again || r === 'miss') cur = cur === 'me' ? 'ai' : 'me';
+    }
+  }
+
+  // My shot; the reply comes later. Returns the message to send, or null.
+  function netFire(G, idx) {
+    if (G.winner || netTurn(G) !== 'me' || !canFire(G.foe, idx)) return null;
+    G.out.push({ i: idx, r: null });
+    G.turn = netTurn(G);
+    return { t: 'shot', n: G.out.length - 1, i: idx };
+  }
+
+  // Their shot number n at idx, answered from my own board. A shot already answered gets
+  // the same reply again (it was lost on the way back); anything else out of order is
+  // dropped, and the next sync fills the gap.
+  function netAnswer(G, n, idx) {
+    if (n >= 0 && n < G.inn.length) return G.inn[n].i === idx ? reply(G, n) : null;
+    if (n !== G.inn.length || G.winner || netTurn(G) !== 'ai') return null;
+    if (!(idx >= 0 && idx < N * N) || idx !== Math.floor(idx) || G.me.shots[idx]) return null;
+    var res = fire(G.me, idx);
+    var rec = { i: idx, r: res.result };
+    if (res.result === 'sunk') rec.cells = cellsOf(G.me.ships[res.ship]);
+    G.inn.push(rec);
+    G.shots.ai++;
+    if (allSunk(G.me)) G.winner = 'ai';
+    G.turn = netTurn(G);
+    return reply(G, n);
+  }
+  function reply(G, n) {
+    var rec = G.inn[n], m = { t: 'reply', n: n, i: rec.i, r: rec.r };
+    if (rec.cells) m.cells = rec.cells.slice();
+    // the loser shows its fleet with the reply that sank it
+    if (G.winner === 'ai' && n === G.inn.length - 1) m.fleet = G.me.ships;
+    return m;
+  }
+
+  // A sunk report must be a whole ship of a size still afloat, over my own hits plus this
+  // shot; a reply that does not fit what I know is refused rather than drawn.
+  function shipFromCells(foe, cells, idx) {
+    if (!Array.isArray(cells) || !cells.length) return null;
+    var cs = cells.slice().sort(function (a, b) { return a - b; });
+    var len = cs.length, r = (cs[0] / N) | 0, c = cs[0] % N;
+    var v = len > 1 && cs[1] - cs[0] === N;
+    var s = { r: r, c: c, len: len, v: v };
+    if (!fits(s) || cellsOf(s).join() !== cs.join() || cs.indexOf(idx) < 0) return null;
+    for (var k = 0; k < cs.length; k++) if (cs[k] !== idx && foe.shots[cs[k]] !== 2) return null;
+    var want = FLEET.filter(function (l) { return l === len; }).length;
+    var have = foe.ships.filter(function (x) { return x.len === len; }).length;
+    return have < want ? s : null;
+  }
+
+  // The reply to my shot number n
+  function netReply(G, n, d) {
+    var o = G.out[n];
+    if (!o || o.r != null || !d || d.i !== o.i) return false;
+    if (d.r !== 'miss' && d.r !== 'hit' && d.r !== 'sunk') return false;
+    var s = null;
+    if (d.r === 'sunk' && !(s = shipFromCells(G.foe, d.cells, o.i))) return false;
+    o.r = d.r;
+    G.foe.shots[o.i] = d.r === 'miss' ? 1 : 2;
+    G.shots.me++;
+    if (s) { o.cells = cellsOf(s); G.foe.ships.push(s); G.foe.sunk.push(true); }
+    // the winner is what my own record shows, not what the reply claims
+    if (G.foe.ships.length === FLEET.length) {
+      G.winner = 'me';
+      if (agrees(G, d.fleet)) G.reveal = d.fleet;
+    }
+    G.turn = netTurn(G);
+    return true;
+  }
+
+  // What a phone tells the other on every connect
+  function netState(G) {
+    return {
+      out: G.out.map(function (o) { return { i: o.i, r: o.r }; }),
+      inn: G.inn.map(function (x) { var m = { i: x.i, r: x.r }; if (x.cells) m.cells = x.cells.slice(); return m; })
+    };
+  }
+
+  // The other phone's lists: take the replies I missed, answer the shots I missed, and
+  // return what it missed from me (replies it has no answer for, my unanswered shot).
+  function netSync(G, d) {
+    var send = [], theirOut = Array.isArray(d && d.out) ? d.out : [], theirInn = Array.isArray(d && d.inn) ? d.inn : [];
+    for (var k = 0; k < Math.min(G.out.length, theirInn.length); k++) {
+      if (G.out[k].r == null && theirInn[k]) netReply(G, k, theirInn[k]);
+    }
+    for (var j = 0; j < theirOut.length; j++) {
+      var o = theirOut[j] || {};
+      if (j < G.inn.length) { if (o.r == null && G.inn[j].i === o.i) send.push(reply(G, j)); continue; }
+      var m = netAnswer(G, j, o.i);
+      if (!m) break;
+      send.push(m);
+    }
+    for (var q = theirInn.length; q < G.out.length; q++) {
+      if (G.out[q].r == null) send.push({ t: 'shot', n: q, i: G.out[q].i });
+    }
+    return send;
+  }
+
+  // The winner's fleet, shown to the loser once the game is over. It must agree with every
+  // reply the loser got, so a phone cannot draw a fleet that its own answers contradict.
+  function netReveal(G, ships) {
+    if (G.winner !== 'ai' || !agrees(G, ships)) return false;
+    G.reveal = makeBoard(ships).ships;
+    return true;
+  }
+  function agrees(G, ships) {
+    if (!validFleet(ships)) return false;
+    var b = makeBoard(ships);
+    for (var k = 0; k < G.out.length; k++) {
+      var o = G.out[k];
+      if (o.r == null) continue;
+      if ((shipAt(b, o.i) >= 0) !== (o.r !== 'miss')) return false;
+    }
+    for (var j = 0; j < G.foe.ships.length; j++) {
+      var cs = cellsOf(G.foe.ships[j]), at = shipAt(b, cs[0]);
+      if (at < 0 || cellsOf(b.ships[at]).join() !== cs.join()) return false;
+    }
+    return true;
+  }
+
   var api = {
     N: N, FLEET: FLEET, cellsOf: cellsOf, fits: fits, halo: halo, canPlace: canPlace,
     validFleet: validFleet, randomFleet: randomFleet, makeBoard: makeBoard, shipAt: shipAt,
     blocked: blocked, canFire: canFire, fire: fire, allSunk: allSunk, knowledge: knowledge,
-    aiShot: aiShot, newGame: newGame, keepsTurn: keepsTurn, playerFire: playerFire, aiFire: aiFire
+    aiShot: aiShot, newGame: newGame, keepsTurn: keepsTurn, playerFire: playerFire, aiFire: aiFire,
+    netGame: netGame, netTurn: netTurn, netFire: netFire, netAnswer: netAnswer, netReply: netReply,
+    netState: netState, netSync: netSync, netReveal: netReveal
   };
   if (typeof self !== 'undefined') self.BattleshipEngine = api;
   return api;
@@ -381,6 +531,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
         newMatch: 'دست تازه', dailyBs: 'نبرد دریایی روزانه', vsMedium: 'مقابل حریف متوسط',
         ship: 'کشتی {n} خانه‌ای', move: 'جابه‌جایی', fireKey: 'شلیک یا گذاشتن کشتی', pickShip: 'انتخاب کشتی',
         wonIn: 'برد در {n} شلیک',
+        vsAi: 'با حریف', twoPhones: 'دو گوشی', hostGame: 'میزبان', joinGame: 'مهمان', linkPick: 'یک گوشی میزبان شود و دیگری مهمان. هر کدام ناوگان خودش را پنهانی می‌چیند و میزبان اول شلیک می‌کند.', linkSearching: 'در جست‌وجوی گوشی دیگر…', linkConnected: 'وصل شد', linkLost: 'اتصال قطع شد؛ دوباره دنبالش می‌گردد…', linkMismatch: 'نسخه‌ی دو گوشی یکی نیست؛ هر دو را به‌روز کن', linkError: 'اتصال راه نیفتاد؛ دوباره امتحان کن', linkPermission: 'اجازه‌ی «دستگاه‌های نزدیک» داده نشده: تنظیمات ← برنامه‌ها ← چوگان پلاس ← اجازه‌ها', linkBluetooth: 'بلوتوث خاموش است؛ روشنش کن و دوباره امتحان کن',
+        waitFleet: 'منتظر ناوگان گوشی دیگر…', waitShot: 'منتظر جواب…',
         tutTitle1: 'ناوگان را بچین', tutText1: 'پنج کشتی داری: ۵، ۴، ۳، ۳ و ۲ خانه. هیچ دو کشتی‌ای حتی از گوشه به هم نمی‌چسبند. دکمه‌ی تصادفی هم هست.',
         tutTitle2: 'نوبتی شلیک کنید', tutText2: 'به نوبت شلیک کنید: آب، اصابت یا غرق. با «اصابت، دوباره شلیک» هر اصابت یک شلیک دیگر می‌دهد و فقط آب نوبت را رد می‌کند. اولین کسی که همه‌ی ناوگان حریف را غرق کند می‌برد.', hitAgain: 'اصابت، دوباره شلیک', oneShot: 'یک شلیک در نوبت',
         tutTitle3: 'دور کشتی غرق‌شده خالی است', tutText3: 'چون کشتی‌ها به هم نمی‌چسبند، خانه‌های دور کشتی غرق‌شده علامت می‌خورند و لازم نیست آنجا شلیک کنی.'
@@ -396,6 +548,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
         newMatch: 'New match', dailyBs: 'Daily battleship', vsMedium: 'against the medium AI',
         ship: '{n}-cell ship', move: 'Move', fireKey: 'Fire or place ship', pickShip: 'Pick ship',
         wonIn: 'Won in {n} shots',
+        vsAi: 'Versus AI', twoPhones: 'Two phones', hostGame: 'Host', joinGame: 'Join', linkPick: 'One phone hosts, the other joins. Each places its own fleet in secret; the host fires first.', linkSearching: 'Looking for the other phone…', linkConnected: 'Connected', linkLost: 'Connection lost; looking again…', linkMismatch: 'The two phones run different versions; update both', linkError: 'Could not connect; try again', linkPermission: 'The nearby devices permission is off: Settings → Apps → Chogan Plus → Permissions', linkBluetooth: 'Bluetooth is off; turn it on and try again',
+        waitFleet: 'Waiting for the other phone’s fleet…', waitShot: 'Waiting for the answer…',
         tutTitle1: 'Place your fleet', tutText1: 'You have five ships: 5, 4, 3, 3 and 2 cells. No two ships touch, not even at a corner. There is a random button too.',
         tutTitle2: 'Take turns firing', tutText2: 'Take turns firing: miss, hit or sunk. With "Hit, fire again" every hit gives another shot and only a miss passes the turn. The first to sink the whole rival fleet wins.', hitAgain: 'Hit, fire again', oneShot: 'One shot a turn',
         tutTitle3: 'Around a wreck is empty', tutText3: 'Ships never touch, so the cells around a sunk ship get marked and you never need to fire there.'
@@ -411,6 +565,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
         newMatch: 'Nowy mecz', dailyBs: 'Codzienna bitwa morska', vsMedium: 'przeciwko AI na średnim poziomie',
         ship: '{n}-masztowiec', move: 'Ruch', fireKey: 'Ognia lub umieść okręt', pickShip: 'Wybierz okręt',
         wonIn: 'Wygrana w {n} strzałach',
+        vsAi: 'Przeciwko SI', twoPhones: 'Dwa telefony', hostGame: 'Gospodarz', joinGame: 'Dołącz', linkPick: 'Jeden telefon jest gospodarzem, drugi dołącza. Każdy w tajemnicy rozmieszcza swoją flotę; gospodarz strzela pierwszy.', linkSearching: 'Szukam drugiego telefonu…', linkConnected: 'Połączono', linkLost: 'Połączenie przerwane; szukam ponownie…', linkMismatch: 'Telefony mają różne wersje; zaktualizuj oba', linkError: 'Nie udało się połączyć; spróbuj ponownie', linkPermission: 'Brak uprawnienia do urządzeń w pobliżu: Ustawienia → Aplikacje → Chogan Plus → Uprawnienia', linkBluetooth: 'Bluetooth jest wyłączony; włącz go i spróbuj ponownie',
+        waitFleet: 'Czekam na flotę drugiego telefonu…', waitShot: 'Czekam na odpowiedź…',
         tutTitle1: 'Rozmieść swoją flotę', tutText1: 'Masz pięć okrętów: 5, 4, 3, 3 i 2-masztowych. Żadne dwa okręty nie mogą się stykać, nawet rogami. Możesz też skorzystać z przycisku losowego rozmieszczenia.',
         tutTitle2: 'Strzelajcie na zmianę', tutText2: 'Strzelacie naprzemiennie: pudło, trafiony lub zatopiony. W trybie „Trafienie daje kolejny strzał” każde trafienie pozwala strzelić ponownie, a tura przechodzi na rywala dopiero przy pudle. Wygrywa ten, kto pierwszy zatopi całą flotę przeciwnika.', hitAgain: 'Trafienie daje kolejny strzał', oneShot: 'Jeden strzał na turę',
         tutTitle3: 'Wokół wraku jest pusto', tutText3: 'Okręty nigdy się nie stykają, więc pola wokół zatopionej jednostki zostają automatycznie oznaczone i nie musisz w nie strzelać.'
@@ -426,6 +582,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
         newMatch: '新一局', dailyBs: '每日海战棋', vsMedium: '对战中等电脑',
         ship: '{n} 格船', move: '移动', fireKey: '开炮或放船', pickShip: '选择船只',
         wonIn: '{n} 炮获胜',
+        vsAi: '对战电脑', twoPhones: '两部手机', hostGame: '主机', joinGame: '加入', linkPick: '一部手机做主机，另一部加入。各自秘密布置舰队，主机先开炮。', linkSearching: '正在寻找另一部手机…', linkConnected: '已连接', linkLost: '连接已断开，正在重新寻找…', linkMismatch: '两部手机版本不同，请都更新', linkError: '无法连接，请重试', linkPermission: '未授予“附近设备”权限：设置 → 应用 → Chogan Plus → 权限', linkBluetooth: '蓝牙已关闭，请打开后重试',
+        waitFleet: '等待另一部手机布置舰队…', waitShot: '等待对方回应…',
         tutTitle1: '布置舰队', tutText1: '你有五艘船：5、4、3、3、2 格。任何两艘船都不相邻，连斜角也不行。也可以随机布置。',
         tutTitle2: '轮流开炮', tutText2: '轮流开炮：落空、命中或击沉。开启“命中再开炮”时，每次命中都能再开一炮，只有落空才换人。先击沉对方全部舰队的人获胜。', hitAgain: '命中再开炮', oneShot: '每回合一炮',
         tutTitle3: '沉船周围是空的', tutText3: '因为船不相邻，被击沉的船周围会被标出，不必再往那里开炮。'
@@ -441,6 +599,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
         newMatch: 'Neue Partie', dailyBs: 'Tägliches Schiffe versenken', vsMedium: 'gegen die mittlere KI',
         ship: '{n}er-Schiff', move: 'Bewegen', fireKey: 'Feuern oder Schiff setzen', pickShip: 'Schiff wählen',
         wonIn: 'Gewonnen mit {n} Schüssen',
+        vsAi: 'Gegen KI', twoPhones: 'Zwei Handys', hostGame: 'Gastgeber', joinGame: 'Beitreten', linkPick: 'Ein Handy ist Gastgeber, das andere tritt bei. Jedes stellt seine Flotte geheim auf; der Gastgeber schießt zuerst.', linkSearching: 'Suche das andere Handy…', linkConnected: 'Verbunden', linkLost: 'Verbindung verloren; suche erneut…', linkMismatch: 'Die Handys haben verschiedene Versionen; aktualisiere beide', linkError: 'Keine Verbindung; versuche es erneut', linkPermission: 'Die Berechtigung „Geräte in der Nähe“ fehlt: Einstellungen → Apps → Chogan Plus → Berechtigungen', linkBluetooth: 'Bluetooth ist aus; schalte es ein und versuche es erneut',
+        waitFleet: 'Warte auf die Flotte des anderen Handys…', waitShot: 'Warte auf die Antwort…',
         tutTitle1: 'Flotte aufstellen', tutText1: 'Du hast fünf Schiffe: 5, 4, 3, 3 und 2 Felder. Keine zwei Schiffe berühren sich, nicht mal an einer Ecke. Es gibt auch einen Zufallsknopf.',
         tutTitle2: 'Abwechselnd feuern', tutText2: 'Abwechselnd feuern: Wasser, Treffer oder versenkt. Mit „Treffer, nochmal“ gibt jeder Treffer einen weiteren Schuss, nur Wasser gibt den Zug ab. Wer zuerst die ganze gegnerische Flotte versenkt, gewinnt.', hitAgain: 'Treffer, nochmal', oneShot: 'Ein Schuss pro Zug',
         tutTitle3: 'Um ein Wrack ist Wasser', tutText3: 'Schiffe berühren sich nie, also werden die Felder um ein versenktes Schiff markiert und du musst nie dorthin schießen.'
@@ -456,6 +616,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
         newMatch: 'Nueva partida', dailyBs: 'Batalla naval diaria', vsMedium: 'contra la IA media',
         ship: 'Barco de {n} casillas', move: 'Mover', fireKey: 'Disparar o colocar barco', pickShip: 'Elegir barco',
         wonIn: 'Ganaste en {n} disparos',
+        vsAi: 'Contra la IA', twoPhones: 'Dos móviles', hostGame: 'Anfitrión', joinGame: 'Unirse', linkPick: 'Un móvil es anfitrión y el otro se une. Cada uno coloca su flota en secreto; el anfitrión dispara primero.', linkSearching: 'Buscando el otro móvil…', linkConnected: 'Conectado', linkLost: 'Conexión perdida; buscando de nuevo…', linkMismatch: 'Los móviles tienen versiones distintas; actualiza ambos', linkError: 'No se pudo conectar; vuelve a intentarlo', linkPermission: 'Falta el permiso de dispositivos cercanos: Ajustes → Aplicaciones → Chogan Plus → Permisos', linkBluetooth: 'El Bluetooth está apagado; actívalo y vuelve a intentarlo',
+        waitFleet: 'Esperando la flota del otro móvil…', waitShot: 'Esperando la respuesta…',
         tutTitle1: 'Coloca tu flota', tutText1: 'Tienes cinco barcos: de 5, 4, 3, 3 y 2 casillas. Dos barcos nunca se tocan, ni siquiera en una esquina. También hay un botón para colocarlos al azar.',
         tutTitle2: 'Disparos por turnos', tutText2: 'Disparad por turnos: agua, tocado o hundido. Con «Tocado, otra vez» cada acierto da otro disparo y solo el agua pasa el turno. Gana quien hunda primero toda la flota rival.', hitAgain: 'Tocado, otra vez', oneShot: 'Un disparo por turno',
         tutTitle3: 'Alrededor de un naufragio hay agua', tutText3: 'Los barcos nunca se tocan, así que las casillas alrededor de un barco hundido se marcan y nunca necesitas disparar ahí.'
@@ -474,6 +636,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
 
   var S = null, aiTimer = null;
   var cur = { me: 44, foe: 44 }, kbUsed = false, hover = -1;
+  // Two phones (#755): 'ai' or 'net'. The two-phone mode is never remembered, because the
+  // next visit may be in an app without the link. NET outlives a match: the role, the open
+  // link and the match counter g stay while new matches are dealt.
+  var mode = 'ai';
+  var NET = { side: 0, link: 'idle', why: null, peer: '', g: 0, want: null };
+  var finTimer = null;
 
   var top = el('div', { class: 'bs-top' });
   var status = el('p', { class: 'bs-status', role: 'status', 'aria-live': 'polite' });
@@ -497,12 +665,14 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
 
   /* ------------------------------------------------------------ ساخت */
 
-  function freshPlace(level, daily) {
+  function freshPlace(level, daily, keepShips) {
     stopAi();
+    if (finTimer) { clearTimeout(finTimer); finTimer = null; }
     S = {
-      phase: 'place', level: level, daily: daily || null,
-      ships: E.FLEET.map(function () { return null; }), sel: 0, vert: false,
-      G: null, startedAt: Date.now(), lastMe: -1, lastAi: -1, msgMe: '', msgAi: ''
+      phase: 'place', level: level, daily: daily || null, mode: daily ? 'ai' : mode,
+      ships: keepShips || E.FLEET.map(function () { return null; }), sel: keepShips ? -1 : 0, vert: false,
+      G: null, startedAt: Date.now(), lastMe: -1, lastAi: -1, msgMe: '', msgAi: '',
+      ready: false, peerReady: false, again: null, peerAgain: null
     };
     hover = -1;
     ctx.setStat('shots', 0);
@@ -518,6 +688,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
 
   function startBattle() {
     if (!S || S.phase !== 'place' || !E.validFleet(S.ships)) { C.feedback('bad'); return; }
+    if (S.mode === 'net') { netReady(); return; }
     // The daily keeps one shot a turn, so every player of a day plays the same rules
     S.G = E.newGame(S.ships, foeFleet(), S.level, !S.daily && prefs.again);
     S.phase = 'battle';
@@ -706,9 +877,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
       return;
     }
     var G = S.G, over = S.phase === 'over';
-    var ff = fitCanvas(cvFoe);
+    var ff = fitCanvas(cvFoe), fb = foeView();
     paintSea(ff.g, 0, 0, ff.w, {
-      board: G.foe, ships: G.foe.ships, reveal: over, ghost: over, sel: -1,
+      board: fb, ships: fb.ships, reveal: over, ghost: over, sel: -1,
       cursor: (kbUsed && !over) ? cur.foe : -1, last: S.lastMe,
       preview: (!over && hover >= 0 && E.canFire(G.foe, hover) && !busy()) ? { cells: [hover], ok: true } : null
     }, P);
@@ -716,6 +887,32 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
     var fm = fitCanvas(cvMe);
     paintSea(fm.g, 0, 0, fm.w, { board: G.me, ships: G.me.ships, reveal: true, sel: -1, cursor: -1, last: S.lastAi }, P);
     drawSplashes(cvMe, fm.g, fm.w, P);
+  }
+
+  // The rival's sea as this phone may draw it. Against the AI that is its board. With two
+  // phones it is only the shots and the ships reported sunk, plus the rival's fleet once
+  // the game is over and that phone has shown it.
+  function foeView() {
+    var G = S.G;
+    if (!G.net || !G.reveal) return G.foe;
+    var b = E.makeBoard(G.reveal);
+    b.shots = G.foe.shots.slice();
+    b.sunk = b.ships.map(function (s) {
+      return E.cellsOf(s).every(function (x) { return b.shots[x] === 2; });
+    });
+    return b;
+  }
+  // Pips for the rival's fleet with two phones: the whole fleet, a pip greyed for each
+  // length reported sunk, since this phone does not know where the rest is.
+  function netFoePips() {
+    var left = S.G.foe.ships.map(function (s) { return s.len; });
+    var flags = E.FLEET.map(function (len) {
+      var k = left.indexOf(len);
+      if (k < 0) return false;
+      left.splice(k, 1);
+      return true;
+    });
+    pips(foePips, { sunk: flags }, E.FLEET.map(function () { return null; }));
   }
 
   function pips(box, board, ships) {
@@ -726,7 +923,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
     }
   }
 
-  function busy() { return !!(S && S.phase === 'battle' && S.G && S.G.turn === 'ai'); }
+  function busy() {
+    if (!(S && S.phase === 'battle' && S.G)) return false;
+    if (S.mode === 'net') return S.G.turn !== 'me' || NET.link !== 'connected';
+    return S.G.turn === 'ai';
+  }
 
   function render() {
     top.innerHTML = '';
@@ -735,20 +936,45 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
         [C.icon('calendar', 14), el('span', { text: C.t('dailyBs') + ' — ' + C.num(S.daily) })]));
       top.appendChild(el('span', { class: 'ch-badge', text: C.t('vsMedium') }));
     } else if (S.phase === 'place') {
-      // سختی فقط پیش از نبرد عوض می‌شود؛ وسط نبرد یعنی دست تازه
-      top.appendChild(C.ui.segmented([
-        { value: 'easy', label: C.t('easy') }, { value: 'medium', label: C.t('medium') }, { value: 'hard', label: C.t('hard') }
-      ], S.level, function (v) {
-        S.level = v;
-        prefs.level = v;
-        ctx.store.set('prefs', prefs);
-      }));
-      top.appendChild(C.ui.segmented([
-        { value: true, label: C.t('hitAgain') }, { value: false, label: C.t('oneShot') }
-      ], prefs.again, function (v) {
-        prefs.again = v;
-        ctx.store.set('prefs', prefs);
-      }));
+      // The two-phone choice shows only where the link exists (Chogan Plus); web, PWA and
+      // F-Droid see the page exactly as before
+      if (C.link.available() || S.mode === 'net') {
+        top.appendChild(C.ui.segmented([
+          { value: 'ai', label: C.t('vsAi') }, { value: 'net', label: C.t('twoPhones') }
+        ], S.mode, function (v) { if (v !== S.mode) setMode(v); }));
+      }
+      if (S.mode === 'net') {
+        top.appendChild(C.ui.segmented([
+          { value: 'host', label: C.t('hostGame') }, { value: 'guest', label: C.t('joinGame') }
+        ], NET.side ? (NET.side === 1 ? 'host' : 'guest') : '', function (v) {
+          if (NET.side === (v === 'host' ? 1 : 2) && NET.link !== 'mismatch' && NET.link !== 'error' && NET.link !== 'idle') return;
+          // the fleet already placed stays; only the readiness starts again
+          freshPlace(S.level, null, E.validFleet(S.ships) ? S.ships : null);
+          openLink(v);
+        }));
+        top.appendChild(el('span', { class: 'ch-badge bs-link', text: linkText() }));
+      } else {
+        // سختی فقط پیش از نبرد عوض می‌شود؛ وسط نبرد یعنی دست تازه
+        top.appendChild(C.ui.segmented([
+          { value: 'easy', label: C.t('easy') }, { value: 'medium', label: C.t('medium') }, { value: 'hard', label: C.t('hard') }
+        ], S.level, function (v) {
+          S.level = v;
+          prefs.level = v;
+          ctx.store.set('prefs', prefs);
+        }));
+      }
+      // With two phones the host's rule counts for both, so only the host picks it
+      if (S.mode !== 'net' || (NET.side === 1 && !S.ready)) {
+        top.appendChild(C.ui.segmented([
+          { value: true, label: C.t('hitAgain') }, { value: false, label: C.t('oneShot') }
+        ], prefs.again, function (v) {
+          prefs.again = v;
+          ctx.store.set('prefs', prefs);
+        }));
+      }
+    } else if (S.mode === 'net') {
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('twoPhones') + ' · ' + C.t(S.G && S.G.again ? 'hitAgain' : 'oneShot') }));
+      if (S.phase === 'battle') top.appendChild(el('span', { class: 'ch-badge bs-link', text: linkText() }));
     } else {
       top.appendChild(el('span', { class: 'ch-badge', text: C.t('rival') + ' · ' + C.t(S.level) + ' · ' + C.t(S.G && S.G.again ? 'hitAgain' : 'oneShot') }));
     }
@@ -763,7 +989,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
     tray.hidden = !placing;
     actions.hidden = !placing;
     if (placing) { renderTray(); pips(mePips, null, S.ships); }
-    else { pips(foePips, S.G.foe, S.G.foe.ships); pips(mePips, S.G.me, S.G.me.ships); ctx.setStat('shots', S.G.shots.me); }
+    else {
+      if (S.G.net) netFoePips(); else pips(foePips, S.G.foe, S.G.foe.ships);
+      pips(mePips, S.G.me, S.G.me.ships);
+      ctx.setStat('shots', S.G.shots.me);
+    }
     renderStatus();
     draw();
   }
@@ -773,6 +1003,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
     status.innerHTML = '';
     if (msg) { status.textContent = msg; return; }
     if (S.phase === 'place') {
+      if (S.ready) { status.textContent = C.t('waitFleet'); status.classList.add('bs-status--wait'); return; }
       status.textContent = E.validFleet(S.ships) ? C.t('placeDone') : C.t('placeHint');
       return;
     }
@@ -780,7 +1011,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
     var parts = [];
     if (S.msgMe) parts.push(C.t('shotYou') + ': ' + S.msgMe);
     if (S.msgAi) parts.push(C.t('shotAi') + ': ' + S.msgAi);
-    var head = el('b', { text: busy() ? C.t('aiming') : C.t('yourTurn') });
+    var turnWord = busy() ? C.t('aiming') : C.t('yourTurn');
+    if (S.mode === 'net' && S.G.turn === 'wait') turnWord = C.t('waitShot');
+    var head = el('b', { text: turnWord });
     status.appendChild(head);
     if (parts.length) status.appendChild(document.createTextNode(' · ' + parts.join(' · ')));
     if (busy()) status.classList.add('bs-status--wait');
@@ -808,7 +1041,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
     var rnd = el('button', { type: 'button', class: 'ch-btn ch-btn--soft' }, [C.icon('sparkle', 18), el('span', { text: C.t('randomFleet') })]);
     rnd.addEventListener('click', function () { C.feedback('tap'); randomize(); });
     var go = el('button', { type: 'button', class: 'ch-btn ch-btn--primary', text: C.t('startBattle') });
-    go.disabled = !E.validFleet(S.ships);
+    go.disabled = !E.validFleet(S.ships) || !!S.ready || (S.mode === 'net' && !NET.side);
+    rot.disabled = rnd.disabled = !!S.ready;
     go.addEventListener('click', startBattle);
     actions.appendChild(rot);
     actions.appendChild(rnd);
@@ -850,7 +1084,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
   }
 
   function selectShip(k) {
-    if (S.phase !== 'place') return;
+    if (S.phase !== 'place' || S.ready) return;
     S.sel = k;
     if (S.ships[k]) S.vert = S.ships[k].v;
     C.feedback('select');
@@ -858,7 +1092,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
   }
 
   function tapMe(idx) {
-    if (!S || S.phase !== 'place') return;
+    // a fleet announced as ready to the other phone is final
+    if (!S || S.phase !== 'place' || S.ready) return;
     var on = placedAt(idx);
     if (on >= 0 && on !== S.sel) { selectShip(on); return; }
     if (on >= 0) { rotateSel(); return; }
@@ -872,7 +1107,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
   }
 
   function rotateSel() {
-    if (S.phase !== 'place') return;
+    if (S.phase !== 'place' || S.ready) return;
     if (S.sel < 0 || !S.ships[S.sel]) { S.vert = !S.vert; render(); return; }
     var old = S.ships[S.sel];
     var s = shipFor(S.sel, old.r * N + old.c, !old.v);
@@ -884,7 +1119,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
   }
 
   function randomize() {
-    if (S.phase !== 'place') return;
+    if (S.phase !== 'place' || S.ready) return;
     S.ships = E.randomFleet(Math.random);
     S.sel = -1;
     render();
@@ -903,6 +1138,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
   function tapFoe(idx) {
     if (!S || S.phase !== 'battle' || busy()) return;
     if (!E.canFire(S.G.foe, idx)) { C.feedback('bad'); return; }
+    if (S.mode === 'net') { netShoot(idx); return; }
     var res = E.playerFire(S.G, idx);
     if (!res) return;
     S.lastMe = idx;
@@ -924,7 +1160,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
   // مکث کوتاه تا بازیکن جای شلیک حریف را ببیند، نه اینکه منتظر بماند
   function maybeAi() {
     stopAi();
-    if (!busy()) return;
+    if (S.mode === 'net' || !busy()) return;
     aiTimer = setTimeout(function () {
       aiTimer = null;
       if (!busy()) return;
@@ -941,9 +1177,262 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
   }
   function stopAi() { if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; } }
 
+  /* ------------------------------------------------- دو گوشی (#755) */
+
+  function setMode(v) {
+    mode = v;
+    if (v !== 'net') {
+      NET.want = null;
+      C.link.close();
+      NET.side = 0; NET.link = 'idle'; NET.why = null;
+    }
+    freshPlace(prefs.level || 'medium', null, keepFleet());
+  }
+
+  // Every message carries the game number, so a shot from a game one phone already left
+  // never lands in the next one
+  function tx(m) { m.g = NET.g; C.link.send(m); }
+
+  var LINK_TEXT = { searching: 'linkSearching', connected: 'linkConnected', lost: 'linkLost', mismatch: 'linkMismatch', error: 'linkError' };
+  // #744: a refused permission and Bluetooth switched off each say what to do; any other
+  // failure carries Nearby's status code, so a player's report can name it.
+  function linkText() {
+    if (!NET.side) return C.t('linkPick');
+    var why = NET.link === 'error' && NET.why || {};
+    if (why.reason === 'permission') return C.t('linkPermission');
+    if (why.reason === 'bluetooth') return C.t('linkBluetooth');
+    return C.t(LINK_TEXT[NET.link] || 'linkPick') + (NET.link === 'error' && why.code ? ' (' + why.code + ')' : '');
+  }
+
+  function openLink(role) {
+    NET.side = role === 'host' ? 1 : 2;
+    NET.link = 'idle';
+    NET.why = null;
+    NET.want = role;
+    C.link.open({
+      role: role, game: 'battleship', version: C.version, name: C.state.profile.name || '',
+      onStatus: function (st, info) {
+        if (!S || S.mode !== 'net') return;
+        if (st === 'mismatch') NET.want = null;
+        NET.link = st;
+        NET.why = st === 'error' ? info : null;
+        if (st === 'connected') {
+          tx({ t: 'name', name: C.state.profile.name || '' });
+          // #752: after an app switch either phone may have restarted or missed a shot;
+          // each says where it is and the one behind catches up
+          tx(syncMsg());
+        }
+        render();
+      },
+      onMessage: onNet
+    });
+    render();
+  }
+
+  function syncMsg() {
+    var G = S.G;
+    var m = { t: 'sync', ready: !!S.ready || S.phase !== 'place', again: S.again, state: G ? E.netState(G) : null };
+    // the winner shows its fleet; the loser's came with the reply that sank it
+    if (G && G.winner === 'me') m.fleet = G.me.ships;
+    return m;
+  }
+
+  function netReady() {
+    if (!NET.side) { C.feedback('bad'); return; }
+    S.ready = true;
+    // the host's rule counts for both phones
+    S.again = NET.side === 1 ? !!prefs.again : null;
+    tx({ t: 'ready', again: S.again });
+    C.feedback('good');
+    save();
+    render();
+    maybeBegin();
+  }
+
+  function maybeBegin() {
+    if (!S || S.phase !== 'place' || !S.ready || !S.peerReady) return;
+    var again = NET.side === 1 ? S.again : S.peerAgain;
+    if (typeof again !== 'boolean') return;
+    S.G = E.netGame(S.ships, again, NET.side === 1);
+    S.phase = 'battle';
+    S.startedAt = Date.now();
+    hover = -1;
+    render();
+    save();
+  }
+
+  function netShoot(idx) {
+    var m = E.netFire(S.G, idx);
+    if (!m) return;
+    S.lastMe = idx;
+    S.msgMe = '';
+    tx(m);
+    C.feedback('tap');
+    save();
+    render();
+  }
+
+  function shotSound(r, mine) {
+    if (r === 'sunk') { C.audio.sfx('boom'); C.haptic(mine ? 'success' : 'warn'); }
+    else if (r === 'hit') { C.audio.sfx('hit'); C.haptic(mine ? 'success' : 'warn'); }
+    else C.audio.sfx(mine ? 'place' : 'tick');
+  }
+
+  function keepFleet() { return S && E.validFleet(S.ships) ? S.ships : null; }
+
+  function onNet(d) {
+    if (!S || S.mode !== 'net' || !d) return;
+    var g = d.g | 0;
+    if (d.t === 'name') { NET.peer = String(d.name || '').slice(0, 16); return; }
+    if (d.t === 'new') { if (g > NET.g) { NET.g = g; freshPlace(S.level, null, keepFleet()); } return; }
+    if (d.t === 'sync') { onSync(d); return; }
+    if (g !== NET.g) return;
+    if (d.t === 'ready') {
+      S.peerReady = true;
+      S.peerAgain = typeof d.again === 'boolean' ? d.again : null;
+      save();
+      maybeBegin();
+    } else if (d.t === 'shot') {
+      if (!S.G) return;
+      var before = S.G.inn.length;
+      var m = E.netAnswer(S.G, d.n, d.i);
+      if (m) tx(m);
+      if (S.G.inn.length > before) theirShot(before);
+    } else if (d.t === 'reply') {
+      if (!S.G || !E.netReply(S.G, d.n, d)) return;
+      myReply(d.n);
+    } else if (d.t === 'fleet') {
+      if (S.G && E.netReveal(S.G, d.ships)) {
+        save();
+        if (S.finWait) showNetResult(); else draw();
+      }
+    }
+  }
+
+  function theirShot(k) {
+    var rec = S.G.inn[k];
+    S.lastAi = rec.i;
+    S.msgAi = word(rec.r);
+    shotSound(rec.r, false);
+    save();
+    render();
+    shotFx(cvMe, rec.i, rec.r);
+    if (S.G.winner && S.phase === 'battle') finish();
+  }
+  function myReply(n) {
+    var o = S.G.out[n];
+    S.msgMe = word(o.r);
+    shotSound(o.r, true);
+    save();
+    render();
+    shotFx(cvFoe, o.i, o.r);
+    if (S.G.winner === 'me') {
+      tx({ t: 'fleet', ships: S.G.me.ships });
+      if (S.phase === 'battle') finish();
+    }
+  }
+
+  function answered(G) { return G.out.filter(function (o) { return o.r != null; }).length; }
+
+  // The newer state wins: a later game number restarts this phone's placing; within one
+  // game the engine merges the two shot lists, so nothing is dropped or applied twice.
+  function onSync(d) {
+    var g = d.g | 0;
+    if (g < NET.g) return;
+    if (g > NET.g) { NET.g = g; freshPlace(S.level, null, keepFleet()); }
+    if (d.ready) {
+      S.peerReady = true;
+      if (typeof d.again === 'boolean') S.peerAgain = d.again;
+    }
+    maybeBegin();
+    if (!S.G) { save(); render(); return; }
+    var outN = answered(S.G), innN = S.G.inn.length;
+    var send = E.netSync(S.G, d.state || {});
+    for (var k = 0; k < send.length; k++) tx(send[k]);
+    if (d.fleet) E.netReveal(S.G, d.fleet);
+    if (S.G.inn.length > innN) theirShot(S.G.inn.length - 1);
+    else if (answered(S.G) > outN) {
+      var last = -1;
+      for (var j = 0; j < S.G.out.length; j++) if (S.G.out[j].r != null) last = j;
+      myReply(last);
+    } else {
+      save();
+      render();
+      if (S.G.winner && S.phase === 'battle') finish();
+      else if (S.finWait && S.G.reveal) showNetResult();
+    }
+  }
+
+  // The loser waits a moment for the winner's fleet so the result card can show it; if it
+  // does not come, the card shows what the shots found.
+  function netFinish() {
+    S.phase = 'over';
+    S.elapsed = Date.now() - S.startedAt;
+    ctx.clearSave();
+    render();
+    if (S.G.winner === 'ai' && !S.G.reveal) {
+      S.finWait = true;
+      finTimer = setTimeout(function () { finTimer = null; showNetResult(); }, 2500);
+      return;
+    }
+    showNetResult();
+  }
+
+  function showNetResult() {
+    if (!S || S.shown) return;
+    if (finTimer) { clearTimeout(finTimer); finTimer = null; }
+    S.finWait = false;
+    S.shown = true;
+    draw();
+    var G = S.G, won = G.winner === 'me';
+    var hits = 0;
+    for (var i = 0; i < N * N; i++) if (G.foe.shots[i] === 2) hits++;
+    var acc = G.shots.me ? Math.round(hits * 100 / G.shots.me) : 0;
+    var afloat = G.me.sunk.filter(function (x) { return !x; }).length;
+    // Same scale as Reversi's two-player game; no awards, stats or daily with two phones
+    var base = 8;
+    var coins = Math.max(2, Math.round(won ? base : base * 0.35));
+    var points = Math.max(3, Math.round(won ? base * 4 : base * 1.2));
+    var foe = JSON.parse(JSON.stringify(foeView()));
+    var name = C.t('appName') + ' · ' + (NAME[C.state.settings.lang] || NAME.en);
+    ctx.finish({
+      won: won,
+      title: won ? C.t('won') : C.t('lost'),
+      timeMs: S.elapsed, coins: coins, points: points,
+      lines: [
+        { label: C.t('shots'), value: C.num(G.shots.me) },
+        { label: C.t('accuracy'), value: C.num(acc) + '%' },
+        { label: C.t('shipsLeft'), value: C.num(afloat) + ' / ' + C.num(G.me.ships.length) },
+        { label: C.t('rival'), value: NET.peer || C.t('twoPhones') }
+      ],
+      shareText: name + '\n' + C.t('twoPhones') + '\n' +
+        (won ? C.t('wonIn', { n: C.num(G.shots.me) }) : C.t('lost')) + ' · ' + C.t('accuracy') + ' ' + C.num(acc) + '%',
+      paint: function (g, W, H) {
+        var side = Math.min(W, H);
+        paintSea(g, (W - side) / 2, (H - side) / 2, side,
+          { board: foe, ships: foe.ships, reveal: true, ghost: true, sel: -1, cursor: -1, last: -1 }, palette());
+      },
+      onAgain: function () { netNew(); }
+    });
+  }
+
+  function netNew() {
+    NET.g++;
+    tx({ t: 'new' });
+    freshPlace(S.level, null, keepFleet());
+  }
+
+  window.addEventListener('pagehide', function () { if (S && S.mode === 'net') C.link.close(); });
+  // If the page was hidden long enough for the link to be closed, coming back reopens it
+  C.onResume(function () {
+    if (S && S.mode === 'net' && NET.want && C.link.status === 'idle') openLink(NET.want);
+  });
+
   function finish() {
     stopAi();
+    if (finTimer) { clearTimeout(finTimer); finTimer = null; }
     var G = S.G;
+    if (S.mode === 'net') { netFinish(); return; }
     S.phase = 'over';
     S.elapsed = Date.now() - S.startedAt;
     render();
@@ -998,6 +1487,16 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
   /* --------------------------------------------------------- ذخیره */
 
   ctx.autosave(function () {
+    // #752: a two-phone game is saved with its side, so a phone the system killed comes
+    // back into the same game, placed fleet included
+    if (S && S.mode === 'net') {
+      if (!NET.side || !(S.phase === 'battle' || (S.phase === 'place' && S.ready))) return { inProgress: false };
+      return {
+        v: 1, mode: 'net', side: NET.side, g: NET.g, peer: NET.peer, phase: S.phase,
+        ships: S.ships, ready: !!S.ready, peerReady: !!S.peerReady, again: S.again, peerAgain: S.peerAgain,
+        G: S.G, elapsed: Date.now() - S.startedAt, lastMe: S.lastMe, lastAi: S.lastAi
+      };
+    }
     if (!S || S.phase !== 'battle' || !S.G) return { inProgress: false };
     return {
       v: 1, level: S.level, daily: S.daily, G: S.G,
@@ -1007,7 +1506,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
   function save() { ctx.save(); }
 
   function askNew() {
-    function go() { freshPlace(S && S.daily ? DAILY_LEVEL : prefs.level, S ? S.daily : dailyDate); }
+    function go() {
+      if (S && S.mode === 'net') { netNew(); return; }
+      freshPlace(S && S.daily ? DAILY_LEVEL : prefs.level, S ? S.daily : dailyDate);
+    }
     if (!S || S.phase !== 'battle') { go(); return; }
     C.ui.confirm({ title: C.t('newMatch'), body: C.t('resetWarn'), onOk: go });
   }
@@ -1146,7 +1648,27 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Battleship
 
   /* ---------------------------------------------------------- شروع */
 
+  function restoreNet(v) {
+    // the web and F-Droid apps have no link, so a two-phone save is only reopened in Chogan Plus
+    if (!C.link.available() || (v.side !== 1 && v.side !== 2) || !E.validFleet(v.ships)) return false;
+    var battle = v.phase === 'battle';
+    if (battle && !(v.G && v.G.net && v.G.me && v.G.foe && E.validFleet(v.G.me.ships) && !v.G.winner)) return false;
+    mode = 'net';
+    NET.side = v.side; NET.g = v.g | 0; NET.peer = String(v.peer || '').slice(0, 16);
+    S = {
+      phase: battle ? 'battle' : 'place', level: prefs.level || 'medium', daily: null, mode: 'net',
+      ships: battle ? v.G.me.ships : v.ships, sel: -1, vert: false, G: battle ? v.G : null,
+      startedAt: Date.now() - (v.elapsed || 0), lastMe: battle ? v.lastMe : -1, lastAi: battle ? v.lastAi : -1,
+      msgMe: '', msgAi: '', ready: true, peerReady: !!v.peerReady,
+      again: typeof v.again === 'boolean' ? v.again : null, peerAgain: typeof v.peerAgain === 'boolean' ? v.peerAgain : null
+    };
+    if (battle) S.G.turn = E.netTurn(S.G);
+    openLink(v.side === 1 ? 'host' : 'guest');
+    return true;
+  }
+
   function restore(v) {
+    if (v && v.mode === 'net') return restoreNet(v);
     if (!v || v.v !== 1 || !v.G || !v.G.me || !v.G.foe || v.G.winner) return false;
     if (!E.validFleet(v.G.me.ships) || !E.validFleet(v.G.foe.ships)) return false;
     S = {
