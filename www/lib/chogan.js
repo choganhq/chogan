@@ -3559,16 +3559,23 @@
   // A dropped link must not lose a move: every message carries a sequence number, each side
   // keeps what it sent, and on reconnecting both say how far they got, so the other resends
   // only what was missed. Duplicates are dropped by number.
+  //
+  // #752: Android kills a backgrounded app on a small phone, and the reopened game opens the
+  // link from zero. Each open therefore names its session (`sid`), and a hello says whose
+  // session its `got` counts. A peer with a new session has none of our old messages and
+  // numbers its own from 1 again, so both counters restart and the old outbox is dropped;
+  // the game resyncs its state on `connected` (info.restarted says this happened).
   function makeLink(getTransport) {
     var api = { status: 'idle' };
     var t = null, opts = null, peer = null, outbox = [], sent = 0, got = 0, said = false;
+    var sid = '', peerSid = '';
     var HELLO = 'hello', DATA = 'data';
     function set(status, info) {
       api.status = status;
       if (opts && opts.onStatus) { try { opts.onStatus(status, info || null); } catch (e) { console.error(e); } }
     }
     function raw(obj) { if (t && peer) t.send(peer, JSON.stringify(obj)); }
-    function hello() { said = true; raw({ k: HELLO, game: opts.game, v: opts.version || '', got: got }); }
+    function hello() { said = true; raw({ k: HELLO, game: opts.game, v: opts.version || '', got: got, sid: sid, of: peerSid }); }
     function onEvent(ev) {
       if (!opts) return;
       if (ev.type === 'connected') {
@@ -3601,9 +3608,19 @@
             api.close();
             return;
           }
+          var restarted = false;
+          if (m.sid !== peerSid) {
+            restarted = peerSid !== '';
+            if (restarted) { got = 0; sent = 0; outbox = []; }
+            peerSid = String(m.sid || '');
+            // our hello may have gone out with the old session's count; say it again
+            said = false;
+          }
           if (!said) hello();
-          for (var i = 0; i < outbox.length; i++) if (outbox[i].n > (m.got | 0)) raw(outbox[i]);
-          set('connected');
+          // a count of another session of ours (we restarted) means it has none of these
+          var upto = m.of === sid ? (m.got | 0) : 0;
+          for (var i = 0; i < outbox.length; i++) if (outbox[i].n > upto) raw(outbox[i]);
+          set('connected', { restarted: restarted });
         } else if (m.k === DATA && (m.n | 0) === got + 1) {
           got = m.n;
           if (opts.onMessage) { try { opts.onMessage(m.d); } catch (e) { console.error(e); } }
@@ -3616,7 +3633,8 @@
       api.close();
       t = getTransport();
       if (!t) { set('unavailable'); return false; }
-      opts = o; outbox = []; sent = 0; got = 0; peer = null; said = false;
+      opts = o; outbox = []; sent = 0; got = 0; peer = null; said = false; peerSid = '';
+      sid = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
       set('searching');
       t.start({ role: o.role, service: 'chogan.' + o.game, name: o.name || '' }, onEvent);
       return true;
