@@ -2361,7 +2361,12 @@ function JigsawPictures() {
     tracePath(g, path, m, m, 1);
     g.save();
     g.clip();
-    g.drawImage(pic, (c * L.cw - m) * d, (r * L.ch - m) * d, (L.cw + 2 * m) * d, (L.ch + 2 * m) * d, 0, 0, L.cw + 2 * m, L.ch + 2 * m);
+    // An edge piece's window reaches m pixels past the picture. Chrome clips such a source rectangle,
+    // but the WebKit of iPadOS 15 paints nothing for it, so every edge piece came out empty and only
+    // the interior ones showed (#756). Cut the window to the picture ourselves and shift the target.
+    var sx = (c * L.cw - m) * d, sy = (r * L.ch - m) * d, sw = (L.cw + 2 * m) * d, sh = (L.ch + 2 * m) * d;
+    var cx = Math.max(0, sx), cy = Math.max(0, sy), cx2 = Math.min(pic.width, sx + sw), cy2 = Math.min(pic.height, sy + sh);
+    if (cx2 > cx && cy2 > cy) g.drawImage(pic, cx, cy, cx2 - cx, cy2 - cy, (cx - sx) / d, (cy - sy) / d, (cx2 - cx) / d, (cy2 - cy) / d);
     g.restore();
     // a light rim and a dark one, so a piece reads as a piece on any part of the picture
     g.lineJoin = 'round';
