@@ -12,6 +12,7 @@
   .ch-fit > .mr-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
   .mr-canvas { display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; user-select: none; -webkit-user-select: none; }
   .mr-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .mr-label { font-weight: 700; font-size: var(--fs-sm); color: var(--c-text-dim); }
   .mr-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
 </style>
 </head>
@@ -29,10 +30,29 @@ function MotoRushEngineFactory() {
   // wheel; the bike is BIKE_L long. x is the bike's lane as a fraction, tl the lane it
   // is steering to.
   var LANES = 4, DT = 1 / 60, START_LANE = 1;
-  // speeds in m/s: the bike starts at V0 and reaches VMAX after RAMP_P metres
-  var V0 = 26, VMAX = 50, RAMP_P = 8000, TV = 14, BOOST_V = 12, BOOST_T = 180, BOOST_MULT = 2;
+  // Each difficulty (#783) sets the road's speed in m/s (v0 at the start, vmax after ramp
+  // metres), the length of one level (lap), the reaction margin every gap leaves (react,
+  // seconds) and the level from which cars change lanes (lc, 0: never). The ramp ends on
+  // a level boundary, so each level up is a step of the speed ramp, not a hidden counter.
+  // The daily ride is always medium, so it is the same road for everyone.
+  var DIFF = {
+    easy: { v0: 22, vmax: 42, ramp: 9600, lap: 1200, react: 0.5, lc: 0 },
+    medium: { v0: 26, vmax: 50, ramp: 8000, lap: 1000, react: 0.35, lc: 3 },
+    hard: { v0: 30, vmax: 56, ramp: 6400, lap: 800, react: 0.35, lc: 2 }
+  };
+  var V0 = DIFF.medium.v0, TV = 14, BOOST_V = 12, BOOST_T = 180, BOOST_MULT = 2;
+  // the gas pedal (#782): held, the bike rides GAS_V above the road's speed and the
+  // distance scores GAS_MULT times; it adds to nitro, so the worst case is both at once
+  var GAS_V = 12, GAS_MULT = 1.5;
+  // The bike's speed is a state that eases toward its target (road + gas + nitro) instead
+  // of jumping there: the owner saw 180 km/h snap to 223 and back when nitro started and
+  // ended. ACC m/s² brings a nitro burst to full in about 1 s, DEC lets it fall back in
+  // about 1.5 s.
+  var ACC = 12, DEC = 8;
   // lanes a second, and a human's reaction time, both used to keep every gap passable
   var LANE_SPEED = 5.5, REACT = 0.35, BIKE_L = 2;
+  // a lane changer blinks for BLINK ticks before it moves, then slides one lane in MOVE
+  var BLINK = 60, MOVE = 30;
   // a crash when the bike is this close to a car's lane, a near miss when it passed closer
   // than NEAR_X (a car in the next lane, ridden past centred, is 1.0 away and does not count)
   var HIT_X = 0.5, NEAR_X = 0.9, COMBO_T = 240, COMBO_MAX = 8, NEAR_PTS = 25;
@@ -45,33 +65,55 @@ function MotoRushEngineFactory() {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   }
-  function base(p) { return Math.min(VMAX, V0 + (VMAX - V0) * Math.max(0, p) / RAMP_P); }
-  function speed(S) { return base(S.p) + (S.boostT > 0 ? BOOST_V : 0); }
+  function cfg(diff) { return DIFF[diff] || DIFF.medium; }
+  function base(p, diff) { var c = cfg(diff); return Math.min(c.vmax, c.v0 + (c.vmax - c.v0) * Math.max(0, p) / c.ramp); }
+  // where the speed is heading, and the speed the bike really rides at
+  function target(S) { return base(S.p, S.diff) + (S.gas ? GAS_V : 0) + (S.boostT > 0 ? BOOST_V : 0); }
+  function speed(S) { return S.v; }
+  function ease(S) {
+    var t = target(S);
+    S.v = S.v < t ? Math.min(t, S.v + ACC * DT) : Math.max(t, S.v - DEC * DT);
+    S.v = Math.round(S.v * 1e9) / 1e9;
+  }
+  // The fastest the bike can close on traffic at p: top of the ramp there, gas and nitro.
+  // The eased speed never passes the highest target it has had, and the road's speed only
+  // grows with p, so this instant worst case also bounds the real, accelerating speed.
+  function closing(p, diff) { return base(p, diff) + GAS_V + BOOST_V - TV; }
+  function topSpeed(diff) { return cfg(diff).vmax + GAS_V + BOOST_V; }
+  function levelAt(p, diff) { return 1 + Math.floor(Math.max(0, p) / cfg(diff).lap); }
   function goal(S) { return S.daily ? DAILY_P : Infinity; }
   // how far behind a wave the next one must start so that a rider who waits for the
-  // first to pass can still reach the next free lane in time, even on a boost
-  function need(from, to, y) {
-    return BIKE_L + (Math.abs(from - to) / LANE_SPEED + REACT) * (base(y + 200) + BOOST_V - TV) + 2;
+  // first to pass can still reach the next free lane in time, even with gas and nitro
+  function need(from, to, y, diff) {
+    return BIKE_L + (Math.abs(from - to) / LANE_SPEED + cfg(diff).react) * closing(y + 200, diff) + 2;
+  }
+  // How far ahead of the bike a lane changer starts to blink. Blinking and sliding take a
+  // fixed time; after that, a rider at the fastest closing speed still has its reaction
+  // time and one lane change to step into the lane the car just left, which is always
+  // free. A slower rider only gets more room.
+  function warnAt(y, diff) {
+    return ((BLINK + MOVE) * DT + 1 / LANE_SPEED + cfg(diff).react) * closing(y, diff) + BIKE_L + 2;
   }
 
-  function fromSeed(seed, daily) {
+  function fromSeed(seed, daily, diff) {
+    diff = daily || !DIFF[diff] ? 'medium' : diff;
     var S = {
-      r: seed >>> 0, daily: !!daily, p: 0, d: 0, x: START_LANE, tl: START_LANE,
-      bar: 0, boostT: 0, combo: 0, comboT: 0, bestCombo: 0, nears: 0, picks: 0,
-      score: 0, tick: 0, top: V0, over: false, won: false, hit: null,
+      r: seed >>> 0, daily: !!daily, diff: diff, p: 0, d: 0, x: START_LANE, tl: START_LANE,
+      bar: 0, boostT: 0, gas: false, combo: 0, comboT: 0, bestCombo: 0, nears: 0, picks: 0,
+      score: 0, tick: 0, v: DIFF[diff].v0, top: DIFF[diff].v0, lvl: 1, over: false, won: false, hit: null,
       waves: [], items: [], ny: FIRST, nf: 0, ev: []
     };
     S.nf = Math.floor(rand(S) * LANES);
     ensure(S);
     return S;
   }
-  function newGame(rnd, daily) { return fromSeed(Math.floor(rnd() * 4294967296), daily); }
+  function newGame(rnd, daily, diff) { return fromSeed(Math.floor(rnd() * 4294967296), daily, diff); }
 
   // One wave: one to three cars side by side (staggered a little), always leaving the
   // lane f free. The next wave's free lane is drawn now, so the gap after this wave
   // can be made long enough to get there.
   function spawn(S) {
-    var y = S.ny, f = S.nf, t = Math.min(1, y / 12000), i;
+    var c0 = cfg(S.diff), y = S.ny, f = S.nf, t = Math.min(1, y / (1.5 * c0.ramp)), i;
     S.nf = Math.floor(rand(S) * LANES);
     var u = rand(S), k = u < 0.6 - 0.4 * t ? 1 : u > 1 - (0.05 + 0.3 * t) ? 3 : 2;
     var other = [];
@@ -80,15 +122,34 @@ function MotoRushEngineFactory() {
     var cars = [], span = 0;
     for (i = 0; i < k; i++) {
       var q = rand(S), kind = q < 0.15 + 0.15 * t ? 'truck' : q < 0.4 + 0.1 * t ? 'van' : 'car';
-      var c = { lane: other[i], o: Math.round(rand(S) * 60) / 10, len: LEN[kind], kind: kind, paint: Math.floor(rand(S) * 5), md: 9, done: false };
+      var c = { lane: other[i], x: other[i], o: Math.round(rand(S) * 60) / 10, len: LEN[kind], kind: kind, paint: Math.floor(rand(S) * 5), md: 9, done: false };
       cars.push(c);
       span = Math.max(span, c.o + c.len);
+    }
+    // From its difficulty's level on, a wave may hold one car that will change lanes
+    // (#783). It moves one lane, so it only ever covers its own lane and the next one;
+    // the next one is never the free lane f and never a lane another car of the wave
+    // holds, so f stays free and the lane it leaves becomes a second free lane.
+    var lv = levelAt(y, S.diff);
+    if (c0.lc && lv >= c0.lc && rand(S) < Math.min(0.5, 0.15 + 0.07 * (lv - c0.lc))) {
+      var taken = cars.map(function (q) { return q.lane; }), opts = [];
+      for (i = 0; i < cars.length; i++) {
+        [-1, 1].forEach(function (dl) {
+          var to = cars[i].lane + dl;
+          if (to >= 0 && to < LANES && to !== f && taken.indexOf(to) < 0) opts.push([i, to]);
+        });
+      }
+      if (opts.length) {
+        var pick = opts[Math.floor(rand(S) * opts.length)], lc = cars[pick[0]];
+        lc.to = pick[1]; lc.ph = 0; lc.k = 0; lc.at = Math.round(warnAt(y + lc.o, S.diff) * 10) / 10;
+      }
     }
     S.waves.push({ y: y, span: span, f: f, cars: cars });
     if (rand(S) < 0.3) S.items.push({ lane: f, y: y + span / 2, got: false });
     var gs = 3.2 - 1.6 * t;
-    var gap = Math.max(need(f, S.nf, y + span), gs * (base(y + span) - TV) * (0.85 + 0.4 * rand(S)));
-    S.ny = Math.round((y + span + gap) * 10) / 10;
+    var gap = Math.max(need(f, S.nf, y + span, S.diff), gs * (base(y + span, S.diff) - TV) * (0.85 + 0.4 * rand(S)));
+    // rounded up: rounding down could take a few centimetres off the margin need() asks for
+    S.ny = Math.ceil((y + span + gap) * 10) / 10;
   }
   function ensure(S) {
     var g = goal(S);
@@ -104,10 +165,29 @@ function MotoRushEngineFactory() {
     S.tl = nt;
     return true;
   }
+  function gas(S, on) { if (!S.over) S.gas = !!on; }
+
+  // lane changers ahead: blink once the bike is within the car's warning distance, then slide
+  function changers(S) {
+    for (var i = 0; i < S.waves.length; i++) {
+      var w = S.waves[i];
+      for (var j = 0; j < w.cars.length; j++) {
+        var c = w.cars[j];
+        if (c.to === undefined || c.ph >= 3) continue;
+        if (c.ph === 0) {
+          if (w.y + c.o - S.p <= c.at) { c.ph = 1; c.k = 0; S.ev.push({ t: 'blink', lane: c.lane, to: c.to }); }
+        } else if (c.ph === 1) {
+          if (++c.k >= BLINK) { c.ph = 2; c.k = 0; }
+        } else if (++c.k >= MOVE) { c.ph = 3; c.x = c.to; }
+        else c.x = Math.round((c.lane + (c.to - c.lane) * c.k / MOVE) * 1e6) / 1e6;
+      }
+    }
+  }
 
   function step(S) {
     if (S.over) return;
     S.tick++;
+    changers(S);
     var v = speed(S), rel = v - TV;
     S.top = Math.max(S.top, v);
     // steering: the bike slides toward its lane
@@ -117,8 +197,10 @@ function MotoRushEngineFactory() {
     S.p += rel * DT;
     S.d += v * DT;
     var mult = 1 + 0.25 * Math.min(S.combo, COMBO_MAX);
-    S.score += v * DT * 0.1 * mult * (S.boostT > 0 ? BOOST_MULT : 1);
+    S.score += v * DT * 0.1 * mult * (S.boostT > 0 ? BOOST_MULT : 1) * (S.gas ? GAS_MULT : 1);
     if (S.boostT > 0) S.boostT--;
+    var lv = levelAt(S.p, S.diff);
+    if (lv > S.lvl) { S.lvl = lv; S.ev.push({ t: 'level', n: lv }); }
     if (S.comboT > 0 && --S.comboT === 0) S.combo = 0;
     var rear = S.p - BIKE_L, i, j;
     for (i = 0; i < S.waves.length; i++) {
@@ -129,10 +211,10 @@ function MotoRushEngineFactory() {
         if (c.done) continue;
         var y0 = w.y + c.o, y1 = y0 + c.len;
         if (S.p > y0 && rear < y1) {
-          var dx = Math.abs(S.x - c.lane);
+          var cx = c.x === undefined ? c.lane : c.x, dx = Math.abs(S.x - cx);
           if (dx < HIT_X) {
-            S.over = true; S.hit = { lane: c.lane, kind: c.kind };
-            S.ev.push({ t: 'crash', lane: c.lane });
+            S.over = true; S.hit = { lane: cx, kind: c.kind };
+            S.ev.push({ t: 'crash', lane: cx });
             return;
           }
           if (dx < c.md) c.md = dx;
@@ -143,7 +225,7 @@ function MotoRushEngineFactory() {
             S.bestCombo = Math.max(S.bestCombo, S.combo);
             var bonus = NEAR_PTS * (1 + 0.25 * Math.min(S.combo, COMBO_MAX));
             S.score += bonus;
-            S.ev.push({ t: 'near', combo: S.combo, pts: bonus, lane: c.lane });
+            S.ev.push({ t: 'near', combo: S.combo, pts: bonus, lane: c.x === undefined ? c.lane : c.x });
           }
         }
       }
@@ -162,6 +244,8 @@ function MotoRushEngineFactory() {
         }
       }
     }
+    // this tick rode at S.v; the next one rides a step closer to the target
+    ease(S);
     if (S.p >= goal(S)) { S.over = true; S.won = true; S.ev.push({ t: 'finish' }); return; }
     ensure(S);
   }
@@ -182,22 +266,37 @@ function MotoRushEngineFactory() {
     for (i = 0; i < o.waves.length; i++) {
       var w = o.waves[i];
       if (!w || !num(w.y) || !num(w.span) || !Array.isArray(w.cars)) return null;
-      for (var j = 0; j < w.cars.length; j++) { var c = w.cars[j]; if (!c || !num(c.o) || !num(c.len) || !num(c.lane) || !LEN[c.kind]) return null; }
+      for (var j = 0; j < w.cars.length; j++) {
+        var c = w.cars[j];
+        if (!c || !num(c.o) || !num(c.len) || !num(c.lane) || !LEN[c.kind]) return null;
+        if (c.x !== undefined && (!num(c.x) || c.x < 0 || c.x > LANES - 1)) return null;
+        // a lane changer moves exactly one lane, so a save can't teleport one
+        if (c.to !== undefined && (!num(c.to) || Math.abs(c.to - c.lane) !== 1 || c.to < 0 || c.to >= LANES || !num(c.ph) || !num(c.k) || !num(c.at))) return null;
+      }
     }
     var S = JSON.parse(JSON.stringify(o));
     S.ev = [];
     S.daily = !!S.daily; S.over = !!S.over; S.won = !!S.won;
+    // saves from before #782/#783 ride on medium with the gas released
+    if (!DIFF[S.diff] || S.daily) S.diff = 'medium';
+    S.gas = false;
+    S.waves.forEach(function (w) { w.cars.forEach(function (q) { if (q.x === undefined) q.x = q.lane; }); });
     ['bestCombo', 'nears', 'picks'].forEach(function (k) { if (!num(S[k])) S[k] = 0; });
     if (!num(S.top)) S.top = V0;
+    // a save from before the eased speed resumes at the speed it was riding
+    if (!num(S.v) || S.v <= 0) S.v = target(S);
+    if (!num(S.lvl)) S.lvl = levelAt(S.p, S.diff);
     return S;
   }
-  function clone(S) { var c = restore(snapshot(S)); c.ev = S.ev.slice(); return c; }
+  function clone(S) { var c = restore(snapshot(S)); c.ev = S.ev.slice(); c.gas = S.gas; return c; }
 
   return {
     LANES: LANES, DT: DT, START_LANE: START_LANE, BIKE_L: BIKE_L, DAILY_P: DAILY_P, HIT_X: HIT_X, NEAR_X: NEAR_X,
     LANE_SPEED: LANE_SPEED, REACT: REACT, TV: TV, BOOST_V: BOOST_V, BOOST_T: BOOST_T, COMBO_T: COMBO_T, COMBO_MAX: COMBO_MAX,
-    PICK_ADD: PICK_ADD, LEN: LEN,
-    base: base, speed: speed, need: need, newGame: newGame, fromSeed: fromSeed, step: step, steer: steer,
+    PICK_ADD: PICK_ADD, LEN: LEN, DIFF: DIFF, GAS_V: GAS_V, GAS_MULT: GAS_MULT, BLINK: BLINK, MOVE: MOVE,
+    ACC: ACC, DEC: DEC, target: target,
+    base: base, speed: speed, need: need, warnAt: warnAt, closing: closing, topSpeed: topSpeed, levelAt: levelAt,
+    newGame: newGame, fromSeed: fromSeed, step: step, steer: steer, gas: gas,
     drain: drain, snapshot: snapshot, restore: restore, clone: clone, ensure: ensure
   };
 }
@@ -224,61 +323,67 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     mood: 'dots',
     strings: {
       fa: {
-        scene: 'موتورسوار در جاده‌ای چهاربانده میان ماشین‌ها', hint: 'انگشت را بکش یا سمت چپ و راست را لمس کن تا بانده عوض کنی.', tapStart: 'برای حرکت لمس کن',
+        scene: 'موتورسوار در جاده‌ای چهاربانده میان ماشین‌ها', hint: 'انگشت را بکش یا سمت چپ و راست را لمس کن تا بانده عوض کنی. پدال گاز را نگه دار تا تندتر بروی.', tapStart: 'برای حرکت لمس کن',
+        gasL: 'گاز', kGas: 'گاز', lvlN: 'مرحله‌ی {n}', lvlUp: 'مرحله‌ی {n}!', lvlL: 'مرحله', dailyMed: 'موتورسوار روزانه همیشه روی سختی متوسط است و برای همه یکسان.',
         pausedTxt: 'مکث', ptsN: 'امتیاز: {n}', bestN: 'بهترین: {n}', kmh: 'کیلومتر/ساعت', kmN: '{n} کیلومتر', crash: 'تصادف!', finishLine: 'به خط پایان رسیدی!',
         dailyMr: 'موتورسوار روزانه', newRun: 'دور تازه', distL: 'مسافت', ptsL: 'امتیاز', topL: 'بیشترین سرعت', tries: 'تلاش‌ها', comboL: 'بهترین زنجیره',
         kSteer: 'بانده‌ی چپ و راست', kPause: 'مکث', kAgain: 'دور تازه', kStart: 'شروع', nitroGo: 'نیترو!', nitroN: 'نیترو {n} از {m}', nearPop: 'خطر از بیخ گوش!',
-        rules: 'با موتور در جاده‌ی چهاربانده جلو برو و به ماشین‌ها و کامیون‌ها نخور. انگشت را به چپ یا راست بکش، یا سمت چپ و راست صفحه را لمس کن، تا یک بانده جابه‌جا شوی. در هر ردیف ماشین همیشه دست‌کم یک بانده‌ی باز هست. از کنار ماشین‌ها از نزدیک رد شو تا زنجیره بسازی؛ هر رد شدن نزدیک امتیاز دارد و زنجیره امتیاز همه چیز را بیشتر می‌کند. اگر چند ثانیه رد شدن نزدیکی نباشد زنجیره صفر می‌شود. قوطی‌های زرد نوار نیترو را پر می‌کنند؛ وقتی پر شد چند ثانیه تندتر می‌روی و امتیاز دوبرابر است. سرعت کم‌کم بالا می‌رود. در موتورسوار روزانه، که برای همه یکسان است، باید به خط پایان برسی.',
+        rules: 'با موتور در جاده‌ی چهاربانده جلو برو و به ماشین‌ها و کامیون‌ها نخور. انگشت را به چپ یا راست بکش، یا سمت چپ و راست صفحه را لمس کن، تا یک بانده جابه‌جا شوی. در هر ردیف ماشین همیشه دست‌کم یک بانده‌ی باز هست. از کنار ماشین‌ها از نزدیک رد شو تا زنجیره بسازی؛ هر رد شدن نزدیک امتیاز دارد و زنجیره امتیاز همه چیز را بیشتر می‌کند. اگر چند ثانیه رد شدن نزدیکی نباشد زنجیره صفر می‌شود. قوطی‌های زرد نوار نیترو را پر می‌کنند؛ وقتی پر شد چند ثانیه تندتر می‌روی و امتیاز دوبرابر است. پدال گاز پایین صفحه، یا کلید بالا یا W، را نگه دار تا تندتر بروی و امتیاز مسافت یک‌ونیم برابر شود. هر چند کیلومتر به مرحله‌ی بعد می‌رسی و جاده تندتر می‌شود؛ در مرحله‌های بالاتر بعضی ماشین‌ها بانده عوض می‌کنند، ولی همیشه اول راهنما می‌زنند. سختی را از چرخ‌دنده انتخاب کن. در موتورسوار روزانه، که برای همه یکسان و همیشه روی سختی متوسط است، باید به خط پایان برسی.',
         tutTitle1: 'بانده عوض کن', tutText1: 'انگشت را بکش یا سمت چپ و راست را لمس کن. همیشه یک بانده باز است.',
         tutTitle2: 'از نزدیک رد شو', tutText2: 'از کنار ماشین‌ها از فاصله‌ی کم رد شو تا زنجیره بسازی و امتیاز بیشتری بگیری.',
         tutTitle3: 'نیترو', tutText3: 'قوطی‌های زرد را بردار. نوار که پر شد، نیترو سرعت و امتیازت را بالا می‌برد.'
       },
       en: {
-        scene: 'A motorbike on a four-lane road among the traffic', hint: 'Swipe, or tap the left or right side, to change lanes.', tapStart: 'Tap to ride',
+        scene: 'A motorbike on a four-lane road among the traffic', hint: 'Swipe, or tap the left or right side, to change lanes. Hold the pedal to speed up.', tapStart: 'Tap to ride',
+        gasL: 'GAS', kGas: 'Gas', lvlN: 'Level {n}', lvlUp: 'Level {n}!', lvlL: 'Level', dailyMed: 'The daily ride is always on Medium, the same for everyone.',
         pausedTxt: 'Paused', ptsN: 'Score: {n}', bestN: 'Best: {n}', kmh: 'km/h', kmN: '{n} km', crash: 'Crash!', finishLine: 'You reached the finish!',
         dailyMr: 'Daily ride', newRun: 'New run', distL: 'Distance', ptsL: 'Score', topL: 'Top speed', tries: 'Tries', comboL: 'Best combo',
         kSteer: 'Lane left and right', kPause: 'Pause', kAgain: 'New run', kStart: 'Start', nitroGo: 'Nitro!', nitroN: 'Nitro {n}/{m}', nearPop: 'Close one!',
-        rules: 'Ride down the four-lane road and keep clear of the cars and trucks. Swipe left or right, or tap the left or right side of the screen, to move one lane. Every row of traffic leaves at least one lane open. Pass cars closely to build a combo: each near miss scores, and the combo raises everything you score. A few seconds without a near miss and the combo resets. Yellow cans fill the nitro bar; when it is full you ride faster for a few seconds and score double. The speed rises slowly. In the daily ride, the same for everyone, you aim for the finish line.',
+        rules: 'Ride down the four-lane road and keep clear of the cars and trucks. Swipe left or right, or tap the left or right side of the screen, to move one lane. Every row of traffic leaves at least one lane open. Pass cars closely to build a combo: each near miss scores, and the combo raises everything you score. A few seconds without a near miss and the combo resets. Yellow cans fill the nitro bar; when it is full you ride faster for a few seconds and score double. Hold the gas pedal at the bottom of the screen, or the Up arrow or W, to ride faster and score 1.5× for distance. Every couple of kilometres you reach the next level and the road gets faster; on higher levels some cars change lanes, always after flashing their indicator first. Pick the difficulty behind the gear. In the daily ride, the same for everyone and always on Medium, you aim for the finish line.',
         tutTitle1: 'Change lanes', tutText1: 'Swipe, or tap the left or right side. One lane is always open.',
         tutTitle2: 'Pass close', tutText2: 'Pass cars closely to build a combo and score more.',
         tutTitle3: 'Nitro', tutText3: 'Pick up the yellow cans. When the bar is full, nitro raises your speed and your score.'
       },
       pl: {
-        scene: 'Motocykl na czteropasmowej drodze wśród samochodów', hint: 'Przesuń palcem albo stuknij lewą lub prawą stronę, aby zmienić pas.', tapStart: 'Stuknij, aby jechać',
+        scene: 'Motocykl na czteropasmowej drodze wśród samochodów', hint: 'Przesuń palcem albo stuknij lewą lub prawą stronę, aby zmienić pas. Przytrzymaj pedał, aby przyspieszyć.', tapStart: 'Stuknij, aby jechać',
+        gasL: 'GAZ', kGas: 'Gaz', lvlN: 'Poziom {n}', lvlUp: 'Poziom {n}!', lvlL: 'Poziom', dailyMed: 'Jazda dnia jest zawsze na poziomie Średni, taka sama dla wszystkich.',
         pausedTxt: 'Pauza', ptsN: 'Punkty: {n}', bestN: 'Najlepszy: {n}', kmh: 'km/h', kmN: '{n} km', crash: 'Kraksa!', finishLine: 'Dojechałeś do mety!',
         dailyMr: 'Jazda dnia', newRun: 'Nowa gra', distL: 'Dystans', ptsL: 'Punkty', topL: 'Najwyższa prędkość', tries: 'Próby', comboL: 'Najlepsza seria',
         kSteer: 'Pas w lewo i w prawo', kPause: 'Pauza', kAgain: 'Nowa gra', kStart: 'Start', nitroGo: 'Nitro!', nitroN: 'Nitro {n}/{m}', nearPop: 'O włos!',
-        rules: 'Jedź czteropasmową drogą i omijaj samochody i ciężarówki. Przesuń palcem w lewo lub w prawo albo stuknij lewą lub prawą stronę ekranu, aby zmienić pas. Każdy rząd aut zostawia co najmniej jeden wolny pas. Mijaj auta z bliska, aby budować serię: każda mijanka o włos daje punkty, a seria zwiększa wszystko, co zdobywasz. Kilka sekund bez mijanki i seria się zeruje. Żółte kanistry napełniają pasek nitro; gdy jest pełny, przez kilka sekund jedziesz szybciej i zdobywasz podwójne punkty. Prędkość powoli rośnie. W jeździe dnia, takiej samej dla wszystkich, celem jest meta.',
+        rules: 'Jedź czteropasmową drogą i omijaj samochody i ciężarówki. Przesuń palcem w lewo lub w prawo albo stuknij lewą lub prawą stronę ekranu, aby zmienić pas. Każdy rząd aut zostawia co najmniej jeden wolny pas. Mijaj auta z bliska, aby budować serię: każda mijanka o włos daje punkty, a seria zwiększa wszystko, co zdobywasz. Kilka sekund bez mijanki i seria się zeruje. Żółte kanistry napełniają pasek nitro; gdy jest pełny, przez kilka sekund jedziesz szybciej i zdobywasz podwójne punkty. Przytrzymaj pedał gazu na dole ekranu albo strzałkę w górę lub W, aby jechać szybciej i dostawać 1,5× punktów za dystans. Co kilka kilometrów wchodzisz na kolejny poziom i droga przyspiesza; na wyższych poziomach niektóre auta zmieniają pas, zawsze najpierw włączając kierunkowskaz. Poziom trudności wybierzesz pod kołem zębatym. W jeździe dnia, takiej samej dla wszystkich i zawsze na poziomie Średni, celem jest meta.',
         tutTitle1: 'Zmieniaj pasy', tutText1: 'Przesuń palcem albo stuknij lewą lub prawą stronę. Jeden pas jest zawsze wolny.',
         tutTitle2: 'Mijaj z bliska', tutText2: 'Mijaj auta z bliska, aby budować serię i zdobywać więcej punktów.',
         tutTitle3: 'Nitro', tutText3: 'Zbieraj żółte kanistry. Gdy pasek jest pełny, nitro podnosi prędkość i punkty.'
       },
       zh: {
-        scene: '四车道公路上穿行在车流中的摩托车', hint: '滑动，或点屏幕左侧或右侧来换道。', tapStart: '点一下出发',
+        scene: '四车道公路上穿行在车流中的摩托车', hint: '滑动，或点屏幕左侧或右侧来换道。按住踏板加速。', tapStart: '点一下出发',
+        gasL: '油门', kGas: '油门', lvlN: '第 {n} 关', lvlUp: '第 {n} 关！', lvlL: '关卡', dailyMed: '每日飞驰始终是中等难度，对所有人都一样。',
         pausedTxt: '已暂停', ptsN: '得分：{n}', bestN: '最佳：{n}', kmh: '公里/时', kmN: '{n} 公里', crash: '撞车了！', finishLine: '到达终点！',
         dailyMr: '每日飞驰', newRun: '重新开始', distL: '距离', ptsL: '得分', topL: '最高速度', tries: '尝试次数', comboL: '最佳连击',
         kSteer: '向左、向右换道', kPause: '暂停', kAgain: '重新开始', kStart: '开始', nitroGo: '氮气加速！', nitroN: '氮气 {n}/{m}', nearPop: '好险！',
-        rules: '骑着摩托在四车道公路上前进，避开轿车和卡车。向左或向右滑动，或点屏幕左侧或右侧，就换一条车道。每一排车至少留出一条空车道。贴着车辆擦身而过可以累积连击：每次擦身都有分，连击还会提高你得到的所有分数。几秒内没有擦身，连击就会归零。黄色油罐会充满氮气条；充满后你会加速几秒，得分翻倍。速度会慢慢提高。每日飞驰对所有人都一样，目标是骑到终点。',
+        rules: '骑着摩托在四车道公路上前进，避开轿车和卡车。向左或向右滑动，或点屏幕左侧或右侧，就换一条车道。每一排车至少留出一条空车道。贴着车辆擦身而过可以累积连击：每次擦身都有分，连击还会提高你得到的所有分数。几秒内没有擦身，连击就会归零。黄色油罐会充满氮气条；充满后你会加速几秒，得分翻倍。按住屏幕下方的油门踏板，或方向键上、W 键，就能骑得更快，距离得分乘以 1.5。每隔几公里进入下一关，路上的速度会更快；在较高的关卡，一些车会换道，但一定会先打转向灯。难度在齿轮里选择。每日飞驰对所有人都一样，始终是中等难度，目标是骑到终点。',
         tutTitle1: '换道', tutText1: '滑动，或点左侧或右侧。总有一条车道是空的。',
         tutTitle2: '擦身而过', tutText2: '贴着车辆骑过去，累积连击，得分更多。',
         tutTitle3: '氮气', tutText3: '捡起黄色油罐。氮气条满了，速度和得分都会提高。'
       },
       de: {
-        scene: 'Ein Motorrad auf einer vierspurigen Straße im Verkehr', hint: 'Wische oder tippe links bzw. rechts, um die Spur zu wechseln.', tapStart: 'Tippe zum Losfahren',
+        scene: 'Ein Motorrad auf einer vierspurigen Straße im Verkehr', hint: 'Wische oder tippe links bzw. rechts, um die Spur zu wechseln. Halte das Pedal, um schneller zu fahren.', tapStart: 'Tippe zum Losfahren',
+        gasL: 'GAS', kGas: 'Gas', lvlN: 'Stufe {n}', lvlUp: 'Stufe {n}!', lvlL: 'Stufe', dailyMed: 'Die Fahrt des Tages ist immer auf Mittel, für alle gleich.',
         pausedTxt: 'Pause', ptsN: 'Punkte: {n}', bestN: 'Bestwert: {n}', kmh: 'km/h', kmN: '{n} km', crash: 'Unfall!', finishLine: 'Du hast das Ziel erreicht!',
         dailyMr: 'Fahrt des Tages', newRun: 'Neuer Lauf', distL: 'Strecke', ptsL: 'Punkte', topL: 'Höchstgeschwindigkeit', tries: 'Versuche', comboL: 'Beste Serie',
         kSteer: 'Spur nach links und rechts', kPause: 'Pause', kAgain: 'Neuer Lauf', kStart: 'Start', nitroGo: 'Nitro!', nitroN: 'Nitro {n}/{m}', nearPop: 'Knapp!',
-        rules: 'Fahre die vierspurige Straße entlang und weiche Autos und Lastwagen aus. Wische nach links oder rechts oder tippe auf die linke oder rechte Bildschirmseite, um eine Spur zu wechseln. Jede Reihe Autos lässt mindestens eine Spur frei. Fahre knapp an Autos vorbei, um eine Serie aufzubauen: Jedes knappe Manöver bringt Punkte, und die Serie erhöht alles, was du erzielst. Ein paar Sekunden ohne knappes Manöver, und die Serie beginnt von vorn. Gelbe Kanister füllen die Nitroleiste; ist sie voll, fährst du ein paar Sekunden schneller und punktest doppelt. Das Tempo steigt langsam. Bei der Fahrt des Tages, für alle gleich, geht es bis ins Ziel.',
+        rules: 'Fahre die vierspurige Straße entlang und weiche Autos und Lastwagen aus. Wische nach links oder rechts oder tippe auf die linke oder rechte Bildschirmseite, um eine Spur zu wechseln. Jede Reihe Autos lässt mindestens eine Spur frei. Fahre knapp an Autos vorbei, um eine Serie aufzubauen: Jedes knappe Manöver bringt Punkte, und die Serie erhöht alles, was du erzielst. Ein paar Sekunden ohne knappes Manöver, und die Serie beginnt von vorn. Gelbe Kanister füllen die Nitroleiste; ist sie voll, fährst du ein paar Sekunden schneller und punktest doppelt. Halte das Gaspedal unten am Bildschirm oder die Pfeiltaste nach oben bzw. W, um schneller zu fahren und für die Strecke 1,5-fach zu punkten. Alle paar Kilometer erreichst du die nächste Stufe und die Straße wird schneller; auf höheren Stufen wechseln manche Autos die Spur, aber immer erst nach dem Blinken. Die Schwierigkeit wählst du unter dem Zahnrad. Bei der Fahrt des Tages, für alle gleich und immer auf Mittel, geht es bis ins Ziel.',
         tutTitle1: 'Spur wechseln', tutText1: 'Wische oder tippe links bzw. rechts. Eine Spur ist immer frei.',
         tutTitle2: 'Knapp vorbei', tutText2: 'Fahre knapp an Autos vorbei, um eine Serie aufzubauen und mehr zu punkten.',
         tutTitle3: 'Nitro', tutText3: 'Sammle die gelben Kanister. Ist die Leiste voll, erhöht Nitro Tempo und Punkte.'
       },
       es: {
-        scene: 'Una moto en una carretera de cuatro carriles entre el tráfico', hint: 'Desliza o toca el lado izquierdo o derecho para cambiar de carril.', tapStart: 'Toca para arrancar',
+        scene: 'Una moto en una carretera de cuatro carriles entre el tráfico', hint: 'Desliza o toca el lado izquierdo o derecho para cambiar de carril. Mantén el pedal para acelerar.', tapStart: 'Toca para arrancar',
+        gasL: 'GAS', kGas: 'Acelerar', lvlN: 'Nivel {n}', lvlUp: '¡Nivel {n}!', lvlL: 'Nivel', dailyMed: 'La carrera del día es siempre en Media, igual para todos.',
         pausedTxt: 'En pausa', ptsN: 'Puntos: {n}', bestN: 'Mejor: {n}', kmh: 'km/h', kmN: '{n} km', crash: '¡Choque!', finishLine: '¡Llegaste a la meta!',
         dailyMr: 'Carrera del día', newRun: 'Partida nueva', distL: 'Distancia', ptsL: 'Puntos', topL: 'Velocidad máxima', tries: 'Intentos', comboL: 'Mejor racha',
         kSteer: 'Carril a izquierda y derecha', kPause: 'Pausa', kAgain: 'Partida nueva', kStart: 'Empezar', nitroGo: '¡Nitro!', nitroN: 'Nitro {n}/{m}', nearPop: '¡Por poco!',
-        rules: 'Recorre la carretera de cuatro carriles y esquiva coches y camiones. Desliza a izquierda o derecha, o toca el lado izquierdo o derecho de la pantalla, para cambiar de carril. Cada fila de tráfico deja al menos un carril libre. Pasa cerca de los coches para formar una racha: cada roce da puntos y la racha aumenta todo lo que ganas. Unos segundos sin roces y la racha vuelve a cero. Las latas amarillas llenan la barra de nitro; cuando está llena vas más rápido unos segundos y ganas el doble. La velocidad sube poco a poco. En la carrera del día, igual para todos, el objetivo es la meta.',
+        rules: 'Recorre la carretera de cuatro carriles y esquiva coches y camiones. Desliza a izquierda o derecha, o toca el lado izquierdo o derecho de la pantalla, para cambiar de carril. Cada fila de tráfico deja al menos un carril libre. Pasa cerca de los coches para formar una racha: cada roce da puntos y la racha aumenta todo lo que ganas. Unos segundos sin roces y la racha vuelve a cero. Las latas amarillas llenan la barra de nitro; cuando está llena vas más rápido unos segundos y ganas el doble. Mantén pulsado el acelerador abajo en la pantalla, o la flecha arriba o W, para ir más rápido y ganar 1,5× por la distancia. Cada pocos kilómetros pasas al siguiente nivel y la carretera va más rápido; en los niveles altos algunos coches cambian de carril, siempre después de poner el intermitente. La dificultad se elige en el engranaje. En la carrera del día, igual para todos y siempre en Media, el objetivo es la meta.',
         tutTitle1: 'Cambia de carril', tutText1: 'Desliza o toca el lado izquierdo o derecho. Siempre hay un carril libre.',
         tutTitle2: 'Pasa cerca', tutText2: 'Pasa cerca de los coches para formar una racha y ganar más.',
         tutTitle3: 'Nitro', tutText3: 'Recoge las latas amarillas. Con la barra llena, el nitro sube tu velocidad y tus puntos.'
@@ -300,7 +405,16 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
   var pauseBtn = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('pause') }, [C.icon('pause', 22)]);
   var wrap = el('div', { class: 'mr-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, status])]);
 
+  // the difficulty is chosen behind a gear, never inside the help (#783), and kept
+  var DIFFS = ['easy', 'medium', 'hard'];
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || typeof prefs !== 'object') prefs = { diff: 'medium' };
+  if (DIFFS.indexOf(prefs.diff) < 0) prefs.diff = 'medium';
+  // the gas: held by a finger on the pedal or by Up / W (#782)
+  var gasPtr = null, keyGas = false;
+
   ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'gear', label: C.t('settings'), onClick: function () { settings(); } });
   ctx.button({ icon: 'refresh', label: C.t('newRun'), onClick: function () { newRun(); } });
   ctx.main.appendChild(wrap);
   ctx.mount();
@@ -314,16 +428,38 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
   // the daily road comes from the day, the same for everyone
   function rngFor(sd) { return dailyDate ? C.daily('motorush', dailyDate).rng : seeded(sd); }
 
-  function newRun() {
+  function newRun(diff) {
+    if (diff) { prefs.diff = diff; ctx.store.set('prefs', prefs); }
     seed = Math.floor(Math.random() * 4294967296);
-    S = E.newGame(rngFor(seed), !!dailyDate);
+    // the engine rides the daily on medium whatever is passed here
+    S = E.newGame(rngFor(seed), !!dailyDate, prefs.diff);
     tries++;
     startedAt = Date.now();
     ended = false; waiting = true; held = false; last = 0; acc = 0;
     pops = []; crashAt = 0; flash = 0; runAwarded = false;
+    gasPtr = null; keyGas = false;
     ctx.clearSave();
     renderTop(); renderStatus();
     kick();
+  }
+  // each difficulty keeps its own best; medium keeps the key it had before #783
+  function diffTag() { return S && S.diff !== 'medium' ? '-' + S.diff : ''; }
+  function settings() {
+    hold();
+    var pick = prefs.diff, body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
+    body.appendChild(el('div', { class: 'mr-label', text: C.t('difficulty') }));
+    if (dailyDate) {
+      // the daily ride is the same road for everyone, so it has no choice to make
+      body.appendChild(el('p', { class: 'ch-dim', text: C.t('dailyMed') }));
+      C.ui.modal({ title: C.t('settings'), closeButton: true, body: [body], actions: [{ label: C.t('done'), kind: 'primary' }] });
+      return;
+    }
+    body.appendChild(C.ui.segmented(DIFFS.map(function (d) { return { value: d, label: C.t(d) }; }), pick, function (v) { pick = v; }));
+    if (S && !ended && S.tick > 0) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('resetWarn') }));
+    C.ui.modal({
+      title: C.t('settings'), closeButton: true, body: [body],
+      actions: [{ label: C.t('cancel') }, { label: C.t('start'), kind: 'primary', onClick: function () { newRun(pick); } }]
+    });
   }
 
   function blocked() { return paused || held || waiting || document.hidden || !!document.querySelector('.ch-scrim'); }
@@ -372,6 +508,10 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
       } else if (e.t === 'boost') {
         C.audio.sfx('nitro'); C.haptic('success');
         pops.push({ text: C.t('nitroGo'), t: 1.3, max: 1.3, big: true });
+      } else if (e.t === 'level') {
+        // a short pop when the level changes (#783), above the nitro word so both can show
+        C.audio.sfx('good');
+        pops.push({ text: C.t('lvlUp', { n: C.num(e.n) }), t: 1.6, max: 1.6, big: true, y: 205, lvl: true });
       } else if (e.t === 'crash') {
         C.audio.sfx('boom'); C.haptic('error');
         crashAt = Date.now(); ended = true;
@@ -395,7 +535,8 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     var lines = [
       { label: C.t('ptsL'), value: C.num(sc) },
       { label: C.t('distL'), value: C.t('kmN', { n: C.num(km.toFixed(1)) }) },
-      { label: C.t('topL'), value: C.num(Math.round(S.top * 3.6)) + ' ' + C.t('kmh') }
+      { label: C.t('topL'), value: C.num(Math.round(S.top * 3.6)) + ' ' + C.t('kmh') },
+      { label: C.t('lvlL'), value: C.num(S.lvl) + (dailyDate ? '' : ' · ' + C.t(S.diff)) }
     ];
     if (S.bestCombo > 1) lines.push({ label: C.t('comboL'), value: '×' + C.num(S.bestCombo) });
     if (dailyDate) {
@@ -404,8 +545,8 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
       lines.push({ label: C.t('tries'), value: C.num(tries) });
     } else {
       // an endless ride always ends in a crash; a new best is what counts as a win
-      if (C.stats.best('motorush', 'score', sc) && sc > 0) { note = C.t('bestN', { n: C.num(sc) }); won = true; }
-      lines.push({ label: C.t('best'), value: C.num(C.stats.getBest('motorush', 'score') || sc) });
+      if (C.stats.best('motorush', 'score' + diffTag(), sc) && sc > 0) { note = C.t('bestN', { n: C.num(sc) }); won = true; }
+      lines.push({ label: C.t('best'), value: C.num(C.stats.getBest('motorush', 'score' + diffTag()) || sc) });
     }
     ctx.finish({
       won: won,
@@ -485,8 +626,9 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
       g.fillStyle = P.star;
       for (i = 0; i < 34; i++) { var sx = (i * 97 + 13) % VW, sy = (i * 53 + 7) % (HZ - 30); g.globalAlpha = 0.4 + 0.6 * ((i * 7) % 5) / 4; g.fillRect(sx, sy, 1.6, 1.6); }
       g.globalAlpha = 1;
-      g.fillStyle = P.moon; g.beginPath(); g.arc(300, 92, 13, 0, Math.PI * 2); g.fill();
-      g.fillStyle = P.sky1; g.beginPath(); g.arc(306, 87, 11, 0, Math.PI * 2); g.globalAlpha = 0.85; g.fill(); g.globalAlpha = 1;
+      // the moon sits left of the speedometer, clear of the level badge under it (#783)
+      g.fillStyle = P.moon; g.beginPath(); g.arc(232, 98, 13, 0, Math.PI * 2); g.fill();
+      g.fillStyle = P.sky1; g.beginPath(); g.arc(238, 93, 11, 0, Math.PI * 2); g.globalAlpha = 0.85; g.fill(); g.globalAlpha = 1;
     } else {
       g.fillStyle = 'rgba(255,255,255,.75)';
       [[60, 104, 1], [250, 86, 1.3], [180, 120, 0.8]].forEach(function (c) {
@@ -546,7 +688,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
   // camera, the roof, and the back with its window and tail lights
   var DIM = { car: [0.95, 1.4], van: [1.0, 2.0], truck: [1.25, 3.2] };
   function vehicle(g, P, c, y0, dk) {
-    var a0 = y0 - cam.rear, a1 = a0 + c.len, X = laneX(c.lane), hw = DIM[c.kind][0], ht = DIM[c.kind][1];
+    var a0 = y0 - cam.rear, a1 = a0 + c.len, X = laneX(c.x), hw = DIM[c.kind][0], ht = DIM[c.kind][1];
     if (a0 > 420 || a1 < -D0 + 1) return;
     var col = P.cars[c.paint % P.cars.length];
     var body = c.kind === 'truck' ? P.box : col;
@@ -584,6 +726,23 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     g.fillStyle = P.tail;
     g.fillRect(L.x + w * 0.04, ly, w * 0.16, lh); g.fillRect(L.x + w * 0.8, ly, w * 0.16, lh);
     g.shadowBlur = 0;
+    if (c.ph === 1 || c.ph === 2) indicator(g, c, L, T, w, h, ly, lh);
+  }
+  // A lane changer flashes its indicator on the side it will move to (#783) before and
+  // while it moves: the amber light, and an arrow over the roof big enough to read from
+  // far down the road, where the car itself is only a few pixels wide.
+  function indicator(g, c, L, T, w, h, ly, lh) {
+    if (Math.floor(S.tick / 9) % 2) return;
+    var right = c.to > c.lane, lx = right ? L.x + w * 0.76 : L.x, amber = '#FFAA1D';
+    g.fillStyle = amber;
+    g.fillRect(lx, ly - lh * 0.2, w * 0.24, lh * 1.4);
+    var s = Math.max(12, w * 0.45), cx = L.x + w / 2 + (right ? 1 : -1) * s * 0.3, cy = T.y - s * 0.75, d = right ? 1 : -1;
+    g.beginPath();
+    g.moveTo(cx - d * s * 0.55, cy - s * 0.32); g.lineTo(cx + d * s * 0.05, cy - s * 0.32); g.lineTo(cx + d * s * 0.05, cy - s * 0.6);
+    g.lineTo(cx + d * s * 0.6, cy); g.lineTo(cx + d * s * 0.05, cy + s * 0.6); g.lineTo(cx + d * s * 0.05, cy + s * 0.32);
+    g.lineTo(cx - d * s * 0.55, cy + s * 0.32); g.closePath();
+    g.lineWidth = Math.max(1.5, s * 0.12); g.strokeStyle = 'rgba(0,0,0,.55)'; g.stroke();
+    g.fill();
   }
 
   // the fuel can for the nitro bar, bobbing a little
@@ -692,12 +851,18 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     g.fillStyle = P.panel; rr(g, VW - 98, 8, 90, 64, 12); g.fill();
     g.lineCap = 'round'; g.lineWidth = 5;
     g.strokeStyle = P.bar; g.beginPath(); g.arc(cx, cy, R - 6, Math.PI * 0.85, Math.PI * 2.15); g.stroke();
-    var fr = Math.min(1, (v - 15) / (E.base(1e9) + E.BOOST_V - 15));
+    var fr = Math.min(1, (v - 15) / (E.topSpeed(S.diff) - 15));
     g.strokeStyle = S.boostT > 0 ? '#FFB13B' : ACCENT; g.beginPath(); g.arc(cx, cy, R - 6, Math.PI * 0.85, Math.PI * (0.85 + 1.3 * fr)); g.stroke();
     g.lineCap = 'butt';
     g.fillStyle = P.text; g.textAlign = 'center';
     g.font = '800 20px ' + font; g.fillText(C.num(Math.round(v * 3.6)), cx, cy + 4);
     g.fillStyle = P.textDim; g.font = '700 10px ' + font; g.fillText(C.t('kmh'), cx, cy + 18);
+    // the level, under the speedometer (#783): the owner saw the speed rise but not why
+    var lt = C.t('lvlN', { n: C.num(S.lvl) });
+    g.font = '800 13px ' + font;
+    var lw = Math.max(70, g.measureText(lt).width + 22);
+    g.fillStyle = ACCENT; rr(g, VW - 8 - lw, 78, lw, 24, 12); g.fill();
+    g.fillStyle = '#FFFFFF'; g.fillText(lt, VW - 8 - lw / 2, 95);
     // the combo, top middle
     if (S.combo > 0) {
       var cf = S.comboT / E.COMBO_T;
@@ -727,16 +892,20 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     g.save(); rr(g, 0, 0, VW, VH, 0); g.clip();
     scene(g, P, t, dk);
     hud(g, P, font);
-    // floating words over the bike
+    // floating words over the bike, in the page's direction: the canvas is left to right,
+    // which put the "!" of «مرحله‌ی ۴!» and «خطر از بیخ گوش!» before the words in Persian
+    g.direction = document.documentElement.dir === 'rtl' ? 'rtl' : 'ltr';
     for (var i = 0; i < pops.length; i++) {
       var p = pops[i], f = p.t / p.max, x = p.lane === undefined ? VW / 2 : P3(laneX(p.lane), 0, 0).x;
       g.globalAlpha = Math.min(1, f * 2.5);
       g.font = '800 ' + (p.big ? 30 : 20) + 'px ' + font; g.textAlign = 'center'; g.textBaseline = 'middle';
-      var y = p.big ? 250 - (1 - f) * 20 : 400 - (1 - f) * 40;
+      var y = (p.y || (p.big ? 250 : 400)) - (1 - f) * (p.big ? 20 : 40);
       g.lineWidth = 5; g.strokeStyle = dk ? 'rgba(0,0,0,.6)' : 'rgba(255,255,255,.85)'; g.strokeText(p.text, x, y);
-      g.fillStyle = p.big ? '#FFB13B' : (dk ? '#FFFFFF' : ACCENT); g.fillText(p.text, x, y);
+      g.fillStyle = p.lvl ? (dk ? '#FFFFFF' : ACCENT) : p.big ? '#FFB13B' : (dk ? '#FFFFFF' : ACCENT); g.fillText(p.text, x, y);
       g.globalAlpha = 1;
     }
+    g.direction = 'ltr';
+    if (!ended) pedal(g, P, font);
     if ((waiting || held) && !ended) {
       var msg = held ? C.t('pausedTxt') : C.t('tapStart');
       g.font = '800 19px ' + font; g.textAlign = 'center'; g.textBaseline = 'middle';
@@ -746,6 +915,30 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     }
     g.restore();
   }
+
+  // The gas pedal (#782), in the bottom right corner where a thumb rests, clear of the
+  // bike at every lane; the other thumb still steers by swiping or tapping. Pressed, it
+  // sinks and takes the accent.
+  var PED = { x: VW - 80, y: VH - 98, w: 68, h: 86 };
+  function pedal(g, P, font) {
+    var on = !!(S && S.gas), x = PED.x, y = PED.y, w = PED.w, h = PED.h, sink = on ? 5 : 0, i;
+    g.fillStyle = P.panel; rr(g, x, y, w, h, 16); g.fill();
+    var px = x + 13, py = y + 10 + sink, pw = w - 26, ph = h - 36 - sink;
+    g.fillStyle = on ? shade(ACCENT, -0.3) : 'rgba(0,0,0,.28)'; rr(g, px, py + 3, pw, ph, 9); g.fill();
+    g.fillStyle = on ? ACCENT : '#8F8C99'; rr(g, px, py, pw, ph, 9); g.fill();
+    g.fillStyle = on ? 'rgba(255,255,255,.35)' : 'rgba(255,255,255,.4)';
+    for (i = 0; i < 4; i++) g.fillRect(px + 6, py + 8 + i * (ph - 16) / 3 - 1.5, pw - 12, 3);
+    g.fillStyle = on ? (P.star ? '#FFFFFF' : ACCENT) : P.text; g.font = '800 12px ' + font; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+    g.fillText(C.t('gasL'), x + w / 2, y + h - 9);
+  }
+  function onPedal(e) {
+    var r = cv.getBoundingClientRect();
+    if (!r.width || !r.height) return false;
+    var x = (e.clientX - r.left) / r.width * VW, y = (e.clientY - r.top) / r.height * VH;
+    // a little wider than drawn, for a thumb
+    return x >= PED.x - 10 && x <= PED.x + PED.w + 10 && y >= PED.y - 10 && y <= VH;
+  }
+  function setGas() { if (S && !ended) E.gas(S, gasPtr !== null || keyGas); }
 
   // the road and everything on it, without the HUD
   function scene(g, P, t, dk) {
@@ -795,7 +988,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     if (dailyDate) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyMr') + ' — ' + C.num(dailyDate) })]));
     if (!S) return;
     top.appendChild(el('span', { class: 'ch-badge', text: C.t('kmN', { n: C.num((S.d / 1000).toFixed(1)) }) }));
-    var best = dailyDate ? 0 : C.stats.getBest('motorush', 'score');
+    var best = dailyDate ? 0 : C.stats.getBest('motorush', 'score' + diffTag());
     if (best) top.appendChild(el('span', { class: 'ch-badge', text: C.t('bestN', { n: C.num(best) }) }));
     var on = !waiting && !held && !ended;
     pauseBtn.innerHTML = '';
@@ -806,7 +999,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
   }
   function renderStatus() { status.textContent = C.t('hint'); }
   function go() { if (ended) return; if (waiting || held) { waiting = false; held = false; last = 0; acc = 0; renderTop(); kick(); } }
-  function hold() { if (!S || ended || waiting || held) return; held = true; ctx.save(); renderTop(); draw(); }
+  function hold() { if (!S || ended || waiting || held) return; held = true; gasPtr = null; keyGas = false; setGas(); ctx.save(); renderTop(); draw(); }
   pauseBtn.addEventListener('click', function () { C.audio.unlock(); if (held || waiting) go(); else hold(); });
 
   /* -------------------------------------------------------------- input */
@@ -821,9 +1014,19 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     e.preventDefault();
     C.audio.unlock();
     if (ended) return;
+    // the pedal is its own finger: held, it never steers, and it starts a waiting ride
+    if (gasPtr === null && onPedal(e)) {
+      gasPtr = e.pointerId;
+      if (waiting || held) go();
+      setGas(); draw();
+      return;
+    }
     if (waiting || held) { go(); return; }
     ptr = { id: e.pointerId, x: e.clientX, moved: false };
   });
+  function gasUp(e) { if (gasPtr !== null && e.pointerId === gasPtr) { gasPtr = null; setGas(); draw(); } }
+  window.addEventListener('pointerup', gasUp);
+  window.addEventListener('pointercancel', gasUp);
   window.addEventListener('pointermove', function (e) {
     if (!ptr || e.pointerId !== ptr.id) return;
     var dx = e.clientX - ptr.x;
@@ -841,7 +1044,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     }
     ptr = null;
   });
-  window.addEventListener('pointercancel', function () { ptr = null; });
+  window.addEventListener('pointercancel', function (e) { if (ptr && e.pointerId === ptr.id) ptr = null; });
   wrap.addEventListener('contextmenu', function (e) { e.preventDefault(); });
   wrap.style.touchAction = 'none';
   window.addEventListener('keydown', function (e) {
@@ -849,11 +1052,24 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     if (e.target && e.target.closest && e.target.closest('button') && (e.key === ' ' || e.key === 'Enter')) return;
     var dir = e.key === 'ArrowLeft' || C.keyIs(e, 'a') ? -1 : e.key === 'ArrowRight' || C.keyIs(e, 'd') ? 1 : 0;
     if (dir) { e.preventDefault(); if (!e.repeat) steer(dir); return; }
+    if (e.key === 'ArrowUp' || C.keyIs(e, 'w')) {
+      e.preventDefault();
+      if (e.repeat || ended) return;
+      keyGas = true;
+      if (waiting || held) go();
+      setGas();
+      return;
+    }
     if (e.repeat) return;
     if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); go(); }
     else if (e.key === 'Escape' || C.keyIs(e, 'p')) { e.preventDefault(); if (held || waiting) go(); else hold(); }
     else if (C.keyIs(e, 'r')) { e.preventDefault(); newRun(); }
   });
+  window.addEventListener('keyup', function (e) {
+    if (e.key === 'ArrowUp' || C.keyIs(e, 'w')) { keyGas = false; setGas(); }
+  });
+  // a key released in another window never sends its keyup here
+  window.addEventListener('blur', function () { keyGas = false; gasPtr = null; setGas(); });
   // a run waits while the app is away, and comes back waiting for a tap
   C.onPause(function () { paused = true; if (S && !ended && !waiting) held = true; ctx.save(); renderTop(); });
   C.onResume(function () { paused = false; kick(); });
@@ -873,7 +1089,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
       body: [
         el('p', { class: 'ch-dim', text: C.t('rules') }),
         el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
-        el('div', { class: 'ch-list' }, [kb('← → / A D', C.t('kSteer')), kb('Space', C.t('kStart')), kb('P / Esc', C.t('kPause')), kb('R', C.t('kAgain'))])
+        el('div', { class: 'ch-list' }, [kb('← → / A D', C.t('kSteer')), kb('↑ / W', C.t('kGas')), kb('Space', C.t('kStart')), kb('P / Esc', C.t('kPause')), kb('R', C.t('kAgain'))])
       ],
       actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
     });
