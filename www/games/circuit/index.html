@@ -1,0 +1,934 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>پیست — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .ci-wrap > .ch-fit { --fit-ar: calc(240 / 320); }
+  .ch-fit > .ci-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+  .ci-canvas { display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; user-select: none; -webkit-user-select: none; image-rendering: pixelated; }
+  .ci-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .ci-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+  .ci-label { font-weight: 700; font-size: var(--fs-sm); color: var(--c-text-dim); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function CircuitEngineFactory() {
+  'use strict';
+
+  // The world is 240 × 320 units, one pixel of the retro picture each. A track is a
+  // closed centre line sampled every SP units; the road reaches HW to either side,
+  // grass VERGE further, and then a tyre wall that no car passes.
+  var VW = 240, VH = 320, DT = 1 / 60, SP = 3;
+  var HW = 13, VERGE = 7, WALL = HW + VERGE, EDGE = 22;
+  // a car's top speed, grip and pace. Steering scrubs speed (SCRUB at full lock), so a
+  // full-lock turn is VMAX·(1-SCRUB)/TURN ≈ 23 wide; the tightest bend a track may have
+  // (RMIN) is wider than that, so auto gas never forces a brake
+  var VMAX = 95, ACC = 70, BRAKE = 150, GRASS = 0.5, GRASS_DRAG = 130, TURN = 2.9, SCRUB = 0.3, RMIN = 30, STEER_RATE = 5;
+  var CR = 4.5, LAPS = 4, GO = 150, CARS = 4;
+  // the bots' pace at each level, one value a car (slowest first)
+  var PACE = { easy: [0.68, 0.72, 0.76], medium: [0.8, 0.84, 0.88], hard: [0.9, 0.93, 0.96] };
+  var LANES = [-7, 0, 7];
+
+  function mulberry(sd) {
+    var a = sd >>> 0;
+    return function () { a = (a + 0x6D2B79F5) >>> 0; var t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  function wrapAng(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
+
+  // The hand-made tracks: the corners of a polygon, each [x, y, radius of its bend]
+  var TRACKS = [
+    { id: 'oval', ctrl: [[40, 40, 70], [200, 40, 70], [200, 280, 70], [40, 280, 70]] },
+    { id: 'kidney', ctrl: [[35, 35, 50], [205, 35, 50], [205, 110, 40], [165, 160, 36], [205, 210, 40], [205, 285, 50], [35, 285, 50]] },
+    { id: 'hook', ctrl: [[35, 35, 45], [205, 35, 45], [205, 135, 36], [105, 135, 34], [105, 215, 34], [205, 215, 34], [205, 295, 34], [35, 295, 45]] },
+    { id: 'zigzag', ctrl: [[30, 30, 34], [125, 30, 34], [125, 105, 34], [210, 105, 34], [210, 295, 40], [120, 295, 34], [120, 210, 34], [30, 210, 34]] }
+  ];
+
+  // Straight edges between the corners, each corner rounded into an arc of its radius
+  // (a fillet); null when two corners are too close for their arcs to fit
+  function rounded(ctrl) {
+    var n = ctrl.length, dense = [], i, j, arcs = [];
+    for (i = 0; i < n; i++) {
+      var P = ctrl[(i - 1 + n) % n], V = ctrl[i], Q = ctrl[(i + 1) % n], r = V[2] || 40;
+      var ux = V[0] - P[0], uy = V[1] - P[1], ul = Math.hypot(ux, uy), wx = Q[0] - V[0], wy = Q[1] - V[1], wl = Math.hypot(wx, wy);
+      if (ul < 1e-6 || wl < 1e-6) return null;
+      ux /= ul; uy /= ul; wx /= wl; wy /= wl;
+      var phi = Math.atan2(ux * wy - uy * wx, ux * wx + uy * wy), t = r * Math.tan(Math.abs(phi) / 2);
+      var side = phi >= 0 ? 1 : -1, cx = V[0] - ux * t - uy * r * side, cy = V[1] - uy * t + ux * r * side;
+      arcs.push({ t: t, ul: ul, cx: cx, cy: cy, r: r, a0: Math.atan2(V[1] - uy * t - cy, V[0] - ux * t - cx), phi: phi });
+    }
+    for (i = 0; i < n; i++) {
+      // the two arcs at the ends of an edge must both fit on it
+      if (arcs[i].t + arcs[(i - 1 + n) % n].t > arcs[i].ul - 4) return null;
+      var A = arcs[i], steps = Math.max(2, Math.ceil(Math.abs(A.phi) * A.r / 1.5));
+      for (j = 0; j <= steps; j++) {
+        var a = A.a0 + A.phi * j / steps;
+        dense.push([A.cx + Math.cos(a) * A.r, A.cy + Math.sin(a) * A.r]);
+      }
+    }
+    return dense;
+  }
+
+  // The closed line through the rounded corners, resampled every SP units
+  function build(ctrl) {
+    var dense = rounded(ctrl), i, j;
+    if (!dense) return { bad: true, check: { ok: false, minR: 0, minSep: 0, inside: false } };
+    // cumulative length round the dense loop, then even samples along it
+    var cum = [0], m = dense.length;
+    for (i = 1; i <= m; i++) { var a = dense[i - 1], b = dense[i % m]; cum.push(cum[i - 1] + Math.hypot(b[0] - a[0], b[1] - a[1])); }
+    var total = cum[m], N = Math.round(total / SP), step = total / N, pts = [], k = 0;
+    for (i = 0; i < N; i++) {
+      var want = i * step;
+      while (cum[k + 1] < want) k++;
+      var f = (want - cum[k]) / Math.max(1e-9, cum[k + 1] - cum[k]), A = dense[k], B = dense[(k + 1) % m];
+      pts.push({ x: A[0] + (B[0] - A[0]) * f, y: A[1] + (B[1] - A[1]) * f });
+    }
+    for (i = 0; i < N; i++) {
+      var nx = pts[(i + 1) % N], pv = pts[(i - 1 + N) % N];
+      pts[i].ang = Math.atan2(nx.y - pv.y, nx.x - pv.x);
+    }
+    // the line sits on the straightest stretch, so the grid never starts in a bend
+    var bestI = 0, bestC = Infinity;
+    for (i = 0; i < N; i++) {
+      var c = 0;
+      for (j = -8; j <= 8; j++) c += Math.abs(wrapAng(pts[(i + j + 1 + N) % N].ang - pts[(i + j + N) % N].ang));
+      if (c < bestC - 1e-9) { bestC = c; bestI = i; }
+    }
+    pts = pts.slice(bestI).concat(pts.slice(0, bestI));
+    for (i = 0; i < N; i++) pts[i].s = i * step;
+    var T = { pts: pts, n: N, L: total, step: step };
+    T.check = check(T);
+    return T;
+  }
+
+  // Can a car drive it? Every bend wider than RMIN, other parts of the track never
+  // closer than two walls apart, the walls inside the picture and a sensible length.
+  function check(T) {
+    var p = T.pts, N = T.n, i, j, minR = Infinity, minSep = Infinity, inside = true;
+    for (i = 0; i < N; i++) {
+      // the turn over five samples, so one noisy sample does not count as a corner
+      var da = Math.abs(wrapAng(p[(i + 5) % N].ang - p[i].ang));
+      if (da > 1e-6) minR = Math.min(minR, 5 * T.step / da);
+      if (p[i].x < EDGE || p[i].x > VW - EDGE || p[i].y < EDGE || p[i].y > VH - EDGE) inside = false;
+    }
+    var far = Math.ceil(80 / T.step);
+    for (i = 0; i < N; i++) for (j = i + far; j < N; j++) {
+      if (N - (j - i) < far) continue;
+      minSep = Math.min(minSep, Math.hypot(p[i].x - p[j].x, p[i].y - p[j].y));
+    }
+    return { minR: minR, minSep: minSep, inside: inside, ok: minR >= RMIN && minSep >= 2 * WALL + 6 && inside && T.L >= 450 && T.L <= 1100 };
+  }
+
+  // The daily track: a loose star of control points round the middle, redrawn until
+  // it passes check(); the day's numbers decide it, the same for everyone
+  function generate(rnd) {
+    for (var tries = 0; tries < 400; tries++) {
+      var K = 5 + Math.floor(rnd() * 4), ctrl = [], off = rnd() * Math.PI * 2;
+      for (var i = 0; i < K; i++) {
+        var a = off + (i + (rnd() - 0.5) * 0.6) * 2 * Math.PI / K, r = 0.45 + 0.6 * rnd();
+        ctrl.push([Math.round(120 + Math.cos(a) * 92 * Math.min(1, r)), Math.round(160 + Math.sin(a) * 130 * Math.min(1, r)), 32 + Math.floor(rnd() * 24)]);
+      }
+      if (rnd() < 0.5) ctrl.reverse();
+      var T = build(ctrl);
+      if (T.check.ok) { T.ctrl = ctrl; T.tries = tries + 1; return T; }
+    }
+    return null;
+  }
+
+  /* ------------------------------------------------------------ the race */
+
+  // nearest sample to (x, y) looking round index i (or the whole loop)
+  function nearest(T, x, y, i, span) {
+    var best = i, bd = Infinity, N = T.n, from = span ? i - span : 0, to = span ? i + span : N - 1;
+    for (var j = from; j <= to; j++) {
+      var k = ((j % N) + N) % N, p = T.pts[k], d = (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y);
+      if (d < bd) { bd = d; best = k; }
+    }
+    return best;
+  }
+  // signed distance from the centre line (left of the way round is negative)
+  function lateral(T, i, x, y) {
+    var p = T.pts[i];
+    return -Math.sin(p.ang) * (x - p.x) + Math.cos(p.ang) * (y - p.y);
+  }
+  function along(T, i, x, y) {
+    var p = T.pts[i];
+    return Math.cos(p.ang) * (x - p.x) + Math.sin(p.ang) * (y - p.y);
+  }
+  // a point at arc length s and lateral offset d
+  function at(T, s, d) {
+    var L = T.L, ss = ((s % L) + L) % L, i = Math.floor(ss / T.step) % T.n, p = T.pts[i], q = T.pts[(i + 1) % T.n], f = (ss - p.s) / T.step;
+    var x = p.x + (q.x - p.x) * f, y = p.y + (q.y - p.y) * f, a = p.ang + wrapAng(q.ang - p.ang) * f;
+    return { x: x - Math.sin(a) * d, y: y + Math.cos(a) * d, ang: a, i: i };
+  }
+
+  // A race: the player (car 0) starts at the back of a staggered grid behind the line
+  function race(T, level) {
+    var pace = PACE[level] || PACE.medium, cars = [];
+    var grid = [[-12, 6], [-22, -6], [-32, 6], [-42, -6]];
+    for (var c = 0; c < CARS; c++) {
+      var g = grid[c === 0 ? 3 : c - 1], P = at(T, g[0], g[1]);
+      cars.push({
+        x: P.x, y: P.y, ang: P.ang, v: 0, st: 0, i: P.i, k: -1, d: g[1],
+        pace: c === 0 ? 1 : pace[c - 1], lane: c === 0 ? 0 : LANES[c - 1],
+        lapAt: 0, laps: [], best: 0, off: false, wall: 0, done: 0, place: 0
+      });
+    }
+    return { T: T, level: PACE[level] ? level : 'medium', cars: cars, cd: GO, t: 0, over: false, finished: 0, ev: [] };
+  }
+
+  function progress(S, c) { return c.k * S.T.L + S.T.pts[c.i].s + along(S.T, c.i, c.x, c.y); }
+
+  // How a bot drives: aim a little way ahead on its lane, step round a car in front
+  function botInput(S, idx) {
+    var T = S.T, c = S.cars[idx], me = progress(S, c), lane = c.lane;
+    // a car that has finished pulls to the side of the road and stops; left to drive on, it
+    // kept circling while the player was still racing (#764, the owner's first race)
+    if (c.done) return { steer: drive(S, c, (c.d < 0 ? -1 : 1) * (HW - 4), 0).steer, brake: true };
+    for (var o = 0; o < S.cars.length; o++) {
+      if (o === idx) continue;
+      var e = S.cars[o], gap = progress(S, e) - me;
+      if (gap > 0 && gap < 32 && Math.abs(e.d - lane) < 9) {
+        // pass on the side this car is already on, unless the road there is too narrow;
+        // choosing by the sign of e.d made a car right behind dither from side to side
+        var up = Math.min(9, e.d + 11), down = Math.max(-9, e.d - 11);
+        lane = c.d >= e.d ? (up - e.d >= 9 ? up : down) : (e.d - down >= 9 ? down : up);
+      }
+    }
+    return drive(S, c, lane, c.pace);
+  }
+  // steer toward a point on lane `lane` ahead; slow down only above pace
+  function drive(S, c, lane, pace) {
+    var T = S.T, ahead = Math.max(14, c.v * 0.3), P = at(T, T.pts[c.i].s + along(T, c.i, c.x, c.y) + ahead, lane);
+    var diff = wrapAng(Math.atan2(P.y - c.y, P.x - c.x) - c.ang);
+    return { steer: Math.max(-1, Math.min(1, diff * 3)), brake: c.v > VMAX * pace + 0.5 };
+  }
+
+  function emit(S, e) { S.ev.push(e); }
+
+  function moveCar(S, idx, inp) {
+    var T = S.T, c = S.cars[idx], cap = VMAX * (idx === 0 ? 1 : c.pace);
+    var off = Math.abs(c.d) > HW;
+    // the wheel turns toward the input over a fifth of a second, so a short tap on a
+    // half of the screen is a small correction rather than a full-lock jerk
+    var want = Math.max(-1, Math.min(1, inp.steer || 0)), ds = STEER_RATE * DT;
+    c.st = want > c.st ? Math.min(want, c.st + ds) : Math.max(want, c.st - ds);
+    var steer = c.st;
+    cap *= 1 - SCRUB * Math.abs(steer);
+    if (off) cap = Math.min(cap, VMAX * GRASS);
+    if (inp.brake) c.v = Math.max(0, c.v - BRAKE * DT);
+    else if (c.v < cap) c.v = Math.min(cap, c.v + ACC * DT);
+    if (c.v > cap) c.v = Math.max(cap, c.v - (off ? GRASS_DRAG : ACC) * DT);
+    c.ang = wrapAng(c.ang + steer * TURN * Math.min(1, c.v / 30) * DT);
+    c.x += Math.cos(c.ang) * c.v * DT; c.y += Math.sin(c.ang) * c.v * DT;
+    locate(S, c, idx);
+  }
+
+  // where a car is on the track: its sample, its lap, the grass and the wall
+  function locate(S, c, idx) {
+    var T = S.T, prev = c.i, i = nearest(T, c.x, c.y, c.i, 8), N = T.n;
+    if (prev > N * 0.75 && i < N * 0.25) crossLine(S, c, idx, 1);
+    else if (prev < N * 0.25 && i > N * 0.75) crossLine(S, c, idx, -1);
+    c.i = i;
+    c.d = lateral(T, i, c.x, c.y);
+    if (Math.abs(c.d) > HW && S.cd === 0) c.off = true;
+    if (Math.abs(c.d) > WALL) {
+      // the tyre wall: back onto its face, and the car loses most of its speed
+      var p = T.pts[i], d = c.d > 0 ? WALL : -WALL, a = along(T, i, c.x, c.y);
+      c.x = p.x + Math.cos(p.ang) * a - Math.sin(p.ang) * d; c.y = p.y + Math.sin(p.ang) * a + Math.cos(p.ang) * d;
+      c.d = d; c.v *= 0.55;
+      if (S.t - c.wall > 20) emit(S, { t: 'wall', car: idx });
+      c.wall = S.t;
+    }
+  }
+
+  function crossLine(S, c, idx, dir) {
+    c.k += dir;
+    if (dir < 0 || c.done) return;
+    if (c.k === 0) { c.lapAt = S.t; c.off = false; return; }
+    // backing over the line and driving across it again is not a new lap: without this,
+    // a wiggle on the line recorded a lap of a few ticks as the track's best
+    if (c.k <= c.laps.length) return;
+    var lt = S.t - c.lapAt;
+    c.laps.push(lt); c.lapAt = S.t;
+    var clean = !c.off; c.off = false;
+    if (!c.best || lt < c.best) c.best = lt;
+    if (c.k >= LAPS) {
+      c.done = S.t; S.finished++; c.place = S.finished;
+      emit(S, { t: 'finish', car: idx, place: c.place, time: S.t });
+      if (idx === 0) { S.over = true; emit(S, { t: 'over', place: c.place }); }
+    } else emit(S, { t: 'lap', car: idx, k: c.k, time: lt, clean: clean });
+    if (idx === 0 && c.k >= LAPS) emit(S, { t: 'lap', car: 0, k: c.k, time: lt, clean: clean, last: true });
+  }
+
+  // two cars touching are pushed apart; the one behind loses a little speed
+  function bump(S) {
+    var cs = S.cars;
+    for (var a = 0; a < cs.length; a++) for (var b = a + 1; b < cs.length; b++) {
+      var A = cs[a], B = cs[b], dx = B.x - A.x, dy = B.y - A.y, d = Math.hypot(dx, dy);
+      if (d >= 2 * CR) continue;
+      if (d < 1e-6) { dx = 1; dy = 0; d = 1; }
+      var push = (2 * CR - d) / 2, ux = dx / d, uy = dy / d;
+      A.x -= ux * push; A.y -= uy * push; B.x += ux * push; B.y += uy * push;
+      // nose to tail, the car behind drops to the speed of the one ahead; side by side
+      // they are only pushed apart, or a car alongside could never pull clear to pass
+      var dir = S.T.pts[A.i].ang, lon = Math.abs(Math.cos(dir) * ux + Math.sin(dir) * uy);
+      if (lon > 0.7) {
+        var front = progress(S, A) < progress(S, B) ? B : A, back = front === A ? B : A;
+        back.v = Math.min(back.v, front.v * 0.95);
+      }
+      locate(S, A, a); locate(S, B, b);
+      if (a === 0 || b === 0) emit(S, { t: 'bump' });
+    }
+  }
+
+  // One fixed step. inp: the player's { steer: -1..1, brake: bool }
+  function step(S, inp) {
+    if (S.over) return;
+    if (S.cd > 0) {
+      S.cd--;
+      if (S.cd % 50 === 0) emit(S, { t: S.cd === 0 ? 'go' : 'count', n: S.cd / 50 });
+      return;
+    }
+    S.t++;
+    moveCar(S, 0, inp || {});
+    for (var c = 1; c < S.cars.length; c++) moveCar(S, c, botInput(S, c));
+    bump(S);
+  }
+
+  // where everyone stands: finishers in order, then by distance covered
+  function order(S) {
+    var idx = S.cars.map(function (c, i) { return i; });
+    return idx.sort(function (a, b) {
+      var A = S.cars[a], B = S.cars[b];
+      if (A.done && B.done) return A.place - B.place;
+      if (A.done || B.done) return A.done ? -1 : 1;
+      return progress(S, B) - progress(S, A);
+    });
+  }
+  function placeOf(S, idx) { return order(S).indexOf(idx) + 1; }
+
+  function drain(S) { var e = S.ev; S.ev = []; return e; }
+
+  var CKEYS = ['x', 'y', 'ang', 'v', 'st', 'i', 'k', 'd', 'pace', 'lane', 'lapAt', 'best', 'wall', 'done', 'place'];
+  function snapshot(S) {
+    return {
+      level: S.level, cd: S.cd, t: S.t, over: S.over, finished: S.finished,
+      cars: S.cars.map(function (c) { var o = { laps: c.laps.slice(), off: c.off }; CKEYS.forEach(function (k) { o[k] = c[k]; }); return o; })
+    };
+  }
+  function restore(o, T) {
+    if (!o || !T || !PACE[o.level] || !Array.isArray(o.cars) || o.cars.length !== CARS) return null;
+    if (!['cd', 't', 'finished'].every(function (k) { return typeof o[k] === 'number' && isFinite(o[k]) && o[k] >= 0; })) return null;
+    for (var c = 0; c < CARS; c++) {
+      var q = o.cars[c];
+      if (!q || !Array.isArray(q.laps) || !CKEYS.every(function (k) { return typeof q[k] === 'number' && isFinite(q[k]); })) return null;
+      if (q.i < 0 || q.i >= T.n || q.k < -1 || q.k > LAPS) return null;
+    }
+    var S = race(T, o.level);
+    S.cd = o.cd; S.t = o.t; S.over = !!o.over; S.finished = o.finished;
+    S.cars = o.cars.map(function (q) { var c = { laps: q.laps.slice(), off: !!q.off }; CKEYS.forEach(function (k) { c[k] = q[k]; }); return c; });
+    return S;
+  }
+
+  // what is under a point: 'road', 'kerb', 'grass', 'wall' or 'out', plus the nearest
+  // sample, for drawing the track once
+  function surface(T, x, y) {
+    var i = nearest(T, x, y, 0, 0), d = Math.abs(lateral(T, i, x, y));
+    var p = T.pts[i], dist = Math.hypot(p.x - x, p.y - y);
+    if (dist > d + T.step) d = dist;
+    var kind = d <= HW - 2.5 ? 'road' : d <= HW ? 'kerb' : d <= WALL ? 'grass' : d <= WALL + 3 ? 'wall' : 'out';
+    return { kind: kind, i: i, d: d, a: along(T, i, x, y) };
+  }
+
+  return {
+    VW: VW, VH: VH, DT: DT, SP: SP, HW: HW, VERGE: VERGE, WALL: WALL, VMAX: VMAX, TURN: TURN, RMIN: RMIN,
+    CR: CR, LAPS: LAPS, GO: GO, CARS: CARS, PACE: PACE, TRACKS: TRACKS,
+    mulberry: mulberry, build: build, check: check, generate: generate, race: race, step: step,
+    drive: drive, botInput: botInput, progress: progress, order: order, placeOf: placeOf,
+    drain: drain, snapshot: snapshot, restore: restore, surface: surface, at: at, nearest: nearest, lateral: lateral
+  };
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = CircuitEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = CircuitEngineFactory();
+  var VW = E.VW, VH = E.VH, ACCENT = '#BE004B';
+  var LEVELS = ['easy', 'medium', 'hard'];
+  var TRACK_KEYS = { oval: 'trkOval', kidney: 'trkKidney', hook: 'trkHook', zigzag: 'trkZigzag' };
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'circuit',
+    name: { fa: 'پیست', en: 'Circuit', zh: '赛道', de: 'Rennstrecke', es: 'Circuito', pl: 'Tor', fr: 'Circuit' },
+    accent: ACCENT,
+    mood: 'dots',
+    strings: {
+      fa: {
+        scene: 'پیست مسابقه از بالا با چهار ماشین', hint: 'نیمه‌ی چپ یا راست صفحه را نگه دار تا بپیچی؛ گاز خودکار است.', tapGo: 'برای ادامه صفحه را لمس کن.',
+        lapN: 'دور {n}/{m}', placeN: 'نفر {n} از {m}', bestLapN: 'بهترین دور: {t}', dailyCi: 'پیست روزانه', newRace: 'مسابقه‌ی تازه', trackL: 'پیست',
+        trkOval: 'بیضی', trkKidney: 'لوبیا', trkHook: 'قلاب', trkZigzag: 'زیگزاگ',
+        finalLap: 'دور آخر!', bestLap: 'بهترین دور!', goWord: 'برو!', youWon: 'اول شدی!',
+        raceTime: 'زمان مسابقه', bestLapL: 'بهترین دور این مسابقه', trackBestL: 'رکورد این پیست', placeL: 'رتبه', tries: 'تلاش‌ها',
+        kSteer: 'پیچیدن', kBrake: 'ترمز', kAgain: 'مسابقه‌ی تازه',
+        rules: 'چهار دور پیست را بزن و پیش از سه ماشین دیگر از خط پایان بگذر. گاز خودکار است. انگشتت را روی نیمه‌ی چپ صفحه نگه دار تا ماشین به چپِ خودش بپیچد، و روی نیمه‌ی راست تا به راستِ خودش؛ لمس کوتاه یعنی پیچ کم. دو انگشت روی هر دو نیمه یعنی ترمز. چمن کنار جاده سرعت را نصف می‌کند و دیواره‌ی لاستیکی بیشتر سرعت را می‌گیرد. زمان هر دور ثبت می‌شود و بهترین دورت در هر پیست نگه داشته می‌شود. دوری که هیچ‌جا از جاده بیرون نزنی دور تمیز است. چهار پیست و سه سطح هست؛ پیست روزانه هر روز تازه و برای همه یکسان است.',
+        tutTitle1: 'بپیچ', tutText1: 'نیمه‌ی چپ یا راست صفحه را نگه دار. ماشین به همان سمتِ خودش می‌پیچد.',
+        tutTitle2: 'روی جاده بمان', tutText2: 'چمن کندت می‌کند و دیواره تقریباً نگهت می‌دارد. پیچ را زودتر شروع کن.',
+        tutTitle3: 'چهار دور', tutText3: 'چهار دور بزن و اول از خط بگذر. بهترین دورت ثبت می‌شود.'
+      },
+      en: {
+        scene: 'A race track seen from above, with four cars', hint: 'Hold the left or right half to steer. Gas is automatic.', tapGo: 'Tap to go on.',
+        lapN: 'Lap {n}/{m}', placeN: 'Place {n} of {m}', bestLapN: 'Best lap: {t}', dailyCi: 'Daily track', newRace: 'New race', trackL: 'Track',
+        trkOval: 'Oval', trkKidney: 'Bean', trkHook: 'Hook', trkZigzag: 'Zigzag',
+        finalLap: 'Final lap!', bestLap: 'Best lap!', goWord: 'Go!', youWon: 'You won!',
+        raceTime: 'Race time', bestLapL: 'Best lap this race', trackBestL: 'Track record', placeL: 'Place', tries: 'Tries',
+        kSteer: 'Steer', kBrake: 'Brake', kAgain: 'New race',
+        rules: 'Drive four laps of the track and cross the line before the three other cars. Gas is automatic. Hold the left half of the screen to turn the car to its own left, the right half to turn it to its right; a short touch is a small turn. Two fingers, one on each half, brake. The grass beside the road halves your speed, and the tyre wall takes most of it. Every lap is timed, and your best lap on each track is kept. A lap that never leaves the road is a clean lap. There are four tracks and three levels; the daily track is new every day and the same for everyone.',
+        tutTitle1: 'Steer', tutText1: 'Hold the left or right half of the screen. The car turns to its own left or right.',
+        tutTitle2: 'Stay on the road', tutText2: 'Grass slows you down and the wall almost stops you. Start each turn early.',
+        tutTitle3: 'Four laps', tutText3: 'Drive four laps and cross the line first. Your best lap is kept.'
+      },
+      pl: {
+        scene: 'Tor wyścigowy z góry, cztery samochody', hint: 'Przytrzymaj lewą lub prawą połowę, aby skręcić. Gaz jest automatyczny.', tapGo: 'Stuknij, aby kontynuować.',
+        lapN: 'Okrążenie {n}/{m}', placeN: 'Miejsce {n} z {m}', bestLapN: 'Najlepsze okrążenie: {t}', dailyCi: 'Tor dnia', newRace: 'Nowy wyścig', trackL: 'Tor',
+        trkOval: 'Owal', trkKidney: 'Fasola', trkHook: 'Hak', trkZigzag: 'Zygzak',
+        finalLap: 'Ostatnie okrążenie!', bestLap: 'Najlepsze okrążenie!', goWord: 'Start!', youWon: 'Wygrana!',
+        raceTime: 'Czas wyścigu', bestLapL: 'Najlepsze okrążenie wyścigu', trackBestL: 'Rekord toru', placeL: 'Miejsce', tries: 'Próby',
+        kSteer: 'Skręt', kBrake: 'Hamulec', kAgain: 'Nowy wyścig',
+        rules: 'Przejedź cztery okrążenia toru i przekrocz linię przed trzema innymi samochodami. Gaz jest automatyczny. Przytrzymaj lewą połowę ekranu, aby samochód skręcił w swoje lewo, a prawą, aby skręcił w swoje prawo; krótkie dotknięcie to lekki skręt. Dwa palce, po jednym na każdej połowie, hamują. Trawa obok drogi zmniejsza prędkość o połowę, a ściana z opon zabiera większość prędkości. Każde okrążenie jest mierzone, a twoje najlepsze okrążenie na każdym torze jest zapisywane. Okrążenie bez zjazdu z drogi jest czyste. Są cztery tory i trzy poziomy; tor dnia jest codziennie nowy i taki sam dla wszystkich.',
+        tutTitle1: 'Skręcaj', tutText1: 'Przytrzymaj lewą lub prawą połowę ekranu. Samochód skręca w swoje lewo lub prawo.',
+        tutTitle2: 'Trzymaj się drogi', tutText2: 'Trawa spowalnia, a ściana prawie zatrzymuje. Zaczynaj zakręt wcześnie.',
+        tutTitle3: 'Cztery okrążenia', tutText3: 'Przejedź cztery okrążenia i przekrocz linię pierwszy. Najlepsze okrążenie zostaje zapisane.'
+      },
+      fr: {
+        scene: 'Un circuit de course vu d’en haut, avec quatre voitures', hint: 'Maintiens la moitié gauche ou droite pour tourner. Les gaz sont automatiques.', tapGo: 'Touche pour continuer.',
+        lapN: 'Tour {n}/{m}', placeN: 'Place {n} sur {m}', bestLapN: 'Meilleur tour : {t}', dailyCi: 'Circuit du jour', newRace: 'Nouvelle course', trackL: 'Circuit',
+        trkOval: 'Ovale', trkKidney: 'Haricot', trkHook: 'Crochet', trkZigzag: 'Zigzag',
+        finalLap: 'Dernier tour !', bestLap: 'Meilleur tour !', goWord: 'Partez !', youWon: 'Tu as gagné !',
+        raceTime: 'Temps de course', bestLapL: 'Meilleur tour de la course', trackBestL: 'Record du circuit', placeL: 'Place', tries: 'Essais',
+        kSteer: 'Braquer', kBrake: 'Frein', kAgain: 'Nouvelle course',
+        rules: 'Fais quatre tours du circuit et franchis la ligne avant les trois autres voitures. Les gaz sont automatiques. Maintiens la moitié gauche de l’écran pour tourner la voiture vers sa gauche, la moitié droite pour la tourner vers sa droite ; un contact bref donne un petit virage. Deux doigts, un sur chaque moitié, freinent. L’herbe au bord de la route réduit ta vitesse de moitié, et le mur de pneus en retire presque tout. Chaque tour est chronométré et ton meilleur tour sur chaque circuit est conservé. Un tour sans sortir de la route est un tour propre. Il y a quatre circuits et trois niveaux ; le circuit du jour change chaque jour et il est le même pour tous.',
+        tutTitle1: 'Braque', tutText1: 'Maintiens la moitié gauche ou droite de l’écran. La voiture tourne vers sa gauche ou sa droite.',
+        tutTitle2: 'Reste sur la route', tutText2: 'L’herbe te ralentit et le mur t’arrête presque. Commence chaque virage tôt.',
+        tutTitle3: 'Quatre tours', tutText3: 'Fais quatre tours et franchis la ligne en premier. Ton meilleur tour est conservé.'
+      },
+      zh: {
+        scene: '俯视的赛道，四辆赛车', hint: '按住屏幕左半或右半转向，油门自动。', tapGo: '点一下继续。',
+        lapN: '第 {n}/{m} 圈', placeN: '第 {n} 名（共 {m}）', bestLapN: '最快圈：{t}', dailyCi: '每日赛道', newRace: '新比赛', trackL: '赛道',
+        trkOval: '椭圆', trkKidney: '豆形', trkHook: '钩形', trkZigzag: '之字',
+        finalLap: '最后一圈！', bestLap: '最快圈！', goWord: '出发！', youWon: '你赢了！',
+        raceTime: '比赛用时', bestLapL: '本场最快圈', trackBestL: '赛道纪录', placeL: '名次', tries: '尝试次数',
+        kSteer: '转向', kBrake: '刹车', kAgain: '新比赛',
+        rules: '绕赛道跑四圈，抢在另外三辆车之前冲过终点线。油门是自动的。按住屏幕左半，赛车向它自己的左边转；按住右半，向它自己的右边转；轻点一下就是小转弯。两根手指分别按住左右两半就是刹车。路边的草地让速度减半，轮胎墙会让你几乎停下。每一圈都会计时，每条赛道上你的最快圈都会保存。全程不离开路面的一圈是干净圈。共有四条赛道和三个难度；每日赛道每天都是新的，对所有人都一样。',
+        tutTitle1: '转向', tutText1: '按住屏幕左半或右半，赛车就朝它自己的那一边转。',
+        tutTitle2: '别出路面', tutText2: '草地会让你变慢，墙几乎让你停下。提早开始转弯。',
+        tutTitle3: '四圈', tutText3: '跑完四圈，第一个冲线。你的最快圈会被记下。'
+      },
+      de: {
+        scene: 'Eine Rennstrecke von oben mit vier Autos', hint: 'Halte die linke oder rechte Hälfte, um zu lenken. Gas gibt es automatisch.', tapGo: 'Tippe, um weiterzumachen.',
+        lapN: 'Runde {n}/{m}', placeN: 'Platz {n} von {m}', bestLapN: 'Beste Runde: {t}', dailyCi: 'Strecke des Tages', newRace: 'Neues Rennen', trackL: 'Strecke',
+        trkOval: 'Oval', trkKidney: 'Bohne', trkHook: 'Haken', trkZigzag: 'Zickzack',
+        finalLap: 'Letzte Runde!', bestLap: 'Beste Runde!', goWord: 'Los!', youWon: 'Gewonnen!',
+        raceTime: 'Rennzeit', bestLapL: 'Beste Runde im Rennen', trackBestL: 'Streckenrekord', placeL: 'Platz', tries: 'Versuche',
+        kSteer: 'Lenken', kBrake: 'Bremsen', kAgain: 'Neues Rennen',
+        rules: 'Fahre vier Runden und überquere die Linie vor den drei anderen Autos. Gas gibt es automatisch. Halte die linke Bildschirmhälfte, damit das Auto nach seiner linken Seite lenkt, die rechte für seine rechte; ein kurzes Tippen ist ein kleiner Lenkeinschlag. Zwei Finger, einer auf jeder Hälfte, bremsen. Das Gras neben der Straße halbiert dein Tempo, und die Reifenwand nimmt dir das meiste davon. Jede Runde wird gestoppt, und deine beste Runde auf jeder Strecke bleibt gespeichert. Eine Runde, die nie von der Straße abkommt, ist eine saubere Runde. Es gibt vier Strecken und drei Stufen; die Strecke des Tages ist jeden Tag neu und für alle gleich.',
+        tutTitle1: 'Lenken', tutText1: 'Halte die linke oder rechte Bildschirmhälfte. Das Auto lenkt nach seiner eigenen Seite.',
+        tutTitle2: 'Auf der Straße bleiben', tutText2: 'Gras bremst dich, die Wand hält dich fast an. Lenke früh in die Kurve.',
+        tutTitle3: 'Vier Runden', tutText3: 'Fahre vier Runden und komm als Erster ins Ziel. Deine beste Runde bleibt gespeichert.'
+      },
+      es: {
+        scene: 'Un circuito visto desde arriba, con cuatro coches', hint: 'Mantén la mitad izquierda o derecha para girar. El gas es automático.', tapGo: 'Toca para seguir.',
+        lapN: 'Vuelta {n}/{m}', placeN: 'Puesto {n} de {m}', bestLapN: 'Mejor vuelta: {t}', dailyCi: 'Circuito del día', newRace: 'Carrera nueva', trackL: 'Circuito',
+        trkOval: 'Óvalo', trkKidney: 'Judía', trkHook: 'Gancho', trkZigzag: 'Zigzag',
+        finalLap: '¡Última vuelta!', bestLap: '¡Mejor vuelta!', goWord: '¡Ya!', youWon: '¡Ganaste!',
+        raceTime: 'Tiempo de carrera', bestLapL: 'Mejor vuelta de la carrera', trackBestL: 'Récord del circuito', placeL: 'Puesto', tries: 'Intentos',
+        kSteer: 'Girar', kBrake: 'Frenar', kAgain: 'Carrera nueva',
+        rules: 'Da cuatro vueltas al circuito y cruza la meta antes que los otros tres coches. El gas es automático. Mantén pulsada la mitad izquierda de la pantalla para que el coche gire hacia su izquierda, y la derecha para que gire hacia su derecha; un toque corto es un giro pequeño. Dos dedos, uno en cada mitad, frenan. La hierba junto a la pista reduce tu velocidad a la mitad, y el muro de neumáticos te quita casi toda. Cada vuelta se cronometra y se guarda tu mejor vuelta en cada circuito. Una vuelta sin salirte de la pista es una vuelta limpia. Hay cuatro circuitos y tres niveles; el circuito del día es nuevo cada día e igual para todos.',
+        tutTitle1: 'Gira', tutText1: 'Mantén la mitad izquierda o derecha de la pantalla. El coche gira hacia su propio lado.',
+        tutTitle2: 'No salgas de la pista', tutText2: 'La hierba te frena y el muro casi te para. Empieza cada curva pronto.',
+        tutTitle3: 'Cuatro vueltas', tutText3: 'Da cuatro vueltas y cruza la meta el primero. Se guarda tu mejor vuelta.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || typeof prefs !== 'object') prefs = { track: 'oval', level: 'medium' };
+  if (!TRACK_KEYS[prefs.track]) prefs.track = 'oval';
+  if (LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+
+  // the race: its track id ('daily' for the day's track), its level and the engine state
+  var R = null, S = null, raf = 0, last = 0, acc = 0, paused = false, waiting = false, ended = false, tries = 0, startedAt = 0;
+  var allClean = true, newBest = false, pop = null, goAt = 0, shownPlace = 0, lastBump = 0, flash = 0;
+  var tracks = {};
+
+  var cv = el('canvas', { class: 'ci-canvas', role: 'img', 'aria-label': C.t('scene') });
+  var box = el('div', { class: 'ci-box' }, [cv]);
+  var top = el('div', { class: 'ci-top ch-above' });
+  var status = el('div', { class: 'ci-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'ci-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  // the track and difficulty live behind a gear, not only inside the new-race button (#764)
+  ctx.button({ icon: 'gear', label: C.t('settings'), onClick: function () { settings(); } });
+  ctx.button({ icon: 'refresh', label: C.t('newRace'), onClick: function () { askNew(); } });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ races */
+
+  function trackOf(id) {
+    if (tracks[id]) return tracks[id];
+    var T = null;
+    if (id === 'daily') T = E.generate(C.daily('circuit', dailyDate).rng);
+    else for (var i = 0; i < E.TRACKS.length; i++) if (E.TRACKS[i].id === id) T = E.build(E.TRACKS[i].ctrl);
+    // a day whose numbers never made a drivable track falls back to the oval
+    if (!T || !T.check || !T.check.ok) T = E.build(E.TRACKS[0].ctrl);
+    tracks[id] = T;
+    return T;
+  }
+  function current() { return R && !R.daily ? { track: R.track, level: R.level } : { track: prefs.track, level: prefs.level }; }
+
+  function newRace(o) {
+    var daily = !!(o && o.daily);
+    R = daily ? { track: 'daily', level: 'medium', daily: true } : { track: o.track, level: o.level, daily: false };
+    if (!daily) { prefs.track = o.track; prefs.level = o.level; ctx.store.set('prefs', prefs); }
+    S = E.race(trackOf(R.track), R.level);
+    tries++;
+    startedAt = Date.now();
+    ended = false; waiting = false; last = 0; acc = 0;
+    allClean = true; newBest = false; pop = null; goAt = 0; shownPlace = 0;
+    ctx.clearSave();
+    renderTop(); renderStatus();
+    C.audio.sfx('tap');
+    kick();
+  }
+  // New race restarts with the choice already made; picking another track or level is the gear's job
+  function askNew() {
+    var again = R && R.daily ? function () { newRace({ daily: true }); } : function () { newRace(current()); };
+    if (!S || ended || S.t === 0) { again(); return; }
+    C.ui.confirm({ title: C.t('newRace'), body: C.t('resetWarn'), onOk: again });
+  }
+  function settings() {
+    var o = current(), body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
+    body.appendChild(el('div', { class: 'ci-label', text: C.t('trackL') }));
+    body.appendChild(C.ui.segmented(E.TRACKS.map(function (t) { return { value: t.id, label: C.t(TRACK_KEYS[t.id]) }; }), o.track, function (v) { o.track = v; }));
+    body.appendChild(el('div', { class: 'ci-label', text: C.t('difficulty') }));
+    body.appendChild(C.ui.segmented([{ value: 'easy', label: C.t('easy') }, { value: 'medium', label: C.t('medium') }, { value: 'hard', label: C.t('hard') }], o.level, function (v) { o.level = v; }));
+    if (S && !ended && S.t > 0) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('resetWarn') }));
+    C.ui.modal({
+      title: C.t('settings'), closeButton: true, body: [body],
+      actions: [{ label: C.t('cancel') }, { label: C.t('start'), kind: 'primary', onClick: function () { newRace(o); } }]
+    });
+  }
+
+  function blocked() { return paused || waiting || document.hidden || !!document.querySelector('.ch-scrim'); }
+  function tick(now) {
+    raf = 0;
+    if (!S) return;
+    var dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
+    last = now;
+    if (!blocked() && !ended) {
+      // a fixed step, so a race drives the same on every screen
+      acc += dt;
+      var n = 0, inp = input();
+      while (acc >= E.DT && n < 8) {
+        E.step(S, inp); acc -= E.DT; n++;
+        events();
+        if (ended) break;
+      }
+      if (n >= 8) acc = 0;
+      var pl = E.placeOf(S, 0);
+      if (pl !== shownPlace && S.cd === 0) { shownPlace = pl; renderTop(); }
+    }
+    if (pop) { pop.t -= dt * 0.8; if (pop.t <= 0) pop = null; }
+    if (flash > 0) flash = Math.max(0, flash - dt * 3);
+    draw();
+    raf = requestAnimationFrame(tick);
+  }
+  function kick() { if (!raf) { last = 0; raf = requestAnimationFrame(tick); } }
+
+  function secs(ticks) {
+    var s = C.num((ticks * E.DT).toFixed(2));
+    return document.documentElement.lang === 'fa' ? s.replace('.', '٫') : s;
+  }
+  function bestKey() { return 'lap_' + R.track; }
+
+  function events() {
+    var ev = E.drain(S), save = false;
+    for (var i = 0; i < ev.length; i++) {
+      var e = ev[i];
+      if (e.t === 'count') C.audio.sfx('tap');
+      else if (e.t === 'go') { C.feedback('select'); goAt = 0.9; }
+      else if (e.t === 'wall' && e.car === 0) { C.feedback('thud'); flash = 1; }
+      else if (e.t === 'bump') { if (S.t - lastBump > 30) { C.feedback('clack'); lastBump = S.t; } }
+      else if (e.t === 'lap' && e.car === 0) {
+        if (!e.clean) allClean = false;
+        // a lap better than this track's record is kept at once: it was really driven
+        var better = !R.daily && C.stats.best('circuit', bestKey(), Math.round(e.time * E.DT * 1000), true);
+        if (better) { newBest = true; C.feedback('good'); }
+        if (e.last) continue;
+        pop = { text: better ? C.t('bestLap') : e.k === E.LAPS - 1 ? C.t('finalLap') : secs(e.time), sub: better || e.k === E.LAPS - 1 ? secs(e.time) : '', t: 1.3 };
+        save = true;
+      } else if (e.t === 'over') {
+        ended = true;
+        ctx.clearSave();
+        pop = { text: e.place === 1 ? C.t('youWon') : C.t('placeN', { n: C.num(e.place), m: C.num(E.CARS) }), sub: '', t: 2 };
+        if (e.place === 1) C.audio.sfx('win');
+        setTimeout(finish, C.ui.reduceMotion() ? 300 : 1300);
+      }
+    }
+    if (ev.length) renderTop();
+    if (save && !ended) ctx.save();
+  }
+
+  function finish() {
+    var me = S.cars[0], place = me.place || E.placeOf(S, 0), won = place === 1;
+    var coins = [30, 18, 10, 5][place - 1] || 5, points = [120, 80, 50, 25][place - 1] || 25;
+    if (won) C.achievements.unlock('ci-win');
+    if (won && R.level === 'hard' && !R.daily) C.achievements.unlock('ci-hard');
+    if (allClean) C.achievements.unlock('ci-clean');
+    var lines = [
+      { label: C.t('placeL'), value: C.num(place) + ' / ' + C.num(E.CARS) },
+      { label: C.t('raceTime'), value: secs(me.done) },
+      { label: C.t('bestLapL'), value: secs(me.best) }
+    ];
+    if (R.daily) {
+      if (won) C.achievements.unlock('ci-daily');
+      if (!C.stats.daily('circuit', dailyDate, { label: C.t('placeN', { n: C.num(place), m: C.num(E.CARS) }) + ' · ' + secs(me.done), win: won, tries: tries })) { coins = Math.max(1, Math.round(coins * 0.2)); points = Math.max(1, Math.round(points * 0.2)); }
+      lines.push({ label: C.t('tries'), value: C.num(tries) });
+    } else {
+      var rec = C.stats.getBest('circuit', bestKey());
+      if (rec) lines.push({ label: C.t('trackBestL'), value: secs(rec / 1000 / E.DT) });
+    }
+    ctx.finish({
+      won: won,
+      title: won ? C.t('youWon') : C.t('placeN', { n: C.num(place), m: C.num(E.CARS) }),
+      note: newBest ? C.t('bestLap') : null, timeMs: Date.now() - startedAt, coins: coins, points: points,
+      lines: lines,
+      shareText: 'چوگان · پیست' + (R.daily ? ('\nروزانه ' + dailyDate) : '') + '\nنفر ' + place + ' · ' + (me.done * E.DT).toFixed(2),
+      paint: function (g, w, h) { paintShare(g, w, h); },
+      againLabel: C.t('newRace'),
+      onAgain: function () { if (R.daily) newRace({ daily: true }); else newRace(current()); }
+    });
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  // pixel colours as [r, g, b], so the track can be painted into an ImageData
+  function palette(dk) {
+    return dk ? {
+      road: [58, 58, 66], kerbR: [158, 46, 42], kerbW: [176, 172, 166], grassA: [44, 88, 48], grassB: [40, 81, 44],
+      wallA: [22, 22, 26], wallB: [128, 128, 124], out: [31, 64, 37], outB: [28, 59, 34], tree: [15, 38, 22], treeHi: [27, 56, 31],
+      lineW: [206, 206, 206], lineB: [22, 22, 22],
+      me: '#F0447F', bots: ['#4A86E0', '#E0B030', '#D2D2D2'], glass: '#6A9AB8', tyre: '#0E0E10', shadow: 'rgba(0,0,0,.45)',
+      text: 'rgba(244,238,228,.96)', shade: 'rgba(0,0,0,.6)'
+    } : {
+      road: [98, 98, 106], kerbR: [214, 60, 52], kerbW: [242, 238, 230], grassA: [114, 180, 86], grassB: [104, 168, 78],
+      wallA: [40, 40, 46], wallB: [222, 222, 218], out: [84, 148, 68], outB: [78, 140, 63], tree: [40, 98, 46], treeHi: [60, 126, 60],
+      lineW: [246, 246, 246], lineB: [32, 32, 32],
+      me: ACCENT, bots: ['#2F6FD0', '#E8B820', '#F4F4F4'], glass: '#A8DCF6', tyre: '#141416', shadow: 'rgba(0,0,0,.3)',
+      text: 'rgba(31,26,23,.92)', shade: 'rgba(255,255,255,.8)'
+    };
+  }
+  function hash(x, y) { var h = Math.imul(x, 73856093) ^ Math.imul(y, 19349663); h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+
+  // What lies under every pixel of a track, worked out once per track; the colours
+  // are laid on per theme, so turning the theme does not walk the track again
+  var KIND = { road: 0, kerb: 1, grass: 2, wall: 3, out: 4 };
+  function kinds(T) {
+    if (T.px) return T.px;
+    var kind = new Uint8Array(VW * VH), s = new Float32Array(VW * VH);
+    for (var y = 0; y < VH; y++) for (var x = 0; x < VW; x++) {
+      var q = E.surface(T, x + 0.5, y + 0.5), sm = ((T.pts[q.i].s + q.a) % T.L + T.L) % T.L;
+      var k = KIND[q.kind];
+      // the start line: a chequered strip across the road
+      if (k === 0 && (sm < 3 || sm > T.L - 1)) k = 5;
+      kind[y * VW + x] = k; s[y * VW + x] = sm;
+    }
+    T.px = { kind: kind, s: s };
+    return T.px;
+  }
+  var bgCache = { T: null, dk: null, cv: null };
+  function background(T, dk) {
+    if (bgCache.T === T && bgCache.dk === dk && bgCache.cv) return bgCache.cv;
+    var P = palette(dk), K = kinds(T), c = document.createElement('canvas');
+    c.width = VW; c.height = VH;
+    var g = c.getContext('2d'), img = g.createImageData(VW, VH), D = img.data;
+    for (var y = 0; y < VH; y++) for (var x = 0; x < VW; x++) {
+      var j = y * VW + x, k = K.kind[j], sm = K.s[j], col, h = hash(x, y);
+      if (k === 0) { var n = Math.round((h - 0.5) * 10); col = [P.road[0] + n, P.road[1] + n, P.road[2] + n]; }
+      else if (k === 5) col = ((x >> 1) + (y >> 1)) & 1 ? P.lineW : P.lineB;
+      else if (k === 1) col = Math.floor(sm / 4) % 2 ? P.kerbR : P.kerbW;
+      else if (k === 2) col = ((x >> 2) + (y >> 2)) & 1 ? P.grassA : P.grassB;
+      else if (k === 3) col = Math.floor(sm / 3) % 2 ? P.wallA : P.wallB;
+      else {
+        // pixel trees on the infield and round the outside
+        var cx = (x >> 3) * 8 + 4, cy = (y >> 3) * 8 + 4, th = hash(x >> 3, (y >> 3) + 999), dx = x - cx, dy = y - cy;
+        if (th < 0.32 && dx * dx + dy * dy <= 8) col = dx + dy < 0 ? P.treeHi : P.tree;
+        else col = h < 0.5 ? P.out : P.outB;
+      }
+      D[j * 4] = col[0]; D[j * 4 + 1] = col[1]; D[j * 4 + 2] = col[2]; D[j * 4 + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+    bgCache = { T: T, dk: dk, cv: c };
+    return c;
+  }
+
+  // A car seen from above as a little pixel mask, one per heading: body, windscreen
+  // toward the nose, and four wheels sticking out at the sides
+  var HEADINGS = 32, masks = [];
+  for (var hd = 0; hd < HEADINGS; hd++) {
+    var a = hd * 2 * Math.PI / HEADINGS, ca = Math.cos(a), sa = Math.sin(a), m = [];
+    for (var dy = -6; dy <= 6; dy++) for (var dx = -6; dx <= 6; dx++) {
+      var u = dx * ca + dy * sa, v = -dx * sa + dy * ca, t = null;
+      if (Math.abs(u) <= 4.5 && Math.abs(v) <= 2.3) t = u >= 0.6 && u <= 2.2 && Math.abs(v) <= 1.5 ? 'g' : 'b';
+      else if (Math.abs(u) >= 1.8 && Math.abs(u) <= 4 && Math.abs(v) <= 3.4) t = 'w';
+      if (t) m.push([dx, dy, t]);
+    }
+    masks.push(m);
+  }
+  function car(g, c, col, P) {
+    var hdg = Math.round(((c.ang % (2 * Math.PI)) + 2 * Math.PI) / (2 * Math.PI) * HEADINGS) % HEADINGS, m = masks[hdg];
+    var x = Math.round(c.x), y = Math.round(c.y), i;
+    g.fillStyle = P.shadow;
+    for (i = 0; i < m.length; i++) g.fillRect(x + m[i][0] + 1, y + m[i][1] + 1, 1, 1);
+    for (i = 0; i < m.length; i++) {
+      g.fillStyle = m[i][2] === 'b' ? col : m[i][2] === 'g' ? P.glass : P.tyre;
+      g.fillRect(x + m[i][0], y + m[i][1], 1, 1);
+    }
+  }
+  // the picture at its own size, 240 × 320 pixels; drawn larger without smoothing
+  var buf = document.createElement('canvas'); buf.width = VW; buf.height = VH;
+  function scene(dk) {
+    var g = buf.getContext('2d'), P = palette(dk);
+    g.drawImage(background(S.T, dk), 0, 0);
+    // the player's car last, so it is never hidden under a bot
+    for (var c = S.cars.length - 1; c >= 0; c--) car(g, S.cars[c], c === 0 ? P.me : P.bots[c - 1], P);
+    return P;
+  }
+
+  var view = { w: 0, h: 0 };
+  function size() {
+    var r = box.getBoundingClientRect(), h = Math.floor(Math.min(r.height, r.width * VH / VW));
+    h = Math.max(120, h || 0);
+    return { w: Math.round(h * VW / VH), h: h };
+  }
+  function font() { return getComputedStyle(document.body).fontFamily || 'sans-serif'; }
+  function label(g, P, text, x, y, px) {
+    g.font = '800 ' + px + 'px ' + font(); g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.lineWidth = Math.max(3, px / 5); g.strokeStyle = P.shade; g.lineJoin = 'round'; g.strokeText(text, x, y);
+    g.fillStyle = P.text; g.fillText(text, x, y);
+  }
+  function draw() {
+    if (!S) return;
+    var Z = size(), dpr = Math.min(2, window.devicePixelRatio || 1), dk = dark();
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
+    cv.style.width = Z.w + 'px'; cv.style.height = Z.h + 'px';
+    view = { w: Z.w, h: Z.h };
+    var P = scene(dk), g = cv.getContext('2d'), k = Z.w / VW;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.imageSmoothingEnabled = false;
+    g.drawImage(buf, 0, 0, cv.width, cv.height);
+    // words are drawn sharp over the pixels, in the picture's units
+    g.setTransform(dpr * k, 0, 0, dpr * k, 0, 0);
+    var me = S.cars[0];
+    if (S.cd > 0) {
+      // a blinking ring round the player's car on the grid, and the count
+      if (Math.floor(S.cd / 12) % 2 === 0) { g.strokeStyle = P.me; g.lineWidth = 1.5; g.beginPath(); g.arc(me.x, me.y, 9, 0, Math.PI * 2); g.stroke(); }
+      label(g, P, C.num(Math.ceil(S.cd / 50)), VW / 2, VH / 2, 44);
+    } else if (goAt > 0) {
+      g.globalAlpha = Math.min(1, goAt * 2); label(g, P, C.t('goWord'), VW / 2, VH / 2, 40); g.globalAlpha = 1;
+      goAt = Math.max(0, goAt - 1 / 60);
+    }
+    // the running lap time in a corner
+    if (S.cd === 0 && !ended && me.k >= 0) label(g, P, secs(S.t - me.lapAt), VW / 2, 12, 12);
+    if (pop) {
+      g.globalAlpha = Math.max(0, Math.min(1, pop.t * 2));
+      var y = VH / 2 - (1 - Math.min(1, pop.t)) * 8;
+      label(g, P, pop.text, VW / 2, y, 24);
+      if (pop.sub) label(g, P, pop.sub, VW / 2, y + 22, 15);
+      g.globalAlpha = 1;
+    }
+    if (flash > 0) { g.fillStyle = 'rgba(255,255,255,' + (0.18 * flash) + ')'; g.fillRect(0, 0, VW, VH); }
+  }
+
+  // the share card: the track as the race ended
+  function paintShare(g, w, h) {
+    var dk = dark();
+    scene(dk);
+    g.fillStyle = dk ? '#1F4025' : '#54943F'; g.fillRect(0, 0, w, h);
+    var k = Math.min(w / VW, h / VH);
+    g.imageSmoothingEnabled = false;
+    g.drawImage(buf, (w - VW * k) / 2, (h - VH * k) / 2, VW * k, VH * k);
+  }
+
+  /* ----------------------------------------------------------------- ui */
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (R && R.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyCi') + ' — ' + C.num(dailyDate) })]));
+    else if (R) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent', text: C.t(TRACK_KEYS[R.track]) + ' · ' + C.t(R.level) }));
+    if (!S) return;
+    var me = S.cars[0];
+    top.appendChild(el('span', { class: 'ch-badge', text: C.t('lapN', { n: C.num(Math.min(E.LAPS, Math.max(1, me.k + 1))), m: C.num(E.LAPS) }) }));
+    top.appendChild(el('span', { class: 'ch-badge', text: C.t('placeN', { n: C.num(me.done ? me.place : E.placeOf(S, 0)), m: C.num(E.CARS) }) }));
+    var best = R.daily ? 0 : C.stats.getBest('circuit', bestKey());
+    if (best) top.appendChild(el('span', { class: 'ch-badge', text: C.t('bestLapN', { t: secs(best / 1000 / E.DT) }) }));
+  }
+  function renderStatus() { status.textContent = waiting ? C.t('tapGo') : C.t('hint'); }
+  function go() { if (waiting) { waiting = false; last = 0; acc = 0; renderStatus(); kick(); } }
+
+  /* -------------------------------------------------------------- input */
+
+  // Each finger steers by the half of the screen it is on, wherever on the game it
+  // landed; one finger on each half brakes. A finger may slide across the middle.
+  var ptrs = {}, keys = { l: false, r: false, b: false };
+  function sideOf(x) { return x < window.innerWidth / 2 ? -1 : 1; }
+  function input() {
+    var l = keys.l, r = keys.r, pl = false, pr = false;
+    for (var id in ptrs) { if (ptrs[id] < 0) pl = true; else pr = true; }
+    if (pl && pr) return { steer: 0, brake: true };
+    l = l || pl; r = r || pr;
+    return { steer: l && !r ? -1 : r && !l ? 1 : 0, brake: keys.b };
+  }
+  wrap.addEventListener('pointerdown', function (e) {
+    if (!S || (e.target.closest && e.target.closest('button'))) return;
+    if (e.button !== undefined && e.button > 0) return;
+    e.preventDefault();
+    C.audio.unlock();
+    if (waiting) { go(); return; }
+    ptrs[e.pointerId] = sideOf(e.clientX);
+  });
+  window.addEventListener('pointermove', function (e) { if (ptrs[e.pointerId] !== undefined) ptrs[e.pointerId] = sideOf(e.clientX); });
+  function lift(e) { delete ptrs[e.pointerId]; }
+  window.addEventListener('pointerup', lift);
+  window.addEventListener('pointercancel', lift);
+  window.addEventListener('blur', function () { ptrs = {}; keys = { l: false, r: false, b: false }; });
+  wrap.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  wrap.style.touchAction = 'none';
+  // the track is drawn left to right in every language, so the arrows are never flipped
+  function keyOf(e) {
+    if (e.key === 'ArrowLeft' || C.keyIs(e, 'a')) return 'l';
+    if (e.key === 'ArrowRight' || C.keyIs(e, 'd')) return 'r';
+    if (e.key === 'ArrowDown' || e.key === ' ' || C.keyIs(e, 's')) return 'b';
+    return null;
+  }
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim')) return;
+    if (e.target && e.target.closest && e.target.closest('button') && (e.key === ' ' || e.key === 'Enter')) return;
+    var k = keyOf(e);
+    if (k) {
+      e.preventDefault();
+      if (waiting) go(); else keys[k] = true;
+    } else if (C.keyIs(e, 'r') && !e.repeat) { e.preventDefault(); if (R && R.daily) askNew(); else newRace(current()); }
+  });
+  window.addEventListener('keyup', function (e) { var k = keyOf(e); if (k) keys[k] = false; });
+  // a race waits while the app is away, and comes back waiting for a tap
+  C.onPause(function () { paused = true; ptrs = {}; if (S && !ended) waiting = true; ctx.save(); renderStatus(); });
+  C.onResume(function () { paused = false; kick(); });
+  document.addEventListener('visibilitychange', function () { if (document.hidden) { ptrs = {}; if (S && !ended) { waiting = true; renderStatus(); } } else kick(); });
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw); } catch (er) { /* old WebViews */ } }
+  // the floating words use the app's font, which may arrive after the first frame
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { draw(); });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← → / A D', C.t('kSteer')), kb('↓ / S / Space', C.t('kBrake')), kb('R', C.t('kAgain'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // little pictures for the tutorial: a stretch of track and a car from above
+  function svgCar(x, y, rot, col) {
+    return '<g transform="translate(' + x + ',' + y + ') rotate(' + rot + ')"><rect x="-8" y="-7" width="5" height="3" fill="#141416"/><rect x="3" y="-7" width="5" height="3" fill="#141416"/><rect x="-8" y="4" width="5" height="3" fill="#141416"/><rect x="3" y="4" width="5" height="3" fill="#141416"/>' +
+      '<rect x="-10" y="-5" width="20" height="10" fill="' + col + '"/><rect x="2" y="-3" width="4" height="6" fill="#A8DCF6"/></g>';
+  }
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 120" width="100%" direction="ltr"><rect width="200" height="120" rx="10" fill="#F9E0EA"/>';
+    if (kind === 1) {
+      s += '<rect x="10" y="10" width="180" height="100" rx="8" fill="#72B456"/><path d="M30 100 C30 40 70 30 100 30 C130 30 170 40 170 100" stroke="#62626A" stroke-width="26" fill="none"/>' +
+        svgCar(100, 30, 0, ACCENT) +
+        '<rect x="12" y="12" width="88" height="96" rx="7" fill="#fff" opacity=".18"/><path d="M50 70 l-14 0 m6 -6 l-6 6 6 6" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' +
+        '<path d="M150 70 l14 0 m-6 -6 l6 6 -6 6" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>';
+    } else if (kind === 2) {
+      s += '<rect x="10" y="10" width="180" height="100" rx="8" fill="#549444"/><rect x="10" y="30" width="180" height="60" fill="#72B456"/><rect x="10" y="44" width="180" height="32" fill="#62626A"/>' +
+        '<g fill="#D63C34">' + [0, 1, 2, 3, 4, 5, 6, 7, 8].map(function (i) { return '<rect x="' + (10 + i * 20) + '" y="41" width="10" height="3"/><rect x="' + (10 + i * 20) + '" y="76" width="10" height="3"/>'; }).join('') + '</g>' +
+        '<g fill="#28282E">' + [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(function (i) { return '<circle cx="' + (16 + i * 15) + '" cy="24" r="5"/>'; }).join('') + '</g>' +
+        svgCar(70, 60, 0, ACCENT) + svgCar(140, 84, 20, ACCENT).replace(/fill="#BE004B"/, 'fill="#BE004B" opacity=".45"');
+    } else {
+      s += '<rect x="10" y="10" width="180" height="100" rx="8" fill="#72B456"/><rect x="20" y="20" width="160" height="80" rx="34" fill="none" stroke="#62626A" stroke-width="22"/>' +
+        '<g>' + [0, 1, 2, 3].map(function (i) { return '<rect x="96" y="' + (89 + (i % 2) * 0) + '" width="4" height="4" fill="' + (i % 2 ? '#202020' : '#F6F6F6') + '" transform="translate(' + (i > 1 ? 4 : 0) + ',' + ((i % 2) * 4 + (i > 1 ? 0 : 0)) + ')"/>'; }).join('') + '</g>' +
+        svgCar(70, 100, 0, ACCENT) + svgCar(130, 100, 0, '#2F6FD0') + svgCar(150, 20, 180, '#E8B820');
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // A race in progress is saved after each of the player's laps and when the app goes
+  // away; the daily race has its own slot
+  ctx.autosave(function () {
+    if (!S || S.over || ended || !R) return { inProgress: false };
+    return { s: E.snapshot(S), track: R.track, level: R.level, daily: R.daily ? dailyDate : null, tries: tries, clean: allClean, elapsed: Date.now() - startedAt };
+  });
+  function resumeRace(sv) {
+    var daily = !!sv.daily;
+    if (!daily && !TRACK_KEYS[sv.track]) return false;
+    var id = daily ? 'daily' : sv.track, X = E.restore(sv.s, trackOf(id));
+    if (!X || X.over) return false;
+    R = { track: id, level: X.level, daily: daily };
+    S = X; tries = sv.tries || 1; allClean = sv.clean !== false; startedAt = Date.now() - (sv.elapsed || 0);
+    ended = false; waiting = true; last = 0; acc = 0; pop = null; goAt = 0; shownPlace = 0; newBest = false;
+    renderTop(); renderStatus(); draw(); kick();
+    return true;
+  }
+  var saved = ctx.loadSave();
+  if (dailyDate) {
+    if (!(saved && saved.s && saved.daily === dailyDate && resumeRace(saved))) newRace({ daily: true });
+    if (C.stats.dailyDone('circuit', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).circuit;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (!(saved && saved.s && !saved.daily && resumeRace(saved))) {
+    newRace(current());
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
