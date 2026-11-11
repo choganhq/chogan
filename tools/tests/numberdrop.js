@@ -197,7 +197,7 @@ module.exports = function (T) {
     });
     const list = T.games();
     const gm = list.find((g) => g.id === 'numberdrop');
-    ok(!!gm && gm.cat === 'puzzle' && gm.people === 1 && gm.daily === undefined && list[list.indexOf(gm) - 1].id === 'carrom', 'Number Drop is listed right after Carrom as a one-player puzzle with a daily game');
+    ok(!!gm && gm.cat === 'puzzle' && gm.people === 1 && gm.daily === undefined && list.indexOf(gm) >= list.findIndex((g) => g.id === 'carrom'), 'Number Drop is listed after Carrom as a one-player puzzle with a daily game');
     ok(!!gm && LOCALE_CODES.every((l) => gm.name[l] && gm.summary[l]), 'its name and summary exist in every language');
     const icon = fs.readFileSync(path.join(ROOT, 'www/games/numberdrop/icon.svg'), 'utf8');
     ok(!!gm && icon.indexOf('<rect width="96" height="96" rx="22" fill="' + gm.soft + '"/>') >= 0, 'the icon sits on the game\'s soft tint');

@@ -124,8 +124,11 @@ jobs:
           set -euo pipefail
           AAB=android/app/build/outputs/bundle/release/app-release.aab
           [ -s "$AAB" ] || { echo "No bundle at $AAB"; exit 1; }
-          keytool -printcert -jarfile "$AAB" | tr -d ':' | tr 'A-F' 'a-f' \
-            | grep -q 'c3f70a1af8a45558678d1d9b413415d1b0a4c3208835ce78c1f37c4a3a008839' \
+          # Read the whole output before looking: `grep -q` closes the pipe at the first
+          # match, `tr` then dies of SIGPIPE and pipefail called a correct signature wrong
+          # (the 0.29.0 upload, 2026-11-11).
+          CERT=$(keytool -printcert -jarfile "$AAB" | tr -d ':' | tr 'A-F' 'a-f')
+          printf '%s\n' "$CERT" | grep -qF 'c3f70a1af8a45558678d1d9b413415d1b0a4c3208835ce78c1f37c4a3a008839' \
             || { echo "The bundle is not signed with the Chogan key"; exit 1; }
           echo "AAB=$AAB" >> "$GITHUB_ENV"
 
