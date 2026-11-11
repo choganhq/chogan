@@ -66,6 +66,10 @@ module.exports = function (T) {
     const evb = [];
     for (let i = 0; i < 1000 && S.picks < 3 && !S.over; i++) { E.step(S); evb.push(...E.drain(S)); }
     ok(S.picks === 3 && S.bar === 0 && S.boostT > 0 && evb.some((e) => e.t === 'boost'), 'the third can fills the bar and starts the nitro');
+    // #781: a pickup says how many of the three cans the bar holds, and the page shows it in every language
+    const pk = evb.filter((e) => e.t === 'pick').map((e) => e.n);
+    ok(pk.join(',') === '1,2,3', 'each pickup event carries the count of cans in the bar (' + pk.join(',') + ')');
+    ok((html.match(/nitroN: '[^']*\{n\}[^']*\{m\}[^']*'/g) || []).length === LOCALE_CODES.length && /e\.n > 0 && e\.n < 3/.test(html), 'the pickup pop "Nitro n/3" exists in every language');
     ok(Math.abs(E.speed(S) - E.base(S.p) - E.BOOST_V) < 1e-9 && E.speed(S) > v0, 'nitro adds ' + E.BOOST_V + ' m/s');
     const sb = S.score, sp = E.speed(S);
     E.step(S);
