@@ -74,6 +74,31 @@ module.exports = function (T) {
       const c1 = await r.U.check();
       ok(c1 === 'failed' && !r.found.length, 'a version that fails to install reads "failed" (' + c1 + ')');
 
+      // 3b. #826: a registration whose update() never settles must not leave the button stuck
+      r = make({ next: () => 'same' });
+      r.reg.update = function () { r.reg.calls++; return new Promise(function () {}); };
+      r.U.updateLimitMs = 40;
+      const t0 = Date.now();
+      // the race makes a regression fail loudly: a check that hangs would end the run silently
+      const h1 = await Promise.race([r.U.check(), new Promise((res) => setTimeout(() => res('hung'), 1500))]);
+      ok(h1 === 'failed' && Date.now() - t0 < 1500, 'a check that never answers ends as "failed" at its limit instead of hanging (' + h1 + ', ' + (Date.now() - t0) + ' ms)');
+      // 3c. #826: an update that installs after the old 30 s limit is still "new"
+      seq = ['new'];
+      r = make({ next: () => seq.shift() });
+      const slow = worker('installing');
+      r.reg.update = function () { r.reg.calls++; r.reg.installing = slow; setTimeout(() => { r.reg.installing = null; r.reg.waiting = slow; slow.go('installed'); }, 120); return Promise.resolve(r.reg); };
+      r.U.installLimitMs = 600;
+      const s1 = await r.U.check();
+      ok(s1 === 'new' && r.found.length === 1, 'a slow download that finishes inside the limit reads "new" (' + s1 + ')');
+      // 3d. #826: still installing at the limit is "downloading", not "failed", and it is offered when it ends
+      r = make({ next: () => 'same' });
+      const crawl = worker('installing');
+      r.reg.update = function () { r.reg.calls++; r.reg.installing = crawl; return Promise.resolve(r.reg); };
+      r.U.installLimitMs = 40;
+      const s2 = await r.U.check();
+      ok(s2 === 'downloading' && !r.found.length, 'a download still running at the limit reads "downloading" (' + s2 + ')');
+      ok(/updateLimitMs: 20000, installLimitMs: 120000/.test(core), 'the real limits are 20 s for the question and 2 min for the download');
+
       // 4. the first install of the app (no page in control yet) is not an update
       seq = ['new'];
       r = make({ next: () => seq.shift(), controller: false });
@@ -94,9 +119,9 @@ module.exports = function (T) {
       ok(fn.length > 0 && /updateRow\(\),/.test(page), 'the Profile has an update row under the version');
       ok(/if \(!U \|\| !U\.supported\) return null;/.test(fn), 'the row is left out where there is no service worker (the Android app)');
       ok(/check\.disabled = false; check\.textContent = C\.t\('updCheck'\);/.test(fn) && !/check\.hidden/.test(fn), 'the check button comes back after every result and is never hidden');
-      ok(/U\.check\(\)\.then\(show, function \(\) \{ show\('failed'\); \}\)/.test(fn), 'every outcome of the check is shown');
+      ok(/U\.check\(\)\.then\(show, function \(\) \{ show\('failed'\); \}\)/.test(fn) && /r === 'downloading' \? C\.t\('updDownloading'\)/.test(fn), 'every outcome of the check is shown, a download still running too');
       ok(/show\(U\.worker \? 'new' : null\);/.test(fn), 'an update already found shows when the Profile opens');
-      for (const k of ['updRow', 'updCheck', 'updChecking', 'updLatest', 'updNew', 'updFailed']) {
+      for (const k of ['updRow', 'updCheck', 'updChecking', 'updLatest', 'updNew', 'updFailed', 'updDownloading']) {
         const n = (core.match(new RegExp('[ ,{]' + k + ": '", 'g')) || []).length;
         ok(LOCALE_CODES.length > 0 && n === LOCALE_CODES.length, k + ' in all ' + LOCALE_CODES.length + ' languages (' + n + ')');
         ok(new RegExp("C\\.t\\('" + k + "'\\)").test(fn) || k === 'updRow' && /C\.t\('updRow'\)/.test(fn), k + ' is used by its literal key');
