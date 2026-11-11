@@ -952,6 +952,44 @@
 
   /* ------------------------------------------------- پروفایل و تنظیمات */
 
+  // Update status beside the version (#788): the automatic check is silent, so a player
+  // behind a restricted network could not tell "no update" from "the check failed". The
+  // button runs the same check and can be tapped again after any result. Only the web
+  // has a service worker; the Android app updates through its store and shows no row.
+  function updateRow() {
+    var U = C.updates;
+    if (!U || !U.supported) return null;
+    var note = el('div', { class: 'ch-upd__note ch-sm ch-dim', role: 'status', 'aria-live': 'polite' });
+    var go = el('button', { class: 'ch-btn ch-btn--primary ch-btn--sm', type: 'button', text: C.t('updateNow') });
+    var check = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', text: C.t('updCheck') });
+    var show = function (r) {
+      note.textContent = r === 'new' ? C.t('updNew') : r === 'latest' ? C.t('updLatest') : r === 'failed' ? C.t('updFailed') : '';
+      note.hidden = !note.textContent;
+      go.hidden = r !== 'new';
+    };
+    go.addEventListener('click', function () {
+      C.feedback('tap');
+      go.disabled = true; go.textContent = '…';
+      U.apply();
+    });
+    check.addEventListener('click', function () {
+      if (check.disabled) return;
+      C.feedback('tap');
+      check.disabled = true; check.textContent = C.t('updChecking');
+      note.hidden = true;
+      U.check().then(show, function () { show('failed'); }).then(function () {
+        check.disabled = false; check.textContent = C.t('updCheck');
+      });
+    });
+    // an update the automatic check already found shows at once
+    show(U.worker ? 'new' : null);
+    // laid out like the report row below it: the word and the result, then the buttons
+    return el('div', { class: 'ch-item ch-upd' }, [
+      el('div', { class: 'ch-item__label' }, [el('div', { text: C.t('updRow') }), note]),
+      el('div', { class: 'ch-row ch-upd__btns' }, [go, check])
+    ]);
+  }
+
   function viewProfile() {
     var page = el('div', { class: 'ch-page' });
     var st = C.stats.get();
@@ -1122,6 +1160,7 @@
           C.builtAt ? el('span', { class: 'ch-version__age ch-dim', title: C.exactDate(C.builtAt), text: C.ago(C.builtAt) }) : null
         ])
       ]),
+      updateRow(),
       // The same game runs on the web, as the Android app and as a Telegram Mini App
       // (@chogangamebot opens the web build; no Telegram script is loaded here) (#203)
       el('div', { class: 'ch-item' }, [

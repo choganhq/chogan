@@ -298,6 +298,7 @@
       menu: 'منو', back: 'بازگشت', undo: 'برگرداندن', close: 'بستن', cancel: 'انصراف', result: 'نتیجه', seeBoard: 'دیدن صفحه‌ی بازی',
       saveImage: 'ذخیره‌ی عکس', copyText: 'کپی متن',
       updateReady: 'نسخه‌ی تازه آماده است', updateNow: 'به‌روزرسانی',
+      updRow: 'به‌روزرسانی‌ها', updCheck: 'بررسی به‌روزرسانی', updChecking: 'در حال بررسی…', updLatest: 'آخرین نسخه را داری.', updNew: 'نسخه‌ی تازه‌ای آمده است.', updFailed: 'بررسی به‌روزرسانی نشد. دوباره امتحان کن.',
       installReady: 'چوگان را مثل یک اپ نصب کن', installNow: 'نصب',
       confirm: 'تأیید', done: 'باشه', next: 'بعدی', skip: 'رد کردن',
       start: 'شروع', pause: 'مکث', resumeGame: 'ادامه‌ی بازی', restart: 'شروع دوباره',
@@ -344,6 +345,7 @@
       menu: 'Menu', back: 'Back', undo: 'Undo', close: 'Close', cancel: 'Cancel', result: 'Result', seeBoard: 'See the board',
       saveImage: 'Save image', copyText: 'Copy text',
       updateReady: 'A new version is ready', updateNow: 'Update',
+      updRow: 'Updates', updCheck: 'Check for updates', updChecking: 'Checking…', updLatest: 'You are using the latest version.', updNew: 'A new version is available.', updFailed: 'Could not check for updates. Try again.',
       installReady: 'Install Chogan as an app', installNow: 'Install',
       confirm: 'Confirm', done: 'OK', next: 'Next', skip: 'Skip',
       start: 'Start', pause: 'Pause', resumeGame: 'Resume', restart: 'Restart',
@@ -390,6 +392,7 @@
       menu: 'Menu', back: 'Wstecz', undo: 'Cofnij', close: 'Zamknij', cancel: 'Anuluj', result: 'Wynik', seeBoard: 'Zobacz planszę',
       saveImage: 'Zapisz obraz', copyText: 'Kopiuj tekst',
       updateReady: 'Nowa wersja jest gotowa', updateNow: 'Aktualizuj',
+      updRow: 'Aktualizacje', updCheck: 'Sprawdź aktualizacje', updChecking: 'Sprawdzanie…', updLatest: 'Masz najnowszą wersję.', updNew: 'Jest nowa wersja.', updFailed: 'Nie udało się sprawdzić aktualizacji. Spróbuj ponownie.',
       installReady: 'Zainstaluj Chogan jako aplikację', installNow: 'Zainstaluj',
       confirm: 'Potwierdź', done: 'Gotowe', next: 'Dalej', skip: 'Pomiń',
       start: 'Start', pause: 'Pauza', resumeGame: 'Wznów', restart: 'Zrestartuj',
@@ -436,6 +439,7 @@
       menu: '菜单', back: '返回', undo: '撤销', close: '关闭', cancel: '取消', result: '结果', seeBoard: '查看棋盘',
       saveImage: '保存图片', copyText: '复制文字',
       updateReady: '新版本已就绪', updateNow: '更新',
+      updRow: '更新', updCheck: '检查更新', updChecking: '正在检查…', updLatest: '你使用的是最新版本。', updNew: '有新版本可用。', updFailed: '无法检查更新，请重试。',
       installReady: '将 Chogan 安装为应用', installNow: '安装',
       confirm: '确定', done: '好', next: '下一步', skip: '跳过',
       start: '开始', pause: '暂停', resumeGame: '继续游戏', restart: '重新开始',
@@ -482,6 +486,7 @@
       menu: 'Menü', back: 'Zurück', undo: 'Rückgängig', close: 'Schließen', cancel: 'Abbrechen', result: 'Ergebnis', seeBoard: 'Spielfeld ansehen',
       saveImage: 'Bild speichern', copyText: 'Text kopieren',
       updateReady: 'Eine neue Version ist da', updateNow: 'Aktualisieren',
+      updRow: 'Updates', updCheck: 'Nach Updates suchen', updChecking: 'Wird geprüft…', updLatest: 'Du hast die neueste Version.', updNew: 'Eine neue Version ist verfügbar.', updFailed: 'Die Suche nach Updates hat nicht geklappt. Versuch es noch einmal.',
       installReady: 'Chogan als App installieren', installNow: 'Installieren',
       confirm: 'Bestätigen', done: 'OK', next: 'Weiter', skip: 'Überspringen',
       start: 'Start', pause: 'Pause', resumeGame: 'Weiter', restart: 'Neu starten',
@@ -528,6 +533,7 @@
       menu: 'Menú', back: 'Atrás', undo: 'Deshacer', close: 'Cerrar', cancel: 'Cancelar', result: 'Resultado', seeBoard: 'Ver el tablero',
       saveImage: 'Guardar imagen', copyText: 'Copiar texto',
       updateReady: 'Hay una versión nueva', updateNow: 'Actualizar',
+      updRow: 'Actualizaciones', updCheck: 'Buscar actualizaciones', updChecking: 'Comprobando…', updLatest: 'Tienes la versión más reciente.', updNew: 'Hay una versión nueva.', updFailed: 'No se pudo comprobar si hay actualizaciones. Vuelve a intentarlo.',
       installReady: 'Instala Chogan como app', installNow: 'Instalar',
       confirm: 'Confirmar', done: 'OK', next: 'Siguiente', skip: 'Saltar',
       start: 'Empezar', pause: 'Pausa', resumeGame: 'Seguir', restart: 'Reiniciar',
@@ -2522,6 +2528,57 @@
     return bar;
   };
 
+  // The update check the Profile can run by hand (#788). A player on an old iPad behind a
+  // restricted network could not tell "no update", "the check failed" and "stuck on an
+  // old build" apart, because the automatic check is silent in all three. check() runs the
+  // same reg.update() the page runs on load and answers 'new', 'latest' or 'failed'; no
+  // other request is made. Only the web registers a service worker, so in the Android
+  // app supported stays false and the Profile shows nothing.
+  Chogan.updates = {
+    supported: false, ready: null, sw: null, worker: null, onFound: null, onApply: null,
+    // a worker that finished installing while a page is in control is an update
+    found: function (w) {
+      if (!w || !this.sw || !this.sw.controller) return false;
+      this.worker = w;
+      if (this.onFound) this.onFound(w);
+      return true;
+    },
+    check: function () {
+      var self = this;
+      if (!self.supported || !self.ready) return Promise.resolve('failed');
+      if (self.worker) return Promise.resolve('new');
+      return Promise.resolve(self.ready).then(function (reg) {
+        return Promise.resolve(reg.update()).then(function () { return reg; });
+      }).then(function (reg) {
+        var w = reg.waiting || reg.installing;
+        if (!w) return 'latest';
+        return self.settle(w);
+      }, function () { return 'failed'; });
+    },
+    // an update still installing is 'new' once installed, 'failed' if it is thrown away
+    settle: function (w) {
+      var self = this;
+      return new Promise(function (resolve) {
+        var done = false, timer = null;
+        var end = function (r) {
+          if (done) return;
+          done = true;
+          if (timer) clearTimeout(timer);
+          resolve(r === 'new' && !self.found(w) ? 'latest' : r);
+        };
+        var look = function () {
+          if (w.state === 'installed' || w.state === 'activating' || w.state === 'activated') end('new');
+          else if (w.state === 'redundant') end('failed');
+        };
+        look();
+        if (done) return;
+        w.addEventListener('statechange', look);
+        timer = setTimeout(function () { end('failed'); }, 30000);
+      });
+    },
+    apply: function () { if (this.worker && this.onApply) this.onApply(this.worker); }
+  };
+
   // The install bar (#557) looks like the update bar. onGo opens the browser's own
   // install question and may return a promise; onNo is a tap on the cross.
   ui.installBar = function (onGo, onNo) {
@@ -3521,24 +3578,31 @@
         if (!hadController) return;
         reload();
       });
+      var U = Chogan.updates, regOk, regFail;
+      var apply = function (worker) {
+        worker.postMessage({ type: 'skipWaiting' });
+        // اگر به هر دلیل کنترل‌کننده عوض نشد، دست کاربر خالی نماند
+        setTimeout(reload, 2500);
+      };
       var offer = function (worker) {
         if (offered || !worker) return;
         offered = true;
-        ui.updateBar(function () {
-          worker.postMessage({ type: 'skipWaiting' });
-          // اگر به هر دلیل کنترل‌کننده عوض نشد، دست کاربر خالی نماند
-          setTimeout(reload, 2500);
-        });
+        ui.updateBar(function () { apply(worker); });
       };
+      // the Profile's check (#788) shares this registration, its bar and its button
+      U.supported = true; U.sw = sw; U.onFound = offer; U.onApply = apply;
+      U.ready = new Promise(function (ok, fail) { regOk = ok; regFail = fail; });
+      U.ready.catch(function () {});
       global.addEventListener('load', function () {
         sw.register('sw.js', { scope: './', updateViaCache: 'none' }).then(function (reg) {
-          if (reg.waiting && sw.controller) offer(reg.waiting);
+          regOk(reg);
+          if (reg.waiting) U.found(reg.waiting);
           reg.addEventListener('updatefound', function () {
             var w = reg.installing;
             if (!w) return;
             w.addEventListener('statechange', function () {
               // نصب تمام شده و کنترل‌کننده‌ای هم هست: این یک آپدیت است، نه نصب اول
-              if (w.state === 'installed' && sw.controller) offer(w);
+              if (w.state === 'installed') U.found(w);
             });
           });
           reg.update();
@@ -3550,7 +3614,7 @@
             last = Date.now();
             reg.update();
           });
-        }).catch(function () { /* بدون سرویس‌ورکر هم اپ کار می‌کند */ });
+        }).catch(function (e) { regFail(e); /* بدون سرویس‌ورکر هم اپ کار می‌کند */ });
       });
     }
     return Chogan;
