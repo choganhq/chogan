@@ -386,7 +386,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
   var params = new URLSearchParams(location.search);
   var dailyDate = params.get('daily');
 
-  var S = null, raf = 0, last = 0, acc = 0, paused = false, held = { l: false, r: false }, keys = { g: false, b: false };
+  var S = null, raf = 0, last = 0, acc = 0, frameDt = 1 / 60, prev = null, paused = false, held = { l: false, r: false }, keys = { g: false, b: false };
   var tries = 0, startedAt = 0, ended = false, waiting = false, resumed = false, flipPending = false;
   // the view follows the car smoothly, so a bump does not shake the whole screen
   var cam = { x: 0, y: 0 };
@@ -420,7 +420,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     tries++;
     startedAt = Date.now();
     ended = false;
-    acc = 0; last = 0;
+    acc = 0; last = 0; prev = null;
     cam.x = S.x; cam.y = S.y;
     renderTop();
     renderStatus();
@@ -433,17 +433,34 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     return gas && brake ? 0 : gas ? 1 : brake ? -1 : 0;
   }
 
+  /* The car is drawn between the last two physics steps, not at the last one. A step is
+     1/60 s and a car at speed moves 0.25 m in it; a screen that shows 0, 1 or 2 steps a frame
+     moved the car by that much in uneven jumps, which read as a blur on the gas (owner,
+     2026-11-11). */
+  function pose(T) {
+    return { x: T.x, y: T.y, a: T.a, wh: T.wh.map(function (W) { return { x: W.x, y: W.y, rot: W.rot }; }) };
+  }
+  function view() {
+    var now = pose(S);
+    if (!prev || ended) return now;
+    var f = Math.max(0, Math.min(1, acc / E.DT));
+    function mix(a, b) { return a + (b - a) * f; }
+    return { x: mix(prev.x, now.x), y: mix(prev.y, now.y), a: mix(prev.a, now.a),
+      wh: now.wh.map(function (W, i) { return { x: mix(prev.wh[i].x, W.x), y: mix(prev.wh[i].y, W.y), rot: mix(prev.wh[i].rot, W.rot) }; }) };
+  }
   function tick(now) {
     raf = 0;
     if (!S) return;
     var blocked = paused || waiting || document.hidden || !!document.querySelector('.ch-scrim');
     if (!last || blocked) last = now;
-    acc += Math.min(0.1, (now - last) / 1000);
+    frameDt = Math.min(0.1, (now - last) / 1000);
+    acc += frameDt;
     last = now;
     var ev = [];
     if (blocked) acc = 0;
     while (acc >= E.DT && !ended) {
       acc -= E.DT;
+      prev = pose(S);
       ev = ev.concat(E.step(S, control()));
       if (S.over || S.won) break;
     }
@@ -532,10 +549,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     var g = cv.getContext('2d'), P = palette();
     // about 16 m across on an upright phone, 21 m on a wide screen
     var ppm = Math.min(Z.w / 16, Z.h / 12);
-    var ahead = Math.max(-2, Math.min(4, S.vx * 0.3));
-    cam.x += (S.x + ahead - cam.x) * 0.12;
-    cam.y += (S.y - cam.y) * 0.1;
-    if (Math.abs(S.x - cam.x) > 30) { cam.x = S.x; cam.y = S.y; }
+    var V = view(), ahead = Math.max(-2, Math.min(4, S.vx * 0.3));
+    // by time, not by frame: a 120 Hz screen must not chase twice as hard
+    var kx = 1 - Math.pow(1 - 0.12, frameDt * 60), ky = 1 - Math.pow(1 - 0.1, frameDt * 60);
+    cam.x += (V.x + ahead - cam.x) * kx;
+    cam.y += (V.y - cam.y) * ky;
+    if (Math.abs(V.x - cam.x) > 30) { cam.x = V.x; cam.y = V.y; }
     var ox = Z.w * 0.36, oy = Z.h * 0.55;
     var x0 = cam.x - ox / ppm - 1, x1 = cam.x + (Z.w - ox) / ppm + 1, yLow = cam.y - (Z.h - oy) / ppm - 2;
 
@@ -591,7 +610,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
       }
     });
 
-    drawCar(g, P);
+    drawCar(g, P, V);
 
     // the dials on top, in screen pixels
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -606,12 +625,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     }
     g.lineTo(Z.w, Z.h); g.closePath(); g.fillStyle = color; g.fill();
   }
-  function drawCar(g, P) {
+  function drawCar(g, P, V) {
     // springs from the body to each wheel first, so the body covers their tops
     g.strokeStyle = P.cage; g.lineWidth = 0.1;
-    for (var k = 0; k < 2; k++) { var A = E.world(S, E.ANCH[k]); g.beginPath(); g.moveTo(A[0], A[1]); g.lineTo(S.wh[k].x, S.wh[k].y); g.stroke(); }
+    for (var k = 0; k < 2; k++) { var pt = E.ANCH[k], c = Math.cos(V.a), sn = Math.sin(V.a); g.beginPath(); g.moveTo(V.x + pt[0] * c - pt[1] * sn, V.y + pt[0] * sn + pt[1] * c); g.lineTo(V.wh[k].x, V.wh[k].y); g.stroke(); }
     g.save();
-    g.translate(S.x, S.y); g.rotate(S.a);
+    g.translate(V.x, V.y); g.rotate(V.a);
     // the driver: a body, and a head in a helmet, open to the hills
     g.fillStyle = P.bodyDk; C.rrect(g, -0.42, 0.1, 0.5, 0.62, 0.15); g.fill();
     g.fillStyle = P.skin; g.beginPath(); g.arc(E.HEAD[0], E.HEAD[1], E.HEAD_R, 0, Math.PI * 2); g.fill();
@@ -627,7 +646,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     g.fillStyle = '#FFFFFF'; g.globalAlpha = 0.8; g.beginPath(); g.arc(1.32, 0.05, 0.07, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
     g.restore();
     for (var w = 0; w < 2; w++) {
-      var W = S.wh[w];
+      var W = V.wh[w];
       g.fillStyle = P.tyre; g.beginPath(); g.arc(W.x, W.y, E.WR, 0, Math.PI * 2); g.fill();
       g.fillStyle = P.hub; g.beginPath(); g.arc(W.x, W.y, E.WR * 0.45, 0, Math.PI * 2); g.fill();
       g.strokeStyle = P.tyre; g.lineWidth = 0.05; g.beginPath();
@@ -780,7 +799,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     var R = E.restore(sv.s);
     if (!R) return false;
     S = R; tries = sv.tries || 1; startedAt = Date.now() - (sv.elapsed || 0);
-    ended = false; waiting = true; resumed = true; flipPending = false; acc = 0; last = 0;
+    ended = false; waiting = true; resumed = true; flipPending = false; acc = 0; last = 0; prev = null;
     cam.x = S.x; cam.y = S.y;
     renderTop(); renderStatus(); draw(); kick();
     return true;
