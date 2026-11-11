@@ -1,10 +1,12 @@
 name: Test
 
+# staging is the web app on staging.playchogan.com, where new games are tried
+# before they reach main (#762). It gets the same tests as main.
 on:
   push:
-    branches: [main]
+    branches: [main, staging]
   pull_request:
-    branches: [main]
+    branches: [main, staging]
   workflow_dispatch:
 
 permissions:
@@ -27,6 +29,12 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: '24'
+
+      # A new game reaches main only after it was tried on staging (#762). The
+      # rule lives in tools/new-games-gate.sh so tools/tests/staging.js can run it
+      # against scratch repositories; it does nothing outside a PR into main.
+      - name: New games come through staging
+        run: bash tools/new-games-gate.sh
 
       - name: Test game engines
         run: node tools/test.js
@@ -212,3 +220,72 @@ jobs:
           bash tools/verify-deploy.sh
           "${{ steps.deployment.outputs.page_url }}version.js"
           "$GITHUB_SHA" production "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+
+  # The staging web app (#762): the staging branch, on its own origin, so it never
+  # shares localStorage or Cache Storage with production. Same gate as Pages: it
+  # deploys only after the tests and the Android build pass on this commit, and the
+  # served version.js is read back. The Cloudflare token is a secret of the
+  # GitHub environment "staging", which only the staging branch may use.
+  staging:
+    name: Deploy web to staging
+    needs: [test, android]
+    if: github.ref == 'refs/heads/staging' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    concurrency:
+      group: staging
+      cancel-in-progress: true
+    environment:
+      name: staging
+      url: https://staging.playchogan.com/
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      # Without these the deploy would fail deep inside wrangler; say what is missing.
+      - name: Check the Cloudflare settings
+        env:
+          HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+          ACCOUNT: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          [ "$HAS_TOKEN" = "true" ] || { echo "The staging environment has no CLOUDFLARE_API_TOKEN secret"; exit 1; }
+          [ -n "$ACCOUNT" ] || { echo "The staging environment has no CLOUDFLARE_ACCOUNT_ID variable"; exit 1; }
+          echo "Cloudflare settings present"
+
+      - name: Stamp the deploy identity on the web build
+        env:
+          APP_ENV: staging
+        run: bash tools/stamp-version.sh www/version.js
+
+      # The STAGING label and title prefix; refuses a build not stamped for staging.
+      - name: Mark the build as staging
+        run: bash tools/stamp-staging.sh www/version.js
+
+      - name: Deploy the staging Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4.153.0 deploy --config worker/staging/wrangler.jsonc
+
+      - name: Check that staging serves this commit and this run
+        run: >-
+          bash tools/verify-deploy.sh
+          "https://staging.playchogan.com/version.js"
+          "$GITHUB_SHA" staging "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+
+      # Search engines must never list staging beside the real app.
+      - name: Check that staging is not indexed
+        run: |
+          set -euo pipefail
+          H=$(curl -sSI "https://staging.playchogan.com/?verify=$GITHUB_RUN_ID")
+          echo "$H" | grep -i '^x-robots-tag:'
+          echo "$H" | grep -qi '^x-robots-tag: noindex' || { echo "Staging answers without the noindex header"; exit 1; }
