@@ -123,6 +123,54 @@ module.exports = function (T) {
     const ms = Date.now() - t0;
     // #785: the tank icon in the HUD is the can drawn on the road, not a plain rectangle
     ok(/function fuelCan\(/.test(html) && /fuelCan\(g, P, p\.x, p\.y, 1, 1\)/.test(html) && /fuelCan\(g, P, gx \+ 10 \* u, gy \+ 6 \* u, 26 \* u, -1\)/.test(html), 'the road and the tank icon draw the same fuel can');
+    // #801: fuel for the app's coins when the tank runs low (owner's wish)
+    const has = (f) => typeof E[f] === 'function';
+    ok(E.FUEL_PRICE === 15 && E.FUEL_BUY === 0.25 && E.FUEL_LOW === 0.2 && has('fuelOffered') && has('refuel'), 'fuel is offered under a fifth of a tank, a quarter tank for 15 coins (#801)');
+    if (has('refuel')) {
+      S = E.newGame(5, 0); S.fuel = 0;
+      ok(E.fuelOffered(S) && E.refuel(S) && S.fuel === 0.25 && !S.fuelOut, 'an empty tank bought once holds exactly a quarter tank');
+      S.fuel = 0.15; E.refuel(S);
+      ok(Math.abs(S.fuel - 0.4) < 1e-9 && !E.fuelOffered(S) && E.refuel(S) === false && Math.abs(S.fuel - 0.4) < 1e-9, 'a low tank gets a quarter on top, and above a fifth nothing is offered or added');
+      S = E.newGame(5, 0); S.fuel = 0.95; S.fuel = 0.19; E.refuel(S); E.refuel(E.newGame(5, 0));
+      ok(S.fuel <= 1, 'the tank never goes past full');
+      S = E.newGame(5, 0); S.over = true; S.fuel = 0;
+      ok(!E.fuelOffered(S) && E.refuel(S) === false && S.fuel === 0, 'a finished run is offered nothing');
+      // the out-of-fuel stop waits while the button is offered and the wallet can pay
+      const held = E.newGame(5, 0); held.fuel = 0.01;
+      for (let i = 0; i < 3000 && !held.over; i++) E.step(held, 1, false, true);
+      const gone = E.newGame(5, 0); gone.fuel = 0.01;
+      for (let i = 0; i < 3000 && !gone.over; i++) E.step(gone, 1, false, false);
+      ok(!held.over && held.fuel === 0 && gone.over && gone.cause === 'fuel', 'an empty tank waits while fuel can be bought, and ends the run as before when it cannot');
+      const before = held.best; E.refuel(held);
+      for (let i = 0; i < 600 && !held.over; i++) E.step(held, E.botControl(held), false, false);
+      ok(held.best > before + 5, 'bought fuel drives the car on (' + before.toFixed(0) + ' → ' + held.best.toFixed(0) + ' m)');
+    }
+    ok(/C\.coins\.can\(E\.FUEL_PRICE\)/.test(html) && /C\.coins\.spend\(E\.FUEL_PRICE\)/.test(html) && /title: C\.t\('notEnoughCoins'\), sub: C\.t\('playToEarn'\)/.test(html) && /E\.step\(S, control\(\), false, canBuy\(\)\)/.test(html),
+      'the page sells fuel from the app wallet, explains a short wallet with the core toast, and holds the stop only while it can sell');
+    const fkeys = ['buyFuel', 'fuelBought', 'buyRule'];
+    ok(blocks.every((b) => fkeys.every((k) => new RegExp('\\b' + k + ": '[^']+'").test(b))) && blocks.every((b) => /buyFuel: '[^']*\{n\}/.test(b)), 'the fuel button has its strings, with the price, in all ' + LOCALE_CODES.length + ' languages');
+    ok(fkeys.every((k) => core.indexOf(k + ':') < 0), 'the fuel strings do not reuse a core key name');
+    // #802 and #803: where the HUD parts go, at an upright phone, a phone on its side and a desktop
+    const boxes = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    // upright 390 and 320 px phones, 844×390 and 740×360 on their side, a desktop
+    const sizes = [[366, 488], [296, 395], [820, 305], [716, 275], [1256, 715]];
+    let corner = 0, clear = 0, inside = 0;
+    sizes.forEach(([w, h]) => {
+      const L = has('hudLayout') ? E.hudLayout(w, h) : null;
+      if (!L) return;
+      const d = L.dial, others = [L.tank, L.buy, L.coins, L.brake, L.gas];
+      if (d.x >= w * 2 / 3 && d.y + d.h <= h / 2) corner++;
+      if (!others.some((o) => boxes(d, o)) && !boxes(L.buy, L.brake) && !boxes(L.buy, L.tank)) clear++;
+      if ([d, L.buy, L.brake, L.gas].every((o) => o.x >= 0 && o.y >= 0 && o.x + o.w <= w && o.y + o.h <= h)) inside++;
+    });
+    ok(sizes.length === 5 && corner === sizes.length, 'the speed dial sits in the top right corner, out of the middle third, at every size (' + corner + '/' + sizes.length + ', #802)');
+    ok(clear === sizes.length && inside === sizes.length, 'the dial and the fuel button touch neither the pedals nor the tank and coins, and stay on the canvas (' + clear + '/' + inside + ')');
+    ok(/var D = L\.dial/.test(html) && !/Z\.w \/ 2 - sw \/ 2/.test(html) && has('dialFrac') && E.dialFrac(0, 'kmh') === 0 && E.dialFrac(40, 'kmh') === 0.5 && E.dialFrac(500, 'kmh') === 1 && E.dialFrac(25, 'mph') === 0.5,
+      'the dial is drawn where the layout puts it, its needle within its scale');
+    ok(has('hudLayout') && E.hudLayout(820, 305).brake.h < 305 * 0.3 && E.hudLayout(366, 488).u === Math.max(0.8, 366 / 420), 'on a low landscape canvas the pedals stay under a third of its height, and upright sizes are unchanged');
+    const wideCss = (html.match(/@container game \(min-aspect-ratio: 5 \/ 4\) \{\s*\.hr-wrap\.ch-split[\s\S]*?\n {2}\}/) || [''])[0];
+    ok(/\.hr-wrap\.ch-split \{ flex-direction: column;/.test(wideCss) && /\.ch-side \{ position: absolute;/.test(wideCss) && /\.hr-wrap\.ch-split > \.ch-fit \{[^}]*width: 100%;[^}]*max-height: none;/.test(wideCss) && /\.ch-nocq \.ch-gamemain\.ch-wide \.hr-wrap\.ch-split > \.ch-fit \{[^}]*width: 100% !important/.test(html),
+      'on a wide screen the rows go above the road and the road takes the full width, with or without container queries (#803)');
     ok(ms < 8000, 'the Hillrider tests finish in under 8 s (' + ms + ' ms)');
   }
   return { testHillrider };
