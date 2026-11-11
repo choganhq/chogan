@@ -16,6 +16,7 @@
   /* left is the brake and right the gas in every language, like the pedals of a car */
   .hr-canvas { display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; user-select: none; -webkit-user-select: none; }
   .hr-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .hr-gear .ch-icon { pointer-events: none; }
   .hr-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
 </style>
 </head>
@@ -273,6 +274,17 @@ function HillriderEngineFactory() {
 
   function metres(S) { return Math.max(0, Math.floor(S.best)); }
 
+  // The speed on the dial (#777). The engine is in real metres and seconds (the car is
+  // 2.9 m long and the distance badge counts the same metres), so the scale is fixed:
+  // 1 m/s is 3.6 km/h or 3600 / 1609.344 mph. Only the horizontal speed counts, backwards
+  // too; 'off' or an unknown unit gives null, so nothing is drawn.
+  var KMH = 3.6, MPH = 3600 / 1609.344;
+  function speedOf(vx, unit) {
+    if (unit !== 'kmh' && unit !== 'mph') return null;
+    var v = Math.abs(+vx) || 0;
+    return Math.round(v * (unit === 'mph' ? MPH : KMH));
+  }
+
   /* A steady driver for the tests, the proof that a course can be driven: gas, unless the
      nose is too far up for the ground under it; in the air, it turns the car to meet the
      ground it will land on. */
@@ -305,7 +317,7 @@ function HillriderEngineFactory() {
     return seed >>> 0;
   }
 
-  return { DT: DT, courseSeed: courseSeed, WR: WR, START: START, HEAD: HEAD, HEAD_R: HEAD_R, ANCH: ANCH, newGame: newGame, step: step, ground: ground, height: height, pickups: pickups, fuelAt: fuelAt, world: world, headPos: headPos, snapshot: snapshot, restore: restore, metres: metres, botControl: botControl, hard: hard, maxSlope: maxSlope };
+  return { DT: DT, courseSeed: courseSeed, WR: WR, START: START, HEAD: HEAD, HEAD_R: HEAD_R, ANCH: ANCH, newGame: newGame, step: step, ground: ground, height: height, pickups: pickups, fuelAt: fuelAt, world: world, headPos: headPos, snapshot: snapshot, restore: restore, metres: metres, speedOf: speedOf, botControl: botControl, hard: hard, maxSlope: maxSlope };
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = HillriderEngineFactory;
 /* ==== ENGINE END ==== */
@@ -333,7 +345,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         rules: 'با ماشین از روی تپه‌ها هر چه دورتر برو. نیمه‌ی راست صفحه گاز است و نیمه‌ی چپ ترمز؛ اگر ماشین ایستاده باشد، ترمز آن را عقب می‌برد. در هوا، گاز دماغه را بالا می‌برد و ترمز پایین. گاز دادن بنزین می‌سوزاند؛ باک‌های قرمز سر راه باک را پر می‌کنند. اگر سر راننده به زمین بخورد، یا بنزین تمام شود و ماشین بایستد، بازی تمام است. هر چه جلوتر، تپه‌ها بلندتر و باک‌ها دورتر. سکه‌های سر راه به سکه‌های بازی اضافه می‌شوند. روزانه یک جاده‌ی یکسان برای همه است تا پرچمی در ۱۰۰۰ متر؛ هر چند بار بخواهی دوباره امتحان کن.',
         tutTitle1: 'گاز و ترمز', tutText1: 'نیمه‌ی راست صفحه را نگه دار تا گاز بدهی، نیمه‌ی چپ را برای ترمز.',
         tutTitle2: 'در هوا', tutText2: 'در هوا گاز دماغه را بالا می‌برد و ترمز پایین. روی چرخ‌ها فرود بیا، نه روی سر.',
-        tutTitle3: 'بنزین', tutText3: 'گاز دادن بنزین می‌سوزاند. باک‌های قرمز را بگیر تا باک پر شود.'
+        tutTitle3: 'بنزین', tutText3: 'گاز دادن بنزین می‌سوزاند. باک‌های قرمز را بگیر تا باک پر شود.',
+        spdT: 'سرعت', spdKmh: 'کیلومتر بر ساعت', spdMph: 'مایل بر ساعت', optKmh: 'کیلومتر', optMph: 'مایل', spdOff: 'خاموش'
       },
       en: {
         tapGo: 'Tap to go on.', hills: 'Hills and car', distM: '{n} m', bestM: 'Best: {n} m', flagM: 'Flag: {n} m', dailyHr: 'Daily Hillrider', newRun: 'Start over',
@@ -342,7 +355,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         rules: 'Drive over the hills as far as you can. The right half of the screen is the gas and the left half the brake; when the car stands still, the brake backs it up. In the air, gas tips the nose up and brake tips it down. Gas burns fuel; the red cans on the road fill the tank. If the driver\'s head hits the ground, or the fuel runs out and the car stops, the run is over. The further you go, the bigger the hills and the further apart the cans. Coins on the road go to your game coins. The daily course is one road, the same for everyone, to a flag at 1,000 m; try it as often as you like.',
         tutTitle1: 'Gas and brake', tutText1: 'Hold the right half of the screen for gas, the left half to brake.',
         tutTitle2: 'In the air', tutText2: 'In the air, gas tips the nose up and brake tips it down. Land on your wheels, not your head.',
-        tutTitle3: 'Fuel', tutText3: 'Gas burns fuel. Pick up the red cans to fill the tank.'
+        tutTitle3: 'Fuel', tutText3: 'Gas burns fuel. Pick up the red cans to fill the tank.',
+        spdT: 'Speed', spdKmh: 'km/h', spdMph: 'mph', optKmh: 'km/h', optMph: 'mph', spdOff: 'Off'
       },
       pl: {
         tapGo: 'Stuknij, aby przejść dalej.', hills: 'Wzgórza i auto', distM: '{n} m', bestM: 'Najlepszy: {n} m', flagM: 'Flaga: {n} m', dailyHr: 'Codzienny Jeździec wzgórz', newRun: 'Zacznij od nowa',
@@ -351,7 +365,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         rules: 'Jedź przez wzgórza jak najdalej. Prawa połowa ekranu to gaz, lewa to hamulec; gdy auto stoi, hamulec cofa. W powietrzu gaz unosi przód, a hamulec go opuszcza. Gaz zużywa paliwo; czerwone kanistry na trasie napełniają bak. Jeśli głowa kierowcy uderzy o ziemię albo skończy się paliwo i auto stanie, przejazd się kończy. Im dalej, tym wyższe wzgórza i rzadsze kanistry. Monety z trasy trafiają do Twoich monet w grze. Codzienna trasa jest jedna, taka sama dla wszystkich, z flagą na 1000 m; możesz próbować tyle razy, ile chcesz.',
         tutTitle1: 'Gaz i hamulec', tutText1: 'Przytrzymaj prawą połowę ekranu, aby dodać gazu, a lewą, aby hamować.',
         tutTitle2: 'W powietrzu', tutText2: 'W powietrzu gaz unosi przód, a hamulec go opuszcza. Ląduj na kołach, nie na głowie.',
-        tutTitle3: 'Paliwo', tutText3: 'Gaz zużywa paliwo. Zbieraj czerwone kanistry, aby napełnić bak.'
+        tutTitle3: 'Paliwo', tutText3: 'Gaz zużywa paliwo. Zbieraj czerwone kanistry, aby napełnić bak.',
+        spdT: 'Prędkość', spdKmh: 'km/h', spdMph: 'mph', optKmh: 'km/h', optMph: 'mph', spdOff: 'Wył.'
       },
       zh: {
         tapGo: '点一下继续。', hills: '山丘和车', distM: '{n} 米', bestM: '最佳：{n} 米', flagM: '旗子：{n} 米', dailyHr: '每日山丘车手', newRun: '重新开始',
@@ -360,7 +375,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         rules: '开车越过山丘，能开多远开多远。屏幕右半边是油门，左半边是刹车；车停住时，刹车会让它倒车。在空中，油门让车头抬起，刹车让车头压低。踩油门会耗油；路上的红色油桶能加满油箱。如果司机的头撞到地面，或者油用完车停下，本局结束。越往前，山越高，油桶间距越大。路上的金币会加到游戏金币里。每日挑战是一条人人相同的路，旗子在 1000 米；想试几次都可以。',
         tutTitle1: '油门和刹车', tutText1: '按住屏幕右半边踩油门，按住左半边刹车。',
         tutTitle2: '在空中', tutText2: '在空中，油门让车头抬起，刹车让车头压低。用车轮着地，别用头。',
-        tutTitle3: '燃油', tutText3: '踩油门会耗油。捡起红色油桶加满油箱。'
+        tutTitle3: '燃油', tutText3: '踩油门会耗油。捡起红色油桶加满油箱。',
+        spdT: '速度', spdKmh: '公里/时', spdMph: '英里/时', optKmh: '公里', optMph: '英里', spdOff: '不显示'
       },
       de: {
         tapGo: 'Tippe, um weiterzumachen.', hills: 'Hügel und Auto', distM: '{n} m', bestM: 'Bestwert: {n} m', flagM: 'Fahne: {n} m', dailyHr: 'Hügelflitzer des Tages', newRun: 'Neu starten',
@@ -369,7 +385,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         rules: 'Fahr so weit du kannst über die Hügel. Die rechte Bildschirmhälfte ist Gas, die linke die Bremse; steht das Auto, fährt die Bremse rückwärts. In der Luft hebt Gas die Nase und die Bremse senkt sie. Gas verbraucht Benzin; die roten Kanister am Weg füllen den Tank. Schlägt der Kopf des Fahrers auf, oder ist das Benzin alle und das Auto bleibt stehen, ist die Fahrt vorbei. Je weiter, desto höher die Hügel und desto seltener die Kanister. Münzen am Weg kommen zu deinen Spielmünzen. Die Tagesstrecke ist eine Straße, für alle gleich, bis zu einer Fahne bei 1000 m; versuch es so oft du willst.',
         tutTitle1: 'Gas und Bremse', tutText1: 'Halte die rechte Bildschirmhälfte für Gas, die linke zum Bremsen.',
         tutTitle2: 'In der Luft', tutText2: 'In der Luft hebt Gas die Nase und die Bremse senkt sie. Lande auf den Rädern, nicht auf dem Kopf.',
-        tutTitle3: 'Benzin', tutText3: 'Gas verbraucht Benzin. Sammle die roten Kanister, um den Tank zu füllen.'
+        tutTitle3: 'Benzin', tutText3: 'Gas verbraucht Benzin. Sammle die roten Kanister, um den Tank zu füllen.',
+        spdT: 'Tempo', spdKmh: 'km/h', spdMph: 'mph', optKmh: 'km/h', optMph: 'mph', spdOff: 'Aus'
       },
       es: {
         tapGo: 'Toca para seguir.', hills: 'Colinas y coche', distM: '{n} m', bestM: 'Mejor: {n} m', flagM: 'Bandera: {n} m', dailyHr: 'Trepacolinas del día', newRun: 'Empezar de nuevo',
@@ -378,10 +395,18 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         rules: 'Conduce por las colinas tan lejos como puedas. La mitad derecha de la pantalla acelera y la izquierda frena; con el coche parado, el freno da marcha atrás. En el aire, acelerar levanta el morro y frenar lo baja. Acelerar gasta gasolina; los bidones rojos del camino llenan el depósito. Si la cabeza del conductor toca el suelo, o se acaba la gasolina y el coche se para, se acaba. Cuanto más lejos, más altas las colinas y más separados los bidones. Las monedas del camino van a tus monedas del juego. El recorrido diario es un camino igual para todos hasta una bandera a 1000 m; inténtalo tantas veces como quieras.',
         tutTitle1: 'Acelerar y frenar', tutText1: 'Mantén pulsada la mitad derecha para acelerar y la izquierda para frenar.',
         tutTitle2: 'En el aire', tutText2: 'En el aire, acelerar levanta el morro y frenar lo baja. Aterriza sobre las ruedas, no de cabeza.',
-        tutTitle3: 'Gasolina', tutText3: 'Acelerar gasta gasolina. Recoge los bidones rojos para llenar el depósito.'
+        tutTitle3: 'Gasolina', tutText3: 'Acelerar gasta gasolina. Recoge los bidones rojos para llenar el depósito.',
+        spdT: 'Velocidad', spdKmh: 'km/h', spdMph: 'mph', optKmh: 'km/h', optMph: 'mph', spdOff: 'No'
       }
     }
   });
+
+  // the speed dial's unit, behind the gear (#777): km/h everywhere by default
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || typeof prefs !== 'object') prefs = {};
+  if (prefs.speed !== 'mph' && prefs.speed !== 'off') prefs.speed = 'kmh';
+  // the shown speed in m/s, eased so the suspension's bounce does not flicker the digits
+  var spd = 0;
 
   var params = new URLSearchParams(location.search);
   var dailyDate = params.get('daily');
@@ -420,7 +445,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     tries++;
     startedAt = Date.now();
     ended = false;
-    acc = 0; last = 0; prev = null;
+    acc = 0; last = 0; prev = null; spd = 0;
     cam.x = S.x; cam.y = S.y;
     renderTop();
     renderStatus();
@@ -465,6 +490,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
       if (S.over || S.won) break;
     }
     events(ev);
+    spd += (Math.abs(S.vx) - spd) * (1 - Math.pow(1 - 0.2, frameDt * 60));
     draw();
     renderDist();
     if ((S.over || S.won) && !ended) { ended = true; setTimeout(finish, C.ui.reduceMotion() ? 200 : 900); }
@@ -524,8 +550,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
   }
   function palette() {
     return dark()
-      ? { sky0: '#121A30', sky1: '#2B3354', far: '#26314A', near: '#1F3A2C', dirt: '#3B2A1E', dirtDk: '#2C1F16', grass: '#3F8A3A', grassLt: '#5FA954', body: '#E0603A', bodyDk: '#A8401F', cage: '#C9CED6', tyre: '#0E0E10', hub: '#9AA1AB', skin: '#E8B98F', helmet: '#F2C230', can: '#E04236', canDk: '#9E2A22', coin: '#F2C230', coinDk: '#B88A12', post: '#C9CED6', text: '#F4EEE4', pedal: 'rgba(255,255,255,', gauge: '#2A2F3A' }
-      : { sky0: '#A9DCF2', sky1: '#F4F8EE', far: '#B9D7C2', near: '#8DBF8F', dirt: '#9A6B45', dirtDk: '#7A5233', grass: '#3E9C3A', grassLt: '#6CC25A', body: '#D94F2B', bodyDk: '#9E3418', cage: '#4A505A', tyre: '#1A1A1C', hub: '#B8BEC6', skin: '#E3AE82', helmet: '#E8B21A', can: '#D8382C', canDk: '#8E231B', coin: '#F0BC1C', coinDk: '#A67C0A', post: '#5A5F68', text: '#1F1A17', pedal: 'rgba(31,26,23,', gauge: '#E9E2D6' };
+      ? { sky0: '#121A30', sky1: '#2B3354', far: '#26314A', near: '#1F3A2C', dirt: '#3B2A1E', dirtDk: '#2C1F16', grass: '#3F8A3A', grassLt: '#5FA954', body: '#E0603A', bodyDk: '#A8401F', cage: '#C9CED6', tyre: '#0E0E10', hub: '#9AA1AB', skin: '#E8B98F', helmet: '#F2C230', can: '#E04236', canDk: '#9E2A22', coin: '#F2C230', coinDk: '#B88A12', post: '#C9CED6', text: '#F4EEE4', pedal: 'rgba(255,255,255,', gauge: '#2A2F3A',
+          skinDk: '#C99A70', shirt: '#4FB07D', shirtDk: '#3A8A60', legs: '#3A4868', cap: '#4A78C8', mouth: '#8A4A33', eye: '#1A1A1A', steer: '#AEB4BD', tread: '#3A3E45', lamp: '#FFE27A', exhaust: '#8B919A', stripe: '#F4EEE4' }
+      : {sky0: '#A9DCF2', sky1: '#F4F8EE', far: '#B9D7C2', near: '#8DBF8F', dirt: '#9A6B45', dirtDk: '#7A5233', grass: '#3E9C3A', grassLt: '#6CC25A', body: '#D94F2B', bodyDk: '#9E3418', cage: '#4A505A', tyre: '#1A1A1C', hub: '#B8BEC6', skin: '#E3AE82', helmet: '#E8B21A', can: '#D8382C', canDk: '#8E231B', coin: '#F0BC1C', coinDk: '#A67C0A', post: '#5A5F68', text: '#1F1A17', pedal: 'rgba(31,26,23,', gauge: '#E9E2D6',
+          skinDk: '#C4906A', shirt: '#3E9C6A', shirtDk: '#2C7550', legs: '#2F3B57', cap: '#2D5BA8', mouth: '#8A4A33', eye: '#1A1A1A', steer: '#22262C', tread: '#44484E', lamp: '#FFE27A', exhaust: '#8B919A', stripe: '#FFFFFF' };
   }
 
   function size() {
@@ -629,30 +657,65 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     // springs from the body to each wheel first, so the body covers their tops
     g.strokeStyle = P.cage; g.lineWidth = 0.1;
     for (var k = 0; k < 2; k++) { var pt = E.ANCH[k], c = Math.cos(V.a), sn = Math.sin(V.a); g.beginPath(); g.moveTo(V.x + pt[0] * c - pt[1] * sn, V.y + pt[0] * sn + pt[1] * c); g.lineTo(V.wh[k].x, V.wh[k].y); g.stroke(); }
+    // Design B, "Buggy", of the mock the owner chose (#763). Only the drawing: the head is
+    // drawn on the engine's head hitbox and the wheels where the physics put them.
     g.save();
     g.translate(V.x, V.y); g.rotate(V.a);
-    // the driver: a body, and a head in a helmet, open to the hills
-    g.fillStyle = P.bodyDk; C.rrect(g, -0.42, 0.1, 0.5, 0.62, 0.15); g.fill();
-    g.fillStyle = P.skin; g.beginPath(); g.arc(E.HEAD[0], E.HEAD[1], E.HEAD_R, 0, Math.PI * 2); g.fill();
-    g.fillStyle = P.helmet; g.beginPath(); g.arc(E.HEAD[0], E.HEAD[1] + 0.02, E.HEAD_R + 0.03, -0.25, Math.PI + 0.1); g.closePath(); g.fill();
-    g.fillStyle = '#1A1A1A'; g.beginPath(); g.arc(E.HEAD[0] + 0.14, E.HEAD[1] - 0.04, 0.04, 0, Math.PI * 2); g.fill();
-    // a roll bar behind the seat that does not cover the head
-    g.strokeStyle = P.cage; g.lineWidth = 0.09; g.lineCap = 'round';
-    g.beginPath(); g.moveTo(-0.8, 0.2); g.lineTo(-0.7, 0.8); g.lineTo(-0.5, 0.82); g.stroke();
-    // the body
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    // the tube cage behind the driver
+    g.strokeStyle = P.cage; g.lineWidth = 0.08;
+    g.beginPath(); g.moveTo(-1.2, 0.1); g.lineTo(-1.0, 1.0); g.lineTo(0, 1.2); g.lineTo(0.6, 0.5); g.stroke();
+    g.beginPath(); g.moveTo(-1.0, 1.0); g.lineTo(-0.6, 0.1); g.stroke();
+    driver(g, P);
+    // the tub, a white stripe, the sill, the lamp and the exhaust
     g.fillStyle = P.body;
-    g.beginPath(); g.moveTo(-1.45, -0.2); g.lineTo(1.45, -0.2); g.lineTo(1.4, 0.12); g.lineTo(0.6, 0.35); g.lineTo(0.25, 0.3); g.lineTo(-0.5, 0.2); g.lineTo(-1.35, 0.3); g.closePath(); g.fill();
-    g.fillStyle = P.bodyDk; g.fillRect(-1.45, -0.2, 2.9, 0.1);
-    g.fillStyle = '#FFFFFF'; g.globalAlpha = 0.8; g.beginPath(); g.arc(1.32, 0.05, 0.07, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
+    g.beginPath(); g.moveTo(-1.4, -0.2); g.lineTo(1.45, -0.2); g.lineTo(1.5, 0.05); g.lineTo(1.1, 0.32); g.lineTo(0.5, 0.36); g.lineTo(0.2, 0.28); g.lineTo(-0.45, 0.22); g.lineTo(-1.1, 0.34); g.lineTo(-1.4, 0.2); g.closePath(); g.fill();
+    g.fillStyle = P.stripe; g.fillRect(-1.0, -0.02, 1.9, 0.07);
+    g.fillStyle = P.bodyDk; g.fillRect(-1.4, -0.2, 2.9, 0.1);
+    g.fillStyle = P.lamp; g.beginPath(); g.arc(1.3, 0.14, 0.09, 0, Math.PI * 2); g.fill();
+    g.fillStyle = P.exhaust; C.rrect(g, -1.58, -0.12, 0.2, 0.2, 0.05); g.fill();
+    // the steering wheel in front of the hand
+    g.strokeStyle = P.steer; g.lineWidth = 0.07; g.beginPath(); g.moveTo(0.42, 0.38); g.lineTo(0.36, 0.66); g.stroke();
+    g.lineWidth = 0.04; g.beginPath(); g.moveTo(0.44, 0.36); g.lineTo(0.62, 0.34); g.stroke();
     g.restore();
+    // big knobbly tyres; the tread turns with the wheel, so the motion shows
     for (var w = 0; w < 2; w++) {
       var W = V.wh[w];
       g.fillStyle = P.tyre; g.beginPath(); g.arc(W.x, W.y, E.WR, 0, Math.PI * 2); g.fill();
-      g.fillStyle = P.hub; g.beginPath(); g.arc(W.x, W.y, E.WR * 0.45, 0, Math.PI * 2); g.fill();
-      g.strokeStyle = P.tyre; g.lineWidth = 0.05; g.beginPath();
-      for (var s = 0; s < 3; s++) { var an = W.rot + s * Math.PI * 2 / 3; g.moveTo(W.x, W.y); g.lineTo(W.x + Math.cos(an) * E.WR * 0.45, W.y + Math.sin(an) * E.WR * 0.45); }
+      g.save(); g.translate(W.x, W.y); g.rotate(W.rot);
+      g.strokeStyle = P.tread; g.lineWidth = 0.06; g.setLineDash([0.1, 0.1]);
+      g.beginPath(); g.arc(0, 0, E.WR - 0.03, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
+      g.fillStyle = P.hub; g.beginPath(); g.arc(0, 0, E.WR * 0.45, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = P.tread; g.lineWidth = 0.035; g.beginPath();
+      for (var s = 0; s < 3; s++) { var an = s * Math.PI * 2 / 3; g.moveTo(0, 0); g.lineTo(Math.cos(an) * E.WR * 0.45, Math.sin(an) * E.WR * 0.45); }
       g.stroke();
+      g.restore();
     }
+  }
+  // The driver, upright in the seat with a hand on the wheel, in the car's own frame
+  function driver(g, P) {
+    var hx = E.HEAD[0], hy = E.HEAD[1];
+    // legs, mostly behind the tub
+    g.strokeStyle = P.legs; g.lineWidth = 0.22; g.beginPath(); g.moveTo(-0.38, 0.3); g.lineTo(0.12, 0.42); g.lineTo(0.3, 0.2); g.stroke();
+    // torso and neck
+    g.strokeStyle = P.shirt; g.lineWidth = 0.46; g.beginPath(); g.moveTo(-0.36, 0.32); g.lineTo(-0.24, 0.62); g.stroke();
+    g.strokeStyle = P.skinDk; g.lineWidth = 0.14; g.beginPath(); g.moveTo(-0.22, 0.62); g.lineTo(hx, hy - 0.2); g.stroke();
+    // the head, on the hitbox
+    g.fillStyle = P.skin; g.beginPath(); g.arc(hx, hy, E.HEAD_R, 0, Math.PI * 2); g.fill();
+    g.fillStyle = P.skinDk; g.beginPath(); g.arc(hx + E.HEAD_R * 0.98, hy - 0.03, 0.045, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = P.mouth; g.lineWidth = 0.025; g.beginPath(); g.arc(hx + 0.1, hy - 0.1, 0.09, 0.3, 1.5); g.stroke();
+    // a cap with its peak forward and a button on top
+    g.fillStyle = P.cap; g.beginPath(); g.arc(hx, hy + 0.03, E.HEAD_R + 0.03, -0.05, Math.PI + 0.1); g.closePath(); g.fill();
+    C.rrect(g, hx + 0.05, hy + 0.07, 0.36, 0.06, 0.03); g.fill();
+    g.fillStyle = '#FFFFFF'; g.beginPath(); g.arc(hx + 0.02, hy + 0.2, 0.05, 0, Math.PI * 2); g.fill();
+    // the scarf streams back and flutters with the speed (still when motion is reduced)
+    var fl = C.ui.reduceMotion() ? 0 : 0.05 * Math.min(1, Math.abs(S.vx) / 8) * Math.sin(S.t * 14);
+    g.strokeStyle = P.helmet; g.lineWidth = 0.1; g.beginPath(); g.moveTo(hx - 0.1, hy - 0.2); g.lineTo(hx - 0.4, hy - 0.16 - fl * 0.5); g.lineTo(hx - 0.72, hy - 0.05 + fl); g.stroke();
+    g.lineWidth = 0.07; g.beginPath(); g.moveTo(hx - 0.1, hy - 0.22); g.lineTo(hx - 0.45, hy - 0.3 + fl * 0.5); g.lineTo(hx - 0.78, hy - 0.24 - fl); g.stroke();
+    g.fillStyle = P.eye; g.beginPath(); g.ellipse(hx + 0.13, hy + 0.04, 0.035, 0.05, 0, 0, Math.PI * 2); g.fill();
+    // the arm: shoulder, elbow, hand on the wheel
+    g.strokeStyle = P.shirtDk; g.lineWidth = 0.17; g.beginPath(); g.moveTo(-0.2, 0.6); g.lineTo(0.08, 0.46); g.lineTo(0.38, 0.62); g.stroke();
+    g.fillStyle = P.skin; g.beginPath(); g.arc(0.4, 0.64, 0.075, 0, Math.PI * 2); g.fill();
   }
   function hud(g, Z, P) {
     var u = Math.max(0.8, Math.min(1.4, Z.w / 420));
@@ -676,6 +739,19 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     var c = control(), pw = 46 * u, ph = 62 * u, py = Z.h - ph - 12 * u;
     pedal(g, 12 * u, py, pw, ph, c < 0, false, P);
     pedal(g, Z.w - 12 * u - pw, py, pw, ph, c > 0, true, P);
+    // the speed, between the pedals like a dashboard, on its own plate so it reads over
+    // any ground (#777)
+    var kmh = E.speedOf(spd, prefs.speed);
+    if (kmh !== null) {
+      var unit = C.t(prefs.speed === 'mph' ? 'spdMph' : 'spdKmh'), num = C.num(kmh);
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.font = font(10 * u); var uw = g.measureText(unit).width;
+      g.font = font(22 * u); var nw = g.measureText(num).width;
+      var sw = Math.max(64 * u, uw + 20 * u, nw + 20 * u), sh = 46 * u, sx = Z.w / 2 - sw / 2, sy = Z.h - sh - 12 * u;
+      g.fillStyle = P.gauge; g.globalAlpha = 0.88; C.rrect(g, sx, sy, sw, sh, 12 * u); g.fill(); g.globalAlpha = 1;
+      g.fillStyle = P.text; g.fillText(num, Z.w / 2, sy + sh * 0.4);
+      g.font = font(10 * u); g.fillText(unit, Z.w / 2, sy + sh * 0.78);
+    }
   }
   function pedal(g, x, y, w, h, on, gas, P) {
     g.fillStyle = P.pedal + (on ? '0.55)' : '0.22)');
@@ -698,6 +774,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     top.appendChild(distEl);
     var best = C.stats.getBest('hillrider', 'metres');
     if (!dailyDate && best) top.appendChild(el('span', { class: 'ch-badge', text: C.t('bestM', { n: C.num(best) }) }));
+    var gear = el('button', { class: 'ch-iconbtn hr-gear', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', showSettings);
+    top.appendChild(gear);
     shownM = -1;
     renderDist();
   }
@@ -709,6 +788,20 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
   }
   function renderStatus() { status.textContent = waiting && resumed ? C.t('tapGo') : C.t('howTo'); }
   function go() { if (waiting) { waiting = false; last = 0; renderStatus(); kick(); } }
+
+  // The speed dial's unit lives behind the gear, never in the help (#777)
+  function showSettings() {
+    var seg = C.ui.segmented([{ value: 'kmh', label: C.t('optKmh') }, { value: 'mph', label: C.t('optMph') }, { value: 'off', label: C.t('spdOff') }], prefs.speed, function (v) {
+      prefs.speed = v === 'mph' || v === 'off' ? v : 'kmh';
+      ctx.store.set('prefs', prefs);
+      draw();
+    });
+    C.ui.modal({
+      title: C.t('settings'),
+      body: [el('div', { class: 'ch-list' }, [el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('spdT') }), seg])])],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
 
   /* -------------------------------------------------------------- input */
 
@@ -799,7 +892,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     var R = E.restore(sv.s);
     if (!R) return false;
     S = R; tries = sv.tries || 1; startedAt = Date.now() - (sv.elapsed || 0);
-    ended = false; waiting = true; resumed = true; flipPending = false; acc = 0; last = 0; prev = null;
+    ended = false; waiting = true; resumed = true; flipPending = false; acc = 0; last = 0; prev = null; spd = Math.abs(S.vx);
     cam.x = S.x; cam.y = S.y;
     renderTop(); renderStatus(); draw(); kick();
     return true;
