@@ -3167,7 +3167,7 @@
   ui.fitFallback = function (main) {
     if (ui.hasContainerQueries() || !main) return null;
     document.documentElement.classList.add('ch-nocq');
-    var busy = false;
+    var busy = false, noAspect = !(window.CSS && CSS.supports && CSS.supports('aspect-ratio', '1'));
     function px(n) { return Math.max(0, Math.floor(n)) + 'px'; }
     function run() {
       if (busy || !main.isConnected) return;
@@ -3194,6 +3194,9 @@
         }
         var kid = fit.firstElementChild;
         if (kid) kid.style.width = px(Math.min(fit.clientWidth, fit.clientHeight * ar));
+        // Boards that get their height from aspect-ratio (Chess, Sudoku) were 0px tall on
+        // WebViews older than Chrome 88, which drop it (#790)
+        if (kid && noAspect) kid.style.height = px(Math.min(fit.clientWidth, fit.clientHeight * ar) / ar);
       });
       busy = false;
     }

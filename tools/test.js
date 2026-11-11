@@ -4233,7 +4233,7 @@ function testMahjongClack() {
   ok(/if \(C\.ui\.reduceMotion\(\) [^\n]*\) \{ C\.feedback\('flint'\); return; \}/.test(clBody), 'with reduced motion only the sound plays');
   ok(/\.mj-fly \{ position: fixed; z-index: 100000;/.test(page) && /fly\.remove\(\)/.test(clBody) && /fx\.style\.position = 'fixed';/.test(page) && /fx\.remove\(\)/.test(page), 'the flying tiles and sparks sit above the zoomed board and remove themselves');
   // The first try kept the tiles' inline board position on the copies, so they flew off-screen unseen
-  ok(/copy\.removeAttribute\('style'\);/.test(clBody) && /\.mj-fly \.mj-tile \{ position: absolute; inset: 0;/.test(page), 'the flying copy fills its own box, not its old board position');
+  ok(/copy\.removeAttribute\('style'\);/.test(clBody) && /\.mj-fly \.mj-tile \{ position: absolute; top: 0; right: 0; bottom: 0; left: 0;/.test(page), 'the flying copy fills its own box, not its old board position');
   const fAt = core.indexOf('    flint: function () {'), fBody = fAt > 0 ? core.slice(fAt, core.indexOf('\n    }', fAt)) : '';
   ok(fAt > 0 && /noise\(\{ freq: 3400/.test(fBody) && /for \(var i = 0; i < 6; i\+\+\)/.test(fBody) && /flint: \['flint', 'tap'\]/.test(core), 'the core has a flint strike sound, with a light vibration');
 }
@@ -8476,7 +8476,7 @@ function coreMotion(core, css, fly, burstAt, burstEnd) {
   const still = cardAt(e, 0, 0, 50, 70);
   ok(e.ui.fly(still, shoe, { flip: true }) === null && e.anims.length === 0 && !still.kids.length && e.ui.burst({ x: 5, y: 5 }) === false && !e.appended.length,
     'with reduced motion nothing flies, turns or bursts');
-  ok(/\.ch-fx \{ position: fixed; inset: 0; z-index: 50; pointer-events: none; \}/.test(css) && /\.ch-scrim \{[^}]*z-index: 60;/.test(css),
+  ok(/\.ch-fx \{ position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 50; pointer-events: none; \}/.test(css) && /\.ch-scrim \{[^}]*z-index: 60;/.test(css),
     'the spark layer never takes a tap and stays under dialogs');
 }
 
