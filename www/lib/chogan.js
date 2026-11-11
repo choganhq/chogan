@@ -1571,8 +1571,19 @@
     return out;
   }
 
+  // #809/#812: an endless game pays a capped base plus MILESTONE_COINS for every full `step`
+  // of distance the player newly reaches above their previous best, so only real progress is
+  // paid: replaying a distance already reached pays nothing extra, and the cap on the base
+  // stays as it was (the first version paid by distance alone and a long ride fed the wallet).
+  var MILESTONE_COINS = 5;
+  function milestoneCoins(prev, now, step) {
+    prev = Math.max(0, +prev || 0); now = Math.max(0, +now || 0);
+    if (!(step > 0) || now <= prev) return 0;
+    return MILESTONE_COINS * (Math.floor(now / step) - Math.floor(prev / step));
+  }
   var statsApi = {
     get: function () { return state.stats; },
+    milestoneCoins: milestoneCoins,
     week: function (ago, now) { return weekOf(state.stats.days || {}, state.settings.lang, ago, now || new Date()); },
     game: function (id) {
       if (!state.stats.byGame[id]) state.stats.byGame[id] = { plays: 0, wins: 0, timeMs: 0, best: {} };
