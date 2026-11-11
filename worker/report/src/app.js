@@ -442,31 +442,39 @@ const PAGE_HEADERS = {
 
 export function makeWorker(html, opts) {
   const o = opts || {};
+  async function handle(request, env, url) {
+    const p = url.pathname;
+    if (p !== '/report' && !p.startsWith('/report/')) {
+      // Unchanged from the playchogan-redirect Worker (#615).
+      return Response.redirect(TARGET + url.pathname + url.search, 301);
+    }
+    if (p === '/report') return Response.redirect(url.origin + '/report/' + url.search, 301);
+    if (p === '/report/') {
+      if (request.method !== 'GET' && request.method !== 'HEAD') return new Response(null, { status: 405, headers: { Allow: 'GET, HEAD' } });
+      return new Response(request.method === 'HEAD' ? null : html, { headers: PAGE_HEADERS });
+    }
+    const route = { '/report/api/start': start, '/report/api/file': file, '/report/api/finish': finish }[p];
+    if (!route) return new Response('Not found', { status: 404, headers: { 'X-Robots-Tag': 'noindex' } });
+    if (request.method !== 'POST') return json(405, { ok: false, error: 'method' });
+    try {
+      if (!sameOrigin(request, url)) throw new HttpError(403, 'origin');
+      const ctx = { fetchImpl: o.fetch || ((...a) => fetch(...a)), now: o.now ? o.now() : Date.now() };
+      return await route(request, env, ctx, url);
+    } catch (e) {
+      if (e instanceof HttpError) return json(e.status, { ok: false, error: e.code });
+      console.error('report error', e && e.stack || e);
+      return json(500, { ok: false, error: 'server' });
+    }
+  }
   return {
     async fetch(request, env, execCtx) {
       const url = new URL(request.url);
-      const p = url.pathname;
-      if (p !== '/report' && !p.startsWith('/report/')) {
-        // Unchanged from the playchogan-redirect Worker (#615).
-        return Response.redirect(TARGET + url.pathname + url.search, 301);
-      }
-      if (p === '/report') return Response.redirect(url.origin + '/report/' + url.search, 301);
-      if (p === '/report/') {
-        if (request.method !== 'GET' && request.method !== 'HEAD') return new Response(null, { status: 405, headers: { Allow: 'GET, HEAD' } });
-        return new Response(request.method === 'HEAD' ? null : html, { headers: PAGE_HEADERS });
-      }
-      const route = { '/report/api/start': start, '/report/api/file': file, '/report/api/finish': finish }[p];
-      if (!route) return new Response('Not found', { status: 404, headers: { 'X-Robots-Tag': 'noindex' } });
-      if (request.method !== 'POST') return json(405, { ok: false, error: 'method' });
-      try {
-        if (!sameOrigin(request, url)) throw new HttpError(403, 'origin');
-        const ctx = { fetchImpl: o.fetch || ((...a) => fetch(...a)), now: o.now ? o.now() : Date.now() };
-        return await route(request, env, ctx, url);
-      } catch (e) {
-        if (e instanceof HttpError) return json(e.status, { ok: false, error: e.code });
-        console.error('report error', e && e.stack || e);
-        return json(500, { ok: false, error: 'server' });
-      }
+      // The zone serves plain http too; a form that takes screenshots must never be read or sent over it.
+      if (url.protocol === 'http:') return Response.redirect('https://' + url.host + url.pathname + url.search, 301);
+      const res = await handle(request, env, url);
+      const out = new Response(res.body, res);
+      out.headers.set('Strict-Transport-Security', 'max-age=31536000');
+      return out;
     },
     async scheduled(event, env, execCtx) {
       const run = cleanup(env, o.fetch || ((...a) => fetch(...a)), o.now ? o.now() : Date.now());

@@ -125,6 +125,19 @@ module.exports = function (T) {
     ok((await W.fetch(req('/report/api/start'), envFor())).status === 405, 'GET on the API is refused');
     ok((await W.fetch(req('/report/nope'), envFor())).status === 404, 'unknown /report/ paths are 404, not redirected');
 
+    // Owner, 2026-11-11: http://playchogan.com/report/ answered 200. Plain http must go to https, and https says so for a year.
+    for (const [from, to] of [
+      ['http://playchogan.com/report/', 'https://playchogan.com/report/'],
+      ['http://www.playchogan.com/report/?lang=fa', 'https://www.playchogan.com/report/?lang=fa'],
+      ['http://playchogan.com/', 'https://playchogan.com/'],
+    ]) {
+      const r = await W.fetch(new Request(from), envFor());
+      ok(r.status === 301 && r.headers.get('Location') === to, 'http goes to https: ' + from + ' -> ' + r.status + ' ' + r.headers.get('Location'));
+    }
+    ok(/max-age=\d{7,}/.test(page.headers.get('Strict-Transport-Security') || ''), 'the page sends Strict-Transport-Security');
+    const r404 = await W.fetch(req('/report/nope'), envFor());
+    ok(/max-age/.test(r404.headers.get('Strict-Transport-Security') || ''), 'every https answer carries HSTS, errors too');
+
     // Magic bytes decide the type, never the name or the claimed type.
     const s = (a) => A.sniff(Uint8Array.from(a));
     ok((A.sniff(PNG()) || {}).ext === 'png', 'sniff: png');
@@ -297,6 +310,18 @@ module.exports = function (T) {
     ok(!/<script[^>]+src=|<link[^>]+href=["']https?:|@import|url\(\s*["']?https?:/i.test(html), 'the page loads no external script, font or stylesheet');
     ok(/name="website"/.test(html) && /class="trap"/.test(html), 'the page has the hidden honeypot field');
     ok(/prefers-color-scheme: dark/.test(html) && /dir/.test(html), 'the page has a dark theme and sets the direction');
+    // Owner, 2026-11-11: a theme switch, Ctrl+V for screenshots, a red warning with a sign, clear Game and Telegram labels.
+    ok(/id="theme"/.test(html) && /data-theme=dark/.test(html) && /data-theme=light/.test(html), 'the page has a theme switch (auto, light, dark)');
+    ok(/addEventListener\('paste'/.test(html) && /clipboardData/.test(html), 'a pasted image (Ctrl+V) is taken as a screenshot');
+    const warn = /\.warn \{[^}]*\}/.exec(html);
+    ok(warn && /var\(--err-bg\)/.test(warn[0]) && !/--ok-bg/.test(warn[0]), 'the personal-information notice is red, not the green note colour');
+    ok(/\.warn::before \{ content: "\\26A0/.test(html), 'the notice carries a warning sign');
+    const enBlock = /\n\s*en: \{([\s\S]*?)\n\s*\},?\n/.exec(html.slice(html.indexOf('var S = {')));
+    ok(enBlock && /game: '[^']*optional[^']*name of the game/i.test(enBlock[1]), 'the Game label says it is the optional name of the game');
+    for (const code of ['fa', 'en', 'zh', 'de', 'es', 'pl']) {
+      const m = new RegExp('\\n\\s*' + code + ': \\{([\\s\\S]*?)\\n\\s*\\},?\\n').exec(html.slice(html.indexOf('var S = {')));
+      ok(m && /contact: '[^']*@name/.test(m[1]), 'the contact label asks for a Telegram username like @name in ' + code);
+    }
     // Every language has the same keys as English.
     const tableAt = html.indexOf('var S = {');
     const keysOf = (code) => {
