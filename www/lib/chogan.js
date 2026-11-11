@@ -939,6 +939,14 @@
       var b = now();
       noise({ freq: 2400, to: 1300, dur: 0.05, gain: 0.24, filter: 'bandpass', at: b });
       tone({ freq: 820, to: 520, dur: 0.07, gain: 0.11, type: 'triangle', at: b });
+    },
+    // Moto Rush's boost (#771): an engine note revving up through the range phone
+    // speakers play, with a rush of air behind it, so a full bar is heard, not just seen
+    nitro: function () {
+      var b = now();
+      tone({ freq: 180, to: 520, dur: 0.45, gain: 0.14, type: 'sawtooth', attack: 0.02, at: b });
+      tone({ freq: 270, to: 780, dur: 0.4, gain: 0.07, type: 'square', attack: 0.02, at: b + 0.02 });
+      noise({ freq: 800, to: 3200, dur: 0.5, gain: 0.12, filter: 'bandpass', at: b + 0.05 });
     }
   };
 
@@ -1307,6 +1315,9 @@
     { id: 'ci-hard',     icon: 'star',     fa: 'قهرمان پیست',         en: 'Hard charger',      dfa: 'در پیست سطح سخت اول شدی', den: 'Win a hard race in Circuit', zh: '赛道王者', dzh: '在赛道困难难度中获胜', de: 'Rennass', dde: 'Gewinne ein schweres Rennen auf der Rennstrecke', es: 'As del volante', des: 'Gana una carrera difícil en Circuito', pl: 'As kierownicy', dpl: 'Wygraj trudny wyścig na Torze' },
     { id: 'ci-clean',    icon: 'shield',   fa: 'رانندگی تمیز',        en: 'Clean racer',       dfa: 'یک مسابقه‌ی پیست را بی بیرون زدن از جاده تمام کن', den: 'Finish a Circuit race without leaving the road', zh: '干净驾驶', dzh: '全程不离开路面完成一场赛道比赛', de: 'Saubere Fahrt', dde: 'Beende ein Rennen, ohne die Straße zu verlassen', es: 'Conducción limpia', des: 'Termina una carrera de Circuito sin salirte de la pista', pl: 'Czysta jazda', dpl: 'Ukończ wyścig na Torze bez zjazdu z drogi' },
     { id: 'ci-daily',    icon: 'calendar', fa: 'مسابقه‌ی روز',         en: 'Race of the day',   dfa: 'در پیست روزانه اول شدی', den: 'Win the daily Circuit race', zh: '今日赛车', dzh: '赢得每日赛道比赛', de: 'Rennen des Tages', dde: 'Gewinne das Rennen des Tages', es: 'Carrera del día', des: 'Gana la carrera diaria de Circuito', pl: 'Wyścig dnia', dpl: 'Wygraj codzienny wyścig na Torze' },
+    { id: 'mo-run',      icon: 'trophy',   fa: 'جاده‌ی بلند',         en: 'Long road',         dfa: 'در موتورسوار در یک دور ده کیلومتر رفتی', den: 'Ride 10 km in one run of Moto Rush', zh: '漫漫长路', dzh: '在摩托狂飙中一局骑行 10 公里', de: 'Lange Straße', dde: 'Fahre in einem Lauf von Motorrad-Rausch 10 km', es: 'Carretera larga', des: 'Recorre 10 km en una partida de Moto veloz', pl: 'Długa droga', dpl: 'Przejedź 10 km w jednej grze Motopędu' },
+    { id: 'mo-close',    icon: 'flame',    fa: 'مو به مو',            en: 'By a hair',         dfa: 'در موتورسوار هشت بار پشت سر هم از کنار ماشین‌ها رد شدی', den: 'Make a combo of eight near misses in Moto Rush', zh: '毫厘之间', dzh: '在摩托狂飙中连续八次擦身而过', de: 'Um Haaresbreite', dde: 'Schaffe in Motorrad-Rausch eine Serie von acht knappen Manövern', es: 'Por un pelo', des: 'Encadena ocho roces en Moto veloz', pl: 'O włos', dpl: 'Zrób serię ośmiu mijanek o włos w Motopędzie' },
+    { id: 'mo-daily',    icon: 'calendar', fa: 'موتورسوار روز',       en: 'Ride of the day',   dfa: 'موتورسوار روزانه را تا خط پایان رفتی', den: 'Reach the finish of the daily Moto Rush', zh: '今日飞驰', dzh: '骑到每日摩托狂飙的终点', de: 'Fahrt des Tages', dde: 'Erreiche das Ziel von Motorrad-Rausch des Tages', es: 'Carrera del día', des: 'Llega a la meta de Moto veloz del día', pl: 'Jazda dnia', dpl: 'Dojedź do mety codziennego Motopędu' },
     { id: 'go-win',      icon: 'medal',   fa: 'زمین‌گیر',          en: 'Territory',         dfa: 'یک دست گو را مقابل ربات بردی',        den: 'Win a game of go against the AI', zh: '围地', dzh: '对战电脑赢下一局围棋', de: 'Gebietsherr', dde: 'Gewinne eine Partie Go gegen den Computer', es: 'Territorio', des: 'Gana una partida de Go contra la IA' },
     { id: 'go-hard',     icon: 'brain',   fa: 'دو چشم',            en: 'Two eyes',          dfa: 'در گو ربات سخت را شکست دادی',         den: 'Beat the hard AI at go', zh: '两只眼', dzh: '在围棋中击败困难电脑', de: 'Zwei Augen', dde: 'Schlag die schwere Go-KI', es: 'Dos ojos', des: 'Vence a la IA difícil en Go' },
     { id: 'bj-win',      icon: 'trophy',  fa: 'دیلر را بردی',      en: 'Beat the dealer',   dfa: 'یک مسابقه‌ی ده‌دستی بیست‌ویک را بردی', den: 'Win a ten-hand blackjack match', zh: '赢过庄家', dzh: '赢下一场十手的二十一点比赛', de: 'Croupier geschlagen', dde: 'Gewinne eine Blackjack-Partie aus zehn Händen', es: 'Vence a la banca', des: 'Gana una partida de Blackjack de diez manos' },
