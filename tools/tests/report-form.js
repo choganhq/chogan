@@ -340,7 +340,7 @@ module.exports = function (T) {
     ok(!/ghp_|github_pat_/.test(cfg + read('worker/report/src/app.js') + html), 'no token in the files');
 
     const menu = read('www/index.html');
-    ok(/href: 'https:\/\/playchogan\.com\/report\/\?lang=' \+ C\.state\.settings\.lang/.test(menu) && /C\.t\('reportForm'\)/.test(menu), 'the profile links the form in the app\'s language');
+    ok(!/playchogan\.com\/report/.test(menu) && !/C\.t\('reportForm'\)/.test(menu), 'the profile has one row for reports, not a second one for the form (#797)');
     ok(/href: 'https:\/\/issues\.playchogan\.com\/\?lang=' \+ C\.state\.settings\.lang/.test(menu) && /C\.t\('issuesList'\)/.test(menu), 'the profile links the public issues list in the app\'s language (#793)');
     const core = read('www/lib/chogan.js');
     for (const k of ['reportForm', 'reportNote', 'issuesList']) {
