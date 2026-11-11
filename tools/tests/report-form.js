@@ -347,6 +347,15 @@ module.exports = function (T) {
       const n = (core.match(new RegExp('[ ,{]' + k + ": '", 'g')) || []).length;
       ok(LOCALE_CODES.length > 0 && n === LOCALE_CODES.length, k + ' exists in all ' + LOCALE_CODES.length + ' languages (' + n + ')');
     }
+    // The owner found "for players who cannot reach GitHub" off-putting (#787): the form is
+    // simply the way to send a report or idea, for everyone. Neither the profile note nor the
+    // form's lead may say who it is for, in any language.
+    const forWhom = /cannot reach|can't reach|دسترسی ندارند|nie mogą|无法访问|nicht erreichen|no pueden|For players|برای بازیکن/i;
+    const notes = core.match(/reportNote: '[^']*'/g) || [];
+    const leads = html.match(/lead: '[^']*'/g) || [];
+    ok(notes.length === LOCALE_CODES.length && leads.length === LOCALE_CODES.length, 'found the profile note and the form lead in every language (' + notes.length + ', ' + leads.length + ')');
+    const who = notes.concat(leads).filter((x) => forWhom.test(x));
+    ok(notes.length > 0 && !who.length, 'neither the profile note nor the form lead says who the form is for' + (who.length ? ' (' + who.join(' | ').slice(0, 200) + ')' : ''));
     for (const page of ['www/privacy.html', 'www/privacy-plus.html']) {
       const p = read(page);
       for (const lang of ['fa', 'en']) {
