@@ -125,7 +125,7 @@ module.exports = function (T) {
     ok(/href="https:\/\/github\.com\/choganhq\/chogan\/issues"/.test(html), 'a link to all issues on GitHub');
 
     // The intro says what the page is, never who it is for (the owner's wording rule, #787).
-    ok(LOCALE_CODES.length === 6 && LOCALE_CODES.every((c) => A.S[c] && A.S[c].lead && !/github|گیت‌هاب/i.test(A.S[c].lead)), 'the intro names no audience and does not mention GitHub, in every language');
+    ok(LOCALE_CODES.length > 0 && LOCALE_CODES.every((c) => A.S[c] && A.S[c].lead && !/github|گیت‌هاب/i.test(A.S[c].lead)), 'the intro names no audience and does not mention GitHub, in every language');
     // Headers.
     const csp = r.headers.get('Content-Security-Policy') || '';
     ok(/default-src 'none'/.test(csp) && /script-src 'self'(;|$)/.test(csp) && /style-src 'self'(;|$)/.test(csp) && /frame-ancestors 'none'/.test(csp) && /base-uri 'none'/.test(csp), 'a strict CSP: ' + csp);
@@ -229,7 +229,7 @@ module.exports = function (T) {
     };
     const en = keysOf('en');
     ok(tableAt > 0 && en.split(',').length >= 20, 'the page has a string table (' + en.split(',').length + ' English keys)');
-    const codes = ['fa', 'en', 'zh', 'de', 'es', 'pl'];
+    const codes = ['fa', 'en', 'zh', 'de', 'es', 'pl', 'fr'];
     ok(LOCALE_CODES.length === codes.length, 'as many languages as the app (' + LOCALE_CODES.length + ')');
     for (const code of codes) ok(keysOf(code) === en, 'every string in ' + code);
 
