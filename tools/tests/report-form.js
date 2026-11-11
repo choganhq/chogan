@@ -346,6 +346,10 @@ module.exports = function (T) {
       const n = (core.match(new RegExp('[ ,{]' + k + ": '", 'g')) || []).length;
       ok(LOCALE_CODES.length > 0 && n === LOCALE_CODES.length, k + ' exists in all ' + LOCALE_CODES.length + ' languages (' + n + ')');
     }
+    // #787: the form is for everyone; no text says it is for players who cannot reach GitHub
+    const audience = /cannot reach|دسترسی ندارند|无法访问|nicht erreichen|no pueden acceder|nie mogą wejść/;
+    const notes = (core.match(/reportNote: '[^']*'/g) || []), leads = (html.match(/lead: '[^']*'/g) || []);
+    ok(notes.length === LOCALE_CODES.length && leads.length === LOCALE_CODES.length && !notes.concat(leads).some((s) => audience.test(s)), 'the profile note and the form lead do not say who the form is for (' + notes.length + ' + ' + leads.length + ' texts)');
     for (const page of ['www/privacy.html', 'www/privacy-plus.html']) {
       const p = read(page);
       for (const lang of ['fa', 'en']) {
