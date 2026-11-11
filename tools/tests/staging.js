@@ -212,7 +212,8 @@ module.exports = function (T) {
       if (r.status !== 0) throw new Error('git ' + args.join(' ') + ': ' + r.stderr);
       return r.stdout;
     };
-    const games = (ids) => JSON.stringify(ids.map((id) => ({ id, path: 'games/' + id + '/index.html' })), null, 2) + '\n';
+    // The real shape is { games: [...] }; a bare array here hid the gate failing on every PR (#769).
+    const games = (ids) => JSON.stringify({ games: ids.map((id) => ({ id, path: 'games/' + id + '/index.html' })) }, null, 2) + '\n';
     const commit = (dir, ids, msg) => {
       fs.mkdirSync(path.join(dir, 'www'), { recursive: true });
       fs.writeFileSync(path.join(dir, 'www/games.json'), typeof ids === 'string' ? ids : games(ids));

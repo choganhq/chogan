@@ -110,7 +110,7 @@ module.exports = function (T) {
     ok(sp(fast.vx, 'kmh') > 20 && sp(fast.vx, 'kmh') <= 70, 'five seconds of gas reads as a plausible speed (' + sp(fast.vx, 'kmh') + ' km/h)');
     const keys = ['spdT', 'spdKmh', 'spdMph', 'optKmh', 'optMph', 'spdOff'];
     const blocks = LOCALE_CODES.map((l) => { const m = html.match(new RegExp('\\n {6}' + l + ': \\{([\\s\\S]*?)\\n {6}\\}')); return m ? m[1] : ''; });
-    ok(LOCALE_CODES.length === 6 && blocks.every((b) => keys.every((k) => new RegExp('\\b' + k + ": '[^']+'").test(b))), 'the speed setting has its strings in all ' + LOCALE_CODES.length + ' languages');
+    ok(LOCALE_CODES.length >= 7 && blocks.every((b) => keys.every((k) => new RegExp('\\b' + k + ": '[^']+'").test(b))), 'the speed setting has its strings in all ' + LOCALE_CODES.length + ' languages');
     ok(keys.every((k) => core.indexOf(k + ':') < 0), 'the speed strings do not reuse a core key name');
     ok(/ctx\.store\.get\('prefs'/.test(html) && /prefs\.speed = v === 'mph' \|\| v === 'off' \? v : 'kmh'/.test(html) && /C\.ui\.segmented\(\[\{ value: 'kmh'/.test(html) && /C\.icon\('gear', 20\)/.test(html) && !/rules: '[^']*km\/h/.test(html),
       'the unit lives behind the gear, is saved through the core and defaults to km/h');

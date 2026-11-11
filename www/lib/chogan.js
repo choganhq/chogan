@@ -192,6 +192,7 @@
       if (/^de\b|^de-/.test(l)) return 'de';
       if (/^es\b|^es-/.test(l)) return 'es';
       if (/^pl\b|^pl-/.test(l)) return 'pl';
+      if (/^fr\b|^fr-/.test(l)) return 'fr';
       return 'en';
     } catch (e) { return 'fa'; }
   }
@@ -279,7 +280,8 @@
     { code: 'zh', label: '中文', dir: 'ltr', tag: 'zh-Hans', date: 'zh-CN' },
     { code: 'de', label: 'Deutsch',  dir: 'ltr', tag: 'de',      date: 'de-DE' },
     { code: 'es', label: 'Español',  dir: 'ltr', tag: 'es',      date: 'es-ES' },
-    { code: 'pl', label: 'Polski',   dir: 'ltr', tag: 'pl',      date: 'pl-PL' }
+    { code: 'pl', label: 'Polski',   dir: 'ltr', tag: 'pl',      date: 'pl-PL' },
+    { code: 'fr', label: 'Français', dir: 'ltr', tag: 'fr',      date: 'fr-FR' }
   ];
   function localeOf(code) {
     for (var i = 0; i < LOCALES.length; i++) if (LOCALES[i].code === code) return LOCALES[i];
@@ -298,6 +300,7 @@
       menu: 'منو', back: 'بازگشت', undo: 'برگرداندن', close: 'بستن', cancel: 'انصراف', result: 'نتیجه', seeBoard: 'دیدن صفحه‌ی بازی',
       saveImage: 'ذخیره‌ی عکس', copyText: 'کپی متن',
       updateReady: 'نسخه‌ی تازه آماده است', updateNow: 'به‌روزرسانی',
+      updRow: 'به‌روزرسانی‌ها', updCheck: 'بررسی به‌روزرسانی', updChecking: 'در حال بررسی…', updLatest: 'آخرین نسخه را داری.', updNew: 'نسخه‌ی تازه‌ای آمده است.', updFailed: 'بررسی به‌روزرسانی نشد. دوباره امتحان کن.',
       installReady: 'چوگان را مثل یک اپ نصب کن', installNow: 'نصب',
       confirm: 'تأیید', done: 'باشه', next: 'بعدی', skip: 'رد کردن',
       start: 'شروع', pause: 'مکث', resumeGame: 'ادامه‌ی بازی', restart: 'شروع دوباره',
@@ -321,6 +324,7 @@
       resetGame: 'بازنشانی داده‌ی بازی', resetAsk: 'داده‌ی این بازی کامل پاک شود؟',
       resetWarn: 'این کار برگشت ندارد.', resetDone: 'پاک شد',
       about: 'درباره', version: 'نسخه', commitHash: 'کامیت', source: 'کد منبع', license: 'مجوز',
+      issuesList: 'گزارش‌ها و پیشنهادها', reportForm: 'گزارش مشکل یا پیشنهاد', reportNote: 'فرم ما در مرورگر باز می‌شود و گزارش یا پیشنهادت را برایمان ثبت می‌کند.',
       aboutText: 'رایگان، متن‌باز، بدون تبلیغ، بدون ردیاب، کاملاً آفلاین.',
       appNamePlus: 'چوگان پلاس', aboutTextPlus: 'رایگان، بدون تبلیغ، بدون خرید درون‌برنامه‌ای. همه‌ی بازی‌ها بدون اینترنت هم کار می‌کنند.',
       name: 'نام', country: 'کشور', optional: 'اختیاری',
@@ -343,6 +347,7 @@
       menu: 'Menu', back: 'Back', undo: 'Undo', close: 'Close', cancel: 'Cancel', result: 'Result', seeBoard: 'See the board',
       saveImage: 'Save image', copyText: 'Copy text',
       updateReady: 'A new version is ready', updateNow: 'Update',
+      updRow: 'Updates', updCheck: 'Check for updates', updChecking: 'Checking…', updLatest: 'You are using the latest version.', updNew: 'A new version is available.', updFailed: 'Could not check for updates. Try again.',
       installReady: 'Install Chogan as an app', installNow: 'Install',
       confirm: 'Confirm', done: 'OK', next: 'Next', skip: 'Skip',
       start: 'Start', pause: 'Pause', resumeGame: 'Resume', restart: 'Restart',
@@ -366,6 +371,7 @@
       resetGame: 'Reset game data', resetAsk: 'Erase all data for this game?',
       resetWarn: 'This cannot be undone.', resetDone: 'Erased',
       about: 'About', version: 'Version', source: 'Source code', commitHash: 'commit', license: 'License',
+      issuesList: 'Reports and suggestions', reportForm: 'Report a problem or idea', reportNote: 'Our form opens in the browser and sends us your report or idea.',
       aboutText: 'Free, open source, no ads, no trackers, fully offline.',
       appNamePlus: 'Chogan Plus', aboutTextPlus: 'Free, no ads, no in-app purchases. Every game also works offline.',
       name: 'Name', country: 'Country', optional: 'optional',
@@ -388,6 +394,7 @@
       menu: 'Menu', back: 'Wstecz', undo: 'Cofnij', close: 'Zamknij', cancel: 'Anuluj', result: 'Wynik', seeBoard: 'Zobacz planszę',
       saveImage: 'Zapisz obraz', copyText: 'Kopiuj tekst',
       updateReady: 'Nowa wersja jest gotowa', updateNow: 'Aktualizuj',
+      updRow: 'Aktualizacje', updCheck: 'Sprawdź aktualizacje', updChecking: 'Sprawdzanie…', updLatest: 'Masz najnowszą wersję.', updNew: 'Jest nowa wersja.', updFailed: 'Nie udało się sprawdzić aktualizacji. Spróbuj ponownie.',
       installReady: 'Zainstaluj Chogan jako aplikację', installNow: 'Zainstaluj',
       confirm: 'Potwierdź', done: 'Gotowe', next: 'Dalej', skip: 'Pomiń',
       start: 'Start', pause: 'Pauza', resumeGame: 'Wznów', restart: 'Zrestartuj',
@@ -411,6 +418,7 @@
       resetGame: 'Resetuj dane gry', resetAsk: 'Usunąć wszystkie dane tej gry?',
       resetWarn: 'Tej operacji nie można cofnąć.', resetDone: 'Usunięto',
       about: 'O aplikacji', version: 'Wersja', source: 'Kod źródłowy', commitHash: 'commit', license: 'Licencja',
+      issuesList: 'Zgłoszenia i pomysły', reportForm: 'Zgłoś problem lub pomysł', reportNote: 'Nasz formularz otwiera się w przeglądarce i przekazuje nam twoje zgłoszenie lub pomysł.',
       aboutText: 'Darmowa, otwartoźródłowa, bez reklam, bez śledzenia, w pełni offline.',
       appNamePlus: 'Chogan Plus', aboutTextPlus: 'Darmowa, bez reklam, bez zakupów w aplikacji. Wszystkie gry działają też offline.',
       name: 'Nazwa', country: 'Kraj', optional: 'opcjonalnie',
@@ -425,6 +433,53 @@
       unlocks: 'Motywy i postacie', unlockCost: 'Odblokuj', owned: 'Odblokowane', apply: 'Wybierz',
       tutorial: 'Jak grać', gotIt: 'Rozumiem', stars: 'gwiazdki'
     },
+    fr: {
+      appName: 'Chogan', home: 'Accueil', daily: 'Défi', league: 'Ligue',
+      achievements: 'Trophées', profile: 'Profil', settings: 'Réglages',
+      play: 'Jouer', resume: 'Reprendre', newGame: 'Nouvelle partie', again: 'Rejouer',
+      cardBack: 'Dos des cartes', backCarpet: 'Tapis', backTermeh: 'Termeh', cardSpeed: 'Vitesse', speedSlow: 'Lente', speedNormal: 'Normale', speedFast: 'Rapide',
+      menu: 'Menu', back: 'Retour', undo: 'Annuler', close: 'Fermer', cancel: 'Annuler', result: 'Résultat', seeBoard: 'Voir le plateau',
+      saveImage: 'Enregistrer l’image', copyText: 'Copier le texte',
+      updateReady: 'Une nouvelle version est prête', updateNow: 'Mettre à jour',
+      updRow: 'Mises à jour', updCheck: 'Chercher des mises à jour', updChecking: 'Vérification…', updLatest: 'Tu as la dernière version.', updNew: 'Une nouvelle version est disponible.', updFailed: 'Impossible de vérifier les mises à jour. Réessaie.',
+      installReady: 'Installer Chogan comme une appli', installNow: 'Installer',
+      confirm: 'Confirmer', done: 'OK', next: 'Suivant', skip: 'Passer',
+      start: 'Démarrer', pause: 'Pause', resumeGame: 'Reprendre', restart: 'Recommencer',
+      quit: 'Retour au menu', help: 'Aide', share: 'Partager', copied: 'Copié dans le presse-papiers', imageSaved: 'Enregistrée dans ta galerie',
+      best: 'Record', score: 'Score', time: 'Temps', coins: 'Pièces',
+      newBadge: 'Nouveau', continueBadge: 'Reprendre', todayChallenge: 'Défi du jour',
+      todayChallengeSub: 'Un nouveau puzzle chaque jour, le même pour tous',
+      won: 'Gagné', lost: 'Perdu', finished: 'Terminé',
+      earned: 'Tu as gagné', weeklyPoints: 'Points de la semaine', tier: 'Rang',
+      promoted: 'Promu', demoted: 'Relégué', stayed: 'Rang maintenu',
+      bronze: 'Bronze', silver: 'Argent', gold: 'Or', diamond: 'Diamant', legend: 'Légende',
+      seasonEnds: 'Fin de saison dans', days: 'j', hours: 'h', minutes: 'min',
+      rank: 'Place', points: 'Points', you: 'Toi',
+      playIn: 'Play Jeux : {name}', playOut: 'Play Jeux : non connecté', playSignIn: 'Se connecter',
+      offlineRivals: 'Rivaux hors ligne, générés sur cet appareil',
+      playBoard: 'Classement de la semaine', playBoardIn: 'De vrais joueurs sur Google Play Jeux. Tes points de la semaine y sont envoyés.', playBoardOut: 'Connecte-toi à Play Jeux pour voir de vrais joueurs.', playSeeAll: 'Tout voir dans Play Jeux', playBoardEmpty: 'Aucun score cette semaine.',
+      streak: 'Série', dayStreak: 'jours d’affilée', locked: 'Verrouillé',
+      unlockedAt: 'Débloqué', totalPlays: 'Parties', playTime: 'Temps de jeu', thisWeek: 'Cette semaine', lastWeek: 'Semaine dernière', weekMinutes: 'Temps de jeu (min)', weekWins: 'Victoires', weekDays: 'Jours joués', weekGames: 'Jeux différents',
+      language: 'Langue', theme: 'Thème', themeAuto: 'Auto', themeLight: 'Clair', themeDark: 'Sombre',
+      sfx: 'Effets sonores', music: 'Musique', haptics: 'Vibrations',
+      resetGame: 'Effacer les données du jeu', resetAsk: 'Effacer toutes les données de ce jeu ?',
+      resetWarn: 'Impossible de revenir en arrière.', resetDone: 'Effacé',
+      about: 'À propos', version: 'Version', source: 'Code source', commitHash: 'commit', license: 'Licence',
+      issuesList: 'Signalements et idées', reportForm: 'Signaler un problème ou une idée', reportNote: 'Notre formulaire s’ouvre dans le navigateur et nous envoie ton signalement ou ton idée.',
+      aboutText: 'Gratuit, libre, sans pub, sans pisteurs, entièrement hors ligne.',
+      appNamePlus: 'Chogan Plus', aboutTextPlus: 'Gratuit, sans pub, sans achats intégrés. Tous les jeux marchent aussi hors ligne.',
+      name: 'Nom', country: 'Pays', optional: 'facultatif',
+      hint: 'Indice', hints: 'Indices', notEnoughCoins: 'Pas assez de pièces', hintUsed: 'Indice utilisé',
+      coinsEarned: 'pièces gagnées', playToEarn: 'Joue une partie pour gagner des pièces',
+      keyboard: 'Clavier', difficulty: 'Difficulté',
+      fullscreen: 'Plein écran', exitFullscreen: 'Quitter le plein écran',
+      easy: 'Facile', medium: 'Moyen', hard: 'Difficile', expert: 'Expert',
+      today: 'Aujourd’hui', dailyDone: 'Fait aujourd’hui', dailyOpen: 'Pas encore joué',
+      emptyDaily: 'Rien d’enregistré ce jour-là', noAchievements: 'Pas encore de trophées',
+      sun: 'D', mon: 'L', tue: 'M', wed: 'M', thu: 'J', fri: 'V', sat: 'S',
+      unlocks: 'Thèmes et personnages', unlockCost: 'Débloquer', owned: 'Débloqué', apply: 'Choisir',
+      tutorial: 'Comment jouer', gotIt: 'Compris', stars: 'étoiles'
+    },
     zh: {
       appName: 'Chogan', home: '主页', daily: '每日', league: '联赛',
       achievements: '成就', profile: '个人', settings: '设置',
@@ -433,6 +488,7 @@
       menu: '菜单', back: '返回', undo: '撤销', close: '关闭', cancel: '取消', result: '结果', seeBoard: '查看棋盘',
       saveImage: '保存图片', copyText: '复制文字',
       updateReady: '新版本已就绪', updateNow: '更新',
+      updRow: '更新', updCheck: '检查更新', updChecking: '正在检查…', updLatest: '你使用的是最新版本。', updNew: '有新版本可用。', updFailed: '无法检查更新，请重试。',
       installReady: '将 Chogan 安装为应用', installNow: '安装',
       confirm: '确定', done: '好', next: '下一步', skip: '跳过',
       start: '开始', pause: '暂停', resumeGame: '继续游戏', restart: '重新开始',
@@ -456,6 +512,7 @@
       resetGame: '重置游戏数据', resetAsk: '确定清除这个游戏的全部数据？',
       resetWarn: '此操作无法撤销。', resetDone: '已清除',
       about: '关于', version: '版本', commitHash: '提交', source: '源代码', license: '许可协议',
+      issuesList: '问题与建议列表', reportForm: '报告问题或提出建议', reportNote: '我们的表单会在浏览器中打开，把你的报告或建议发给我们。',
       aboutText: '免费、开源、无广告、无追踪，完全离线。',
       appNamePlus: 'Chogan Plus', aboutTextPlus: '免费、无广告、无内购。所有游戏也可离线游玩。',
       name: '名字', country: '国家', optional: '可选',
@@ -478,6 +535,7 @@
       menu: 'Menü', back: 'Zurück', undo: 'Rückgängig', close: 'Schließen', cancel: 'Abbrechen', result: 'Ergebnis', seeBoard: 'Spielfeld ansehen',
       saveImage: 'Bild speichern', copyText: 'Text kopieren',
       updateReady: 'Eine neue Version ist da', updateNow: 'Aktualisieren',
+      updRow: 'Updates', updCheck: 'Nach Updates suchen', updChecking: 'Wird geprüft…', updLatest: 'Du hast die neueste Version.', updNew: 'Eine neue Version ist verfügbar.', updFailed: 'Die Suche nach Updates hat nicht geklappt. Versuch es noch einmal.',
       installReady: 'Chogan als App installieren', installNow: 'Installieren',
       confirm: 'Bestätigen', done: 'OK', next: 'Weiter', skip: 'Überspringen',
       start: 'Start', pause: 'Pause', resumeGame: 'Weiter', restart: 'Neu starten',
@@ -501,6 +559,7 @@
       resetGame: 'Spieldaten zurücksetzen', resetAsk: 'Alle Daten dieses Spiels löschen?',
       resetWarn: 'Das lässt sich nicht rückgängig machen.', resetDone: 'Gelöscht',
       about: 'Über', version: 'Version', source: 'Quellcode', commitHash: 'Commit', license: 'Lizenz',
+      issuesList: 'Meldungen und Vorschläge', reportForm: 'Problem oder Idee melden', reportNote: 'Unser Formular öffnet sich im Browser und schickt uns deine Meldung oder Idee.',
       aboutText: 'Kostenlos, Open Source, ohne Werbung, ohne Tracker, komplett offline.',
       appNamePlus: 'Chogan Plus', aboutTextPlus: 'Kostenlos, ohne Werbung, ohne In-App-Käufe. Alle Spiele laufen auch offline.',
       name: 'Name', country: 'Land', optional: 'optional',
@@ -523,6 +582,7 @@
       menu: 'Menú', back: 'Atrás', undo: 'Deshacer', close: 'Cerrar', cancel: 'Cancelar', result: 'Resultado', seeBoard: 'Ver el tablero',
       saveImage: 'Guardar imagen', copyText: 'Copiar texto',
       updateReady: 'Hay una versión nueva', updateNow: 'Actualizar',
+      updRow: 'Actualizaciones', updCheck: 'Buscar actualizaciones', updChecking: 'Comprobando…', updLatest: 'Tienes la versión más reciente.', updNew: 'Hay una versión nueva.', updFailed: 'No se pudo comprobar si hay actualizaciones. Vuelve a intentarlo.',
       installReady: 'Instala Chogan como app', installNow: 'Instalar',
       confirm: 'Confirmar', done: 'OK', next: 'Siguiente', skip: 'Saltar',
       start: 'Empezar', pause: 'Pausa', resumeGame: 'Seguir', restart: 'Reiniciar',
@@ -546,6 +606,7 @@
       resetGame: 'Borrar datos del juego', resetAsk: '¿Borrar todos los datos de este juego?',
       resetWarn: 'No se puede deshacer.', resetDone: 'Borrado',
       about: 'Acerca de', version: 'Versión', commitHash: 'commit', source: 'Código fuente', license: 'Licencia',
+      issuesList: 'Incidencias y sugerencias', reportForm: 'Informar de un problema o idea', reportNote: 'Nuestro formulario se abre en el navegador y nos envía tu informe o idea.',
       aboutText: 'Gratis, de código abierto, sin anuncios, sin rastreadores, totalmente sin conexión.',
       appNamePlus: 'Chogan Plus', aboutTextPlus: 'Gratis, sin anuncios, sin compras dentro de la app. Todos los juegos funcionan también sin conexión.',
       name: 'Nombre', country: 'País', optional: 'opcional',
@@ -1254,70 +1315,70 @@
     { id: 'cor-win',     icon: 'trophy',  fa: 'آن طرف راهرو',       en: 'Through the corridor', dfa: 'یک بازی راهرو را مقابل ربات بردی', den: 'Win a game of Corridor against the bot', zh: '穿过走廊', dzh: '对战电脑赢下一局走廊', de: 'Durch den Korridor', dde: 'Gewinne eine Partie Korridor gegen den Bot', es: 'Al otro lado', des: 'Gana una partida de Pasillo contra el bot' },
     { id: 'cor-hard',    icon: 'brain',   fa: 'معمار دیوارها',       en: 'Master builder',    dfa: 'راهرو را مقابل ربات سخت بردی',          den: 'Beat the hard bot at Corridor', zh: '筑墙大师', dzh: '在走廊中战胜困难电脑', de: 'Baumeister', dde: 'Schlage den starken Bot bei Korridor', es: 'Maestro de obras', des: 'Gana al bot difícil en Pasillo' },
     { id: 'cor-flag',    icon: 'flag',    fa: 'زیر پرچم',           en: 'Under the flag',    dfa: 'یک بازی پرچم راهرو را مقابل ربات بردی',   den: 'Win a flag game of Corridor against the bot', zh: '旗下', dzh: '对战电脑赢下一局带旗子的走廊', de: 'Unter der Fahne', dde: 'Gewinne ein Fahnenspiel Korridor gegen den Bot', es: 'Bajo la bandera', des: 'Gana una partida de Pasillo con bandera contra el bot' },
-    { id: 'lnk-win',     icon: 'link',    fa: 'پل زدی',             en: 'Bridged',           dfa: 'یک بازی پل‌بند را مقابل ربات بردی', den: 'Win a game of Link Up against the bot', zh: '架桥成功', dzh: '对战电脑赢下一局连桥', de: 'Brücke geschlagen', dde: 'Gewinne eine Partie Brückenschlag gegen den Bot', es: 'Enlazado', des: 'Gana una partida de Enlaces contra el bot', pl: 'Połączone', dpl: 'Wygraj partię Połączeń z botem' },
-    { id: 'lnk-hard',    icon: 'brain',   fa: 'پل‌ساز',             en: 'Bridge builder',    dfa: 'پل‌بند را مقابل ربات سخت بردی',     den: 'Beat the hard bot at Link Up', zh: '造桥能手', dzh: '在连桥中战胜困难电脑', de: 'Brückenbauer', dde: 'Schlage den starken Bot bei Brückenschlag', es: 'Constructor de puentes', des: 'Gana al bot difícil en Enlaces', pl: 'Budowniczy mostów', dpl: 'Pokonaj trudnego bota w Połączeniach' },
-    { id: 'lnk-four',    icon: 'grid',    fa: 'چهار نفر سر یک صفحه', en: 'Four at one board', dfa: 'یک بازی چهارنفره‌ی پل‌بند را تمام کردی', den: 'Finish a four-player game of Link Up', zh: '四人一盘', dzh: '下完一局四人连桥', de: 'Vier an einem Brett', dde: 'Spiele eine Partie Brückenschlag zu viert zu Ende', es: 'Cuatro en un tablero', des: 'Termina una partida de Enlaces a cuatro', pl: 'Czworo przy planszy', dpl: 'Dokończ partię Połączeń w cztery osoby' },
-    { id: 'sum-clean',   icon: 'star',    fa: 'حساب تمیز',          en: 'Clean sums',        dfa: 'یک جمع‌های ۶×۶ یا بزرگ‌تر را بدون اشتباه و راهنمایی حل کردی', den: 'Solve a 6×6 or larger Sums with no mistake and no hint', zh: '干净的和', dzh: '不出错不用提示解开一道 6×6 或更大的数和', de: 'Saubere Summen', dde: 'Löse Summen ab 6×6 ohne Fehler und ohne Tipp', es: 'Cuentas limpias', des: 'Resuelve unas Sumas de 6×6 o más sin errores ni pistas', pl: 'Czyste sumy', dpl: 'Rozwiąż Sumy 6×6 lub większe bez błędu i podpowiedzi' },
-    { id: 'sum-big',     icon: 'brain',   fa: 'جمع بزرگ',           en: 'Grand total',       dfa: 'یک جمع‌های ۷×۷ را حل کردی',            den: 'Solve a 7×7 Sums', zh: '大总和', dzh: '解开一道 7×7 的数和', de: 'Gesamtsumme', dde: 'Löse Summen in 7×7', es: 'Gran total', des: 'Resuelve unas Sumas de 7×7', pl: 'Suma całkowita', dpl: 'Rozwiąż Sumy 7×7' },
-    { id: 'sum-daily',   icon: 'calendar', fa: 'جمع روز',            en: 'Sums of the day',   dfa: 'جمع‌های روزانه را بدون اشتباه حل کردی', den: 'Solve the daily Sums with no mistake', zh: '今日之和', dzh: '不出错解开每日数和', de: 'Summen des Tages', dde: 'Löse die Summen des Tages ohne Fehler', es: 'Sumas del día', des: 'Resuelve las Sumas diarias sin errores', pl: 'Sumy dnia', dpl: 'Rozwiąż codzienne Sumy bez błędu' },
-    { id: 'tw-30',       icon: 'flag',    fa: 'سی طبقه',            en: 'Thirty floors',     dfa: 'در برج‌ساز به ارتفاع ۳۰ رسیدی', den: 'Reach a height of 30 in Tower Up', zh: '三十层', dzh: '在叠高楼中盖到 30 层', de: 'Dreißig Stockwerke', dde: 'Erreiche bei Turmbau eine Höhe von 30', es: 'Treinta pisos', des: 'Llega a una altura de 30 en Torre arriba', pl: 'Trzydzieści pięter', dpl: 'Osiągnij wysokość 30 w Wieżowcu' },
-    { id: 'tw-perfect',  icon: 'star',    fa: 'دست ثابت',           en: 'Steady hand',       dfa: 'در برج‌ساز ده فرود بی‌نقص پشت سر هم داشتی', den: 'Make ten perfect drops in a row in Tower Up', zh: '稳如磐石', dzh: '在叠高楼中连续十次完美落下', de: 'Ruhige Hand', dde: 'Schaffe bei Turmbau zehn perfekte Treffer in Folge', es: 'Pulso firme', des: 'Logra diez encajes perfectos seguidos en Torre arriba', pl: 'Pewna ręka', dpl: 'Wykonaj dziesięć idealnych zrzutów z rzędu w Wieżowcu' },
-    { id: 'tw-daily',    icon: 'calendar', fa: 'برج روز',           en: 'Tower of the day',  dfa: 'در برج روزانه به ارتفاع ۲۵ رسیدی', den: 'Reach a height of 25 in a daily Tower Up', zh: '今日高楼', dzh: '在每日叠高楼中盖到 25 层', de: 'Turm des Tages', dde: 'Erreiche bei einem Tages-Turmbau eine Höhe von 25', es: 'Torre del día', des: 'Llega a una altura de 25 en una Torre arriba diaria', pl: 'Wieża dnia', dpl: 'Osiągnij wysokość 25 w codziennym Wieżowcu' },
-    { id: 'dom-win',     icon: 'trophy',  fa: 'دومینوباز',          en: 'Bones player',      dfa: 'یک مسابقه‌ی دومینو را مقابل ربات بردی', den: 'Win a game of Dominoes against the bot', zh: '骨牌高手', dzh: '对战电脑赢下一场多米诺', de: 'Steineleger', dde: 'Gewinne ein Domino-Match gegen den Bot', es: 'Fichero', des: 'Gana una partida de Dominó contra el bot', pl: 'Kościarz', dpl: 'Wygraj mecz Domina z botem' },
-    { id: 'dom-hard',    icon: 'brain',   fa: 'استاد کاشی',         en: 'Master of the tiles', dfa: 'دومینو را مقابل ربات سخت بردی',     den: 'Beat the hard bot at Dominoes', zh: '骨牌大师', dzh: '在多米诺中战胜困难电脑', de: 'Meister der Steine', dde: 'Schlage den starken Bot bei Domino', es: 'Maestro del dominó', des: 'Gana al bot difícil en Dominó', pl: 'Mistrz kostek', dpl: 'Pokonaj trudnego bota w Dominie' },
-    { id: 'dom-big',     icon: 'star',    fa: 'ضربه‌ی بیست',         en: 'Big count',         dfa: 'در دومینو با یک کاشی ۲۰ امتیاز یا بیشتر گرفتی', den: 'Score 20 or more with one tile in Dominoes', zh: '一手二十', dzh: '在多米诺中一张牌得 20 分以上', de: 'Großer Wurf', dde: 'Hol bei Domino mit einem Stein 20 Punkte oder mehr', es: 'Gran cuenta', des: 'Suma 20 o más con una ficha en Dominó', pl: 'Duża suma', dpl: 'Zdobądź 20 lub więcej punktów jedną kostką w Dominie' },
-    { id: 'ws-perfect',  icon: 'star',    fa: 'ریزش بی‌خطا',        en: 'Clean pour',        dfa: 'یک رنگ‌ریز متوسط یا سخت را در حد هدف مرتب کردی', den: 'Sort a medium or hard Water Sort within the target', zh: '一滴不洒', dzh: '在目标步数内解开一道中等或困难的倒水排序', de: 'Sauber gegossen', dde: 'Sortiere eine mittlere oder schwere Wassersortierung im Ziel', es: 'Vertido limpio', des: 'Resuelve un Ordena el agua medio o difícil dentro de la meta', pl: 'Czyste przelanie', dpl: 'Rozwiąż średnie lub trudne Sortowanie wody w ramach celu' },
-    { id: 'ws-hard',     icon: 'palette', fa: 'یازده رنگ',          en: 'Eleven colours',    dfa: 'یک رنگ‌ریز سخت را بی لوله‌ی اضافه مرتب کردی', den: 'Sort a hard Water Sort without the extra tube', zh: '十一色', dzh: '不加试管解开一道困难的倒水排序', de: 'Elf Farben', dde: 'Sortiere eine schwere Wassersortierung ohne Extra-Röhrchen', es: 'Once colores', des: 'Resuelve un Ordena el agua difícil sin el tubo extra', pl: 'Jedenaście kolorów', dpl: 'Rozwiąż trudne Sortowanie wody bez dodatkowej probówki' },
-    { id: 'ws-daily',    icon: 'calendar', fa: 'رنگ‌ریز روز',        en: 'Sorted today',      dfa: 'رنگ‌ریز روزانه را در حد هدف مرتب کردی', den: 'Sort the daily Water Sort within the target', zh: '今日排好', dzh: '在目标步数内解开每日倒水排序', de: 'Heute sortiert', dde: 'Sortiere die tägliche Wassersortierung im Ziel', es: 'Ordenado hoy', des: 'Resuelve el Ordena el agua diario dentro de la meta', pl: 'Posortowane dziś', dpl: 'Rozwiąż codzienne Sortowanie wody w ramach celu' },
-    { id: 'fb-win',      icon: 'trophy',  fa: 'سوت پایان',          en: 'Final whistle',     dfa: 'در فوتبال دکمه‌ای ربات را بردی', den: 'Beat the bot at Button Football', zh: '终场哨', dzh: '在按钮足球中战胜电脑', de: 'Abpfiff', dde: 'Schlag den Bot beim Knopffußball', es: 'Pitido final', des: 'Gana al bot en Fútbol de chapas', pl: 'Ostatni gwizdek', dpl: 'Pokonaj bota w Piłkarzykach guzikowych' },
-    { id: 'fb-hard',     icon: 'star',    fa: 'قهرمان جام',         en: 'Cup winner',        dfa: 'در فوتبال دکمه‌ای ربات سخت را بردی', den: 'Beat the hard bot at Button Football', zh: '冠军', dzh: '在按钮足球中战胜困难电脑', de: 'Pokalsieger', dde: 'Schlag den schweren Bot beim Knopffußball', es: 'Campeón de copa', des: 'Gana al bot difícil en Fútbol de chapas', pl: 'Zdobywca pucharu', dpl: 'Pokonaj trudnego bota w Piłkarzykach guzikowych' },
-    { id: 'fb-shut',     icon: 'shield',  fa: 'دروازه‌ی بسته',      en: 'Clean sheet',       dfa: 'در فوتبال دکمه‌ای بی‌آنکه گل بخوری ربات را بردی', den: 'Beat the bot at Button Football without letting in a goal', zh: '零失球', dzh: '在按钮足球中零失球战胜电脑', de: 'Weiße Weste', dde: 'Schlag den Bot beim Knopffußball ohne Gegentor', es: 'Portería a cero', des: 'Gana al bot en Fútbol de chapas sin recibir un gol', pl: 'Czyste konto', dpl: 'Pokonaj bota w Piłkarzykach guzikowych bez straty gola' },
-    { id: 'wg-200',      icon: 'flame',   fa: 'مار دراز',           en: 'Long one',          dfa: 'در مارها به طول ۲۰۰ رسیدی', den: 'Reach a length of 200 in Wrigglers', zh: '长长的蛇', dzh: '在扭扭蛇中长到 200', de: 'Langer Schlängler', dde: 'Erreiche bei Schlängler eine Länge von 200', es: 'Muy larga', des: 'Llega a una longitud de 200 en Serpenteo', pl: 'Długi wąż', dpl: 'Osiągnij długość 200 w grze Węże' },
-    { id: 'wg-five',     icon: 'shield',  fa: 'دام‌گذار',           en: 'Trap setter',       dfa: 'در یک دور مارها پنج ربات به تو خوردند', den: 'Make five bots crash into you in one run of Wrigglers', zh: '设陷高手', dzh: '在一局扭扭蛇中让五条电脑蛇撞上你', de: 'Fallensteller', dde: 'Lass in einer Runde Schlängler fünf Bots in dich krachen', es: 'Trampero', des: 'Haz que cinco bots choquen contigo en una partida de Serpenteo', pl: 'Zastawiacz pułapek', dpl: 'Spraw, by w jednej rundzie Węży pięć botów wpadło na Ciebie' },
-    { id: 'wg-daily',    icon: 'calendar', fa: 'مار روز',           en: 'Wriggler of the day', dfa: 'در میدان روزانه‌ی مارها به طول ۱۲۰ رسیدی', den: 'Reach a length of 120 in a daily Wrigglers arena', zh: '今日之蛇', dzh: '在每日扭扭蛇竞技场中长到 120', de: 'Schlängler des Tages', dde: 'Erreiche in einer Tagesarena von Schlängler eine Länge von 120', es: 'Serpiente del día', des: 'Llega a una longitud de 120 en una arena diaria de Serpenteo', pl: 'Wąż dnia', dpl: 'Osiągnij długość 120 na codziennej arenie Węży' },
-    { id: 'tri-fast',    icon: 'bolt',    fa: 'چشم تیز',            en: 'Sharp eye',         dfa: 'ده سه‌تایی را زیر دو دقیقه پیدا کردی', den: 'Find ten trios in under two minutes', zh: '眼明手快', dzh: '两分钟内找到十组三连组', de: 'Scharfes Auge', dde: 'Finde zehn Trios in unter zwei Minuten', es: 'Ojo agudo', des: 'Encuentra diez tríos en menos de dos minutos', pl: 'Bystre oko', dpl: 'Znajdź dziesięć trójek w mniej niż dwie minuty' },
-    { id: 'tri-deck',    icon: 'list',    fa: 'تا ته دسته',          en: 'The whole deck',    dfa: 'کل دسته‌ی سه‌تایی را تمام کردی',        den: 'Play a whole deck of Trio to the end', zh: '一副到底', dzh: '把一整副三连组打完', de: 'Das ganze Deck', dde: 'Spiele ein ganzes Trio-Deck zu Ende', es: 'La baraja entera', des: 'Juega una baraja entera de Trío hasta el final', pl: 'Cała talia', dpl: 'Rozegraj całą talię Trójki do końca' },
-    { id: 'tri-daily',   icon: 'calendar', fa: 'سه‌تایی روز',        en: 'Trio of the day',   dfa: 'سه‌تایی روزانه را بدون اشتباه تمام کردی', den: 'Finish the daily Trio with no mistake', zh: '今日三连组', dzh: '不出错完成每日三连组', de: 'Trio des Tages', dde: 'Beende das Trio des Tages ohne Fehler', es: 'Trío del día', des: 'Termina el Trío diario sin errores', pl: 'Trójka dnia', dpl: 'Ukończ codzienną Trójkę bez błędu' },
-    { id: 'fr-win',      icon: 'trophy',   fa: 'چهار در ردیف',       en: 'Four in a line',    dfa: 'در چهار در ردیف ربات را ببر', den: 'Beat the bot at Four in a Row', zh: '四子连成', dzh: '在四子连线中战胜电脑', de: 'Vier in einer Linie', dde: 'Schlage den Bot bei Vier in einer Reihe', es: 'Cuatro en línea', des: 'Gana al bot en Cuatro en línea', pl: 'Cztery w linii', dpl: 'Pokonaj bota w Cztery w rzędzie' },
-    { id: 'fr-hard',     icon: 'brain',    fa: 'ستون به ستون',       en: 'Column by column',  dfa: 'در چهار در ردیف ربات سخت را ببر', den: 'Beat the hard bot at Four in a Row', zh: '步步为营', dzh: '在四子连线中战胜困难电脑', de: 'Spalte für Spalte', dde: 'Schlage den schweren Bot bei Vier in einer Reihe', es: 'Columna a columna', des: 'Gana al bot difícil en Cuatro en línea', pl: 'Kolumna po kolumnie', dpl: 'Pokonaj trudnego bota w Cztery w rzędzie' },
-    { id: 'fr-daily',    icon: 'calendar', fa: 'ردیف روز',           en: 'Row of the day',    dfa: 'چهار در ردیف روزانه را ببر', den: 'Win the daily Four in a Row', zh: '今日连线', dzh: '赢下每日四子连线', de: 'Reihe des Tages', dde: 'Gewinne Vier in einer Reihe des Tages', es: 'Línea del día', des: 'Gana el Cuatro en línea diario', pl: 'Rząd dnia', dpl: 'Wygraj codzienne Cztery w rzędzie' },
-    { id: 'pk-win',      icon: 'trophy',   fa: 'رسیدن به قله',       en: 'Summit',            dfa: 'یک دست قله را ببر', den: 'Win a game of Peak', zh: '登上顶峰', dzh: '赢下一局登顶', de: 'Gipfelsieg', dde: 'Gewinne eine Partie Gipfel', es: 'Cima', des: 'Gana una partida de Cumbre', pl: 'Na szczycie', dpl: 'Wygraj partię Szczytu' },
-    { id: 'pk-hard',     icon: 'brain',    fa: 'کوهنورد کارکشته',    en: 'Seasoned climber',  dfa: 'در قله ربات‌های سخت را ببر', den: 'Win Peak against hard bots', zh: '老练登山者', dzh: '在登顶中战胜困难电脑', de: 'Bergprofi', dde: 'Gewinne Gipfel gegen schwere Bots', es: 'Alpinista curtido', des: 'Gana Cumbre contra bots difíciles', pl: 'Doświadczony wspinacz', dpl: 'Wygraj Szczyt z trudnymi botami' },
-    { id: 'pk-daily',    icon: 'calendar', fa: 'قله‌ی روز',          en: 'Peak of the day',   dfa: 'قله‌ی روزانه را ببر', den: 'Win the daily Peak', zh: '今日登顶', dzh: '赢下每日登顶', de: 'Gipfel des Tages', dde: 'Gewinne den Gipfel des Tages', es: 'Cumbre del día', des: 'Gana la Cumbre diaria', pl: 'Szczyt dnia', dpl: 'Wygraj codzienny Szczyt' },
-    { id: 'tr-clean',    icon: 'star',     fa: 'بی‌خطا',             en: 'Clean sweep',       dfa: 'یک قلمرو ۷×۷ یا بزرگ‌تر را بدون هیچ اشتباهی حل کردی', den: 'Solve a 7×7 or larger Territories with no mistake', zh: '零失误', dzh: '不出错解开一道 7×7 或更大的领地', de: 'Fehlerfrei', dde: 'Löse Reviere ab 7×7 ohne Fehler', es: 'Sin un fallo', des: 'Resuelve unos Territorios de 7×7 o más sin errores', pl: 'Bez błędu', dpl: 'Rozwiąż Terytoria 7×7 lub większe bez błędu' },
-    { id: 'tr-big',      icon: 'brain',    fa: 'هشت قلمرو',          en: 'Eight lands',       dfa: 'یک قلمرو ۸×۸ را حل کردی',                den: 'Solve an 8×8 Territories', zh: '八方领地', dzh: '解开一道 8×8 的领地', de: 'Acht Reviere', dde: 'Löse Reviere in 8×8', es: 'Ocho tierras', des: 'Resuelve unos Territorios de 8×8', pl: 'Osiem krain', dpl: 'Rozwiąż Terytoria 8×8' },
-    { id: 'tr-daily',    icon: 'calendar', fa: 'قلمرو روز',          en: 'Lands of the day',  dfa: 'قلمرو روزانه را بدون اشتباه حل کردی',     den: 'Solve the daily Territories with no mistake', zh: '今日领地', dzh: '不出错解开每日领地', de: 'Reviere des Tages', dde: 'Löse die Reviere des Tages ohne Fehler', es: 'Territorios del día', des: 'Resuelve los Territorios diarios sin errores', pl: 'Terytoria dnia', dpl: 'Rozwiąż codzienne Terytoria bez błędu' },
-    { id: 'sr-win',      icon: 'trophy',   fa: 'آسمان پاک',          en: 'Clear skies',       dfa: 'هر نُه مرحله‌ی یورش را تمام کردی', den: 'Clear all nine Star Raid stages', zh: '晴朗天空', dzh: '通关星际突袭全部九个关卡', de: 'Freier Himmel', dde: 'Schaffe alle neun Etappen im Sternenangriff', es: 'Cielo despejado', des: 'Supera las nueve fases del Asalto estelar', pl: 'Czyste niebo', dpl: 'Ukończ wszystkie dziewięć etapów Gwiezdnego najazdu' },
-    { id: 'sr-clean',    icon: 'shield',   fa: 'بی‌خراش',            en: 'Untouched',         dfa: 'در یورش سه موج پشت سر هم بی‌آسیب ماندی', den: 'Clear three Star Raid waves in a row without losing a ship', zh: '毫发无伤', dzh: '在星际突袭中连续三波不损失飞船', de: 'Unberührt', dde: 'Schaffe im Sternenangriff drei Wellen in Folge ohne Schiffsverlust', es: 'Intacto', des: 'Supera tres oleadas seguidas del Asalto estelar sin perder naves', pl: 'Nietknięty', dpl: 'Odeprzyj trzy fale Gwiezdnego najazdu z rzędu bez utraty statku' },
-    { id: 'sr-daily',    icon: 'calendar', fa: 'یورش روز',           en: 'Raid of the day',   dfa: 'در یورش روزانه چهار موج را پاک کردی', den: 'Clear four waves of the daily Star Raid', zh: '今日突袭', dzh: '在每日星际突袭中清除四波', de: 'Angriff des Tages', dde: 'Schaffe vier Wellen im Sternenangriff des Tages', es: 'Asalto del día', des: 'Supera cuatro oleadas del Asalto estelar diario', pl: 'Najazd dnia', dpl: 'Odeprzyj cztery fale w codziennym Gwiezdnym najeździe' },
-    { id: 'pw-clean',    icon: 'star',     fa: 'لوله‌کش دقیق',        en: 'Not a turn wasted', dfa: 'یک لوله‌کشی ۷×۷ یا بزرگ‌تر را با کمترین چرخش حل کردی', den: 'Solve a 7×7 or larger Pipeworks in the fewest turns', zh: '一转不多', dzh: '用最少转动解开 7×7 或更大的接水管', de: 'Keine Drehung zu viel', dde: 'Löse ein Rohrwerk ab 7×7 mit den wenigsten Drehungen', es: 'Ni un giro de más', des: 'Resuelve unas Cañerías de 7×7 o más con los mínimos giros', pl: 'Ani jednego obrotu za dużo', dpl: 'Rozwiąż Rury 7×7 lub większe najmniejszą liczbą obrotów' },
-    { id: 'pw-big',      icon: 'trophy',   fa: 'شبکه‌ی بزرگ',          en: 'Water mains',       dfa: 'یک لوله‌کشی ۹×۹ را حل کردی',                       den: 'Solve a 9×9 Pipeworks', zh: '总水管', dzh: '解开一个 9×9 接水管', de: 'Hauptleitung', dde: 'Löse ein Rohrwerk 9×9', es: 'Red principal', des: 'Resuelve unas Cañerías de 9×9', pl: 'Magistrala', dpl: 'Rozwiąż Rury 9×9' },
-    { id: 'pw-daily',    icon: 'calendar', fa: 'آب امروز',             en: 'Today\'s water',    dfa: 'لوله‌کشی روزانه را حل کردی',                       den: 'Solve the daily Pipeworks', zh: '今日之水', dzh: '解开每日接水管', de: 'Wasser des Tages', dde: 'Löse das Rohrwerk des Tages', es: 'El agua de hoy', des: 'Resuelve las Cañerías diarias', pl: 'Dzisiejsza woda', dpl: 'Rozwiąż codzienne Rury' },
-    { id: 'db-2048',     icon: 'trophy',   fa: 'دو هزار و چهل و هشت', en: 'Doubled up',        dfa: 'در دوبرابر به کاشی ۲۰۴۸ رسیدی', den: 'Reach the 2048 tile in Doubles', zh: '翻倍达人', dzh: '在翻倍中合成 2048 方块', de: 'Verdoppelt', dde: 'Schaffe den Stein 2048 in Doppelt', es: 'Doblado', des: 'Llega a la ficha 2048 en Dobles', pl: 'Podwojone', dpl: 'Zdobądź kafelek 2048 w Podwójnych' },
-    { id: 'db-4096',     icon: 'flame',    fa: 'باز هم دو برابر',     en: 'Double again',      dfa: 'در دوبرابر به کاشی ۴۰۹۶ رسیدی', den: 'Reach the 4096 tile in Doubles', zh: '再翻一倍', dzh: '在翻倍中合成 4096 方块', de: 'Noch einmal doppelt', dde: 'Schaffe den Stein 4096 in Doppelt', es: 'Otra vez doble', des: 'Llega a la ficha 4096 en Dobles', pl: 'Jeszcze raz podwójnie', dpl: 'Zdobądź kafelek 4096 w Podwójnych' },
-    { id: 'db-daily',    icon: 'calendar', fa: 'دوبرابر روز',          en: 'Doubles of the day', dfa: 'در دوبرابر روزانه به کاشی ۱۰۲۴ رسیدی', den: 'Reach the 1024 tile in the daily Doubles', zh: '今日翻倍', dzh: '在每日翻倍中合成 1024 方块', de: 'Doppelt des Tages', dde: 'Schaffe den Stein 1024 im Doppelt des Tages', es: 'Dobles del día', des: 'Llega a la ficha 1024 en Dobles diario', pl: 'Podwójne dnia', dpl: 'Zdobądź kafelek 1024 w codziennych Podwójnych' },
-    { id: 'sk-best',     icon: 'star',     fa: 'بی‌هل اضافه',        en: 'Not one push wasted', dfa: 'یک انبار متوسط یا بزرگ را با کمترین هل ممکن مرتب کردی', den: 'Solve a medium or large Storekeeper in the fewest pushes possible', zh: '一下不多推', dzh: '用最少推动次数完成中或大仓库', de: 'Kein Schub zu viel', dde: 'Löse ein mittleres oder großes Lager mit den wenigsten Schüben', es: 'Ni un empuje de más', des: 'Resuelve un Almacenero mediano o grande con el mínimo de empujes', pl: 'Ani jednego pchnięcia za dużo', dpl: 'Ułóż średni lub duży magazyn w najmniejszej liczbie pchnięć' },
-    { id: 'sk-big',      icon: 'trophy',   fa: 'انبار بزرگ',         en: 'Big warehouse',     dfa: 'یک انبار بزرگ را مرتب کردی',             den: 'Solve a large Storekeeper', zh: '大仓库', dzh: '完成一个大仓库', de: 'Großes Lager', dde: 'Löse ein großes Lager', es: 'Gran almacén', des: 'Resuelve un Almacenero grande', pl: 'Duży magazyn', dpl: 'Ułóż duży magazyn' },
-    { id: 'sk-daily',    icon: 'calendar', fa: 'انبار روز',          en: 'Storeroom of the day', dfa: 'انبار روزانه را با سه ستاره مرتب کردی', den: 'Solve the daily Storekeeper with three stars', zh: '今日仓库', dzh: '三星完成每日仓库', de: 'Lager des Tages', dde: 'Löse das Lager des Tages mit drei Sternen', es: 'Almacén del día', des: 'Resuelve el Almacenero diario con tres estrellas', pl: 'Magazyn dnia', dpl: 'Ułóż codzienny magazyn na trzy gwiazdki' },
-    { id: 'cx-home',     icon: 'trophy',   fa: 'همه در خانه',        en: 'All home',          dfa: 'هر پنج مرحله‌ی گذرگاه را تمام کردی', den: 'Finish all five levels of Crossing', zh: '全部到家', dzh: '通过过路的全部五关', de: 'Alle zu Hause', dde: 'Schaffe alle fünf Stufen im Überweg', es: 'Todos en casa', des: 'Completa los cinco niveles de Cruce', pl: 'Wszyscy w domu', dpl: 'Ukończ wszystkie pięć poziomów Przejścia' },
-    { id: 'cx-clean',    icon: 'shield',   fa: 'بی‌زخم',             en: 'Unhurt',            dfa: 'یک مرحله‌ی گذرگاه را بدون از دست دادن جان تمام کردی', den: 'Clear a level of Crossing without losing a life', zh: '安然无恙', dzh: '在过路中不丢一条命通过一关', de: 'Unversehrt', dde: 'Schaffe eine Stufe im Überweg, ohne ein Leben zu verlieren', es: 'Ileso', des: 'Supera un nivel de Cruce sin perder una vida', pl: 'Bez szwanku', dpl: 'Ukończ poziom Przejścia bez utraty życia' },
-    { id: 'cx-daily',    icon: 'calendar', fa: 'گذرگاه روز',         en: 'Crossing of the day', dfa: 'گذرگاه روزانه را تا آخر بردی', den: 'Win the daily Crossing', zh: '今日过路', dzh: '通关每日过路', de: 'Überweg des Tages', dde: 'Gewinne den Überweg des Tages', es: 'Cruce del día', des: 'Gana el Cruce del día', pl: 'Przejście dnia', dpl: 'Wygraj codzienne Przejście' },
-    { id: 'cm-win',      icon: 'trophy',   fa: 'صفحه‌ی تمیز',        en: 'Clean board',       dfa: 'در کاروم ربات را بردی', den: 'Beat the bot at Carrom', zh: '清台', dzh: '在克朗棋中战胜电脑', de: 'Leeres Brett', dde: 'Schlag den Bot beim Carrom', es: 'Tablero limpio', des: 'Gana al bot en Carrom', pl: 'Czysta plansza', dpl: 'Pokonaj bota w carromie' },
-    { id: 'cm-hard',     icon: 'star',     fa: 'سلطان ضربه‌زن',      en: 'Striker king',      dfa: 'در کاروم ربات سخت را بردی', den: 'Beat the hard bot at Carrom', zh: '母子之王', dzh: '在克朗棋中战胜困难电脑', de: 'Strikerkönig', dde: 'Schlag den schweren Bot beim Carrom', es: 'Rey del striker', des: 'Gana al bot difícil en Carrom', pl: 'Król strikera', dpl: 'Pokonaj trudnego bota w carromie' },
-    { id: 'cm-queen',    icon: 'crown',    fa: 'ملکه‌ی پوشیده',       en: 'Queen covered',     dfa: 'در کاروم ملکه را خودت پوشاندی و ربات را بردی', den: 'Cover the queen yourself and beat the bot at Carrom', zh: '保住红后', dzh: '在克朗棋中亲自保住红后并战胜电脑', de: 'Dame gedeckt', dde: 'Deck die Dame selbst und schlag den Bot beim Carrom', es: 'Reina cubierta', des: 'Cubre tú la reina y gana al bot en Carrom', pl: 'Królowa pokryta', dpl: 'Pokryj królową sam i pokonaj bota w carromie' },
-    { id: 'nd-2048',     icon: 'trophy',   fa: 'ریزش طلایی',          en: 'Golden drop',       dfa: 'در عددریز به ۲۰۴۸ رسیدی', den: 'Make 2048 in Number Drop', zh: '金色落块', dzh: '在数字掉落中合成 2048', de: 'Goldener Fall', dde: 'Bilde 2048 im Zahlenfall', es: 'Caída dorada', des: 'Forma 2048 en Caída de números', pl: 'Złoty spadek', dpl: 'Zrób 2048 w Spadających liczbach' },
-    { id: 'nd-chain',    icon: 'flame',    fa: 'آبشار عدد',           en: 'Number waterfall',  dfa: 'در عددریز با یک بلوک زنجیره‌ای چهارتایی ساختی', den: 'Set off a chain of four merges with one block in Number Drop', zh: '数字瀑布', dzh: '在数字掉落中用一个方块引发四连锁', de: 'Zahlenkaskade', dde: 'Löse im Zahlenfall mit einem Block eine Kette aus vier aus', es: 'Cascada de números', des: 'Provoca una cadena de cuatro con un bloque en Caída de números', pl: 'Wodospad liczb', dpl: 'Wywołaj jednym klockiem łańcuch czterech w Spadających liczbach' },
-    { id: 'nd-daily',    icon: 'calendar', fa: 'عددریز روز',          en: 'Drop of the day',   dfa: 'در عددریز روزانه به ۵۱۲ رسیدی', den: 'Make 512 in the daily Number Drop', zh: '今日落块', dzh: '在每日数字掉落中合成 512', de: 'Fall des Tages', dde: 'Bilde 512 im Zahlenfall des Tages', es: 'Caída del día', des: 'Forma 512 en la Caída de números diaria', pl: 'Spadek dnia', dpl: 'Zrób 512 w codziennych Spadających liczbach' },
-    { id: 'hr-1k',       icon: 'trophy',   fa: 'یک کیلومتر',          en: 'One kilometre',     dfa: 'در تپه‌سوار در یک دور ۱۰۰۰ متر رفتی', den: 'Drive 1,000 m in one Hillrider run', zh: '一公里', dzh: '在山丘车手中一局开出 1000 米', de: 'Ein Kilometer', dde: 'Fahr im Hügelflitzer 1000 m in einer Fahrt', es: 'Un kilómetro', des: 'Recorre 1000 m en una partida de Trepacolinas', pl: 'Jeden kilometr', dpl: 'Przejedź 1000 m w jednym przejeździe Jeźdźca wzgórz' },
-    { id: 'hr-flip',     icon: 'sparkle',  fa: 'معلق کامل',           en: 'Full turn',         dfa: 'در تپه‌سوار یک دور کامل در هوا زدی و سالم فرود آمدی', den: 'Turn a full circle in the air in Hillrider and land on your wheels', zh: '空中一圈', dzh: '在山丘车手中空翻一整圈并安全落地', de: 'Volle Drehung', dde: 'Dreh dich im Hügelflitzer einmal ganz in der Luft und lande auf den Rädern', es: 'Vuelta completa', des: 'Da una vuelta completa en el aire en Trepacolinas y aterriza sobre las ruedas', pl: 'Pełny obrót', dpl: 'Zrób pełny obrót w powietrzu w Jeźdźcu wzgórz i wyląduj na kołach' },
-    { id: 'hr-daily',    icon: 'calendar', fa: 'تپه‌ی روز',           en: 'Hill of the day',   dfa: 'در تپه‌سوار روزانه به پرچم رسیدی', den: 'Reach the flag in the daily Hillrider', zh: '今日山丘', dzh: '在每日山丘车手中到达旗子', de: 'Hügel des Tages', dde: 'Erreiche die Fahne im Hügelflitzer des Tages', es: 'Colina del día', des: 'Llega a la bandera en el Trepacolinas diario', pl: 'Wzgórze dnia', dpl: 'Dojedź do flagi w codziennym Jeźdźcu wzgórz' },
-    { id: 'ci-win',      icon: 'trophy',   fa: 'پرچم شطرنجی',         en: 'Chequered flag',    dfa: 'در پیست اول شدی', den: 'Win a race in Circuit', zh: '方格旗', dzh: '在赛道中赢得一场比赛', de: 'Zielflagge', dde: 'Gewinne ein Rennen auf der Rennstrecke', es: 'Bandera a cuadros', des: 'Gana una carrera en Circuito', pl: 'Flaga w szachownicę', dpl: 'Wygraj wyścig na Torze' },
-    { id: 'ci-hard',     icon: 'star',     fa: 'قهرمان پیست',         en: 'Hard charger',      dfa: 'در پیست سطح سخت اول شدی', den: 'Win a hard race in Circuit', zh: '赛道王者', dzh: '在赛道困难难度中获胜', de: 'Rennass', dde: 'Gewinne ein schweres Rennen auf der Rennstrecke', es: 'As del volante', des: 'Gana una carrera difícil en Circuito', pl: 'As kierownicy', dpl: 'Wygraj trudny wyścig na Torze' },
-    { id: 'ci-clean',    icon: 'shield',   fa: 'رانندگی تمیز',        en: 'Clean racer',       dfa: 'یک مسابقه‌ی پیست را بی بیرون زدن از جاده تمام کن', den: 'Finish a Circuit race without leaving the road', zh: '干净驾驶', dzh: '全程不离开路面完成一场赛道比赛', de: 'Saubere Fahrt', dde: 'Beende ein Rennen, ohne die Straße zu verlassen', es: 'Conducción limpia', des: 'Termina una carrera de Circuito sin salirte de la pista', pl: 'Czysta jazda', dpl: 'Ukończ wyścig na Torze bez zjazdu z drogi' },
-    { id: 'ci-daily',    icon: 'calendar', fa: 'مسابقه‌ی روز',         en: 'Race of the day',   dfa: 'در پیست روزانه اول شدی', den: 'Win the daily Circuit race', zh: '今日赛车', dzh: '赢得每日赛道比赛', de: 'Rennen des Tages', dde: 'Gewinne das Rennen des Tages', es: 'Carrera del día', des: 'Gana la carrera diaria de Circuito', pl: 'Wyścig dnia', dpl: 'Wygraj codzienny wyścig na Torze' },
-    { id: 'mo-run',      icon: 'trophy',   fa: 'جاده‌ی بلند',         en: 'Long road',         dfa: 'در موتورسوار در یک دور ده کیلومتر رفتی', den: 'Ride 10 km in one run of Moto Rush', zh: '漫漫长路', dzh: '在摩托狂飙中一局骑行 10 公里', de: 'Lange Straße', dde: 'Fahre in einem Lauf von Motorrad-Rausch 10 km', es: 'Carretera larga', des: 'Recorre 10 km en una partida de Moto veloz', pl: 'Długa droga', dpl: 'Przejedź 10 km w jednej grze Motopędu' },
-    { id: 'mo-close',    icon: 'flame',    fa: 'مو به مو',            en: 'By a hair',         dfa: 'در موتورسوار هشت بار پشت سر هم از کنار ماشین‌ها رد شدی', den: 'Make a combo of eight near misses in Moto Rush', zh: '毫厘之间', dzh: '在摩托狂飙中连续八次擦身而过', de: 'Um Haaresbreite', dde: 'Schaffe in Motorrad-Rausch eine Serie von acht knappen Manövern', es: 'Por un pelo', des: 'Encadena ocho roces en Moto veloz', pl: 'O włos', dpl: 'Zrób serię ośmiu mijanek o włos w Motopędzie' },
-    { id: 'mo-daily',    icon: 'calendar', fa: 'موتورسوار روز',       en: 'Ride of the day',   dfa: 'موتورسوار روزانه را تا خط پایان رفتی', den: 'Reach the finish of the daily Moto Rush', zh: '今日飞驰', dzh: '骑到每日摩托狂飙的终点', de: 'Fahrt des Tages', dde: 'Erreiche das Ziel von Motorrad-Rausch des Tages', es: 'Carrera del día', des: 'Llega a la meta de Moto veloz del día', pl: 'Jazda dnia', dpl: 'Dojedź do mety codziennego Motopędu' },
+    { id: 'lnk-win',     icon: 'link',    fa: 'پل زدی',             en: 'Bridged',           dfa: 'یک بازی پل‌بند را مقابل ربات بردی', den: 'Win a game of Link Up against the bot', zh: '架桥成功', dzh: '对战电脑赢下一局连桥', de: 'Brücke geschlagen', dde: 'Gewinne eine Partie Brückenschlag gegen den Bot', es: 'Enlazado', des: 'Gana una partida de Enlaces contra el bot', pl: 'Połączone', dpl: 'Wygraj partię Połączeń z botem', fr: 'Pont jeté', dfr: 'Gagne une partie de Liaisons contre le bot' },
+    { id: 'lnk-hard',    icon: 'brain',   fa: 'پل‌ساز',             en: 'Bridge builder',    dfa: 'پل‌بند را مقابل ربات سخت بردی',     den: 'Beat the hard bot at Link Up', zh: '造桥能手', dzh: '在连桥中战胜困难电脑', de: 'Brückenbauer', dde: 'Schlage den starken Bot bei Brückenschlag', es: 'Constructor de puentes', des: 'Gana al bot difícil en Enlaces', pl: 'Budowniczy mostów', dpl: 'Pokonaj trudnego bota w Połączeniach', fr: 'Bâtisseur de ponts', dfr: 'Bats le bot difficile à Liaisons' },
+    { id: 'lnk-four',    icon: 'grid',    fa: 'چهار نفر سر یک صفحه', en: 'Four at one board', dfa: 'یک بازی چهارنفره‌ی پل‌بند را تمام کردی', den: 'Finish a four-player game of Link Up', zh: '四人一盘', dzh: '下完一局四人连桥', de: 'Vier an einem Brett', dde: 'Spiele eine Partie Brückenschlag zu viert zu Ende', es: 'Cuatro en un tablero', des: 'Termina una partida de Enlaces a cuatro', pl: 'Czworo przy planszy', dpl: 'Dokończ partię Połączeń w cztery osoby', fr: 'Quatre autour du plateau', dfr: 'Termine une partie de Liaisons à quatre' },
+    { id: 'sum-clean',   icon: 'star',    fa: 'حساب تمیز',          en: 'Clean sums',        dfa: 'یک جمع‌های ۶×۶ یا بزرگ‌تر را بدون اشتباه و راهنمایی حل کردی', den: 'Solve a 6×6 or larger Sums with no mistake and no hint', zh: '干净的和', dzh: '不出错不用提示解开一道 6×6 或更大的数和', de: 'Saubere Summen', dde: 'Löse Summen ab 6×6 ohne Fehler und ohne Tipp', es: 'Cuentas limpias', des: 'Resuelve unas Sumas de 6×6 o más sin errores ni pistas', pl: 'Czyste sumy', dpl: 'Rozwiąż Sumy 6×6 lub większe bez błędu i podpowiedzi', fr: 'Calcul propre', dfr: 'Résous des Sommes 6×6 ou plus sans erreur ni indice' },
+    { id: 'sum-big',     icon: 'brain',   fa: 'جمع بزرگ',           en: 'Grand total',       dfa: 'یک جمع‌های ۷×۷ را حل کردی',            den: 'Solve a 7×7 Sums', zh: '大总和', dzh: '解开一道 7×7 的数和', de: 'Gesamtsumme', dde: 'Löse Summen in 7×7', es: 'Gran total', des: 'Resuelve unas Sumas de 7×7', pl: 'Suma całkowita', dpl: 'Rozwiąż Sumy 7×7', fr: 'Grand total', dfr: 'Résous des Sommes 7×7' },
+    { id: 'sum-daily',   icon: 'calendar', fa: 'جمع روز',            en: 'Sums of the day',   dfa: 'جمع‌های روزانه را بدون اشتباه حل کردی', den: 'Solve the daily Sums with no mistake', zh: '今日之和', dzh: '不出错解开每日数和', de: 'Summen des Tages', dde: 'Löse die Summen des Tages ohne Fehler', es: 'Sumas del día', des: 'Resuelve las Sumas diarias sin errores', pl: 'Sumy dnia', dpl: 'Rozwiąż codzienne Sumy bez błędu', fr: 'Sommes du jour', dfr: 'Résous les Sommes du jour sans erreur' },
+    { id: 'tw-30',       icon: 'flag',    fa: 'سی طبقه',            en: 'Thirty floors',     dfa: 'در برج‌ساز به ارتفاع ۳۰ رسیدی', den: 'Reach a height of 30 in Tower Up', zh: '三十层', dzh: '在叠高楼中盖到 30 层', de: 'Dreißig Stockwerke', dde: 'Erreiche bei Turmbau eine Höhe von 30', es: 'Treinta pisos', des: 'Llega a una altura de 30 en Torre arriba', pl: 'Trzydzieści pięter', dpl: 'Osiągnij wysokość 30 w Wieżowcu', fr: 'Trente étages', dfr: 'Atteins une hauteur de 30 au Gratte-ciel' },
+    { id: 'tw-perfect',  icon: 'star',    fa: 'دست ثابت',           en: 'Steady hand',       dfa: 'در برج‌ساز ده فرود بی‌نقص پشت سر هم داشتی', den: 'Make ten perfect drops in a row in Tower Up', zh: '稳如磐石', dzh: '在叠高楼中连续十次完美落下', de: 'Ruhige Hand', dde: 'Schaffe bei Turmbau zehn perfekte Treffer in Folge', es: 'Pulso firme', des: 'Logra diez encajes perfectos seguidos en Torre arriba', pl: 'Pewna ręka', dpl: 'Wykonaj dziesięć idealnych zrzutów z rzędu w Wieżowcu', fr: 'Main sûre', dfr: 'Réussis dix poses parfaites d’affilée au Gratte-ciel' },
+    { id: 'tw-daily',    icon: 'calendar', fa: 'برج روز',           en: 'Tower of the day',  dfa: 'در برج روزانه به ارتفاع ۲۵ رسیدی', den: 'Reach a height of 25 in a daily Tower Up', zh: '今日高楼', dzh: '在每日叠高楼中盖到 25 层', de: 'Turm des Tages', dde: 'Erreiche bei einem Tages-Turmbau eine Höhe von 25', es: 'Torre del día', des: 'Llega a una altura de 25 en una Torre arriba diaria', pl: 'Wieża dnia', dpl: 'Osiągnij wysokość 25 w codziennym Wieżowcu', fr: 'Tour du jour', dfr: 'Atteins une hauteur de 25 au Gratte-ciel du jour' },
+    { id: 'dom-win',     icon: 'trophy',  fa: 'دومینوباز',          en: 'Bones player',      dfa: 'یک مسابقه‌ی دومینو را مقابل ربات بردی', den: 'Win a game of Dominoes against the bot', zh: '骨牌高手', dzh: '对战电脑赢下一场多米诺', de: 'Steineleger', dde: 'Gewinne ein Domino-Match gegen den Bot', es: 'Fichero', des: 'Gana una partida de Dominó contra el bot', pl: 'Kościarz', dpl: 'Wygraj mecz Domina z botem', fr: 'Poseur de dominos', dfr: 'Gagne une partie de Dominos contre le bot' },
+    { id: 'dom-hard',    icon: 'brain',   fa: 'استاد کاشی',         en: 'Master of the tiles', dfa: 'دومینو را مقابل ربات سخت بردی',     den: 'Beat the hard bot at Dominoes', zh: '骨牌大师', dzh: '在多米诺中战胜困难电脑', de: 'Meister der Steine', dde: 'Schlage den starken Bot bei Domino', es: 'Maestro del dominó', des: 'Gana al bot difícil en Dominó', pl: 'Mistrz kostek', dpl: 'Pokonaj trudnego bota w Dominie', fr: 'Maître des dominos', dfr: 'Bats le bot difficile aux Dominos' },
+    { id: 'dom-big',     icon: 'star',    fa: 'ضربه‌ی بیست',         en: 'Big count',         dfa: 'در دومینو با یک کاشی ۲۰ امتیاز یا بیشتر گرفتی', den: 'Score 20 or more with one tile in Dominoes', zh: '一手二十', dzh: '在多米诺中一张牌得 20 分以上', de: 'Großer Wurf', dde: 'Hol bei Domino mit einem Stein 20 Punkte oder mehr', es: 'Gran cuenta', des: 'Suma 20 o más con una ficha en Dominó', pl: 'Duża suma', dpl: 'Zdobądź 20 lub więcej punktów jedną kostką w Dominie', fr: 'Gros coup', dfr: 'Marque 20 points ou plus avec un seul domino' },
+    { id: 'ws-perfect',  icon: 'star',    fa: 'ریزش بی‌خطا',        en: 'Clean pour',        dfa: 'یک رنگ‌ریز متوسط یا سخت را در حد هدف مرتب کردی', den: 'Sort a medium or hard Water Sort within the target', zh: '一滴不洒', dzh: '在目标步数内解开一道中等或困难的倒水排序', de: 'Sauber gegossen', dde: 'Sortiere eine mittlere oder schwere Wassersortierung im Ziel', es: 'Vertido limpio', des: 'Resuelve un Ordena el agua medio o difícil dentro de la meta', pl: 'Czyste przelanie', dpl: 'Rozwiąż średnie lub trudne Sortowanie wody w ramach celu', fr: 'Versement net', dfr: 'Résous un Tri de l’eau moyen ou difficile dans l’objectif' },
+    { id: 'ws-hard',     icon: 'palette', fa: 'یازده رنگ',          en: 'Eleven colours',    dfa: 'یک رنگ‌ریز سخت را بی لوله‌ی اضافه مرتب کردی', den: 'Sort a hard Water Sort without the extra tube', zh: '十一色', dzh: '不加试管解开一道困难的倒水排序', de: 'Elf Farben', dde: 'Sortiere eine schwere Wassersortierung ohne Extra-Röhrchen', es: 'Once colores', des: 'Resuelve un Ordena el agua difícil sin el tubo extra', pl: 'Jedenaście kolorów', dpl: 'Rozwiąż trudne Sortowanie wody bez dodatkowej probówki', fr: 'Onze couleurs', dfr: 'Résous un Tri de l’eau difficile sans tube en plus' },
+    { id: 'ws-daily',    icon: 'calendar', fa: 'رنگ‌ریز روز',        en: 'Sorted today',      dfa: 'رنگ‌ریز روزانه را در حد هدف مرتب کردی', den: 'Sort the daily Water Sort within the target', zh: '今日排好', dzh: '在目标步数内解开每日倒水排序', de: 'Heute sortiert', dde: 'Sortiere die tägliche Wassersortierung im Ziel', es: 'Ordenado hoy', des: 'Resuelve el Ordena el agua diario dentro de la meta', pl: 'Posortowane dziś', dpl: 'Rozwiąż codzienne Sortowanie wody w ramach celu', fr: 'Trié aujourd’hui', dfr: 'Résous le Tri de l’eau du jour dans l’objectif' },
+    { id: 'fb-win',      icon: 'trophy',  fa: 'سوت پایان',          en: 'Final whistle',     dfa: 'در فوتبال دکمه‌ای ربات را بردی', den: 'Beat the bot at Button Football', zh: '终场哨', dzh: '在按钮足球中战胜电脑', de: 'Abpfiff', dde: 'Schlag den Bot beim Knopffußball', es: 'Pitido final', des: 'Gana al bot en Fútbol de chapas', pl: 'Ostatni gwizdek', dpl: 'Pokonaj bota w Piłkarzykach guzikowych', fr: 'Coup de sifflet final', dfr: 'Bats le bot au Foot à boutons' },
+    { id: 'fb-hard',     icon: 'star',    fa: 'قهرمان جام',         en: 'Cup winner',        dfa: 'در فوتبال دکمه‌ای ربات سخت را بردی', den: 'Beat the hard bot at Button Football', zh: '冠军', dzh: '在按钮足球中战胜困难电脑', de: 'Pokalsieger', dde: 'Schlag den schweren Bot beim Knopffußball', es: 'Campeón de copa', des: 'Gana al bot difícil en Fútbol de chapas', pl: 'Zdobywca pucharu', dpl: 'Pokonaj trudnego bota w Piłkarzykach guzikowych', fr: 'Vainqueur de la coupe', dfr: 'Bats le bot difficile au Foot à boutons' },
+    { id: 'fb-shut',     icon: 'shield',  fa: 'دروازه‌ی بسته',      en: 'Clean sheet',       dfa: 'در فوتبال دکمه‌ای بی‌آنکه گل بخوری ربات را بردی', den: 'Beat the bot at Button Football without letting in a goal', zh: '零失球', dzh: '在按钮足球中零失球战胜电脑', de: 'Weiße Weste', dde: 'Schlag den Bot beim Knopffußball ohne Gegentor', es: 'Portería a cero', des: 'Gana al bot en Fútbol de chapas sin recibir un gol', pl: 'Czyste konto', dpl: 'Pokonaj bota w Piłkarzykach guzikowych bez straty gola', fr: 'Cage inviolée', dfr: 'Bats le bot au Foot à boutons sans encaisser de but' },
+    { id: 'wg-200',      icon: 'flame',   fa: 'مار دراز',           en: 'Long one',          dfa: 'در مارها به طول ۲۰۰ رسیدی', den: 'Reach a length of 200 in Wrigglers', zh: '长长的蛇', dzh: '在扭扭蛇中长到 200', de: 'Langer Schlängler', dde: 'Erreiche bei Schlängler eine Länge von 200', es: 'Muy larga', des: 'Llega a una longitud de 200 en Serpenteo', pl: 'Długi wąż', dpl: 'Osiągnij długość 200 w grze Węże', fr: 'Le plus long', dfr: 'Atteins une longueur de 200 dans Serpentins' },
+    { id: 'wg-five',     icon: 'shield',  fa: 'دام‌گذار',           en: 'Trap setter',       dfa: 'در یک دور مارها پنج ربات به تو خوردند', den: 'Make five bots crash into you in one run of Wrigglers', zh: '设陷高手', dzh: '在一局扭扭蛇中让五条电脑蛇撞上你', de: 'Fallensteller', dde: 'Lass in einer Runde Schlängler fünf Bots in dich krachen', es: 'Trampero', des: 'Haz que cinco bots choquen contigo en una partida de Serpenteo', pl: 'Zastawiacz pułapek', dpl: 'Spraw, by w jednej rundzie Węży pięć botów wpadło na Ciebie', fr: 'Poseur de pièges', dfr: 'Fais percuter cinq bots contre toi en une partie de Serpentins' },
+    { id: 'wg-daily',    icon: 'calendar', fa: 'مار روز',           en: 'Wriggler of the day', dfa: 'در میدان روزانه‌ی مارها به طول ۱۲۰ رسیدی', den: 'Reach a length of 120 in a daily Wrigglers arena', zh: '今日之蛇', dzh: '在每日扭扭蛇竞技场中长到 120', de: 'Schlängler des Tages', dde: 'Erreiche in einer Tagesarena von Schlängler eine Länge von 120', es: 'Serpiente del día', des: 'Llega a una longitud de 120 en una arena diaria de Serpenteo', pl: 'Wąż dnia', dpl: 'Osiągnij długość 120 na codziennej arenie Węży', fr: 'Serpentin du jour', dfr: 'Atteins une longueur de 120 dans l’arène du jour de Serpentins' },
+    { id: 'tri-fast',    icon: 'bolt',    fa: 'چشم تیز',            en: 'Sharp eye',         dfa: 'ده سه‌تایی را زیر دو دقیقه پیدا کردی', den: 'Find ten trios in under two minutes', zh: '眼明手快', dzh: '两分钟内找到十组三连组', de: 'Scharfes Auge', dde: 'Finde zehn Trios in unter zwei Minuten', es: 'Ojo agudo', des: 'Encuentra diez tríos en menos de dos minutos', pl: 'Bystre oko', dpl: 'Znajdź dziesięć trójek w mniej niż dwie minuty', fr: 'Œil vif', dfr: 'Trouve dix trios en moins de deux minutes' },
+    { id: 'tri-deck',    icon: 'list',    fa: 'تا ته دسته',          en: 'The whole deck',    dfa: 'کل دسته‌ی سه‌تایی را تمام کردی',        den: 'Play a whole deck of Trio to the end', zh: '一副到底', dzh: '把一整副三连组打完', de: 'Das ganze Deck', dde: 'Spiele ein ganzes Trio-Deck zu Ende', es: 'La baraja entera', des: 'Juega una baraja entera de Trío hasta el final', pl: 'Cała talia', dpl: 'Rozegraj całą talię Trójki do końca', fr: 'Tout le paquet', dfr: 'Joue un paquet entier de Trio jusqu’au bout' },
+    { id: 'tri-daily',   icon: 'calendar', fa: 'سه‌تایی روز',        en: 'Trio of the day',   dfa: 'سه‌تایی روزانه را بدون اشتباه تمام کردی', den: 'Finish the daily Trio with no mistake', zh: '今日三连组', dzh: '不出错完成每日三连组', de: 'Trio des Tages', dde: 'Beende das Trio des Tages ohne Fehler', es: 'Trío del día', des: 'Termina el Trío diario sin errores', pl: 'Trójka dnia', dpl: 'Ukończ codzienną Trójkę bez błędu', fr: 'Trio du jour', dfr: 'Termine le Trio du jour sans erreur' },
+    { id: 'fr-win',      icon: 'trophy',   fa: 'چهار در ردیف',       en: 'Four in a line',    dfa: 'در چهار در ردیف ربات را ببر', den: 'Beat the bot at Four in a Row', zh: '四子连成', dzh: '在四子连线中战胜电脑', de: 'Vier in einer Linie', dde: 'Schlage den Bot bei Vier in einer Reihe', es: 'Cuatro en línea', des: 'Gana al bot en Cuatro en línea', pl: 'Cztery w linii', dpl: 'Pokonaj bota w Cztery w rzędzie', fr: 'Quatre alignés', dfr: 'Bats le bot à Quatre en ligne' },
+    { id: 'fr-hard',     icon: 'brain',    fa: 'ستون به ستون',       en: 'Column by column',  dfa: 'در چهار در ردیف ربات سخت را ببر', den: 'Beat the hard bot at Four in a Row', zh: '步步为营', dzh: '在四子连线中战胜困难电脑', de: 'Spalte für Spalte', dde: 'Schlage den schweren Bot bei Vier in einer Reihe', es: 'Columna a columna', des: 'Gana al bot difícil en Cuatro en línea', pl: 'Kolumna po kolumnie', dpl: 'Pokonaj trudnego bota w Cztery w rzędzie', fr: 'Colonne par colonne', dfr: 'Bats le bot difficile à Quatre en ligne' },
+    { id: 'fr-daily',    icon: 'calendar', fa: 'ردیف روز',           en: 'Row of the day',    dfa: 'چهار در ردیف روزانه را ببر', den: 'Win the daily Four in a Row', zh: '今日连线', dzh: '赢下每日四子连线', de: 'Reihe des Tages', dde: 'Gewinne Vier in einer Reihe des Tages', es: 'Línea del día', des: 'Gana el Cuatro en línea diario', pl: 'Rząd dnia', dpl: 'Wygraj codzienne Cztery w rzędzie', fr: 'Ligne du jour', dfr: 'Gagne le Quatre en ligne du jour' },
+    { id: 'pk-win',      icon: 'trophy',   fa: 'رسیدن به قله',       en: 'Summit',            dfa: 'یک دست قله را ببر', den: 'Win a game of Peak', zh: '登上顶峰', dzh: '赢下一局登顶', de: 'Gipfelsieg', dde: 'Gewinne eine Partie Gipfel', es: 'Cima', des: 'Gana una partida de Cumbre', pl: 'Na szczycie', dpl: 'Wygraj partię Szczytu', fr: 'Au sommet', dfr: 'Gagne une partie de Sommet' },
+    { id: 'pk-hard',     icon: 'brain',    fa: 'کوهنورد کارکشته',    en: 'Seasoned climber',  dfa: 'در قله ربات‌های سخت را ببر', den: 'Win Peak against hard bots', zh: '老练登山者', dzh: '在登顶中战胜困难电脑', de: 'Bergprofi', dde: 'Gewinne Gipfel gegen schwere Bots', es: 'Alpinista curtido', des: 'Gana Cumbre contra bots difíciles', pl: 'Doświadczony wspinacz', dpl: 'Wygraj Szczyt z trudnymi botami', fr: 'Grimpeur aguerri', dfr: 'Gagne au Sommet contre des bots difficiles' },
+    { id: 'pk-daily',    icon: 'calendar', fa: 'قله‌ی روز',          en: 'Peak of the day',   dfa: 'قله‌ی روزانه را ببر', den: 'Win the daily Peak', zh: '今日登顶', dzh: '赢下每日登顶', de: 'Gipfel des Tages', dde: 'Gewinne den Gipfel des Tages', es: 'Cumbre del día', des: 'Gana la Cumbre diaria', pl: 'Szczyt dnia', dpl: 'Wygraj codzienny Szczyt', fr: 'Sommet du jour', dfr: 'Gagne le Sommet du jour' },
+    { id: 'tr-clean',    icon: 'star',     fa: 'بی‌خطا',             en: 'Clean sweep',       dfa: 'یک قلمرو ۷×۷ یا بزرگ‌تر را بدون هیچ اشتباهی حل کردی', den: 'Solve a 7×7 or larger Territories with no mistake', zh: '零失误', dzh: '不出错解开一道 7×7 或更大的领地', de: 'Fehlerfrei', dde: 'Löse Reviere ab 7×7 ohne Fehler', es: 'Sin un fallo', des: 'Resuelve unos Territorios de 7×7 o más sin errores', pl: 'Bez błędu', dpl: 'Rozwiąż Terytoria 7×7 lub większe bez błędu', fr: 'Sans faute', dfr: 'Résous des Territoires 7×7 ou plus sans erreur' },
+    { id: 'tr-big',      icon: 'brain',    fa: 'هشت قلمرو',          en: 'Eight lands',       dfa: 'یک قلمرو ۸×۸ را حل کردی',                den: 'Solve an 8×8 Territories', zh: '八方领地', dzh: '解开一道 8×8 的领地', de: 'Acht Reviere', dde: 'Löse Reviere in 8×8', es: 'Ocho tierras', des: 'Resuelve unos Territorios de 8×8', pl: 'Osiem krain', dpl: 'Rozwiąż Terytoria 8×8', fr: 'Huit terres', dfr: 'Résous des Territoires 8×8' },
+    { id: 'tr-daily',    icon: 'calendar', fa: 'قلمرو روز',          en: 'Lands of the day',  dfa: 'قلمرو روزانه را بدون اشتباه حل کردی',     den: 'Solve the daily Territories with no mistake', zh: '今日领地', dzh: '不出错解开每日领地', de: 'Reviere des Tages', dde: 'Löse die Reviere des Tages ohne Fehler', es: 'Territorios del día', des: 'Resuelve los Territorios diarios sin errores', pl: 'Terytoria dnia', dpl: 'Rozwiąż codzienne Terytoria bez błędu', fr: 'Terres du jour', dfr: 'Résous les Territoires du jour sans erreur' },
+    { id: 'sr-win',      icon: 'trophy',   fa: 'آسمان پاک',          en: 'Clear skies',       dfa: 'هر نُه مرحله‌ی یورش را تمام کردی', den: 'Clear all nine Star Raid stages', zh: '晴朗天空', dzh: '通关星际突袭全部九个关卡', de: 'Freier Himmel', dde: 'Schaffe alle neun Etappen im Sternenangriff', es: 'Cielo despejado', des: 'Supera las nueve fases del Asalto estelar', pl: 'Czyste niebo', dpl: 'Ukończ wszystkie dziewięć etapów Gwiezdnego najazdu', fr: 'Ciel dégagé', dfr: 'Termine les neuf étapes de Raid stellaire' },
+    { id: 'sr-clean',    icon: 'shield',   fa: 'بی‌خراش',            en: 'Untouched',         dfa: 'در یورش سه موج پشت سر هم بی‌آسیب ماندی', den: 'Clear three Star Raid waves in a row without losing a ship', zh: '毫发无伤', dzh: '在星际突袭中连续三波不损失飞船', de: 'Unberührt', dde: 'Schaffe im Sternenangriff drei Wellen in Folge ohne Schiffsverlust', es: 'Intacto', des: 'Supera tres oleadas seguidas del Asalto estelar sin perder naves', pl: 'Nietknięty', dpl: 'Odeprzyj trzy fale Gwiezdnego najazdu z rzędu bez utraty statku', fr: 'Intact', dfr: 'Repousse trois vagues de Raid stellaire d’affilée sans perdre de vaisseau' },
+    { id: 'sr-daily',    icon: 'calendar', fa: 'یورش روز',           en: 'Raid of the day',   dfa: 'در یورش روزانه چهار موج را پاک کردی', den: 'Clear four waves of the daily Star Raid', zh: '今日突袭', dzh: '在每日星际突袭中清除四波', de: 'Angriff des Tages', dde: 'Schaffe vier Wellen im Sternenangriff des Tages', es: 'Asalto del día', des: 'Supera cuatro oleadas del Asalto estelar diario', pl: 'Najazd dnia', dpl: 'Odeprzyj cztery fale w codziennym Gwiezdnym najeździe', fr: 'Raid du jour', dfr: 'Repousse quatre vagues du Raid stellaire du jour' },
+    { id: 'pw-clean',    icon: 'star',     fa: 'لوله‌کش دقیق',        en: 'Not a turn wasted', dfa: 'یک لوله‌کشی ۷×۷ یا بزرگ‌تر را با کمترین چرخش حل کردی', den: 'Solve a 7×7 or larger Pipeworks in the fewest turns', zh: '一转不多', dzh: '用最少转动解开 7×7 或更大的接水管', de: 'Keine Drehung zu viel', dde: 'Löse ein Rohrwerk ab 7×7 mit den wenigsten Drehungen', es: 'Ni un giro de más', des: 'Resuelve unas Cañerías de 7×7 o más con los mínimos giros', pl: 'Ani jednego obrotu za dużo', dpl: 'Rozwiąż Rury 7×7 lub większe najmniejszą liczbą obrotów', fr: 'Pas un tour de trop', dfr: 'Résous une Tuyauterie 7×7 ou plus en un minimum de rotations' },
+    { id: 'pw-big',      icon: 'trophy',   fa: 'شبکه‌ی بزرگ',          en: 'Water mains',       dfa: 'یک لوله‌کشی ۹×۹ را حل کردی',                       den: 'Solve a 9×9 Pipeworks', zh: '总水管', dzh: '解开一个 9×9 接水管', de: 'Hauptleitung', dde: 'Löse ein Rohrwerk 9×9', es: 'Red principal', des: 'Resuelve unas Cañerías de 9×9', pl: 'Magistrala', dpl: 'Rozwiąż Rury 9×9', fr: 'Grand réseau', dfr: 'Résous une Tuyauterie 9×9' },
+    { id: 'pw-daily',    icon: 'calendar', fa: 'آب امروز',             en: 'Today\'s water',    dfa: 'لوله‌کشی روزانه را حل کردی',                       den: 'Solve the daily Pipeworks', zh: '今日之水', dzh: '解开每日接水管', de: 'Wasser des Tages', dde: 'Löse das Rohrwerk des Tages', es: 'El agua de hoy', des: 'Resuelve las Cañerías diarias', pl: 'Dzisiejsza woda', dpl: 'Rozwiąż codzienne Rury', fr: 'L’eau du jour', dfr: 'Résous la Tuyauterie du jour' },
+    { id: 'db-2048',     icon: 'trophy',   fa: 'دو هزار و چهل و هشت', en: 'Doubled up',        dfa: 'در دوبرابر به کاشی ۲۰۴۸ رسیدی', den: 'Reach the 2048 tile in Doubles', zh: '翻倍达人', dzh: '在翻倍中合成 2048 方块', de: 'Verdoppelt', dde: 'Schaffe den Stein 2048 in Doppelt', es: 'Doblado', des: 'Llega a la ficha 2048 en Dobles', pl: 'Podwojone', dpl: 'Zdobądź kafelek 2048 w Podwójnych', fr: 'Doublé', dfr: 'Atteins la tuile 2048 dans Doubles' },
+    { id: 'db-4096',     icon: 'flame',    fa: 'باز هم دو برابر',     en: 'Double again',      dfa: 'در دوبرابر به کاشی ۴۰۹۶ رسیدی', den: 'Reach the 4096 tile in Doubles', zh: '再翻一倍', dzh: '在翻倍中合成 4096 方块', de: 'Noch einmal doppelt', dde: 'Schaffe den Stein 4096 in Doppelt', es: 'Otra vez doble', des: 'Llega a la ficha 4096 en Dobles', pl: 'Jeszcze raz podwójnie', dpl: 'Zdobądź kafelek 4096 w Podwójnych', fr: 'Encore le double', dfr: 'Atteins la tuile 4096 dans Doubles' },
+    { id: 'db-daily',    icon: 'calendar', fa: 'دوبرابر روز',          en: 'Doubles of the day', dfa: 'در دوبرابر روزانه به کاشی ۱۰۲۴ رسیدی', den: 'Reach the 1024 tile in the daily Doubles', zh: '今日翻倍', dzh: '在每日翻倍中合成 1024 方块', de: 'Doppelt des Tages', dde: 'Schaffe den Stein 1024 im Doppelt des Tages', es: 'Dobles del día', des: 'Llega a la ficha 1024 en Dobles diario', pl: 'Podwójne dnia', dpl: 'Zdobądź kafelek 1024 w codziennych Podwójnych', fr: 'Doubles du jour', dfr: 'Atteins la tuile 1024 dans les Doubles du jour' },
+    { id: 'sk-best',     icon: 'star',     fa: 'بی‌هل اضافه',        en: 'Not one push wasted', dfa: 'یک انبار متوسط یا بزرگ را با کمترین هل ممکن مرتب کردی', den: 'Solve a medium or large Storekeeper in the fewest pushes possible', zh: '一下不多推', dzh: '用最少推动次数完成中或大仓库', de: 'Kein Schub zu viel', dde: 'Löse ein mittleres oder großes Lager mit den wenigsten Schüben', es: 'Ni un empuje de más', des: 'Resuelve un Almacenero mediano o grande con el mínimo de empujes', pl: 'Ani jednego pchnięcia za dużo', dpl: 'Ułóż średni lub duży magazyn w najmniejszej liczbie pchnięć', fr: 'Pas une poussée de trop', dfr: 'Résous un Magasinier moyen ou grand avec le moins de poussées possible' },
+    { id: 'sk-big',      icon: 'trophy',   fa: 'انبار بزرگ',         en: 'Big warehouse',     dfa: 'یک انبار بزرگ را مرتب کردی',             den: 'Solve a large Storekeeper', zh: '大仓库', dzh: '完成一个大仓库', de: 'Großes Lager', dde: 'Löse ein großes Lager', es: 'Gran almacén', des: 'Resuelve un Almacenero grande', pl: 'Duży magazyn', dpl: 'Ułóż duży magazyn', fr: 'Grand entrepôt', dfr: 'Résous un grand Magasinier' },
+    { id: 'sk-daily',    icon: 'calendar', fa: 'انبار روز',          en: 'Storeroom of the day', dfa: 'انبار روزانه را با سه ستاره مرتب کردی', den: 'Solve the daily Storekeeper with three stars', zh: '今日仓库', dzh: '三星完成每日仓库', de: 'Lager des Tages', dde: 'Löse das Lager des Tages mit drei Sternen', es: 'Almacén del día', des: 'Resuelve el Almacenero diario con tres estrellas', pl: 'Magazyn dnia', dpl: 'Ułóż codzienny magazyn na trzy gwiazdki', fr: 'Réserve du jour', dfr: 'Résous le Magasinier du jour avec trois étoiles' },
+    { id: 'cx-home',     icon: 'trophy',   fa: 'همه در خانه',        en: 'All home',          dfa: 'هر پنج مرحله‌ی گذرگاه را تمام کردی', den: 'Finish all five levels of Crossing', zh: '全部到家', dzh: '通过过路的全部五关', de: 'Alle zu Hause', dde: 'Schaffe alle fünf Stufen im Überweg', es: 'Todos en casa', des: 'Completa los cinco niveles de Cruce', pl: 'Wszyscy w domu', dpl: 'Ukończ wszystkie pięć poziomów Przejścia', fr: 'Tous à la maison', dfr: 'Termine les cinq niveaux de Traversée' },
+    { id: 'cx-clean',    icon: 'shield',   fa: 'بی‌زخم',             en: 'Unhurt',            dfa: 'یک مرحله‌ی گذرگاه را بدون از دست دادن جان تمام کردی', den: 'Clear a level of Crossing without losing a life', zh: '安然无恙', dzh: '在过路中不丢一条命通过一关', de: 'Unversehrt', dde: 'Schaffe eine Stufe im Überweg, ohne ein Leben zu verlieren', es: 'Ileso', des: 'Supera un nivel de Cruce sin perder una vida', pl: 'Bez szwanku', dpl: 'Ukończ poziom Przejścia bez utraty życia', fr: 'Sain et sauf', dfr: 'Termine un niveau de Traversée sans perdre de vie' },
+    { id: 'cx-daily',    icon: 'calendar', fa: 'گذرگاه روز',         en: 'Crossing of the day', dfa: 'گذرگاه روزانه را تا آخر بردی', den: 'Win the daily Crossing', zh: '今日过路', dzh: '通关每日过路', de: 'Überweg des Tages', dde: 'Gewinne den Überweg des Tages', es: 'Cruce del día', des: 'Gana el Cruce del día', pl: 'Przejście dnia', dpl: 'Wygraj codzienne Przejście', fr: 'Traversée du jour', dfr: 'Gagne la Traversée du jour' },
+    { id: 'cm-win',      icon: 'trophy',   fa: 'صفحه‌ی تمیز',        en: 'Clean board',       dfa: 'در کاروم ربات را بردی', den: 'Beat the bot at Carrom', zh: '清台', dzh: '在克朗棋中战胜电脑', de: 'Leeres Brett', dde: 'Schlag den Bot beim Carrom', es: 'Tablero limpio', des: 'Gana al bot en Carrom', pl: 'Czysta plansza', dpl: 'Pokonaj bota w carromie', fr: 'Plateau net', dfr: 'Bats le bot au Carrom' },
+    { id: 'cm-hard',     icon: 'star',     fa: 'سلطان ضربه‌زن',      en: 'Striker king',      dfa: 'در کاروم ربات سخت را بردی', den: 'Beat the hard bot at Carrom', zh: '母子之王', dzh: '在克朗棋中战胜困难电脑', de: 'Strikerkönig', dde: 'Schlag den schweren Bot beim Carrom', es: 'Rey del striker', des: 'Gana al bot difícil en Carrom', pl: 'Król strikera', dpl: 'Pokonaj trudnego bota w carromie', fr: 'Roi du striker', dfr: 'Bats le bot difficile au Carrom' },
+    { id: 'cm-queen',    icon: 'crown',    fa: 'ملکه‌ی پوشیده',       en: 'Queen covered',     dfa: 'در کاروم ملکه را خودت پوشاندی و ربات را بردی', den: 'Cover the queen yourself and beat the bot at Carrom', zh: '保住红后', dzh: '在克朗棋中亲自保住红后并战胜电脑', de: 'Dame gedeckt', dde: 'Deck die Dame selbst und schlag den Bot beim Carrom', es: 'Reina cubierta', des: 'Cubre tú la reina y gana al bot en Carrom', pl: 'Królowa pokryta', dpl: 'Pokryj królową sam i pokonaj bota w carromie', fr: 'Reine couverte', dfr: 'Couvre toi-même la reine et bats le bot au Carrom' },
+    { id: 'nd-2048',     icon: 'trophy',   fa: 'ریزش طلایی',          en: 'Golden drop',       dfa: 'در عددریز به ۲۰۴۸ رسیدی', den: 'Make 2048 in Number Drop', zh: '金色落块', dzh: '在数字掉落中合成 2048', de: 'Goldener Fall', dde: 'Bilde 2048 im Zahlenfall', es: 'Caída dorada', des: 'Forma 2048 en Caída de números', pl: 'Złoty spadek', dpl: 'Zrób 2048 w Spadających liczbach', fr: 'Chute dorée', dfr: 'Fais 2048 dans Chute de nombres' },
+    { id: 'nd-chain',    icon: 'flame',    fa: 'آبشار عدد',           en: 'Number waterfall',  dfa: 'در عددریز با یک بلوک زنجیره‌ای چهارتایی ساختی', den: 'Set off a chain of four merges with one block in Number Drop', zh: '数字瀑布', dzh: '在数字掉落中用一个方块引发四连锁', de: 'Zahlenkaskade', dde: 'Löse im Zahlenfall mit einem Block eine Kette aus vier aus', es: 'Cascada de números', des: 'Provoca una cadena de cuatro con un bloque en Caída de números', pl: 'Wodospad liczb', dpl: 'Wywołaj jednym klockiem łańcuch czterech w Spadających liczbach', fr: 'Cascade de nombres', dfr: 'Déclenche une chaîne de quatre fusions avec un bloc dans Chute de nombres' },
+    { id: 'nd-daily',    icon: 'calendar', fa: 'عددریز روز',          en: 'Drop of the day',   dfa: 'در عددریز روزانه به ۵۱۲ رسیدی', den: 'Make 512 in the daily Number Drop', zh: '今日落块', dzh: '在每日数字掉落中合成 512', de: 'Fall des Tages', dde: 'Bilde 512 im Zahlenfall des Tages', es: 'Caída del día', des: 'Forma 512 en la Caída de números diaria', pl: 'Spadek dnia', dpl: 'Zrób 512 w codziennych Spadających liczbach', fr: 'Chute du jour', dfr: 'Fais 512 dans la Chute de nombres du jour' },
+    { id: 'hr-1k',       icon: 'trophy',   fa: 'یک کیلومتر',          en: 'One kilometre',     dfa: 'در تپه‌سوار در یک دور ۱۰۰۰ متر رفتی', den: 'Drive 1,000 m in one Hillrider run', zh: '一公里', dzh: '在山丘车手中一局开出 1000 米', de: 'Ein Kilometer', dde: 'Fahr im Hügelflitzer 1000 m in einer Fahrt', es: 'Un kilómetro', des: 'Recorre 1000 m en una partida de Trepacolinas', pl: 'Jeden kilometr', dpl: 'Przejedź 1000 m w jednym przejeździe Jeźdźca wzgórz', fr: 'Un kilomètre', dfr: 'Roule 1000 m en une seule course de Grimpe-colline' },
+    { id: 'hr-flip',     icon: 'sparkle',  fa: 'معلق کامل',           en: 'Full turn',         dfa: 'در تپه‌سوار یک دور کامل در هوا زدی و سالم فرود آمدی', den: 'Turn a full circle in the air in Hillrider and land on your wheels', zh: '空中一圈', dzh: '在山丘车手中空翻一整圈并安全落地', de: 'Volle Drehung', dde: 'Dreh dich im Hügelflitzer einmal ganz in der Luft und lande auf den Rädern', es: 'Vuelta completa', des: 'Da una vuelta completa en el aire en Trepacolinas y aterriza sobre las ruedas', pl: 'Pełny obrót', dpl: 'Zrób pełny obrót w powietrzu w Jeźdźcu wzgórz i wyląduj na kołach', fr: 'Tour complet', dfr: 'Fais un tour complet en l’air dans Grimpe-colline et retombe sur tes roues' },
+    { id: 'hr-daily',    icon: 'calendar', fa: 'تپه‌ی روز',           en: 'Hill of the day',   dfa: 'در تپه‌سوار روزانه به پرچم رسیدی', den: 'Reach the flag in the daily Hillrider', zh: '今日山丘', dzh: '在每日山丘车手中到达旗子', de: 'Hügel des Tages', dde: 'Erreiche die Fahne im Hügelflitzer des Tages', es: 'Colina del día', des: 'Llega a la bandera en el Trepacolinas diario', pl: 'Wzgórze dnia', dpl: 'Dojedź do flagi w codziennym Jeźdźcu wzgórz', fr: 'Colline du jour', dfr: 'Atteins le drapeau dans le Grimpe-colline du jour' },
+    { id: 'ci-win',      icon: 'trophy',   fa: 'پرچم شطرنجی',         en: 'Chequered flag',    dfa: 'در پیست اول شدی', den: 'Win a race in Circuit', zh: '方格旗', dzh: '在赛道中赢得一场比赛', de: 'Zielflagge', dde: 'Gewinne ein Rennen auf der Rennstrecke', es: 'Bandera a cuadros', des: 'Gana una carrera en Circuito', pl: 'Flaga w szachownicę', dpl: 'Wygraj wyścig na Torze', fr: 'Drapeau à damier', dfr: 'Gagne une course sur Circuit' },
+    { id: 'ci-hard',     icon: 'star',     fa: 'قهرمان پیست',         en: 'Hard charger',      dfa: 'در پیست سطح سخت اول شدی', den: 'Win a hard race in Circuit', zh: '赛道王者', dzh: '在赛道困难难度中获胜', de: 'Rennass', dde: 'Gewinne ein schweres Rennen auf der Rennstrecke', es: 'As del volante', des: 'Gana una carrera difícil en Circuito', pl: 'As kierownicy', dpl: 'Wygraj trudny wyścig na Torze', fr: 'As du volant', dfr: 'Gagne une course difficile sur Circuit' },
+    { id: 'ci-clean',    icon: 'shield',   fa: 'رانندگی تمیز',        en: 'Clean racer',       dfa: 'یک مسابقه‌ی پیست را بی بیرون زدن از جاده تمام کن', den: 'Finish a Circuit race without leaving the road', zh: '干净驾驶', dzh: '全程不离开路面完成一场赛道比赛', de: 'Saubere Fahrt', dde: 'Beende ein Rennen, ohne die Straße zu verlassen', es: 'Conducción limpia', des: 'Termina una carrera de Circuito sin salirte de la pista', pl: 'Czysta jazda', dpl: 'Ukończ wyścig na Torze bez zjazdu z drogi', fr: 'Conduite propre', dfr: 'Termine une course de Circuit sans quitter la route' },
+    { id: 'ci-daily',    icon: 'calendar', fa: 'مسابقه‌ی روز',         en: 'Race of the day',   dfa: 'در پیست روزانه اول شدی', den: 'Win the daily Circuit race', zh: '今日赛车', dzh: '赢得每日赛道比赛', de: 'Rennen des Tages', dde: 'Gewinne das Rennen des Tages', es: 'Carrera del día', des: 'Gana la carrera diaria de Circuito', pl: 'Wyścig dnia', dpl: 'Wygraj codzienny wyścig na Torze', fr: 'Course du jour', dfr: 'Gagne la course quotidienne de Circuit' },
+    { id: 'mo-run',      icon: 'trophy',   fa: 'جاده‌ی بلند',         en: 'Long road',         dfa: 'در موتورسوار در یک دور ده کیلومتر رفتی', den: 'Ride 10 km in one run of Moto Rush', zh: '漫漫长路', dzh: '在摩托狂飙中一局骑行 10 公里', de: 'Lange Straße', dde: 'Fahre in einem Lauf von Motorrad-Rausch 10 km', es: 'Carretera larga', des: 'Recorre 10 km en una partida de Moto veloz', pl: 'Długa droga', dpl: 'Przejedź 10 km w jednej grze Motopędu', fr: 'Longue route', dfr: 'Roule 10 km en une seule partie de Moto Express' },
+    { id: 'mo-close',    icon: 'flame',    fa: 'مو به مو',            en: 'By a hair',         dfa: 'در موتورسوار هشت بار پشت سر هم از کنار ماشین‌ها رد شدی', den: 'Make a combo of eight near misses in Moto Rush', zh: '毫厘之间', dzh: '在摩托狂飙中连续八次擦身而过', de: 'Um Haaresbreite', dde: 'Schaffe in Motorrad-Rausch eine Serie von acht knappen Manövern', es: 'Por un pelo', des: 'Encadena ocho roces en Moto veloz', pl: 'O włos', dpl: 'Zrób serię ośmiu mijanek o włos w Motopędzie', fr: 'D’un cheveu', dfr: 'Enchaîne huit frôlements d’affilée dans Moto Express' },
+    { id: 'mo-daily',    icon: 'calendar', fa: 'موتورسوار روز',       en: 'Ride of the day',   dfa: 'موتورسوار روزانه را تا خط پایان رفتی', den: 'Reach the finish of the daily Moto Rush', zh: '今日飞驰', dzh: '骑到每日摩托狂飙的终点', de: 'Fahrt des Tages', dde: 'Erreiche das Ziel von Motorrad-Rausch des Tages', es: 'Carrera del día', des: 'Llega a la meta de Moto veloz del día', pl: 'Jazda dnia', dpl: 'Dojedź do mety codziennego Motopędu', fr: 'Balade du jour', dfr: 'Atteins l’arrivée du Moto Express du jour' },
     { id: 'go-win',      icon: 'medal',   fa: 'زمین‌گیر',          en: 'Territory',         dfa: 'یک دست گو را مقابل ربات بردی',        den: 'Win a game of go against the AI', zh: '围地', dzh: '对战电脑赢下一局围棋', de: 'Gebietsherr', dde: 'Gewinne eine Partie Go gegen den Computer', es: 'Territorio', des: 'Gana una partida de Go contra la IA' },
     { id: 'go-hard',     icon: 'brain',   fa: 'دو چشم',            en: 'Two eyes',          dfa: 'در گو ربات سخت را شکست دادی',         den: 'Beat the hard AI at go', zh: '两只眼', dzh: '在围棋中击败困难电脑', de: 'Zwei Augen', dde: 'Schlag die schwere Go-KI', es: 'Dos ojos', des: 'Vence a la IA difícil en Go' },
     { id: 'bj-win',      icon: 'trophy',  fa: 'دیلر را بردی',      en: 'Beat the dealer',   dfa: 'یک مسابقه‌ی ده‌دستی بیست‌ویک را بردی', den: 'Win a ten-hand blackjack match', zh: '赢过庄家', dzh: '赢下一场十手的二十一点比赛', de: 'Croupier geschlagen', dde: 'Gewinne eine Blackjack-Partie aus zehn Händen', es: 'Vence a la banca', des: 'Gana una partida de Blackjack de diez manos' },
@@ -2545,6 +2606,57 @@
     return bar;
   };
 
+  // The update check the Profile can run by hand (#788). A player on an old iPad behind a
+  // restricted network could not tell "no update", "the check failed" and "stuck on an
+  // old build" apart, because the automatic check is silent in all three. check() runs the
+  // same reg.update() the page runs on load and answers 'new', 'latest' or 'failed'; no
+  // other request is made. Only the web registers a service worker, so in the Android
+  // app supported stays false and the Profile shows nothing.
+  Chogan.updates = {
+    supported: false, ready: null, sw: null, worker: null, onFound: null, onApply: null,
+    // a worker that finished installing while a page is in control is an update
+    found: function (w) {
+      if (!w || !this.sw || !this.sw.controller) return false;
+      this.worker = w;
+      if (this.onFound) this.onFound(w);
+      return true;
+    },
+    check: function () {
+      var self = this;
+      if (!self.supported || !self.ready) return Promise.resolve('failed');
+      if (self.worker) return Promise.resolve('new');
+      return Promise.resolve(self.ready).then(function (reg) {
+        return Promise.resolve(reg.update()).then(function () { return reg; });
+      }).then(function (reg) {
+        var w = reg.waiting || reg.installing;
+        if (!w) return 'latest';
+        return self.settle(w);
+      }, function () { return 'failed'; });
+    },
+    // an update still installing is 'new' once installed, 'failed' if it is thrown away
+    settle: function (w) {
+      var self = this;
+      return new Promise(function (resolve) {
+        var done = false, timer = null;
+        var end = function (r) {
+          if (done) return;
+          done = true;
+          if (timer) clearTimeout(timer);
+          resolve(r === 'new' && !self.found(w) ? 'latest' : r);
+        };
+        var look = function () {
+          if (w.state === 'installed' || w.state === 'activating' || w.state === 'activated') end('new');
+          else if (w.state === 'redundant') end('failed');
+        };
+        look();
+        if (done) return;
+        w.addEventListener('statechange', look);
+        timer = setTimeout(function () { end('failed'); }, 30000);
+      });
+    },
+    apply: function () { if (this.worker && this.onApply) this.onApply(this.worker); }
+  };
+
   // The install bar (#557) looks like the update bar. onGo opens the browser's own
   // install question and may return a promise; onNo is a tap on the cross.
   ui.installBar = function (onGo, onNo) {
@@ -3544,24 +3656,31 @@
         if (!hadController) return;
         reload();
       });
+      var U = Chogan.updates, regOk, regFail;
+      var apply = function (worker) {
+        worker.postMessage({ type: 'skipWaiting' });
+        // اگر به هر دلیل کنترل‌کننده عوض نشد، دست کاربر خالی نماند
+        setTimeout(reload, 2500);
+      };
       var offer = function (worker) {
         if (offered || !worker) return;
         offered = true;
-        ui.updateBar(function () {
-          worker.postMessage({ type: 'skipWaiting' });
-          // اگر به هر دلیل کنترل‌کننده عوض نشد، دست کاربر خالی نماند
-          setTimeout(reload, 2500);
-        });
+        ui.updateBar(function () { apply(worker); });
       };
+      // the Profile's check (#788) shares this registration, its bar and its button
+      U.supported = true; U.sw = sw; U.onFound = offer; U.onApply = apply;
+      U.ready = new Promise(function (ok, fail) { regOk = ok; regFail = fail; });
+      U.ready.catch(function () {});
       global.addEventListener('load', function () {
         sw.register('sw.js', { scope: './', updateViaCache: 'none' }).then(function (reg) {
-          if (reg.waiting && sw.controller) offer(reg.waiting);
+          regOk(reg);
+          if (reg.waiting) U.found(reg.waiting);
           reg.addEventListener('updatefound', function () {
             var w = reg.installing;
             if (!w) return;
             w.addEventListener('statechange', function () {
               // نصب تمام شده و کنترل‌کننده‌ای هم هست: این یک آپدیت است، نه نصب اول
-              if (w.state === 'installed' && sw.controller) offer(w);
+              if (w.state === 'installed') U.found(w);
             });
           });
           reg.update();
@@ -3573,7 +3692,7 @@
             last = Date.now();
             reg.update();
           });
-        }).catch(function () { /* بدون سرویس‌ورکر هم اپ کار می‌کند */ });
+        }).catch(function (e) { regFail(e); /* بدون سرویس‌ورکر هم اپ کار می‌کند */ });
       });
     }
     return Chogan;
