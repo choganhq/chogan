@@ -190,6 +190,9 @@ function CircuitEngineFactory() {
   // How a bot drives: aim a little way ahead on its lane, step round a car in front
   function botInput(S, idx) {
     var T = S.T, c = S.cars[idx], me = progress(S, c), lane = c.lane;
+    // a car that has finished pulls to the side of the road and stops; left to drive on, it
+    // kept circling while the player was still racing (#764, the owner's first race)
+    if (c.done) return { steer: drive(S, c, (c.d < 0 ? -1 : 1) * (HW - 4), 0).steer, brake: true };
     for (var o = 0; o < S.cars.length; o++) {
       if (o === idx) continue;
       var e = S.cars[o], gap = progress(S, e) - me;
@@ -468,6 +471,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = CircuitEng
   var wrap = el('div', { class: 'ci-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, status])]);
 
   ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  // the track and difficulty live behind a gear, not only inside the new-race button (#764)
+  ctx.button({ icon: 'gear', label: C.t('settings'), onClick: function () { settings(); } });
   ctx.button({ icon: 'refresh', label: C.t('newRace'), onClick: function () { askNew(); } });
   ctx.main.appendChild(wrap);
   ctx.mount();
@@ -500,10 +505,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = CircuitEng
     C.audio.sfx('tap');
     kick();
   }
+  // New race restarts with the choice already made; picking another track or level is the gear's job
   function askNew() {
-    if (!R || !R.daily) { settings(); return; }
-    if (ended || S.t === 0) { newRace({ daily: true }); return; }
-    C.ui.confirm({ title: C.t('newRace'), body: C.t('resetWarn'), onOk: function () { newRace({ daily: true }); } });
+    var again = R && R.daily ? function () { newRace({ daily: true }); } : function () { newRace(current()); };
+    if (!S || ended || S.t === 0) { again(); return; }
+    C.ui.confirm({ title: C.t('newRace'), body: C.t('resetWarn'), onOk: again });
   }
   function settings() {
     var o = current(), body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
@@ -513,7 +519,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = CircuitEng
     body.appendChild(C.ui.segmented([{ value: 'easy', label: C.t('easy') }, { value: 'medium', label: C.t('medium') }, { value: 'hard', label: C.t('hard') }], o.level, function (v) { o.level = v; }));
     if (S && !ended && S.t > 0) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('resetWarn') }));
     C.ui.modal({
-      title: C.t('newRace'), closeButton: true, body: [body],
+      title: C.t('settings'), closeButton: true, body: [body],
       actions: [{ label: C.t('cancel') }, { label: C.t('start'), kind: 'primary', onClick: function () { newRace(o); } }]
     });
   }

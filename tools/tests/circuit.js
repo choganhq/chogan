@@ -133,6 +133,25 @@ module.exports = function (T) {
     ok(/C\.daily\('circuit', dailyDate\)\.rng/.test(html) && /C\.stats\.best\('circuit', bestKey\(\)/.test(html), 'the daily track is seeded by the day, and the best lap is kept per track');
     ok(/ctx\.tutorialIfNew\(TUT\)/.test(html) && !/history\.(push|replace)State|localStorage/.test(html), 'a tutorial, no history or direct storage');
     ok(!/retro ?racing/i.test(html) && !/retro ?racing/i.test(JSON.stringify(gm)), 'the product name "Retro Racing" appears nowhere');
+    // #764: the track and difficulty were reachable only through the new-race button, and the first
+    // open had no gear; options live behind a gear, and New race restarts with the saved choice
+    ok(/ctx\.button\(\{ icon: 'gear', label: C\.t\('settings'\), onClick: function \(\) \{ settings\(\); \} \}\)/.test(html) && /title: C\.t\('settings'\), closeButton: true/.test(html), 'the track and difficulty sit behind a gear whose window is titled Settings');
+    ok(/function askNew\(\) \{\s*var again = R && R\.daily/.test(html) && !/if \(!R \|\| !R\.daily\) \{ settings\(\); return; \}/.test(html), 'New race restarts with the chosen track and level instead of opening the choice');
+    // #764: a bot that has finished its laps stops at the side of the road instead of driving on
+    {
+      const S = E.race(built[0][1], 'hard');
+      let n = 0, fin = {};
+      while (n < 60 * 400 && Object.keys(fin).length < E.CARS - 1) {
+        E.step(S, { steer: 0, brake: true }); n++;
+        for (let k = 1; k < E.CARS; k++) if (S.cars[k].done && !fin[k]) fin[k] = n;
+      }
+      const all = Object.keys(fin).length === E.CARS - 1;
+      for (let i = 0; i < 400; i++) E.step(S, { steer: 0, brake: true });
+      const before = S.cars.slice(1).map((c) => [c.x, c.y]);
+      for (let i = 0; i < 200; i++) E.step(S, { steer: 0, brake: true });
+      const moved = S.cars.slice(1).map((c, i) => Math.hypot(c.x - before[i][0], c.y - before[i][1]));
+      ok(all && S.cars.slice(1).every((c) => c.v < 0.5 && Math.abs(c.d) <= E.HW) && moved.every((m) => m < 1), 'every bot that finishes stops on the road within seconds and stays put (' + (all ? moved.map((m) => m.toFixed(2)).join(', ') : 'not all finished') + ')');
+    }
     const ms = Date.now() - t0;
     ok(ms < 6000, 'the Circuit tests finish in under 6 s (' + ms + ' ms)');
   }
