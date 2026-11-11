@@ -628,10 +628,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
 
     E.pickups(S, x0, x1).forEach(function (p) {
       if (p.kind === 'fuel') {
-        g.fillStyle = P.canDk; C.rrect(g, p.x - 0.33, p.y - 0.42, 0.66, 0.84, 0.1); g.fill();
-        g.fillStyle = P.can; C.rrect(g, p.x - 0.27, p.y - 0.36, 0.54, 0.7, 0.08); g.fill();
-        g.fillStyle = P.canDk; g.fillRect(p.x + 0.05, p.y + 0.42, 0.2, 0.14);
-        g.strokeStyle = '#FFFFFF'; g.lineWidth = 0.07; g.beginPath(); g.moveTo(p.x - 0.15, p.y - 0.2); g.lineTo(p.x + 0.15, p.y + 0.2); g.moveTo(p.x + 0.15, p.y - 0.2); g.lineTo(p.x - 0.15, p.y + 0.2); g.stroke();
+        fuelCan(g, P, p.x, p.y, 1, 1);
       } else {
         g.fillStyle = P.coinDk; g.beginPath(); g.arc(p.x, p.y, 0.26, 0, Math.PI * 2); g.fill();
         g.fillStyle = P.coin; g.beginPath(); g.arc(p.x, p.y, 0.2, 0, Math.PI * 2); g.fill();
@@ -717,14 +714,22 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     g.strokeStyle = P.shirtDk; g.lineWidth = 0.17; g.beginPath(); g.moveTo(-0.2, 0.6); g.lineTo(0.08, 0.46); g.lineTo(0.38, 0.62); g.stroke();
     g.fillStyle = P.skin; g.beginPath(); g.arc(0.4, 0.64, 0.075, 0, Math.PI * 2); g.fill();
   }
+  // The fuel can, one drawing for the road and for the tank icon (#763): k scales it, and up is +1 where
+  // y grows upward (the world) or -1 on the screen, so the spout stays on top
+  function fuelCan(g, P, cx, cy, k, up) {
+    g.fillStyle = P.canDk; C.rrect(g, cx - 0.33 * k, cy - 0.42 * k, 0.66 * k, 0.84 * k, 0.1 * k); g.fill();
+    g.fillStyle = P.can; C.rrect(g, cx - 0.27 * k, cy - 0.36 * k, 0.54 * k, 0.7 * k, 0.08 * k); g.fill();
+    g.fillStyle = P.canDk; g.fillRect(cx + 0.05 * k, cy + (up > 0 ? 0.42 : -0.56) * k, 0.2 * k, 0.14 * k);
+    g.strokeStyle = '#FFFFFF'; g.lineWidth = 0.07 * k; g.beginPath(); g.moveTo(cx - 0.15 * k, cy - 0.2 * k); g.lineTo(cx + 0.15 * k, cy + 0.2 * k); g.moveTo(cx + 0.15 * k, cy - 0.2 * k); g.lineTo(cx - 0.15 * k, cy + 0.2 * k); g.stroke();
+  }
   function hud(g, Z, P) {
     var u = Math.max(0.8, Math.min(1.4, Z.w / 420));
     // the tank, top left; it blinks when nearly empty
     var gx = 12 * u, gy = 12 * u, gw = 110 * u, gh = 12 * u;
-    g.fillStyle = P.can; C.rrect(g, gx, gy - 2 * u, 12 * u, 16 * u, 3 * u); g.fill();
-    g.fillStyle = P.gauge; C.rrect(g, gx + 18 * u, gy, gw, gh, gh / 2); g.fill();
+    fuelCan(g, P, gx + 10 * u, gy + 6 * u, 26 * u, -1);
+    g.fillStyle = P.gauge; C.rrect(g, gx + 26 * u, gy, gw, gh, gh / 2); g.fill();
     var f = S.fuel, low = f < 0.2, blink = low && !C.ui.reduceMotion() && Math.floor(S.t * 3) % 2 === 0;
-    if (f > 0 && !blink) { g.fillStyle = low ? '#D8382C' : f < 0.45 ? '#E8A21A' : '#3E9C3A'; C.rrect(g, gx + 18 * u, gy, Math.max(gh, gw * f), gh, gh / 2); g.fill(); }
+    if (f > 0 && !blink) { g.fillStyle = low ? '#D8382C' : f < 0.45 ? '#E8A21A' : '#3E9C3A'; C.rrect(g, gx + 26 * u, gy, Math.max(gh, gw * f), gh, gh / 2); g.fill(); }
     // coins picked up, top right
     g.font = font(14 * u); g.textBaseline = 'middle'; g.textAlign = 'right';
     g.fillStyle = P.text; g.fillText(C.num(S.coins), Z.w - 12 * u, gy + gh / 2);
