@@ -1,0 +1,32 @@
+// playchogan.com (#615, #757). Deployed by hand from this folder to the Hossein
+// account with `npx wrangler@4 deploy` (wrangler 4.36 or later, for ratelimits).
+// The name is the old redirect Worker's, so a deploy replaces it in place on the
+// same routes. Nothing in CI deploys it.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "playchogan-redirect",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  "routes": [
+    { "pattern": "playchogan.com/*", "zone_name": "playchogan.com" },
+    { "pattern": "www.playchogan.com/*", "zone_name": "playchogan.com" }
+  ],
+  // Deletes inbox releases older than three days (the second deletion guarantee).
+  "triggers": { "crons": ["17 3 * * *"] },
+  // Per-address limit on starting a report. The binding counts per Cloudflare
+  // location and only over 10 or 60 seconds; the daily caps below are counted
+  // from the inbox releases instead. namespace_id is any number unique to this account.
+  "ratelimits": [
+    { "name": "REPORT_LIMIT", "namespace_id": "7571", "simple": { "limit": 3, "period": 60 } }
+  ],
+  "vars": {
+    "INBOX_REPO": "choganhq/inbox",
+    "ISSUE_REPO": "choganhq/chogan",
+    "DAILY_CAP": "30",
+    "IP_DAILY_CAP": "5"
+  }
+  // Secret, set with `npx wrangler secret put GITHUB_TOKEN`: a fine-grained token,
+  // resource owner choganhq, repositories chogan and inbox only, with
+  // Issues: Read and write and Contents: Read and write (Metadata: Read is implied).
+}

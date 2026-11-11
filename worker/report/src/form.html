@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="light dark">
+<title>چوگان — گزارش</title>
+<!-- One self-contained file (#757): no fonts, scripts or images from anywhere else,
+     no cookies, no analytics. The Worker that serves it checks everything again. -->
+<style>
+:root {
+  --bg: #f6f4ef; --card: #ffffff; --ink: #1d1f22; --dim: #5d6168; --line: #d9d5cc;
+  --accent: #0f6b5c; --accent-ink: #ffffff; --err: #b3261e; --err-bg: #fdecea; --ok-bg: #e5f4ef;
+  --focus: #1a73e8;
+}
+/* Dark by the system unless the player picked light; or dark by the player's pick. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme=light]) {
+    --bg: #15171a; --card: #1f2226; --ink: #eceae6; --dim: #a7abb2; --line: #363a40;
+    --accent: #5fc3ad; --accent-ink: #0b1f1b; --err: #ffb4ab; --err-bg: #3b1e1c; --ok-bg: #173229;
+    --focus: #8ab4f8;
+  }
+}
+:root[data-theme=dark] {
+  --bg: #15171a; --card: #1f2226; --ink: #eceae6; --dim: #a7abb2; --line: #363a40;
+  --accent: #5fc3ad; --accent-ink: #0b1f1b; --err: #ffb4ab; --err-bg: #3b1e1c; --ok-bg: #173229;
+  --focus: #8ab4f8;
+}
+:root[data-theme=light] { color-scheme: light; }
+:root[data-theme=dark] { color-scheme: dark; }
+.tools { display: flex; align-items: center; gap: 8px; }
+.tbtn { width: 40px; min-height: 40px; padding: 0; font-size: 1.2rem; line-height: 1; border-radius: 10px; background: transparent; color: var(--ink); border: 1px solid var(--line); font-weight: 400; }
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Vazirmatn", Tahoma, "Noto Sans", sans-serif;
+}
+main { max-width: 640px; margin: 0 auto; padding: 16px 16px 48px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 8px 0 16px; }
+h1 { font-size: 1.4rem; margin: 0; line-height: 1.3; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.note { color: var(--dim); font-size: .92rem; margin: 0 0 16px; }
+/* Red with a sign: it says "do not write personal details" and must not read as a success note. */
+.warn { background: var(--err-bg); color: var(--err); border: 1px solid var(--err); border-radius: 10px; padding: 10px 12px; font-size: .92rem; font-weight: 600; margin: 0 0 16px; }
+.warn::before { content: "\26A0\FE0E\00a0"; }
+.x { width: auto; min-height: 28px; padding: 0 8px; margin-inline-start: 8px; font-size: 1rem; background: transparent; color: var(--err); border: 1px solid var(--line); border-radius: 8px; font-weight: 400; }
+label, legend { display: block; font-weight: 600; margin: 0 0 6px; }
+.field { margin: 0 0 18px; }
+.hint { display: block; color: var(--dim); font-size: .85rem; font-weight: 400; margin-top: 4px; }
+fieldset { border: 0; padding: 0; margin: 0 0 18px; min-width: 0; }
+.seg { display: flex; gap: 8px; flex-wrap: wrap; }
+.seg label { font-weight: 500; margin: 0; display: flex; align-items: center; gap: 6px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; min-height: 44px; }
+.seg input { accent-color: var(--accent); margin: 0; }
+.seg label:has(input:checked) { border-color: var(--accent); outline: 1px solid var(--accent); }
+input[type=text], textarea, select {
+  width: 100%; font: inherit; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-height: 44px;
+}
+textarea { min-height: 9em; resize: vertical; }
+input[type=file] { font: inherit; color: var(--dim); max-width: 100%; }
+input[type=file]::file-selector-button {
+  font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 10px; padding: 8px 12px; margin-inline-end: 10px; cursor: pointer; min-height: 44px;
+}
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+select { width: auto; min-height: 40px; padding: 6px 10px; }
+.count { display: block; text-align: end; color: var(--dim); font-size: .8rem; margin-top: 2px; }
+.list { margin: 6px 0 0; padding: 0; list-style: none; font-size: .88rem; color: var(--dim); }
+.list li { overflow-wrap: anywhere; }
+/* Clipped in place, not moved off-screen: left: -10000px made the Persian (RTL) page
+   10000px wide and scrollable sideways. */
+.trap { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+button {
+  font: inherit; font-weight: 700; border: 0; border-radius: 12px; padding: 12px 22px; min-height: 48px;
+  background: var(--accent); color: var(--accent-ink); cursor: pointer; width: 100%;
+}
+button[disabled] { opacity: .6; cursor: progress; }
+.btn-soft { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.err { background: var(--err-bg); color: var(--err); border-radius: 10px; padding: 10px 12px; margin: 0 0 16px; font-weight: 600; }
+.err:empty { display: none; }
+.field.bad input, .field.bad textarea { border-color: var(--err); }
+progress { width: 100%; height: 10px; margin: 12px 0 4px; accent-color: var(--accent); }
+.status { color: var(--dim); font-size: .9rem; min-height: 1.4em; margin: 0; }
+.done { text-align: center; }
+.done h2 { margin: 8px 0; font-size: 1.25rem; }
+.foot { color: var(--dim); font-size: .85rem; margin-top: 18px; }
+.foot a, .done a { color: var(--accent); }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 id="t-title"></h1>
+    <div class="tools">
+      <button type="button" class="tbtn" id="theme"></button>
+      <select id="lang" aria-label="Language"></select>
+    </div>
+  </header>
+
+  <form id="form" class="card" novalidate>
+    <p class="note" id="t-lead"></p>
+    <p class="warn" id="t-public"></p>
+    <p class="err" id="err" role="alert" aria-live="assertive"></p>
+
+    <fieldset>
+      <legend id="t-kind"></legend>
+      <div class="seg">
+        <label><input type="radio" name="kind" value="bug" checked> <span id="t-bug"></span></label>
+        <label><input type="radio" name="kind" value="idea"> <span id="t-idea"></span></label>
+      </div>
+    </fieldset>
+
+    <div class="field" id="f-text">
+      <label for="text" id="t-desc"></label>
+      <textarea id="text" name="text" maxlength="4000" required></textarea>
+      <span class="hint" id="t-descHint"></span>
+      <span class="count" id="count" aria-live="polite"></span>
+    </div>
+
+    <div class="field">
+      <label for="game" id="t-game"></label>
+      <input type="text" id="game" name="game" maxlength="60" autocomplete="off">
+    </div>
+
+    <div class="field" id="f-shots">
+      <label for="shots" id="t-shots"></label>
+      <input type="file" id="shots" accept="image/png,image/jpeg,image/webp" multiple>
+      <span class="hint" id="t-pasteHint"></span>
+      <ul class="list" id="shotList"></ul>
+    </div>
+
+    <div class="field" id="f-video">
+      <label for="video" id="t-video"></label>
+      <input type="file" id="video" accept="video/mp4,video/webm,video/quicktime">
+      <ul class="list" id="videoList"></ul>
+    </div>
+
+    <div class="field">
+      <label for="contact" id="t-contact"></label>
+      <input type="text" id="contact" name="contact" maxlength="120" autocomplete="off" dir="auto">
+      <span class="hint" id="t-contactNote"></span>
+    </div>
+
+    <!-- Bots fill every field; people never see this one. -->
+    <div class="trap" aria-hidden="true">
+      <label for="website">Website</label>
+      <input type="text" id="website" name="website" tabindex="-1" autocomplete="off">
+    </div>
+
+    <button type="submit" id="send"></button>
+    <progress id="bar" max="1" value="0" hidden></progress>
+    <p class="status" id="status" aria-live="polite"></p>
+  </form>
+
+  <div class="card done" id="done" hidden>
+    <h2 id="t-done"></h2>
+    <p id="doneIssue"></p>
+    <p class="err" id="donePartial"></p>
+    <button type="button" class="btn-soft" id="again"></button>
+  </div>
+
+  <p class="foot"><span id="t-privacy"></span> <a id="privacyLink" href="https://choganhq.github.io/chogan/privacy.html" rel="noopener noreferrer"></a> · <a id="backLink" href="https://choganhq.github.io/chogan/" rel="noopener noreferrer"></a></p>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  var MAX = { text: 4000, shots: 5, shotBytes: 5 * 1024 * 1024, videoBytes: 25 * 1024 * 1024 };
+  var LANGS = [
+    ['fa', 'فارسی', 'rtl'], ['en', 'English', 'ltr'], ['zh', '中文', 'ltr'],
+    ['de', 'Deutsch', 'ltr'], ['es', 'Español', 'ltr'], ['pl', 'Polski', 'ltr']
+  ];
+  var S = {
+    fa: {
+      title: 'گزارش مشکل یا پیشنهاد', lead: 'برای بازیکن‌هایی که به گیت‌هاب دسترسی ندارند. گزارش شما در مخزن چوگان در گیت‌هاب ثبت می‌شود.',
+      public: 'متنی که می‌نویسید به‌صورت عمومی در گیت‌هاب منتشر می‌شود. اطلاعات شخصی ننویسید.',
+      kind: 'نوع', bug: 'مشکل', idea: 'پیشنهاد', desc: 'شرح', descHint: 'چه شد؟ انتظار چه چیزی را داشتید؟ چه دستگاهی؟',
+      theme: 'پوسته (خودکار، روشن، تاریک)', remove: 'حذف', pasteHint: 'می‌توانید با Ctrl+V عکسی را که کپی کرده‌اید همین‌جا بچسبانید.',
+      game: 'بازی (اختیاری): اسم بازی‌ای که مشکل در آن است، مثلاً شطرنج', shots: 'تصویر صفحه (اختیاری، تا ۵ عدد، PNG یا JPG یا WebP، هر کدام تا ۵ مگابایت)',
+      video: 'ویدیو (اختیاری، یکی، MP4 یا WebM یا MOV، تا ۲۵ مگابایت)',
+      contact: 'راه تماس (اختیاری): نام کاربری تلگرام (مثل \u2066@name\u2069) یا ایمیل', contactNote: 'فقط سازنده می‌بیند و هیچ‌وقت منتشر نمی‌شود.',
+      send: 'ارسال', sending: 'در حال ارسال…', uploading: 'بارگذاری فایل {n} از {m}…', finishing: 'ثبت گزارش…',
+      done: 'ممنون! گزارش شما رسید.', doneIssue: 'شماره‌ی آن در گیت‌هاب: #{n}', another: 'یک گزارش دیگر',
+      privacy: 'فایل‌ها حداکثر پس از سه روز پاک می‌شوند. بدون آمارگیر و بدون کوکی.', privacyLink: 'حریم خصوصی', back: 'بازگشت به چوگان',
+      chars: '{n} از ۴۰۰۰',
+      eDesc: 'لطفاً شرح را بنویسید.', eLong: 'شرح بیش از ۴۰۰۰ نویسه است.', eShotsN: 'حداکثر ۵ تصویر.',
+      eShotType: '{name}: فقط PNG یا JPG یا WebP.', eShotSize: '{name} بزرگ‌تر از ۵ مگابایت است.',
+      eVideoType: '{name}: فقط MP4 یا WebM یا MOV.', eVideoSize: '{name} بزرگ‌تر از ۲۵ مگابایت است.',
+      eRate: 'گزارش‌های زیادی از این‌جا رسیده. یک دقیقه‌ی دیگر دوباره امتحان کنید.',
+      eCap: 'امروز گزارش‌های زیادی رسیده. لطفاً فردا دوباره امتحان کنید.',
+      eNet: 'به سرور وصل نشد. اتصال را بررسی کنید و دوباره امتحان کنید.',
+      eServer: 'مشکلی پیش آمد. لطفاً بعداً دوباره امتحان کنید.',
+      eFileBad: 'سرور یکی از فایل‌ها را نپذیرفت.',
+      ePartial: 'گزارش ثبت شد، ولی {n} فایل بارگذاری نشد.'
+    },
+    en: {
+      title: 'Report a problem or idea', lead: 'For players who cannot reach GitHub. Your report is filed in Chogan’s repository on GitHub.',
+      public: 'What you write here becomes public on GitHub. Do not include personal details.',
+      kind: 'Type', bug: 'Problem', idea: 'Suggestion', desc: 'Description', descHint: 'What happened? What did you expect? Which device?',
+      theme: 'Theme (auto, light, dark)', remove: 'Remove', pasteHint: 'You can also paste a copied image here with Ctrl+V.',
+      game: 'Game (optional): the name of the game it is about, e.g. Chess', shots: 'Screenshots (optional, up to 5, PNG, JPG or WebP, 5 MB each)',
+      video: 'Video (optional, one, MP4, WebM or MOV, up to 25 MB)',
+      contact: 'Contact (optional): Telegram username (like @name) or email', contactNote: 'Only the developer sees it. It is never published.',
+      send: 'Send', sending: 'Sending…', uploading: 'Uploading file {n} of {m}…', finishing: 'Filing the report…',
+      done: 'Thank you! Your report arrived.', doneIssue: 'It is #{n} on GitHub.', another: 'Send another',
+      privacy: 'Files are deleted within three days. No analytics, no cookies.', privacyLink: 'Privacy', back: 'Back to Chogan',
+      chars: '{n} / 4000',
+      eDesc: 'Please write a description.', eLong: 'The description is over 4000 characters.', eShotsN: 'At most 5 screenshots.',
+      eShotType: '{name}: PNG, JPG or WebP only.', eShotSize: '{name} is larger than 5 MB.',
+      eVideoType: '{name}: MP4, WebM or MOV only.', eVideoSize: '{name} is larger than 25 MB.',
+      eRate: 'Too many reports from here. Please try again in a minute.',
+      eCap: 'Too many reports today. Please try again tomorrow.',
+      eNet: 'Could not reach the server. Check your connection and try again.',
+      eServer: 'Something went wrong. Please try again later.',
+      eFileBad: 'The server refused one of the files.',
+      ePartial: 'The report was filed, but {n} file(s) could not be uploaded.'
+    },
+    zh: {
+      title: '报告问题或提出建议', lead: '供无法访问 GitHub 的玩家使用。你的报告会提交到 Chogan 在 GitHub 上的仓库。',
+      public: '你在这里写的内容会在 GitHub 上公开。请不要填写个人信息。',
+      kind: '类型', bug: '问题', idea: '建议', desc: '描述', descHint: '发生了什么？你期望的是什么？使用什么设备？',
+      theme: '主题（自动、浅色、深色）', remove: '移除', pasteHint: '也可以用 Ctrl+V 粘贴已复制的图片。',
+      game: '游戏（可选）：问题所在游戏的名称，例如国际象棋', shots: '截图（可选，最多 5 张，PNG、JPG 或 WebP，每张不超过 5 MB）',
+      video: '视频（可选，一个，MP4、WebM 或 MOV，不超过 25 MB）',
+      contact: '联系方式（可选）：Telegram 用户名（如 @name）或电子邮件', contactNote: '只有开发者能看到，绝不会公开。',
+      send: '发送', sending: '正在发送…', uploading: '正在上传第 {n} 个文件，共 {m} 个…', finishing: '正在提交报告…',
+      done: '谢谢！我们已收到你的报告。', doneIssue: '它在 GitHub 上的编号是 #{n}。', another: '再发一份',
+      privacy: '文件最多保留三天后删除。没有统计分析，没有 Cookie。', privacyLink: '隐私', back: '返回 Chogan',
+      chars: '{n} / 4000',
+      eDesc: '请填写描述。', eLong: '描述超过 4000 个字符。', eShotsN: '最多 5 张截图。',
+      eShotType: '{name}：仅支持 PNG、JPG 或 WebP。', eShotSize: '{name} 超过 5 MB。',
+      eVideoType: '{name}：仅支持 MP4、WebM 或 MOV。', eVideoSize: '{name} 超过 25 MB。',
+      eRate: '来自这里的报告太多。请一分钟后再试。',
+      eCap: '今天的报告太多。请明天再试。',
+      eNet: '无法连接服务器。请检查网络后重试。',
+      eServer: '出了点问题。请稍后再试。',
+      eFileBad: '服务器拒绝了其中一个文件。',
+      ePartial: '报告已提交，但有 {n} 个文件未能上传。'
+    },
+    de: {
+      title: 'Problem oder Idee melden', lead: 'Für Spieler, die GitHub nicht erreichen. Deine Meldung landet im Repository von Chogan auf GitHub.',
+      public: 'Was du hier schreibst, wird auf GitHub öffentlich. Bitte keine persönlichen Angaben.',
+      kind: 'Art', bug: 'Problem', idea: 'Vorschlag', desc: 'Beschreibung', descHint: 'Was ist passiert? Was hast du erwartet? Welches Gerät?',
+      theme: 'Design (automatisch, hell, dunkel)', remove: 'Entfernen', pasteHint: 'Ein kopiertes Bild lässt sich auch mit Strg+V einfügen.',
+      game: 'Spiel (optional): Name des Spiels, um das es geht, z. B. Schach', shots: 'Screenshots (optional, bis zu 5, PNG, JPG oder WebP, je bis 5 MB)',
+      video: 'Video (optional, eins, MP4, WebM oder MOV, bis 25 MB)',
+      contact: 'Kontakt (optional): Telegram-Benutzername (z. B. @name) oder E-Mail', contactNote: 'Nur der Entwickler sieht ihn. Er wird nie veröffentlicht.',
+      send: 'Senden', sending: 'Wird gesendet…', uploading: 'Datei {n} von {m} wird hochgeladen…', finishing: 'Meldung wird angelegt…',
+      done: 'Danke! Deine Meldung ist angekommen.', doneIssue: 'Sie ist #{n} auf GitHub.', another: 'Noch eine senden',
+      privacy: 'Dateien werden nach spätestens drei Tagen gelöscht. Keine Analyse, keine Cookies.', privacyLink: 'Datenschutz', back: 'Zurück zu Chogan',
+      chars: '{n} / 4000',
+      eDesc: 'Bitte schreib eine Beschreibung.', eLong: 'Die Beschreibung hat mehr als 4000 Zeichen.', eShotsN: 'Höchstens 5 Screenshots.',
+      eShotType: '{name}: nur PNG, JPG oder WebP.', eShotSize: '{name} ist größer als 5 MB.',
+      eVideoType: '{name}: nur MP4, WebM oder MOV.', eVideoSize: '{name} ist größer als 25 MB.',
+      eRate: 'Zu viele Meldungen von hier. Bitte versuch es in einer Minute erneut.',
+      eCap: 'Heute sind zu viele Meldungen eingegangen. Bitte versuch es morgen erneut.',
+      eNet: 'Der Server ist nicht erreichbar. Prüf deine Verbindung und versuch es erneut.',
+      eServer: 'Etwas ist schiefgegangen. Bitte versuch es später erneut.',
+      eFileBad: 'Der Server hat eine der Dateien abgelehnt.',
+      ePartial: 'Die Meldung wurde angelegt, aber {n} Datei(en) konnten nicht hochgeladen werden.'
+    },
+    es: {
+      title: 'Informar de un problema o idea', lead: 'Para jugadores que no pueden acceder a GitHub. Tu informe se registra en el repositorio de Chogan en GitHub.',
+      public: 'Lo que escribas aquí será público en GitHub. No incluyas datos personales.',
+      kind: 'Tipo', bug: 'Problema', idea: 'Sugerencia', desc: 'Descripción', descHint: '¿Qué pasó? ¿Qué esperabas? ¿Qué dispositivo?',
+      theme: 'Tema (automático, claro, oscuro)', remove: 'Quitar', pasteHint: 'También puedes pegar una imagen copiada con Ctrl+V.',
+      game: 'Juego (opcional): nombre del juego, p. ej. Ajedrez', shots: 'Capturas (opcional, hasta 5, PNG, JPG o WebP, 5 MB cada una)',
+      video: 'Vídeo (opcional, uno, MP4, WebM o MOV, hasta 25 MB)',
+      contact: 'Contacto (opcional): usuario de Telegram (como @name) o correo', contactNote: 'Solo lo ve el desarrollador. Nunca se publica.',
+      send: 'Enviar', sending: 'Enviando…', uploading: 'Subiendo archivo {n} de {m}…', finishing: 'Registrando el informe…',
+      done: '¡Gracias! Tu informe ha llegado.', doneIssue: 'Es el #{n} en GitHub.', another: 'Enviar otro',
+      privacy: 'Los archivos se borran en tres días como máximo. Sin analíticas ni cookies.', privacyLink: 'Privacidad', back: 'Volver a Chogan',
+      chars: '{n} / 4000',
+      eDesc: 'Escribe una descripción.', eLong: 'La descripción supera los 4000 caracteres.', eShotsN: 'Como máximo 5 capturas.',
+      eShotType: '{name}: solo PNG, JPG o WebP.', eShotSize: '{name} supera los 5 MB.',
+      eVideoType: '{name}: solo MP4, WebM o MOV.', eVideoSize: '{name} supera los 25 MB.',
+      eRate: 'Demasiados informes desde aquí. Inténtalo de nuevo en un minuto.',
+      eCap: 'Hoy han llegado demasiados informes. Inténtalo de nuevo mañana.',
+      eNet: 'No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.',
+      eServer: 'Algo salió mal. Inténtalo de nuevo más tarde.',
+      eFileBad: 'El servidor rechazó uno de los archivos.',
+      ePartial: 'El informe se registró, pero no se pudieron subir {n} archivo(s).'
+    },
+    pl: {
+      title: 'Zgłoś problem lub pomysł', lead: 'Dla graczy, którzy nie mogą wejść na GitHub. Twoje zgłoszenie trafi do repozytorium Chogan na GitHubie.',
+      public: 'To, co tu napiszesz, będzie publiczne na GitHubie. Nie podawaj danych osobowych.',
+      kind: 'Rodzaj', bug: 'Problem', idea: 'Sugestia', desc: 'Opis', descHint: 'Co się stało? Czego się spodziewałeś? Jakie urządzenie?',
+      theme: 'Motyw (auto, jasny, ciemny)', remove: 'Usuń', pasteHint: 'Skopiowany obraz można też wkleić przez Ctrl+V.',
+      game: 'Gra (opcjonalnie): nazwa gry, której dotyczy, np. Szachy', shots: 'Zrzuty ekranu (opcjonalnie, do 5, PNG, JPG lub WebP, każdy do 5 MB)',
+      video: 'Wideo (opcjonalnie, jedno, MP4, WebM lub MOV, do 25 MB)',
+      contact: 'Kontakt (opcjonalnie): nazwa użytkownika w Telegramie (np. @name) lub e-mail', contactNote: 'Widzi go tylko twórca. Nigdy nie jest publikowany.',
+      send: 'Wyślij', sending: 'Wysyłanie…', uploading: 'Przesyłanie pliku {n} z {m}…', finishing: 'Zapisywanie zgłoszenia…',
+      done: 'Dziękujemy! Zgłoszenie dotarło.', doneIssue: 'Na GitHubie ma numer #{n}.', another: 'Wyślij kolejne',
+      privacy: 'Pliki są usuwane najpóźniej po trzech dniach. Bez analityki i bez ciasteczek.', privacyLink: 'Prywatność', back: 'Wróć do Chogan',
+      chars: '{n} / 4000',
+      eDesc: 'Napisz opis.', eLong: 'Opis ma ponad 4000 znaków.', eShotsN: 'Najwyżej 5 zrzutów ekranu.',
+      eShotType: '{name}: tylko PNG, JPG lub WebP.', eShotSize: '{name} ma ponad 5 MB.',
+      eVideoType: '{name}: tylko MP4, WebM lub MOV.', eVideoSize: '{name} ma ponad 25 MB.',
+      eRate: 'Za dużo zgłoszeń stąd. Spróbuj ponownie za minutę.',
+      eCap: 'Dziś przyszło za dużo zgłoszeń. Spróbuj ponownie jutro.',
+      eNet: 'Nie udało się połączyć z serwerem. Sprawdź połączenie i spróbuj ponownie.',
+      eServer: 'Coś poszło nie tak. Spróbuj ponownie później.',
+      eFileBad: 'Serwer odrzucił jeden z plików.',
+      ePartial: 'Zgłoszenie zapisano, ale nie udało się przesłać {n} plików.'
+    }
+  };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var lang = 'fa';
+  function pick() {
+    var q = /[?&]lang=([a-z]{2})/.exec(location.search);
+    if (q && S[q[1]]) return q[1];
+    var n = (navigator.languages || [navigator.language || '']);
+    for (var i = 0; i < n.length; i++) { var c = String(n[i]).slice(0, 2).toLowerCase(); if (S[c]) return c; }
+    return 'fa';
+  }
+  function digits(s) { return lang === 'fa' ? String(s).replace(/\d/g, function (d) { return '۰۱۲۳۴۵۶۷۸۹'[d]; }) : String(s); }
+  function t(k, v) {
+    var s = S[lang][k] || S.en[k] || k;
+    if (v) for (var x in v) s = s.split('{' + x + '}').join(x === 'name' ? v[x] : digits(v[x]));
+    return s;
+  }
+  function apply() {
+    var L = LANGS.filter(function (l) { return l[0] === lang; })[0];
+    document.documentElement.lang = lang === 'zh' ? 'zh-Hans' : lang;
+    document.documentElement.dir = L[2];
+    document.title = 'Chogan — ' + t('title');
+    ['title', 'lead', 'public', 'kind', 'bug', 'idea', 'desc', 'descHint', 'game', 'shots', 'pasteHint', 'video', 'contact', 'contactNote', 'done', 'privacy']
+      .forEach(function (k) { $('t-' + k).textContent = t(k); });
+    $('send').textContent = busy ? t('sending') : t('send');
+    $('again').textContent = t('another');
+    $('privacyLink').textContent = t('privacyLink');
+    $('backLink').textContent = t('back');
+    count();
+    if (lastErr) showErr(lastErr[0], lastErr[1]);
+  }
+
+  var sel = $('lang');
+  LANGS.forEach(function (l) { var o = document.createElement('option'); o.value = l[0]; o.textContent = l[1]; sel.appendChild(o); });
+  sel.addEventListener('change', function () { lang = sel.value; apply(); });
+
+  function count() { $('count').textContent = t('chars', { n: Array.from($('text').value).length }); }
+  $('text').addEventListener('input', count);
+
+  var lastErr = null;
+  function showErr(key, v, field) {
+    lastErr = key ? [key, v] : null;
+    $('err').textContent = key ? t(key, v) : '';
+    document.querySelectorAll('.field.bad').forEach(function (f) { f.classList.remove('bad'); });
+    if (field) $(field).classList.add('bad');
+    if (key) $('err').scrollIntoView({ block: 'nearest' });
+  }
+
+  var IMG = { 'image/png': 1, 'image/jpeg': 1, 'image/webp': 1 };
+  var VID = { 'video/mp4': 1, 'video/webm': 1, 'video/quicktime': 1 };
+  // Screenshots live in an array so a picked file and a pasted image (Ctrl+V) are the same thing.
+  var shotFiles = [];
+  function listShots() {
+    var ul = $('shotList');
+    ul.textContent = '';
+    shotFiles.forEach(function (f, i) {
+      var li = document.createElement('li');
+      li.textContent = f.name + ' — ' + digits((f.size / 1048576).toFixed(1)) + ' MB';
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'x'; b.textContent = '×'; b.title = t('remove'); b.setAttribute('aria-label', t('remove') + ' ' + f.name);
+      b.addEventListener('click', function () { shotFiles.splice(i, 1); listShots(); });
+      li.appendChild(b);
+      ul.appendChild(li);
+    });
+  }
+  function listVideo() {
+    var ul = $('videoList');
+    ul.textContent = '';
+    Array.prototype.forEach.call($('video').files, function (f) {
+      var li = document.createElement('li');
+      li.textContent = f.name + ' — ' + digits((f.size / 1048576).toFixed(1)) + ' MB';
+      ul.appendChild(li);
+    });
+  }
+  $('shots').addEventListener('change', function () {
+    shotFiles = shotFiles.concat(Array.prototype.slice.call(this.files));
+    this.value = '';
+    listShots();
+  });
+  $('video').addEventListener('change', listVideo);
+  var pasted = 0;
+  document.addEventListener('paste', function (e) {
+    var items = (e.clipboardData && e.clipboardData.files) || [];
+    var added = false;
+    Array.prototype.forEach.call(items, function (f) {
+      if (!IMG[f.type]) return;
+      pasted++;
+      shotFiles.push(new File([f], 'pasted-' + pasted + '.' + f.type.split('/')[1].replace('jpeg', 'jpg'), { type: f.type }));
+      added = true;
+    });
+    if (added) { e.preventDefault(); listShots(); }
+  });
+
+  // A first check here saves a wasted upload; the Worker checks every rule again.
+  function check() {
+    var text = $('text').value.trim();
+    if (!text) return ['eDesc', null, 'f-text'];
+    if (Array.from(text).length > MAX.text) return ['eLong', null, 'f-text'];
+    var shots = shotFiles;
+    if (shots.length > MAX.shots) return ['eShotsN', null, 'f-shots'];
+    for (var i = 0; i < shots.length; i++) {
+      if (!IMG[shots[i].type]) return ['eShotType', { name: shots[i].name }, 'f-shots'];
+      if (shots[i].size > MAX.shotBytes) return ['eShotSize', { name: shots[i].name }, 'f-shots'];
+    }
+    var v = $('video').files[0];
+    if (v && !VID[v.type]) return ['eVideoType', { name: v.name }, 'f-video'];
+    if (v && v.size > MAX.videoBytes) return ['eVideoSize', { name: v.name }, 'f-video'];
+    return null;
+  }
+
+  var ERR = { rate: 'eRate', cap: 'eCap', type: 'eFileBad', too_big: 'eFileBad', too_many: 'eShotsN', too_long: 'eLong' };
+  function post(path, body, headers, onProgress) {
+    return new Promise(function (resolve, reject) {
+      var x = new XMLHttpRequest();
+      x.open('POST', 'api/' + path);
+      for (var h in headers) x.setRequestHeader(h, headers[h]);
+      if (onProgress && x.upload) x.upload.onprogress = function (e) { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+      x.onload = function () {
+        var d = null;
+        try { d = JSON.parse(x.responseText); } catch (e) {}
+        if (x.status >= 200 && x.status < 300 && d && d.ok) resolve(d);
+        else reject({ code: d && d.error || 'server' });
+      };
+      x.onerror = function () { reject({ code: 'net' }); };
+      x.send(body);
+    });
+  }
+
+  var busy = false;
+  function setBusy(b) {
+    busy = b;
+    $('send').disabled = b;
+    $('send').textContent = b ? t('sending') : t('send');
+    $('bar').hidden = !b;
+    if (!b) $('status').textContent = '';
+  }
+
+  $('form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (busy) return;
+    var bad = check();
+    if (bad) { showErr(bad[0], bad[1], bad[2]); return; }
+    showErr(null);
+    var shots = shotFiles;
+    var video = $('video').files[0];
+    var files = shots.map(function (f, i) { return { f: f, kind: 'image', slot: 'shot-' + (i + 1) }; });
+    if (video) files.push({ f: video, kind: 'video', slot: 'video' });
+    var total = files.reduce(function (a, x) { return a + x.f.size; }, 0) || 1;
+    var doneBytes = 0;
+    var kind = document.querySelector('input[name=kind]:checked').value;
+    setBusy(true);
+    $('bar').value = 0;
+    post('start', JSON.stringify({
+      kind: kind, lang: lang, text: $('text').value, game: $('game').value, contact: $('contact').value,
+      website: $('website').value,
+      files: files.map(function (x) { return { kind: x.kind, size: x.f.size }; })
+    }), { 'Content-Type': 'application/json' }).then(function (d) {
+      if (d.done) return { issue: null, failed: 0 };
+      var failed = 0;
+      var chain = Promise.resolve();
+      files.forEach(function (x, i) {
+        chain = chain.then(function () {
+          $('status').textContent = t('uploading', { n: i + 1, m: files.length });
+          return post('file?slot=' + x.slot, x.f, { 'X-Report-Ticket': d.ticket, 'Content-Type': 'application/octet-stream' }, function (p) {
+            $('bar').value = (doneBytes + p * x.f.size) / total;
+          }).then(null, function () { failed++; }).then(function () { doneBytes += x.f.size; $('bar').value = doneBytes / total; });
+        });
+      });
+      return chain.then(function () {
+        $('status').textContent = t('finishing');
+        return post('finish', JSON.stringify({ ticket: d.ticket }), { 'Content-Type': 'application/json' });
+      }).then(function (r) { return { issue: r.issue, failed: failed }; });
+    }).then(function (r) {
+      setBusy(false);
+      $('form').hidden = true;
+      $('done').hidden = false;
+      $('doneIssue').textContent = r.issue ? t('doneIssue', { n: r.issue }) : '';
+      $('donePartial').textContent = r.failed ? t('ePartial', { n: r.failed }) : '';
+      $('done').scrollIntoView({ block: 'start' });
+    }, function (err) {
+      setBusy(false);
+      showErr(err.code === 'net' ? 'eNet' : (ERR[err.code] || 'eServer'));
+    });
+  });
+
+  $('again').addEventListener('click', function () {
+    $('form').reset();
+    shotFiles = []; listShots(); $('videoList').textContent = '';
+    $('done').hidden = true; $('form').hidden = false;
+    showErr(null); count();
+  });
+
+  // Theme: auto follows the system; a pick is kept in this browser only (no cookie).
+  var THEMES = ['auto', 'light', 'dark'], ICON = { auto: '\u25D0', light: '\u2600', dark: '\u263E' }, theme = 'auto';
+  try { theme = localStorage.getItem('chogan.reportTheme') || 'auto'; } catch (e) {}
+  if (THEMES.indexOf(theme) < 0) theme = 'auto';
+  function applyTheme() {
+    var r = document.documentElement;
+    if (theme === 'auto') r.removeAttribute('data-theme'); else r.setAttribute('data-theme', theme);
+    $('theme').textContent = ICON[theme];
+    $('theme').title = t('theme');
+    $('theme').setAttribute('aria-label', t('theme'));
+  }
+  $('theme').addEventListener('click', function () {
+    theme = THEMES[(THEMES.indexOf(theme) + 1) % 3];
+    try { localStorage.setItem('chogan.reportTheme', theme); } catch (e) {}
+    applyTheme();
+  });
+
+  lang = pick();
+  sel.value = lang;
+  apply();
+  applyTheme();
+})();
+</script>
+</body>
+</html>
