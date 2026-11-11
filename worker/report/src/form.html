@@ -38,8 +38,13 @@ body {
   font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Vazirmatn", Tahoma, "Noto Sans", sans-serif;
 }
 main { max-width: 640px; margin: 0 auto; padding: 16px 16px 48px; }
-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 8px 0 16px; }
-h1 { font-size: 1.4rem; margin: 0; line-height: 1.3; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0 8px; }
+h1 { font-size: 1.4rem; margin: 0 0 16px; line-height: 1.3; }
+/* the way back (#792): the form had only a small link under the long form */
+.back { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px 0 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--ink); text-decoration: none; font-weight: 600; font-size: .95rem; min-width: 0; }
+.back svg { flex: none; }
+[dir=rtl] .back svg { transform: scaleX(-1); }
+.back span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
 .note { color: var(--dim); font-size: .92rem; margin: 0 0 16px; }
 /* Red with a sign: it says "do not write personal details" and must not read as a success note. */
@@ -93,12 +98,13 @@ progress { width: 100%; height: 10px; margin: 12px 0 4px; accent-color: var(--ac
 <body>
 <main>
   <header>
-    <h1 id="t-title"></h1>
+    <a class="back" id="backTop" href="https://choganhq.github.io/chogan/" rel="noopener noreferrer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg><span id="t-backTop"></span></a>
     <div class="tools">
       <button type="button" class="tbtn" id="theme"></button>
       <select id="lang" aria-label="Language"></select>
     </div>
   </header>
+  <h1 id="t-title"></h1>
 
   <form id="form" class="card" novalidate>
     <p class="note" id="t-lead"></p>
@@ -334,9 +340,23 @@ progress { width: 100%; height: 10px; margin: 12px 0 4px; accent-color: var(--ac
     $('again').textContent = t('another');
     $('privacyLink').textContent = t('privacyLink');
     $('backLink').textContent = t('back');
+    $('t-backTop').textContent = t('back');
     count();
     if (lastErr) showErr(lastErr[0], lastErr[1]);
   }
+
+  // Back goes where the player came from when that was a Chogan page in this tab, so the
+  // app or the issues list keeps its place; a form opened in a new tab (the app links it
+  // with target=_blank) has nothing to go back to and opens the web app instead.
+  var BACK_FROM = [location.origin, 'https://issues.playchogan.com', 'https://choganhq.github.io', 'https://staging.playchogan.com'];
+  function cameFromChogan() {
+    try { return history.length > 1 && BACK_FROM.indexOf(new URL(document.referrer).origin) >= 0; } catch (e) { return false; }
+  }
+  $('backTop').addEventListener('click', function (e) {
+    if (!cameFromChogan()) return;
+    e.preventDefault();
+    history.back();
+  });
 
   var sel = $('lang');
   LANGS.forEach(function (l) { var o = document.createElement('option'); o.value = l[0]; o.textContent = l[1]; sel.appendChild(o); });
