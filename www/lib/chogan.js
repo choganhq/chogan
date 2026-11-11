@@ -1418,8 +1418,34 @@
     { id: 'xq-clean',    icon: 'sparkle', fa: 'بی برگشت',          en: 'No second thoughts', dfa: 'شطرنج چینی را بدون برگرداندن حرکت بردی', den: 'Win Chinese chess without undoing a move', zh: '不悔棋', dzh: '不撤销任何一步赢下中国象棋', de: 'Ohne Rückzieher', dde: 'Gewinne Chinesisches Schach ohne einen Zug zurückzunehmen', es: 'Sin marcha atrás', des: 'Gana al ajedrez chino sin deshacer ninguna jugada' }
   ];
 
+  // The game an award belongs to, by its id's prefix; null is an award for the whole
+  // app (#821). The Awards screen was one flat grid, and a player could not tell which
+  // game an award came from. A new game's prefix goes here: a test fails on an award
+  // used in a game's page that does not map to that game.
+  var ACH_GAME = {
+    td: 'tower-defence', sd: 'sudoku', ms: 'minesweeper', dt: 'dots', ng: 'nonogram', mc: 'mancala',
+    fc: 'freecell', pg: 'peg', rv: 'reversi', bg: 'backgammon', mr: 'morris', bs: 'battleship',
+    br: 'bridges', cb: 'mastermind', bo: 'breakout', ps: 'pasur', mj: 'mahjong', cs: 'chess', hk: 'hokm',
+    bd: 'blockdrop', gk: 'gomoku', go: 'go', wo: 'wayout', bj: 'blackjack', eb: 'eightball', sn: 'snooker',
+    gl: 'gridlock', cr: 'chain', lu: 'ludo', sl: 'snakes', dr: 'darts', bw: 'bowling', sp: 'sliding',
+    jg: 'jigsaw', ck: 'checkers', kl: 'klondike', ce: 'crazyeights', gr: 'ginrummy', sh: 'shelem',
+    spi: 'spider', pr: 'pairs', gor: 'gorillas', hop: 'hop', tnk: 'tanks', xq: 'xiangqi', pp: 'pingpong',
+    air: 'airhockey', smn: 'simon', lit: 'lights', cor: 'corridor', lnk: 'linkup', sum: 'sums',
+    tw: 'towerup', dom: 'dominoes', ws: 'watersort', fb: 'football', wg: 'wrigglers', tri: 'trio',
+    fr: 'fourrow', pk: 'peak', tr: 'territories', pw: 'pipes', db: 'doubles', sk: 'storekeeper',
+    sr: 'starraid', cx: 'crossing', cm: 'carrom', nd: 'numberdrop', ci: 'circuit'
+  };
+  // Darts kept Dots' prefix for this one award when #464 renamed the others
+  var ACH_GAME_ID = { 'dt-180': 'darts' };
+  function achGame(id) {
+    if (Object.prototype.hasOwnProperty.call(ACH_GAME_ID, id)) return ACH_GAME_ID[id];
+    var p = String(id).split('-')[0];
+    return Object.prototype.hasOwnProperty.call(ACH_GAME, p) ? ACH_GAME[p] : null;
+  }
+
   var achApi = {
     all: ACH,
+    game: achGame,
     def: function (id) { for (var i = 0; i < ACH.length; i++) if (ACH[i].id === id) return ACH[i]; return null; },
     has: function (id) { return !!state.achievements[id]; },
     count: function () { return Object.keys(state.achievements).length; },
