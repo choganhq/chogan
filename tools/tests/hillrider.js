@@ -99,6 +99,27 @@ module.exports = function (T) {
     // The car blurred under gas: a frame holding 0, 1 or 2 physics steps moved it in uneven jumps
     // (up to 0.25 m at speed). The page draws between the last two steps and chases by time.
     ok(/prev = pose\(S\);\s*ev = ev\.concat\(E\.step\(/.test(html) && /var V = view\(\)/.test(html) && /drawCar\(g, P, V\)/.test(html) && /Math\.pow\(1 - 0\.12, frameDt \* 60\)/.test(html), 'the car is drawn between the last two physics steps and the camera chases by time, so it does not blur under gas (#763)');
+    // #777: the speed on the screen. The engine is in real metres and seconds, so the
+    // scale is fixed: 1 m/s is 3.6 km/h or 2.237 mph, by the horizontal speed alone.
+    const sp = typeof E.speedOf === 'function' ? E.speedOf : () => NaN;
+    ok(sp(10, 'kmh') === 36 && sp(10, 'mph') === 22 && sp(15, 'kmh') === 54 && sp(15, 'mph') === 34 && sp(0, 'kmh') === 0,
+      'the speed converts m/s to km/h and mph (10 m/s → ' + sp(10, 'kmh') + ' km/h, ' + sp(10, 'mph') + ' mph)');
+    ok(sp(-6, 'kmh') === sp(6, 'kmh') && sp(6, 'kmh') === 22 && sp(NaN, 'kmh') === 0, 'reversing shows the same speed as forward, and a broken value shows 0');
+    ok(sp(10, 'off') === null && sp(10, 'knots') === null && sp(10) === null, 'off or an unknown unit shows no speed');
+    const fast = drive(E.newGame(42, 0), 300, 1);
+    ok(sp(fast.vx, 'kmh') > 20 && sp(fast.vx, 'kmh') <= 70, 'five seconds of gas reads as a plausible speed (' + sp(fast.vx, 'kmh') + ' km/h)');
+    const keys = ['spdT', 'spdKmh', 'spdMph', 'optKmh', 'optMph', 'spdOff'];
+    const blocks = LOCALE_CODES.map((l) => { const m = html.match(new RegExp('\\n {6}' + l + ': \\{([\\s\\S]*?)\\n {6}\\}')); return m ? m[1] : ''; });
+    ok(LOCALE_CODES.length === 6 && blocks.every((b) => keys.every((k) => new RegExp('\\b' + k + ": '[^']+'").test(b))), 'the speed setting has its strings in all ' + LOCALE_CODES.length + ' languages');
+    ok(keys.every((k) => core.indexOf(k + ':') < 0), 'the speed strings do not reuse a core key name');
+    ok(/ctx\.store\.get\('prefs'/.test(html) && /prefs\.speed = v === 'mph' \|\| v === 'off' \? v : 'kmh'/.test(html) && /C\.ui\.segmented\(\[\{ value: 'kmh'/.test(html) && /C\.icon\('gear', 20\)/.test(html) && !/rules: '[^']*km\/h/.test(html),
+      'the unit lives behind the gear, is saved through the core and defaults to km/h');
+    ok(/E\.speedOf\(spd, prefs\.speed\)/.test(html), 'the dial reads the engine conversion');
+    // #763: design B ("Buggy") of the approved mock: a tube cage, a driver in a cap and
+    // scarf, knobbly tyres. Only the drawing changed; the head is drawn on the hitbox.
+    ok(/function driver\(/.test(html) && /tube cage/.test(html) && /scarf/.test(html) && /knobbly/.test(html) && /g\.arc\(hx, hy, E\.HEAD_R/.test(html) && /var hx = E\.HEAD\[0\], hy = E\.HEAD\[1\]/.test(html),
+      'the car is the approved buggy, its head drawn on the hitbox (#763)');
+    ok(E.HEAD[0] === -0.15 && E.HEAD[1] === 0.95 && E.HEAD_R === 0.27 && E.WR === 0.42 && JSON.stringify(E.ANCH) === '[[-1.05,-0.42],[1.05,-0.42]]', 'the hitbox and wheel positions are unchanged');
     const ms = Date.now() - t0;
     ok(ms < 8000, 'the Hillrider tests finish in under 8 s (' + ms + ' ms)');
   }
