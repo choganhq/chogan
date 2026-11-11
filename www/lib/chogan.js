@@ -300,7 +300,7 @@
       menu: 'منو', back: 'بازگشت', undo: 'برگرداندن', close: 'بستن', cancel: 'انصراف', result: 'نتیجه', seeBoard: 'دیدن صفحه‌ی بازی',
       saveImage: 'ذخیره‌ی عکس', copyText: 'کپی متن',
       updateReady: 'نسخه‌ی تازه آماده است', updateNow: 'به‌روزرسانی',
-      updRow: 'به‌روزرسانی‌ها', updCheck: 'بررسی به‌روزرسانی', updChecking: 'در حال بررسی…', updLatest: 'آخرین نسخه را داری.', updNew: 'نسخه‌ی تازه‌ای آمده است.', updFailed: 'بررسی به‌روزرسانی نشد. دوباره امتحان کن.',
+      updRow: 'به‌روزرسانی‌ها', updCheck: 'بررسی به‌روزرسانی', updChecking: 'در حال بررسی…', updLatest: 'آخرین نسخه را داری.', updNew: 'نسخه‌ی تازه‌ای آمده است.', updFailed: 'بررسی به‌روزرسانی نشد. دوباره امتحان کن.', updDownloading: 'نسخه‌ی تازه هنوز در حال دانلود است. کمی بعد دوباره امتحان کن.',
       installReady: 'چوگان را مثل یک اپ نصب کن', installNow: 'نصب',
       confirm: 'تأیید', done: 'باشه', next: 'بعدی', skip: 'رد کردن',
       start: 'شروع', pause: 'مکث', resumeGame: 'ادامه‌ی بازی', restart: 'شروع دوباره',
@@ -347,7 +347,7 @@
       menu: 'Menu', back: 'Back', undo: 'Undo', close: 'Close', cancel: 'Cancel', result: 'Result', seeBoard: 'See the board',
       saveImage: 'Save image', copyText: 'Copy text',
       updateReady: 'A new version is ready', updateNow: 'Update',
-      updRow: 'Updates', updCheck: 'Check for updates', updChecking: 'Checking…', updLatest: 'You are using the latest version.', updNew: 'A new version is available.', updFailed: 'Could not check for updates. Try again.',
+      updRow: 'Updates', updCheck: 'Check for updates', updChecking: 'Checking…', updLatest: 'You are using the latest version.', updNew: 'A new version is available.', updFailed: 'Could not check for updates. Try again.', updDownloading: 'The new version is still downloading. Try again in a minute.',
       installReady: 'Install Chogan as an app', installNow: 'Install',
       confirm: 'Confirm', done: 'OK', next: 'Next', skip: 'Skip',
       start: 'Start', pause: 'Pause', resumeGame: 'Resume', restart: 'Restart',
@@ -394,7 +394,7 @@
       menu: 'Menu', back: 'Wstecz', undo: 'Cofnij', close: 'Zamknij', cancel: 'Anuluj', result: 'Wynik', seeBoard: 'Zobacz planszę',
       saveImage: 'Zapisz obraz', copyText: 'Kopiuj tekst',
       updateReady: 'Nowa wersja jest gotowa', updateNow: 'Aktualizuj',
-      updRow: 'Aktualizacje', updCheck: 'Sprawdź aktualizacje', updChecking: 'Sprawdzanie…', updLatest: 'Masz najnowszą wersję.', updNew: 'Jest nowa wersja.', updFailed: 'Nie udało się sprawdzić aktualizacji. Spróbuj ponownie.',
+      updRow: 'Aktualizacje', updCheck: 'Sprawdź aktualizacje', updChecking: 'Sprawdzanie…', updLatest: 'Masz najnowszą wersję.', updNew: 'Jest nowa wersja.', updFailed: 'Nie udało się sprawdzić aktualizacji. Spróbuj ponownie.', updDownloading: 'Nowa wersja nadal się pobiera. Spróbuj za minutę.',
       installReady: 'Zainstaluj Chogan jako aplikację', installNow: 'Zainstaluj',
       confirm: 'Potwierdź', done: 'Gotowe', next: 'Dalej', skip: 'Pomiń',
       start: 'Start', pause: 'Pauza', resumeGame: 'Wznów', restart: 'Zrestartuj',
@@ -441,7 +441,7 @@
       menu: 'Menu', back: 'Retour', undo: 'Annuler', close: 'Fermer', cancel: 'Annuler', result: 'Résultat', seeBoard: 'Voir le plateau',
       saveImage: 'Enregistrer l’image', copyText: 'Copier le texte',
       updateReady: 'Une nouvelle version est prête', updateNow: 'Mettre à jour',
-      updRow: 'Mises à jour', updCheck: 'Chercher des mises à jour', updChecking: 'Vérification…', updLatest: 'Tu as la dernière version.', updNew: 'Une nouvelle version est disponible.', updFailed: 'Impossible de vérifier les mises à jour. Réessaie.',
+      updRow: 'Mises à jour', updCheck: 'Chercher des mises à jour', updChecking: 'Vérification…', updLatest: 'Tu as la dernière version.', updNew: 'Une nouvelle version est disponible.', updFailed: 'Impossible de vérifier les mises à jour. Réessaie.', updDownloading: 'La nouvelle version se télécharge encore. Réessaie dans une minute.',
       installReady: 'Installer Chogan comme une appli', installNow: 'Installer',
       confirm: 'Confirmer', done: 'OK', next: 'Suivant', skip: 'Passer',
       start: 'Démarrer', pause: 'Pause', resumeGame: 'Reprendre', restart: 'Recommencer',
@@ -488,7 +488,7 @@
       menu: '菜单', back: '返回', undo: '撤销', close: '关闭', cancel: '取消', result: '结果', seeBoard: '查看棋盘',
       saveImage: '保存图片', copyText: '复制文字',
       updateReady: '新版本已就绪', updateNow: '更新',
-      updRow: '更新', updCheck: '检查更新', updChecking: '正在检查…', updLatest: '你使用的是最新版本。', updNew: '有新版本可用。', updFailed: '无法检查更新，请重试。',
+      updRow: '更新', updCheck: '检查更新', updChecking: '正在检查…', updLatest: '你使用的是最新版本。', updNew: '有新版本可用。', updFailed: '无法检查更新，请重试。', updDownloading: '新版本仍在下载，请稍后再试。',
       installReady: '将 Chogan 安装为应用', installNow: '安装',
       confirm: '确定', done: '好', next: '下一步', skip: '跳过',
       start: '开始', pause: '暂停', resumeGame: '继续游戏', restart: '重新开始',
@@ -535,7 +535,7 @@
       menu: 'Menü', back: 'Zurück', undo: 'Rückgängig', close: 'Schließen', cancel: 'Abbrechen', result: 'Ergebnis', seeBoard: 'Spielfeld ansehen',
       saveImage: 'Bild speichern', copyText: 'Text kopieren',
       updateReady: 'Eine neue Version ist da', updateNow: 'Aktualisieren',
-      updRow: 'Updates', updCheck: 'Nach Updates suchen', updChecking: 'Wird geprüft…', updLatest: 'Du hast die neueste Version.', updNew: 'Eine neue Version ist verfügbar.', updFailed: 'Die Suche nach Updates hat nicht geklappt. Versuch es noch einmal.',
+      updRow: 'Updates', updCheck: 'Nach Updates suchen', updChecking: 'Wird geprüft…', updLatest: 'Du hast die neueste Version.', updNew: 'Eine neue Version ist verfügbar.', updFailed: 'Die Suche nach Updates hat nicht geklappt. Versuch es noch einmal.', updDownloading: 'Die neue Version wird noch geladen. Versuche es gleich noch einmal.',
       installReady: 'Chogan als App installieren', installNow: 'Installieren',
       confirm: 'Bestätigen', done: 'OK', next: 'Weiter', skip: 'Überspringen',
       start: 'Start', pause: 'Pause', resumeGame: 'Weiter', restart: 'Neu starten',
@@ -582,7 +582,7 @@
       menu: 'Menú', back: 'Atrás', undo: 'Deshacer', close: 'Cerrar', cancel: 'Cancelar', result: 'Resultado', seeBoard: 'Ver el tablero',
       saveImage: 'Guardar imagen', copyText: 'Copiar texto',
       updateReady: 'Hay una versión nueva', updateNow: 'Actualizar',
-      updRow: 'Actualizaciones', updCheck: 'Buscar actualizaciones', updChecking: 'Comprobando…', updLatest: 'Tienes la versión más reciente.', updNew: 'Hay una versión nueva.', updFailed: 'No se pudo comprobar si hay actualizaciones. Vuelve a intentarlo.',
+      updRow: 'Actualizaciones', updCheck: 'Buscar actualizaciones', updChecking: 'Comprobando…', updLatest: 'Tienes la versión más reciente.', updNew: 'Hay una versión nueva.', updFailed: 'No se pudo comprobar si hay actualizaciones. Vuelve a intentarlo.', updDownloading: 'La nueva versión aún se está descargando. Vuelve a intentarlo en un minuto.',
       installReady: 'Instala Chogan como app', installNow: 'Instalar',
       confirm: 'Confirmar', done: 'OK', next: 'Siguiente', skip: 'Saltar',
       start: 'Empezar', pause: 'Pausa', resumeGame: 'Seguir', restart: 'Reiniciar',
@@ -2589,6 +2589,10 @@
   // app supported stays false and the Profile shows nothing.
   Chogan.updates = {
     supported: false, ready: null, sw: null, worker: null, onFound: null, onApply: null,
+    // #826: a hung reg.update() left the button disabled for good, and a healthy update that
+    // took over 30 s to download (the worker fetches the whole app) read as "failed". The
+    // limits are fields so the tests can shorten them.
+    updateLimitMs: 20000, installLimitMs: 120000,
     // a worker that finished installing while a page is in control is an update
     found: function (w) {
       if (!w || !this.sw || !this.sw.controller) return false;
@@ -2601,14 +2605,19 @@
       if (!self.supported || !self.ready) return Promise.resolve('failed');
       if (self.worker) return Promise.resolve('new');
       return Promise.resolve(self.ready).then(function (reg) {
-        return Promise.resolve(reg.update()).then(function () { return reg; });
+        return new Promise(function (resolve, reject) {
+          var t = setTimeout(function () { reject(new Error('update timed out')); }, self.updateLimitMs);
+          Promise.resolve(reg.update()).then(function () { clearTimeout(t); resolve(reg); }, function (e) { clearTimeout(t); reject(e); });
+        });
       }).then(function (reg) {
         var w = reg.waiting || reg.installing;
         if (!w) return 'latest';
         return self.settle(w);
       }, function () { return 'failed'; });
     },
-    // an update still installing is 'new' once installed, 'failed' if it is thrown away
+    // an update still installing is 'new' once installed, 'failed' if it is thrown away, and
+    // 'downloading' if it is still installing at the limit (the page's own listener offers it
+    // when it finishes)
     settle: function (w) {
       var self = this;
       return new Promise(function (resolve) {
@@ -2626,7 +2635,7 @@
         look();
         if (done) return;
         w.addEventListener('statechange', look);
-        timer = setTimeout(function () { end('failed'); }, 30000);
+        timer = setTimeout(function () { end(w.state === 'installing' ? 'downloading' : 'failed'); }, self.installLimitMs);
       });
     },
     apply: function () { if (this.worker && this.onApply) this.onApply(this.worker); }
