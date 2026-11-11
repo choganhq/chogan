@@ -341,8 +341,9 @@ module.exports = function (T) {
 
     const menu = read('www/index.html');
     ok(/href: 'https:\/\/playchogan\.com\/report\/\?lang=' \+ C\.state\.settings\.lang/.test(menu) && /C\.t\('reportForm'\)/.test(menu), 'the profile links the form in the app\'s language');
+    ok(/href: 'https:\/\/issues\.playchogan\.com\/\?lang=' \+ C\.state\.settings\.lang/.test(menu) && /C\.t\('issuesList'\)/.test(menu), 'the profile links the public issues list in the app\'s language (#793)');
     const core = read('www/lib/chogan.js');
-    for (const k of ['reportForm', 'reportNote']) {
+    for (const k of ['reportForm', 'reportNote', 'issuesList']) {
       const n = (core.match(new RegExp('[ ,{]' + k + ": '", 'g')) || []).length;
       ok(LOCALE_CODES.length > 0 && n === LOCALE_CODES.length, k + ' exists in all ' + LOCALE_CODES.length + ' languages (' + n + ')');
     }
