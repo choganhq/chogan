@@ -26,6 +26,7 @@ const CACHE_HOST = 'https://issues-cache.invalid/';
 export const LANGS = [
   ['fa', 'فارسی', 'rtl', 'fa-IR'], ['en', 'English', 'ltr', 'en-GB'], ['zh', '中文', 'ltr', 'zh-Hans'],
   ['de', 'Deutsch', 'ltr', 'de-DE'], ['es', 'Español', 'ltr', 'es-ES'], ['pl', 'Polski', 'ltr', 'pl-PL'],
+  ['fr', 'Français', 'ltr', 'fr-FR'],
 ];
 
 export const S = {
@@ -100,6 +101,18 @@ export const S = {
     refresh: 'Lista odświeża się co pięć minut. Treść zgłoszeń jest pokazana tak, jak ją napisano.',
     theme: 'Motyw (auto, jasny, ciemny)', langGo: 'Przejdź', back: 'Wróć do Chogan', page: 'Strona {n}',
     filter: 'Stan', labels: 'Etykiety',
+  },
+  fr: {
+    title: 'Signalements Chogan', lead: 'Une copie en lecture seule des signalements et idées publics de Chogan.',
+    report: 'Signaler un problème ou une idée', all: 'Tous', open: 'Ouverts', closed: 'Fermés',
+    stOpen: 'Ouvert', stDone: 'Fait', stNotPlanned: 'Non prévu',
+    opened: 'Ouvert le {d}', closedOn: 'Fermé le {d}', noBody: '(pas de description)',
+    allOnGithub: 'Tous les signalements sur GitHub', newer: 'Plus récents', older: 'Plus anciens', empty: 'Aucun signalement ici.',
+    error: 'Impossible de charger la liste depuis GitHub. Réessaie dans quelques minutes.',
+    stale: 'GitHub est injoignable ; voici la dernière copie enregistrée.',
+    refresh: 'La liste se met à jour toutes les cinq minutes. Le texte est affiché tel qu’il a été écrit.',
+    theme: 'Thème (auto, clair, sombre)', langGo: 'OK', back: 'Retour à Chogan', page: 'Page {n}',
+    filter: 'État', labels: 'Étiquettes',
   },
 };
 
