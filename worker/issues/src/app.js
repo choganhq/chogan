@@ -30,7 +30,7 @@ export const LANGS = [
 
 export const S = {
   fa: {
-    title: 'گزارش‌های چوگان', lead: 'نسخه‌ی فقط‌خواندنی گزارش‌های عمومی چوگان در گیت‌هاب، برای کسانی که به گیت‌هاب دسترسی ندارند.',
+    title: 'گزارش‌های چوگان', lead: 'نسخه‌ی فقط‌خواندنی گزارش‌ها و پیشنهادهای عمومی چوگان.',
     report: 'ثبت گزارش تازه', all: 'همه', open: 'باز', closed: 'بسته',
     stOpen: 'باز', stDone: 'انجام شد', stNotPlanned: 'انجام نمی‌شود',
     opened: 'ثبت: {d}', closedOn: 'بسته: {d}', noBody: '(بدون شرح)',
@@ -42,7 +42,7 @@ export const S = {
     filter: 'وضعیت', labels: 'برچسب‌ها',
   },
   en: {
-    title: 'Chogan issues', lead: 'A read-only copy of Chogan’s public issues on GitHub, for anyone who cannot reach GitHub.',
+    title: 'Chogan issues', lead: 'A read-only copy of Chogan’s public reports and suggestions.',
     report: 'Report a problem or idea', all: 'All', open: 'Open', closed: 'Closed',
     stOpen: 'Open', stDone: 'Done', stNotPlanned: 'Not planned',
     opened: 'Opened {d}', closedOn: 'Closed {d}', noBody: '(no description)',
@@ -54,7 +54,7 @@ export const S = {
     filter: 'State', labels: 'Labels',
   },
   zh: {
-    title: 'Chogan 问题列表', lead: '这是 Chogan 在 GitHub 上公开问题的只读副本，供无法访问 GitHub 的人查看。',
+    title: 'Chogan 问题列表', lead: 'Chogan 公开问题和建议的只读副本。',
     report: '报告问题或提出建议', all: '全部', open: '未解决', closed: '已关闭',
     stOpen: '未解决', stDone: '已完成', stNotPlanned: '不予处理',
     opened: '提交于 {d}', closedOn: '关闭于 {d}', noBody: '（无描述）',
@@ -66,7 +66,7 @@ export const S = {
     filter: '状态', labels: '标签',
   },
   de: {
-    title: 'Chogan-Meldungen', lead: 'Eine schreibgeschützte Kopie der öffentlichen Meldungen von Chogan auf GitHub, für alle, die GitHub nicht erreichen.',
+    title: 'Chogan-Meldungen', lead: 'Eine schreibgeschützte Kopie der öffentlichen Meldungen und Vorschläge von Chogan.',
     report: 'Problem oder Idee melden', all: 'Alle', open: 'Offen', closed: 'Geschlossen',
     stOpen: 'Offen', stDone: 'Erledigt', stNotPlanned: 'Nicht geplant',
     opened: 'Gemeldet am {d}', closedOn: 'Geschlossen am {d}', noBody: '(keine Beschreibung)',
@@ -78,7 +78,7 @@ export const S = {
     filter: 'Status', labels: 'Labels',
   },
   es: {
-    title: 'Incidencias de Chogan', lead: 'Una copia de solo lectura de las incidencias públicas de Chogan en GitHub, para quien no puede acceder a GitHub.',
+    title: 'Incidencias de Chogan', lead: 'Una copia de solo lectura de las incidencias y sugerencias públicas de Chogan.',
     report: 'Informar de un problema o idea', all: 'Todas', open: 'Abiertas', closed: 'Cerradas',
     stOpen: 'Abierta', stDone: 'Hecha', stNotPlanned: 'No prevista',
     opened: 'Abierta el {d}', closedOn: 'Cerrada el {d}', noBody: '(sin descripción)',
@@ -90,7 +90,7 @@ export const S = {
     filter: 'Estado', labels: 'Etiquetas',
   },
   pl: {
-    title: 'Zgłoszenia Chogan', lead: 'Kopia tylko do odczytu publicznych zgłoszeń Chogan na GitHubie, dla osób, które nie mogą wejść na GitHub.',
+    title: 'Zgłoszenia Chogan', lead: 'Kopia tylko do odczytu publicznych zgłoszeń i pomysłów Chogan.',
     report: 'Zgłoś problem lub pomysł', all: 'Wszystkie', open: 'Otwarte', closed: 'Zamknięte',
     stOpen: 'Otwarte', stDone: 'Zrobione', stNotPlanned: 'Nieplanowane',
     opened: 'Zgłoszono {d}', closedOn: 'Zamknięto {d}', noBody: '(brak opisu)',

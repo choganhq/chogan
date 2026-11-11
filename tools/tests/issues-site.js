@@ -124,6 +124,8 @@ module.exports = function (T) {
     ok(/<a class="btn" href="https:\/\/playchogan\.com\/report\/\?lang=en">Report a problem or idea<\/a>/.test(html), 'the Report button opens the existing form at playchogan.com/report/ in the page\'s language');
     ok(/href="https:\/\/github\.com\/choganhq\/chogan\/issues"/.test(html), 'a link to all issues on GitHub');
 
+    // The intro says what the page is, never who it is for (the owner's wording rule, #787).
+    ok(LOCALE_CODES.length === 6 && LOCALE_CODES.every((c) => A.S[c] && A.S[c].lead && !/github|گیت‌هاب/i.test(A.S[c].lead)), 'the intro names no audience and does not mention GitHub, in every language');
     // Headers.
     const csp = r.headers.get('Content-Security-Policy') || '';
     ok(/default-src 'none'/.test(csp) && /script-src 'self'(;|$)/.test(csp) && /style-src 'self'(;|$)/.test(csp) && /frame-ancestors 'none'/.test(csp) && /base-uri 'none'/.test(csp), 'a strict CSP: ' + csp);
