@@ -96,6 +96,9 @@ module.exports = function (T) {
     ok(['hr-1k', 'hr-flip', 'hr-daily'].every((id) => core.indexOf("id: '" + id + "'") > 0 && html.indexOf("unlock('" + id + "')") > 0), 'the three awards are in the core and unlocked by the game');
     ok(/C\.daily\('hillrider', dailyDate\)\.rng/.test(html) && /E\.courseSeed\(/.test(html) && /C\.stats\.best\('hillrider', 'metres'/.test(html), 'the daily course is seeded by the day and checked drivable, and the best distance is kept');
     ok(/ctx\.tutorialIfNew\(TUT\)/.test(html) && !/history\.(push|replace)State|localStorage/.test(html), 'a tutorial, no history or direct storage');
+    // The car blurred under gas: a frame holding 0, 1 or 2 physics steps moved it in uneven jumps
+    // (up to 0.25 m at speed). The page draws between the last two steps and chases by time.
+    ok(/prev = pose\(S\);\s*ev = ev\.concat\(E\.step\(/.test(html) && /var V = view\(\)/.test(html) && /drawCar\(g, P, V\)/.test(html) && /Math\.pow\(1 - 0\.12, frameDt \* 60\)/.test(html), 'the car is drawn between the last two physics steps and the camera chases by time, so it does not blur under gas (#763)');
     const ms = Date.now() - t0;
     ok(ms < 8000, 'the Hillrider tests finish in under 8 s (' + ms + ' ms)');
   }
