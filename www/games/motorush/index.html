@@ -1,0 +1,938 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>موتورسوار — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .mr-wrap > .ch-fit { --fit-ar: calc(360 / 540); }
+  .ch-fit > .mr-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+  .mr-canvas { display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; user-select: none; -webkit-user-select: none; }
+  .mr-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .mr-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function MotoRushEngineFactory() {
+  'use strict';
+
+  // The road has four lanes. Positions run along the road in metres, in the frame of
+  // the traffic: every car drives at the same speed TV, so in that frame the cars
+  // stand still and the bike closes on them at (its speed − TV). p is the bike's front
+  // wheel; the bike is BIKE_L long. x is the bike's lane as a fraction, tl the lane it
+  // is steering to.
+  var LANES = 4, DT = 1 / 60, START_LANE = 1;
+  // speeds in m/s: the bike starts at V0 and reaches VMAX after RAMP_P metres
+  var V0 = 26, VMAX = 50, RAMP_P = 8000, TV = 14, BOOST_V = 12, BOOST_T = 180, BOOST_MULT = 2;
+  // lanes a second, and a human's reaction time, both used to keep every gap passable
+  var LANE_SPEED = 5.5, REACT = 0.35, BIKE_L = 2;
+  // a crash when the bike is this close to a car's lane, a near miss when it passed closer
+  // than NEAR_X (a car in the next lane, ridden past centred, is 1.0 away and does not count)
+  var HIT_X = 0.5, NEAR_X = 0.9, COMBO_T = 240, COMBO_MAX = 8, NEAR_PTS = 25;
+  var DAILY_P = 5000, HORIZON = 300, PICK_ADD = 0.34, FIRST = 90;
+  var LEN = { car: 4.4, van: 5.6, truck: 9.5 };
+
+  function rand(S) {
+    var a = S.r = (S.r + 0x6D2B79F5) >>> 0;
+    var t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  function base(p) { return Math.min(VMAX, V0 + (VMAX - V0) * Math.max(0, p) / RAMP_P); }
+  function speed(S) { return base(S.p) + (S.boostT > 0 ? BOOST_V : 0); }
+  function goal(S) { return S.daily ? DAILY_P : Infinity; }
+  // how far behind a wave the next one must start so that a rider who waits for the
+  // first to pass can still reach the next free lane in time, even on a boost
+  function need(from, to, y) {
+    return BIKE_L + (Math.abs(from - to) / LANE_SPEED + REACT) * (base(y + 200) + BOOST_V - TV) + 2;
+  }
+
+  function fromSeed(seed, daily) {
+    var S = {
+      r: seed >>> 0, daily: !!daily, p: 0, d: 0, x: START_LANE, tl: START_LANE,
+      bar: 0, boostT: 0, combo: 0, comboT: 0, bestCombo: 0, nears: 0, picks: 0,
+      score: 0, tick: 0, top: V0, over: false, won: false, hit: null,
+      waves: [], items: [], ny: FIRST, nf: 0, ev: []
+    };
+    S.nf = Math.floor(rand(S) * LANES);
+    ensure(S);
+    return S;
+  }
+  function newGame(rnd, daily) { return fromSeed(Math.floor(rnd() * 4294967296), daily); }
+
+  // One wave: one to three cars side by side (staggered a little), always leaving the
+  // lane f free. The next wave's free lane is drawn now, so the gap after this wave
+  // can be made long enough to get there.
+  function spawn(S) {
+    var y = S.ny, f = S.nf, t = Math.min(1, y / 12000), i;
+    S.nf = Math.floor(rand(S) * LANES);
+    var u = rand(S), k = u < 0.6 - 0.4 * t ? 1 : u > 1 - (0.05 + 0.3 * t) ? 3 : 2;
+    var other = [];
+    for (i = 0; i < LANES; i++) if (i !== f) other.push(i);
+    for (i = other.length - 1; i > 0; i--) { var j = Math.floor(rand(S) * (i + 1)), s = other[i]; other[i] = other[j]; other[j] = s; }
+    var cars = [], span = 0;
+    for (i = 0; i < k; i++) {
+      var q = rand(S), kind = q < 0.15 + 0.15 * t ? 'truck' : q < 0.4 + 0.1 * t ? 'van' : 'car';
+      var c = { lane: other[i], o: Math.round(rand(S) * 60) / 10, len: LEN[kind], kind: kind, paint: Math.floor(rand(S) * 5), md: 9, done: false };
+      cars.push(c);
+      span = Math.max(span, c.o + c.len);
+    }
+    S.waves.push({ y: y, span: span, f: f, cars: cars });
+    if (rand(S) < 0.3) S.items.push({ lane: f, y: y + span / 2, got: false });
+    var gs = 3.2 - 1.6 * t;
+    var gap = Math.max(need(f, S.nf, y + span), gs * (base(y + span) - TV) * (0.85 + 0.4 * rand(S)));
+    S.ny = Math.round((y + span + gap) * 10) / 10;
+  }
+  function ensure(S) {
+    var g = goal(S);
+    while (S.ny < S.p + HORIZON && S.ny < g - 40) spawn(S);
+    while (S.waves.length && S.waves[0].y + S.waves[0].span < S.p - 40) S.waves.shift();
+    while (S.items.length && S.items[0].y < S.p - 40) S.items.shift();
+  }
+
+  function steer(S, dir) {
+    if (S.over) return false;
+    var nt = Math.max(0, Math.min(LANES - 1, S.tl + (dir > 0 ? 1 : -1)));
+    if (nt === S.tl) return false;
+    S.tl = nt;
+    return true;
+  }
+
+  function step(S) {
+    if (S.over) return;
+    S.tick++;
+    var v = speed(S), rel = v - TV;
+    S.top = Math.max(S.top, v);
+    // steering: the bike slides toward its lane
+    if (S.x < S.tl) S.x = Math.min(S.tl, S.x + LANE_SPEED * DT);
+    else if (S.x > S.tl) S.x = Math.max(S.tl, S.x - LANE_SPEED * DT);
+    S.x = Math.round(S.x * 1e6) / 1e6;
+    S.p += rel * DT;
+    S.d += v * DT;
+    var mult = 1 + 0.25 * Math.min(S.combo, COMBO_MAX);
+    S.score += v * DT * 0.1 * mult * (S.boostT > 0 ? BOOST_MULT : 1);
+    if (S.boostT > 0) S.boostT--;
+    if (S.comboT > 0 && --S.comboT === 0) S.combo = 0;
+    var rear = S.p - BIKE_L, i, j;
+    for (i = 0; i < S.waves.length; i++) {
+      var w = S.waves[i];
+      if (w.y > S.p) break;
+      for (j = 0; j < w.cars.length; j++) {
+        var c = w.cars[j];
+        if (c.done) continue;
+        var y0 = w.y + c.o, y1 = y0 + c.len;
+        if (S.p > y0 && rear < y1) {
+          var dx = Math.abs(S.x - c.lane);
+          if (dx < HIT_X) {
+            S.over = true; S.hit = { lane: c.lane, kind: c.kind };
+            S.ev.push({ t: 'crash', lane: c.lane });
+            return;
+          }
+          if (dx < c.md) c.md = dx;
+        } else if (rear >= y1) {
+          c.done = true;
+          if (c.md < NEAR_X) {
+            S.combo++; S.comboT = COMBO_T; S.nears++;
+            S.bestCombo = Math.max(S.bestCombo, S.combo);
+            var bonus = NEAR_PTS * (1 + 0.25 * Math.min(S.combo, COMBO_MAX));
+            S.score += bonus;
+            S.ev.push({ t: 'near', combo: S.combo, pts: bonus, lane: c.lane });
+          }
+        }
+      }
+    }
+    for (i = 0; i < S.items.length; i++) {
+      var it = S.items[i];
+      if (it.got || it.y > S.p) continue;
+      if (it.y >= rear && Math.abs(S.x - it.lane) < 0.6) {
+        it.got = true; S.picks++;
+        S.ev.push({ t: 'pick' });
+        if (S.boostT <= 0) {
+          S.bar = Math.round((S.bar + PICK_ADD) * 100) / 100;
+          if (S.bar >= 1) { S.bar = 0; S.boostT = BOOST_T; S.ev.push({ t: 'boost' }); }
+        }
+      }
+    }
+    if (S.p >= goal(S)) { S.over = true; S.won = true; S.ev.push({ t: 'finish' }); return; }
+    ensure(S);
+  }
+
+  function drain(S) { var e = S.ev; S.ev = []; return e; }
+  function snapshot(S) {
+    var o = JSON.parse(JSON.stringify(S));
+    delete o.ev;
+    return o;
+  }
+  function num(v) { return typeof v === 'number' && isFinite(v); }
+  function restore(o) {
+    if (!o || typeof o !== 'object') return null;
+    var keys = ['r', 'p', 'd', 'x', 'tl', 'bar', 'boostT', 'combo', 'comboT', 'score', 'tick', 'ny', 'nf'];
+    for (var i = 0; i < keys.length; i++) if (!num(o[keys[i]])) return null;
+    if (!Array.isArray(o.waves) || !Array.isArray(o.items)) return null;
+    if (o.tl < 0 || o.tl >= LANES || o.tl !== Math.floor(o.tl) || o.x < 0 || o.x > LANES - 1 || o.nf < 0 || o.nf >= LANES) return null;
+    for (i = 0; i < o.waves.length; i++) {
+      var w = o.waves[i];
+      if (!w || !num(w.y) || !num(w.span) || !Array.isArray(w.cars)) return null;
+      for (var j = 0; j < w.cars.length; j++) { var c = w.cars[j]; if (!c || !num(c.o) || !num(c.len) || !num(c.lane) || !LEN[c.kind]) return null; }
+    }
+    var S = JSON.parse(JSON.stringify(o));
+    S.ev = [];
+    S.daily = !!S.daily; S.over = !!S.over; S.won = !!S.won;
+    ['bestCombo', 'nears', 'picks'].forEach(function (k) { if (!num(S[k])) S[k] = 0; });
+    if (!num(S.top)) S.top = V0;
+    return S;
+  }
+  function clone(S) { var c = restore(snapshot(S)); c.ev = S.ev.slice(); return c; }
+
+  return {
+    LANES: LANES, DT: DT, START_LANE: START_LANE, BIKE_L: BIKE_L, DAILY_P: DAILY_P, HIT_X: HIT_X, NEAR_X: NEAR_X,
+    LANE_SPEED: LANE_SPEED, REACT: REACT, TV: TV, BOOST_V: BOOST_V, BOOST_T: BOOST_T, COMBO_T: COMBO_T, COMBO_MAX: COMBO_MAX,
+    PICK_ADD: PICK_ADD, LEN: LEN,
+    base: base, speed: speed, need: need, newGame: newGame, fromSeed: fromSeed, step: step, steer: steer,
+    drain: drain, snapshot: snapshot, restore: restore, clone: clone, ensure: ensure
+  };
+}
+if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = MotoRushEngineFactory();
+  var ACCENT = '#3945C6';
+  // the logical view, scaled to the screen: the sky and the HUD above HZ, the road below
+  var VW = 360, VH = 540, HZ = 162;
+  // the camera: a point at depth a ahead of the bike's rear wheel (plus D0) is drawn
+  // F/a pixels a metre wide and K/a pixels below the horizon
+  var D0 = 10.8, K = 3660, F = 253, LW = 3.2, BIKE_PX = 37;
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'motorush',
+    name: { fa: 'موتورسوار', en: 'Moto Rush', zh: '摩托狂飙', de: 'Motorrad-Rausch', es: 'Moto veloz', pl: 'Motopęd' },
+    accent: ACCENT,
+    mood: 'dots',
+    strings: {
+      fa: {
+        scene: 'موتورسوار در جاده‌ای چهاربانده میان ماشین‌ها', hint: 'انگشت را بکش یا سمت چپ و راست را لمس کن تا بانده عوض کنی.', tapStart: 'برای حرکت لمس کن',
+        pausedTxt: 'مکث', ptsN: 'امتیاز: {n}', bestN: 'بهترین: {n}', kmh: 'کیلومتر/ساعت', kmN: '{n} کیلومتر', crash: 'تصادف!', finishLine: 'به خط پایان رسیدی!',
+        dailyMr: 'موتورسوار روزانه', newRun: 'دور تازه', distL: 'مسافت', ptsL: 'امتیاز', topL: 'بیشترین سرعت', tries: 'تلاش‌ها', comboL: 'بهترین زنجیره',
+        kSteer: 'بانده‌ی چپ و راست', kPause: 'مکث', kAgain: 'دور تازه', kStart: 'شروع', nitroGo: 'نیترو!', nearPop: 'خطر از بیخ گوش!',
+        rules: 'با موتور در جاده‌ی چهاربانده جلو برو و به ماشین‌ها و کامیون‌ها نخور. انگشت را به چپ یا راست بکش، یا سمت چپ و راست صفحه را لمس کن، تا یک بانده جابه‌جا شوی. در هر ردیف ماشین همیشه دست‌کم یک بانده‌ی باز هست. از کنار ماشین‌ها از نزدیک رد شو تا زنجیره بسازی؛ هر رد شدن نزدیک امتیاز دارد و زنجیره امتیاز همه چیز را بیشتر می‌کند. اگر چند ثانیه رد شدن نزدیکی نباشد زنجیره صفر می‌شود. قوطی‌های زرد نوار نیترو را پر می‌کنند؛ وقتی پر شد چند ثانیه تندتر می‌روی و امتیاز دوبرابر است. سرعت کم‌کم بالا می‌رود. در موتورسوار روزانه، که برای همه یکسان است، باید به خط پایان برسی.',
+        tutTitle1: 'بانده عوض کن', tutText1: 'انگشت را بکش یا سمت چپ و راست را لمس کن. همیشه یک بانده باز است.',
+        tutTitle2: 'از نزدیک رد شو', tutText2: 'از کنار ماشین‌ها از فاصله‌ی کم رد شو تا زنجیره بسازی و امتیاز بیشتری بگیری.',
+        tutTitle3: 'نیترو', tutText3: 'قوطی‌های زرد را بردار. نوار که پر شد، نیترو سرعت و امتیازت را بالا می‌برد.'
+      },
+      en: {
+        scene: 'A motorbike on a four-lane road among the traffic', hint: 'Swipe, or tap the left or right side, to change lanes.', tapStart: 'Tap to ride',
+        pausedTxt: 'Paused', ptsN: 'Score: {n}', bestN: 'Best: {n}', kmh: 'km/h', kmN: '{n} km', crash: 'Crash!', finishLine: 'You reached the finish!',
+        dailyMr: 'Daily ride', newRun: 'New run', distL: 'Distance', ptsL: 'Score', topL: 'Top speed', tries: 'Tries', comboL: 'Best combo',
+        kSteer: 'Lane left and right', kPause: 'Pause', kAgain: 'New run', kStart: 'Start', nitroGo: 'Nitro!', nearPop: 'Close one!',
+        rules: 'Ride down the four-lane road and keep clear of the cars and trucks. Swipe left or right, or tap the left or right side of the screen, to move one lane. Every row of traffic leaves at least one lane open. Pass cars closely to build a combo: each near miss scores, and the combo raises everything you score. A few seconds without a near miss and the combo resets. Yellow cans fill the nitro bar; when it is full you ride faster for a few seconds and score double. The speed rises slowly. In the daily ride, the same for everyone, you aim for the finish line.',
+        tutTitle1: 'Change lanes', tutText1: 'Swipe, or tap the left or right side. One lane is always open.',
+        tutTitle2: 'Pass close', tutText2: 'Pass cars closely to build a combo and score more.',
+        tutTitle3: 'Nitro', tutText3: 'Pick up the yellow cans. When the bar is full, nitro raises your speed and your score.'
+      },
+      pl: {
+        scene: 'Motocykl na czteropasmowej drodze wśród samochodów', hint: 'Przesuń palcem albo stuknij lewą lub prawą stronę, aby zmienić pas.', tapStart: 'Stuknij, aby jechać',
+        pausedTxt: 'Pauza', ptsN: 'Punkty: {n}', bestN: 'Najlepszy: {n}', kmh: 'km/h', kmN: '{n} km', crash: 'Kraksa!', finishLine: 'Dojechałeś do mety!',
+        dailyMr: 'Jazda dnia', newRun: 'Nowa gra', distL: 'Dystans', ptsL: 'Punkty', topL: 'Najwyższa prędkość', tries: 'Próby', comboL: 'Najlepsza seria',
+        kSteer: 'Pas w lewo i w prawo', kPause: 'Pauza', kAgain: 'Nowa gra', kStart: 'Start', nitroGo: 'Nitro!', nearPop: 'O włos!',
+        rules: 'Jedź czteropasmową drogą i omijaj samochody i ciężarówki. Przesuń palcem w lewo lub w prawo albo stuknij lewą lub prawą stronę ekranu, aby zmienić pas. Każdy rząd aut zostawia co najmniej jeden wolny pas. Mijaj auta z bliska, aby budować serię: każda mijanka o włos daje punkty, a seria zwiększa wszystko, co zdobywasz. Kilka sekund bez mijanki i seria się zeruje. Żółte kanistry napełniają pasek nitro; gdy jest pełny, przez kilka sekund jedziesz szybciej i zdobywasz podwójne punkty. Prędkość powoli rośnie. W jeździe dnia, takiej samej dla wszystkich, celem jest meta.',
+        tutTitle1: 'Zmieniaj pasy', tutText1: 'Przesuń palcem albo stuknij lewą lub prawą stronę. Jeden pas jest zawsze wolny.',
+        tutTitle2: 'Mijaj z bliska', tutText2: 'Mijaj auta z bliska, aby budować serię i zdobywać więcej punktów.',
+        tutTitle3: 'Nitro', tutText3: 'Zbieraj żółte kanistry. Gdy pasek jest pełny, nitro podnosi prędkość i punkty.'
+      },
+      zh: {
+        scene: '四车道公路上穿行在车流中的摩托车', hint: '滑动，或点屏幕左侧或右侧来换道。', tapStart: '点一下出发',
+        pausedTxt: '已暂停', ptsN: '得分：{n}', bestN: '最佳：{n}', kmh: '公里/时', kmN: '{n} 公里', crash: '撞车了！', finishLine: '到达终点！',
+        dailyMr: '每日飞驰', newRun: '重新开始', distL: '距离', ptsL: '得分', topL: '最高速度', tries: '尝试次数', comboL: '最佳连击',
+        kSteer: '向左、向右换道', kPause: '暂停', kAgain: '重新开始', kStart: '开始', nitroGo: '氮气加速！', nearPop: '好险！',
+        rules: '骑着摩托在四车道公路上前进，避开轿车和卡车。向左或向右滑动，或点屏幕左侧或右侧，就换一条车道。每一排车至少留出一条空车道。贴着车辆擦身而过可以累积连击：每次擦身都有分，连击还会提高你得到的所有分数。几秒内没有擦身，连击就会归零。黄色油罐会充满氮气条；充满后你会加速几秒，得分翻倍。速度会慢慢提高。每日飞驰对所有人都一样，目标是骑到终点。',
+        tutTitle1: '换道', tutText1: '滑动，或点左侧或右侧。总有一条车道是空的。',
+        tutTitle2: '擦身而过', tutText2: '贴着车辆骑过去，累积连击，得分更多。',
+        tutTitle3: '氮气', tutText3: '捡起黄色油罐。氮气条满了，速度和得分都会提高。'
+      },
+      de: {
+        scene: 'Ein Motorrad auf einer vierspurigen Straße im Verkehr', hint: 'Wische oder tippe links bzw. rechts, um die Spur zu wechseln.', tapStart: 'Tippe zum Losfahren',
+        pausedTxt: 'Pause', ptsN: 'Punkte: {n}', bestN: 'Bestwert: {n}', kmh: 'km/h', kmN: '{n} km', crash: 'Unfall!', finishLine: 'Du hast das Ziel erreicht!',
+        dailyMr: 'Fahrt des Tages', newRun: 'Neuer Lauf', distL: 'Strecke', ptsL: 'Punkte', topL: 'Höchstgeschwindigkeit', tries: 'Versuche', comboL: 'Beste Serie',
+        kSteer: 'Spur nach links und rechts', kPause: 'Pause', kAgain: 'Neuer Lauf', kStart: 'Start', nitroGo: 'Nitro!', nearPop: 'Knapp!',
+        rules: 'Fahre die vierspurige Straße entlang und weiche Autos und Lastwagen aus. Wische nach links oder rechts oder tippe auf die linke oder rechte Bildschirmseite, um eine Spur zu wechseln. Jede Reihe Autos lässt mindestens eine Spur frei. Fahre knapp an Autos vorbei, um eine Serie aufzubauen: Jedes knappe Manöver bringt Punkte, und die Serie erhöht alles, was du erzielst. Ein paar Sekunden ohne knappes Manöver, und die Serie beginnt von vorn. Gelbe Kanister füllen die Nitroleiste; ist sie voll, fährst du ein paar Sekunden schneller und punktest doppelt. Das Tempo steigt langsam. Bei der Fahrt des Tages, für alle gleich, geht es bis ins Ziel.',
+        tutTitle1: 'Spur wechseln', tutText1: 'Wische oder tippe links bzw. rechts. Eine Spur ist immer frei.',
+        tutTitle2: 'Knapp vorbei', tutText2: 'Fahre knapp an Autos vorbei, um eine Serie aufzubauen und mehr zu punkten.',
+        tutTitle3: 'Nitro', tutText3: 'Sammle die gelben Kanister. Ist die Leiste voll, erhöht Nitro Tempo und Punkte.'
+      },
+      es: {
+        scene: 'Una moto en una carretera de cuatro carriles entre el tráfico', hint: 'Desliza o toca el lado izquierdo o derecho para cambiar de carril.', tapStart: 'Toca para arrancar',
+        pausedTxt: 'En pausa', ptsN: 'Puntos: {n}', bestN: 'Mejor: {n}', kmh: 'km/h', kmN: '{n} km', crash: '¡Choque!', finishLine: '¡Llegaste a la meta!',
+        dailyMr: 'Carrera del día', newRun: 'Partida nueva', distL: 'Distancia', ptsL: 'Puntos', topL: 'Velocidad máxima', tries: 'Intentos', comboL: 'Mejor racha',
+        kSteer: 'Carril a izquierda y derecha', kPause: 'Pausa', kAgain: 'Partida nueva', kStart: 'Empezar', nitroGo: '¡Nitro!', nearPop: '¡Por poco!',
+        rules: 'Recorre la carretera de cuatro carriles y esquiva coches y camiones. Desliza a izquierda o derecha, o toca el lado izquierdo o derecho de la pantalla, para cambiar de carril. Cada fila de tráfico deja al menos un carril libre. Pasa cerca de los coches para formar una racha: cada roce da puntos y la racha aumenta todo lo que ganas. Unos segundos sin roces y la racha vuelve a cero. Las latas amarillas llenan la barra de nitro; cuando está llena vas más rápido unos segundos y ganas el doble. La velocidad sube poco a poco. En la carrera del día, igual para todos, el objetivo es la meta.',
+        tutTitle1: 'Cambia de carril', tutText1: 'Desliza o toca el lado izquierdo o derecho. Siempre hay un carril libre.',
+        tutTitle2: 'Pasa cerca', tutText2: 'Pasa cerca de los coches para formar una racha y ganar más.',
+        tutTitle3: 'Nitro', tutText3: 'Recoge las latas amarillas. Con la barra llena, el nitro sube tu velocidad y tus puntos.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+
+  var S = null, raf = 0, last = 0, acc = 0, paused = false, held = false, waiting = true, ended = false, tries = 0, startedAt = 0, seed = 0;
+  // drawing state: floating words, the crash moment, a flash on each pick-up
+  var pops = [], crashAt = 0, flash = 0, runAwarded = false;
+
+  var cv = el('canvas', { class: 'mr-canvas', role: 'img', 'aria-label': C.t('scene') });
+  var box = el('div', { class: 'mr-box' }, [cv]);
+  var top = el('div', { class: 'mr-top ch-above' });
+  var status = el('div', { class: 'mr-status', role: 'status', 'aria-live': 'polite' });
+  var pauseBtn = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('pause') }, [C.icon('pause', 22)]);
+  var wrap = el('div', { class: 'mr-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newRun'), onClick: function () { newRun(); } });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- runs */
+
+  function seeded(sd) {
+    var a = sd >>> 0;
+    return function () { a = (a + 0x6D2B79F5) >>> 0; var t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  // the daily road comes from the day, the same for everyone
+  function rngFor(sd) { return dailyDate ? C.daily('motorush', dailyDate).rng : seeded(sd); }
+
+  function newRun() {
+    seed = Math.floor(Math.random() * 4294967296);
+    S = E.newGame(rngFor(seed), !!dailyDate);
+    tries++;
+    startedAt = Date.now();
+    ended = false; waiting = true; held = false; last = 0; acc = 0;
+    pops = []; crashAt = 0; flash = 0; runAwarded = false;
+    ctx.clearSave();
+    renderTop(); renderStatus();
+    kick();
+  }
+
+  function blocked() { return paused || held || waiting || document.hidden || !!document.querySelector('.ch-scrim'); }
+  function tick(now) {
+    raf = 0;
+    if (!S) return;
+    var dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
+    last = now;
+    if (!blocked() && !ended) {
+      // a fixed step, so a run plays the same on every screen
+      acc += dt;
+      var n = 0;
+      while (acc >= E.DT && n < 8) {
+        E.step(S); acc -= E.DT; n++;
+        events();
+        if (ended) break;
+      }
+      if (n >= 8) acc = 0;
+    }
+    for (var i = pops.length - 1; i >= 0; i--) { pops[i].t -= dt; if (pops[i].t <= 0) pops.splice(i, 1); }
+    if (flash > 0) flash = Math.max(0, flash - dt * 3);
+    draw();
+    // a still screen needs no frames: waiting, paused, or the crash has played out;
+    // go() and kick() start the loop again
+    if (!paused && !held && !waiting && !(ended && Date.now() - crashAt > 1500)) raf = requestAnimationFrame(tick);
+  }
+  function kick() { if (!raf) { last = 0; raf = requestAnimationFrame(tick); } }
+
+  function steer(dir) {
+    if (!S || ended || S.over) return;
+    if (waiting || held) { go(); return; }
+    if (E.steer(S, dir)) C.audio.sfx('tap');
+  }
+
+  function events() {
+    var ev = E.drain(S);
+    for (var i = 0; i < ev.length; i++) {
+      var e = ev[i];
+      if (e.t === 'near') {
+        C.audio.sfx('whoosh');
+        pops.push({ text: e.combo > 1 ? '×' + C.num(e.combo) : C.t('nearPop'), lane: e.lane, t: 0.9, max: 0.9 });
+        if (e.combo >= E.COMBO_MAX) C.achievements.unlock('mo-close');
+      } else if (e.t === 'pick') {
+        C.audio.sfx('coin'); flash = 1;
+      } else if (e.t === 'boost') {
+        C.audio.sfx('nitro'); C.haptic('success');
+        pops.push({ text: C.t('nitroGo'), t: 1.3, max: 1.3, big: true });
+      } else if (e.t === 'crash') {
+        C.audio.sfx('boom'); C.haptic('error');
+        crashAt = Date.now(); ended = true;
+        ctx.clearSave();
+        setTimeout(finish, C.ui.reduceMotion() ? 400 : 1400);
+      } else if (e.t === 'finish') {
+        C.audio.sfx('win'); C.haptic('success');
+        crashAt = Date.now(); ended = true;
+        ctx.clearSave();
+        setTimeout(finish, C.ui.reduceMotion() ? 300 : 1000);
+      }
+    }
+    if (!runAwarded && S.d >= 10000) { runAwarded = true; C.achievements.unlock('mo-run'); }
+    // the HUD is on the canvas; only the badges need the DOM, so they change rarely
+    if (S.tick % 60 === 0) renderTop();
+  }
+
+  function finish() {
+    var sc = Math.floor(S.score), km = S.d / 1000, won = S.won, note = null;
+    var coins = won ? 30 : Math.min(30, 1 + Math.floor(S.d / 400)), points = won ? 120 : Math.min(120, 4 + Math.floor(S.d / 100));
+    var lines = [
+      { label: C.t('ptsL'), value: C.num(sc) },
+      { label: C.t('distL'), value: C.t('kmN', { n: C.num(km.toFixed(1)) }) },
+      { label: C.t('topL'), value: C.num(Math.round(S.top * 3.6)) + ' ' + C.t('kmh') }
+    ];
+    if (S.bestCombo > 1) lines.push({ label: C.t('comboL'), value: '×' + C.num(S.bestCombo) });
+    if (dailyDate) {
+      if (won) C.achievements.unlock('mo-daily');
+      if (!C.stats.daily('motorush', dailyDate, { label: C.t('ptsN', { n: C.num(sc) }), win: won, tries: tries })) { coins = Math.max(1, Math.round(coins * 0.2)); points = Math.max(1, Math.round(points * 0.2)); }
+      lines.push({ label: C.t('tries'), value: C.num(tries) });
+    } else {
+      // an endless ride always ends in a crash; a new best is what counts as a win
+      if (C.stats.best('motorush', 'score', sc) && sc > 0) { note = C.t('bestN', { n: C.num(sc) }); won = true; }
+      lines.push({ label: C.t('best'), value: C.num(C.stats.getBest('motorush', 'score') || sc) });
+    }
+    ctx.finish({
+      won: won,
+      title: S.won ? C.t('finishLine') : C.t('crash'),
+      note: note, timeMs: Date.now() - startedAt, coins: coins, points: points,
+      lines: lines,
+      shareText: 'چوگان · موتورسوار' + (dailyDate ? ('\nروزانه ' + dailyDate) : '') + '\nامتیاز ' + sc + ' · ' + km.toFixed(1) + ' km',
+      paint: function (g, w, h) { paintShare(g, w, h); },
+      againLabel: C.t('newRun'),
+      onAgain: function () { newRun(); }
+    });
+    renderTop();
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  function palette(dk) {
+    return dk ? {
+      sky0: '#0B1230', sky1: '#28345E', hill: '#18213C', hill2: '#1F2B48', star: 'rgba(255,255,240,.8)', moon: '#F3E9C8',
+      grass: '#1E3326', grass2: '#26402F', road: '#2A2932', edge: '#8C8798', dash: 'rgba(255,255,255,.55)', post: '#C9C2D4', reflector: '#FF6A4D',
+      tail: '#FF3B3B', glass: 'rgba(150,190,240,.45)', tyre: '#0A0A0E', shadow: 'rgba(0,0,0,.45)', light: 'rgba(255,240,190,.10)',
+      text: '#F4EEE4', textDim: 'rgba(244,238,228,.7)', panel: 'rgba(10,14,32,.55)', bar: 'rgba(255,255,255,.16)', can: '#F6B93B',
+      // no blue car: the rider wears the indigo accent and must not read as traffic
+      cars: ['#C9493F', '#D9952E', '#9AA0AC', '#3B9466', '#C86A98'], box: '#B8B4C2'
+    } : {
+      sky0: '#7EC3EC', sky1: '#DCEFF8', hill: '#8DB97A', hill2: '#A6CB8E', star: null, moon: null,
+      grass: '#93C273', grass2: '#82B263', road: '#5A5862', edge: '#F2EEE6', dash: 'rgba(255,255,255,.85)', post: '#FFFFFF', reflector: '#E8473A',
+      tail: '#E3342F', glass: 'rgba(30,45,70,.6)', tyre: '#1C1B21', shadow: 'rgba(0,0,0,.22)', light: null,
+      text: '#1F1A17', textDim: 'rgba(31,26,23,.65)', panel: 'rgba(255,255,255,.62)', bar: 'rgba(0,0,0,.12)', can: '#F6B93B',
+      cars: ['#E2584D', '#F0A830', '#B4BAC6', '#3FA872', '#E57AAE'], box: '#ECE8E0'
+    };
+  }
+  function shade(hex, f) {
+    var n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+    var m = function (v) { return Math.max(0, Math.min(255, Math.round(f < 0 ? v * (1 + f) : v + (255 - v) * f))); };
+    return 'rgb(' + m(r) + ',' + m(g) + ',' + m(b) + ')';
+  }
+
+  function size() {
+    var r = box.getBoundingClientRect(), h = Math.floor(Math.min(r.height, r.width * VH / VW));
+    h = Math.max(120, h || 0);
+    return { w: Math.round(h * VW / VH), h: h };
+  }
+  function rr(g, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    g.beginPath();
+    g.moveTo(x + r, y); g.lineTo(x + w - r, y); g.quadraticCurveTo(x + w, y, x + w, y + r);
+    g.lineTo(x + w, y + h - r); g.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    g.lineTo(x + r, y + h); g.quadraticCurveTo(x, y + h, x, y + h - r);
+    g.lineTo(x, y + r); g.quadraticCurveTo(x, y, x + r, y); g.closePath();
+  }
+
+  // the camera follows the bike only part of the way, so a lane change is seen
+  var cam = { rear: 0, X: 0 };
+  function laneX(l) { return (l - (E.LANES - 1) / 2) * LW; }
+  function P3(X, a, Z) {
+    // a: metres ahead of the bike's rear wheel
+    var q = a + D0;
+    if (q < 0.6) q = 0.6;
+    var s = F / q;
+    return { x: VW / 2 + (X - cam.X) * s, y: HZ + K / q - (Z || 0) * s, s: s };
+  }
+  function quad(g, a, b, c, d) { g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.lineTo(c.x, c.y); g.lineTo(d.x, d.y); g.closePath(); g.fill(); }
+
+  function sky(g, P, t) {
+    var gr = g.createLinearGradient(0, 0, 0, HZ);
+    gr.addColorStop(0, P.sky0); gr.addColorStop(1, P.sky1);
+    g.fillStyle = gr; g.fillRect(0, 0, VW, HZ + 1);
+    var i;
+    if (P.star) {
+      g.fillStyle = P.star;
+      for (i = 0; i < 34; i++) { var sx = (i * 97 + 13) % VW, sy = (i * 53 + 7) % (HZ - 30); g.globalAlpha = 0.4 + 0.6 * ((i * 7) % 5) / 4; g.fillRect(sx, sy, 1.6, 1.6); }
+      g.globalAlpha = 1;
+      g.fillStyle = P.moon; g.beginPath(); g.arc(300, 92, 13, 0, Math.PI * 2); g.fill();
+      g.fillStyle = P.sky1; g.beginPath(); g.arc(306, 87, 11, 0, Math.PI * 2); g.globalAlpha = 0.85; g.fill(); g.globalAlpha = 1;
+    } else {
+      g.fillStyle = 'rgba(255,255,255,.75)';
+      [[60, 104, 1], [250, 86, 1.3], [180, 120, 0.8]].forEach(function (c) {
+        var x = c[0] - (cam.X * 2) % 40, s = c[2];
+        g.beginPath(); g.ellipse(x, c[1], 22 * s, 7 * s, 0, 0, Math.PI * 2); g.ellipse(x + 12 * s, c[1] - 5 * s, 13 * s, 8 * s, 0, 0, Math.PI * 2); g.fill();
+      });
+    }
+    // two rows of hills that drift a little with the camera
+    [[P.hill2, 0.6, 22, 0.011], [P.hill, 1.2, 14, 0.019]].forEach(function (L) {
+      g.fillStyle = L[0];
+      g.beginPath(); g.moveTo(0, HZ + 1);
+      for (var x = 0; x <= VW; x += 8) { var u = (x + cam.X * 6 * L[1]) * L[3]; g.lineTo(x, HZ - L[2] * (0.55 + 0.45 * Math.sin(u) * Math.sin(u * 0.37 + 1.3))); }
+      g.lineTo(VW, HZ + 1); g.closePath(); g.fill();
+    });
+  }
+
+  function ground(g, P, d) {
+    g.fillStyle = P.grass; g.fillRect(0, HZ, VW, VH - HZ);
+    var i, a, A, B;
+    // stripes of the verge rushing past, to feel the speed
+    g.fillStyle = P.grass2;
+    for (i = 0; i < 40; i++) {
+      a = i * 8 - (d % 8);
+      if (a < -1.5) continue;
+      A = P3(-40, a, 0); B = P3(40, a + 4, 0);
+      if (A.y - B.y < 0.4) continue;
+      g.fillRect(0, B.y, VW, A.y - B.y);
+    }
+    // the road
+    var far = 400, n0 = P3(-7, -1.4, 0), n1 = P3(7, -1.4, 0), f0 = P3(-7, far, 0), f1 = P3(7, far, 0);
+    g.fillStyle = P.road; quad(g, n0, n1, f1, f0);
+    g.fillStyle = P.edge;
+    [-6.5, 6.3].forEach(function (X) { quad(g, P3(X, -1.4, 0), P3(X + 0.2, -1.4, 0), P3(X + 0.2, far, 0), P3(X, far, 0)); });
+    // lane dashes are painted on the ground, so they move at the bike's own speed
+    g.fillStyle = P.dash;
+    for (i = 0; i < 34; i++) {
+      a = i * 12 - (d % 12);
+      if (a < -1.4 || a > 360) continue;
+      for (var l = 1; l < E.LANES; l++) {
+        var X = laneX(l - 0.5);
+        quad(g, P3(X - 0.09, a, 0), P3(X + 0.09, a, 0), P3(X + 0.09, a + 4, 0), P3(X - 0.09, a + 4, 0));
+      }
+    }
+    // roadside posts with a reflector
+    for (i = 0; i < 18; i++) {
+      a = i * 20 - (d % 20);
+      if (a < -1.2 || a > 340) continue;
+      [-7.6, 7.6].forEach(function (X) {
+        var b = P3(X, a, 0), t = P3(X, a, 1.1), w = Math.max(1, 0.16 * b.s);
+        g.fillStyle = P.post; g.fillRect(b.x - w / 2, t.y, w, b.y - t.y);
+        g.fillStyle = P.reflector; g.fillRect(b.x - w / 2, t.y + (b.y - t.y) * 0.12, w, Math.max(1, (b.y - t.y) * 0.18));
+      });
+    }
+  }
+
+  // a car, van or truck seen from behind and a little above: the side that faces the
+  // camera, the roof, and the back with its window and tail lights
+  var DIM = { car: [0.95, 1.4], van: [1.0, 2.0], truck: [1.25, 3.2] };
+  function vehicle(g, P, c, y0, dk) {
+    var a0 = y0 - cam.rear, a1 = a0 + c.len, X = laneX(c.lane), hw = DIM[c.kind][0], ht = DIM[c.kind][1];
+    if (a0 > 420 || a1 < -D0 + 1) return;
+    var col = P.cars[c.paint % P.cars.length];
+    var body = c.kind === 'truck' ? P.box : col;
+    // shadow
+    g.fillStyle = P.shadow;
+    quad(g, P3(X - hw - 0.1, a0 - 0.3, 0), P3(X + hw + 0.1, a0 - 0.3, 0), P3(X + hw + 0.1, a1, 0), P3(X - hw - 0.1, a1, 0));
+    // the side facing the camera
+    var sx = X > cam.X ? X - hw : X + hw;
+    g.fillStyle = shade(body, -0.28);
+    quad(g, P3(sx, a0, 0), P3(sx, a1, 0), P3(sx, a1, ht), P3(sx, a0, ht));
+    if (c.kind === 'truck') {
+      // the cab in the paint colour at the front
+      g.fillStyle = shade(col, -0.25);
+      quad(g, P3(sx, a1, 0), P3(sx, a1 + 2.2, 0), P3(sx, a1 + 2.2, 2.5), P3(sx, a1, 2.5));
+    }
+    // the roof
+    g.fillStyle = shade(body, 0.18);
+    quad(g, P3(X - hw, a0, ht), P3(X + hw, a0, ht), P3(X + hw, a1, ht), P3(X - hw, a1, ht));
+    // the back
+    var L = P3(X - hw, a0, 0), R = P3(X + hw, a0, 0), T = P3(X - hw, a0, ht), w = R.x - L.x, h = L.y - T.y;
+    g.fillStyle = body; rr(g, L.x, T.y, w, h, Math.min(w, h) * 0.12); g.fill();
+    if (c.kind === 'truck') {
+      g.fillStyle = shade(body, -0.12);
+      g.fillRect(L.x + w * 0.49, T.y + h * 0.06, Math.max(1, w * 0.02), h * 0.8);
+      g.fillStyle = col; g.fillRect(L.x, T.y + h * 0.42, w, h * 0.1);
+    } else {
+      g.fillStyle = P.glass; rr(g, L.x + w * 0.14, T.y + h * 0.1, w * 0.72, h * (c.kind === 'van' ? 0.32 : 0.36), w * 0.05); g.fill();
+    }
+    // bumper, wheels and tail lights
+    g.fillStyle = P.tyre;
+    g.fillRect(L.x + w * 0.06, L.y - h * 0.06, w * 0.18, h * 0.08 + 1); g.fillRect(L.x + w * 0.76, L.y - h * 0.06, w * 0.18, h * 0.08 + 1);
+    g.fillStyle = shade(body, -0.4); g.fillRect(L.x, L.y - h * 0.16, w, h * 0.08);
+    var ly = c.kind === 'truck' ? L.y - h * 0.24 : L.y - h * 0.4, lh = Math.max(1, h * (c.kind === 'truck' ? 0.07 : 0.12));
+    if (dk) { g.shadowColor = P.tail; g.shadowBlur = Math.min(14, w * 0.2); }
+    g.fillStyle = P.tail;
+    g.fillRect(L.x + w * 0.04, ly, w * 0.16, lh); g.fillRect(L.x + w * 0.8, ly, w * 0.16, lh);
+    g.shadowBlur = 0;
+  }
+
+  // the fuel can for the nitro bar, bobbing a little
+  function can(g, P, it, t) {
+    var a = it.y - cam.rear, X = laneX(it.lane), b = P3(X, a, 0.35 + 0.12 * Math.sin(t * 5 + it.y)), s = b.s;
+    if (a > 300 || a < -D0 + 1) return;
+    g.fillStyle = P.shadow; g.beginPath(); g.ellipse(b.x, P3(X, a, 0).y, 0.4 * s, 0.12 * s, 0, 0, Math.PI * 2); g.fill();
+    var w = 0.62 * s, h = 0.78 * s;
+    g.fillStyle = P.can; rr(g, b.x - w / 2, b.y - h, w, h, w * 0.18); g.fill();
+    g.fillStyle = shade('#F6B93B', -0.35); g.fillRect(b.x - w * 0.18, b.y - h - w * 0.16, w * 0.36, w * 0.18);
+    g.fillStyle = '#FFFFFF';
+    g.beginPath();
+    g.moveTo(b.x + w * 0.08, b.y - h * 0.86); g.lineTo(b.x - w * 0.2, b.y - h * 0.45); g.lineTo(b.x - w * 0.02, b.y - h * 0.45);
+    g.lineTo(b.x - w * 0.1, b.y - h * 0.12); g.lineTo(b.x + w * 0.2, b.y - h * 0.55); g.lineTo(b.x + w * 0.02, b.y - h * 0.55); g.closePath(); g.fill();
+  }
+
+  function finishLine(g, a) {
+    if (a > 400 || a < -D0 + 1) return;
+    var n = 16;
+    for (var i = 0; i < n; i++) for (var r = 0; r < 2; r++) {
+      g.fillStyle = (i + r) % 2 ? '#FFFFFF' : '#1F1D24';
+      var x0 = -6.4 + 12.8 * i / n, x1 = -6.4 + 12.8 * (i + 1) / n;
+      quad(g, P3(x0, a + r * 0.8, 0), P3(x1, a + r * 0.8, 0), P3(x1, a + (r + 1) * 0.8, 0), P3(x0, a + (r + 1) * 0.8, 0));
+    }
+  }
+
+  // the bike from behind: tyre, mudguard and tail light, the rider in the accent colour
+  // leaning into a lane change; it tumbles away after a crash
+  function bike(g, P, t, dk) {
+    var bx = laneX(S.x), gp = P3(bx, 0, 0), u = BIKE_PX / 26;
+    var lean = Math.max(-0.35, Math.min(0.35, (S.tl - S.x) * 0.3));
+    var cr = 0;
+    if (S.over && !S.won && crashAt) cr = Math.min(1, (Date.now() - crashAt) / 900);
+    g.save();
+    g.translate(gp.x + cr * 40 * (S.hit && S.hit.lane < S.x ? 1 : -1), gp.y - cr * 30 * Math.sin(cr * Math.PI));
+    g.rotate(lean + cr * 2.4 * (S.hit && S.hit.lane < S.x ? 1 : -1));
+    g.scale(u, u);
+    // headlight beam at night
+    if (dk && !cr) {
+      g.fillStyle = P.light;
+      g.beginPath(); g.moveTo(-6, -30); g.lineTo(-60, -150); g.lineTo(60, -150); g.lineTo(6, -30); g.closePath(); g.fill();
+    }
+    g.fillStyle = P.shadow; g.beginPath(); g.ellipse(0, 1, 16, 4, 0, 0, Math.PI * 2); g.fill();
+    // flame and speed lines on nitro
+    if (S.boostT > 0 && !S.over) {
+      var fl = 10 + 6 * Math.sin(t * 40);
+      g.fillStyle = '#FFB13B'; g.beginPath(); g.moveTo(5, -11); g.lineTo(9 + 3, -11 + fl * 0.2); g.lineTo(7 + fl * 0.5, -6 + fl * 0.5); g.lineTo(3, -8); g.closePath(); g.fill();
+      g.fillStyle = '#FFF2B0'; g.beginPath(); g.moveTo(6, -10); g.lineTo(8 + fl * 0.3, -6 + fl * 0.3); g.lineTo(5, -8); g.closePath(); g.fill();
+    }
+    // tyre
+    g.fillStyle = P.tyre; rr(g, -3.4, -15, 6.8, 15, 3); g.fill();
+    // exhaust
+    g.fillStyle = '#9A98A2'; rr(g, 2.5, -14, 4.5, 3.6, 1.6); g.fill();
+    // mudguard and body
+    g.fillStyle = '#2F2D36'; rr(g, -5, -22, 10, 8, 3); g.fill();
+    g.fillStyle = ACCENT; rr(g, -7, -29, 14, 8, 3.5); g.fill();
+    // tail light
+    if (dk) { g.shadowColor = '#FF3B3B'; g.shadowBlur = 10; }
+    g.fillStyle = '#FF3B3B'; rr(g, -3.2, -22.5, 6.4, 2.6, 1.2); g.fill();
+    g.shadowBlur = 0;
+    // rider: legs on the pegs, the back of a jacket, arms out to the bars, the helmet
+    g.fillStyle = '#2A3550';
+    rr(g, -10, -30, 4.5, 12, 2); g.fill(); rr(g, 5.5, -30, 4.5, 12, 2); g.fill();
+    g.fillStyle = '#1F1D24'; rr(g, -11, -20, 5.5, 4, 1.5); g.fill(); rr(g, 5.5, -20, 5.5, 4, 1.5); g.fill();
+    g.fillStyle = '#2F2D36'; g.fillRect(-15, -41, 30, 2.2);
+    g.fillStyle = shade(ACCENT, -0.25);
+    g.beginPath(); g.moveTo(-8, -37); g.lineTo(-14.5, -40.5); g.lineTo(-13, -42.5); g.lineTo(-6, -42); g.closePath(); g.fill();
+    g.beginPath(); g.moveTo(8, -37); g.lineTo(14.5, -40.5); g.lineTo(13, -42.5); g.lineTo(6, -42); g.closePath(); g.fill();
+    g.fillStyle = ACCENT;
+    g.beginPath(); g.moveTo(-8.5, -29); g.lineTo(8.5, -29); g.lineTo(7.5, -44); g.quadraticCurveTo(0, -47, -7.5, -44); g.closePath(); g.fill();
+    g.fillStyle = 'rgba(255,255,255,.75)'; g.fillRect(-7.6, -36.5, 15.2, 1.6);
+    g.fillStyle = dk ? '#ECE6DA' : '#FFFFFF'; g.beginPath(); g.arc(0, -50, 6.4, 0, Math.PI * 2); g.fill();
+    g.fillStyle = ACCENT; g.fillRect(-1.3, -56.3, 2.6, 12.6);
+    g.restore();
+    // sparks from the crash
+    if (cr > 0 && cr < 1) {
+      g.fillStyle = '#FFD15C';
+      for (var i = 0; i < 10; i++) {
+        var ang = i * 2.39 + 0.4, r = 8 + cr * 60 * (0.5 + (i % 3) / 4);
+        g.globalAlpha = 1 - cr;
+        g.fillRect(gp.x + Math.cos(ang) * r, gp.y - 26 + Math.sin(ang) * r * 0.6, 3, 3);
+      }
+      g.globalAlpha = 1;
+    }
+  }
+
+  function hud(g, P, font) {
+    // score and the nitro bar, top left
+    g.fillStyle = P.panel; rr(g, 8, 8, 132, 52, 12); g.fill();
+    g.fillStyle = P.text; g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+    g.font = '800 24px ' + font; g.fillText(C.num(Math.floor(S.score)), 18, 36);
+    g.fillStyle = P.bar; rr(g, 18, 44, 112, 8, 4); g.fill();
+    var f = S.boostT > 0 ? S.boostT / E.BOOST_T : S.bar;
+    if (f > 0) { g.fillStyle = S.boostT > 0 ? '#FFB13B' : P.can; rr(g, 18, 44, Math.max(8, 112 * Math.min(1, f)), 8, 4); g.fill(); }
+    if (flash > 0) { g.strokeStyle = 'rgba(246,185,59,' + flash + ')'; g.lineWidth = 2; rr(g, 16, 42, 116, 12, 6); g.stroke(); }
+    // the speedometer, top right
+    var v = E.speed(S), cx = VW - 52, cy = 50, R = 34;
+    g.fillStyle = P.panel; rr(g, VW - 98, 8, 90, 64, 12); g.fill();
+    g.lineCap = 'round'; g.lineWidth = 5;
+    g.strokeStyle = P.bar; g.beginPath(); g.arc(cx, cy, R - 6, Math.PI * 0.85, Math.PI * 2.15); g.stroke();
+    var fr = Math.min(1, (v - 15) / (E.base(1e9) + E.BOOST_V - 15));
+    g.strokeStyle = S.boostT > 0 ? '#FFB13B' : ACCENT; g.beginPath(); g.arc(cx, cy, R - 6, Math.PI * 0.85, Math.PI * (0.85 + 1.3 * fr)); g.stroke();
+    g.lineCap = 'butt';
+    g.fillStyle = P.text; g.textAlign = 'center';
+    g.font = '800 20px ' + font; g.fillText(C.num(Math.round(v * 3.6)), cx, cy + 4);
+    g.fillStyle = P.textDim; g.font = '700 10px ' + font; g.fillText(C.t('kmh'), cx, cy + 18);
+    // the combo, top middle
+    if (S.combo > 0) {
+      var cf = S.comboT / E.COMBO_T;
+      g.globalAlpha = 0.35 + 0.65 * cf;
+      g.fillStyle = ACCENT; rr(g, VW / 2 - 30, 12, 60, 28, 14); g.fill();
+      g.fillStyle = '#FFFFFF'; g.font = '800 17px ' + font; g.fillText('×' + C.num(1 + 0.25 * Math.min(S.combo, E.COMBO_MAX)), VW / 2, 32);
+      g.globalAlpha = 1;
+    }
+    // the daily ride's progress along the bottom of the sky
+    if (S.daily) {
+      var pr = Math.max(0, Math.min(1, S.p / E.DAILY_P));
+      g.fillStyle = P.bar; rr(g, 8, HZ - 30, VW - 16, 6, 3); g.fill();
+      g.fillStyle = ACCENT; rr(g, 8, HZ - 30, Math.max(6, (VW - 16) * pr), 6, 3); g.fill();
+    }
+  }
+
+  function draw() {
+    if (!S) return;
+    var Z = size(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
+    cv.style.width = Z.w + 'px'; cv.style.height = Z.h + 'px';
+    var g = cv.getContext('2d'), k = Z.w / VW, dk = dark(), P = palette(dk), t = S.tick * E.DT;
+    var font = getComputedStyle(document.body).fontFamily || 'sans-serif';
+    g.setTransform(dpr * k, 0, 0, dpr * k, 0, 0);
+    g.clearRect(0, 0, VW, VH);
+    g.save(); rr(g, 0, 0, VW, VH, 0); g.clip();
+    scene(g, P, t, dk);
+    hud(g, P, font);
+    // floating words over the bike
+    for (var i = 0; i < pops.length; i++) {
+      var p = pops[i], f = p.t / p.max, x = p.lane === undefined ? VW / 2 : P3(laneX(p.lane), 0, 0).x;
+      g.globalAlpha = Math.min(1, f * 2.5);
+      g.font = '800 ' + (p.big ? 30 : 20) + 'px ' + font; g.textAlign = 'center'; g.textBaseline = 'middle';
+      var y = p.big ? 250 - (1 - f) * 20 : 400 - (1 - f) * 40;
+      g.lineWidth = 5; g.strokeStyle = dk ? 'rgba(0,0,0,.6)' : 'rgba(255,255,255,.85)'; g.strokeText(p.text, x, y);
+      g.fillStyle = p.big ? '#FFB13B' : (dk ? '#FFFFFF' : ACCENT); g.fillText(p.text, x, y);
+      g.globalAlpha = 1;
+    }
+    if ((waiting || held) && !ended) {
+      var msg = held ? C.t('pausedTxt') : C.t('tapStart');
+      g.font = '800 19px ' + font; g.textAlign = 'center'; g.textBaseline = 'middle';
+      var tw = g.measureText(msg).width + 40;
+      g.fillStyle = 'rgba(0,0,0,.55)'; rr(g, VW / 2 - tw / 2, 262, tw, 44, 22); g.fill();
+      g.fillStyle = '#FFFFFF'; g.fillText(msg, VW / 2, 285);
+    }
+    g.restore();
+  }
+
+  // the road and everything on it, without the HUD
+  function scene(g, P, t, dk) {
+    cam.rear = S.p - E.BIKE_L;
+    cam.X = laneX(S.x) * 0.6;
+    sky(g, P, t);
+    ground(g, P, S.d);
+    if (S.daily) finishLine(g, E.DAILY_P - cam.rear);
+    var list = [], i, j;
+    for (i = 0; i < S.waves.length; i++) for (j = 0; j < S.waves[i].cars.length; j++) {
+      var c = S.waves[i].cars[j];
+      list.push({ c: c, y: S.waves[i].y + c.o });
+    }
+    // far to near; what is already beside the bike is drawn over it
+    list.sort(function (a, b) { return b.y - a.y; });
+    var behind = [];
+    for (i = 0; i < list.length; i++) { if (list[i].y < cam.rear) behind.push(list[i]); else vehicle(g, P, list[i].c, list[i].y, dk); }
+    for (i = S.items.length - 1; i >= 0; i--) if (!S.items[i].got && S.items[i].y >= cam.rear) can(g, P, S.items[i], t);
+    bike(g, P, t, dk);
+    for (i = 0; i < behind.length; i++) vehicle(g, P, behind[i].c, behind[i].y, dk);
+    // speed lines at the edges on nitro
+    if (S.boostT > 0 && !S.over) {
+      g.strokeStyle = dk ? 'rgba(255,255,255,.35)' : 'rgba(255,255,255,.7)'; g.lineWidth = 2;
+      for (i = 0; i < 10; i++) {
+        var side = i % 2 ? 1 : -1, y0 = HZ + 30 + ((i * 47 + S.tick * 9) % (VH - HZ - 30)), x0 = VW / 2 + side * (70 + (i * 13) % 60 + (y0 - HZ) * 0.5);
+        g.beginPath(); g.moveTo(x0, y0); g.lineTo(x0 + side * 22, y0 + 26); g.stroke();
+      }
+    }
+  }
+
+  // the share card: the road as the run ended
+  function paintShare(g, w, h) {
+    var P = palette(dark());
+    g.fillStyle = P.grass; g.fillRect(0, 0, w, h);
+    var k = Math.min(w / VW, h / VH);
+    g.save();
+    g.translate((w - VW * k) / 2, (h - VH * k) / 2); g.scale(k, k);
+    g.beginPath(); g.rect(0, 0, VW, VH); g.clip();
+    scene(g, P, S.tick * E.DT, dark());
+    g.restore();
+  }
+
+  /* ----------------------------------------------------------------- ui */
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (dailyDate) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyMr') + ' — ' + C.num(dailyDate) })]));
+    if (!S) return;
+    top.appendChild(el('span', { class: 'ch-badge', text: C.t('kmN', { n: C.num((S.d / 1000).toFixed(1)) }) }));
+    var best = dailyDate ? 0 : C.stats.getBest('motorush', 'score');
+    if (best) top.appendChild(el('span', { class: 'ch-badge', text: C.t('bestN', { n: C.num(best) }) }));
+    var on = !waiting && !held && !ended;
+    pauseBtn.innerHTML = '';
+    pauseBtn.appendChild(C.icon(on ? 'pause' : 'play', 22));
+    pauseBtn.setAttribute('aria-label', on ? C.t('pause') : C.t('resume'));
+    pauseBtn.disabled = ended;
+    top.appendChild(pauseBtn);
+  }
+  function renderStatus() { status.textContent = C.t('hint'); }
+  function go() { if (ended) return; if (waiting || held) { waiting = false; held = false; last = 0; acc = 0; renderTop(); kick(); } }
+  function hold() { if (!S || ended || waiting || held) return; held = true; ctx.save(); renderTop(); draw(); }
+  pauseBtn.addEventListener('click', function () { C.audio.unlock(); if (held || waiting) go(); else hold(); });
+
+  /* -------------------------------------------------------------- input */
+
+  // A swipe steers as soon as it has gone far enough sideways; a touch that never does
+  // is a tap, which steers toward its side of the road. The canvas is drawn left to
+  // right in every language, so its left is the road's left.
+  var ptr = null, SWIPE = 22;
+  wrap.addEventListener('pointerdown', function (e) {
+    if (!S || (e.target.closest && e.target.closest('button'))) return;
+    if (e.button !== undefined && e.button > 0) return;
+    e.preventDefault();
+    C.audio.unlock();
+    if (ended) return;
+    if (waiting || held) { go(); return; }
+    ptr = { id: e.pointerId, x: e.clientX, moved: false };
+  });
+  window.addEventListener('pointermove', function (e) {
+    if (!ptr || e.pointerId !== ptr.id) return;
+    var dx = e.clientX - ptr.x;
+    if (Math.abs(dx) < SWIPE) return;
+    // a long swipe may cross two lanes: steer once more for each further stretch
+    ptr.moved = true;
+    steer(dx > 0 ? 1 : -1);
+    ptr.x = e.clientX;
+  });
+  window.addEventListener('pointerup', function (e) {
+    if (!ptr || e.pointerId !== ptr.id) return;
+    if (!ptr.moved) {
+      var r = cv.getBoundingClientRect();
+      steer(e.clientX < r.left + r.width / 2 ? -1 : 1);
+    }
+    ptr = null;
+  });
+  window.addEventListener('pointercancel', function () { ptr = null; });
+  wrap.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  wrap.style.touchAction = 'none';
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim')) return;
+    if (e.target && e.target.closest && e.target.closest('button') && (e.key === ' ' || e.key === 'Enter')) return;
+    var dir = e.key === 'ArrowLeft' || C.keyIs(e, 'a') ? -1 : e.key === 'ArrowRight' || C.keyIs(e, 'd') ? 1 : 0;
+    if (dir) { e.preventDefault(); if (!e.repeat) steer(dir); return; }
+    if (e.repeat) return;
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); go(); }
+    else if (e.key === 'Escape' || C.keyIs(e, 'p')) { e.preventDefault(); if (held || waiting) go(); else hold(); }
+    else if (C.keyIs(e, 'r')) { e.preventDefault(); newRun(); }
+  });
+  // a run waits while the app is away, and comes back waiting for a tap
+  C.onPause(function () { paused = true; if (S && !ended && !waiting) held = true; ctx.save(); renderTop(); });
+  C.onResume(function () { paused = false; kick(); });
+  document.addEventListener('visibilitychange', function () { if (document.hidden) { if (S && !ended && !waiting) { held = true; renderTop(); } } else kick(); });
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw); } catch (er) { /* old WebViews */ } }
+  // the HUD uses the app's font, which may arrive after the first frame
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { draw(); });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    hold();
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← → / A D', C.t('kSteer')), kb('Space', C.t('kStart')), kb('P / Esc', C.t('kPause')), kb('R', C.t('kAgain'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // little pictures for the tutorial: the road from behind, the bike, cars and a can
+  var SVG_BIKE = function (x, y) {
+    return '<g transform="translate(' + x + ',' + y + ')"><rect x="-3" y="-14" width="6" height="14" rx="3" fill="#1C1B21"/><rect x="-7" y="-27" width="14" height="8" rx="3.5" fill="' + ACCENT + '"/>' +
+      '<rect x="-15" y="-39" width="30" height="2" fill="#2F2D36"/><path d="M-8 -27 L8 -27 L7 -42 Q0 -45 -7 -42Z" fill="' + ACCENT + '"/><circle cy="-47" r="6" fill="#fff" stroke="#ccc"/></g>';
+  };
+  var SVG_CAR = function (x, y, w, col) {
+    return '<g transform="translate(' + x + ',' + y + ')"><rect x="' + (-w / 2) + '" y="' + (-w * 0.6) + '" width="' + w + '" height="' + (w * 0.6) + '" rx="3" fill="' + col + '"/>' +
+      '<rect x="' + (-w * 0.36) + '" y="' + (-w * 0.54) + '" width="' + (w * 0.72) + '" height="' + (w * 0.2) + '" rx="2" fill="rgba(30,45,70,.6)"/>' +
+      '<rect x="' + (-w * 0.46) + '" y="' + (-w * 0.26) + '" width="' + (w * 0.16) + '" height="' + (w * 0.07) + '" fill="#E3342F"/><rect x="' + (w * 0.3) + '" y="' + (-w * 0.26) + '" width="' + (w * 0.16) + '" height="' + (w * 0.07) + '" fill="#E3342F"/></g>';
+  };
+  function road() {
+    return '<rect x="0" y="20" width="200" height="100" fill="#93C273"/><path d="M92 20 L108 20 L196 120 L4 120Z" fill="#5A5862"/>' +
+      '<path d="M100 20 L100 120 M96 20 L52 120 M104 20 L148 120" stroke="#fff" stroke-width="1.5" stroke-dasharray="6 6" opacity=".85"/>' +
+      '<rect x="0" y="0" width="200" height="20" fill="#B8DEF2"/>';
+  }
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 120" width="100%" direction="ltr"><rect width="200" height="120" rx="10" fill="#FBE6EC"/><g clip-path="inset(0 round 10px)">' + road();
+    if (kind === 1) {
+      s += SVG_CAR(76, 70, 26, '#3E8FD6') + SVG_CAR(122, 56, 18, '#F0A830') + SVG_BIKE(126, 116) +
+        '<path d="M70 100 h-22 M54 94 l-7 6 7 6 M132 100 h22 M148 94 l7 6 -7 6" stroke="' + ACCENT + '" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>';
+    } else if (kind === 2) {
+      s += SVG_CAR(68, 104, 40, '#E2584D') + SVG_BIKE(118, 116) +
+        '<path d="M92 66 q8 -6 16 0" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round"/>' +
+        '<rect x="134" y="28" width="44" height="22" rx="11" fill="' + ACCENT + '"/><text x="156" y="44" font-size="13" font-weight="800" text-anchor="middle" fill="#fff" font-family="sans-serif">×2</text>';
+    } else {
+      s += '<g transform="translate(100,74)"><rect x="-9" y="-12" width="18" height="22" rx="3" fill="#F6B93B"/><path d="M2 -9 L-5 1 L0 1 L-2 8 L5 -2 L0 -2Z" fill="#fff"/></g>' +
+        SVG_BIKE(100, 116) + '<rect x="20" y="30" width="70" height="8" rx="4" fill="rgba(0,0,0,.15)"/><rect x="20" y="30" width="52" height="8" rx="4" fill="#F6B93B"/>' +
+        '<path d="M110 112 l6 8 M90 112 l-6 8" stroke="#FFB13B" stroke-width="3" stroke-linecap="round"/>';
+    }
+    return s + '</g></svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // A ride in progress is saved when it is paused and when the app goes away; the
+  // daily ride has its own slot
+  ctx.autosave(function () {
+    if (!S || S.over || ended) return { inProgress: false };
+    return { s: E.snapshot(S), seed: seed, tries: tries, daily: dailyDate || null, elapsed: Date.now() - startedAt };
+  });
+  function resumeRun(sv) {
+    var R = E.restore(sv.s);
+    if (!R || R.over || R.daily !== !!dailyDate) return false;
+    S = R; seed = sv.seed; tries = sv.tries || 1; startedAt = Date.now() - (sv.elapsed || 0);
+    ended = false; waiting = true; held = false; last = 0; acc = 0; pops = []; crashAt = 0;
+    runAwarded = S.d >= 10000;
+    renderTop(); renderStatus(); draw(); kick();
+    return true;
+  }
+  var saved = ctx.loadSave();
+  if (dailyDate) {
+    if (!(saved && saved.s && saved.daily === dailyDate && resumeRun(saved))) newRun();
+    if (C.stats.dailyDone('motorush', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).motorush;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (!(saved && saved.s && !saved.daily && resumeRun(saved))) {
+    newRun();
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
