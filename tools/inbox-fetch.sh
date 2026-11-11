@@ -40,16 +40,18 @@ field() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const
 if [[ "$ref" =~ ^[0-9]+$ ]]; then
   id="$ref"
 else
-  # Drafts have no tag yet, so /releases/tags/<tag> cannot find them; search the list.
+  # Drafts have no tag yet (GitHub shows "untagged-<hex>" and keeps the report id only in the
+  # release name), so /releases/tags/<tag> cannot find them; search the list by name.
   # One page is enough: the Worker caps reports at 30 a day and deletes them after 3 days.
-  id="$(gh api "repos/$REPO/releases?per_page=100" | REF="$ref" field 'v.find(r => r.tag_name === process.env.REF)?.id')"
+  id="$(gh api "repos/$REPO/releases?per_page=100" | REF="$ref" field 'v.find(r => r.name === process.env.REF || r.tag_name === process.env.REF)?.id')"
 fi
 if [ -z "$id" ]; then echo "no release $ref in $REPO" >&2; exit 2; fi
 
 rel="$(gh api "repos/$REPO/releases/$id")" || { echo "no release $id in $REPO" >&2; exit 2; }
 tag="$(printf '%s' "$rel" | field 'v.tag_name')"
+name="$(printf '%s' "$rel" | field 'v.name')"
 draft="$(printf '%s' "$rel" | field 'v.draft')"
-case "$tag" in report-*) ;; *) echo "release $id ($tag) is not a form report; refusing" >&2; exit 2 ;; esac
+case "$name" in report-*) ;; *) echo "release $id ($name) is not a form report; refusing" >&2; exit 2 ;; esac
 
 printf '%s\n' "$(printf '%s' "$rel" | field 'v.body')" > "$dir/report.md"
 echo "report.md"

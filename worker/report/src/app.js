@@ -29,6 +29,10 @@ export const LIMITS = {
 export const LANGS = ['fa', 'en', 'zh', 'de', 'es', 'pl'];
 const KINDS = { bug: 'bug report', idea: 'suggestion' };
 const TAG_PREFIX = 'report-';
+// GitHub gives a draft release a placeholder tag ("untagged-<hex>") whatever tag_name we
+// send, so the daily cap and the cleanup cron found no report at all until the first real
+// submission showed it (#757). The report's id is the release name, which we set to it.
+const isReport = (r) => typeof r.name === 'string' && r.name.startsWith(TAG_PREFIX);
 
 // Content is identified by its first bytes, never by the name or the type the
 // browser claims: a renamed .html must not reach the inbox as a "png".
@@ -228,7 +232,7 @@ async function start(request, env, ctx) {
   const inbox = env.INBOX_REPO;
   const list = await ghJson(env, fetchImpl, 'GET', `/repos/${inbox}/releases?per_page=100`);
   const dayAgo = now - 24 * 3600 * 1000;
-  const today = list.filter((r) => r.tag_name && r.tag_name.startsWith(TAG_PREFIX) && Date.parse(r.created_at) > dayAgo);
+  const today = list.filter((r) => isReport(r) && Date.parse(r.created_at) > dayAgo);
   if (today.length >= intVar(env.DAILY_CAP, 30)) throw new HttpError(429, 'cap');
   if (today.filter((r) => parseRelease(r.body).head.sender === hash).length >= intVar(env.IP_DAILY_CAP, 5)) throw new HttpError(429, 'cap');
 
@@ -408,7 +412,7 @@ export async function cleanup(env, fetchImpl, now) {
     const list = await r.json();
     for (const rel of list) {
       if (calls + 2 > budget) break;
-      if (!rel.tag_name || !rel.tag_name.startsWith(TAG_PREFIX)) continue;
+      if (!isReport(rel)) continue;
       if (!(Date.parse(rel.created_at) < cutoff)) continue;
       const del = await gh(env, fetchImpl, 'DELETE', `/repos/${inbox}/releases/${rel.id}`);
       calls++;

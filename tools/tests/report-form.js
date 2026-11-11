@@ -47,7 +47,8 @@ module.exports = function (T) {
       }
       if (p === '/repos/choganhq/inbox/releases' && m === 'POST') {
         const b = JSON.parse(init.body);
-        const rel = { id: st.nextId++, tag_name: b.tag_name, name: b.name, draft: !!b.draft, body: b.body, created_at: new Date(st.now || NOW).toISOString(), assets: [] };
+        // Like GitHub: a draft's tag_name is a placeholder, only `name` survives.
+        const rel = { id: st.nextId++, tag_name: b.draft ? 'untagged-' + String(st.nextId * 7919).padStart(8, '0') : b.tag_name, name: b.name, draft: !!b.draft, body: b.body, created_at: new Date(st.now || NOW).toISOString(), assets: [] };
         st.releases.push(rel);
         return res(201, rel);
       }
@@ -199,7 +200,7 @@ module.exports = function (T) {
     const sj = await st.json();
     ok(st.status === 200 && typeof sj.ticket === 'string', 'start returns a ticket (' + st.status + ')');
     const rel = gh.releases[gh.releases.length - 1] || {};
-    ok(rel.draft === true && /^report-20261110-120000-[a-z0-9]+$/.test(rel.tag_name || ''), 'a draft inbox release is created: ' + rel.tag_name);
+    ok(rel.draft === true && /^report-20261110-120000-[a-z0-9]+$/.test(rel.name || ''), 'a draft inbox release is created: ' + rel.name);
     ok(gh.calls.every((x) => x.auth === 'Bearer test-token') && gh.calls.some((x) => x.m === 'GET' && x.path === '/repos/choganhq/inbox/releases'), 'GitHub is called with the token, after reading the inbox for the caps');
     const parsed = A.parseRelease(rel.body);
     ok(parsed.head.kind === 'bug' && parsed.head.lang === 'en' && parsed.head.issue === 'pending' && /^[0-9a-f]{16}$/.test(parsed.head.sender), 'the release header has kind, language, pending issue and a hashed sender');
@@ -237,7 +238,7 @@ module.exports = function (T) {
     const fj = await fin.json();
     const issue = gh.issues[gh.issues.length - 1] || {};
     ok(fin.status === 200 && fj.issue === issue.number && fj.ok, 'finish opens an issue (#' + fj.issue + ')');
-    ok(JSON.stringify(issue.labels) === '["from-form"]' && issue.title === 'Web form: bug report (' + rel.tag_name + ')', 'the issue has a fixed title and the from-form label: ' + issue.title);
+    ok(JSON.stringify(issue.labels) === '["from-form"]' && issue.title === 'Web form: bug report (' + rel.name + ')', 'the issue has a fixed title and the from-form label: ' + issue.title);
     const ib = String(issue.body || '');
     ok(ib.startsWith('<!-- from-form -->') && /Untrusted user text/.test(ib), 'the issue body starts with the marker and the untrusted-text warning');
     ok(!ib.includes('someone_private') && /Contact: given, kept only in the private inbox/.test(ib), 'the contact is not in the public issue, only that one was given');
@@ -247,7 +248,7 @@ module.exports = function (T) {
     const outside = ib.replace(iFence + 'text\n' + inside + '\n' + iFence, '');
     ok(!/@margani|<img|https:\/\/evil|#1\b/.test(outside), 'no @mention, html, url or #ref from the text outside the fence');
     ok(/- Game: `Chess  ?x`/.test(ib) || /- Game: `Chess x`/.test(ib), 'the game name is an inline code span without backticks');
-    ok(/shot-1\.png/.test(ib) && /video\.mp4/.test(ib) && ib.includes('tools/inbox-fetch.sh ' + rel.tag_name), 'the issue lists the files and how to fetch them');
+    ok(/shot-1\.png/.test(ib) && /video\.mp4/.test(ib) && ib.includes('tools/inbox-fetch.sh ' + rel.name), 'the issue lists the files and how to fetch them');
     ok(A.parseRelease(rel.body).head.issue === ISSUES + '#' + issue.number, 'the inbox release records the issue number');
     const again = await W.fetch(post('/report/api/finish', { ticket }), envFor());
     ok(again.status === 409 && gh.issues.length === 1, 'a second finish opens no second issue (' + again.status + ')');
@@ -277,14 +278,14 @@ module.exports = function (T) {
 
     // The daily cleanup.
     const cl = fakeGitHub();
-    const mk = (tag, hoursAgo, draft) => cl.releases.push({ id: cl.nextId++, tag_name: tag, draft, body: '', created_at: new Date(NOW - hoursAgo * 3600 * 1000).toISOString(), assets: [] });
+    const mk = (tag, hoursAgo, draft) => cl.releases.push({ id: cl.nextId++, tag_name: draft ? 'untagged-' + cl.nextId : tag, name: tag, draft, body: '', created_at: new Date(NOW - hoursAgo * 3600 * 1000).toISOString(), assets: [] });
     mk('report-old-draft', 80, true); mk('report-old-pub', 100, false); mk('report-new', 10, true); mk('v1.0.0', 900, false);
     const CL = A.makeWorker(html, { fetch: cl.fetch, now: () => NOW });
     const n = await CL.scheduled({}, envFor(), null);
-    ok(n === 2 && cl.releases.map((r) => r.tag_name).sort().join(',') === 'report-new,v1.0.0', 'the cron deletes report-* releases older than 3 days and nothing else (' + n + ')');
+    ok(n === 2 && cl.releases.map((r) => r.name || r.tag_name).sort().join(',') === 'report-new,v1.0.0', 'the cron deletes report-* releases older than 3 days and nothing else (' + n + ')');
     ok(cl.calls.some((x) => x.m === 'DELETE' && x.path === '/repos/choganhq/inbox/git/refs/tags/report-old-pub') && !cl.calls.some((x) => /tags\/report-old-draft/.test(x.path)), 'a published report also loses its tag; a draft has none');
     const many = fakeGitHub();
-    for (let i = 0; i < 80; i++) many.releases.push({ id: i + 1, tag_name: 'report-' + i, draft: true, body: '', created_at: new Date(NOW - 100 * 3600 * 1000).toISOString(), assets: [] });
+    for (let i = 0; i < 80; i++) many.releases.push({ id: i + 1, tag_name: 'untagged-' + i, name: 'report-' + i, draft: true, body: '', created_at: new Date(NOW - 100 * 3600 * 1000).toISOString(), assets: [] });
     await A.cleanup(envFor(), many.fetch, NOW);
     ok(many.calls.length <= 45 && many.releases.length < 80, 'one cron run stays inside the subrequest budget (' + many.calls.length + ' calls, ' + (80 - many.releases.length) + ' deleted)');
   }
@@ -359,9 +360,9 @@ module.exports = function (T) {
       fs.chmodSync(path.join(bin, 'gh'), 0o755);
       const png = Buffer.from(PNG());
       const state = (extra) => Object.assign({ releases: [
-        { id: 77, tag_name: 'report-20261110-120000-abcd', draft: true, body: 'Report from the web form (#757).\nkind: bug\n\nContact (untrusted text): `x`',
+        { id: 77, tag_name: 'untagged-0c8f857f', name: 'report-20261110-120000-abcd', draft: true, body: 'Report from the web form (#757).\nkind: bug\n\nContact (untrusted text): `x`',
           assets: [{ id: 901, name: 'shot-1.png', size: png.length, data: png.toString('base64') }, { id: 902, name: 'video.mp4', size: 4, data: Buffer.from('abcd').toString('base64') }] },
-        { id: 78, tag_name: 'v0.28.0', draft: false, body: 'not a report', assets: [] },
+        { id: 78, tag_name: 'v0.28.0', name: 'v0.28.0', draft: false, body: 'not a report', assets: [] },
       ] }, extra || {});
       const run = (name, args, st) => {
         const f = path.join(tmp, name + '.json');
