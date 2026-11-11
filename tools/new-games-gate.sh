@@ -41,7 +41,8 @@ ids() {
   if [ "$1" = WORKTREE ]; then cat www/games.json; else git show "${1}:www/games.json"; fi |
     node -e '
       let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
-        const list = JSON.parse(s);
+        const data = JSON.parse(s);
+        const list = data && data.games;
         if (!Array.isArray(list) || !list.length) throw new Error("empty or not a list");
         for (const g of list) { if (!g || typeof g.id !== "string") throw new Error("entry without id"); console.log(g.id); }
       });'
