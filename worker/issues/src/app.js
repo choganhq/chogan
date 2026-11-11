@@ -1,5 +1,5 @@
 // issues.playchogan.com Worker (#768): a read-only mirror of the public issues of
-// choganhq/chogan, for players who cannot reach GitHub. The report form stays at
+// choganhq/chogan,. The report form stays at
 // playchogan.com/report/ (#757); this site only links to it.
 //
 // Stateless: no KV, D1 or R2. GitHub is the only source, read through its REST API

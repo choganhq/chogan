@@ -1,6 +1,6 @@
 'use strict';
 // issues.playchogan.com (#768): a read-only mirror of the public issues of
-// choganhq/chogan for players who cannot reach GitHub. These tests run the Worker's own
+// choganhq/chogan. These tests run the Worker's own
 // code under Node against a fake GitHub. Nothing here reaches the network.
 module.exports = function (T) {
   const { ok, head, fs, path, LOCALE_CODES } = T;
@@ -128,7 +128,8 @@ module.exports = function (T) {
     const csp = r.headers.get('Content-Security-Policy') || '';
     ok(/default-src 'none'/.test(csp) && /script-src 'self'(;|$)/.test(csp) && /style-src 'self'(;|$)/.test(csp) && /frame-ancestors 'none'/.test(csp) && /base-uri 'none'/.test(csp), 'a strict CSP: ' + csp);
     ok(!/unsafe-inline|unsafe-eval|https?:|\*/.test(csp), 'the CSP allows no inline code and no other origin');
-    ok(!/<style|\sstyle="|\son[a-z]+=/i.test(html), 'the page has no inline style or event handler the CSP would block');
+    // Look inside real tags only: a hostile body is shown as escaped text (`&lt;svg onload=`), and that text is not a handler.
+    ok(!/<style/i.test(html) && !/<[a-z][^>]*\s(style|on[a-z]+)\s*=/i.test(html), 'the page has no inline style or event handler the CSP would block');
     ok(r.headers.get('Strict-Transport-Security') === 'max-age=31536000', 'HSTS on the page');
     ok(r.headers.get('X-Content-Type-Options') === 'nosniff' && r.headers.get('X-Robots-Tag') === 'noindex' && r.headers.get('Referrer-Policy') === 'no-referrer', 'nosniff, noindex, no referrer');
 
