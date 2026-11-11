@@ -1,0 +1,802 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>تپه‌سوار — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* upright on a phone, wide beside the side rows on a wide screen */
+  .hr-wrap > .ch-fit { --fit-ar: calc(3 / 4); }
+  @container game (min-aspect-ratio: 5 / 4) { .hr-wrap > .ch-fit { --fit-ar: calc(16 / 9); } }
+  .ch-nocq .ch-gamemain.ch-wide .hr-wrap > .ch-fit { --fit-ar: calc(16 / 9); }
+  .ch-fit > .hr-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+  /* left is the brake and right the gas in every language, like the pedals of a car */
+  .hr-canvas { display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; user-select: none; -webkit-user-select: none; }
+  .hr-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .hr-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function HillriderEngineFactory() {
+  'use strict';
+
+  // Metres and seconds, y up. Fixed steps of 1/60 s, each cut into eight smaller ones so
+  // the springs between the body and the wheels stay steady; the same inputs give the
+  // same drive on every device.
+  var DT = 1 / 60, SUB = 8, H = DT / SUB, G = 9.8;
+  // the body: a box with the driver's head on top, wheels hung from two points under it
+  var M = 1, INERTIA = 0.9, WM = 0.2, WROT = 0.1, WR = 0.42;
+  var ANCH = [[-1.05, -0.42], [1.05, -0.42]];
+  var BODY = [[-1.45, -0.2], [1.45, -0.2], [-1.35, 0.3], [1.35, 0.3], [0.6, 0.35]];
+  var HEAD = [-0.15, 0.95], HEAD_R = 0.27;
+  var KU = 600, CU = 14, KV = 55, CV = 3.2, STOP = 0.32;
+  var MU = 1.15, VMAX = 15, VREV = 6, MOTOR = 28, BRAKE = 40, REACT = 0.55, AIR = 5.5, WMAX = 7;
+  // a full tank lasts 30 s of gas, or 110 s rolling
+  var BURN_GAS = 1 / 30, BURN_IDLE = 1 / 110;
+  var START = 4, STEP = 1, ORIGIN = 40;
+
+  function hash(seed, i) {
+    var h = Math.imul((seed >>> 0) ^ Math.imul(i | 0, 0x9E3779B1), 0x85EBCA6B);
+    h ^= h >>> 13; h = Math.imul(h, 0xC2B2AE35); h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  }
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function smooth(t) { return t * t * (3 - 2 * t); }
+
+  /* ------------------------------------------------------------ terrain */
+
+  // How hard the hills are at a distance: 0 at the start, 1 from 2,000 m on
+  function hard(x) { return clamp(x / 2000, 0, 1); }
+  function noise(seed, o, t) {
+    var i = Math.floor(t), f = t - i, a = hash(seed + o * 7919, i) * 2 - 1, b = hash(seed + o * 7919, i + 1) * 2 - 1;
+    return a + (b - a) * smooth(f);
+  }
+  // the raw hills: three sizes of wave that grow with the distance, flat at the start
+  function raw(seed, x) {
+    var d = hard(x), ramp = smooth(clamp((x - 12) / 60, 0, 1));
+    return ramp * ((4 + 12 * d) * noise(seed, 1, x / 46) + (1.6 + 4.5 * d) * noise(seed, 2, x / 16) + (0.2 + 0.7 * d) * noise(seed, 3, x / 6));
+  }
+  // The ground is laid a metre at a time, each metre at most so steep (the raw waves can
+  // stack into a wall no car climbs), then softened over five points; between points it
+  // is a smooth curve, so a wheel never meets a corner.
+  function maxSlope(x) { return 0.6 + 0.5 * hard(x); }
+  function grow(S, i) {
+    var T = S.ter;
+    while (T.c.length <= i + 3) {
+      var k = T.c.length, x = k - ORIGIN;
+      if (x <= 0) { T.c.push(x < -14 ? 0.35 * (-x - 14) * (-x - 14) : 0); continue; }
+      var prev = T.c[k - 1], m = maxSlope(x);
+      T.c.push(prev + clamp(raw(S.seed, x) - prev, -m, m));
+    }
+    while (T.p.length <= i + 1) {
+      var j = T.p.length, s = 0, n = 0;
+      for (var q = j - 2; q <= j + 2; q++) if (q >= 0) { s += T.c[q]; n++; }
+      T.p.push(s / n);
+    }
+  }
+  function pt(S, j) { if (j < 0) return S.ter.c[0] + 0.35 * j * j; grow(S, j); return S.ter.p[j]; }
+  // height and slope at x, on a Catmull-Rom curve through the points
+  function ground(S, x) {
+    var u = (x + ORIGIN) / STEP, j = Math.floor(u), t = u - j;
+    var p0 = pt(S, j - 1), p1 = pt(S, j), p2 = pt(S, j + 1), p3 = pt(S, j + 2);
+    var a = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3, b = p0 - 2.5 * p1 + 2 * p2 - 0.5 * p3, c = -0.5 * p0 + 0.5 * p2;
+    return { h: ((a * t + b) * t + c) * t + p1, s: ((3 * a * t + 2 * b) * t + c) / STEP };
+  }
+  function height(S, x) { return ground(S, x).h; }
+
+  /* ----------------------------------------------------------- pickups */
+
+  // Fuel cans: the first at about 110 m, then the gap grows from about 160 m to 420 m with the distance; coins come in rows
+  // of five between them. Both follow from the seed, so only what was taken is saved.
+  function fuelAt(S, n) {
+    var F = S.fx;
+    while (F.length <= n) {
+      var last = F.length ? F[F.length - 1] : 0;
+      F.push(Math.round(last + (F.length ? 160 + 260 * hard(last) : 110) + (hash(S.seed + 31, F.length) - 0.5) * 40));
+    }
+    return F[n];
+  }
+  function coinRow(S, n) { return Math.round(45 + n * 64 + hash(S.seed + 57, n) * 24); }
+  // what lies between x0 and x1, for the drawing and the pickup test
+  function pickups(S, x0, x1) {
+    var out = [], n = 0, x;
+    while ((x = fuelAt(S, n)) < x1 + 2) { if (x >= x0 - 2 && !S.got['f' + n]) out.push({ kind: 'fuel', id: 'f' + n, x: x, y: height(S, x) + 0.55 }); n++; }
+    var r0 = Math.max(0, Math.floor((x0 - 70) / 64));
+    for (var r = r0; (x = coinRow(S, r)) < x1 + 2; r++) {
+      for (var c = 0; c < 5; c++) {
+        var cx = x + c * 1.6, id = 'c' + (r * 5 + c);
+        if (cx < x0 - 2 || cx > x1 + 2 || S.got[id]) continue;
+        // a coin never sits on a can
+        if (Math.abs(cx - fuelAt(S, nearFuel(S, cx))) < 3) continue;
+        out.push({ kind: 'coin', id: id, x: cx, y: height(S, cx) + 0.9 + 0.35 * Math.sin(c / 4 * Math.PI) });
+      }
+    }
+    return out;
+  }
+  function nearFuel(S, x) { var n = 0; while (fuelAt(S, n + 1) < x) n++; return Math.abs(fuelAt(S, n + 1) - x) < Math.abs(fuelAt(S, n) - x) ? n + 1 : n; }
+
+  /* -------------------------------------------------------------- game */
+
+  // seed: whole number; finish: metres for the daily course, 0 for an endless run
+  function newGame(seed, finish) {
+    var S = { seed: seed >>> 0, finish: finish || 0, ter: { c: [], p: [] }, fx: [], got: {}, t: 0,
+      x: START, y: 0, a: 0, vx: 0, vy: 0, w: 0,
+      wh: [], fuel: 1, coins: 0, cans: 0, best: 0, air: 0, airBest: 0, flips: 0, spin: 0, still: 0,
+      over: false, won: false, cause: '', touch: [false, false] };
+    var g = height(S, START);
+    S.y = g + WR + 0.52;
+    for (var k = 0; k < 2; k++) { var A = world(S, ANCH[k]); S.wh.push({ x: A[0], y: A[1], vx: 0, vy: 0, sp: 0, rot: 0 }); }
+    // settle on the springs before the first frame
+    for (var i = 0; i < 90; i++) step(S, 0, true);
+    S.t = 0; S.best = 0; S.fuel = 1;
+    return S;
+  }
+  function world(S, p) {
+    var c = Math.cos(S.a), s = Math.sin(S.a);
+    return [S.x + p[0] * c - p[1] * s, S.y + p[0] * s + p[1] * c];
+  }
+  function headPos(S) { return world(S, HEAD); }
+
+  // A point's depth into the ground along the ground's normal: positive is inside
+  function depth(S, x, y, r) {
+    var g = ground(S, x), n = 1 / Math.sqrt(1 + g.s * g.s);
+    return { pen: r - (y - g.h) * n, nx: -g.s * n, ny: n };
+  }
+
+  // One step. ctl: 1 gas, -1 brake (and reverse), 0 neither. Returns the step's events.
+  function step(S, ctl, settling) {
+    if (S.over || S.won) return [];
+    var ev = [], gas = ctl > 0 && S.fuel > 0, brake = ctl < 0;
+    var a0 = S.a;
+    for (var sub = 0; sub < SUB; sub++) substep(S, gas, brake, ev);
+    if (settling) return ev;
+    S.t += DT;
+    S.fuel = Math.max(0, S.fuel - DT * (gas ? BURN_GAS : BURN_IDLE));
+    if (S.fuel === 0 && S.fuelOut !== true) { S.fuelOut = true; ev.push('empty'); }
+    // whole turns in the air: an air-time trick
+    var onGround = S.touch[0] || S.touch[1];
+    if (!onGround) {
+      S.air += DT;
+      var da = S.a - a0; S.spin += da;
+      if (Math.abs(S.spin) >= Math.PI * 2 - 0.3) { S.flips++; S.spin = 0; ev.push('flip'); }
+    } else {
+      if (S.air > 0.6) ev.push('land');
+      if (S.air > S.airBest) S.airBest = S.air;
+      S.air = 0; S.spin = 0;
+    }
+    var d = S.x - START;
+    if (d > S.best) S.best = d;
+    // pickups the car passes through
+    var near = pickups(S, S.x - 2.2, S.x + 2.2);
+    for (var i = 0; i < near.length; i++) {
+      var p = near[i];
+      if (Math.abs(p.x - S.x) < 1.9 && Math.abs(p.y - (S.y + 0.2)) < 1.6) {
+        S.got[p.id] = 1;
+        if (p.kind === 'fuel') { S.fuel = 1; S.cans++; S.fuelOut = false; ev.push('fuel'); }
+        else { S.coins++; ev.push('coin'); }
+      }
+    }
+    // the head touching the ground ends the run
+    var hp = headPos(S);
+    if (depth(S, hp[0], hp[1], HEAD_R).pen > 0) { S.over = true; S.cause = 'head'; ev.push('crash'); return ev; }
+    // standing still out of fuel, or stuck on a side, ends it too
+    var speed = Math.hypot(S.vx, S.vy);
+    if ((S.fuel === 0 || Math.cos(S.a) < 0.15) && speed < 0.5) S.still += DT; else S.still = 0;
+    if (S.still > 1.5) { S.over = true; S.cause = S.fuel === 0 ? 'fuel' : 'stuck'; ev.push(S.cause === 'fuel' ? 'stall' : 'crash'); return ev; }
+    if (S.finish && S.best >= S.finish) { S.won = true; ev.push('finish'); }
+    return ev;
+  }
+
+  function substep(S, gas, brake, ev) {
+    var c = Math.cos(S.a), s = Math.sin(S.a), fx = 0, fy = -M * G, tq = 0, touched = [false, false];
+    for (var k = 0; k < 2; k++) {
+      var W = S.wh[k], lx = ANCH[k][0] * c - ANCH[k][1] * s, ly = ANCH[k][0] * s + ANCH[k][1] * c;
+      var ax = S.x + lx, ay = S.y + ly, avx = S.vx - S.w * ly, avy = S.vy + S.w * lx;
+      var dx = ax - W.x, dy = ay - W.y, dvx = avx - W.vx, dvy = avy - W.vy;
+      // stiff along the body, soft across it: the suspension
+      var du = dx * c + dy * s, dv = -dx * s + dy * c, vu = dvx * c + dvy * s, vv = -dvx * s + dvy * c;
+      var Fu = KU * du + CU * vu, Fv = KV * dv + CV * vv;
+      // the wheel pushed up into the body hits a stop
+      if (dv < -STOP) Fv += 900 * (dv + STOP) + 20 * vv;
+      var Fx = Fu * c - Fv * s, Fy = Fu * s + Fv * c;
+      W.vx += Fx / WM * H; W.vy += (Fy / WM - G) * H;
+      fx -= Fx; fy -= Fy; tq -= lx * Fy - ly * Fx;
+      // the motor turns both wheels; its push turns the body the other way
+      var sp0 = W.sp;
+      if (gas) { if (W.sp < VMAX) W.sp = Math.min(VMAX, W.sp + MOTOR * H); }
+      else if (brake) { if (W.sp > 0.5) W.sp = Math.max(0, W.sp - BRAKE * H); else if (W.sp > -VREV) W.sp = Math.max(-VREV, W.sp - MOTOR * 0.6 * H); }
+      else W.sp *= 1 - 0.15 * H;
+      if (gas || brake) tq += REACT * WROT * (W.sp - sp0) / H * WR;
+    }
+    S.vx += fx / M * H; S.vy += fy / M * H; S.w += tq / INERTIA * H;
+    for (var k2 = 0; k2 < 2; k2++) {
+      var V = S.wh[k2];
+      V.x += V.vx * H; V.y += V.vy * H;
+      var D = depth(S, V.x, V.y, WR);
+      if (D.pen > 0) {
+        touched[k2] = true;
+        V.x += D.nx * D.pen; V.y += D.ny * D.pen;
+        var vn = V.vx * D.nx + V.vy * D.ny, jn = 0;
+        if (vn < 0) { jn = -vn * WM; V.vx -= vn * D.nx; V.vy -= vn * D.ny; }
+        // grip: the wheel's turning and its sliding meet, up to what the load allows
+        jn += WM * G * D.ny * H * 0.5;
+        var tx = D.ny, ty = -D.nx, vt = V.vx * tx + V.vy * ty;
+        var slip = V.sp - vt, meff = 1 / (1 / WM + 1 / WROT), jt = clamp(slip * meff, -MU * jn, MU * jn);
+        V.vx += jt / WM * tx; V.vy += jt / WM * ty; V.sp -= jt / WROT;
+      }
+      V.rot -= V.sp * H / WR;
+    }
+    S.touch = touched;
+    if (!touched[0] && !touched[1]) {
+      if (gas) S.w += AIR * H; else if (brake) S.w -= AIR * H;
+    }
+    S.w = clamp(S.w, -WMAX, WMAX);
+    S.x += S.vx * H; S.y += S.vy * H; S.a += S.w * H;
+    // the body's corners slide on the ground rather than through it
+    for (var b = 0; b < BODY.length; b++) {
+      var P = world(S, BODY[b]), Q = depth(S, P[0], P[1], 0);
+      if (Q.pen <= 0) continue;
+      var rx = P[0] - S.x, ry = P[1] - S.y;
+      S.x += Q.nx * Q.pen; S.y += Q.ny * Q.pen;
+      var pvx = S.vx - S.w * ry, pvy = S.vy + S.w * rx, pn = pvx * Q.nx + pvy * Q.ny;
+      if (pn >= 0) continue;
+      var rn = rx * Q.ny - ry * Q.nx, j = -pn / (1 / M + rn * rn / INERTIA);
+      var tX = Q.ny, tY = -Q.nx, pt2 = pvx * tX + pvy * tY, rt = rx * tY - ry * tX, jt2 = clamp(-pt2 / (1 / M + rt * rt / INERTIA), -0.5 * j, 0.5 * j);
+      var ix = Q.nx * j + tX * jt2, iy = Q.ny * j + tY * jt2;
+      S.vx += ix / M; S.vy += iy / M; S.w += (rx * iy - ry * ix) / INERTIA;
+    }
+  }
+
+  var KEEP = ['x', 'y', 'a', 'vx', 'vy', 'w', 'fuel', 'coins', 'cans', 'best', 't', 'air', 'airBest', 'flips', 'spin', 'still', 'finish', 'seed'];
+  function snapshot(S) {
+    var o = { wh: S.wh.map(function (W) { return { x: W.x, y: W.y, vx: W.vx, vy: W.vy, sp: W.sp, rot: W.rot }; }), got: Object.keys(S.got), fuelOut: !!S.fuelOut, touch: S.touch.slice() };
+    KEEP.forEach(function (k) { o[k] = S[k]; });
+    return o;
+  }
+  function restore(v) {
+    if (!v || !Array.isArray(v.wh) || v.wh.length !== 2 || !Array.isArray(v.got) || KEEP.some(function (k) { return typeof v[k] !== 'number' || !isFinite(v[k]); })) return null;
+    if (v.fuel < 0 || v.fuel > 1 || v.seed < 0 || v.seed > 4294967295 || v.finish < 0) return null;
+    var S = { ter: { c: [], p: [] }, fx: [], got: {}, over: false, won: false, cause: '', fuelOut: !!v.fuelOut, touch: Array.isArray(v.touch) ? [!!v.touch[0], !!v.touch[1]] : [false, false] };
+    KEEP.forEach(function (k) { S[k] = v[k]; });
+    S.wh = v.wh.map(function (W) { return { x: +W.x, y: +W.y, vx: +W.vx || 0, vy: +W.vy || 0, sp: +W.sp || 0, rot: +W.rot || 0 }; });
+    if (S.wh.some(function (W) { return !isFinite(W.x) || !isFinite(W.y); })) return null;
+    v.got.forEach(function (id) { if (/^[fc]\d+$/.test(id)) S.got[id] = 1; });
+    return S;
+  }
+
+  function metres(S) { return Math.max(0, Math.floor(S.best)); }
+
+  /* A steady driver for the tests, the proof that a course can be driven: gas, unless the
+     nose is too far up for the ground under it; in the air, it turns the car to meet the
+     ground it will land on. */
+  function botControl(S) {
+    var onGround = S.touch[0] || S.touch[1];
+    var ahead = ground(S, S.x + 1.5), slopeA = Math.atan(ahead.s), rel = S.a - slopeA;
+    if (!onGround) {
+      var land = Math.atan(ground(S, S.x + S.vx * 0.4).s);
+      if (S.a - land > 0.2) return -1;
+      if (S.a - land < -0.25) return 1;
+      return 0;
+    }
+    if (rel > 0.55) return S.w > 0 ? -1 : 0;
+    if (rel > 0.4 && S.w > 0.6) return 0;
+    var speed = Math.hypot(S.vx, S.vy);
+    // a long way down: no gas, so a crest doesn't throw it into a spin
+    if (ahead.s < -0.45 && speed > 11) return 0;
+    return 1;
+  }
+
+  /* The daily course is one the steady driver above finishes: from the day's seed, the
+     first of the next few seeds whose hills it drives to the flag. A course nobody can
+     finish would cost every player the day's star. */
+  function courseSeed(seed, finish, tries) {
+    for (var k = 0; k < (tries || 12); k++) {
+      var s = (seed + k * 7919) >>> 0, S = newGame(s, finish);
+      while (!S.over && !S.won && S.t < 300) step(S, botControl(S));
+      if (S.won) return s;
+    }
+    return seed >>> 0;
+  }
+
+  return { DT: DT, courseSeed: courseSeed, WR: WR, START: START, HEAD: HEAD, HEAD_R: HEAD_R, ANCH: ANCH, newGame: newGame, step: step, ground: ground, height: height, pickups: pickups, fuelAt: fuelAt, world: world, headPos: headPos, snapshot: snapshot, restore: restore, metres: metres, botControl: botControl, hard: hard, maxSlope: maxSlope };
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = HillriderEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = HillriderEngineFactory();
+  var ACCENT = '#0C5700';
+  // the daily course's flag, in metres from the start
+  var FINISH = 1000;
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'hillrider',
+    name: { fa: 'تپه‌سوار', en: 'Hillrider', zh: '山丘车手', de: 'Hügelflitzer', es: 'Trepacolinas', pl: 'Jeździec wzgórz' },
+    accent: ACCENT,
+    mood: 'dots',
+    strings: {
+      fa: {
+        tapGo: 'برای ادامه صفحه را لمس کن.', hills: 'تپه‌ها و ماشین', distM: '{n} متر', bestM: 'بهترین: {n} متر', flagM: 'پرچم: {n} متر', dailyHr: 'تپه‌سوار روزانه', newRun: 'از نو',
+        howTo: 'راست: گاز · چپ: ترمز و دنده‌عقب', crashT: 'سرت به زمین خورد!', emptyT: 'بنزین تمام شد!', stuckT: 'ماشین گیر کرد!', flagT: 'به پرچم رسیدی!',
+        distance: 'مسافت', best: 'بهترین', tries: 'تلاش‌ها', coinsGot: 'سکه‌های جاده', kGas: 'گاز', kBrake: 'ترمز و دنده‌عقب', kAgain: 'از نو',
+        rules: 'با ماشین از روی تپه‌ها هر چه دورتر برو. نیمه‌ی راست صفحه گاز است و نیمه‌ی چپ ترمز؛ اگر ماشین ایستاده باشد، ترمز آن را عقب می‌برد. در هوا، گاز دماغه را بالا می‌برد و ترمز پایین. گاز دادن بنزین می‌سوزاند؛ باک‌های قرمز سر راه باک را پر می‌کنند. اگر سر راننده به زمین بخورد، یا بنزین تمام شود و ماشین بایستد، بازی تمام است. هر چه جلوتر، تپه‌ها بلندتر و باک‌ها دورتر. سکه‌های سر راه به سکه‌های بازی اضافه می‌شوند. روزانه یک جاده‌ی یکسان برای همه است تا پرچمی در ۱۰۰۰ متر؛ هر چند بار بخواهی دوباره امتحان کن.',
+        tutTitle1: 'گاز و ترمز', tutText1: 'نیمه‌ی راست صفحه را نگه دار تا گاز بدهی، نیمه‌ی چپ را برای ترمز.',
+        tutTitle2: 'در هوا', tutText2: 'در هوا گاز دماغه را بالا می‌برد و ترمز پایین. روی چرخ‌ها فرود بیا، نه روی سر.',
+        tutTitle3: 'بنزین', tutText3: 'گاز دادن بنزین می‌سوزاند. باک‌های قرمز را بگیر تا باک پر شود.'
+      },
+      en: {
+        tapGo: 'Tap to go on.', hills: 'Hills and car', distM: '{n} m', bestM: 'Best: {n} m', flagM: 'Flag: {n} m', dailyHr: 'Daily Hillrider', newRun: 'Start over',
+        howTo: 'Right: gas · Left: brake and reverse', crashT: 'Head first into the hill!', emptyT: 'Out of fuel!', stuckT: 'Stuck!', flagT: 'You reached the flag!',
+        distance: 'Distance', best: 'Best', tries: 'Tries', coinsGot: 'Coins on the road', kGas: 'Gas', kBrake: 'Brake and reverse', kAgain: 'Start over',
+        rules: 'Drive over the hills as far as you can. The right half of the screen is the gas and the left half the brake; when the car stands still, the brake backs it up. In the air, gas tips the nose up and brake tips it down. Gas burns fuel; the red cans on the road fill the tank. If the driver\'s head hits the ground, or the fuel runs out and the car stops, the run is over. The further you go, the bigger the hills and the further apart the cans. Coins on the road go to your game coins. The daily course is one road, the same for everyone, to a flag at 1,000 m; try it as often as you like.',
+        tutTitle1: 'Gas and brake', tutText1: 'Hold the right half of the screen for gas, the left half to brake.',
+        tutTitle2: 'In the air', tutText2: 'In the air, gas tips the nose up and brake tips it down. Land on your wheels, not your head.',
+        tutTitle3: 'Fuel', tutText3: 'Gas burns fuel. Pick up the red cans to fill the tank.'
+      },
+      pl: {
+        tapGo: 'Stuknij, aby przejść dalej.', hills: 'Wzgórza i auto', distM: '{n} m', bestM: 'Najlepszy: {n} m', flagM: 'Flaga: {n} m', dailyHr: 'Codzienny Jeździec wzgórz', newRun: 'Zacznij od nowa',
+        howTo: 'Prawo: gaz · Lewo: hamulec i wsteczny', crashT: 'Głową w zbocze!', emptyT: 'Skończyło się paliwo!', stuckT: 'Utknąłeś!', flagT: 'Dotarłeś do flagi!',
+        distance: 'Dystans', best: 'Najlepszy', tries: 'Próby', coinsGot: 'Monety z trasy', kGas: 'Gaz', kBrake: 'Hamulec i wsteczny', kAgain: 'Zacznij od nowa',
+        rules: 'Jedź przez wzgórza jak najdalej. Prawa połowa ekranu to gaz, lewa to hamulec; gdy auto stoi, hamulec cofa. W powietrzu gaz unosi przód, a hamulec go opuszcza. Gaz zużywa paliwo; czerwone kanistry na trasie napełniają bak. Jeśli głowa kierowcy uderzy o ziemię albo skończy się paliwo i auto stanie, przejazd się kończy. Im dalej, tym wyższe wzgórza i rzadsze kanistry. Monety z trasy trafiają do Twoich monet w grze. Codzienna trasa jest jedna, taka sama dla wszystkich, z flagą na 1000 m; możesz próbować tyle razy, ile chcesz.',
+        tutTitle1: 'Gaz i hamulec', tutText1: 'Przytrzymaj prawą połowę ekranu, aby dodać gazu, a lewą, aby hamować.',
+        tutTitle2: 'W powietrzu', tutText2: 'W powietrzu gaz unosi przód, a hamulec go opuszcza. Ląduj na kołach, nie na głowie.',
+        tutTitle3: 'Paliwo', tutText3: 'Gaz zużywa paliwo. Zbieraj czerwone kanistry, aby napełnić bak.'
+      },
+      zh: {
+        tapGo: '点一下继续。', hills: '山丘和车', distM: '{n} 米', bestM: '最佳：{n} 米', flagM: '旗子：{n} 米', dailyHr: '每日山丘车手', newRun: '重新开始',
+        howTo: '右边：油门 · 左边：刹车和倒车', crashT: '头撞到地上了！', emptyT: '没油了！', stuckT: '卡住了！', flagT: '到达旗子了！',
+        distance: '距离', best: '最佳', tries: '尝试次数', coinsGot: '路上的金币', kGas: '油门', kBrake: '刹车和倒车', kAgain: '重新开始',
+        rules: '开车越过山丘，能开多远开多远。屏幕右半边是油门，左半边是刹车；车停住时，刹车会让它倒车。在空中，油门让车头抬起，刹车让车头压低。踩油门会耗油；路上的红色油桶能加满油箱。如果司机的头撞到地面，或者油用完车停下，本局结束。越往前，山越高，油桶间距越大。路上的金币会加到游戏金币里。每日挑战是一条人人相同的路，旗子在 1000 米；想试几次都可以。',
+        tutTitle1: '油门和刹车', tutText1: '按住屏幕右半边踩油门，按住左半边刹车。',
+        tutTitle2: '在空中', tutText2: '在空中，油门让车头抬起，刹车让车头压低。用车轮着地，别用头。',
+        tutTitle3: '燃油', tutText3: '踩油门会耗油。捡起红色油桶加满油箱。'
+      },
+      de: {
+        tapGo: 'Tippe, um weiterzumachen.', hills: 'Hügel und Auto', distM: '{n} m', bestM: 'Bestwert: {n} m', flagM: 'Fahne: {n} m', dailyHr: 'Hügelflitzer des Tages', newRun: 'Neu starten',
+        howTo: 'Rechts: Gas · Links: Bremse und rückwärts', crashT: 'Mit dem Kopf auf den Hügel!', emptyT: 'Kein Benzin mehr!', stuckT: 'Festgefahren!', flagT: 'Fahne erreicht!',
+        distance: 'Strecke', best: 'Bestwert', tries: 'Versuche', coinsGot: 'Münzen am Weg', kGas: 'Gas', kBrake: 'Bremse und rückwärts', kAgain: 'Neu starten',
+        rules: 'Fahr so weit du kannst über die Hügel. Die rechte Bildschirmhälfte ist Gas, die linke die Bremse; steht das Auto, fährt die Bremse rückwärts. In der Luft hebt Gas die Nase und die Bremse senkt sie. Gas verbraucht Benzin; die roten Kanister am Weg füllen den Tank. Schlägt der Kopf des Fahrers auf, oder ist das Benzin alle und das Auto bleibt stehen, ist die Fahrt vorbei. Je weiter, desto höher die Hügel und desto seltener die Kanister. Münzen am Weg kommen zu deinen Spielmünzen. Die Tagesstrecke ist eine Straße, für alle gleich, bis zu einer Fahne bei 1000 m; versuch es so oft du willst.',
+        tutTitle1: 'Gas und Bremse', tutText1: 'Halte die rechte Bildschirmhälfte für Gas, die linke zum Bremsen.',
+        tutTitle2: 'In der Luft', tutText2: 'In der Luft hebt Gas die Nase und die Bremse senkt sie. Lande auf den Rädern, nicht auf dem Kopf.',
+        tutTitle3: 'Benzin', tutText3: 'Gas verbraucht Benzin. Sammle die roten Kanister, um den Tank zu füllen.'
+      },
+      es: {
+        tapGo: 'Toca para seguir.', hills: 'Colinas y coche', distM: '{n} m', bestM: 'Mejor: {n} m', flagM: 'Bandera: {n} m', dailyHr: 'Trepacolinas del día', newRun: 'Empezar de nuevo',
+        howTo: 'Derecha: acelerar · Izquierda: frenar y marcha atrás', crashT: '¡De cabeza contra la colina!', emptyT: '¡Sin gasolina!', stuckT: '¡Atascado!', flagT: '¡Llegaste a la bandera!',
+        distance: 'Distancia', best: 'Mejor', tries: 'Intentos', coinsGot: 'Monedas del camino', kGas: 'Acelerar', kBrake: 'Frenar y marcha atrás', kAgain: 'Empezar de nuevo',
+        rules: 'Conduce por las colinas tan lejos como puedas. La mitad derecha de la pantalla acelera y la izquierda frena; con el coche parado, el freno da marcha atrás. En el aire, acelerar levanta el morro y frenar lo baja. Acelerar gasta gasolina; los bidones rojos del camino llenan el depósito. Si la cabeza del conductor toca el suelo, o se acaba la gasolina y el coche se para, se acaba. Cuanto más lejos, más altas las colinas y más separados los bidones. Las monedas del camino van a tus monedas del juego. El recorrido diario es un camino igual para todos hasta una bandera a 1000 m; inténtalo tantas veces como quieras.',
+        tutTitle1: 'Acelerar y frenar', tutText1: 'Mantén pulsada la mitad derecha para acelerar y la izquierda para frenar.',
+        tutTitle2: 'En el aire', tutText2: 'En el aire, acelerar levanta el morro y frenar lo baja. Aterriza sobre las ruedas, no de cabeza.',
+        tutTitle3: 'Gasolina', tutText3: 'Acelerar gasta gasolina. Recoge los bidones rojos para llenar el depósito.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+
+  var S = null, raf = 0, last = 0, acc = 0, paused = false, held = { l: false, r: false }, keys = { g: false, b: false };
+  var tries = 0, startedAt = 0, ended = false, waiting = false, resumed = false, flipPending = false;
+  // the view follows the car smoothly, so a bump does not shake the whole screen
+  var cam = { x: 0, y: 0 };
+
+  var cv = el('canvas', { class: 'hr-canvas', role: 'img', 'aria-label': C.t('hills') });
+  var box = el('div', { class: 'hr-box' }, [cv]);
+  var top = el('div', { class: 'hr-top ch-above' });
+  var status = el('div', { class: 'hr-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'hr-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newRun'), onClick: function () { newRun(); } });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- runs */
+
+  // The daily road is the same for everyone: the day's seed, moved on to a road the
+  // engine's own driver finishes (E.courseSeed), worked out once a page load
+  var dailySeed = null;
+  function seedFor() {
+    if (!dailyDate) return Math.floor(Math.random() * 4294967296);
+    if (dailySeed === null) dailySeed = E.courseSeed(Math.floor(C.daily('hillrider', dailyDate).rng() * 4294967296), FINISH);
+    return dailySeed;
+  }
+
+  function newRun() {
+    S = E.newGame(seedFor(), dailyDate ? FINISH : 0);
+    // a new run stands still until the first touch, so the tank is full when it starts
+    waiting = true; resumed = false; flipPending = false;
+    tries++;
+    startedAt = Date.now();
+    ended = false;
+    acc = 0; last = 0;
+    cam.x = S.x; cam.y = S.y;
+    renderTop();
+    renderStatus();
+    draw();
+    kick();
+  }
+
+  function control() {
+    var gas = held.r || keys.g, brake = held.l || keys.b;
+    return gas && brake ? 0 : gas ? 1 : brake ? -1 : 0;
+  }
+
+  function tick(now) {
+    raf = 0;
+    if (!S) return;
+    var blocked = paused || waiting || document.hidden || !!document.querySelector('.ch-scrim');
+    if (!last || blocked) last = now;
+    acc += Math.min(0.1, (now - last) / 1000);
+    last = now;
+    var ev = [];
+    if (blocked) acc = 0;
+    while (acc >= E.DT && !ended) {
+      acc -= E.DT;
+      ev = ev.concat(E.step(S, control()));
+      if (S.over || S.won) break;
+    }
+    events(ev);
+    draw();
+    renderDist();
+    if ((S.over || S.won) && !ended) { ended = true; setTimeout(finish, C.ui.reduceMotion() ? 200 : 900); }
+    if (!ended) raf = requestAnimationFrame(tick);
+  }
+  function kick() { if (!raf) raf = requestAnimationFrame(tick); }
+  function events(ev) {
+    if (!ev.length) return;
+    if (ev.indexOf('coin') >= 0) C.audio.sfx('tap');
+    if (ev.indexOf('fuel') >= 0) C.feedback('good');
+    if (ev.indexOf('flip') >= 0) { flipPending = true; C.feedback('whoosh'); }
+    if (ev.indexOf('land') >= 0) {
+      C.feedback('thud');
+      // a whole turn in the air counts once the car is back on its wheels
+      if (flipPending && ev.indexOf('crash') < 0) C.achievements.unlock('hr-flip');
+      flipPending = false;
+    }
+    if (ev.indexOf('finish') >= 0) C.feedback('good');
+    if (ev.indexOf('crash') >= 0 || ev.indexOf('stall') >= 0) C.feedback('bad');
+  }
+
+  function finish() {
+    ctx.clearSave();
+    var m = E.metres(S), won = S.won;
+    var coins = Math.min(40, 2 + Math.floor(m / 150) + Math.floor(S.coins / 8)), points = Math.min(120, 6 + Math.floor(m / 30)), note = null;
+    if (m >= 1000 && !dailyDate) C.achievements.unlock('hr-1k');
+    if (won) C.achievements.unlock('hr-daily');
+    if (dailyDate) {
+      if (won) {
+        coins += 8; points += 25;
+        if (!C.stats.daily('hillrider', dailyDate, { label: C.t('distM', { n: C.num(FINISH) }), win: true, tries: tries })) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+      } else { coins = 1; points = 2; }
+    } else if (C.stats.best('hillrider', 'metres', m)) note = C.t('bestM', { n: C.num(m) });
+    var bestEver = C.stats.getBest('hillrider', 'metres');
+    ctx.finish({
+      won: dailyDate ? won : null,
+      title: won ? C.t('flagT') : S.cause === 'fuel' ? C.t('emptyT') : S.cause === 'stuck' ? C.t('stuckT') : C.t('crashT'),
+      note: note, timeMs: Date.now() - startedAt, coins: coins, points: points,
+      lines: [
+        { label: C.t('distance'), value: C.t('distM', { n: C.num(m) }) },
+        { label: C.t('coinsGot'), value: C.num(S.coins) },
+        dailyDate ? { label: C.t('tries'), value: C.num(tries) } : { label: C.t('best'), value: C.t('distM', { n: C.num(bestEver || m) }) }
+      ],
+      shareText: 'چوگان · تپه‌سوار' + (dailyDate ? ('\nروزانه ' + dailyDate) : '') + '\n' + m + ' متر',
+      againLabel: C.t('newRun'),
+      onAgain: dailyDate && won ? null : function () { newRun(); }
+    });
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  function palette() {
+    return dark()
+      ? { sky0: '#121A30', sky1: '#2B3354', far: '#26314A', near: '#1F3A2C', dirt: '#3B2A1E', dirtDk: '#2C1F16', grass: '#3F8A3A', grassLt: '#5FA954', body: '#E0603A', bodyDk: '#A8401F', cage: '#C9CED6', tyre: '#0E0E10', hub: '#9AA1AB', skin: '#E8B98F', helmet: '#F2C230', can: '#E04236', canDk: '#9E2A22', coin: '#F2C230', coinDk: '#B88A12', post: '#C9CED6', text: '#F4EEE4', pedal: 'rgba(255,255,255,', gauge: '#2A2F3A' }
+      : { sky0: '#A9DCF2', sky1: '#F4F8EE', far: '#B9D7C2', near: '#8DBF8F', dirt: '#9A6B45', dirtDk: '#7A5233', grass: '#3E9C3A', grassLt: '#6CC25A', body: '#D94F2B', bodyDk: '#9E3418', cage: '#4A505A', tyre: '#1A1A1C', hub: '#B8BEC6', skin: '#E3AE82', helmet: '#E8B21A', can: '#D8382C', canDk: '#8E231B', coin: '#F0BC1C', coinDk: '#A67C0A', post: '#5A5F68', text: '#1F1A17', pedal: 'rgba(31,26,23,', gauge: '#E9E2D6' };
+  }
+
+  function size() {
+    var r = box.getBoundingClientRect();
+    return { w: Math.max(160, Math.floor(r.width) || 0), h: Math.max(120, Math.floor(r.height) || 0) };
+  }
+  var fontFam = '';
+  function font(px) {
+    if (!fontFam) fontFam = getComputedStyle(document.body).fontFamily || 'sans-serif';
+    return '700 ' + Math.round(px) + 'px ' + fontFam;
+  }
+  // the last size drawn at: a touch is read against what the player saw
+  var drawn = { w: 0, h: 0 };
+  function draw() {
+    if (!S) return;
+    var Z = size(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
+    cv.style.width = Z.w + 'px'; cv.style.height = Z.h + 'px';
+    drawn = Z;
+    var g = cv.getContext('2d'), P = palette();
+    // about 16 m across on an upright phone, 21 m on a wide screen
+    var ppm = Math.min(Z.w / 16, Z.h / 12);
+    var ahead = Math.max(-2, Math.min(4, S.vx * 0.3));
+    cam.x += (S.x + ahead - cam.x) * 0.12;
+    cam.y += (S.y - cam.y) * 0.1;
+    if (Math.abs(S.x - cam.x) > 30) { cam.x = S.x; cam.y = S.y; }
+    var ox = Z.w * 0.36, oy = Z.h * 0.55;
+    var x0 = cam.x - ox / ppm - 1, x1 = cam.x + (Z.w - ox) / ppm + 1, yLow = cam.y - (Z.h - oy) / ppm - 2;
+
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var sky = g.createLinearGradient(0, 0, 0, Z.h);
+    sky.addColorStop(0, P.sky0); sky.addColorStop(1, P.sky1);
+    g.fillStyle = sky; g.fillRect(0, 0, Z.w, Z.h);
+    // two rows of hills far off, moving slower than the road
+    backHills(g, Z, P.far, 0.15, Z.h * 0.62, Z.h * 0.12, 0.011);
+    backHills(g, Z, P.near, 0.35, Z.h * 0.76, Z.h * 0.1, 0.019);
+
+    // the world in metres, y up
+    g.setTransform(dpr * ppm, 0, 0, -dpr * ppm, dpr * (ox - cam.x * ppm), dpr * (oy + cam.y * ppm));
+    g.beginPath();
+    var stepX = 0.5, x;
+    g.moveTo(x0, yLow);
+    for (x = x0; x <= x1 + stepX; x += stepX) g.lineTo(x, E.height(S, x));
+    g.lineTo(x1 + stepX, yLow);
+    g.closePath();
+    g.fillStyle = P.dirt; g.fill();
+    // a darker layer under the grass, then the grass on top
+    g.beginPath();
+    for (x = x0; x <= x1 + stepX; x += stepX) { var h = E.height(S, x) - 0.55; if (x === x0) g.moveTo(x, h); else g.lineTo(x, h); }
+    g.lineWidth = 0.5; g.strokeStyle = P.dirtDk; g.stroke();
+    g.beginPath();
+    for (x = x0; x <= x1 + stepX; x += stepX) { var hh = E.height(S, x) - 0.1; if (x === x0) g.moveTo(x, hh); else g.lineTo(x, hh); }
+    g.lineWidth = 0.32; g.lineJoin = 'round'; g.strokeStyle = P.grass; g.stroke();
+    g.lineWidth = 0.08; g.strokeStyle = P.grassLt; g.stroke();
+
+    // a post every 100 m, and the flag of the daily road
+    var posts = [];
+    for (var pm = Math.ceil((x0 - E.START) / 100) * 100; pm + E.START <= x1; pm += 100) if (pm > 0 && (!S.finish || pm < S.finish)) posts.push(pm);
+    posts.forEach(function (m) {
+      var px = m + E.START, py = E.height(S, px);
+      g.fillStyle = P.post; g.fillRect(px - 0.05, py, 0.1, 1.6);
+      g.fillStyle = P.gauge; g.fillRect(px - 0.6, py + 1.3, 1.2, 0.55);
+    });
+    if (S.finish && S.finish + E.START >= x0 && S.finish + E.START <= x1 + 2) {
+      var fx = S.finish + E.START, fy = E.height(S, fx);
+      g.fillStyle = P.post; g.fillRect(fx - 0.06, fy, 0.12, 3.2);
+      for (var r = 0; r < 3; r++) for (var c = 0; c < 4; c++) { g.fillStyle = (r + c) % 2 ? '#FFFFFF' : '#1A1A1A'; g.fillRect(fx + 0.06 + c * 0.35, fy + 2.15 + r * 0.35, 0.35, 0.35); }
+    }
+
+    E.pickups(S, x0, x1).forEach(function (p) {
+      if (p.kind === 'fuel') {
+        g.fillStyle = P.canDk; C.rrect(g, p.x - 0.33, p.y - 0.42, 0.66, 0.84, 0.1); g.fill();
+        g.fillStyle = P.can; C.rrect(g, p.x - 0.27, p.y - 0.36, 0.54, 0.7, 0.08); g.fill();
+        g.fillStyle = P.canDk; g.fillRect(p.x + 0.05, p.y + 0.42, 0.2, 0.14);
+        g.strokeStyle = '#FFFFFF'; g.lineWidth = 0.07; g.beginPath(); g.moveTo(p.x - 0.15, p.y - 0.2); g.lineTo(p.x + 0.15, p.y + 0.2); g.moveTo(p.x + 0.15, p.y - 0.2); g.lineTo(p.x - 0.15, p.y + 0.2); g.stroke();
+      } else {
+        g.fillStyle = P.coinDk; g.beginPath(); g.arc(p.x, p.y, 0.26, 0, Math.PI * 2); g.fill();
+        g.fillStyle = P.coin; g.beginPath(); g.arc(p.x, p.y, 0.2, 0, Math.PI * 2); g.fill();
+      }
+    });
+
+    drawCar(g, P);
+
+    // the dials on top, in screen pixels
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    hud(g, Z, P);
+  }
+  function backHills(g, Z, color, speed, base, amp, freq) {
+    var off = cam.x * 30 * speed;
+    g.beginPath(); g.moveTo(0, Z.h);
+    for (var px = 0; px <= Z.w + 8; px += 8) {
+      var t = (px + off) * freq;
+      g.lineTo(px, base - amp * (0.6 * Math.sin(t) + 0.4 * Math.sin(t * 2.3 + 1.7)) + cam.y * speed * 2);
+    }
+    g.lineTo(Z.w, Z.h); g.closePath(); g.fillStyle = color; g.fill();
+  }
+  function drawCar(g, P) {
+    // springs from the body to each wheel first, so the body covers their tops
+    g.strokeStyle = P.cage; g.lineWidth = 0.1;
+    for (var k = 0; k < 2; k++) { var A = E.world(S, E.ANCH[k]); g.beginPath(); g.moveTo(A[0], A[1]); g.lineTo(S.wh[k].x, S.wh[k].y); g.stroke(); }
+    g.save();
+    g.translate(S.x, S.y); g.rotate(S.a);
+    // the driver: a body, and a head in a helmet, open to the hills
+    g.fillStyle = P.bodyDk; C.rrect(g, -0.42, 0.1, 0.5, 0.62, 0.15); g.fill();
+    g.fillStyle = P.skin; g.beginPath(); g.arc(E.HEAD[0], E.HEAD[1], E.HEAD_R, 0, Math.PI * 2); g.fill();
+    g.fillStyle = P.helmet; g.beginPath(); g.arc(E.HEAD[0], E.HEAD[1] + 0.02, E.HEAD_R + 0.03, -0.25, Math.PI + 0.1); g.closePath(); g.fill();
+    g.fillStyle = '#1A1A1A'; g.beginPath(); g.arc(E.HEAD[0] + 0.14, E.HEAD[1] - 0.04, 0.04, 0, Math.PI * 2); g.fill();
+    // a roll bar behind the seat that does not cover the head
+    g.strokeStyle = P.cage; g.lineWidth = 0.09; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(-0.8, 0.2); g.lineTo(-0.7, 0.8); g.lineTo(-0.5, 0.82); g.stroke();
+    // the body
+    g.fillStyle = P.body;
+    g.beginPath(); g.moveTo(-1.45, -0.2); g.lineTo(1.45, -0.2); g.lineTo(1.4, 0.12); g.lineTo(0.6, 0.35); g.lineTo(0.25, 0.3); g.lineTo(-0.5, 0.2); g.lineTo(-1.35, 0.3); g.closePath(); g.fill();
+    g.fillStyle = P.bodyDk; g.fillRect(-1.45, -0.2, 2.9, 0.1);
+    g.fillStyle = '#FFFFFF'; g.globalAlpha = 0.8; g.beginPath(); g.arc(1.32, 0.05, 0.07, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
+    g.restore();
+    for (var w = 0; w < 2; w++) {
+      var W = S.wh[w];
+      g.fillStyle = P.tyre; g.beginPath(); g.arc(W.x, W.y, E.WR, 0, Math.PI * 2); g.fill();
+      g.fillStyle = P.hub; g.beginPath(); g.arc(W.x, W.y, E.WR * 0.45, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = P.tyre; g.lineWidth = 0.05; g.beginPath();
+      for (var s = 0; s < 3; s++) { var an = W.rot + s * Math.PI * 2 / 3; g.moveTo(W.x, W.y); g.lineTo(W.x + Math.cos(an) * E.WR * 0.45, W.y + Math.sin(an) * E.WR * 0.45); }
+      g.stroke();
+    }
+  }
+  function hud(g, Z, P) {
+    var u = Math.max(0.8, Math.min(1.4, Z.w / 420));
+    // the tank, top left; it blinks when nearly empty
+    var gx = 12 * u, gy = 12 * u, gw = 110 * u, gh = 12 * u;
+    g.fillStyle = P.can; C.rrect(g, gx, gy - 2 * u, 12 * u, 16 * u, 3 * u); g.fill();
+    g.fillStyle = P.gauge; C.rrect(g, gx + 18 * u, gy, gw, gh, gh / 2); g.fill();
+    var f = S.fuel, low = f < 0.2, blink = low && !C.ui.reduceMotion() && Math.floor(S.t * 3) % 2 === 0;
+    if (f > 0 && !blink) { g.fillStyle = low ? '#D8382C' : f < 0.45 ? '#E8A21A' : '#3E9C3A'; C.rrect(g, gx + 18 * u, gy, Math.max(gh, gw * f), gh, gh / 2); g.fill(); }
+    // coins picked up, top right
+    g.font = font(14 * u); g.textBaseline = 'middle'; g.textAlign = 'right';
+    g.fillStyle = P.text; g.fillText(C.num(S.coins), Z.w - 12 * u, gy + gh / 2);
+    var tw = g.measureText(C.num(S.coins)).width;
+    g.fillStyle = P.coinDk; g.beginPath(); g.arc(Z.w - 22 * u - tw, gy + gh / 2, 8 * u, 0, Math.PI * 2); g.fill();
+    g.fillStyle = P.coin; g.beginPath(); g.arc(Z.w - 22 * u - tw, gy + gh / 2, 6 * u, 0, Math.PI * 2); g.fill();
+    if (S.finish && !S.won) {
+      g.textAlign = 'center'; g.fillStyle = P.text; g.font = font(13 * u);
+      g.fillText(C.t('flagM', { n: C.num(S.finish) }), Z.w / 2, gy + gh / 2);
+    }
+    // the pedals: brake on the left, gas on the right
+    var c = control(), pw = 46 * u, ph = 62 * u, py = Z.h - ph - 12 * u;
+    pedal(g, 12 * u, py, pw, ph, c < 0, false, P);
+    pedal(g, Z.w - 12 * u - pw, py, pw, ph, c > 0, true, P);
+  }
+  function pedal(g, x, y, w, h, on, gas, P) {
+    g.fillStyle = P.pedal + (on ? '0.55)' : '0.22)');
+    C.rrect(g, x, y, w, h, 10); g.fill();
+    g.strokeStyle = P.pedal + (on ? '0.9)' : '0.5)'); g.lineWidth = 2.5; g.lineCap = 'round';
+    g.beginPath();
+    // ridges: across on the brake, along on the gas, like the real pedals
+    if (gas) for (var i = 1; i < 4; i++) { g.moveTo(x + w * i / 4, y + h * 0.22); g.lineTo(x + w * i / 4, y + h * 0.78); }
+    else for (var j = 1; j < 4; j++) { g.moveTo(x + w * 0.22, y + h * j / 4); g.lineTo(x + w * 0.78, y + h * j / 4); }
+    g.stroke();
+  }
+
+  /* ----------------------------------------------------------------- ui */
+
+  var distEl = null;
+  function renderTop() {
+    top.innerHTML = '';
+    if (dailyDate) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyHr') + ' — ' + C.num(dailyDate) })]));
+    distEl = el('span', { class: 'ch-badge' });
+    top.appendChild(distEl);
+    var best = C.stats.getBest('hillrider', 'metres');
+    if (!dailyDate && best) top.appendChild(el('span', { class: 'ch-badge', text: C.t('bestM', { n: C.num(best) }) }));
+    shownM = -1;
+    renderDist();
+  }
+  var shownM = -1;
+  function renderDist() {
+    if (!distEl || !S) return;
+    var m = E.metres(S);
+    if (m !== shownM) { shownM = m; distEl.textContent = C.t('distM', { n: C.num(m) }); }
+  }
+  function renderStatus() { status.textContent = waiting && resumed ? C.t('tapGo') : C.t('howTo'); }
+  function go() { if (waiting) { waiting = false; last = 0; renderStatus(); kick(); } }
+
+  /* -------------------------------------------------------------- input */
+
+  // The whole game area is the two pedals, split at the middle of the road: on a phone
+  // on its side the road is narrower than the screen, and its empty sides still drive.
+  var touches = {};
+  function side(e) { var r = cv.getBoundingClientRect(); return e.clientX < r.left + r.width / 2 ? 'l' : 'r'; }
+  function syncHeld() { held.l = held.r = false; for (var id in touches) held[touches[id]] = true; }
+  wrap.addEventListener('pointerdown', function (e) {
+    if (!S || (e.target.closest && e.target.closest('button'))) return;
+    e.preventDefault();
+    if (ended) return;
+    go();
+    touches[e.pointerId] = side(e); syncHeld();
+    try { wrap.setPointerCapture(e.pointerId); } catch (er) { /* old browsers */ }
+  });
+  wrap.addEventListener('pointermove', function (e) { if (touches[e.pointerId]) { touches[e.pointerId] = side(e); syncHeld(); } });
+  function lift(e) { delete touches[e.pointerId]; syncHeld(); }
+  wrap.addEventListener('pointerup', lift);
+  wrap.addEventListener('pointercancel', lift);
+  wrap.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  wrap.style.touchAction = 'none';
+
+  function isGas(e) { return e.key === 'ArrowRight' || e.key === 'ArrowUp' || C.keyIs(e, 'd') || C.keyIs(e, 'w'); }
+  function isBrake(e) { return e.key === 'ArrowLeft' || e.key === 'ArrowDown' || C.keyIs(e, 'a') || C.keyIs(e, 's'); }
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim')) return;
+    if (isGas(e)) { go(); keys.g = true; e.preventDefault(); }
+    else if (isBrake(e)) { go(); keys.b = true; e.preventDefault(); }
+    else if (e.key === ' ') { go(); e.preventDefault(); }
+    else if (C.keyIs(e, 'r')) { newRun(); e.preventDefault(); }
+  });
+  window.addEventListener('keyup', function (e) {
+    if (isGas(e)) keys.g = false;
+    else if (isBrake(e)) keys.b = false;
+  });
+  // a run waits while the app is away, and no pedal is held when it comes back
+  C.onPause(function () { paused = true; keys.g = keys.b = false; touches = {}; syncHeld(); ctx.save(); });
+  C.onResume(function () { paused = false; last = 0; kick(); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { last = 0; kick(); } });
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { fontFam = ''; draw(); });
+  if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw); } catch (er) { /* old WebViews */ } }
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('→ ↑ / D W', C.t('kGas')), kb('← ↓ / A S', C.t('kBrake')), kb('R', C.t('kAgain'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 110" width="100%" direction="ltr"><rect width="200" height="110" rx="10" fill="#A9DCF2"/>';
+    var hill = '<path d="M0 84 Q 50 64 100 80 T 200 70 V110 H0Z" fill="#9A6B45"/><path d="M0 84 Q 50 64 100 80 T 200 70" fill="none" stroke="#3E9C3A" stroke-width="4"/>';
+    var car = function (x, y, a) {
+      return '<g transform="translate(' + x + ' ' + y + ') rotate(' + a + ')"><circle cx="-14" cy="0" r="6" fill="#1A1A1C"/><circle cx="14" cy="0" r="6" fill="#1A1A1C"/>' +
+        '<path d="M-21 -6 H21 L20 -10 L9 -13 L-6 -10 L-20 -12Z" fill="#D94F2B"/><circle cx="-2" cy="-19" r="4.5" fill="#E8B21A"/></g>';
+    };
+    if (kind === 1) s += hill + car(100, 72, -4) + '<rect x="6" y="40" width="22" height="30" rx="5" fill="rgba(31,26,23,.25)"/><rect x="172" y="40" width="22" height="30" rx="5" fill="rgba(31,26,23,.25)"/>' +
+      '<text x="17" y="34" font-size="12" text-anchor="middle" fill="#1F1A17">◀</text><text x="183" y="34" font-size="12" text-anchor="middle" fill="#1F1A17">▶</text>';
+    if (kind === 2) s += hill + car(100, 36, -30) + '<path d="M70 40 A 32 32 0 0 1 120 12" fill="none" stroke="' + ACCENT + '" stroke-width="2.5" stroke-dasharray="4 4"/><path d="M118 6 l6 7 -9 2z" fill="' + ACCENT + '"/>';
+    if (kind === 3) s += hill + car(56, 70, -6) + '<rect x="126" y="54" width="16" height="20" rx="3" fill="#D8382C"/><rect x="134" y="50" width="6" height="4" fill="#8E231B"/>' +
+      '<rect x="10" y="10" width="70" height="9" rx="4.5" fill="#E9E2D6"/><rect x="10" y="10" width="18" height="9" rx="4.5" fill="#D8382C"/>';
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // A run in progress is saved when the app goes away, and comes back waiting for a tap,
+  // so the car is never dropped mid-jump; the daily road has its own slot (#132)
+  ctx.autosave(function () {
+    if (!S || S.over || S.won || ended || S.t < 1) return { inProgress: false };
+    return { s: E.snapshot(S), tries: tries, daily: dailyDate || null, elapsed: Date.now() - startedAt };
+  });
+  function resumeRun(sv) {
+    var R = E.restore(sv.s);
+    if (!R) return false;
+    S = R; tries = sv.tries || 1; startedAt = Date.now() - (sv.elapsed || 0);
+    ended = false; waiting = true; resumed = true; flipPending = false; acc = 0; last = 0;
+    cam.x = S.x; cam.y = S.y;
+    renderTop(); renderStatus(); draw(); kick();
+    return true;
+  }
+  var saved = ctx.loadSave();
+  if (dailyDate) {
+    if (!(saved && saved.s && saved.daily === dailyDate && resumeRun(saved))) newRun();
+    if (C.stats.dailyDone('hillrider', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).hillrider;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (!(saved && saved.s && !saved.daily && resumeRun(saved))) {
+    newRun();
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
