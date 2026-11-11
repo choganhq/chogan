@@ -773,21 +773,53 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
 
   // the bike from behind: tyre, mudguard and tail light, the rider in the accent colour
   // leaning into a lane change; it tumbles away after a crash
+  // The fall after a crash (#799). The old tumble spun the bike 137° while it arced
+  // sideways, so it ended upside down in the grass. Now it tips over to lie on its side
+  // (90°, easing out), slides a little up the road as its speed bleeds off, and stays on
+  // the tarmac: it falls away from the car it hit unless lying that way would reach past
+  // the road's edge, and the slide is cut at the edge line. cr runs 0..1 over the fall;
+  // dir is the side away from the car (+1 right); x, lo and hi are screen x of the bike
+  // and of the road's two edges; len is the bike's height in pixels, the length it lies.
+  function crashPose(cr, dir, x, len, lo, hi) {
+    if (dir > 0 && x + len > hi) dir = -1;
+    else if (dir < 0 && x - len < lo) dir = 1;
+    var e = 1 - Math.pow(1 - Math.max(0, Math.min(1, cr)), 3);
+    var dx = dir * 18 * e, tip = x + dx + dir * len * e;
+    if (tip > hi) dx -= tip - hi;
+    else if (tip < lo) dx += lo - tip;
+    return { dir: dir, e: e, ang: dir * Math.PI / 2 * e, dx: dx, dy: -14 * e };
+  }
+
   function bike(g, P, t, dk) {
     var bx = laneX(S.x), gp = P3(bx, 0, 0), u = BIKE_PX / 26;
     var lean = Math.max(-0.35, Math.min(0.35, (S.tl - S.x) * 0.3));
-    var cr = 0;
-    if (S.over && !S.won && crashAt) cr = Math.min(1, (Date.now() - crashAt) / 900);
+    var cr = 0, pose = null;
+    if (S.over && !S.won && crashAt) {
+      cr = Math.min(1, (Date.now() - crashAt) / 900);
+      // a crash into the back of a car falls toward the wider side of the road
+      var hl = S.hit ? S.hit.lane : S.x;
+      var side = hl < S.x - 0.05 ? 1 : hl > S.x + 0.05 ? -1 : (S.x < (E.LANES - 1) / 2 ? 1 : -1);
+      pose = crashPose(cr, side, gp.x, 56 * u, P3(-6.4, 0, 0).x, P3(6.4, 0, 0).x);
+    }
     g.save();
-    g.translate(gp.x + cr * 40 * (S.hit && S.hit.lane < S.x ? 1 : -1), gp.y - cr * 30 * Math.sin(cr * Math.PI));
-    g.rotate(lean + cr * 2.4 * (S.hit && S.hit.lane < S.x ? 1 : -1));
+    if (pose) {
+      g.translate(gp.x + pose.dx, gp.y + pose.dy);
+      // the shadow stays on the ground and stretches under the bike as it lies down;
+      // drawn in the rotated frame it stood up like a black disc
+      g.fillStyle = P.shadow; g.beginPath();
+      g.ellipse(pose.dir * 26 * u * pose.e, u, (16 + 14 * pose.e) * u, 4 * u, 0, 0, Math.PI * 2); g.fill();
+      g.rotate(lean * (1 - pose.e) + pose.ang);
+    } else {
+      g.translate(gp.x, gp.y);
+      g.rotate(lean);
+    }
     g.scale(u, u);
     // headlight beam at night
     if (dk && !cr) {
       g.fillStyle = P.light;
       g.beginPath(); g.moveTo(-6, -30); g.lineTo(-60, -150); g.lineTo(60, -150); g.lineTo(6, -30); g.closePath(); g.fill();
     }
-    g.fillStyle = P.shadow; g.beginPath(); g.ellipse(0, 1, 16, 4, 0, 0, Math.PI * 2); g.fill();
+    if (!pose) { g.fillStyle = P.shadow; g.beginPath(); g.ellipse(0, 1, 16, 4, 0, 0, Math.PI * 2); g.fill(); }
     // flame and speed lines on nitro
     if (S.boostT > 0 && !S.over) {
       var fl = 10 + 6 * Math.sin(t * 40);
