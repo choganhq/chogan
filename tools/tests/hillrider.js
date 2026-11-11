@@ -121,6 +121,8 @@ module.exports = function (T) {
       'the car is the approved buggy, its head drawn on the hitbox (#763)');
     ok(E.HEAD[0] === -0.15 && E.HEAD[1] === 0.95 && E.HEAD_R === 0.27 && E.WR === 0.42 && JSON.stringify(E.ANCH) === '[[-1.05,-0.42],[1.05,-0.42]]', 'the hitbox and wheel positions are unchanged');
     const ms = Date.now() - t0;
+    // #785: the tank icon in the HUD is the can drawn on the road, not a plain rectangle
+    ok(/function fuelCan\(/.test(html) && /fuelCan\(g, P, p\.x, p\.y, 1, 1\)/.test(html) && /fuelCan\(g, P, gx \+ 10 \* u, gy \+ 6 \* u, 26 \* u, -1\)/.test(html), 'the road and the tank icon draw the same fuel can');
     ok(ms < 8000, 'the Hillrider tests finish in under 8 s (' + ms + ' ms)');
   }
   return { testHillrider };
