@@ -25,7 +25,7 @@ Several files are shared by every new game: `www/games.json`, the awards in `www
 
 ## Style
 
-- Commit messages, pull requests and code comments in English; the game's text in all eight languages (Persian, English, Simplified Chinese, German, Spanish, Polish, French, Arabic).
+- Commit messages, pull requests and code comments in English; the game's text in all nine languages (Persian, English, Simplified Chinese, German, Spanish, Polish, French, Arabic, Hindi).
 - Comments say why, not what.
 - A pull request says what changed, how it was tested, and what was not tested.
 
