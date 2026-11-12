@@ -69,7 +69,7 @@ module.exports = function (T) {
       'a car is paid for only once: an owned car or a failed spend changes nothing');
     ok(/owned = E\.CAR_IDS\.filter\(function \(id\) \{ return id === 'buggy' \|\| owned\.indexOf\(id\) >= 0; \}\)/.test(html) && /prefs\.car = owned\.indexOf\(prefs\.car\) >= 0 \? prefs\.car : 'buggy'/.test(html),
       'the owned list is read back, keeps the buggy, drops unknown ids, and a car not owned cannot be chosen');
-    ok(/E\.newGame\(seedFor\(\), dailyDate \? FINISH : 0, dailyDate \? 'sun' : prefs\.scene, dailyDate \? 'buggy' : prefs\.car\)/.test(html), 'the daily road is driven in the buggy for everyone');
+    ok(/E\.newGame\(seedFor\(\), dailyDate \? FINISH : (race \? E\.RACE : )?0, dailyDate \? 'sun' : prefs\.scene, dailyDate \? 'buggy' : prefs\.car\)/.test(html), 'the daily road is driven in the buggy for everyone');
     ok(/hr-car--locked/.test(garage) && /C\.icon\('coin', 16\), el\('span', \{ text: C\.num\(info\.price\) \}\)/.test(garage) && /garage\(\),/.test(html), 'a locked car is greyed with its price, in the gear');
     const help = (html.match(/function showHelp\(\) \{[\s\S]*?\n {2}\}/) || [''])[0];
     ok(help.length > 0 && !/garage\(/.test(help), 'the garage is not in the help');

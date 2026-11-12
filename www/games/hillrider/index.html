@@ -473,7 +473,21 @@ function HillriderEngineFactory() {
   /* A steady driver for the tests, the proof that a course can be driven: gas, unless the
      nose is too far up for the ground under it; in the air, it turns the car to meet the
      ground it will land on. */
-  function botControl(S) {
+  /* The race bot (#807) at three levels, set by how it reads the road: the speed it lets
+     itself carry down a long drop and on the level. All three look a moment ahead at the
+     turn in the air, which the old driver did not: past 1000 m the hills grow, and reading
+     only the angle it landed on its head on 10 of 10 courses to 2000 m. Measured over 12
+     courses to 1500 m in the buggy (2026-11-12): easy 144.7 s, medium 120.0 s, hard 105.0 s. */
+  var LEVELS = { easy: { down: 8, cap: 9 }, medium: { down: 11, cap: 12 }, hard: { down: 14, cap: 99 } };
+  var LEVEL_IDS = ['easy', 'medium', 'hard'];
+  function levelOf(id) { return LEVELS.hasOwnProperty(id) ? id : 'medium'; }
+  // the race's flag: about two minutes for the medium bot
+  var RACE = 1500;
+
+  // level: one of LEVEL_IDS for the race bot; left out, the steady driver of the daily
+  // course seeds, unchanged
+  function botControl(S, level) {
+    var lv = level ? LEVELS[levelOf(level)] : null;
     var onGround = S.touch[0] || S.touch[1];
     var ahead = ground(S, S.x + 1.5), slopeA = Math.atan(ahead.s), rel = S.a - slopeA;
     if (!onGround) {
@@ -482,7 +496,7 @@ function HillriderEngineFactory() {
       // driver kept braking until the nose had gone past the ground and landed a jeep on
       // its head 7 m from a flag. It looks a moment ahead at the turn instead. The buggy
       // keeps the old driver, so its daily courses stay the same.
-      var pa = S.cp.vmax > VMAX ? S.a + S.w * 0.15 : S.a;
+      var pa = lv || S.cp.vmax > VMAX ? S.a + S.w * 0.15 : S.a;
       if (pa - land > 0.2) return -1;
       if (pa - land < -0.25) return 1;
       return 0;
@@ -491,17 +505,20 @@ function HillriderEngineFactory() {
     if (rel > 0.4 && S.w > 0.6) return 0;
     var speed = Math.hypot(S.vx, S.vy);
     // a long way down: no gas, so a crest doesn't throw it into a spin
-    if (ahead.s < -0.45 && speed > 11) return 0;
+    if (ahead.s < -0.45 && speed > (lv ? lv.down : 11)) return 0;
+    if (lv && speed > lv.cap) return 0;
     return 1;
   }
 
   /* The daily course is one the steady driver above finishes: from the day's seed, the
      first of the next few seeds whose hills it drives to the flag. A course nobody can
-     finish would cost every player the day's star. */
-  function courseSeed(seed, finish, tries, scene) {
+     finish would cost every player the day's star. A race course (#807) is one the race
+     bot at its level finishes in the player's car and weather, so the bot is never lost
+     to a can too far away; it depends on the seed alone, as a two-phone race will need. */
+  function courseSeed(seed, finish, tries, scene, carId, level) {
     for (var k = 0; k < (tries || 12); k++) {
-      var s = (seed + k * 7919) >>> 0, S = newGame(s, finish, scene);
-      while (!S.over && !S.won && S.t < 300) step(S, botControl(S));
+      var s = (seed + k * 7919) >>> 0, S = newGame(s, finish, scene, carId), lim = level ? 600 : 300;
+      while (!S.over && !S.won && S.t < lim) step(S, botControl(S, level));
       if (S.won) return s;
     }
     return seed >>> 0;
@@ -528,7 +545,7 @@ function HillriderEngineFactory() {
   };
   function look(scene, dark) { return LOOKS[sceneOf(scene)][dark ? 'dark' : 'light']; }
 
-  return { CAR_IDS: CAR_IDS, car: car, carOf: carOf, SCENE_IDS: SCENE_IDS, sceneOf: sceneOf, grip: grip, look: look, DT: DT, courseSeed: courseSeed, WR: WR, START: START, HEAD: HEAD, HEAD_R: HEAD_R, ANCH: ANCH, newGame: newGame, step: step, ground: ground, height: height, pickups: pickups, fuelAt: fuelAt, world: world, headPos: headPos, snapshot: snapshot, restore: restore, metres: metres, speedOf: speedOf, FUEL_PRICE: FUEL_PRICE, FUEL_BUY: FUEL_BUY, FUEL_LOW: FUEL_LOW, fuelOffered: fuelOffered, refuel: refuel, hudLayout: hudLayout, dialFrac: dialFrac, botControl: botControl, hard: hard, maxSlope: maxSlope, bumps: bumps, scenery: scenery, animals: animals, animalAt: animalAt, BUMP_GAP: BUMP_GAP, BUMP_FLAT: BUMP_FLAT, BUMP_CAN: BUMP_CAN };
+  return { LEVEL_IDS: LEVEL_IDS, levelOf: levelOf, RACE: RACE, CAR_IDS: CAR_IDS, car: car, carOf: carOf, SCENE_IDS: SCENE_IDS, sceneOf: sceneOf, grip: grip, look: look, DT: DT, courseSeed: courseSeed, WR: WR, START: START, HEAD: HEAD, HEAD_R: HEAD_R, ANCH: ANCH, newGame: newGame, step: step, ground: ground, height: height, pickups: pickups, fuelAt: fuelAt, world: world, headPos: headPos, snapshot: snapshot, restore: restore, metres: metres, speedOf: speedOf, FUEL_PRICE: FUEL_PRICE, FUEL_BUY: FUEL_BUY, FUEL_LOW: FUEL_LOW, fuelOffered: fuelOffered, refuel: refuel, hudLayout: hudLayout, dialFrac: dialFrac, botControl: botControl, hard: hard, maxSlope: maxSlope, bumps: bumps, scenery: scenery, animals: animals, animalAt: animalAt, BUMP_GAP: BUMP_GAP, BUMP_FLAT: BUMP_FLAT, BUMP_CAN: BUMP_CAN };
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = HillriderEngineFactory;
 /* ==== ENGINE END ==== */
@@ -562,7 +579,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         scT: 'هوا', scSun: 'آفتابی', scSnow: 'برفی', scRain: 'بارانی', scNight: 'شب', gripSun: 'جاده‌ی خشک: چسبندگی کامل', gripWet: 'خیس: چسبندگی کمتر', gripSnow: 'برف: لغزنده', gripNight: 'شب: جاده‌ی خشک، چسبندگی کامل', dailySun: 'جاده‌ی روزانه همیشه آفتابی است.',
         sceneRule: 'هوا را در تنظیمات انتخاب کن: باران جاده را لیز می‌کند و برف لیزتر؛ چرخ‌ها زودتر درجا می‌چرخند و ترمز جای بیشتری می‌خواهد. شب جاده خشک است و فقط چراغ ماشین راه را روشن می‌کند. جاده‌ی روزانه همیشه آفتابی است.',
         carT: 'ماشین', carBuggy: 'باگی', carJeep: 'جیپ', carTruck: 'وانت', carRacer: 'مسابقه‌ای', dBuggy: 'سبک و چابک؛ رایگان.', dJeep: 'باک بزرگ‌تر و کمی چسبندگی بیشتر.', dTruck: 'موتور قوی، باک بزرگ، چسبندگی خوب.', dRacer: 'تندترین، با بیشترین چسبندگی و بزرگ‌ترین باک.', carOn: 'سوارش هستی', carPick: 'سوار شو', buyCarT: '{car} را بخری؟', buyCarText: '{n} سکه از سکه‌هایت، فقط یک بار. بعد برای همیشه مال توست.', carBought: '{car} مال توست', dailyBuggy: 'جاده‌ی روزانه همیشه با باگی است.',
-        carRule: 'ماشین‌های بهتر را در تنظیمات با سکه‌هایت می‌خری، فقط یک بار: هر کدام موتور قوی‌تر، باکی که دیرتر خالی می‌شود و چسبندگی بیشتری دارد.'
+        carRule: 'ماشین‌های بهتر را در تنظیمات با سکه‌هایت می‌خری، فقط یک بار: هر کدام موتور قوی‌تر، باکی که دیرتر خالی می‌شود و چسبندگی بیشتری دارد.',
+        rcT: 'حالت', rcSolo: 'آزاد', rcRace: 'مسابقه', rcBot: 'ربات', rcBotM: 'ربات: {n} متر', rcWin: 'از ربات جلو زدی!', rcLose: 'ربات زودتر رسید', rcYou: 'زمان تو', rcBotTime: 'زمان ربات', rcBadge: 'مسابقه · {lv}', rcDaily: 'جاده‌ی روزانه بدون ربات است.',
+        rcRule: 'در تنظیمات حالت مسابقه را انتخاب کن: یک ماشین ربات روی همان جاده، با همان ماشین و همان هوا، تا پرچم ۱۵۰۰ متری با تو مسابقه می‌دهد. ماشین ربات کم‌رنگ است و به تو نمی‌خورد؛ هر کس زودتر به پرچم برسد برنده است. ربات سه سطح دارد و قانون بنزین برای هر دو یکی است.'
       },
       en: {
         tapGo: 'Tap to go on.', hills: 'Hills and car', distM: '{n} m', bestM: 'Best: {n} m', flagM: 'Flag: {n} m', dailyHr: 'Daily Hillrider', newRun: 'Start over',
@@ -577,7 +596,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         scT: 'Weather', scSun: 'Sunny', scSnow: 'Snowy', scRain: 'Rainy', scNight: 'Night', gripSun: 'Dry road: full grip', gripWet: 'Wet: less grip', gripSnow: 'Snow: slippery', gripNight: 'Night: dry road, full grip', dailySun: 'The daily road is always sunny.',
         sceneRule: 'Pick the weather in the settings: rain makes the road slippery and snow more so; the wheels spin sooner and the brake needs more room. At night the road is dry and only your headlamp lights the way. The daily road is always sunny.',
         carT: 'Car', carBuggy: 'Buggy', carJeep: 'Jeep', carTruck: 'Pickup', carRacer: 'Racer', dBuggy: 'Light and nimble; free.', dJeep: 'A bigger tank and a little more grip.', dTruck: 'Strong engine, big tank, good grip.', dRacer: 'The fastest, with the most grip and the biggest tank.', carOn: 'Driving', carPick: 'Drive', buyCarT: 'Buy the {car}?', buyCarText: 'It costs {n} of your coins, once. Then it is yours for good.', carBought: 'The {car} is yours', dailyBuggy: 'The daily road is always driven in the buggy.',
-        carRule: 'Better cars cost coins from your wallet, once, in the settings: each has a stronger engine, a tank that lasts longer and more grip.'
+        carRule: 'Better cars cost coins from your wallet, once, in the settings: each has a stronger engine, a tank that lasts longer and more grip.',
+        rcT: 'Mode', rcSolo: 'Free ride', rcRace: 'Race', rcBot: 'Bot', rcBotM: 'Bot: {n} m', rcWin: 'You beat the bot!', rcLose: 'The bot got there first', rcYou: 'Your time', rcBotTime: 'Bot\'s time', rcBadge: 'Race · {lv}', rcDaily: 'The daily road has no bot.',
+        rcRule: 'Pick Race in the settings: a bot car drives the same road, in the same car and weather, to a flag at 1,500 m. The bot is see-through and never touches you; the first to the flag wins. The bot has three levels, and the fuel rules are the same for both.'
       },
       pl: {
         tapGo: 'Stuknij, aby przejść dalej.', hills: 'Wzgórza i auto', distM: '{n} m', bestM: 'Najlepszy: {n} m', flagM: 'Flaga: {n} m', dailyHr: 'Codzienny Jeździec wzgórz', newRun: 'Zacznij od nowa',
@@ -592,7 +613,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         scT: 'Pogoda', scSun: 'Słonecznie', scSnow: 'Śnieg', scRain: 'Deszcz', scNight: 'Noc', gripSun: 'Sucho: pełna przyczepność', gripWet: 'Mokro: mniejsza przyczepność', gripSnow: 'Śnieg: ślisko', gripNight: 'Noc: sucho, pełna przyczepność', dailySun: 'Codzienna trasa jest zawsze słoneczna.',
         sceneRule: 'Wybierz pogodę w ustawieniach: deszcz robi drogę śliską, a śnieg jeszcze bardziej; koła szybciej buksują, a hamowanie wymaga więcej miejsca. W nocy droga jest sucha i tylko reflektor oświetla trasę. Codzienna trasa jest zawsze słoneczna.',
         carT: 'Auto', carBuggy: 'Łazik', carJeep: 'Terenówka', carTruck: 'Pikap', carRacer: 'Wyścigówka', dBuggy: 'Lekki i zwinny; za darmo.', dJeep: 'Większy bak i trochę lepsza przyczepność.', dTruck: 'Mocny silnik, duży bak, dobra przyczepność.', dRacer: 'Najszybsza, z najlepszą przyczepnością i największym bakiem.', carOn: 'W użyciu', carPick: 'Jedź', buyCarT: 'Kupić: {car}?', buyCarText: 'Kosztuje {n} twoich monet, jeden raz. Potem masz to auto na zawsze.', carBought: 'Masz już: {car}', dailyBuggy: 'Codzienną trasę zawsze jedzie się łazikiem.',
-        carRule: 'Lepsze auta kupisz w ustawieniach za monety, jeden raz: każde ma mocniejszy silnik, bak starczający na dłużej i lepszą przyczepność.'
+        carRule: 'Lepsze auta kupisz w ustawieniach za monety, jeden raz: każde ma mocniejszy silnik, bak starczający na dłużej i lepszą przyczepność.',
+        rcT: 'Tryb', rcSolo: 'Swobodna jazda', rcRace: 'Wyścig', rcBot: 'Bot', rcBotM: 'Bot: {n} m', rcWin: 'Pokonałeś bota!', rcLose: 'Bot był pierwszy', rcYou: 'Twój czas', rcBotTime: 'Czas bota', rcBadge: 'Wyścig · {lv}', rcDaily: 'Codzienna trasa jest bez bota.',
+        rcRule: 'Wybierz Wyścig w ustawieniach: auto bota jedzie tą samą trasą, tym samym autem i w tej samej pogodzie, do flagi na 1500 m. Bot jest przezroczysty i nigdy cię nie dotyka; wygrywa ten, kto pierwszy dotrze do flagi. Bot ma trzy poziomy, a zasady paliwa są dla obu takie same.'
       },
       fr: {
         tapGo: 'Touche pour continuer.', hills: 'Les collines et la voiture', distM: '{n} m', bestM: 'Record : {n} m', flagM: 'Drapeau : {n} m', dailyHr: 'Grimpe-colline du jour', newRun: 'Recommencer',
@@ -607,7 +630,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         scT: 'Météo', scSun: 'Soleil', scSnow: 'Neige', scRain: 'Pluie', scNight: 'Nuit', gripSun: 'Sec : adhérence totale', gripWet: 'Mouillé : moins d’adhérence', gripSnow: 'Neige : glissant', gripNight: 'Nuit : sec, adhérence totale', dailySun: 'Le parcours du jour est toujours ensoleillé.',
         sceneRule: 'Choisis la météo dans les réglages : la pluie rend la route glissante, la neige encore plus ; les roues patinent plus tôt et le freinage demande plus de place. La nuit, la route est sèche et seul ton phare éclaire le chemin. Le parcours du jour est toujours ensoleillé.',
         carT: 'Voiture', carBuggy: 'Buggy', carJeep: 'Jeep', carTruck: 'Pick-up', carRacer: 'Bolide', dBuggy: 'Léger et agile ; gratuit.', dJeep: 'Un plus grand réservoir et un peu plus d’adhérence.', dTruck: 'Moteur puissant, grand réservoir, bonne adhérence.', dRacer: 'Le plus rapide, avec la meilleure adhérence et le plus grand réservoir.', carOn: 'En route', carPick: 'Conduire', buyCarT: 'Acheter : {car} ?', buyCarText: 'Ça coûte {n} de tes pièces, une seule fois. Ensuite, c’est à toi pour toujours.', carBought: '{car} : c’est à toi', dailyBuggy: 'Le parcours du jour se fait toujours en buggy.',
-        carRule: 'Dans les réglages, tu peux acheter de meilleures voitures avec tes pièces, une seule fois : chacune a un moteur plus puissant, un réservoir qui dure plus longtemps et plus d’adhérence.'
+        carRule: 'Dans les réglages, tu peux acheter de meilleures voitures avec tes pièces, une seule fois : chacune a un moteur plus puissant, un réservoir qui dure plus longtemps et plus d’adhérence.',
+        rcT: 'Mode', rcSolo: 'Balade', rcRace: 'Course', rcBot: 'Robot', rcBotM: 'Robot : {n} m', rcWin: 'Tu as battu le robot !', rcLose: 'Le robot est arrivé avant toi', rcYou: 'Ton temps', rcBotTime: 'Temps du robot', rcBadge: 'Course · {lv}', rcDaily: 'Le parcours du jour se fait sans robot.',
+        rcRule: 'Choisis Course dans les réglages : une voiture robot roule sur la même route, avec la même voiture et la même météo, jusqu’à un drapeau à 1500 m. Le robot est transparent et ne te touche jamais ; le premier au drapeau gagne. Le robot a trois niveaux, et les règles du carburant sont les mêmes pour vous deux.'
       },
       zh: {
         tapGo: '点一下继续。', hills: '山丘和车', distM: '{n} 米', bestM: '最佳：{n} 米', flagM: '旗子：{n} 米', dailyHr: '每日山丘车手', newRun: '重新开始',
@@ -622,7 +647,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         scT: '天气', scSun: '晴天', scSnow: '雪天', scRain: '雨天', scNight: '夜晚', gripSun: '干燥路面：抓地力满', gripWet: '湿滑：抓地力较低', gripSnow: '雪地：很滑', gripNight: '夜晚：路面干燥，抓地力满', dailySun: '每日挑战总是晴天。',
         sceneRule: '在设置里选择天气：雨天路面湿滑，雪天更滑；车轮更容易打滑，刹车需要更长距离。夜晚路面干燥，只有车灯照亮前路。每日挑战总是晴天。',
         carT: '车辆', carBuggy: '越野小车', carJeep: '吉普', carTruck: '皮卡', carRacer: '赛车', dBuggy: '轻巧灵活；免费。', dJeep: '油箱更大，抓地力稍强。', dTruck: '引擎强劲，油箱大，抓地力好。', dRacer: '最快，抓地力最强，油箱最大。', carOn: '驾驶中', carPick: '驾驶', buyCarT: '购买{car}？', buyCarText: '花费 {n} 个金币，只需一次，之后永久归你。', carBought: '{car}归你了', dailyBuggy: '每日挑战总是用越野小车。',
-        carRule: '在设置里可以用金币买更好的车，只需买一次：每辆车引擎更强、油更耐用、抓地力更好。'
+        carRule: '在设置里可以用金币买更好的车，只需买一次：每辆车引擎更强、油更耐用、抓地力更好。',
+        rcT: '模式', rcSolo: '自由', rcRace: '竞速', rcBot: '机器人', rcBotM: '机器人：{n} 米', rcWin: '你赢了机器人！', rcLose: '机器人先到了', rcYou: '你的用时', rcBotTime: '机器人用时', rcBadge: '竞速 · {lv}', rcDaily: '每日挑战没有机器人。',
+        rcRule: '在设置里选择竞速：一辆机器人车在同一条路上，用同样的车和天气，跑到 1500 米的旗子。机器人车是半透明的，不会碰到你；先到旗子的赢。机器人有三个难度，燃油规则对双方都一样。'
       },
       de: {
         tapGo: 'Tippe, um weiterzumachen.', hills: 'Hügel und Auto', distM: '{n} m', bestM: 'Bestwert: {n} m', flagM: 'Fahne: {n} m', dailyHr: 'Hügelflitzer des Tages', newRun: 'Neu starten',
@@ -637,7 +664,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         scT: 'Wetter', scSun: 'Sonnig', scSnow: 'Schnee', scRain: 'Regen', scNight: 'Nacht', gripSun: 'Trocken: volle Haftung', gripWet: 'Nass: weniger Haftung', gripSnow: 'Schnee: rutschig', gripNight: 'Nacht: trocken, volle Haftung', dailySun: 'Die Tagesstrecke ist immer sonnig.',
         sceneRule: 'Wähle das Wetter in den Einstellungen: Regen macht die Straße rutschig, Schnee noch mehr; die Räder drehen früher durch und die Bremse braucht mehr Platz. Nachts ist die Straße trocken, und nur dein Scheinwerfer leuchtet den Weg. Die Tagesstrecke ist immer sonnig.',
         carT: 'Auto', carBuggy: 'Buggy', carJeep: 'Jeep', carTruck: 'Pick-up', carRacer: 'Flitzer', dBuggy: 'Leicht und wendig; gratis.', dJeep: 'Größerer Tank und etwas mehr Haftung.', dTruck: 'Starker Motor, großer Tank, gute Haftung.', dRacer: 'Der schnellste, mit der besten Haftung und dem größten Tank.', carOn: 'Im Einsatz', carPick: 'Fahren', buyCarT: '{car} kaufen?', buyCarText: 'Kostet {n} deiner Münzen, nur einmal. Danach gehört er dir für immer.', carBought: '{car} gehört dir', dailyBuggy: 'Die Tagesstrecke fährst du immer im Buggy.',
-        carRule: 'Bessere Autos kaufst du in den Einstellungen einmalig mit deinen Münzen: Jedes hat einen stärkeren Motor, einen Tank, der länger hält, und mehr Haftung.'
+        carRule: 'Bessere Autos kaufst du in den Einstellungen einmalig mit deinen Münzen: Jedes hat einen stärkeren Motor, einen Tank, der länger hält, und mehr Haftung.',
+        rcT: 'Modus', rcSolo: 'Freie Fahrt', rcRace: 'Rennen', rcBot: 'Bot', rcBotM: 'Bot: {n} m', rcWin: 'Du hast den Bot geschlagen!', rcLose: 'Der Bot war schneller', rcYou: 'Deine Zeit', rcBotTime: 'Zeit des Bots', rcBadge: 'Rennen · {lv}', rcDaily: 'Die Tagesstrecke fährst du ohne Bot.',
+        rcRule: 'Wähle in den Einstellungen Rennen: Ein Bot-Auto fährt dieselbe Straße, im selben Auto und Wetter, bis zu einer Fahne bei 1500 m. Der Bot ist durchsichtig und berührt dich nie; wer zuerst an der Fahne ist, gewinnt. Der Bot hat drei Stufen, und die Benzinregeln gelten für beide.'
       },
       es: {
         tapGo: 'Toca para seguir.', hills: 'Colinas y coche', distM: '{n} m', bestM: 'Mejor: {n} m', flagM: 'Bandera: {n} m', dailyHr: 'Trepacolinas del día', newRun: 'Empezar de nuevo',
@@ -652,7 +681,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         scT: 'Clima', scSun: 'Soleado', scSnow: 'Nevado', scRain: 'Lluvioso', scNight: 'Noche', gripSun: 'Seco: agarre total', gripWet: 'Mojado: menos agarre', gripSnow: 'Nieve: resbala', gripNight: 'Noche: seco, agarre total', dailySun: 'El recorrido diario siempre es soleado.',
         sceneRule: 'Elige el clima en los ajustes: la lluvia hace resbalar la carretera y la nieve aún más; las ruedas patinan antes y el freno necesita más espacio. De noche la carretera está seca y solo tu faro alumbra el camino. El recorrido diario siempre es soleado.',
         carT: 'Coche', carBuggy: 'Buggy', carJeep: 'Todoterreno', carTruck: 'Camioneta', carRacer: 'Bólido', dBuggy: 'Ligero y ágil; gratis.', dJeep: 'Depósito más grande y algo más de agarre.', dTruck: 'Motor potente, depósito grande, buen agarre.', dRacer: 'El más rápido, con el mejor agarre y el depósito más grande.', carOn: 'En uso', carPick: 'Conducir', buyCarT: '¿Comprar {car}?', buyCarText: 'Cuesta {n} de tus monedas, una sola vez. Luego es tuyo para siempre.', carBought: 'Ya tienes: {car}', dailyBuggy: 'El recorrido diario siempre se hace en buggy.',
-        carRule: 'En los ajustes puedes comprar mejores coches con tus monedas, una sola vez: cada uno tiene más motor, un depósito que dura más y más agarre.'
+        carRule: 'En los ajustes puedes comprar mejores coches con tus monedas, una sola vez: cada uno tiene más motor, un depósito que dura más y más agarre.',
+        rcT: 'Modo', rcSolo: 'Libre', rcRace: 'Carrera', rcBot: 'Bot', rcBotM: 'Bot: {n} m', rcWin: '¡Le ganaste al bot!', rcLose: 'El bot llegó antes', rcYou: 'Tu tiempo', rcBotTime: 'Tiempo del bot', rcBadge: 'Carrera · {lv}', rcDaily: 'El recorrido diario es sin bot.',
+        rcRule: 'Elige Carrera en los ajustes: un coche bot recorre el mismo camino, con el mismo coche y el mismo clima, hasta una bandera a 1500 m. El bot es transparente y nunca te toca; gana quien llegue antes a la bandera. El bot tiene tres niveles y las reglas de gasolina son las mismas para los dos.'
       }
     }
   });
@@ -668,6 +699,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
   if (!Array.isArray(owned)) owned = [];
   owned = E.CAR_IDS.filter(function (id) { return id === 'buggy' || owned.indexOf(id) >= 0; });
   prefs.car = owned.indexOf(prefs.car) >= 0 ? prefs.car : 'buggy';
+  // a free ride or a race against the bot (#807), and the bot's level; medium for a new player
+  prefs.mode = prefs.mode === 'race' ? 'race' : 'solo';
+  prefs.level = E.levelOf(prefs.level);
   // the shown speed in m/s, eased so the suspension's bounce does not flicker the digits
   var spd = 0;
 
@@ -678,6 +712,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
   var tries = 0, startedAt = 0, ended = false, waiting = false, resumed = false, flipPending = false;
   // the view follows the car smoothly, so a bump does not shake the whole screen
   var cam = { x: 0, y: 0 };
+  // the race (#807): the bot's own car B on the same course, stepped beside the player's
+  // with the same clock, never touching it; null on a free ride and on the daily road
+  var race = false, raceLv = 'medium', B = null, prevB = null;
 
   var cv = el('canvas', { class: 'hr-canvas', role: 'img', 'aria-label': C.t('hills') });
   var buyLabel = el('span');
@@ -702,7 +739,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
   // engine's own driver finishes (E.courseSeed), worked out once a page load
   var dailySeed = null;
   function seedFor() {
-    if (!dailyDate) return Math.floor(Math.random() * 4294967296);
+    // a race course is one the bot at its level finishes in this car and weather
+    if (!dailyDate) return race ? E.courseSeed(Math.floor(Math.random() * 4294967296), E.RACE, 12, prefs.scene, prefs.car, raceLv) : Math.floor(Math.random() * 4294967296);
     if (dailySeed === null) dailySeed = E.courseSeed(Math.floor(C.daily('hillrider', dailyDate).rng() * 4294967296), FINISH);
     return dailySeed;
   }
@@ -710,7 +748,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
   function newRun() {
     // the daily road is sunny for everyone, so the scores compare (#805)
     // and in the buggy, for the same reason (#808)
-    S = E.newGame(seedFor(), dailyDate ? FINISH : 0, dailyDate ? 'sun' : prefs.scene, dailyDate ? 'buggy' : prefs.car);
+    race = !dailyDate && prefs.mode === 'race'; raceLv = prefs.level;
+    S = E.newGame(seedFor(), dailyDate ? FINISH : race ? E.RACE : 0, dailyDate ? 'sun' : prefs.scene, dailyDate ? 'buggy' : prefs.car);
+    B = race ? E.newGame(S.seed, E.RACE, S.scene, S.car) : null; prevB = null;
     // a new run stands still until the first touch, so the tank is full when it starts
     waiting = true; resumed = false; flipPending = false;
     tries++;
@@ -736,13 +776,14 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
   function pose(T) {
     return { x: T.x, y: T.y, a: T.a, wh: T.wh.map(function (W) { return { x: W.x, y: W.y, rot: W.rot }; }) };
   }
-  function view() {
-    var now = pose(S);
-    if (!prev || ended) return now;
+  function view(T, P0) {
+    if (!T) { T = S; P0 = prev; }
+    var now = pose(T);
+    if (!P0 || ended) return now;
     var f = Math.max(0, Math.min(1, acc / E.DT));
     function mix(a, b) { return a + (b - a) * f; }
-    return { x: mix(prev.x, now.x), y: mix(prev.y, now.y), a: mix(prev.a, now.a),
-      wh: now.wh.map(function (W, i) { return { x: mix(prev.wh[i].x, W.x), y: mix(prev.wh[i].y, W.y), rot: mix(prev.wh[i].rot, W.rot) }; }) };
+    return { x: mix(P0.x, now.x), y: mix(P0.y, now.y), a: mix(P0.a, now.a),
+      wh: now.wh.map(function (W, i) { return { x: mix(P0.wh[i].x, W.x), y: mix(P0.wh[i].y, W.y), rot: mix(P0.wh[i].rot, W.rot) }; }) };
   }
   function tick(now) {
     raf = 0;
@@ -759,6 +800,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
       acc -= E.DT;
       prev = pose(S);
       ev = ev.concat(E.step(S, control(), false, canBuy()));
+      // the bot drives the same step as the player, so both clocks agree to the frame
+      if (B) { prevB = pose(B); E.step(B, E.botControl(B, raceLv)); }
       if (S.over || S.won) break;
     }
     events(ev);
@@ -810,7 +853,35 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     if (ev.indexOf('crash') >= 0 || ev.indexOf('stall') >= 0) C.feedback('bad');
   }
 
+  // a race time to a tenth of a second, so a close finish reads as close
+  function raceTime(t) { return C.time(t * 1000) + C.num('.' + (Math.floor(t * 10) % 10)); }
+  /* The race's end (#807): the bot is driven on to its own flag at once, with the same
+     steps it would have taken on screen, so its time is known even when the player went
+     off the road first. The first to the flag by the run's clock wins. */
+  function finishRace() {
+    ctx.clearSave();
+    while (!B.won && !B.over && B.t < 600) E.step(B, E.botControl(B, raceLv));
+    var m = E.metres(S), mine = S.won ? S.t : null, bots = B.won ? B.t : null;
+    var won = mine !== null && (bots === null || mine < bots);
+    var coins = Math.min(40, 2 + Math.floor(m / 150) + Math.floor(S.coins / 8)), points = Math.min(120, 6 + Math.floor(m / 30));
+    if (won) { coins += 5; points += 15; }
+    ctx.finish({
+      won: won,
+      title: won ? C.t('rcWin') : S.won ? C.t('rcLose') : S.cause === 'fuel' ? C.t('emptyT') : S.cause === 'stuck' ? C.t('stuckT') : C.t('crashT'),
+      timeMs: Date.now() - startedAt, coins: coins, points: points,
+      lines: [
+        { label: C.t('rcYou'), value: mine !== null ? raceTime(mine) : C.t('distM', { n: C.num(m) }) },
+        { label: C.t('rcBotTime') + ' · ' + C.t(raceLv), value: bots !== null ? raceTime(bots) : C.t('distM', { n: C.num(E.metres(B)) }) },
+        { label: C.t('coinsGot'), value: C.num(S.coins) }
+      ],
+      shareText: 'چوگان · تپه‌سوار\nمسابقه · ' + (mine !== null ? (mine.toFixed(1) + ' ثانیه') : (m + ' متر')),
+      againLabel: C.t('newRun'),
+      onAgain: function () { newRun(); }
+    });
+  }
+
   function finish() {
+    if (B) { finishRace(); return; }
     ctx.clearSave();
     var m = E.metres(S), won = S.won;
     var coins = Math.min(40, 2 + Math.floor(m / 150) + Math.floor(S.coins / 8)), points = Math.min(120, 6 + Math.floor(m / 30)), note = null;
@@ -909,6 +980,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     // the world in metres, y up
     g.setTransform(dpr * ppm, 0, 0, -dpr * ppm, dpr * (ox - cam.x * ppm), dpr * (oy + cam.y * ppm));
     roadside(g, P, x0, x1);
+    // the bot's lane lies behind the road's edge, so the road covers its wheels' feet
+    if (B) ghost(g, P, dpr);
     g.beginPath();
     var stepX = 0.5, x;
     g.moveTo(x0, yLow);
@@ -958,6 +1031,28 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     weather(g, Z, P, ppm);
     hud(g, Z, P);
+  }
+  /* The bot's car in a race (#807) is a ghost in its own lane: drawn whole on its own
+     layer, then laid on the view at half strength, so its wheels do not show through its
+     body as they would with the car drawn straight at half alpha. The lane is LANE m up
+     and drawn before the road: on the same spot as the player, as at the start, the two
+     cars sat one on the other and the bot could not be seen. Off the screen it costs nothing. */
+  var ghostCv = null, LANE = 0.45;
+  function ghost(g, P, dpr) {
+    var VB = view(B, prevB);
+    VB.y += LANE; VB.wh.forEach(function (W) { W.y += LANE; });
+    if (Math.abs(VB.x - cam.x) > drawn.w / Math.min(drawn.w / 16, drawn.h / 12) + 4) return;
+    if (!ghostCv) ghostCv = document.createElement('canvas');
+    if (ghostCv.width !== cv.width || ghostCv.height !== cv.height) { ghostCv.width = cv.width; ghostCv.height = cv.height; }
+    var q = ghostCv.getContext('2d'), m = g.getTransform();
+    q.setTransform(1, 0, 0, 1, 0, 0); q.clearRect(0, 0, ghostCv.width, ghostCv.height);
+    q.setTransform(m);
+    drawCar(q, P, VB, B.car);
+    // one cool tint over the whole car, so beside the player's own paint it reads as the other car
+    q.setTransform(1, 0, 0, 1, 0, 0); q.globalCompositeOperation = 'source-atop'; q.globalAlpha = 0.6;
+    q.fillStyle = dark() ? '#9FC2FF' : '#2F5FB8'; q.fillRect(0, 0, ghostCv.width, ghostCv.height);
+    q.globalCompositeOperation = 'source-over'; q.globalAlpha = 1;
+    g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 0.5; g.drawImage(ghostCv, 0, 0); g.restore();
   }
   /* The weather of the scene (#805), in screen pixels over the world and under the dials.
      The drops and flakes are a fixed set placed by index, moved by the clock and against
@@ -1286,21 +1381,31 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     if (dailyDate) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyHr') + ' — ' + C.num(dailyDate) })]));
     distEl = el('span', { class: 'ch-badge' });
     top.appendChild(distEl);
+    // in a race (#807) the bot's metres stand beside the player's, so a bot off the screen
+    // is still in the race; the level is on the race's label
+    botEl = null;
+    if (B) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent hr-race', text: C.t('rcBadge', { lv: C.t(raceLv) }) }));
+      botEl = el('span', { class: 'ch-badge hr-bot' });
+      top.appendChild(botEl);
+    }
     var best = C.stats.getBest('hillrider', 'metres');
-    if (!dailyDate && best) top.appendChild(el('span', { class: 'ch-badge', text: C.t('bestM', { n: C.num(best) }) }));
+    if (!dailyDate && !B && best) top.appendChild(el('span', { class: 'ch-badge', text: C.t('bestM', { n: C.num(best) }) }));
     // the scene's grip, so a slippery road is never a surprise (#805); sunny is the plain case
     if (S && S.scene !== 'sun') top.appendChild(el('span', { class: 'ch-badge hr-grip', text: gripText(S.scene) }));
     var gear = el('button', { class: 'ch-iconbtn hr-gear', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
     gear.addEventListener('click', showSettings);
     top.appendChild(gear);
-    shownM = -1;
+    shownM = -1; shownB = -1;
     renderDist();
   }
-  var shownM = -1;
+  var shownM = -1, shownB = -1, botEl = null;
   function renderDist() {
     if (!distEl || !S) return;
     var m = E.metres(S);
     if (m !== shownM) { shownM = m; distEl.textContent = C.t('distM', { n: C.num(m) }); }
+    var mb = B && botEl ? Math.min(E.RACE, E.metres(B)) : -1;
+    if (mb >= 0 && mb !== shownB) { shownB = mb; botEl.textContent = C.t('rcBotM', { n: C.num(mb) }); }
   }
   function renderStatus() {
     var tap = waiting && resumed;
@@ -1383,9 +1488,26 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
       ctx.store.set('prefs', prefs);
       if (!dailyDate) { gripEl.textContent = gripText(prefs.scene); ctx.clearSave(); newRun(); }
     });
+    // a free ride or a race (#807); the bot's level shows only for a race. Either change
+    // starts a new run, like the weather: a bot that changed mid-race would be no race
+    var lvRow = el('div', { class: 'ch-item hr-scene', hidden: prefs.mode !== 'race' }, [el('div', { class: 'ch-item__label', text: C.t('rcBot') }),
+      C.ui.segmented([{ value: 'easy', label: C.t('easy') }, { value: 'medium', label: C.t('medium') }, { value: 'hard', label: C.t('hard') }], prefs.level, function (v) {
+        prefs.level = E.levelOf(v);
+        ctx.store.set('prefs', prefs);
+        if (!dailyDate) { ctx.clearSave(); newRun(); }
+      })]);
+    var modeSeg = C.ui.segmented([{ value: 'solo', label: C.t('rcSolo') }, { value: 'race', label: C.t('rcRace') }], prefs.mode, function (v) {
+      prefs.mode = v === 'race' ? 'race' : 'solo';
+      ctx.store.set('prefs', prefs);
+      lvRow.hidden = prefs.mode !== 'race';
+      if (!dailyDate) { ctx.clearSave(); newRun(); }
+    });
+    var modeRow = el('div', { class: 'ch-item hr-scene' }, [el('div', { class: 'ch-item__label', text: C.t('rcT') }), modeSeg].concat(dailyDate ? [el('div', { class: 'ch-dim hr-gripnote', text: C.t('rcDaily') })] : []));
     C.ui.modal({
       title: C.t('settings'),
       body: [el('div', { class: 'ch-list' }, [
+        modeRow,
+        lvRow,
         garage(),
         el('div', { class: 'ch-item hr-scene' }, [el('div', { class: 'ch-item__label', text: C.t('scT') }), scSeg, gripEl]),
         el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('spdT') }), seg])])],
@@ -1448,6 +1570,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         el('p', { class: 'ch-dim', text: C.t('buyRule', { n: C.num(E.FUEL_PRICE) }) }),
         el('p', { class: 'ch-dim', text: C.t('sceneRule') }),
         el('p', { class: 'ch-dim', text: C.t('carRule') }),
+        el('p', { class: 'ch-dim', text: C.t('rcRule') }),
         el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
         el('div', { class: 'ch-list' }, [kb('→ ↑ / D W', C.t('kGas')), kb('← ↓ / A S', C.t('kBrake')), kb('R', C.t('kAgain'))])
       ],
@@ -1480,12 +1603,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
   // so the car is never dropped mid-jump; the daily road has its own slot (#132)
   ctx.autosave(function () {
     if (!S || S.over || S.won || ended || S.t < 1) return { inProgress: false };
-    return { s: E.snapshot(S), tries: tries, daily: dailyDate || null, elapsed: Date.now() - startedAt };
+    // a race keeps the bot's car and level too (#807)
+    return { s: E.snapshot(S), b: B ? E.snapshot(B) : null, lv: raceLv, tries: tries, daily: dailyDate || null, elapsed: Date.now() - startedAt };
   });
   function resumeRun(sv) {
-    var R = E.restore(sv.s);
-    if (!R) return false;
-    S = R; tries = sv.tries || 1; startedAt = Date.now() - (sv.elapsed || 0);
+    var R = E.restore(sv.s), RB = sv.b && !sv.daily ? E.restore(sv.b) : null;
+    if (!R || (sv.b && !sv.daily && !RB)) return false;
+    S = R; B = RB; prevB = null; race = !!RB; raceLv = E.levelOf(sv.lv); tries = sv.tries || 1; startedAt = Date.now() - (sv.elapsed || 0);
     ended = false; waiting = true; resumed = true; flipPending = false; acc = 0; last = 0; prev = null; spd = Math.abs(S.vx);
     cam.x = S.x; cam.y = S.y;
     renderTop(); renderStatus(); draw(); kick();
