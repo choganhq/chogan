@@ -55,9 +55,9 @@ dates() {
 head_dates=$(dates WORKTREE) || { echo "updated-gate: cannot read www/games.json of this pull request" >&2; exit 2; }
 base_dates=$(dates "$base") || { echo "updated-gate: cannot read www/games.json on the base" >&2; exit 2; }
 
-# A game changed twice in one day already carries the merge day on the base: the second
-# pull request cannot move it again (Hillrider's scenes and world, #805 then #806, both
-# 2026-11-12). GATE_TODAY lets the tests pin the day.
+# A date the base already moved to today is the merge day too: a second change to the
+# same game on the same day (#813, then #814 on Moto Rush) could otherwise never pass,
+# since no date is both new and not in the future. GATE_TODAY lets the tests pin the day.
 today="${GATE_TODAY:-$(date -u +%F)}"
 stale=""
 for id in $changed; do
