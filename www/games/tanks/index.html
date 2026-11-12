@@ -513,6 +513,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
   function stop() { if (timer) { clearTimeout(timer); timer = null; } }
   function later(fn, ms) { stop(); timer = setTimeout(function () { timer = null; fn(); }, ms); }
   function pname(seat) {
+    if (G.mode === 'net' && G.side == null) return C.t('playerN', { n: C.num(seat + 1) });
     if (G.mode === 'net') return seat === G.side ? (C.state.profile.name || C.t('you')) : (G.peerName || C.t('rival'));
     if (seat === 0) return G.mode === 'people' ? C.t('playerN', { n: C.num(1) }) : (C.state.profile.name || C.t('you'));
     return isBot(seat) ? C.t('bot') : C.t('playerN', { n: C.num(2) });
@@ -551,6 +552,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
           // #752: after an app switch either phone may have restarted or missed a turn;
           // each says where its match is, with its own last shot, and the one behind catches up
           sendSync();
+          // a restarted phone has none of my aim: say it again
+          aimSent = '';
         }
         render();
       },
@@ -572,8 +575,48 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
     else if (d.t === 'sync') onSync(d);
     else if (d.t === 'turn') { if ((d.g | 0) === (G.g | 0)) { G.inbox = d; pump(); } }
     else if (d.t === 'want') { if (G.side === 0) sendSync(); }
+    else if (d.t === 'aim') onAim(d);
+  }
+
+  // The other phone's aim, live (#861, the owner: "I want to see the other one aim too").
+  // It is only a picture: kept apart from the match (never in G.M, so never in a digest or
+  // a shot), tied to the shot number it was aimed for, and dropped once that shot is fired.
+  // The turn message alone says where a shot goes; a late or lost aim changes nothing.
+  var peerAim = null, aimSent = '', aimAt = -1e9, aimTimer = null, AIM_GAP = 66;
+  function onAim(d) {
+    var angle = +d.angle, power = +d.power;
+    if ((d.g | 0) !== (G.g | 0) || d.n !== G.M0.n || G.M0.turn === G.side || flight || G.done) return;
+    if (!(angle >= 0 && angle <= 90) || !(power >= 0 && power <= 100)) return;
+    peerAim = { g: G.g | 0, n: d.n, angle: angle, power: power };
+    draw();
+  }
+  function theirAim() {
+    var a = peerAim;
+    return a && G && G.mode === 'net' && !flight && !G.done && a.g === (G.g | 0) && a.n === G.M0.n && G.M.turn !== G.side ? a : null;
+  }
+  // sends my aim while I set it: at most one message every AIM_GAP ms, and the last
+  // position always goes out after a pause, so the other phone ends where I stopped
+  function aimOut() {
+    if (!G || G.mode !== 'net' || G.side == null || G.link !== 'connected' || flight || G.done || G.phase !== 'aim' || G.M.turn !== G.side) return;
+    var L = G.M.last[G.side], a = prefs.control === 'drag' && aiming && aiming.aim ? aiming.aim : L;
+    var m = { t: 'aim', g: G.g | 0, n: G.M0.n, angle: Math.round(a.angle * 10) / 10, power: Math.round(a.power * 10) / 10 };
+    var key = m.g + '|' + m.n + '|' + m.angle + '|' + m.power;
+    if (key === aimSent) return;
+    var now = performance.now();
+    if (now - aimAt < AIM_GAP) {
+      if (!aimTimer) aimTimer = setTimeout(function () { aimTimer = null; aimOut(); }, AIM_GAP - (now - aimAt));
+      return;
+    }
+    aimSent = key; aimAt = now;
+    C.link.send(m);
   }
   function onSync(d) {
+    // #861: a phone counts a shot only once it has landed (G.M0), so while one flies, or a
+    // turn waits its turn in the inbox, this phone looks a shot behind. A sync then (every
+    // reconnect sends one) was taken as "you are behind": the newer match was adopted, the
+    // flying shot vanished and the queued one was dropped, so that shot showed on one phone
+    // only. Such a sync waits until the shot has landed, and is read against the match after it.
+    if (flight || (G.inbox && !G.done)) { G.held = d; return; }
     var pick = E.syncPick({ g: G.g, n: G.M0.n, seed: G.seed, sum: E.digest(G.M0) }, d, G.side === 1);
     if (pick === 'take') adopt(d);
     else if (pick === 'tell') sendSync();
@@ -585,7 +628,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
     if (!E.validMatch(d.M, true)) return;
     stop();
     G.M0 = clone(d.M); G.M = clone(d.M); G.seed = String(d.seed || ''); G.g = d.g | 0;
-    G.steps = []; G.inbox = null; flight = null; aiming = null; msg = '';
+    G.steps = []; G.inbox = null; G.held = null; flight = null; aiming = null; msg = '';
     // a sent shot the adopted match already holds, or never will, is no longer ours to repeat
     if (G.sent && (G.sent.g !== G.g || G.sent.n < G.M0.n)) G.sent = null;
     G.done = false;
@@ -594,14 +637,22 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
   }
   // plays the other phone's queued turn once nothing else is moving
   function pump() {
-    var d = G && G.inbox;
-    if (!d || flight || G.done || timer) return;
-    G.inbox = null;
-    if (d.n < G.M0.n) return;
-    // this phone is behind: the other answers our match with its newer one
-    if (d.n > G.M0.n) { sendSync(); return; }
-    if (G.M0.turn === G.side) return;
-    applyTurn(d, G.M0.turn);
+    if (!G || flight || timer) return;
+    var d = G.inbox;
+    if (d && !G.done) {
+      G.inbox = null;
+      // this phone is behind: the other answers our match with its newer one
+      if (d.n > G.M0.n) sendSync();
+      else if (d.n === G.M0.n && G.M0.turn !== G.side) { applyTurn(d, G.M0.turn); if (flight) return; }
+    }
+    settle();
+  }
+  // a sync held back while a shot flew (#861), read once nothing is moving or queued
+  function settle() {
+    var d = G && G.held;
+    if (!d || flight || (G.inbox && !G.done)) return;
+    G.held = null;
+    onSync(d);
   }
   function applyTurn(d, seat) {
     var M = clone(G.M0), steps = Array.isArray(d.m) ? d.m.slice(0, E.MOVES) : [];
@@ -638,7 +689,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
     var M = G.M;
     if (E.left(M, who, a) <= 0) return;
     G.phase = 'busy';
-    msg = ''; aiming = null;
+    msg = ''; aiming = null; peerAim = null;
     var sim = E.simulate(M, who, a, angle, power);
     C.feedback('whoosh');
     flight = { who: who, arm: a, sim: sim, t0: performance.now(), angle: angle, power: power, sum: sum || null };
@@ -661,11 +712,14 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
     var f = flight, M = G.M;
     flight = null;
     var r = E.fire(M, f.who, f.arm, f.angle, f.power, f.sim, seeded('wind' + M.n));
-    if (!r) return;
+    if (!r) { settle(); return; }
     if (G.mode === 'net') {
       // the two phones disagree after this shot: the host's match stands (#754)
-      if (f.sum && E.digest(M) !== f.sum) { if (G.side === 0) sendSync(); else C.link.send({ t: 'want' }); }
+      // The host's sync goes out with the match after this shot: sent before it (as until
+      // #861), it was a shot behind the guest's, so the guest answered with its own wrong
+      // match, which the host kept as it was, and the guest stayed off
       G.M0 = clone(M); G.steps = [];
+      if (f.sum && E.digest(M) !== f.sum) { if (G.side === 0) sendSync(); else C.link.send({ t: 'want' }); }
     }
     var now = performance.now();
     f.sim.blasts.forEach(function (b, i) {
@@ -687,11 +741,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
       G.done = true; G.phase = 'done';
       render();
       later(finish, C.ui.reduceMotion() ? 300 : 1800);
+      settle();
       return;
     }
     save();
     render();
     later(startTurn, C.ui.reduceMotion() ? 200 : 900);
+    settle();
   }
 
   /* ------------------------------------------------------------ result */
@@ -923,6 +979,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
     var g = cv.getContext('2d');
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     paint(g, S.w, S.h, now);
+    if (G.mode === 'net') aimOut();
     if (flight && flight.done) landed();
   }
   function loop() {
@@ -945,6 +1002,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
   /* ----------------------------------------------------------------- ui */
 
   function aimNow() {
+    // two phones: on the other's turn, their aim as it last came in (#861)
+    if (G && G.mode === 'net' && G.side != null && G.M.turn !== G.side) return theirAim();
     if (!G || G.phase !== 'aim' || isBot(G.M.turn)) return null;
     if (prefs.control === 'drag') return aiming && aiming.aim ? aiming.aim : null;
     return G.M.last[G.M.turn];
@@ -953,7 +1012,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
     top.innerHTML = '';
     if (G.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyTk') + ' — ' + C.num(G.daily) })]));
     else top.appendChild(el('button', { class: 'ch-badge ch-tap', type: 'button', onclick: askNew, text: G.mode === 'bot' ? C.t('vsBot') + ' · ' + C.t(G.level) : C.t(G.mode === 'net' ? 'twoPhones' : 'people') }));
-    if (G.mode === 'net') {
+    // #861: as in Battleship, host and join are a choice made before the match; once the
+    // phones are linked (or were, and look for each other again mid-match) only the small
+    // link chip stays, where the picker and its long sentence had stayed all match long
+    if (G.mode === 'net' && pickRole()) {
       top.appendChild(C.ui.segmented([
         { value: 'host', label: C.t('hostGame') }, { value: 'guest', label: C.t('joinGame') }
       ], G.side == null ? '' : (G.side === 0 ? 'host' : 'guest'), function (v) {
@@ -962,11 +1024,16 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
         openLink(v);
       }));
     }
+    // the small chip sits beside the mode, as in Battleship; the long sentence before a
+    // role is picked goes last, so it wraps below the row instead of pushing the gear down
+    var chip = G.mode === 'net' ? el('span', { class: 'ch-badge tk-link', text: linkText() }) : null;
+    if (chip && !pickRole()) top.appendChild(chip);
     var gear = el('button', { class: 'ch-iconbtn tk-gear', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
     gear.addEventListener('click', showSettings);
     top.appendChild(gear);
-    if (G.mode === 'net') top.appendChild(el('span', { class: 'ch-badge tk-link', text: linkText() }));
+    if (chip && pickRole()) top.appendChild(chip);
   }
+  function pickRole() { return G.side == null || (G.link !== 'connected' && G.link !== 'lost' && !G.M0.n); }
   function renderPlayers() {
     players.innerHTML = '';
     var P = palette();
@@ -980,6 +1047,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
     }
   }
   function renderStatus() {
+    // before a role is picked neither tank is this phone's: "Rival is aiming" on both
+    // seats (#861) said a match was under way that had not begun
+    if (G.mode === 'net' && G.side == null) { status.textContent = ''; return; }
     var seat = G.M.turn, who = isBot(seat) || isRemote(seat) ? C.t('botThinks', { n: pname(seat) }) : (G.mode === 'people' ? C.t('turnOf', { n: pname(seat) }) : C.t('yourTurn'));
     var how = canShow() ? ' — ' + C.t(prefs.control === 'nums' ? 'aimNums' : 'aimDrag') : '';
     status.textContent = flight ? '…' : (msg && (G.phase !== 'aim' || G.done) ? msg : who + how);
@@ -1107,14 +1177,16 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
   else window.addEventListener('resize', function () { if (G) draw(); });
   document.addEventListener('visibilitychange', function () { if (!document.hidden && G) kick(); });
   if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { draw(); }); } catch (er) { /* old WebViews */ } }
-  // A pause mid-flight lets that shot land when the game comes back
+  // A pause mid-flight lets that shot fly again when the game comes back
   C.onPause(function () { stop(); aiming = null; });
   window.addEventListener('pagehide', function () { if (G && G.mode === 'net') C.link.close(); });
   C.onResume(function () {
     // if the page was hidden long enough for the link to be closed, coming back reopens it
     if (G && G.mode === 'net' && wantLink && C.link.status === 'idle') openLink(wantLink);
     if (!G || G.done) return;
-    if (flight) { landed(); return; }
+    // #861: a shot that came in while this phone looked away flies again from its start, so
+    // it is seen here too instead of landing unseen
+    if (flight) { flight.t0 = performance.now(); flight.done = false; kick(); return; }
     startTurn();
   });
 
