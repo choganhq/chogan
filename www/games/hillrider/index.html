@@ -1,0 +1,1632 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>تپه‌سوار — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* upright on a phone, wide beside the side rows on a wide screen */
+  .hr-wrap > .ch-fit { --fit-ar: calc(3 / 4); }
+  @container game (min-aspect-ratio: 5 / 4) { .hr-wrap > .ch-fit { --fit-ar: calc(16 / 9); } }
+  .ch-nocq .ch-gamemain.ch-wide .hr-wrap > .ch-fit { --fit-ar: calc(16 / 9); }
+  .ch-fit > .hr-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; position: relative; }
+  /* #803: on a phone on its side the side column took 240 of 844 px and the road stayed as
+     small as upright (64% of the width). The road takes the whole game area instead and
+     the rows sit over its top centre as one line (a row above it still cost a fifth of
+     the height), so gas and brake are at the two ends of the phone for two thumbs. The
+     canvas is drawn at whatever size its box has. */
+  @container game (min-aspect-ratio: 5 / 4) {
+    .hr-wrap.ch-split { flex-direction: column; position: relative; }
+    .hr-wrap.ch-split > .ch-fit { flex: 1 1 0; width: 100%; height: auto; max-height: none; }
+    .hr-wrap.ch-split > .ch-side { position: absolute; top: 6px; left: 50%; transform: translateX(-50%); z-index: 1; flex-direction: row; align-items: center; justify-content: center; width: auto; max-width: 60%; max-height: none; overflow: visible; pointer-events: none; }
+    .hr-wrap.ch-split > .ch-side > * { width: auto; }
+    .hr-wrap.ch-split > .ch-side button { pointer-events: auto; }
+    .hr-wrap .hr-status--hint { display: none; }
+  }
+  /* the same where container queries are missing (#610); the fallback sets pixel widths
+     inline, so these must win over them */
+  .ch-nocq .ch-gamemain.ch-wide .hr-wrap.ch-split { flex-direction: column; position: relative; }
+  .ch-nocq .ch-gamemain.ch-wide .hr-wrap.ch-split > .ch-fit { flex: 1 1 0; width: 100% !important; height: auto; max-height: none !important; }
+  .ch-nocq .ch-gamemain.ch-wide .hr-wrap.ch-split > .ch-fit > .hr-box { width: 100% !important; }
+  .ch-nocq .ch-gamemain.ch-wide .hr-wrap.ch-split > .ch-side { position: absolute; top: 6px; left: 50%; transform: translateX(-50%); z-index: 1; flex-direction: row; align-items: center; justify-content: center; width: auto !important; max-width: 60%; max-height: none; overflow: visible; pointer-events: none; }
+  .ch-nocq .ch-gamemain.ch-wide .hr-wrap.ch-split > .ch-side button { pointer-events: auto; }
+  .ch-nocq .ch-gamemain.ch-wide .hr-wrap .hr-status--hint { display: none; }
+  /* fuel for coins (#801), over the canvas under the tank; placed from E.hudLayout */
+  .hr-buy { position: absolute; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 0; border-radius: 999px; background: #D8382C; color: #FFFFFF; font: inherit; font-weight: 800; font-size: var(--fs-sm); box-shadow: 0 2px 6px rgba(0, 0, 0, .25); cursor: pointer; white-space: nowrap; }
+  .hr-buy[hidden] { display: none; }
+  .hr-buy .ch-icon { pointer-events: none; }
+  /* left is the brake and right the gas in every language, like the pedals of a car */
+  .hr-canvas { display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; user-select: none; -webkit-user-select: none; }
+  .hr-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .hr-gear .ch-icon { pointer-events: none; }
+  .hr-scene { flex-wrap: wrap; }
+  .hr-garage { flex-basis: 100%; display: flex; flex-direction: column; gap: var(--s-2); }
+  .hr-car { display: flex; align-items: center; gap: var(--s-2); }
+  .hr-car__pic { flex: none; }
+  .hr-car__text { flex: 1 1 auto; min-width: 0; }
+  .hr-car__name { font-weight: 800; }
+  .hr-car__desc { font-size: var(--fs-sm); }
+  .hr-car--locked .hr-car__pic, .hr-car--locked .hr-car__text { opacity: 0.55; }
+  .hr-carbtn { flex: none; display: inline-flex; align-items: center; gap: 4px; min-height: 36px; padding: 0 12px; }
+  .hr-carbtn .ch-icon { pointer-events: none; }
+  .hr-gripnote { flex-basis: 100%; font-size: var(--fs-sm); }
+  .hr-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function HillriderEngineFactory() {
+  'use strict';
+
+  // Metres and seconds, y up. Fixed steps of 1/60 s, each cut into eight smaller ones so
+  // the springs between the body and the wheels stay steady; the same inputs give the
+  // same drive on every device.
+  var DT = 1 / 60, SUB = 8, H = DT / SUB, G = 9.8;
+  // the body: a box with the driver's head on top, wheels hung from two points under it
+  var M = 1, INERTIA = 0.9, WM = 0.2, WROT = 0.1, WR = 0.42;
+  var ANCH = [[-1.05, -0.42], [1.05, -0.42]];
+  var BODY = [[-1.45, -0.2], [1.45, -0.2], [-1.35, 0.3], [1.35, 0.3], [0.6, 0.35]];
+  var HEAD = [-0.15, 0.95], HEAD_R = 0.27;
+  var KU = 600, CU = 14, KV = 55, CV = 3.2, STOP = 0.32;
+  var MU = 1.15, VMAX = 15, VREV = 6, MOTOR = 28, BRAKE = 40, REACT = 0.55, AIR = 5.5, WMAX = 7;
+  // a full tank lasts 30 s of gas, or 110 s rolling
+  var BURN_GAS = 1 / 30, BURN_IDLE = 1 / 110;
+  var START = 4, STEP = 1, ORIGIN = 40;
+  /* Scenes (#805, owner's wish; night is the fourth, decided 2026-11-11). mu is the wheel's
+     grip on the ground, sunny's 1.15 the reference: on a wet road a wheel spins and slides
+     sooner, on snow sooner still, so climbs take more care and the brake needs more room.
+     Night keeps a dry road and only takes the light away. The daily is always sunny. */
+  var SCENES = { sun: { mu: MU }, rain: { mu: 0.34 }, snow: { mu: 0.2 }, night: { mu: MU } };
+  var SCENE_IDS = ['sun', 'snow', 'rain', 'night'];
+  function sceneOf(id) { return SCENES.hasOwnProperty(id) ? id : 'sun'; }
+  /* Cars (#808, owner's wish; three to buy at 300, 800 and 2000 app coins, decided
+     2026-11-11). The body, the wheels and the driver's head stay where they are, so every
+     car meets the ground the same way; what changes is the engine's push and top speed,
+     how long a tank lasts on the gas, how much the tyres grip (a factor on the scene's),
+     and the turn in the air. The buggy is free and drives the daily for everyone. */
+  var CARS = {
+    buggy: { price: 0, motor: MOTOR, vmax: VMAX, burn: 30, grip: 1, air: AIR },
+    jeep: { price: 300, motor: 30, vmax: 15.5, burn: 38, grip: 1.15, air: AIR },
+    truck: { price: 800, motor: 32, vmax: 16.5, burn: 46, grip: 1.3, air: 6 },
+    racer: { price: 2000, motor: 35, vmax: 18, burn: 56, grip: 1.45, air: 6.5 }
+  };
+  var CAR_IDS = ['buggy', 'jeep', 'truck', 'racer'];
+  function carOf(id) { return CARS.hasOwnProperty(id) ? id : 'buggy'; }
+  function car(id) { var c = CARS[carOf(id)]; return { id: carOf(id), price: c.price, motor: c.motor, vmax: c.vmax, burn: c.burn, grip: c.grip, air: c.air }; }
+  // the car's numbers on the run, so a step reads them without a lookup
+  function fit(S, carId) { var c = CARS[carOf(carId)]; S.car = carOf(carId); S.mu = SCENES[S.scene].mu * c.grip; S.cp = c; }
+
+  function hash(seed, i) {
+    var h = Math.imul((seed >>> 0) ^ Math.imul(i | 0, 0x9E3779B1), 0x85EBCA6B);
+    h ^= h >>> 13; h = Math.imul(h, 0xC2B2AE35); h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  }
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function smooth(t) { return t * t * (3 - 2 * t); }
+
+  /* ------------------------------------------------------------ terrain */
+
+  // How hard the hills are at a distance: 0 at the start, 1 from 2,000 m on
+  function hard(x) { return clamp(x / 2000, 0, 1); }
+  function noise(seed, o, t) {
+    var i = Math.floor(t), f = t - i, a = hash(seed + o * 7919, i) * 2 - 1, b = hash(seed + o * 7919, i + 1) * 2 - 1;
+    return a + (b - a) * smooth(f);
+  }
+  // the raw hills: three sizes of wave that grow with the distance, flat at the start
+  function raw(seed, x) {
+    var d = hard(x), ramp = smooth(clamp((x - 12) / 60, 0, 1));
+    return ramp * ((4 + 12 * d) * noise(seed, 1, x / 46) + (1.6 + 4.5 * d) * noise(seed, 2, x / 16) + (0.2 + 0.7 * d) * noise(seed, 3, x / 6));
+  }
+  // The ground is laid a metre at a time, each metre at most so steep (the raw waves can
+  // stack into a wall no car climbs), then softened over five points; between points it
+  // is a smooth curve, so a wheel never meets a corner.
+  function maxSlope(x) { return 0.6 + 0.5 * hard(x); }
+  function grow(S, i) {
+    var T = S.ter;
+    while (T.c.length <= i + 3) {
+      var k = T.c.length, x = k - ORIGIN;
+      if (x <= 0) { T.c.push(x < -14 ? 0.35 * (-x - 14) * (-x - 14) : 0); continue; }
+      var prev = T.c[k - 1], m = maxSlope(x);
+      T.c.push(prev + clamp(raw(S.seed, x) - prev, -m, m));
+    }
+    while (T.p.length <= i + 1) {
+      var j = T.p.length, s = 0, n = 0;
+      for (var q = j - 2; q <= j + 2; q++) if (q >= 0) { s += T.c[q]; n++; }
+      T.p.push(s / n);
+    }
+  }
+  function pt(S, j) { if (j < 0) return S.ter.c[0] + 0.35 * j * j; grow(S, j); return S.ter.p[j]; }
+  // height and slope at x, on a Catmull-Rom curve through the points
+  function ground(S, x) {
+    var u = (x + ORIGIN) / STEP, j = Math.floor(u), t = u - j;
+    var p0 = pt(S, j - 1), p1 = pt(S, j), p2 = pt(S, j + 1), p3 = pt(S, j + 2);
+    var a = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3, b = p0 - 2.5 * p1 + 2 * p2 - 0.5 * p3, c = -0.5 * p0 + 0.5 * p2;
+    return { h: ((a * t + b) * t + c) * t + p1, s: ((3 * a * t + 2 * b) * t + c) / STEP };
+  }
+  function height(S, x) { return ground(S, x).h; }
+
+  /* ----------------------------------------------------------- pickups */
+
+  // Fuel cans: the first at about 110 m, then the gap grows from about 160 m to 420 m with the distance; coins come in rows
+  // of five between them. Both follow from the seed, so only what was taken is saved.
+  function fuelAt(S, n) {
+    var F = S.fx;
+    while (F.length <= n) {
+      var last = F.length ? F[F.length - 1] : 0;
+      F.push(Math.round(last + (F.length ? 160 + 260 * hard(last) : 110) + (hash(S.seed + 31, F.length) - 0.5) * 40));
+    }
+    return F[n];
+  }
+  function coinRow(S, n) { return Math.round(45 + n * 64 + hash(S.seed + 57, n) * 24); }
+  // what lies between x0 and x1, for the drawing and the pickup test
+  function pickups(S, x0, x1) {
+    var out = [], n = 0, x;
+    while ((x = fuelAt(S, n)) < x1 + 2) { if (x >= x0 - 2 && !S.got['f' + n]) out.push({ kind: 'fuel', id: 'f' + n, x: x, y: height(S, x) + 0.55 }); n++; }
+    var r0 = Math.max(0, Math.floor((x0 - 70) / 64));
+    for (var r = r0; (x = coinRow(S, r)) < x1 + 2; r++) {
+      for (var c = 0; c < 5; c++) {
+        var cx = x + c * 1.6, id = 'c' + (r * 5 + c);
+        if (cx < x0 - 2 || cx > x1 + 2 || S.got[id]) continue;
+        // a coin never sits on a can
+        if (Math.abs(cx - fuelAt(S, nearFuel(S, cx))) < 3) continue;
+        out.push({ kind: 'coin', id: id, x: cx, y: height(S, cx) + 0.9 + 0.35 * Math.sin(c / 4 * Math.PI) });
+      }
+    }
+    return out;
+  }
+  function nearFuel(S, x) { var n = 0; while (fuelAt(S, n + 1) < x) n++; return Math.abs(fuelAt(S, n + 1) - x) < Math.abs(fuelAt(S, n) - x) ? n + 1 : n; }
+
+  /* ---------------------------------------------------- the world (#806) */
+
+  /* Small things on the road, a rock or a branch, about one every 150 m from about 50 m on, at the
+     same rate however far the car gets. Each follows from the seed alone, like the cans. One
+     is never put on a steep stretch or within 10 m of a can, so it never stands between a
+     car and a climb or its fuel. A wheel rolling over one is thrown up a little and loses a
+     little speed: a jolt, never a wall. */
+  var BUMP_GAP = 150, BUMP_FLAT = 0.3, BUMP_CAN = 10;
+  function bumpAt(S, n) {
+    var B = S.bx;
+    while (B.length <= n) {
+      var i = B.length, x0 = Math.round(80 + i * BUMP_GAP + (hash(S.seed + 91, i) - 0.5) * 60), x = null;
+      // the nearest fitting spot within 35 m of its place, so steep country keeps its share
+      for (var o = 0; o <= 70 && x === null; o++) { var c = x0 + (o % 2 ? (o + 1) / 2 : -o / 2); if (bumpFits(S, c)) x = c; }
+      B.push(x === null ? null : { x: x, kind: hash(S.seed + 92, i) < 0.5 ? 'rock' : 'branch' });
+    }
+    return B[n];
+  }
+  function bumpFits(S, x) {
+    for (var d = -3; d <= 3; d++) if (Math.abs(ground(S, x + d).s) > BUMP_FLAT) return false;
+    return Math.abs(fuelAt(S, nearFuel(S, x)) - x) >= BUMP_CAN;
+  }
+  function bumps(S, x0, x1) {
+    var out = [], n = Math.max(0, Math.floor((x0 - 120) / BUMP_GAP)), b;
+    for (; 80 + n * BUMP_GAP - 70 <= x1 + 1; n++) { b = bumpAt(S, n); if (b && b.x >= x0 - 1 && b.x <= x1 + 1) out.push(b); }
+    return out;
+  }
+  // a wheel that crossed a bump this step, on the ground, is jolted up along the normal
+  function jolt(S, x0s, ev) {
+    var hit = false;
+    for (var k = 0; k < 2; k++) {
+      var W = S.wh[k], a = Math.min(x0s[k], W.x), b = Math.max(x0s[k], W.x);
+      if (b - a < 1e-6) continue;
+      var near = bumps(S, a, b);
+      for (var i = 0; i < near.length; i++) {
+        if (near[i].x < a || near[i].x > b || depth(S, W.x, W.y, WR + 0.08).pen <= 0) continue;
+        var D = depth(S, W.x, W.y, WR), sp = Math.abs(W.vx), up = Math.min(2.4, 0.6 + 0.22 * sp);
+        W.vx += D.nx * up - W.vx * 0.06; W.vy += D.ny * up;
+        S.vx *= 0.97;
+        hit = true;
+      }
+    }
+    if (hit) ev.push('bump');
+  }
+
+  /* Scenery beside the road (#806), a pure function of the seed: the same course always
+     has the same trees, bushes, rocks, signs and fences, one slot every 6 m, so it is as
+     full at 5 km as at the start. Nothing here touches the car. Animals have a home every
+     40 m or so and move around it by the clock alone. */
+  var SCN_CELL = 6, ANI_CELL = 40;
+  function scenery(seed, x0, x1) {
+    var out = [], i, r, x;
+    for (i = Math.floor(x0 / SCN_CELL) - 1; i * SCN_CELL <= x1 + SCN_CELL; i++) {
+      if (i * SCN_CELL < 10 - START) continue;
+      r = hash(seed + 101, i); x = i * SCN_CELL + hash(seed + 102, i) * (SCN_CELL - 1);
+      var kind = r < 0.3 ? 'tree' : r < 0.45 ? 'bush' : r < 0.55 ? 'stone' : r < 0.6 ? 'sign' : r < 0.72 ? 'fence' : null;
+      if (kind && x >= x0 - 3 && x <= x1 + 3) out.push({ kind: kind, x: x, s: 0.75 + 0.5 * hash(seed + 103, i), v: hash(seed + 104, i) });
+    }
+    return out;
+  }
+  var ANIMALS = ['rabbit', 'bird', 'deer'];
+  function animals(seed, x0, x1) {
+    var out = [];
+    for (var i = Math.max(1, Math.floor(x0 / ANI_CELL) - 1); i * ANI_CELL <= x1 + ANI_CELL; i++) {
+      if (hash(seed + 111, i) > 0.45) continue;
+      var x = i * ANI_CELL + hash(seed + 112, i) * 30;
+      if (x >= x0 - 8 && x <= x1 + 8) out.push({ kind: ANIMALS[Math.floor(hash(seed + 113, i) * 3) % 3], x: x, ph: hash(seed + 114, i) * 6.283 });
+    }
+    return out;
+  }
+  // where an animal is at time t: an offset from its home and a hop or flight height, both
+  // bounded, so it never wanders far from its own patch of road side
+  function animalAt(A, t) {
+    var w = t * (A.kind === 'bird' ? 0.9 : A.kind === 'deer' ? 0.25 : 0.6) + A.ph;
+    var dx = (A.kind === 'bird' ? 6 : A.kind === 'deer' ? 2.5 : 3) * Math.sin(w), dir = Math.cos(w) >= 0 ? 1 : -1;
+    var up = A.kind === 'bird' ? 3.2 + 0.6 * Math.sin(w * 2.3) : A.kind === 'rabbit' ? 0.35 * Math.abs(Math.sin(t * 5 + A.ph)) : 0;
+    return { x: A.x + dx, up: up, dir: dir };
+  }
+
+  /* -------------------------------------------------------------- game */
+
+  // seed: whole number; finish: metres for the daily course, 0 for an endless run; scene:
+  // one of SCENE_IDS, sunny when missing
+  function newGame(seed, finish, scene, carId) {
+    var sc = sceneOf(scene);
+    var S = { seed: seed >>> 0, finish: finish || 0, scene: sc, mu: SCENES[sc].mu, ter: { c: [], p: [] }, fx: [], bx: [], got: {}, t: 0,
+      x: START, y: 0, a: 0, vx: 0, vy: 0, w: 0,
+      wh: [], fuel: 1, coins: 0, cans: 0, best: 0, air: 0, airBest: 0, flips: 0, spin: 0, still: 0,
+      over: false, won: false, cause: '', touch: [false, false] };
+    fit(S, carId);
+    var g = height(S, START);
+    S.y = g + WR + 0.52;
+    for (var k = 0; k < 2; k++) { var A = world(S, ANCH[k]); S.wh.push({ x: A[0], y: A[1], vx: 0, vy: 0, sp: 0, rot: 0 }); }
+    // settle on the springs before the first frame
+    for (var i = 0; i < 90; i++) step(S, 0, true);
+    S.t = 0; S.best = 0; S.fuel = 1;
+    return S;
+  }
+  function world(S, p) {
+    var c = Math.cos(S.a), s = Math.sin(S.a);
+    return [S.x + p[0] * c - p[1] * s, S.y + p[0] * s + p[1] * c];
+  }
+  function headPos(S) { return world(S, HEAD); }
+
+  // A point's depth into the ground along the ground's normal: positive is inside
+  function depth(S, x, y, r) {
+    var g = ground(S, x), n = 1 / Math.sqrt(1 + g.s * g.s);
+    return { pen: r - (y - g.h) * n, nx: -g.s * n, ny: n };
+  }
+
+  // One step. ctl: 1 gas, -1 brake (and reverse), 0 neither. hold: the player is being
+  // offered fuel for coins (#801), so an empty tank does not end the run yet. Returns the
+  // step's events.
+  function step(S, ctl, settling, hold) {
+    if (S.over || S.won) return [];
+    var ev = [], gas = ctl > 0 && S.fuel > 0, brake = ctl < 0;
+    var a0 = S.a;
+    var wx = [S.wh[0].x, S.wh[1].x];
+    for (var sub = 0; sub < SUB; sub++) substep(S, gas, brake, ev);
+    if (settling) return ev;
+    jolt(S, wx, ev);
+    S.t += DT;
+    S.fuel = Math.max(0, S.fuel - DT * (gas ? 1 / S.cp.burn : BURN_IDLE));
+    if (S.fuel === 0 && S.fuelOut !== true) { S.fuelOut = true; ev.push('empty'); }
+    // whole turns in the air: an air-time trick
+    var onGround = S.touch[0] || S.touch[1];
+    if (!onGround) {
+      S.air += DT;
+      var da = S.a - a0; S.spin += da;
+      if (Math.abs(S.spin) >= Math.PI * 2 - 0.3) { S.flips++; S.spin = 0; ev.push('flip'); }
+    } else {
+      if (S.air > 0.6) ev.push('land');
+      if (S.air > S.airBest) S.airBest = S.air;
+      S.air = 0; S.spin = 0;
+    }
+    var d = S.x - START;
+    if (d > S.best) S.best = d;
+    // pickups the car passes through
+    var near = pickups(S, S.x - 2.2, S.x + 2.2);
+    for (var i = 0; i < near.length; i++) {
+      var p = near[i];
+      if (Math.abs(p.x - S.x) < 1.9 && Math.abs(p.y - (S.y + 0.2)) < 1.6) {
+        S.got[p.id] = 1;
+        if (p.kind === 'fuel') { S.fuel = 1; S.cans++; S.fuelOut = false; ev.push('fuel'); }
+        else { S.coins++; ev.push('coin'); }
+      }
+    }
+    // the head touching the ground ends the run
+    var hp = headPos(S);
+    if (depth(S, hp[0], hp[1], HEAD_R).pen > 0) { S.over = true; S.cause = 'head'; ev.push('crash'); return ev; }
+    // standing still out of fuel, or stuck on a side, ends it too
+    var speed = Math.hypot(S.vx, S.vy);
+    var waitBuy = hold && S.fuel === 0 && Math.cos(S.a) >= 0.15;
+    if (!waitBuy && (S.fuel === 0 || Math.cos(S.a) < 0.15) && speed < 0.5) S.still += DT; else S.still = 0;
+    if (S.still > 1.5) { S.over = true; S.cause = S.fuel === 0 ? 'fuel' : 'stuck'; ev.push(S.cause === 'fuel' ? 'stall' : 'crash'); return ev; }
+    if (S.finish && S.best >= S.finish) { S.won = true; ev.push('finish'); }
+    return ev;
+  }
+
+  function substep(S, gas, brake, ev) {
+    var c = Math.cos(S.a), s = Math.sin(S.a), fx = 0, fy = -M * G, tq = 0, touched = [false, false];
+    for (var k = 0; k < 2; k++) {
+      var W = S.wh[k], lx = ANCH[k][0] * c - ANCH[k][1] * s, ly = ANCH[k][0] * s + ANCH[k][1] * c;
+      var ax = S.x + lx, ay = S.y + ly, avx = S.vx - S.w * ly, avy = S.vy + S.w * lx;
+      var dx = ax - W.x, dy = ay - W.y, dvx = avx - W.vx, dvy = avy - W.vy;
+      // stiff along the body, soft across it: the suspension
+      var du = dx * c + dy * s, dv = -dx * s + dy * c, vu = dvx * c + dvy * s, vv = -dvx * s + dvy * c;
+      var Fu = KU * du + CU * vu, Fv = KV * dv + CV * vv;
+      // the wheel pushed up into the body hits a stop
+      if (dv < -STOP) Fv += 900 * (dv + STOP) + 20 * vv;
+      var Fx = Fu * c - Fv * s, Fy = Fu * s + Fv * c;
+      W.vx += Fx / WM * H; W.vy += (Fy / WM - G) * H;
+      fx -= Fx; fy -= Fy; tq -= lx * Fy - ly * Fx;
+      // the motor turns both wheels; its push turns the body the other way
+      var sp0 = W.sp;
+      var cp = S.cp;
+      if (gas) { if (W.sp < cp.vmax) W.sp = Math.min(cp.vmax, W.sp + cp.motor * H); }
+      else if (brake) { if (W.sp > 0.5) W.sp = Math.max(0, W.sp - BRAKE * H); else if (W.sp > -VREV) W.sp = Math.max(-VREV, W.sp - MOTOR * 0.6 * H); }
+      else W.sp *= 1 - 0.15 * H;
+      if (gas || brake) tq += REACT * WROT * (W.sp - sp0) / H * WR;
+    }
+    S.vx += fx / M * H; S.vy += fy / M * H; S.w += tq / INERTIA * H;
+    for (var k2 = 0; k2 < 2; k2++) {
+      var V = S.wh[k2];
+      V.x += V.vx * H; V.y += V.vy * H;
+      var D = depth(S, V.x, V.y, WR);
+      if (D.pen > 0) {
+        touched[k2] = true;
+        V.x += D.nx * D.pen; V.y += D.ny * D.pen;
+        var vn = V.vx * D.nx + V.vy * D.ny, jn = 0;
+        if (vn < 0) { jn = -vn * WM; V.vx -= vn * D.nx; V.vy -= vn * D.ny; }
+        // grip: the wheel's turning and its sliding meet, up to what the load allows
+        jn += WM * G * D.ny * H * 0.5;
+        var tx = D.ny, ty = -D.nx, vt = V.vx * tx + V.vy * ty;
+        var slip = V.sp - vt, meff = 1 / (1 / WM + 1 / WROT), jt = clamp(slip * meff, -S.mu * jn, S.mu * jn);
+        V.vx += jt / WM * tx; V.vy += jt / WM * ty; V.sp -= jt / WROT;
+      }
+      V.rot -= V.sp * H / WR;
+    }
+    S.touch = touched;
+    if (!touched[0] && !touched[1]) {
+      if (gas) S.w += S.cp.air * H; else if (brake) S.w -= S.cp.air * H;
+    }
+    S.w = clamp(S.w, -WMAX, WMAX);
+    S.x += S.vx * H; S.y += S.vy * H; S.a += S.w * H;
+    // the body's corners slide on the ground rather than through it
+    for (var b = 0; b < BODY.length; b++) {
+      var P = world(S, BODY[b]), Q = depth(S, P[0], P[1], 0);
+      if (Q.pen <= 0) continue;
+      var rx = P[0] - S.x, ry = P[1] - S.y;
+      S.x += Q.nx * Q.pen; S.y += Q.ny * Q.pen;
+      var pvx = S.vx - S.w * ry, pvy = S.vy + S.w * rx, pn = pvx * Q.nx + pvy * Q.ny;
+      if (pn >= 0) continue;
+      var rn = rx * Q.ny - ry * Q.nx, j = -pn / (1 / M + rn * rn / INERTIA);
+      var tX = Q.ny, tY = -Q.nx, pt2 = pvx * tX + pvy * tY, rt = rx * tY - ry * tX, jt2 = clamp(-pt2 / (1 / M + rt * rt / INERTIA), -0.5 * S.mu / MU * j, 0.5 * S.mu / MU * j);
+      var ix = Q.nx * j + tX * jt2, iy = Q.ny * j + tY * jt2;
+      S.vx += ix / M; S.vy += iy / M; S.w += (rx * iy - ry * ix) / INERTIA;
+    }
+  }
+
+  var KEEP = ['x', 'y', 'a', 'vx', 'vy', 'w', 'fuel', 'coins', 'cans', 'best', 't', 'air', 'airBest', 'flips', 'spin', 'still', 'finish', 'seed'];
+  function snapshot(S) {
+    var o = { wh: S.wh.map(function (W) { return { x: W.x, y: W.y, vx: W.vx, vy: W.vy, sp: W.sp, rot: W.rot }; }), got: Object.keys(S.got), fuelOut: !!S.fuelOut, touch: S.touch.slice(), scene: S.scene, car: S.car };
+    KEEP.forEach(function (k) { o[k] = S[k]; });
+    return o;
+  }
+  function restore(v) {
+    if (!v || !Array.isArray(v.wh) || v.wh.length !== 2 || !Array.isArray(v.got) || KEEP.some(function (k) { return typeof v[k] !== 'number' || !isFinite(v[k]); })) return null;
+    if (v.fuel < 0 || v.fuel > 1 || v.seed < 0 || v.seed > 4294967295 || v.finish < 0) return null;
+    var S = { ter: { c: [], p: [] }, fx: [], bx: [], got: {}, over: false, won: false, cause: '', fuelOut: !!v.fuelOut, touch: Array.isArray(v.touch) ? [!!v.touch[0], !!v.touch[1]] : [false, false] };
+    KEEP.forEach(function (k) { S[k] = v[k]; });
+    // a save from before the scenes (#805) drives on in the sun
+    S.scene = sceneOf(v.scene);
+    // a save from before the cars (#808) drives on in the buggy
+    fit(S, v.car);
+    S.wh = v.wh.map(function (W) { return { x: +W.x, y: +W.y, vx: +W.vx || 0, vy: +W.vy || 0, sp: +W.sp || 0, rot: +W.rot || 0 }; });
+    if (S.wh.some(function (W) { return !isFinite(W.x) || !isFinite(W.y); })) return null;
+    v.got.forEach(function (id) { if (/^[fc]\d+$/.test(id)) S.got[id] = 1; });
+    return S;
+  }
+
+  function metres(S) { return Math.max(0, Math.floor(S.best)); }
+
+  // The speed on the dial (#777). The engine is in real metres and seconds (the car is
+  // 2.9 m long and the distance badge counts the same metres), so the scale is fixed:
+  // 1 m/s is 3.6 km/h or 3600 / 1609.344 mph. Only the horizontal speed counts, backwards
+  // too; 'off' or an unknown unit gives null, so nothing is drawn.
+  var KMH = 3.6, MPH = 3600 / 1609.344;
+  function speedOf(vx, unit) {
+    if (unit !== 'kmh' && unit !== 'mph') return null;
+    var v = Math.abs(+vx) || 0;
+    return Math.round(v * (unit === 'mph' ? MPH : KMH));
+  }
+
+  /* Fuel for the app's coins (#801, owner's wish): the owner's screenshot ended at 3093 m
+     with 230 road coins and an empty tank, and the coins had no use in the run. Under a
+     fifth of a tank the player may buy a quarter tank for 15 coins, again and again; the
+     wallet itself is the page's (C.coins). */
+  var FUEL_PRICE = 15, FUEL_BUY = 0.25, FUEL_LOW = 0.2;
+  function fuelOffered(S) { return !!S && !S.over && !S.won && S.fuel < FUEL_LOW; }
+  function refuel(S) {
+    if (!fuelOffered(S)) return false;
+    S.fuel = Math.min(1, S.fuel + FUEL_BUY); S.fuelOut = false; S.still = 0;
+    return true;
+  }
+
+  /* Where the screen parts go, in CSS pixels of a w×h canvas: the tank top left with the
+     fuel button under it, the coins top right with the speed dial under them, the pedals
+     in the bottom corners. The dial was a plate at the bottom centre, right where the
+     player watches the car (#802); in a corner it reads like a dashboard and stays clear
+     of the pedals. u follows the height too, so a wide, low landscape canvas (#803) does
+     not get pedals a third of its height. */
+  function hudLayout(w, h) {
+    var u = Math.max(0.8, Math.min(1.4, w / 420, h / 260));
+    var m = 12 * u, gh = 12 * u, pw = 46 * u, ph = 62 * u, r = 30 * u;
+    return {
+      u: u,
+      tank: { x: m, y: m, w: 136 * u, h: gh },
+      buy: { x: m, y: m + gh + 10 * u, w: 136 * u, h: 34 * u },
+      coins: { x: w - m - 90 * u, y: m - 4 * u, w: 90 * u, h: gh + 8 * u },
+      dial: { x: w - m - 2 * r, y: m + gh + 14 * u, w: 2 * r, h: 2 * r },
+      brake: { x: m, y: h - ph - m, w: pw, h: ph },
+      gas: { x: w - m - pw, y: h - ph - m, w: pw, h: ph }
+    };
+  }
+  // the dial's needle: a 270° sweep from 0 to the top of the scale, never past it
+  function dialFrac(v, unit) { var top = unit === 'mph' ? 50 : 80; return Math.max(0, Math.min(1, (+v || 0) / top)); }
+
+  /* A steady driver for the tests, the proof that a course can be driven: gas, unless the
+     nose is too far up for the ground under it; in the air, it turns the car to meet the
+     ground it will land on. */
+  /* The race bot (#807) at three levels, set by how it reads the road: the speed it lets
+     itself carry down a long drop and on the level. All three look a moment ahead at the
+     turn in the air, which the old driver did not: past 1000 m the hills grow, and reading
+     only the angle it landed on its head on 10 of 10 courses to 2000 m. Measured over 12
+     courses to 1500 m in the buggy (2026-11-12): easy 144.7 s, medium 120.0 s, hard 105.0 s. */
+  var LEVELS = { easy: { down: 8, cap: 9 }, medium: { down: 11, cap: 12 }, hard: { down: 14, cap: 99 } };
+  var LEVEL_IDS = ['easy', 'medium', 'hard'];
+  function levelOf(id) { return LEVELS.hasOwnProperty(id) ? id : 'medium'; }
+  // the race's flag: about two minutes for the medium bot
+  var RACE = 1500;
+
+  // level: one of LEVEL_IDS for the race bot; left out, the steady driver of the daily
+  // course seeds, unchanged
+  function botControl(S, level) {
+    var lv = level ? LEVELS[levelOf(level)] : null;
+    var onGround = S.touch[0] || S.touch[1];
+    var ahead = ground(S, S.x + 1.5), slopeA = Math.atan(ahead.s), rel = S.a - slopeA;
+    if (!onGround) {
+      var land = Math.atan(ground(S, S.x + S.vx * 0.4).s);
+      // The bought cars (#808) fly further and turn faster: reading only the angle, the
+      // driver kept braking until the nose had gone past the ground and landed a jeep on
+      // its head 7 m from a flag. It looks a moment ahead at the turn instead. The buggy
+      // keeps the old driver, so its daily courses stay the same.
+      var pa = lv || S.cp.vmax > VMAX ? S.a + S.w * 0.15 : S.a;
+      if (pa - land > 0.2) return -1;
+      if (pa - land < -0.25) return 1;
+      return 0;
+    }
+    if (rel > 0.55) return S.w > 0 ? -1 : 0;
+    if (rel > 0.4 && S.w > 0.6) return 0;
+    var speed = Math.hypot(S.vx, S.vy);
+    // a long way down: no gas, so a crest doesn't throw it into a spin
+    if (ahead.s < -0.45 && speed > (lv ? lv.down : 11)) return 0;
+    if (lv && speed > lv.cap) return 0;
+    return 1;
+  }
+
+  /* The daily course is one the steady driver above finishes: from the day's seed, the
+     first of the next few seeds whose hills it drives to the flag. A course nobody can
+     finish would cost every player the day's star. A race course (#807) is one the race
+     bot at its level finishes in the player's car and weather, so the bot is never lost
+     to a can too far away; it depends on the seed alone, as a two-phone race will need. */
+  function courseSeed(seed, finish, tries, scene, carId, level) {
+    for (var k = 0; k < (tries || 12); k++) {
+      var s = (seed + k * 7919) >>> 0, S = newGame(s, finish, scene, carId), lim = level ? 600 : 300;
+      while (!S.over && !S.won && S.t < lim) step(S, botControl(S, level));
+      if (S.won) return s;
+    }
+    return seed >>> 0;
+  }
+
+  function grip(scene) { return SCENES[sceneOf(scene)].mu; }
+  // Each scene's colours over the page's palette, light and dark. text is the HUD's
+  // digits on the sky, so it must read on both ends of the sky's gradient; night keeps
+  // light digits in both themes.
+  var LOOKS = {
+    sun: { light: {}, dark: {} },
+    snow: {
+      light: { sky0: '#B9CCDD', sky1: '#EEF3F7', far: '#E4ECF2', near: '#C9D8E3', dirt: '#DCE5EC', dirtDk: '#B5C3CF', grass: '#FFFFFF', grassLt: '#F2F6FA', text: '#1F1A17', flake: '#FFFFFF', capDk: '#B8C7D3', mtn: '#B4C6D5' },
+      dark: { sky0: '#141C2B', sky1: '#33415A', far: '#4A5870', near: '#5D6E86', dirt: '#8E9CAD', dirtDk: '#6F7D8E', grass: '#E3EAF1', grassLt: '#C9D3DE', text: '#F4EEE4', flake: '#E8EEF5', capDk: '#9DAABA', mtn: '#55657C' }
+    },
+    rain: {
+      light: { sky0: '#8E9BA8', sky1: '#CDD4DA', far: '#93A59D', near: '#6F8F74', dirt: '#6E4B30', dirtDk: '#553921', grass: '#2F7A30', grassLt: '#4F9B48', text: '#1F1A17', drop: 'rgba(40,60,90,0.45)', sheen: 'rgba(255,255,255,0.55)', mtn: '#5F737E' },
+      dark: { sky0: '#151B23', sky1: '#323C49', far: '#2A3540', near: '#22362C', dirt: '#33251A', dirtDk: '#261A12', grass: '#2E6E2E', grassLt: '#4A8E44', text: '#F4EEE4', drop: 'rgba(190,210,235,0.4)', sheen: 'rgba(220,235,255,0.45)', mtn: '#2A3440' }
+    },
+    night: {
+      light: { sky0: '#0A0F24', sky1: '#27325C', far: '#1B2342', near: '#17302A', dirt: '#3A2A1E', dirtDk: '#2A1E15', grass: '#2C6A2A', grassLt: '#438A3E', text: '#F4EEE4', pedal: 'rgba(255,255,255,', gauge: '#2A2F3A', post: '#AEB4BD', star: '#F4EEE4', moon: '#F2E6C4', beam: 'rgba(255,226,122,', mtn: '#1D2645', tree: '#173322', treeDk: '#10261A', trunk: '#2E2018', bush: '#1B3A22', stone: '#3A3D48', stoneDk: '#2A2C35', sign: '#8A7020', signDk: '#0E0E10', fence: '#3E3024', rabbit: '#5A4E44', bird: '#C9CED6', deer: '#4E3826', deerDk: '#36261A', rock: '#4A4D58', rockDk: '#33353E', branch: '#3E2C1E' },
+      dark: { sky0: '#06091A', sky1: '#1E2748', far: '#161D38', near: '#132823', dirt: '#2E2218', dirtDk: '#211810', grass: '#275E26', grassLt: '#3C7C37', text: '#F4EEE4', pedal: 'rgba(255,255,255,', gauge: '#2A2F3A', post: '#AEB4BD', star: '#F4EEE4', moon: '#F2E6C4', beam: 'rgba(255,226,122,', mtn: '#1D2645', tree: '#173322', treeDk: '#10261A', trunk: '#2E2018', bush: '#1B3A22', stone: '#3A3D48', stoneDk: '#2A2C35', sign: '#8A7020', signDk: '#0E0E10', fence: '#3E3024', rabbit: '#5A4E44', bird: '#C9CED6', deer: '#4E3826', deerDk: '#36261A', rock: '#4A4D58', rockDk: '#33353E', branch: '#3E2C1E' }
+    }
+  };
+  function look(scene, dark) { return LOOKS[sceneOf(scene)][dark ? 'dark' : 'light']; }
+
+  return { LEVEL_IDS: LEVEL_IDS, levelOf: levelOf, RACE: RACE, CAR_IDS: CAR_IDS, car: car, carOf: carOf, SCENE_IDS: SCENE_IDS, sceneOf: sceneOf, grip: grip, look: look, DT: DT, courseSeed: courseSeed, WR: WR, START: START, HEAD: HEAD, HEAD_R: HEAD_R, ANCH: ANCH, newGame: newGame, step: step, ground: ground, height: height, pickups: pickups, fuelAt: fuelAt, world: world, headPos: headPos, snapshot: snapshot, restore: restore, metres: metres, speedOf: speedOf, FUEL_PRICE: FUEL_PRICE, FUEL_BUY: FUEL_BUY, FUEL_LOW: FUEL_LOW, fuelOffered: fuelOffered, refuel: refuel, hudLayout: hudLayout, dialFrac: dialFrac, botControl: botControl, hard: hard, maxSlope: maxSlope, bumps: bumps, scenery: scenery, animals: animals, animalAt: animalAt, BUMP_GAP: BUMP_GAP, BUMP_FLAT: BUMP_FLAT, BUMP_CAN: BUMP_CAN };
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = HillriderEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = HillriderEngineFactory();
+  var ACCENT = '#0C5700';
+  // the daily course's flag, in metres from the start
+  var FINISH = 1000;
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'hillrider',
+    name: { fa: 'تپه‌سوار', en: 'Hillrider', zh: '山丘车手', de: 'Hügelflitzer', es: 'Trepacolinas', pl: 'Jeździec wzgórz', fr: 'Grimpe-colline' },
+    accent: ACCENT,
+    mood: 'dots',
+    strings: {
+      fa: {
+        tapGo: 'برای ادامه صفحه را لمس کن.', hills: 'تپه‌ها و ماشین', distM: '{n} متر', bestM: 'بهترین: {n} متر', flagM: 'پرچم: {n} متر', dailyHr: 'تپه‌سوار روزانه', newRun: 'از نو',
+        howTo: 'راست: گاز · چپ: ترمز و دنده‌عقب', crashT: 'سرت به زمین خورد!', emptyT: 'بنزین تمام شد!', stuckT: 'ماشین گیر کرد!', flagT: 'به پرچم رسیدی!',
+        distance: 'مسافت', best: 'بهترین', tries: 'تلاش‌ها', coinsGot: 'سکه‌های جاده', kGas: 'گاز', kBrake: 'ترمز و دنده‌عقب', kAgain: 'از نو',
+        rules: 'با ماشین از روی تپه‌ها هر چه دورتر برو. نیمه‌ی راست صفحه گاز است و نیمه‌ی چپ ترمز؛ اگر ماشین ایستاده باشد، ترمز آن را عقب می‌برد. در هوا، گاز دماغه را بالا می‌برد و ترمز پایین. گاز دادن بنزین می‌سوزاند؛ باک‌های قرمز سر راه باک را پر می‌کنند. اگر سر راننده به زمین بخورد، یا بنزین تمام شود و ماشین بایستد، بازی تمام است. هر چه جلوتر، تپه‌ها بلندتر و باک‌ها دورتر. سکه‌های سر راه به سکه‌های بازی اضافه می‌شوند. روزانه یک جاده‌ی یکسان برای همه است تا پرچمی در ۱۰۰۰ متر؛ هر چند بار بخواهی دوباره امتحان کن.',
+        tutTitle1: 'گاز و ترمز', tutText1: 'نیمه‌ی راست صفحه را نگه دار تا گاز بدهی، نیمه‌ی چپ را برای ترمز.',
+        tutTitle2: 'در هوا', tutText2: 'در هوا گاز دماغه را بالا می‌برد و ترمز پایین. روی چرخ‌ها فرود بیا، نه روی سر.',
+        tutTitle3: 'بنزین', tutText3: 'گاز دادن بنزین می‌سوزاند. باک‌های قرمز را بگیر تا باک پر شود.',
+        buyFuel: 'بنزین · {n} سکه', fuelBought: 'یک‌چهارم باک پر شد', buyRule: 'وقتی کمتر از یک‌پنجم باک مانده، دکمه‌ی قرمز زیر باک با {n} سکه‌ی خودت یک‌چهارم باک بنزین می‌دهد، هر چند بار که سکه داری. تا آن دکمه هست و سکه‌اش را داری، تمام شدن بنزین بازی را تمام نمی‌کند.',
+        spdT: 'سرعت', spdKmh: 'کیلومتر بر ساعت', spdMph: 'مایل بر ساعت', optKmh: 'کیلومتر', optMph: 'مایل', spdOff: 'خاموش',
+        scT: 'هوا', scSun: 'آفتابی', scSnow: 'برفی', scRain: 'بارانی', scNight: 'شب', gripSun: 'جاده‌ی خشک: چسبندگی کامل', gripWet: 'خیس: چسبندگی کمتر', gripSnow: 'برف: لغزنده', gripNight: 'شب: جاده‌ی خشک، چسبندگی کامل', dailySun: 'جاده‌ی روزانه همیشه آفتابی است.',
+        sceneRule: 'هوا را در تنظیمات انتخاب کن: باران جاده را لیز می‌کند و برف لیزتر؛ چرخ‌ها زودتر درجا می‌چرخند و ترمز جای بیشتری می‌خواهد. شب جاده خشک است و فقط چراغ ماشین راه را روشن می‌کند. جاده‌ی روزانه همیشه آفتابی است.',
+        carT: 'ماشین', carBuggy: 'باگی', carJeep: 'جیپ', carTruck: 'وانت', carRacer: 'مسابقه‌ای', dBuggy: 'سبک و چابک؛ رایگان.', dJeep: 'باک بزرگ‌تر و کمی چسبندگی بیشتر.', dTruck: 'موتور قوی، باک بزرگ، چسبندگی خوب.', dRacer: 'تندترین، با بیشترین چسبندگی و بزرگ‌ترین باک.', carOn: 'سوارش هستی', carPick: 'سوار شو', buyCarT: '{car} را بخری؟', buyCarText: '{n} سکه از سکه‌هایت، فقط یک بار. بعد برای همیشه مال توست.', carBought: '{car} مال توست', dailyBuggy: 'جاده‌ی روزانه همیشه با باگی است.',
+        carRule: 'ماشین‌های بهتر را در تنظیمات با سکه‌هایت می‌خری، فقط یک بار: هر کدام موتور قوی‌تر، باکی که دیرتر خالی می‌شود و چسبندگی بیشتری دارد.',
+        rcT: 'حالت', rcSolo: 'آزاد', rcRace: 'مسابقه', rcBot: 'ربات', rcBotM: 'ربات: {n} متر', rcWin: 'از ربات جلو زدی!', rcLose: 'ربات زودتر رسید', rcYou: 'زمان تو', rcBotTime: 'زمان ربات', rcBadge: 'مسابقه · {lv}', rcDaily: 'جاده‌ی روزانه بدون ربات است.',
+        rcRule: 'در تنظیمات حالت مسابقه را انتخاب کن: یک ماشین ربات روی همان جاده، با همان ماشین و همان هوا، تا پرچم ۱۵۰۰ متری با تو مسابقه می‌دهد. ماشین ربات کم‌رنگ است و به تو نمی‌خورد؛ هر کس زودتر به پرچم برسد برنده است. ربات سه سطح دارد و قانون بنزین برای هر دو یکی است.'
+      },
+      en: {
+        tapGo: 'Tap to go on.', hills: 'Hills and car', distM: '{n} m', bestM: 'Best: {n} m', flagM: 'Flag: {n} m', dailyHr: 'Daily Hillrider', newRun: 'Start over',
+        howTo: 'Right: gas · Left: brake and reverse', crashT: 'Head first into the hill!', emptyT: 'Out of fuel!', stuckT: 'Stuck!', flagT: 'You reached the flag!',
+        distance: 'Distance', best: 'Best', tries: 'Tries', coinsGot: 'Coins on the road', kGas: 'Gas', kBrake: 'Brake and reverse', kAgain: 'Start over',
+        rules: 'Drive over the hills as far as you can. The right half of the screen is the gas and the left half the brake; when the car stands still, the brake backs it up. In the air, gas tips the nose up and brake tips it down. Gas burns fuel; the red cans on the road fill the tank. If the driver\'s head hits the ground, or the fuel runs out and the car stops, the run is over. The further you go, the bigger the hills and the further apart the cans. Coins on the road go to your game coins. The daily course is one road, the same for everyone, to a flag at 1,000 m; try it as often as you like.',
+        tutTitle1: 'Gas and brake', tutText1: 'Hold the right half of the screen for gas, the left half to brake.',
+        tutTitle2: 'In the air', tutText2: 'In the air, gas tips the nose up and brake tips it down. Land on your wheels, not your head.',
+        tutTitle3: 'Fuel', tutText3: 'Gas burns fuel. Pick up the red cans to fill the tank.',
+        buyFuel: 'Fuel · {n} coins', fuelBought: 'A quarter tank added', buyRule: 'Under a fifth of a tank, the red button under the tank gives a quarter tank for {n} of your coins, as often as your coins last. While it is there and you have the coins, running dry does not end the run.',
+        spdT: 'Speed', spdKmh: 'km/h', spdMph: 'mph', optKmh: 'km/h', optMph: 'mph', spdOff: 'Off',
+        scT: 'Weather', scSun: 'Sunny', scSnow: 'Snowy', scRain: 'Rainy', scNight: 'Night', gripSun: 'Dry road: full grip', gripWet: 'Wet: less grip', gripSnow: 'Snow: slippery', gripNight: 'Night: dry road, full grip', dailySun: 'The daily road is always sunny.',
+        sceneRule: 'Pick the weather in the settings: rain makes the road slippery and snow more so; the wheels spin sooner and the brake needs more room. At night the road is dry and only your headlamp lights the way. The daily road is always sunny.',
+        carT: 'Car', carBuggy: 'Buggy', carJeep: 'Jeep', carTruck: 'Pickup', carRacer: 'Racer', dBuggy: 'Light and nimble; free.', dJeep: 'A bigger tank and a little more grip.', dTruck: 'Strong engine, big tank, good grip.', dRacer: 'The fastest, with the most grip and the biggest tank.', carOn: 'Driving', carPick: 'Drive', buyCarT: 'Buy the {car}?', buyCarText: 'It costs {n} of your coins, once. Then it is yours for good.', carBought: 'The {car} is yours', dailyBuggy: 'The daily road is always driven in the buggy.',
+        carRule: 'Better cars cost coins from your wallet, once, in the settings: each has a stronger engine, a tank that lasts longer and more grip.',
+        rcT: 'Mode', rcSolo: 'Free ride', rcRace: 'Race', rcBot: 'Bot', rcBotM: 'Bot: {n} m', rcWin: 'You beat the bot!', rcLose: 'The bot got there first', rcYou: 'Your time', rcBotTime: 'Bot\'s time', rcBadge: 'Race · {lv}', rcDaily: 'The daily road has no bot.',
+        rcRule: 'Pick Race in the settings: a bot car drives the same road, in the same car and weather, to a flag at 1,500 m. The bot is see-through and never touches you; the first to the flag wins. The bot has three levels, and the fuel rules are the same for both.'
+      },
+      pl: {
+        tapGo: 'Stuknij, aby przejść dalej.', hills: 'Wzgórza i auto', distM: '{n} m', bestM: 'Najlepszy: {n} m', flagM: 'Flaga: {n} m', dailyHr: 'Codzienny Jeździec wzgórz', newRun: 'Zacznij od nowa',
+        howTo: 'Prawo: gaz · Lewo: hamulec i wsteczny', crashT: 'Głową w zbocze!', emptyT: 'Skończyło się paliwo!', stuckT: 'Utknąłeś!', flagT: 'Dotarłeś do flagi!',
+        distance: 'Dystans', best: 'Najlepszy', tries: 'Próby', coinsGot: 'Monety z trasy', kGas: 'Gaz', kBrake: 'Hamulec i wsteczny', kAgain: 'Zacznij od nowa',
+        rules: 'Jedź przez wzgórza jak najdalej. Prawa połowa ekranu to gaz, lewa to hamulec; gdy auto stoi, hamulec cofa. W powietrzu gaz unosi przód, a hamulec go opuszcza. Gaz zużywa paliwo; czerwone kanistry na trasie napełniają bak. Jeśli głowa kierowcy uderzy o ziemię albo skończy się paliwo i auto stanie, przejazd się kończy. Im dalej, tym wyższe wzgórza i rzadsze kanistry. Monety z trasy trafiają do Twoich monet w grze. Codzienna trasa jest jedna, taka sama dla wszystkich, z flagą na 1000 m; możesz próbować tyle razy, ile chcesz.',
+        tutTitle1: 'Gaz i hamulec', tutText1: 'Przytrzymaj prawą połowę ekranu, aby dodać gazu, a lewą, aby hamować.',
+        tutTitle2: 'W powietrzu', tutText2: 'W powietrzu gaz unosi przód, a hamulec go opuszcza. Ląduj na kołach, nie na głowie.',
+        tutTitle3: 'Paliwo', tutText3: 'Gaz zużywa paliwo. Zbieraj czerwone kanistry, aby napełnić bak.',
+        buyFuel: 'Paliwo · {n} monet', fuelBought: 'Dolano ćwierć baku', buyRule: 'Poniżej jednej piątej baku czerwony przycisk pod bakiem daje ćwierć baku za {n} twoich monet, tyle razy, na ile starczy monet. Dopóki przycisk jest widoczny i masz monety, brak paliwa nie kończy przejazdu.',
+        spdT: 'Prędkość', spdKmh: 'km/h', spdMph: 'mph', optKmh: 'km/h', optMph: 'mph', spdOff: 'Wył.',
+        scT: 'Pogoda', scSun: 'Słonecznie', scSnow: 'Śnieg', scRain: 'Deszcz', scNight: 'Noc', gripSun: 'Sucho: pełna przyczepność', gripWet: 'Mokro: mniejsza przyczepność', gripSnow: 'Śnieg: ślisko', gripNight: 'Noc: sucho, pełna przyczepność', dailySun: 'Codzienna trasa jest zawsze słoneczna.',
+        sceneRule: 'Wybierz pogodę w ustawieniach: deszcz robi drogę śliską, a śnieg jeszcze bardziej; koła szybciej buksują, a hamowanie wymaga więcej miejsca. W nocy droga jest sucha i tylko reflektor oświetla trasę. Codzienna trasa jest zawsze słoneczna.',
+        carT: 'Auto', carBuggy: 'Łazik', carJeep: 'Terenówka', carTruck: 'Pikap', carRacer: 'Wyścigówka', dBuggy: 'Lekki i zwinny; za darmo.', dJeep: 'Większy bak i trochę lepsza przyczepność.', dTruck: 'Mocny silnik, duży bak, dobra przyczepność.', dRacer: 'Najszybsza, z najlepszą przyczepnością i największym bakiem.', carOn: 'W użyciu', carPick: 'Jedź', buyCarT: 'Kupić: {car}?', buyCarText: 'Kosztuje {n} twoich monet, jeden raz. Potem masz to auto na zawsze.', carBought: 'Masz już: {car}', dailyBuggy: 'Codzienną trasę zawsze jedzie się łazikiem.',
+        carRule: 'Lepsze auta kupisz w ustawieniach za monety, jeden raz: każde ma mocniejszy silnik, bak starczający na dłużej i lepszą przyczepność.',
+        rcT: 'Tryb', rcSolo: 'Swobodna jazda', rcRace: 'Wyścig', rcBot: 'Bot', rcBotM: 'Bot: {n} m', rcWin: 'Pokonałeś bota!', rcLose: 'Bot był pierwszy', rcYou: 'Twój czas', rcBotTime: 'Czas bota', rcBadge: 'Wyścig · {lv}', rcDaily: 'Codzienna trasa jest bez bota.',
+        rcRule: 'Wybierz Wyścig w ustawieniach: auto bota jedzie tą samą trasą, tym samym autem i w tej samej pogodzie, do flagi na 1500 m. Bot jest przezroczysty i nigdy cię nie dotyka; wygrywa ten, kto pierwszy dotrze do flagi. Bot ma trzy poziomy, a zasady paliwa są dla obu takie same.'
+      },
+      fr: {
+        tapGo: 'Touche pour continuer.', hills: 'Les collines et la voiture', distM: '{n} m', bestM: 'Record : {n} m', flagM: 'Drapeau : {n} m', dailyHr: 'Grimpe-colline du jour', newRun: 'Recommencer',
+        howTo: 'Droite : gaz · Gauche : frein et marche arrière', crashT: 'La tête dans la colline !', emptyT: 'Panne sèche !', stuckT: 'Coincé !', flagT: 'Tu as atteint le drapeau !',
+        distance: 'Distance', best: 'Record', tries: 'Essais', coinsGot: 'Pièces sur la route', kGas: 'Gaz', kBrake: 'Frein et marche arrière', kAgain: 'Recommencer',
+        rules: 'Roule le plus loin possible sur les collines. La moitié droite de l’écran est l’accélérateur et la moitié gauche le frein ; quand la voiture est à l’arrêt, le frein la fait reculer. En l’air, le gaz lève le nez de la voiture et le frein le baisse. Le gaz consomme du carburant ; les bidons rouges sur la route remplissent le réservoir. Si la tête du pilote touche le sol, ou si le carburant s’épuise et que la voiture s’arrête, la course est finie. Plus tu vas loin, plus les collines sont hautes et plus les bidons sont espacés. Les pièces sur la route s’ajoutent à tes pièces de jeu. Le parcours du jour est une seule route, la même pour tous, jusqu’à un drapeau à 1000 m ; essaie autant de fois que tu veux.',
+        tutTitle1: 'Gaz et frein', tutText1: 'Maintiens la moitié droite de l’écran pour accélérer, la moitié gauche pour freiner.',
+        tutTitle2: 'En l’air', tutText2: 'En l’air, le gaz lève le nez et le frein le baisse. Atterris sur tes roues, pas sur la tête.',
+        tutTitle3: 'Carburant', tutText3: 'Le gaz consomme du carburant. Ramasse les bidons rouges pour remplir le réservoir.',
+        buyFuel: 'Carburant · {n} pièces', fuelBought: 'Un quart de réservoir en plus', buyRule: 'Sous un cinquième de réservoir, le bouton rouge sous la jauge donne un quart de réservoir pour {n} de tes pièces, autant de fois que tes pièces le permettent. Tant qu’il est là et que tu as les pièces, la panne sèche ne termine pas la course.',
+        spdT: 'Vitesse', spdKmh: 'km/h', spdMph: 'mph', optKmh: 'km/h', optMph: 'mph', spdOff: 'Non',
+        scT: 'Météo', scSun: 'Soleil', scSnow: 'Neige', scRain: 'Pluie', scNight: 'Nuit', gripSun: 'Sec : adhérence totale', gripWet: 'Mouillé : moins d’adhérence', gripSnow: 'Neige : glissant', gripNight: 'Nuit : sec, adhérence totale', dailySun: 'Le parcours du jour est toujours ensoleillé.',
+        sceneRule: 'Choisis la météo dans les réglages : la pluie rend la route glissante, la neige encore plus ; les roues patinent plus tôt et le freinage demande plus de place. La nuit, la route est sèche et seul ton phare éclaire le chemin. Le parcours du jour est toujours ensoleillé.',
+        carT: 'Voiture', carBuggy: 'Buggy', carJeep: 'Jeep', carTruck: 'Pick-up', carRacer: 'Bolide', dBuggy: 'Léger et agile ; gratuit.', dJeep: 'Un plus grand réservoir et un peu plus d’adhérence.', dTruck: 'Moteur puissant, grand réservoir, bonne adhérence.', dRacer: 'Le plus rapide, avec la meilleure adhérence et le plus grand réservoir.', carOn: 'En route', carPick: 'Conduire', buyCarT: 'Acheter : {car} ?', buyCarText: 'Ça coûte {n} de tes pièces, une seule fois. Ensuite, c’est à toi pour toujours.', carBought: '{car} : c’est à toi', dailyBuggy: 'Le parcours du jour se fait toujours en buggy.',
+        carRule: 'Dans les réglages, tu peux acheter de meilleures voitures avec tes pièces, une seule fois : chacune a un moteur plus puissant, un réservoir qui dure plus longtemps et plus d’adhérence.',
+        rcT: 'Mode', rcSolo: 'Balade', rcRace: 'Course', rcBot: 'Robot', rcBotM: 'Robot : {n} m', rcWin: 'Tu as battu le robot !', rcLose: 'Le robot est arrivé avant toi', rcYou: 'Ton temps', rcBotTime: 'Temps du robot', rcBadge: 'Course · {lv}', rcDaily: 'Le parcours du jour se fait sans robot.',
+        rcRule: 'Choisis Course dans les réglages : une voiture robot roule sur la même route, avec la même voiture et la même météo, jusqu’à un drapeau à 1500 m. Le robot est transparent et ne te touche jamais ; le premier au drapeau gagne. Le robot a trois niveaux, et les règles du carburant sont les mêmes pour vous deux.'
+      },
+      zh: {
+        tapGo: '点一下继续。', hills: '山丘和车', distM: '{n} 米', bestM: '最佳：{n} 米', flagM: '旗子：{n} 米', dailyHr: '每日山丘车手', newRun: '重新开始',
+        howTo: '右边：油门 · 左边：刹车和倒车', crashT: '头撞到地上了！', emptyT: '没油了！', stuckT: '卡住了！', flagT: '到达旗子了！',
+        distance: '距离', best: '最佳', tries: '尝试次数', coinsGot: '路上的金币', kGas: '油门', kBrake: '刹车和倒车', kAgain: '重新开始',
+        rules: '开车越过山丘，能开多远开多远。屏幕右半边是油门，左半边是刹车；车停住时，刹车会让它倒车。在空中，油门让车头抬起，刹车让车头压低。踩油门会耗油；路上的红色油桶能加满油箱。如果司机的头撞到地面，或者油用完车停下，本局结束。越往前，山越高，油桶间距越大。路上的金币会加到游戏金币里。每日挑战是一条人人相同的路，旗子在 1000 米；想试几次都可以。',
+        tutTitle1: '油门和刹车', tutText1: '按住屏幕右半边踩油门，按住左半边刹车。',
+        tutTitle2: '在空中', tutText2: '在空中，油门让车头抬起，刹车让车头压低。用车轮着地，别用头。',
+        tutTitle3: '燃油', tutText3: '踩油门会耗油。捡起红色油桶加满油箱。',
+        buyFuel: '加油 · {n} 金币', fuelBought: '加了四分之一箱油', buyRule: '油箱不到五分之一时，油箱下方的红色按钮可用 {n} 个金币加四分之一箱油，金币够就能一直加。按钮还在且金币足够时，没油不会结束本局。',
+        spdT: '速度', spdKmh: '公里/时', spdMph: '英里/时', optKmh: '公里', optMph: '英里', spdOff: '不显示',
+        scT: '天气', scSun: '晴天', scSnow: '雪天', scRain: '雨天', scNight: '夜晚', gripSun: '干燥路面：抓地力满', gripWet: '湿滑：抓地力较低', gripSnow: '雪地：很滑', gripNight: '夜晚：路面干燥，抓地力满', dailySun: '每日挑战总是晴天。',
+        sceneRule: '在设置里选择天气：雨天路面湿滑，雪天更滑；车轮更容易打滑，刹车需要更长距离。夜晚路面干燥，只有车灯照亮前路。每日挑战总是晴天。',
+        carT: '车辆', carBuggy: '越野小车', carJeep: '吉普', carTruck: '皮卡', carRacer: '赛车', dBuggy: '轻巧灵活；免费。', dJeep: '油箱更大，抓地力稍强。', dTruck: '引擎强劲，油箱大，抓地力好。', dRacer: '最快，抓地力最强，油箱最大。', carOn: '驾驶中', carPick: '驾驶', buyCarT: '购买{car}？', buyCarText: '花费 {n} 个金币，只需一次，之后永久归你。', carBought: '{car}归你了', dailyBuggy: '每日挑战总是用越野小车。',
+        carRule: '在设置里可以用金币买更好的车，只需买一次：每辆车引擎更强、油更耐用、抓地力更好。',
+        rcT: '模式', rcSolo: '自由', rcRace: '竞速', rcBot: '机器人', rcBotM: '机器人：{n} 米', rcWin: '你赢了机器人！', rcLose: '机器人先到了', rcYou: '你的用时', rcBotTime: '机器人用时', rcBadge: '竞速 · {lv}', rcDaily: '每日挑战没有机器人。',
+        rcRule: '在设置里选择竞速：一辆机器人车在同一条路上，用同样的车和天气，跑到 1500 米的旗子。机器人车是半透明的，不会碰到你；先到旗子的赢。机器人有三个难度，燃油规则对双方都一样。'
+      },
+      de: {
+        tapGo: 'Tippe, um weiterzumachen.', hills: 'Hügel und Auto', distM: '{n} m', bestM: 'Bestwert: {n} m', flagM: 'Fahne: {n} m', dailyHr: 'Hügelflitzer des Tages', newRun: 'Neu starten',
+        howTo: 'Rechts: Gas · Links: Bremse und rückwärts', crashT: 'Mit dem Kopf auf den Hügel!', emptyT: 'Kein Benzin mehr!', stuckT: 'Festgefahren!', flagT: 'Fahne erreicht!',
+        distance: 'Strecke', best: 'Bestwert', tries: 'Versuche', coinsGot: 'Münzen am Weg', kGas: 'Gas', kBrake: 'Bremse und rückwärts', kAgain: 'Neu starten',
+        rules: 'Fahr so weit du kannst über die Hügel. Die rechte Bildschirmhälfte ist Gas, die linke die Bremse; steht das Auto, fährt die Bremse rückwärts. In der Luft hebt Gas die Nase und die Bremse senkt sie. Gas verbraucht Benzin; die roten Kanister am Weg füllen den Tank. Schlägt der Kopf des Fahrers auf, oder ist das Benzin alle und das Auto bleibt stehen, ist die Fahrt vorbei. Je weiter, desto höher die Hügel und desto seltener die Kanister. Münzen am Weg kommen zu deinen Spielmünzen. Die Tagesstrecke ist eine Straße, für alle gleich, bis zu einer Fahne bei 1000 m; versuch es so oft du willst.',
+        tutTitle1: 'Gas und Bremse', tutText1: 'Halte die rechte Bildschirmhälfte für Gas, die linke zum Bremsen.',
+        tutTitle2: 'In der Luft', tutText2: 'In der Luft hebt Gas die Nase und die Bremse senkt sie. Lande auf den Rädern, nicht auf dem Kopf.',
+        tutTitle3: 'Benzin', tutText3: 'Gas verbraucht Benzin. Sammle die roten Kanister, um den Tank zu füllen.',
+        buyFuel: 'Benzin · {n} Münzen', fuelBought: 'Ein Viertel Tank getankt', buyRule: 'Unter einem Fünftel Tank gibt der rote Knopf unter dem Tank ein Viertel Tank für {n} deiner Münzen, so oft deine Münzen reichen. Solange er da ist und du die Münzen hast, beendet ein leerer Tank die Fahrt nicht.',
+        spdT: 'Tempo', spdKmh: 'km/h', spdMph: 'mph', optKmh: 'km/h', optMph: 'mph', spdOff: 'Aus',
+        scT: 'Wetter', scSun: 'Sonnig', scSnow: 'Schnee', scRain: 'Regen', scNight: 'Nacht', gripSun: 'Trocken: volle Haftung', gripWet: 'Nass: weniger Haftung', gripSnow: 'Schnee: rutschig', gripNight: 'Nacht: trocken, volle Haftung', dailySun: 'Die Tagesstrecke ist immer sonnig.',
+        sceneRule: 'Wähle das Wetter in den Einstellungen: Regen macht die Straße rutschig, Schnee noch mehr; die Räder drehen früher durch und die Bremse braucht mehr Platz. Nachts ist die Straße trocken, und nur dein Scheinwerfer leuchtet den Weg. Die Tagesstrecke ist immer sonnig.',
+        carT: 'Auto', carBuggy: 'Buggy', carJeep: 'Jeep', carTruck: 'Pick-up', carRacer: 'Flitzer', dBuggy: 'Leicht und wendig; gratis.', dJeep: 'Größerer Tank und etwas mehr Haftung.', dTruck: 'Starker Motor, großer Tank, gute Haftung.', dRacer: 'Der schnellste, mit der besten Haftung und dem größten Tank.', carOn: 'Im Einsatz', carPick: 'Fahren', buyCarT: '{car} kaufen?', buyCarText: 'Kostet {n} deiner Münzen, nur einmal. Danach gehört er dir für immer.', carBought: '{car} gehört dir', dailyBuggy: 'Die Tagesstrecke fährst du immer im Buggy.',
+        carRule: 'Bessere Autos kaufst du in den Einstellungen einmalig mit deinen Münzen: Jedes hat einen stärkeren Motor, einen Tank, der länger hält, und mehr Haftung.',
+        rcT: 'Modus', rcSolo: 'Freie Fahrt', rcRace: 'Rennen', rcBot: 'Bot', rcBotM: 'Bot: {n} m', rcWin: 'Du hast den Bot geschlagen!', rcLose: 'Der Bot war schneller', rcYou: 'Deine Zeit', rcBotTime: 'Zeit des Bots', rcBadge: 'Rennen · {lv}', rcDaily: 'Die Tagesstrecke fährst du ohne Bot.',
+        rcRule: 'Wähle in den Einstellungen Rennen: Ein Bot-Auto fährt dieselbe Straße, im selben Auto und Wetter, bis zu einer Fahne bei 1500 m. Der Bot ist durchsichtig und berührt dich nie; wer zuerst an der Fahne ist, gewinnt. Der Bot hat drei Stufen, und die Benzinregeln gelten für beide.'
+      },
+      es: {
+        tapGo: 'Toca para seguir.', hills: 'Colinas y coche', distM: '{n} m', bestM: 'Mejor: {n} m', flagM: 'Bandera: {n} m', dailyHr: 'Trepacolinas del día', newRun: 'Empezar de nuevo',
+        howTo: 'Derecha: acelerar · Izquierda: frenar y marcha atrás', crashT: '¡De cabeza contra la colina!', emptyT: '¡Sin gasolina!', stuckT: '¡Atascado!', flagT: '¡Llegaste a la bandera!',
+        distance: 'Distancia', best: 'Mejor', tries: 'Intentos', coinsGot: 'Monedas del camino', kGas: 'Acelerar', kBrake: 'Frenar y marcha atrás', kAgain: 'Empezar de nuevo',
+        rules: 'Conduce por las colinas tan lejos como puedas. La mitad derecha de la pantalla acelera y la izquierda frena; con el coche parado, el freno da marcha atrás. En el aire, acelerar levanta el morro y frenar lo baja. Acelerar gasta gasolina; los bidones rojos del camino llenan el depósito. Si la cabeza del conductor toca el suelo, o se acaba la gasolina y el coche se para, se acaba. Cuanto más lejos, más altas las colinas y más separados los bidones. Las monedas del camino van a tus monedas del juego. El recorrido diario es un camino igual para todos hasta una bandera a 1000 m; inténtalo tantas veces como quieras.',
+        tutTitle1: 'Acelerar y frenar', tutText1: 'Mantén pulsada la mitad derecha para acelerar y la izquierda para frenar.',
+        tutTitle2: 'En el aire', tutText2: 'En el aire, acelerar levanta el morro y frenar lo baja. Aterriza sobre las ruedas, no de cabeza.',
+        tutTitle3: 'Gasolina', tutText3: 'Acelerar gasta gasolina. Recoge los bidones rojos para llenar el depósito.',
+        buyFuel: 'Gasolina · {n} monedas', fuelBought: 'Un cuarto de depósito más', buyRule: 'Con menos de un quinto de depósito, el botón rojo bajo el depósito da un cuarto de depósito por {n} de tus monedas, tantas veces como te alcancen. Mientras esté ahí y tengas las monedas, quedarte sin gasolina no acaba la partida.',
+        spdT: 'Velocidad', spdKmh: 'km/h', spdMph: 'mph', optKmh: 'km/h', optMph: 'mph', spdOff: 'No',
+        scT: 'Clima', scSun: 'Soleado', scSnow: 'Nevado', scRain: 'Lluvioso', scNight: 'Noche', gripSun: 'Seco: agarre total', gripWet: 'Mojado: menos agarre', gripSnow: 'Nieve: resbala', gripNight: 'Noche: seco, agarre total', dailySun: 'El recorrido diario siempre es soleado.',
+        sceneRule: 'Elige el clima en los ajustes: la lluvia hace resbalar la carretera y la nieve aún más; las ruedas patinan antes y el freno necesita más espacio. De noche la carretera está seca y solo tu faro alumbra el camino. El recorrido diario siempre es soleado.',
+        carT: 'Coche', carBuggy: 'Buggy', carJeep: 'Todoterreno', carTruck: 'Camioneta', carRacer: 'Bólido', dBuggy: 'Ligero y ágil; gratis.', dJeep: 'Depósito más grande y algo más de agarre.', dTruck: 'Motor potente, depósito grande, buen agarre.', dRacer: 'El más rápido, con el mejor agarre y el depósito más grande.', carOn: 'En uso', carPick: 'Conducir', buyCarT: '¿Comprar {car}?', buyCarText: 'Cuesta {n} de tus monedas, una sola vez. Luego es tuyo para siempre.', carBought: 'Ya tienes: {car}', dailyBuggy: 'El recorrido diario siempre se hace en buggy.',
+        carRule: 'En los ajustes puedes comprar mejores coches con tus monedas, una sola vez: cada uno tiene más motor, un depósito que dura más y más agarre.',
+        rcT: 'Modo', rcSolo: 'Libre', rcRace: 'Carrera', rcBot: 'Bot', rcBotM: 'Bot: {n} m', rcWin: '¡Le ganaste al bot!', rcLose: 'El bot llegó antes', rcYou: 'Tu tiempo', rcBotTime: 'Tiempo del bot', rcBadge: 'Carrera · {lv}', rcDaily: 'El recorrido diario es sin bot.',
+        rcRule: 'Elige Carrera en los ajustes: un coche bot recorre el mismo camino, con el mismo coche y el mismo clima, hasta una bandera a 1500 m. El bot es transparente y nunca te toca; gana quien llegue antes a la bandera. El bot tiene tres niveles y las reglas de gasolina son las mismas para los dos.'
+      }
+    }
+  });
+
+  // the speed dial's unit, behind the gear (#777): km/h everywhere by default
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || typeof prefs !== 'object') prefs = {};
+  if (prefs.speed !== 'mph' && prefs.speed !== 'off') prefs.speed = 'kmh';
+  // the scene, behind the gear too (#805); sunny for a new player
+  prefs.scene = E.sceneOf(prefs.scene);
+  // the cars bought (#808), kept as a list of ids; the buggy is always there
+  var owned = ctx.store.get('cars', null);
+  if (!Array.isArray(owned)) owned = [];
+  owned = E.CAR_IDS.filter(function (id) { return id === 'buggy' || owned.indexOf(id) >= 0; });
+  prefs.car = owned.indexOf(prefs.car) >= 0 ? prefs.car : 'buggy';
+  // a free ride or a race against the bot (#807), and the bot's level; medium for a new player
+  prefs.mode = prefs.mode === 'race' ? 'race' : 'solo';
+  prefs.level = E.levelOf(prefs.level);
+  // the shown speed in m/s, eased so the suspension's bounce does not flicker the digits
+  var spd = 0;
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+
+  var S = null, raf = 0, last = 0, acc = 0, frameDt = 1 / 60, prev = null, paused = false, held = { l: false, r: false }, keys = { g: false, b: false };
+  var tries = 0, startedAt = 0, ended = false, waiting = false, resumed = false, flipPending = false;
+  // the view follows the car smoothly, so a bump does not shake the whole screen
+  var cam = { x: 0, y: 0 };
+  // the race (#807): the bot's own car B on the same course, stepped beside the player's
+  // with the same clock, never touching it; null on a free ride and on the daily road
+  var race = false, raceLv = 'medium', B = null, prevB = null;
+
+  var cv = el('canvas', { class: 'hr-canvas', role: 'img', 'aria-label': C.t('hills') });
+  var buyLabel = el('span');
+  var buyBtn = el('button', { class: 'hr-buy', type: 'button', hidden: true }, [C.icon('coin', 16), buyLabel]);
+  var box = el('div', { class: 'hr-box' }, [cv, buyBtn]);
+  var top = el('div', { class: 'hr-top ch-above' });
+  var status = el('div', { class: 'hr-status', role: 'status', 'aria-live': 'polite' });
+  var sideEl = el('div', { class: 'ch-side' }, [top, status]);
+  var wrap = el('div', { class: 'hr-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), sideEl]);
+  // the rows lie over the road's top centre on a wide screen (#803); read on resize, not per frame
+  var rowOver = false;
+  function readRowOver() { rowOver = getComputedStyle(sideEl).position === 'absolute'; }
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newRun'), onClick: function () { newRun(); } });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- runs */
+
+  // The daily road is the same for everyone: the day's seed, moved on to a road the
+  // engine's own driver finishes (E.courseSeed), worked out once a page load
+  var dailySeed = null;
+  function seedFor() {
+    // a race course is one the bot at its level finishes in this car and weather
+    if (!dailyDate) return race ? E.courseSeed(Math.floor(Math.random() * 4294967296), E.RACE, 12, prefs.scene, prefs.car, raceLv) : Math.floor(Math.random() * 4294967296);
+    if (dailySeed === null) dailySeed = E.courseSeed(Math.floor(C.daily('hillrider', dailyDate).rng() * 4294967296), FINISH);
+    return dailySeed;
+  }
+
+  function newRun() {
+    // the daily road is sunny for everyone, so the scores compare (#805)
+    // and in the buggy, for the same reason (#808)
+    race = !dailyDate && prefs.mode === 'race'; raceLv = prefs.level;
+    S = E.newGame(seedFor(), dailyDate ? FINISH : race ? E.RACE : 0, dailyDate ? 'sun' : prefs.scene, dailyDate ? 'buggy' : prefs.car);
+    B = race ? E.newGame(S.seed, E.RACE, S.scene, S.car) : null; prevB = null;
+    // a new run stands still until the first touch, so the tank is full when it starts
+    waiting = true; resumed = false; flipPending = false;
+    tries++;
+    startedAt = Date.now();
+    ended = false;
+    acc = 0; last = 0; prev = null; spd = 0;
+    cam.x = S.x; cam.y = S.y;
+    renderTop();
+    renderStatus();
+    draw();
+    kick();
+  }
+
+  function control() {
+    var gas = held.r || keys.g, brake = held.l || keys.b;
+    return gas && brake ? 0 : gas ? 1 : brake ? -1 : 0;
+  }
+
+  /* The car is drawn between the last two physics steps, not at the last one. A step is
+     1/60 s and a car at speed moves 0.25 m in it; a screen that shows 0, 1 or 2 steps a frame
+     moved the car by that much in uneven jumps, which read as a blur on the gas (owner,
+     2026-11-11). */
+  function pose(T) {
+    return { x: T.x, y: T.y, a: T.a, wh: T.wh.map(function (W) { return { x: W.x, y: W.y, rot: W.rot }; }) };
+  }
+  function view(T, P0) {
+    if (!T) { T = S; P0 = prev; }
+    var now = pose(T);
+    if (!P0 || ended) return now;
+    var f = Math.max(0, Math.min(1, acc / E.DT));
+    function mix(a, b) { return a + (b - a) * f; }
+    return { x: mix(P0.x, now.x), y: mix(P0.y, now.y), a: mix(P0.a, now.a),
+      wh: now.wh.map(function (W, i) { return { x: mix(P0.wh[i].x, W.x), y: mix(P0.wh[i].y, W.y), rot: mix(P0.wh[i].rot, W.rot) }; }) };
+  }
+  function tick(now) {
+    raf = 0;
+    if (!S) return;
+    clock = now / 1000;
+    var blocked = paused || waiting || document.hidden || !!document.querySelector('.ch-scrim');
+    if (!last || blocked) last = now;
+    frameDt = Math.min(0.1, (now - last) / 1000);
+    acc += frameDt;
+    last = now;
+    var ev = [];
+    if (blocked) acc = 0;
+    while (acc >= E.DT && !ended) {
+      acc -= E.DT;
+      prev = pose(S);
+      ev = ev.concat(E.step(S, control(), false, canBuy()));
+      // the bot drives the same step as the player, so both clocks agree to the frame
+      if (B) { prevB = pose(B); E.step(B, E.botControl(B, raceLv)); }
+      if (S.over || S.won) break;
+    }
+    events(ev);
+    spd += (Math.abs(S.vx) - spd) * (1 - Math.pow(1 - 0.2, frameDt * 60));
+    draw();
+    renderDist();
+    if ((S.over || S.won) && !ended) { ended = true; setTimeout(finish, C.ui.reduceMotion() ? 200 : 900); }
+    if (!ended) raf = requestAnimationFrame(tick);
+  }
+  function kick() { if (!raf) raf = requestAnimationFrame(tick); }
+
+  /* Fuel for the app's coins (#801). The out-of-fuel stop waits while the button is offered
+     and the wallet can pay, so the player has time to decide; with too few coins the run
+     ends as before and a tap only explains why. */
+  function canBuy() { return E.fuelOffered(S) && C.coins.can(E.FUEL_PRICE); }
+  function buyFuel() {
+    if (!S || ended || !E.fuelOffered(S)) return;
+    if (!C.coins.can(E.FUEL_PRICE)) { C.ui.toast({ icon: 'coin', title: C.t('notEnoughCoins'), sub: C.t('playToEarn') }); return; }
+    if (!C.coins.spend(E.FUEL_PRICE)) return;
+    E.refuel(S);
+    C.feedback('good');
+    C.ui.toast({ icon: 'coin', title: C.t('fuelBought') });
+    go();
+    draw();
+  }
+  buyBtn.addEventListener('click', buyFuel);
+  buyLabel.textContent = C.t('buyFuel', { n: C.num(E.FUEL_PRICE) });
+  buyBtn.setAttribute('aria-label', buyLabel.textContent);
+  function placeBuy(L) {
+    var show = !!S && !ended && E.fuelOffered(S);
+    if (buyBtn.hidden === show) buyBtn.hidden = !show;
+    if (!show) return;
+    var st = buyBtn.style, b = L.buy;
+    st.left = Math.round(b.x) + 'px'; st.top = Math.round(b.y) + 'px'; st.height = Math.round(b.h) + 'px'; st.minWidth = Math.round(b.w) + 'px';
+  }
+  function events(ev) {
+    if (!ev.length) return;
+    if (ev.indexOf('coin') >= 0) C.audio.sfx('tap');
+    if (ev.indexOf('fuel') >= 0) C.feedback('good');
+    if (ev.indexOf('bump') >= 0 && ev.indexOf('land') < 0) C.feedback('thud');
+    if (ev.indexOf('flip') >= 0) { flipPending = true; C.feedback('whoosh'); }
+    if (ev.indexOf('land') >= 0) {
+      C.feedback('thud');
+      // a whole turn in the air counts once the car is back on its wheels
+      if (flipPending && ev.indexOf('crash') < 0) C.achievements.unlock('hr-flip');
+      flipPending = false;
+    }
+    if (ev.indexOf('finish') >= 0) C.feedback('good');
+    if (ev.indexOf('crash') >= 0 || ev.indexOf('stall') >= 0) C.feedback('bad');
+  }
+
+  // a race time to a tenth of a second, so a close finish reads as close
+  function raceTime(t) { return C.time(t * 1000) + C.num('.' + (Math.floor(t * 10) % 10)); }
+  /* The race's end (#807): the bot is driven on to its own flag at once, with the same
+     steps it would have taken on screen, so its time is known even when the player went
+     off the road first. The first to the flag by the run's clock wins. */
+  function finishRace() {
+    ctx.clearSave();
+    while (!B.won && !B.over && B.t < 600) E.step(B, E.botControl(B, raceLv));
+    var m = E.metres(S), mine = S.won ? S.t : null, bots = B.won ? B.t : null;
+    var won = mine !== null && (bots === null || mine < bots);
+    var coins = Math.min(40, 2 + Math.floor(m / 150) + Math.floor(S.coins / 8)), points = Math.min(120, 6 + Math.floor(m / 30));
+    if (won) { coins += 5; points += 15; }
+    ctx.finish({
+      won: won,
+      title: won ? C.t('rcWin') : S.won ? C.t('rcLose') : S.cause === 'fuel' ? C.t('emptyT') : S.cause === 'stuck' ? C.t('stuckT') : C.t('crashT'),
+      timeMs: Date.now() - startedAt, coins: coins, points: points,
+      lines: [
+        { label: C.t('rcYou'), value: mine !== null ? raceTime(mine) : C.t('distM', { n: C.num(m) }) },
+        { label: C.t('rcBotTime') + ' · ' + C.t(raceLv), value: bots !== null ? raceTime(bots) : C.t('distM', { n: C.num(E.metres(B)) }) },
+        { label: C.t('coinsGot'), value: C.num(S.coins) }
+      ],
+      shareText: 'چوگان · تپه‌سوار\nمسابقه · ' + (mine !== null ? (mine.toFixed(1) + ' ثانیه') : (m + ' متر')),
+      againLabel: C.t('newRun'),
+      onAgain: function () { newRun(); }
+    });
+  }
+
+  function finish() {
+    if (B) { finishRace(); return; }
+    ctx.clearSave();
+    var m = E.metres(S), won = S.won;
+    var coins = Math.min(40, 2 + Math.floor(m / 150) + Math.floor(S.coins / 8)), points = Math.min(120, 6 + Math.floor(m / 30)), note = null;
+    if (m >= 1000 && !dailyDate) C.achievements.unlock('hr-1k');
+    if (won) C.achievements.unlock('hr-daily');
+    if (dailyDate) {
+      if (won) {
+        coins += 8; points += 25;
+        if (!C.stats.daily('hillrider', dailyDate, { label: C.t('distM', { n: C.num(FINISH) }), win: true, tries: tries })) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+      } else { coins = 1; points = 2; }
+    } else {
+      // a new personal best pays +5 coins for every full 1000 m it newly reaches (#809)
+      var prevBest = C.stats.getBest('hillrider', 'metres') || 0;
+      if (C.stats.best('hillrider', 'metres', m)) note = C.t('bestM', { n: C.num(m) });
+      coins += C.stats.milestoneCoins(prevBest, m, 1000);
+    }
+    var bestEver = C.stats.getBest('hillrider', 'metres');
+    ctx.finish({
+      won: dailyDate ? won : null,
+      title: won ? C.t('flagT') : S.cause === 'fuel' ? C.t('emptyT') : S.cause === 'stuck' ? C.t('stuckT') : C.t('crashT'),
+      note: note, timeMs: Date.now() - startedAt, coins: coins, points: points,
+      lines: [
+        { label: C.t('distance'), value: C.t('distM', { n: C.num(m) }) },
+        { label: C.t('coinsGot'), value: C.num(S.coins) },
+        dailyDate ? { label: C.t('tries'), value: C.num(tries) } : { label: C.t('best'), value: C.t('distM', { n: C.num(bestEver || m) }) }
+      ],
+      shareText: 'چوگان · تپه‌سوار' + (dailyDate ? ('\nروزانه ' + dailyDate) : '') + '\n' + m + ' متر',
+      againLabel: C.t('newRun'),
+      onAgain: dailyDate && won ? null : function () { newRun(); }
+    });
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  // the theme's colours with the scene's on top (#805)
+  function palette() {
+    var P = basePalette(), o = E.look(S ? S.scene : 'sun', dark());
+    for (var k in o) P[k] = o[k];
+    return P;
+  }
+  function basePalette() {
+    return dark()
+      ? { sky0: '#121A30', sky1: '#2B3354', far: '#26314A', near: '#1F3A2C', dirt: '#3B2A1E', dirtDk: '#2C1F16', grass: '#3F8A3A', grassLt: '#5FA954', body: '#E0603A', bodyDk: '#A8401F', cage: '#C9CED6', tyre: '#0E0E10', hub: '#9AA1AB', skin: '#E8B98F', helmet: '#F2C230', can: '#E04236', canDk: '#9E2A22', coin: '#F2C230', coinDk: '#B88A12', post: '#C9CED6', text: '#F4EEE4', pedal: 'rgba(255,255,255,', gauge: '#2A2F3A',
+          skinDk: '#C99A70', shirt: '#4FB07D', shirtDk: '#3A8A60', legs: '#3A4868', cap: '#4A78C8', mouth: '#8A4A33', eye: '#1A1A1A', steer: '#AEB4BD', tread: '#3A3E45', lamp: '#FFE27A', exhaust: '#8B919A', stripe: '#F4EEE4',
+          mtn: '#3A4766', tree: '#2C6B34', treeDk: '#1F5128', trunk: '#5A3E28', bush: '#346E30', stone: '#6E7079', stoneDk: '#55575F', sign: '#D9A417', signDk: '#1A1A1A', fence: '#7A5C40', rabbit: '#B49A80', bird: '#C9CED6', deer: '#9A6A3E', deerDk: '#6E4A2A', branch: '#6B4A2E', rock: '#8D8F94', rockDk: '#5E6066' }
+      : {sky0: '#A9DCF2', sky1: '#F4F8EE', far: '#B9D7C2', near: '#8DBF8F', dirt: '#9A6B45', dirtDk: '#7A5233', grass: '#3E9C3A', grassLt: '#6CC25A', body: '#D94F2B', bodyDk: '#9E3418', cage: '#4A505A', tyre: '#1A1A1C', hub: '#B8BEC6', skin: '#E3AE82', helmet: '#E8B21A', can: '#D8382C', canDk: '#8E231B', coin: '#F0BC1C', coinDk: '#A67C0A', post: '#5A5F68', text: '#1F1A17', pedal: 'rgba(31,26,23,', gauge: '#E9E2D6',
+          skinDk: '#C4906A', shirt: '#3E9C6A', shirtDk: '#2C7550', legs: '#2F3B57', cap: '#2D5BA8', mouth: '#8A4A33', eye: '#1A1A1A', steer: '#22262C', tread: '#44484E', lamp: '#FFE27A', exhaust: '#8B919A', stripe: '#FFFFFF',
+          mtn: '#7F9BB0', tree: '#2F7A3A', treeDk: '#245E2D', trunk: '#6B4A2E', bush: '#3E8A3C', stone: '#9A9CA2', stoneDk: '#7A7C82', sign: '#E8B21A', signDk: '#1F1A17', fence: '#8A6A48', rabbit: '#A88B6E', bird: '#3B3F48', deer: '#9A6A3E', deerDk: '#6E4A2A', branch: '#6B4A2E', rock: '#8D8F94', rockDk: '#6C6E73' };
+  }
+
+  function size() {
+    var r = box.getBoundingClientRect();
+    return { w: Math.max(160, Math.floor(r.width) || 0), h: Math.max(120, Math.floor(r.height) || 0) };
+  }
+  var fontFam = '';
+  function font(px) {
+    if (!fontFam) fontFam = getComputedStyle(document.body).fontFamily || 'sans-serif';
+    return '700 ' + Math.round(px) + 'px ' + fontFam;
+  }
+  // the last size drawn at: a touch is read against what the player saw
+  var drawn = { w: 0, h: 0 };
+  function draw() {
+    if (!S) return;
+    var Z = size(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
+    cv.style.width = Z.w + 'px'; cv.style.height = Z.h + 'px';
+    drawn = Z;
+    var g = cv.getContext('2d'), P = palette();
+    // about 16 m across on an upright phone, 21 m on a wide screen
+    var ppm = Math.min(Z.w / 16, Z.h / 12);
+    var V = view(), ahead = Math.max(-2, Math.min(4, S.vx * 0.3));
+    // by time, not by frame: a 120 Hz screen must not chase twice as hard
+    var kx = 1 - Math.pow(1 - 0.12, frameDt * 60), ky = 1 - Math.pow(1 - 0.1, frameDt * 60);
+    cam.x += (V.x + ahead - cam.x) * kx;
+    cam.y += (V.y - cam.y) * ky;
+    if (Math.abs(V.x - cam.x) > 30) { cam.x = V.x; cam.y = V.y; }
+    var ox = Z.w * 0.36, oy = Z.h * 0.55;
+    var x0 = cam.x - ox / ppm - 1, x1 = cam.x + (Z.w - ox) / ppm + 1, yLow = cam.y - (Z.h - oy) / ppm - 2;
+
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var sky = g.createLinearGradient(0, 0, 0, Z.h);
+    sky.addColorStop(0, P.sky0); sky.addColorStop(1, P.sky1);
+    g.fillStyle = sky; g.fillRect(0, 0, Z.w, Z.h);
+    if (S.scene === 'night') nightSky(g, Z, P);
+    // three ranges of mountains, hazier the further they are, then the near hills (#806)
+    mountains(g, Z, P);
+    backHills(g, Z, P.near, 0.35, Z.h * 0.76, Z.h * 0.1, 0.019);
+
+    // the world in metres, y up
+    g.setTransform(dpr * ppm, 0, 0, -dpr * ppm, dpr * (ox - cam.x * ppm), dpr * (oy + cam.y * ppm));
+    roadside(g, P, x0, x1);
+    // the bot's lane lies behind the road's edge, so the road covers its wheels' feet
+    if (B) ghost(g, P, dpr);
+    g.beginPath();
+    var stepX = 0.5, x;
+    g.moveTo(x0, yLow);
+    for (x = x0; x <= x1 + stepX; x += stepX) g.lineTo(x, E.height(S, x));
+    g.lineTo(x1 + stepX, yLow);
+    g.closePath();
+    g.fillStyle = P.dirt; g.fill();
+    // a darker layer under the grass, then the grass on top
+    g.beginPath();
+    for (x = x0; x <= x1 + stepX; x += stepX) { var h = E.height(S, x) - 0.55; if (x === x0) g.moveTo(x, h); else g.lineTo(x, h); }
+    g.lineWidth = 0.5; g.strokeStyle = P.dirtDk; g.stroke();
+    g.beginPath();
+    for (x = x0; x <= x1 + stepX; x += stepX) { var hh = E.height(S, x) - 0.1; if (x === x0) g.moveTo(x, hh); else g.lineTo(x, hh); }
+    g.lineWidth = 0.32; g.lineJoin = 'round'; g.strokeStyle = P.grass; g.stroke();
+    g.lineWidth = 0.08; g.strokeStyle = P.grassLt; g.stroke();
+    // a wet road shines along its top (#805)
+    if (P.sheen) { g.lineWidth = 0.05; g.strokeStyle = P.sheen; g.setLineDash([0.9, 0.6]); g.stroke(); g.setLineDash([]); }
+
+    // a post every 100 m, and the flag of the daily road
+    var posts = [];
+    for (var pm = Math.ceil((x0 - E.START) / 100) * 100; pm + E.START <= x1; pm += 100) if (pm > 0 && (!S.finish || pm < S.finish)) posts.push(pm);
+    posts.forEach(function (m) {
+      var px = m + E.START, py = E.height(S, px);
+      g.fillStyle = P.post; g.fillRect(px - 0.05, py, 0.1, 1.6);
+      g.fillStyle = P.gauge; g.fillRect(px - 0.6, py + 1.3, 1.2, 0.55);
+    });
+    if (S.finish && S.finish + E.START >= x0 && S.finish + E.START <= x1 + 2) {
+      var fx = S.finish + E.START, fy = E.height(S, fx);
+      g.fillStyle = P.post; g.fillRect(fx - 0.06, fy, 0.12, 3.2);
+      for (var r = 0; r < 3; r++) for (var c = 0; c < 4; c++) { g.fillStyle = (r + c) % 2 ? '#FFFFFF' : '#1A1A1A'; g.fillRect(fx + 0.06 + c * 0.35, fy + 2.15 + r * 0.35, 0.35, 0.35); }
+    }
+
+    E.bumps(S, x0, x1).forEach(function (b) { bump(g, P, b); });
+    E.pickups(S, x0, x1).forEach(function (p) {
+      if (p.kind === 'fuel') {
+        fuelCan(g, P, p.x, p.y, 1, 1);
+      } else {
+        g.fillStyle = P.coinDk; g.beginPath(); g.arc(p.x, p.y, 0.26, 0, Math.PI * 2); g.fill();
+        g.fillStyle = P.coin; g.beginPath(); g.arc(p.x, p.y, 0.2, 0, Math.PI * 2); g.fill();
+      }
+    });
+
+    if (P.beam) headlamp(g, P, V);
+    drawCar(g, P, V, S.car);
+
+    // the dials on top, in screen pixels
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    weather(g, Z, P, ppm);
+    hud(g, Z, P);
+  }
+  /* The bot's car in a race (#807) is a ghost in its own lane: drawn whole on its own
+     layer, then laid on the view at half strength, so its wheels do not show through its
+     body as they would with the car drawn straight at half alpha. The lane is LANE m up
+     and drawn before the road: on the same spot as the player, as at the start, the two
+     cars sat one on the other and the bot could not be seen. Off the screen it costs nothing. */
+  var ghostCv = null, LANE = 0.45;
+  function ghost(g, P, dpr) {
+    var VB = view(B, prevB);
+    VB.y += LANE; VB.wh.forEach(function (W) { W.y += LANE; });
+    if (Math.abs(VB.x - cam.x) > drawn.w / Math.min(drawn.w / 16, drawn.h / 12) + 4) return;
+    if (!ghostCv) ghostCv = document.createElement('canvas');
+    if (ghostCv.width !== cv.width || ghostCv.height !== cv.height) { ghostCv.width = cv.width; ghostCv.height = cv.height; }
+    var q = ghostCv.getContext('2d'), m = g.getTransform();
+    q.setTransform(1, 0, 0, 1, 0, 0); q.clearRect(0, 0, ghostCv.width, ghostCv.height);
+    q.setTransform(m);
+    drawCar(q, P, VB, B.car);
+    // one cool tint over the whole car, so beside the player's own paint it reads as the other car
+    q.setTransform(1, 0, 0, 1, 0, 0); q.globalCompositeOperation = 'source-atop'; q.globalAlpha = 0.6;
+    q.fillStyle = dark() ? '#9FC2FF' : '#2F5FB8'; q.fillRect(0, 0, ghostCv.width, ghostCv.height);
+    q.globalCompositeOperation = 'source-over'; q.globalAlpha = 1;
+    g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 0.5; g.drawImage(ghostCv, 0, 0); g.restore();
+  }
+  /* The weather of the scene (#805), in screen pixels over the world and under the dials.
+     The drops and flakes are a fixed set placed by index, moved by the clock and against
+     the camera, so they fall and drift past as the car drives; nothing is kept per frame.
+     With reduced motion they stand still. */
+  var clock = 0;
+  function frac(v) { return v - Math.floor(v); }
+  function weather(g, Z, P, ppm) {
+    var t = C.ui.reduceMotion() ? 0 : clock, cx = cam.x * ppm, i, x, y;
+    if (S.scene === 'rain') {
+      var n = Math.round(Z.w * Z.h / 4200);
+      g.strokeStyle = P.drop; g.lineWidth = 1.4; g.lineCap = 'round'; g.beginPath();
+      for (i = 0; i < n; i++) {
+        var sp = 0.9 + 0.5 * frac(i * 0.618);
+        x = frac(i * 0.7548 - (cx * 0.9 + t * 120) / Z.w) * (Z.w + 40) - 20;
+        y = frac(i * 0.5698 + t * sp * 1.6) * (Z.h + 40) - 20;
+        g.moveTo(x, y); g.lineTo(x - 5, y + 16);
+      }
+      g.stroke();
+    } else if (S.scene === 'snow') {
+      var m = Math.round(Z.w * Z.h / 5200);
+      g.fillStyle = P.flake;
+      for (i = 0; i < m; i++) {
+        var r = 1.2 + 1.8 * frac(i * 0.381), fall = 0.12 + 0.1 * frac(i * 0.271);
+        x = frac(i * 0.7548 - cx * 0.6 / Z.w + 0.02 * Math.sin(t * 1.3 + i)) * (Z.w + 20) - 10;
+        y = frac(i * 0.5698 + t * fall) * (Z.h + 20) - 10;
+        g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+      }
+    }
+  }
+  // stars and a moon, fixed in the sky (they are far enough not to move with the road)
+  function nightSky(g, Z, P) {
+    g.fillStyle = P.star;
+    for (var i = 0; i < 46; i++) {
+      var x = frac(i * 0.7548 + 0.13) * Z.w, y = frac(i * 0.5698 + 0.31) * Z.h * 0.55, r = 0.6 + frac(i * 0.381) * 1.1;
+      g.globalAlpha = 0.45 + 0.5 * frac(i * 0.271); g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+    }
+    g.globalAlpha = 1;
+    var mr = Math.min(Z.w, Z.h) * 0.05, mx = Z.w * 0.75, my = Z.h * 0.25;
+    // a crescent: the disc with a smaller one cut out, so the sky shows through the cut
+    g.save(); g.beginPath(); g.rect(0, 0, Z.w, Z.h); g.arc(mx + mr * 0.45, my - mr * 0.2, mr * 0.85, 0, Math.PI * 2); g.clip('evenodd');
+    g.fillStyle = P.moon; g.beginPath(); g.arc(mx, my, mr, 0, Math.PI * 2); g.fill();
+    g.restore();
+  }
+  // the headlamp's beam ahead of the car at night, in the car's own frame
+  function headlamp(g, P, V) {
+    g.save(); g.translate(V.x, V.y); g.rotate(V.a);
+    var beam = g.createLinearGradient(1.3, 0, 8.5, 0);
+    beam.addColorStop(0, P.beam + '0.5)'); beam.addColorStop(1, P.beam + '0)');
+    g.fillStyle = beam; g.beginPath(); g.moveTo(1.3, 0.2); g.lineTo(8.5, 1.6); g.lineTo(8.5, -2.4); g.lineTo(1.3, 0.05); g.closePath(); g.fill();
+    g.restore();
+  }
+  /* ---------------------------------------------------- the world (#806) */
+
+  // a colour part of the way to another, for the haze of distance
+  function mixHex(a, b, t) {
+    var A = parseInt(a.slice(1), 16), B = parseInt(b.slice(1), 16), o = '#';
+    for (var sh = 16; sh >= 0; sh -= 8) { var v = Math.round(((A >> sh) & 255) * (1 - t) + ((B >> sh) & 255) * t); o += (v < 16 ? '0' : '') + v.toString(16); }
+    return o;
+  }
+  // Three ranges of peaks, each slower and hazier than the one in front, so the sky is full
+  // and the depth reads. One path of a point every 6 px per range.
+  var RANGES = [{ sp: 0.04, base: 0.5, amp: 0.3, f: 0.0042, haze: 0.62, o: 0 }, { sp: 0.08, base: 0.58, amp: 0.24, f: 0.0065, haze: 0.4, o: 2.1 }, { sp: 0.16, base: 0.66, amp: 0.17, f: 0.0105, haze: 0.18, o: 4.7 }];
+  function mountains(g, Z, P) {
+    for (var r = 0; r < RANGES.length; r++) {
+      var L = RANGES[r], off = cam.x * 30 * L.sp, base = Z.h * L.base + cam.y * L.sp * 2;
+      g.beginPath(); g.moveTo(0, Z.h);
+      for (var px = 0; px <= Z.w + 6; px += 6) {
+        var t = (px + off) * L.f + L.o;
+        // ridges: peaks from folded waves, softened by a wider one
+        var hgt = 0.55 * (1 - Math.abs(Math.sin(t))) + 0.3 * (1 - Math.abs(Math.sin(t * 2.3 + 1.1))) + 0.15 * Math.sin(t * 0.37 + 0.5);
+        g.lineTo(px, base - Z.h * L.amp * hgt);
+      }
+      g.lineTo(Z.w, Z.h); g.closePath();
+      g.fillStyle = mixHex(P.mtn, P.sky1, L.haze); g.fill();
+    }
+  }
+  // Trees, bushes, stones, signs and fences beside the road, and the animals around them,
+  // all from the seed (E.scenery). They stand a little behind the road's edge, so the road
+  // covers their feet and they never look as if they were on it.
+  var SINK = 0.35;
+  function roadside(g, P, x0, x1) {
+    var snowy = S.scene === 'snow', wet = !!P.sheen;
+    E.scenery(S.seed, x0 - 3, x1 + 3).forEach(function (o) {
+      var y = E.height(S, o.x) - SINK, k = o.s;
+      if (o.kind === 'tree') tree(g, P, o.x, y, k, o.v < 0.5, snowy);
+      else if (o.kind === 'bush') {
+        g.fillStyle = P.bush;
+        g.beginPath(); g.arc(o.x - 0.35 * k, y + 0.4 * k, 0.38 * k, 0, Math.PI * 2); g.arc(o.x + 0.3 * k, y + 0.42 * k, 0.4 * k, 0, Math.PI * 2); g.arc(o.x, y + 0.7 * k, 0.42 * k, 0, Math.PI * 2); g.fill();
+        if (snowy) { g.fillStyle = P.grass; g.beginPath(); g.ellipse(o.x, y + 1.05 * k, 0.42 * k, 0.12 * k, 0, 0, Math.PI * 2); g.fill(); }
+      } else if (o.kind === 'stone') {
+        g.fillStyle = P.stoneDk; g.beginPath(); g.ellipse(o.x, y + 0.3 * k, 0.6 * k, 0.45 * k, 0, 0, Math.PI * 2); g.fill();
+        g.fillStyle = P.stone; g.beginPath(); g.ellipse(o.x - 0.08 * k, y + 0.36 * k, 0.48 * k, 0.36 * k, 0, 0, Math.PI * 2); g.fill();
+        if (snowy) { g.fillStyle = P.grass; g.beginPath(); g.ellipse(o.x - 0.05 * k, y + 0.68 * k, 0.4 * k, 0.12 * k, 0, 0, Math.PI * 2); g.fill(); }
+        if (wet) { g.strokeStyle = P.sheen; g.lineWidth = 0.06; g.beginPath(); g.arc(o.x - 0.1 * k, y + 0.36 * k, 0.32 * k, 1.9, 2.8); g.stroke(); }
+      } else if (o.kind === 'sign') {
+        g.fillStyle = P.fence; g.fillRect(o.x - 0.05, y, 0.1, 1.9);
+        // a warning diamond with a hill on it
+        g.save(); g.translate(o.x, y + 1.95); g.rotate(Math.PI / 4);
+        g.fillStyle = P.signDk; g.fillRect(-0.36, -0.36, 0.72, 0.72); g.fillStyle = P.sign; g.fillRect(-0.3, -0.3, 0.6, 0.6); g.restore();
+        g.fillStyle = P.signDk; g.beginPath(); g.moveTo(o.x - 0.24, y + 1.82); g.lineTo(o.x + 0.24, y + 1.82); g.lineTo(o.x + 0.24, y + 2.08); g.closePath(); g.fill();
+        if (snowy) { g.fillStyle = P.grass; g.fillRect(o.x - 0.12, y + 2.42, 0.24, 0.06); }
+      } else if (o.kind === 'fence') {
+        g.strokeStyle = P.fence; g.lineCap = 'round';
+        var ys = [0, 1, 2, 3].map(function (i) { return E.height(S, o.x + i * 1.2) - SINK; });
+        g.lineWidth = 0.12; g.beginPath();
+        ys.forEach(function (yy, i) { g.moveTo(o.x + i * 1.2, yy); g.lineTo(o.x + i * 1.2, yy + 1.05); }); g.stroke();
+        g.lineWidth = 0.08; g.beginPath();
+        [0.5, 0.88].forEach(function (h) { ys.forEach(function (yy, i) { if (i) g.lineTo(o.x + i * 1.2, yy + h); else g.moveTo(o.x, yy + h); }); }); g.stroke();
+      }
+    });
+    var t = C.ui.reduceMotion() ? 0 : clock;
+    E.animals(S.seed, x0 - 8, x1 + 8).forEach(function (A) {
+      var at = E.animalAt(A, t), y = E.height(S, at.x) - SINK + at.up;
+      animal(g, P, A.kind, at.x, y, at.dir, t + A.ph);
+    });
+  }
+  function tree(g, P, x, y, k, pine, snowy) {
+    g.fillStyle = P.trunk; g.fillRect(x - 0.1 * k, y, 0.2 * k, 1.1 * k);
+    g.fillStyle = P.tree;
+    if (pine) {
+      for (var i = 0; i < 3; i++) {
+        var b = y + (0.8 + i * 0.75) * k, w = (1.0 - i * 0.24) * k;
+        g.fillStyle = i % 2 ? P.treeDk : P.tree;
+        g.beginPath(); g.moveTo(x - w, b); g.lineTo(x + w, b); g.lineTo(x, b + 1.2 * k); g.closePath(); g.fill();
+        if (snowy) { g.fillStyle = P.grass; g.beginPath(); g.moveTo(x - w * 0.4, b + 0.72 * k); g.lineTo(x + w * 0.4, b + 0.72 * k); g.lineTo(x, b + 1.2 * k); g.closePath(); g.fill(); }
+      }
+    } else {
+      g.fillStyle = P.treeDk; g.beginPath(); g.arc(x + 0.3 * k, y + 1.6 * k, 0.7 * k, 0, Math.PI * 2); g.fill();
+      g.fillStyle = P.tree; g.beginPath(); g.arc(x - 0.25 * k, y + 1.75 * k, 0.75 * k, 0, Math.PI * 2); g.arc(x + 0.1 * k, y + 2.25 * k, 0.65 * k, 0, Math.PI * 2); g.fill();
+      if (snowy) { g.fillStyle = P.grass; g.beginPath(); g.ellipse(x - 0.05 * k, y + 2.75 * k, 0.5 * k, 0.16 * k, 0, 0, Math.PI * 2); g.ellipse(x - 0.6 * k, y + 2.2 * k, 0.32 * k, 0.11 * k, 0, 0, Math.PI * 2); g.fill(); }
+    }
+  }
+  // a rabbit hopping, a bird flying, a deer grazing; dir is the way it faces
+  function animal(g, P, kind, x, y, dir, t) {
+    g.save(); g.translate(x, y); g.scale(dir, 1);
+    if (kind === 'rabbit') {
+      g.fillStyle = P.rabbit;
+      g.beginPath(); g.ellipse(0, 0.22, 0.28, 0.2, 0, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.arc(0.26, 0.38, 0.13, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.ellipse(0.24, 0.6, 0.04, 0.16, -0.2, 0, Math.PI * 2); g.ellipse(0.32, 0.6, 0.04, 0.16, 0.15, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#FFFFFF'; g.beginPath(); g.arc(-0.27, 0.27, 0.07, 0, Math.PI * 2); g.fill();
+    } else if (kind === 'bird') {
+      var fl = Math.sin(t * 9) * 0.22;
+      g.strokeStyle = P.bird; g.lineWidth = 0.08; g.lineCap = 'round'; g.lineJoin = 'round';
+      g.beginPath(); g.moveTo(-0.45, 0.1 + fl); g.lineTo(0, 0); g.lineTo(0.45, 0.1 + fl); g.stroke();
+    } else {
+      g.fillStyle = P.deer; g.strokeStyle = P.deerDk; g.lineWidth = 0.09; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(-0.45, 0.05); g.lineTo(-0.45, 0.7); g.moveTo(-0.25, 0.05); g.lineTo(-0.28, 0.7); g.moveTo(0.3, 0.05); g.lineTo(0.3, 0.7); g.moveTo(0.48, 0.05); g.lineTo(0.5, 0.7); g.stroke();
+      g.beginPath(); g.ellipse(0, 0.85, 0.62, 0.26, 0, 0, Math.PI * 2); g.fill();
+      // the head goes down to graze and up again
+      var nod = 0.5 + 0.5 * Math.sin(t * 0.7), hx = 0.72, hy = 0.95 + 0.55 * nod;
+      g.lineWidth = 0.16; g.strokeStyle = P.deer; g.beginPath(); g.moveTo(0.45, 0.95); g.lineTo(hx, hy); g.stroke();
+      g.beginPath(); g.ellipse(hx + 0.12, hy, 0.18, 0.1, 0.3 - 0.6 * nod, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = P.deerDk; g.lineWidth = 0.05; g.beginPath(); g.moveTo(hx, hy + 0.08); g.lineTo(hx - 0.08, hy + 0.36); g.moveTo(hx - 0.04, hy + 0.24); g.lineTo(hx - 0.2, hy + 0.3); g.stroke();
+    }
+    g.restore();
+  }
+  // a rock or a branch lying on the road (E.bumps): it jolts the car, no more
+  function bump(g, P, b) {
+    var y = E.height(S, b.x), s = E.ground(S, b.x).s;
+    g.save(); g.translate(b.x, y); g.rotate(Math.atan(s));
+    if (b.kind === 'rock') {
+      g.fillStyle = P.rockDk; g.beginPath(); g.ellipse(0, 0, 0.36, 0.26, 0, 0, Math.PI); g.fill();
+      g.fillStyle = P.rock; g.beginPath(); g.ellipse(-0.04, 0.02, 0.28, 0.2, 0, 0, Math.PI); g.fill();
+      if (P.sheen) { g.strokeStyle = P.sheen; g.lineWidth = 0.04; g.beginPath(); g.arc(-0.06, 0.02, 0.17, 1.9, 2.7); g.stroke(); }
+      if (S.scene === 'snow') { g.fillStyle = P.grass; g.beginPath(); g.ellipse(-0.04, 0.18, 0.2, 0.06, 0, 0, Math.PI * 2); g.fill(); }
+    } else {
+      g.strokeStyle = P.branch; g.lineCap = 'round';
+      g.lineWidth = 0.13; g.beginPath(); g.moveTo(-0.6, 0.07); g.lineTo(0.6, 0.1); g.stroke();
+      g.lineWidth = 0.06; g.beginPath(); g.moveTo(0.1, 0.1); g.lineTo(0.35, 0.32); g.moveTo(-0.25, 0.08); g.lineTo(-0.42, 0.26); g.stroke();
+    }
+    g.restore();
+  }
+  function backHills(g, Z, color, speed, base, amp, freq) {
+    var off = cam.x * 30 * speed;
+    g.beginPath(); g.moveTo(0, Z.h);
+    for (var px = 0; px <= Z.w + 8; px += 8) {
+      var t = (px + off) * freq;
+      g.lineTo(px, base - amp * (0.6 * Math.sin(t) + 0.4 * Math.sin(t * 2.3 + 1.7)) + cam.y * speed * 2);
+    }
+    g.lineTo(Z.w, Z.h); g.closePath(); g.fillStyle = color; g.fill();
+  }
+  // each car's paint over the buggy's (#808), chosen to read on sun, snow, rain and night
+  var CAR_LOOK = { buggy: {}, jeep: { body: '#3F7F3A', bodyDk: '#2A5A27', stripe: '#F2C230' }, truck: { body: '#2E6BBF', bodyDk: '#1D4A87', stripe: '#FFFFFF' }, racer: { body: '#F2B01E', bodyDk: '#A8780A', stripe: '#1A1A1A' } };
+  function drawCar(g, P0, V, carId) {
+    var id = E.carOf(carId || (S && S.car)), P = P0, o = CAR_LOOK[id];
+    if (o.body) { P = {}; for (var pk in P0) P[pk] = P0[pk]; for (var ok2 in o) P[ok2] = o[ok2]; }
+    // springs from the body to each wheel first, so the body covers their tops
+    g.strokeStyle = P.cage; g.lineWidth = 0.1;
+    for (var k = 0; k < 2; k++) { var pt = E.ANCH[k], c = Math.cos(V.a), sn = Math.sin(V.a); g.beginPath(); g.moveTo(V.x + pt[0] * c - pt[1] * sn, V.y + pt[0] * sn + pt[1] * c); g.lineTo(V.wh[k].x, V.wh[k].y); g.stroke(); }
+    // Design B, "Buggy", of the mock the owner chose (#763). Only the drawing: the head is
+    // drawn on the engine's head hitbox and the wheels where the physics put them.
+    g.save();
+    g.translate(V.x, V.y); g.rotate(V.a);
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    // the tube cage behind the driver
+    g.strokeStyle = P.cage; g.lineWidth = 0.08;
+    g.beginPath(); g.moveTo(-1.2, 0.1); g.lineTo(-1.0, 1.0); g.lineTo(0, 1.2); g.lineTo(0.6, 0.5); g.stroke();
+    g.beginPath(); g.moveTo(-1.0, 1.0); g.lineTo(-0.6, 0.1); g.stroke();
+    driver(g, P);
+    // the tub, a white stripe, the sill, the lamp and the exhaust
+    g.fillStyle = P.body;
+    g.beginPath(); g.moveTo(-1.4, -0.2); g.lineTo(1.45, -0.2); g.lineTo(1.5, 0.05); g.lineTo(1.1, 0.32); g.lineTo(0.5, 0.36); g.lineTo(0.2, 0.28); g.lineTo(-0.45, 0.22); g.lineTo(-1.1, 0.34); g.lineTo(-1.4, 0.2); g.closePath(); g.fill();
+    g.fillStyle = P.stripe; g.fillRect(-1.0, -0.02, 1.9, 0.07);
+    g.fillStyle = P.bodyDk; g.fillRect(-1.4, -0.2, 2.9, 0.1);
+    g.fillStyle = P.lamp; g.beginPath(); g.arc(1.3, 0.14, 0.09, 0, Math.PI * 2); g.fill();
+    g.fillStyle = P.exhaust; C.rrect(g, -1.58, -0.12, 0.2, 0.2, 0.05); g.fill();
+    // what tells the cars apart besides the paint: a spare wheel, a cab roof, a wing
+    if (id === 'jeep') { g.fillStyle = P.tyre; g.beginPath(); g.arc(-1.5, 0.3, 0.26, 0, Math.PI * 2); g.fill(); g.fillStyle = P.hub; g.beginPath(); g.arc(-1.5, 0.3, 0.1, 0, Math.PI * 2); g.fill(); }
+    if (id === 'truck') { g.fillStyle = P.bodyDk; g.fillRect(-1.38, 0.2, 0.62, 0.22); g.fillStyle = P.stripe; g.fillRect(-1.32, 0.3, 0.5, 0.05); }
+    if (id === 'racer') { g.strokeStyle = P.bodyDk; g.lineWidth = 0.07; g.beginPath(); g.moveTo(-1.25, 0.3); g.lineTo(-1.3, 0.62); g.stroke(); g.fillStyle = P.bodyDk; C.rrect(g, -1.62, 0.6, 0.62, 0.12, 0.04); g.fill(); }
+    // the steering wheel in front of the hand
+    g.strokeStyle = P.steer; g.lineWidth = 0.07; g.beginPath(); g.moveTo(0.42, 0.38); g.lineTo(0.36, 0.66); g.stroke();
+    g.lineWidth = 0.04; g.beginPath(); g.moveTo(0.44, 0.36); g.lineTo(0.62, 0.34); g.stroke();
+    g.restore();
+    // big knobbly tyres; the tread turns with the wheel, so the motion shows
+    for (var w = 0; w < 2; w++) {
+      var W = V.wh[w];
+      g.fillStyle = P.tyre; g.beginPath(); g.arc(W.x, W.y, E.WR, 0, Math.PI * 2); g.fill();
+      g.save(); g.translate(W.x, W.y); g.rotate(W.rot);
+      g.strokeStyle = P.tread; g.lineWidth = 0.06; g.setLineDash([0.1, 0.1]);
+      g.beginPath(); g.arc(0, 0, E.WR - 0.03, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
+      g.fillStyle = P.hub; g.beginPath(); g.arc(0, 0, E.WR * 0.45, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = P.tread; g.lineWidth = 0.035; g.beginPath();
+      for (var s = 0; s < 3; s++) { var an = s * Math.PI * 2 / 3; g.moveTo(0, 0); g.lineTo(Math.cos(an) * E.WR * 0.45, Math.sin(an) * E.WR * 0.45); }
+      g.stroke();
+      g.restore();
+    }
+  }
+  // The driver, upright in the seat with a hand on the wheel, in the car's own frame
+  function driver(g, P) {
+    var hx = E.HEAD[0], hy = E.HEAD[1];
+    // legs, mostly behind the tub
+    g.strokeStyle = P.legs; g.lineWidth = 0.22; g.beginPath(); g.moveTo(-0.38, 0.3); g.lineTo(0.12, 0.42); g.lineTo(0.3, 0.2); g.stroke();
+    // torso and neck
+    g.strokeStyle = P.shirt; g.lineWidth = 0.46; g.beginPath(); g.moveTo(-0.36, 0.32); g.lineTo(-0.24, 0.62); g.stroke();
+    g.strokeStyle = P.skinDk; g.lineWidth = 0.14; g.beginPath(); g.moveTo(-0.22, 0.62); g.lineTo(hx, hy - 0.2); g.stroke();
+    // the head, on the hitbox
+    g.fillStyle = P.skin; g.beginPath(); g.arc(hx, hy, E.HEAD_R, 0, Math.PI * 2); g.fill();
+    g.fillStyle = P.skinDk; g.beginPath(); g.arc(hx + E.HEAD_R * 0.98, hy - 0.03, 0.045, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = P.mouth; g.lineWidth = 0.025; g.beginPath(); g.arc(hx + 0.1, hy - 0.1, 0.09, 0.3, 1.5); g.stroke();
+    // a cap with its peak forward and a button on top
+    g.fillStyle = P.cap; g.beginPath(); g.arc(hx, hy + 0.03, E.HEAD_R + 0.03, -0.05, Math.PI + 0.1); g.closePath(); g.fill();
+    C.rrect(g, hx + 0.05, hy + 0.07, 0.36, 0.06, 0.03); g.fill();
+    g.fillStyle = '#FFFFFF'; g.beginPath(); g.arc(hx + 0.02, hy + 0.2, 0.05, 0, Math.PI * 2); g.fill();
+    // the scarf streams back and flutters with the speed (still when motion is reduced)
+    var fl = C.ui.reduceMotion() ? 0 : 0.05 * Math.min(1, Math.abs(S.vx) / 8) * Math.sin(S.t * 14);
+    g.strokeStyle = P.helmet; g.lineWidth = 0.1; g.beginPath(); g.moveTo(hx - 0.1, hy - 0.2); g.lineTo(hx - 0.4, hy - 0.16 - fl * 0.5); g.lineTo(hx - 0.72, hy - 0.05 + fl); g.stroke();
+    g.lineWidth = 0.07; g.beginPath(); g.moveTo(hx - 0.1, hy - 0.22); g.lineTo(hx - 0.45, hy - 0.3 + fl * 0.5); g.lineTo(hx - 0.78, hy - 0.24 - fl); g.stroke();
+    g.fillStyle = P.eye; g.beginPath(); g.ellipse(hx + 0.13, hy + 0.04, 0.035, 0.05, 0, 0, Math.PI * 2); g.fill();
+    // the arm: shoulder, elbow, hand on the wheel
+    g.strokeStyle = P.shirtDk; g.lineWidth = 0.17; g.beginPath(); g.moveTo(-0.2, 0.6); g.lineTo(0.08, 0.46); g.lineTo(0.38, 0.62); g.stroke();
+    g.fillStyle = P.skin; g.beginPath(); g.arc(0.4, 0.64, 0.075, 0, Math.PI * 2); g.fill();
+  }
+  // The fuel can, one drawing for the road and for the tank icon (#763): k scales it, and up is +1 where
+  // y grows upward (the world) or -1 on the screen, so the spout stays on top
+  function fuelCan(g, P, cx, cy, k, up) {
+    g.fillStyle = P.canDk; C.rrect(g, cx - 0.33 * k, cy - 0.42 * k, 0.66 * k, 0.84 * k, 0.1 * k); g.fill();
+    g.fillStyle = P.can; C.rrect(g, cx - 0.27 * k, cy - 0.36 * k, 0.54 * k, 0.7 * k, 0.08 * k); g.fill();
+    g.fillStyle = P.canDk; g.fillRect(cx + 0.05 * k, cy + (up > 0 ? 0.42 : -0.56) * k, 0.2 * k, 0.14 * k);
+    g.strokeStyle = '#FFFFFF'; g.lineWidth = 0.07 * k; g.beginPath(); g.moveTo(cx - 0.15 * k, cy - 0.2 * k); g.lineTo(cx + 0.15 * k, cy + 0.2 * k); g.moveTo(cx + 0.15 * k, cy - 0.2 * k); g.lineTo(cx - 0.15 * k, cy + 0.2 * k); g.stroke();
+  }
+  function hud(g, Z, P) {
+    var L = E.hudLayout(Z.w, Z.h), u = L.u;
+    // the tank, top left; it blinks when nearly empty
+    var gx = L.tank.x, gy = L.tank.y, gw = L.tank.w - 26 * u, gh = L.tank.h;
+    fuelCan(g, P, gx + 10 * u, gy + 6 * u, 26 * u, -1);
+    g.fillStyle = P.gauge; C.rrect(g, gx + 26 * u, gy, gw, gh, gh / 2); g.fill();
+    var f = S.fuel, low = f < 0.2, blink = low && !C.ui.reduceMotion() && Math.floor(S.t * 3) % 2 === 0;
+    if (f > 0 && !blink) { g.fillStyle = low ? '#D8382C' : f < 0.45 ? '#E8A21A' : '#3E9C3A'; C.rrect(g, gx + 26 * u, gy, Math.max(gh, gw * f), gh, gh / 2); g.fill(); }
+    placeBuy(L);
+    // coins picked up, top right
+    g.font = font(14 * u); g.textBaseline = 'middle'; g.textAlign = 'right';
+    g.fillStyle = P.text; g.fillText(C.num(S.coins), Z.w - 12 * u, gy + gh / 2);
+    var tw = g.measureText(C.num(S.coins)).width;
+    g.fillStyle = P.coinDk; g.beginPath(); g.arc(Z.w - 22 * u - tw, gy + gh / 2, 8 * u, 0, Math.PI * 2); g.fill();
+    g.fillStyle = P.coin; g.beginPath(); g.arc(Z.w - 22 * u - tw, gy + gh / 2, 6 * u, 0, Math.PI * 2); g.fill();
+    // the daily flag's distance, top centre; at the bottom centre when the rows lie over the top
+    if (S.finish && !S.won) {
+      g.textAlign = 'center'; g.fillStyle = P.text; g.font = font(13 * u);
+      g.fillText(C.t('flagM', { n: C.num(S.finish) }), Z.w / 2, rowOver ? Z.h - 12 * u - 7 * u : gy + gh / 2);
+    }
+    // the pedals: brake on the left, gas on the right
+    var c = control();
+    pedal(g, L.brake.x, L.brake.y, L.brake.w, L.brake.h, c < 0, false, P);
+    pedal(g, L.gas.x, L.gas.y, L.gas.w, L.gas.h, c > 0, true, P);
+    // the speed: a round dial in the top right corner, under the coins, like a dashboard
+    // (#802); on its own plate so it reads over any sky (#777)
+    var kmh = E.speedOf(spd, prefs.speed);
+    if (kmh !== null) {
+      var D = L.dial, R = D.w / 2, cx = D.x + R, cy = D.y + R, a0 = Math.PI * 0.75, sweep = Math.PI * 1.5;
+      var a = a0 + sweep * E.dialFrac(kmh, prefs.speed);
+      g.fillStyle = P.gauge; g.globalAlpha = 0.88; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
+      g.lineCap = 'round'; g.lineWidth = 4 * u;
+      g.strokeStyle = P.pedal + '0.2)'; g.beginPath(); g.arc(cx, cy, R - 6 * u, a0, a0 + sweep); g.stroke();
+      if (a > a0 + 0.01) { g.strokeStyle = P.body; g.beginPath(); g.arc(cx, cy, R - 6 * u, a0, a); g.stroke(); }
+      // the needle is a pointer on the rim, so it never crosses the digits in the middle
+      g.strokeStyle = P.text; g.lineWidth = 2.5 * u;
+      g.beginPath(); g.moveTo(cx + Math.cos(a) * R * 0.5, cy + Math.sin(a) * R * 0.5); g.lineTo(cx + Math.cos(a) * (R - 3 * u), cy + Math.sin(a) * (R - 3 * u)); g.stroke();
+      g.fillStyle = P.text; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.font = font(15 * u); g.fillText(C.num(kmh), cx, cy - R * 0.02);
+      // the short unit (the long Persian «کیلومتر بر ساعت» ran past the dial), shrunk if still wider
+      var unit = C.t(prefs.speed === 'mph' ? 'optMph' : 'optKmh');
+      g.font = font(8 * u); var uw = g.measureText(unit).width;
+      if (uw > R * 1.15) g.font = font(8 * u * R * 1.15 / uw);
+      g.fillText(unit, cx, cy + R * 0.62);
+    }
+  }
+  function pedal(g, x, y, w, h, on, gas, P) {
+    g.fillStyle = P.pedal + (on ? '0.55)' : '0.22)');
+    C.rrect(g, x, y, w, h, 10); g.fill();
+    g.strokeStyle = P.pedal + (on ? '0.9)' : '0.5)'); g.lineWidth = 2.5; g.lineCap = 'round';
+    g.beginPath();
+    // ridges: across on the brake, along on the gas, like the real pedals
+    if (gas) for (var i = 1; i < 4; i++) { g.moveTo(x + w * i / 4, y + h * 0.22); g.lineTo(x + w * i / 4, y + h * 0.78); }
+    else for (var j = 1; j < 4; j++) { g.moveTo(x + w * 0.22, y + h * j / 4); g.lineTo(x + w * 0.78, y + h * j / 4); }
+    g.stroke();
+  }
+
+  /* ----------------------------------------------------------------- ui */
+
+  var distEl = null;
+  function renderTop() {
+    top.innerHTML = '';
+    if (dailyDate) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyHr') + ' — ' + C.num(dailyDate) })]));
+    distEl = el('span', { class: 'ch-badge' });
+    top.appendChild(distEl);
+    // in a race (#807) the bot's metres stand beside the player's, so a bot off the screen
+    // is still in the race; the level is on the race's label
+    botEl = null;
+    if (B) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent hr-race', text: C.t('rcBadge', { lv: C.t(raceLv) }) }));
+      botEl = el('span', { class: 'ch-badge hr-bot' });
+      top.appendChild(botEl);
+    }
+    var best = C.stats.getBest('hillrider', 'metres');
+    if (!dailyDate && !B && best) top.appendChild(el('span', { class: 'ch-badge', text: C.t('bestM', { n: C.num(best) }) }));
+    // the scene's grip, so a slippery road is never a surprise (#805); sunny is the plain case
+    if (S && S.scene !== 'sun') top.appendChild(el('span', { class: 'ch-badge hr-grip', text: gripText(S.scene) }));
+    var gear = el('button', { class: 'ch-iconbtn hr-gear', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', showSettings);
+    top.appendChild(gear);
+    shownM = -1; shownB = -1;
+    renderDist();
+  }
+  var shownM = -1, shownB = -1, botEl = null;
+  function renderDist() {
+    if (!distEl || !S) return;
+    var m = E.metres(S);
+    if (m !== shownM) { shownM = m; distEl.textContent = C.t('distM', { n: C.num(m) }); }
+    var mb = B && botEl ? Math.min(E.RACE, E.metres(B)) : -1;
+    if (mb >= 0 && mb !== shownB) { shownB = mb; botEl.textContent = C.t('rcBotM', { n: C.num(mb) }); }
+  }
+  function renderStatus() {
+    var tap = waiting && resumed;
+    status.textContent = tap ? C.t('tapGo') : C.t('howTo');
+    // on a wide screen the pedals are drawn on the road, so the how-to line gives its room
+    // to the road (#803); "tap to go on" still shows
+    status.classList.toggle('hr-status--hint', !tap);
+  }
+  function go() { if (waiting) { waiting = false; last = 0; renderStatus(); kick(); } }
+
+  /* The garage (#808): the buggy is free, the others are bought once with the app's coins
+     (C.coins.can and C.coins.spend, like fuel and hints) and kept in the game's store. A
+     locked car shows its price; a tap asks first, and a short wallet gets the core's toast. */
+  function carName(id) { return id === 'jeep' ? C.t('carJeep') : id === 'truck' ? C.t('carTruck') : id === 'racer' ? C.t('carRacer') : C.t('carBuggy'); }
+  function carDesc(id) { return id === 'jeep' ? C.t('dJeep') : id === 'truck' ? C.t('dTruck') : id === 'racer' ? C.t('dRacer') : C.t('dBuggy'); }
+  function garage() {
+    var list = el('div', { class: 'hr-garage' });
+    function render() {
+      list.innerHTML = '';
+      if (dailyDate) list.appendChild(el('div', { class: 'ch-dim hr-gripnote', text: C.t('dailyBuggy') }));
+      E.CAR_IDS.forEach(function (id) {
+        var info = E.car(id), mine = owned.indexOf(id) >= 0, on = prefs.car === id, act;
+        if (on) act = el('span', { class: 'ch-badge ch-badge--accent', text: C.t('carOn') });
+        else if (mine) act = el('button', { class: 'ch-btn hr-carbtn', type: 'button', text: C.t('carPick'), onclick: function () { pick(id); } });
+        else act = el('button', { class: 'ch-btn hr-carbtn', type: 'button', 'aria-label': C.t('buyCarT', { car: carName(id) }), onclick: function () { buy(id); } }, [C.icon('coin', 16), el('span', { text: C.num(info.price) })]);
+        list.appendChild(el('div', { class: 'hr-car' + (mine ? '' : ' hr-car--locked') }, [
+          carPreview(id),
+          el('div', { class: 'hr-car__text' }, [el('div', { class: 'hr-car__name', text: carName(id) }), el('div', { class: 'ch-dim hr-car__desc', text: carDesc(id) })]),
+          act
+        ]));
+      });
+    }
+    function pick(id) {
+      prefs.car = id; ctx.store.set('prefs', prefs);
+      render();
+      if (!dailyDate) { ctx.clearSave(); newRun(); }
+    }
+    function buy(id) {
+      var price = E.car(id).price;
+      if (!C.coins.can(price)) { C.ui.toast({ icon: 'coin', title: C.t('notEnoughCoins'), sub: C.t('playToEarn') }); return; }
+      C.ui.modal({
+        title: C.t('buyCarT', { car: carName(id) }),
+        body: [el('p', { class: 'ch-dim', text: C.t('buyCarText', { n: C.num(price) }) })],
+        actions: [{ label: C.t('cancel') }, { label: C.t('buyCarT', { car: carName(id) }), kind: 'primary', onClick: function () {
+          // the price is taken once, and only a car not yet owned is paid for
+          if (owned.indexOf(id) >= 0 || !C.coins.spend(price)) return;
+          owned.push(id); ctx.store.set('cars', owned.slice());
+          C.feedback('good');
+          C.ui.toast({ icon: 'coin', title: C.t('carBought', { car: carName(id) }) });
+          pick(id);
+        } }]
+      });
+    }
+    render();
+    return el('div', { class: 'ch-item hr-scene' }, [el('div', { class: 'ch-item__label', text: C.t('carT') }), list]);
+  }
+  // a small picture of a car for the garage, drawn with the road's own drawing
+  function carPreview(id) {
+    var w = 76, h = 46, dpr = Math.min(2, window.devicePixelRatio || 1);
+    var c = el('canvas', { class: 'hr-car__pic', width: Math.round(w * dpr), height: Math.round(h * dpr), 'aria-hidden': 'true' });
+    c.style.width = w + 'px'; c.style.height = h + 'px';
+    var g = c.getContext('2d'), k = 20;
+    g.setTransform(dpr * k, 0, 0, -dpr * k, dpr * w / 2, dpr * (h - 6));
+    var pose = { x: 0, y: 0.95, a: 0, wh: [{ x: -1.05, y: 0.42, rot: 0 }, { x: 1.05, y: 0.42, rot: 0 }] };
+    drawCar(g, basePalette(), pose, id);
+    return c;
+  }
+  function gripText(sc) { return sc === 'rain' ? C.t('gripWet') : sc === 'snow' ? C.t('gripSnow') : sc === 'night' ? C.t('gripNight') : C.t('gripSun'); }
+  // The speed dial's unit and the scene live behind the gear, never in the help (#777, #805)
+  function showSettings() {
+    var seg = C.ui.segmented([{ value: 'kmh', label: C.t('optKmh') }, { value: 'mph', label: C.t('optMph') }, { value: 'off', label: C.t('spdOff') }], prefs.speed, function (v) {
+      prefs.speed = v === 'mph' || v === 'off' ? v : 'kmh';
+      ctx.store.set('prefs', prefs);
+      draw();
+    });
+    var gripEl = el('div', { class: 'ch-dim hr-gripnote', text: dailyDate ? C.t('dailySun') : gripText(prefs.scene) });
+    // a new scene starts a new run: grip that changed under a running car would be unfair
+    var scSeg = C.ui.segmented([{ value: 'sun', label: C.t('scSun') }, { value: 'snow', label: C.t('scSnow') }, { value: 'rain', label: C.t('scRain') }, { value: 'night', label: C.t('scNight') }], prefs.scene, function (v) {
+      prefs.scene = E.sceneOf(v);
+      ctx.store.set('prefs', prefs);
+      if (!dailyDate) { gripEl.textContent = gripText(prefs.scene); ctx.clearSave(); newRun(); }
+    });
+    // a free ride or a race (#807); the bot's level shows only for a race. Either change
+    // starts a new run, like the weather: a bot that changed mid-race would be no race
+    var lvRow = el('div', { class: 'ch-item hr-scene', hidden: prefs.mode !== 'race' }, [el('div', { class: 'ch-item__label', text: C.t('rcBot') }),
+      C.ui.segmented([{ value: 'easy', label: C.t('easy') }, { value: 'medium', label: C.t('medium') }, { value: 'hard', label: C.t('hard') }], prefs.level, function (v) {
+        prefs.level = E.levelOf(v);
+        ctx.store.set('prefs', prefs);
+        if (!dailyDate) { ctx.clearSave(); newRun(); }
+      })]);
+    var modeSeg = C.ui.segmented([{ value: 'solo', label: C.t('rcSolo') }, { value: 'race', label: C.t('rcRace') }], prefs.mode, function (v) {
+      prefs.mode = v === 'race' ? 'race' : 'solo';
+      ctx.store.set('prefs', prefs);
+      lvRow.hidden = prefs.mode !== 'race';
+      if (!dailyDate) { ctx.clearSave(); newRun(); }
+    });
+    var modeRow = el('div', { class: 'ch-item hr-scene' }, [el('div', { class: 'ch-item__label', text: C.t('rcT') }), modeSeg].concat(dailyDate ? [el('div', { class: 'ch-dim hr-gripnote', text: C.t('rcDaily') })] : []));
+    C.ui.modal({
+      title: C.t('settings'),
+      body: [el('div', { class: 'ch-list' }, [
+        modeRow,
+        lvRow,
+        garage(),
+        el('div', { class: 'ch-item hr-scene' }, [el('div', { class: 'ch-item__label', text: C.t('scT') }), scSeg, gripEl]),
+        el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('spdT') }), seg])])],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  // The whole game area is the two pedals, split at the middle of the road: on a phone
+  // on its side the road is narrower than the screen, and its empty sides still drive.
+  var touches = {};
+  function side(e) { var r = cv.getBoundingClientRect(); return e.clientX < r.left + r.width / 2 ? 'l' : 'r'; }
+  function syncHeld() { held.l = held.r = false; for (var id in touches) held[touches[id]] = true; }
+  wrap.addEventListener('pointerdown', function (e) {
+    if (!S || (e.target.closest && e.target.closest('button'))) return;
+    e.preventDefault();
+    if (ended) return;
+    go();
+    touches[e.pointerId] = side(e); syncHeld();
+    try { wrap.setPointerCapture(e.pointerId); } catch (er) { /* old browsers */ }
+  });
+  wrap.addEventListener('pointermove', function (e) { if (touches[e.pointerId]) { touches[e.pointerId] = side(e); syncHeld(); } });
+  function lift(e) { delete touches[e.pointerId]; syncHeld(); }
+  wrap.addEventListener('pointerup', lift);
+  wrap.addEventListener('pointercancel', lift);
+  wrap.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  wrap.style.touchAction = 'none';
+
+  function isGas(e) { return e.key === 'ArrowRight' || e.key === 'ArrowUp' || C.keyIs(e, 'd') || C.keyIs(e, 'w'); }
+  function isBrake(e) { return e.key === 'ArrowLeft' || e.key === 'ArrowDown' || C.keyIs(e, 'a') || C.keyIs(e, 's'); }
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim')) return;
+    if (isGas(e)) { go(); keys.g = true; e.preventDefault(); }
+    else if (isBrake(e)) { go(); keys.b = true; e.preventDefault(); }
+    else if (e.key === ' ') { go(); e.preventDefault(); }
+    else if (C.keyIs(e, 'r')) { newRun(); e.preventDefault(); }
+  });
+  window.addEventListener('keyup', function (e) {
+    if (isGas(e)) keys.g = false;
+    else if (isBrake(e)) keys.b = false;
+  });
+  // a run waits while the app is away, and no pedal is held when it comes back
+  C.onPause(function () { paused = true; keys.g = keys.b = false; touches = {}; syncHeld(); ctx.save(); });
+  C.onResume(function () { paused = false; last = 0; kick(); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { last = 0; kick(); } });
+  if (window.ResizeObserver) new ResizeObserver(function () { readRowOver(); draw(); }).observe(box);
+  readRowOver();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { fontFam = ''; draw(); });
+  if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw); } catch (er) { /* old WebViews */ } }
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('p', { class: 'ch-dim', text: C.t('buyRule', { n: C.num(E.FUEL_PRICE) }) }),
+        el('p', { class: 'ch-dim', text: C.t('sceneRule') }),
+        el('p', { class: 'ch-dim', text: C.t('carRule') }),
+        el('p', { class: 'ch-dim', text: C.t('rcRule') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('→ ↑ / D W', C.t('kGas')), kb('← ↓ / A S', C.t('kBrake')), kb('R', C.t('kAgain'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 110" width="100%" direction="ltr"><rect width="200" height="110" rx="10" fill="#A9DCF2"/>';
+    var hill = '<path d="M0 84 Q 50 64 100 80 T 200 70 V110 H0Z" fill="#9A6B45"/><path d="M0 84 Q 50 64 100 80 T 200 70" fill="none" stroke="#3E9C3A" stroke-width="4"/>';
+    var car = function (x, y, a) {
+      return '<g transform="translate(' + x + ' ' + y + ') rotate(' + a + ')"><circle cx="-14" cy="0" r="6" fill="#1A1A1C"/><circle cx="14" cy="0" r="6" fill="#1A1A1C"/>' +
+        '<path d="M-21 -6 H21 L20 -10 L9 -13 L-6 -10 L-20 -12Z" fill="#D94F2B"/><circle cx="-2" cy="-19" r="4.5" fill="#E8B21A"/></g>';
+    };
+    if (kind === 1) s += hill + car(100, 72, -4) + '<rect x="6" y="40" width="22" height="30" rx="5" fill="rgba(31,26,23,.25)"/><rect x="172" y="40" width="22" height="30" rx="5" fill="rgba(31,26,23,.25)"/>' +
+      '<text x="17" y="34" font-size="12" text-anchor="middle" fill="#1F1A17">◀</text><text x="183" y="34" font-size="12" text-anchor="middle" fill="#1F1A17">▶</text>';
+    if (kind === 2) s += hill + car(100, 36, -30) + '<path d="M70 40 A 32 32 0 0 1 120 12" fill="none" stroke="' + ACCENT + '" stroke-width="2.5" stroke-dasharray="4 4"/><path d="M118 6 l6 7 -9 2z" fill="' + ACCENT + '"/>';
+    if (kind === 3) s += hill + car(56, 70, -6) + '<rect x="126" y="54" width="16" height="20" rx="3" fill="#D8382C"/><rect x="134" y="50" width="6" height="4" fill="#8E231B"/>' +
+      '<rect x="10" y="10" width="70" height="9" rx="4.5" fill="#E9E2D6"/><rect x="10" y="10" width="18" height="9" rx="4.5" fill="#D8382C"/>';
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // A run in progress is saved when the app goes away, and comes back waiting for a tap,
+  // so the car is never dropped mid-jump; the daily road has its own slot (#132)
+  ctx.autosave(function () {
+    if (!S || S.over || S.won || ended || S.t < 1) return { inProgress: false };
+    // a race keeps the bot's car and level too (#807)
+    return { s: E.snapshot(S), b: B ? E.snapshot(B) : null, lv: raceLv, tries: tries, daily: dailyDate || null, elapsed: Date.now() - startedAt };
+  });
+  function resumeRun(sv) {
+    var R = E.restore(sv.s), RB = sv.b && !sv.daily ? E.restore(sv.b) : null;
+    if (!R || (sv.b && !sv.daily && !RB)) return false;
+    S = R; B = RB; prevB = null; race = !!RB; raceLv = E.levelOf(sv.lv); tries = sv.tries || 1; startedAt = Date.now() - (sv.elapsed || 0);
+    ended = false; waiting = true; resumed = true; flipPending = false; acc = 0; last = 0; prev = null; spd = Math.abs(S.vx);
+    cam.x = S.x; cam.y = S.y;
+    renderTop(); renderStatus(); draw(); kick();
+    return true;
+  }
+  var saved = ctx.loadSave();
+  if (dailyDate) {
+    if (!(saved && saved.s && saved.daily === dailyDate && resumeRun(saved))) newRun();
+    if (C.stats.dailyDone('hillrider', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).hillrider;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (!(saved && saved.s && !saved.daily && resumeRun(saved))) {
+    newRun();
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
