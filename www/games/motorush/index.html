@@ -13,6 +13,11 @@
   .mr-canvas { display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; user-select: none; -webkit-user-select: none; }
   .mr-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
   .mr-label { font-weight: 700; font-size: var(--fs-sm); color: var(--c-text-dim); }
+  .mr-bikes { width: 100%; }
+  .mr-bikes .ch-item { gap: var(--s-2); flex-wrap: nowrap; }
+  .mr-bikes .ch-item__label { flex: 1; min-width: 0; }
+  .mr-bikes .ch-btn { flex: none; }
+  .mr-dot { width: 14px; height: 14px; border-radius: 50%; flex: none; }
   .mr-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
 </style>
 </head>
@@ -76,13 +81,29 @@ function MotoRushEngineFactory() {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   }
+  // Bikes (#815), bought with the app's coins; the courier is the starter and the daily's
+  // bike. Each one after it is at least as good in everything and better in one more:
+  // gas is the pedal's extra m/s, boost nitro's extra m/s for boostT ticks, cans the cans
+  // that fill the nitro bar, lane a factor on the steering speed. The traffic generator
+  // builds every gap for the bike being ridden, so a faster bike never meets a gap it
+  // cannot make.
+  var BIKES = {
+    courier: { price: 0, gas: 12, boost: 12, boostT: 180, cans: 3, lane: 1, color: '#3945C6' },
+    gale: { price: 300, gas: 15, boost: 12, boostT: 180, cans: 3, lane: 1, color: '#D0383E' },
+    thunder: { price: 800, gas: 15, boost: 14, boostT: 270, cans: 2, lane: 1, color: '#2E9A5E' },
+    arrow: { price: 2000, gas: 16, boost: 14, boostT: 270, cans: 2, lane: 1.25, color: '#E39A12' }
+  };
+  var BIKE_IDS = ['courier', 'gale', 'thunder', 'arrow'];
+  function bikeOf(id) { return BIKES[id] || BIKES.courier; }
+  // what one can adds to the bar: a third (0.34, so three always fill it) or a half
+  function pickAdd(id) { var n = bikeOf(id).cans; return n === 3 ? PICK_ADD : Math.ceil(100 / n) / 100; }
   function cfg(diff) { return DIFF[diff] || DIFF.medium; }
   function sceneOf(sc) { return SCENES[sc] || SCENES.sunny; }
   // lanes a second the bike steers at in a scene
-  function laneSpeed(sc) { return LANE_SPEED * sceneOf(sc).grip; }
+  function laneSpeed(sc, bk) { return LANE_SPEED * sceneOf(sc).grip * bikeOf(bk).lane; }
   function base(p, diff) { var c = cfg(diff); return Math.min(c.vmax, c.v0 + (c.vmax - c.v0) * Math.max(0, p) / c.ramp); }
   // where the speed is heading, and the speed the bike really rides at
-  function target(S) { return base(S.p, S.diff) + (S.gas ? GAS_V : 0) + (S.boostT > 0 ? BOOST_V : 0); }
+  function target(S) { var b = bikeOf(S.bike); return base(S.p, S.diff) + (S.gas ? b.gas : 0) + (S.boostT > 0 ? b.boost : 0); }
   function speed(S) { return S.v; }
   function ease(S) {
     var t = target(S);
@@ -92,8 +113,8 @@ function MotoRushEngineFactory() {
   // The fastest the bike can close on traffic at p: top of the ramp there, gas and nitro.
   // The eased speed never passes the highest target it has had, and the road's speed only
   // grows with p, so this instant worst case also bounds the real, accelerating speed.
-  function closing(p, diff) { return base(p, diff) + GAS_V + BOOST_V - TV; }
-  function topSpeed(diff) { return cfg(diff).vmax + GAS_V + BOOST_V; }
+  function closing(p, diff, bk) { var b = bikeOf(bk); return base(p, diff) + b.gas + b.boost - TV; }
+  function topSpeed(diff, bk) { var b = bikeOf(bk); return cfg(diff).vmax + b.gas + b.boost; }
   function levelAt(p, diff) { return 1 + Math.floor(Math.max(0, p) / cfg(diff).lap); }
   function goal(S) { return S.daily ? DAILY_P : Infinity; }
   // The roadside (#814): every SIDE_STEP metres of ground holds one thing on each side,
@@ -132,24 +153,25 @@ function MotoRushEngineFactory() {
   // first to pass can still reach the next free lane in time, even with gas and nitro
   // (with the overshoot of a slippery scene counted as part of the way, in case the bike
   // is still sliding back from it)
-  function need(from, to, y, diff, sc) {
+  function need(from, to, y, diff, sc, bk) {
     var Q = sceneOf(sc);
-    return BIKE_L + ((Math.abs(from - to) + Q.ov) / laneSpeed(sc) + cfg(diff).react + Q.react) * closing(y + 200, diff) + 2;
+    return BIKE_L + ((Math.abs(from - to) + Q.ov) / laneSpeed(sc, bk) + cfg(diff).react + Q.react) * closing(y + 200, diff, bk) + 2;
   }
   // How far ahead of the bike a lane changer starts to blink. Blinking and sliding take a
   // fixed time; after that, a rider at the fastest closing speed still has its reaction
   // time and one lane change to step into the lane the car just left, which is always
   // free. A slower rider only gets more room.
-  function warnAt(y, diff, sc) {
+  function warnAt(y, diff, sc, bk) {
     var Q = sceneOf(sc);
-    return ((BLINK + MOVE) * DT + (1 + Q.ov) / laneSpeed(sc) + cfg(diff).react + Q.react) * closing(y, diff) + BIKE_L + 2;
+    return ((BLINK + MOVE) * DT + (1 + Q.ov) / laneSpeed(sc, bk) + cfg(diff).react + Q.react) * closing(y, diff, bk) + BIKE_L + 2;
   }
 
-  function fromSeed(seed, daily, diff, scene) {
+  function fromSeed(seed, daily, diff, scene, bike) {
     diff = daily || !DIFF[diff] ? 'medium' : diff;
     scene = daily || !SCENES[scene] ? 'sunny' : scene;
+    bike = daily || !BIKES[bike] ? 'courier' : bike;
     var S = {
-      r: seed >>> 0, sd: seed >>> 0, daily: !!daily, diff: diff, scene: scene, p: 0, d: 0, x: START_LANE, tl: START_LANE, ox: 0,
+      r: seed >>> 0, sd: seed >>> 0, daily: !!daily, diff: diff, scene: scene, bike: bike, p: 0, d: 0, x: START_LANE, tl: START_LANE, ox: 0,
       bar: 0, boostT: 0, gas: false, combo: 0, comboT: 0, bestCombo: 0, nears: 0, picks: 0,
       score: 0, tick: 0, v: DIFF[diff].v0, top: DIFF[diff].v0, lvl: 1, over: false, won: false, hit: null,
       waves: [], items: [], ny: FIRST, nf: 0, ev: []
@@ -158,7 +180,7 @@ function MotoRushEngineFactory() {
     ensure(S);
     return S;
   }
-  function newGame(rnd, daily, diff, scene) { return fromSeed(Math.floor(rnd() * 4294967296), daily, diff, scene); }
+  function newGame(rnd, daily, diff, scene, bike) { return fromSeed(Math.floor(rnd() * 4294967296), daily, diff, scene, bike); }
 
   // One wave: one to three cars side by side (staggered a little), always leaving the
   // lane f free. The next wave's free lane is drawn now, so the gap after this wave
@@ -192,13 +214,13 @@ function MotoRushEngineFactory() {
       }
       if (opts.length) {
         var pick = opts[Math.floor(rand(S) * opts.length)], lc = cars[pick[0]];
-        lc.to = pick[1]; lc.ph = 0; lc.k = 0; lc.at = Math.round(warnAt(y + lc.o, S.diff, S.scene) * 10) / 10;
+        lc.to = pick[1]; lc.ph = 0; lc.k = 0; lc.at = Math.round(warnAt(y + lc.o, S.diff, S.scene, S.bike) * 10) / 10;
       }
     }
     S.waves.push({ y: y, span: span, f: f, cars: cars });
     if (rand(S) < 0.3) S.items.push({ lane: f, y: y + span / 2, got: false });
     var gs = 3.2 - 1.6 * t;
-    var gap = Math.max(need(f, S.nf, y + span, S.diff, S.scene), gs * (base(y + span, S.diff) - TV) * (0.85 + 0.4 * rand(S)));
+    var gap = Math.max(need(f, S.nf, y + span, S.diff, S.scene, S.bike), gs * (base(y + span, S.diff) - TV) * (0.85 + 0.4 * rand(S)));
     // rounded up: rounding down could take a few centimetres off the margin need() asks for
     S.ny = Math.ceil((y + span + gap) * 10) / 10;
   }
@@ -245,7 +267,7 @@ function MotoRushEngineFactory() {
     S.top = Math.max(S.top, v);
     // steering: the bike slides toward its lane at the scene's grip, past it by the
     // overshoot, and back
-    var ls = laneSpeed(S.scene), aim = Math.round((S.tl + S.ox) * 1e6) / 1e6;
+    var ls = laneSpeed(S.scene, S.bike), aim = Math.round((S.tl + S.ox) * 1e6) / 1e6;
     if (S.x < aim) S.x = Math.min(aim, S.x + ls * DT);
     else if (S.x > aim) S.x = Math.max(aim, S.x - ls * DT);
     S.x = Math.round(S.x * 1e6) / 1e6;
@@ -291,12 +313,12 @@ function MotoRushEngineFactory() {
       if (it.got || it.y > S.p) continue;
       if (it.y >= rear && Math.abs(S.x - it.lane) < 0.6) {
         it.got = true; S.picks++;
-        // n: how many of the three cans the bar now holds, so the page can say it (#781)
-        var pe = { t: 'pick', n: 0, lane: it.lane }; S.ev.push(pe);
+        // n: how many of the m cans the bar now holds, so the page can say it (#781)
+        var bk = bikeOf(S.bike), add = pickAdd(S.bike), pe = { t: 'pick', n: 0, m: bk.cans, lane: it.lane }; S.ev.push(pe);
         if (S.boostT <= 0) {
-          S.bar = Math.round((S.bar + PICK_ADD) * 100) / 100;
-          pe.n = Math.min(3, Math.round(S.bar / PICK_ADD));
-          if (S.bar >= 1) { S.bar = 0; S.boostT = BOOST_T; S.ev.push({ t: 'boost' }); }
+          S.bar = Math.round((S.bar + add) * 100) / 100;
+          pe.n = Math.min(bk.cans, Math.round(S.bar / add));
+          if (S.bar >= 1) { S.bar = 0; S.boostT = bk.boostT; S.ev.push({ t: 'boost' }); }
         }
       }
     }
@@ -339,6 +361,8 @@ function MotoRushEngineFactory() {
     if (!DIFF[S.diff] || S.daily) S.diff = 'medium';
     // saves from before #813 ride in the sun
     if (!SCENES[S.scene] || S.daily) S.scene = 'sunny';
+    // saves from before #815 ride the courier
+    if (!BIKES[S.bike] || S.daily) S.bike = 'courier';
     if (!num(S.ox)) S.ox = 0;
     // the roadside's seed; a save from before #814 grows its scenery from the traffic's
     if (!num(S.sd)) S.sd = S.r >>> 0;
@@ -358,6 +382,7 @@ function MotoRushEngineFactory() {
     LANE_SPEED: LANE_SPEED, REACT: REACT, TV: TV, BOOST_V: BOOST_V, BOOST_T: BOOST_T, COMBO_T: COMBO_T, COMBO_MAX: COMBO_MAX,
     PICK_ADD: PICK_ADD, LEN: LEN, DIFF: DIFF, GAS_V: GAS_V, GAS_MULT: GAS_MULT, BLINK: BLINK, MOVE: MOVE,
     ACC: ACC, DEC: DEC, target: target, SCENES: SCENES, laneSpeed: laneSpeed,
+    BIKES: BIKES, BIKE_IDS: BIKE_IDS, bikeOf: bikeOf, pickAdd: pickAdd,
     BIOMES: BIOMES, KINDS: KINDS, SIDE_STEP: SIDE_STEP, SIDE_MIN: SIDE_MIN, biomeAt: biomeAt, props: props,
     base: base, speed: speed, need: need, warnAt: warnAt, closing: closing, topSpeed: topSpeed, levelAt: levelAt,
     newGame: newGame, fromSeed: fromSeed, step: step, steer: steer, gas: gas,
@@ -387,6 +412,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     mood: 'dots',
     strings: {
       fa: {
+        bikeL: 'موتور', bkCourier: 'پیک', bkGale: 'تندباد', bkThunder: 'تندر', bkArrow: 'تیر', bkCourierD: 'موتور اول، برای همه', bkGaleD: 'گاز قوی‌تر', bkThunderD: 'نیتروی بیشتر؛ با دو قوطی پر می‌شود', bkArrowD: 'از همه تندتر، با بانده‌عوض‌کردن سریع‌تر', bikeRide: 'سوار شو', bikeRiding: 'سواری', bikePrice: '{n} سکه', bikeBought: '{name} مال تو شد', dailyBike: 'در موتورسوار روزانه همه با «پیک» می‌رانند.',
         sceneL: 'هوا', sceneSunny: 'آفتابی', sceneRainy: 'بارانی', sceneSnowy: 'برفی', sceneNight: 'شب', gripN: 'چسبندگی {n}٪', dailySunny: 'هوای موتورسوار روزانه همیشه آفتابی است.', sceneHint: 'در باران و برف بانده عوض کردن کندتر است و موتور کمی از بانده رد می‌شود و برمی‌گردد؛ شب‌ها جاده‌ی جلو را کوتاه‌تر می‌بینی.',
         scene: 'موتورسوار در جاده‌ای چهاربانده میان ماشین‌ها', hint: 'انگشت را بکش یا سمت چپ و راست را لمس کن تا بانده عوض کنی. پدال گاز را نگه دار تا تندتر بروی.', tapStart: 'برای حرکت لمس کن',
         gasL: 'گاز', kGas: 'گاز', lvlN: 'مرحله‌ی {n}', lvlUp: 'مرحله‌ی {n}!', lvlL: 'مرحله', dailyMed: 'موتورسوار روزانه همیشه روی سختی متوسط است و برای همه یکسان.',
@@ -399,6 +425,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         tutTitle3: 'نیترو', tutText3: 'قوطی‌های زرد را بردار. نوار که پر شد، نیترو سرعت و امتیازت را بالا می‌برد.'
       },
       en: {
+        bikeL: 'Bike', bkCourier: 'Courier', bkGale: 'Gale', bkThunder: 'Thunder', bkArrow: 'Arrow', bkCourierD: 'The first bike, for everyone', bkGaleD: 'A stronger throttle', bkThunderD: 'More nitro; two cans fill it', bkArrowD: 'The fastest, with quicker lane changes', bikeRide: 'Ride', bikeRiding: 'Riding', bikePrice: '{n} coins', bikeBought: 'The {name} is yours', dailyBike: 'In the daily ride everyone rides the Courier.',
         sceneL: 'Weather', sceneSunny: 'Sunny', sceneRainy: 'Rain', sceneSnowy: 'Snow', sceneNight: 'Night', gripN: 'Grip {n}%', dailySunny: 'The daily ride is always sunny.', sceneHint: 'In rain and snow a lane change is slower and the bike slides a little past the lane; at night you see less of the road ahead.',
         scene: 'A motorbike on a four-lane road among the traffic', hint: 'Swipe, or tap the left or right side, to change lanes. Hold the pedal to speed up.', tapStart: 'Tap to ride',
         gasL: 'GAS', kGas: 'Gas', lvlN: 'Level {n}', lvlUp: 'Level {n}!', lvlL: 'Level', dailyMed: 'The daily ride is always on Medium, the same for everyone.',
@@ -411,6 +438,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         tutTitle3: 'Nitro', tutText3: 'Pick up the yellow cans. When the bar is full, nitro raises your speed and your score.'
       },
       pl: {
+        bikeL: 'Motocykl', bkCourier: 'Kurier', bkGale: 'Wicher', bkThunder: 'Grom', bkArrow: 'Strzała', bkCourierD: 'Pierwszy motocykl, dla każdego', bkGaleD: 'Mocniejszy gaz', bkThunderD: 'Więcej nitro; napełniają je dwa kanistry', bkArrowD: 'Najszybszy, szybciej zmienia pas', bikeRide: 'Jedź', bikeRiding: 'W użyciu', bikePrice: '{n} monet', bikeBought: '{name} jest twój', dailyBike: 'W jeździe dnia wszyscy jadą Kurierem.',
         sceneL: 'Pogoda', sceneSunny: 'Słońce', sceneRainy: 'Deszcz', sceneSnowy: 'Śnieg', sceneNight: 'Noc', gripN: 'Przyczepność {n}%', dailySunny: 'Jazda dnia jest zawsze w słońcu.', sceneHint: 'W deszczu i śniegu zmiana pasa trwa dłużej, a motocykl lekko wyjeżdża za pas; nocą widzisz mniej drogi przed sobą.',
         scene: 'Motocykl na czteropasmowej drodze wśród samochodów', hint: 'Przesuń palcem albo stuknij lewą lub prawą stronę, aby zmienić pas. Przytrzymaj pedał, aby przyspieszyć.', tapStart: 'Stuknij, aby jechać',
         gasL: 'GAZ', kGas: 'Gaz', lvlN: 'Poziom {n}', lvlUp: 'Poziom {n}!', lvlL: 'Poziom', dailyMed: 'Jazda dnia jest zawsze na poziomie Średni, taka sama dla wszystkich.',
@@ -423,6 +451,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         tutTitle3: 'Nitro', tutText3: 'Zbieraj żółte kanistry. Gdy pasek jest pełny, nitro podnosi prędkość i punkty.'
       },
       fr: {
+        bikeL: 'Moto', bkCourier: 'Coursier', bkGale: 'Rafale', bkThunder: 'Tonnerre', bkArrow: 'Flèche', bkCourierD: 'La première moto, pour tous', bkGaleD: 'Des gaz plus puissants', bkThunderD: 'Plus de nitro ; deux bidons la remplissent', bkArrowD: 'La plus rapide, avec des changements de voie plus vifs', bikeRide: 'Rouler', bikeRiding: 'En selle', bikePrice: '{n} pièces', bikeBought: '{name} est à toi', dailyBike: 'Dans la balade du jour, tout le monde roule en Coursier.',
         sceneL: 'Météo', sceneSunny: 'Soleil', sceneRainy: 'Pluie', sceneSnowy: 'Neige', sceneNight: 'Nuit', gripN: 'Adhérence {n} %', dailySunny: 'La balade du jour est toujours au soleil.', sceneHint: 'Sous la pluie et la neige, changer de voie prend plus de temps et la moto glisse un peu au-delà de la voie ; la nuit, tu vois moins loin devant toi.',
         scene: 'Une moto sur une route à quatre voies, au milieu de la circulation', hint: 'Balaie, ou touche le côté gauche ou droit, pour changer de voie. Maintiens la pédale pour accélérer.', tapStart: 'Touche pour rouler',
         gasL: 'GAZ', kGas: 'Gaz', lvlN: 'Niveau {n}', lvlUp: 'Niveau {n} !', lvlL: 'Niveau', dailyMed: 'La balade du jour est toujours en Moyen, la même pour tous.',
@@ -435,6 +464,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         tutTitle3: 'Nitro', tutText3: 'Ramasse les bidons jaunes. Quand la jauge est pleine, le nitro augmente ta vitesse et ton score.'
       },
       zh: {
+        bikeL: '摩托', bkCourier: '信使', bkGale: '疾风', bkThunder: '雷霆', bkArrow: '飞箭', bkCourierD: '第一辆摩托，人人都有', bkGaleD: '油门更强', bkThunderD: '氮气更多；两个油罐就能充满', bkArrowD: '最快，换道也更灵活', bikeRide: '骑这辆', bikeRiding: '正在骑', bikePrice: '{n} 金币', bikeBought: '{name}归你了', dailyBike: '每日飞驰中大家都骑“信使”。',
         sceneL: '天气', sceneSunny: '晴天', sceneRainy: '雨天', sceneSnowy: '雪天', sceneNight: '夜晚', gripN: '抓地力 {n}%', dailySunny: '每日飞驰总是晴天。', sceneHint: '雨天和雪天换道更慢，摩托还会稍微滑过车道；夜里能看到的前方路面更短。',
         scene: '四车道公路上穿行在车流中的摩托车', hint: '滑动，或点屏幕左侧或右侧来换道。按住踏板加速。', tapStart: '点一下出发',
         gasL: '油门', kGas: '油门', lvlN: '第 {n} 关', lvlUp: '第 {n} 关！', lvlL: '关卡', dailyMed: '每日飞驰始终是中等难度，对所有人都一样。',
@@ -447,6 +477,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         tutTitle3: '氮气', tutText3: '捡起黄色油罐。氮气条满了，速度和得分都会提高。'
       },
       de: {
+        bikeL: 'Motorrad', bkCourier: 'Kurier', bkGale: 'Sturm', bkThunder: 'Donner', bkArrow: 'Pfeil', bkCourierD: 'Das erste Motorrad, für alle', bkGaleD: 'Kräftigeres Gas', bkThunderD: 'Mehr Nitro; zwei Kanister füllen es', bkArrowD: 'Das schnellste, mit flinkeren Spurwechseln', bikeRide: 'Fahren', bikeRiding: 'Im Sattel', bikePrice: '{n} Münzen', bikeBought: '{name} gehört dir', dailyBike: 'Bei der Fahrt des Tages fahren alle den Kurier.',
         sceneL: 'Wetter', sceneSunny: 'Sonne', sceneRainy: 'Regen', sceneSnowy: 'Schnee', sceneNight: 'Nacht', gripN: 'Grip {n} %', dailySunny: 'Die Fahrt des Tages ist immer sonnig.', sceneHint: 'Bei Regen und Schnee dauert ein Spurwechsel länger und das Motorrad rutscht etwas über die Spur hinaus; nachts siehst du weniger von der Straße vor dir.',
         scene: 'Ein Motorrad auf einer vierspurigen Straße im Verkehr', hint: 'Wische oder tippe links bzw. rechts, um die Spur zu wechseln. Halte das Pedal, um schneller zu fahren.', tapStart: 'Tippe zum Losfahren',
         gasL: 'GAS', kGas: 'Gas', lvlN: 'Stufe {n}', lvlUp: 'Stufe {n}!', lvlL: 'Stufe', dailyMed: 'Die Fahrt des Tages ist immer auf Mittel, für alle gleich.',
@@ -459,6 +490,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         tutTitle3: 'Nitro', tutText3: 'Sammle die gelben Kanister. Ist die Leiste voll, erhöht Nitro Tempo und Punkte.'
       },
       es: {
+        bikeL: 'Moto', bkCourier: 'Mensajero', bkGale: 'Ráfaga', bkThunder: 'Trueno', bkArrow: 'Flecha', bkCourierD: 'La primera moto, para todos', bkGaleD: 'Más potencia', bkThunderD: 'Más nitro; dos latas la llenan', bkArrowD: 'La más rápida, con cambios de carril más ágiles', bikeRide: 'Montar', bikeRiding: 'En uso', bikePrice: '{n} monedas', bikeBought: '{name} es tuya', dailyBike: 'En la carrera del día todos van en la Mensajero.',
         sceneL: 'Tiempo', sceneSunny: 'Sol', sceneRainy: 'Lluvia', sceneSnowy: 'Nieve', sceneNight: 'Noche', gripN: 'Agarre {n} %', dailySunny: 'La carrera del día siempre es con sol.', sceneHint: 'Con lluvia y nieve cambiar de carril cuesta más y la moto se pasa un poco del carril; de noche ves menos carretera por delante.',
         scene: 'Una moto en una carretera de cuatro carriles entre el tráfico', hint: 'Desliza o toca el lado izquierdo o derecho para cambiar de carril. Mantén el pedal para acelerar.', tapStart: 'Toca para arrancar',
         gasL: 'GAS', kGas: 'Acelerar', lvlN: 'Nivel {n}', lvlUp: '¡Nivel {n}!', lvlL: 'Nivel', dailyMed: 'La carrera del día es siempre en Media, igual para todos.',
@@ -495,6 +527,23 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
   // the weather (#813), beside the difficulty and kept with it
   var SCENE_IDS = ['sunny', 'rainy', 'snowy', 'night'];
   if (SCENE_IDS.indexOf(prefs.scene) < 0) prefs.scene = 'sunny';
+  // bikes bought with the app's coins (#815), kept for good; the courier is always owned
+  if (!E.BIKES[prefs.bike]) prefs.bike = 'courier';
+  var owned = ctx.store.get('bikes', null);
+  if (!Array.isArray(owned)) owned = [];
+  owned = E.BIKE_IDS.filter(function (id) { return id === 'courier' || owned.indexOf(id) >= 0; });
+  if (owned.indexOf(prefs.bike) < 0) prefs.bike = 'courier';
+  function bikeName(id) { return id === 'gale' ? C.t('bkGale') : id === 'thunder' ? C.t('bkThunder') : id === 'arrow' ? C.t('bkArrow') : C.t('bkCourier'); }
+  function bikeDesc(id) { return id === 'gale' ? C.t('bkGaleD') : id === 'thunder' ? C.t('bkThunderD') : id === 'arrow' ? C.t('bkArrowD') : C.t('bkCourierD'); }
+  // A purchase: the price is taken once and only when the wallet holds it; a second tap
+  // on a bike already owned buys nothing. Returns 'owned', 'short' or 'bought'.
+  function tryBuy(id, coins, list) {
+    var b = E.BIKES[id];
+    if (!b || list.indexOf(id) >= 0) return 'owned';
+    if (!coins.can(b.price) || !coins.spend(b.price)) return 'short';
+    list.push(id);
+    return 'bought';
+  }
   function sceneName(id) { return id === 'rainy' ? C.t('sceneRainy') : id === 'snowy' ? C.t('sceneSnowy') : id === 'night' ? C.t('sceneNight') : C.t('sceneSunny'); }
   // the gas: held by a finger on the pedal or by Up / W (#782)
   var gasPtr = null, keyGas = false;
@@ -514,12 +563,13 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
   // the daily road comes from the day, the same for everyone
   function rngFor(sd) { return dailyDate ? C.daily('motorush', dailyDate).rng : seeded(sd); }
 
-  function newRun(diff, scene) {
+  function newRun(diff, scene, bike) {
     if (diff) { prefs.diff = diff; ctx.store.set('prefs', prefs); }
     if (scene) { prefs.scene = scene; ctx.store.set('prefs', prefs); }
+    if (bike && owned.indexOf(bike) >= 0) { prefs.bike = bike; ctx.store.set('prefs', prefs); }
     seed = Math.floor(Math.random() * 4294967296);
-    // the engine rides the daily on medium and in the sun whatever is passed here
-    S = E.newGame(rngFor(seed), !!dailyDate, prefs.diff, prefs.scene);
+    // the engine rides the daily on medium, in the sun, on the courier whatever is passed here
+    S = E.newGame(rngFor(seed), !!dailyDate, prefs.diff, prefs.scene, prefs.bike);
     tries++;
     startedAt = Date.now();
     ended = false; waiting = true; held = false; last = 0; acc = 0;
@@ -539,6 +589,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
       // the daily ride is the same road for everyone, so it has no choice to make
       body.appendChild(el('p', { class: 'ch-dim', text: C.t('dailyMed') }));
       body.appendChild(el('p', { class: 'ch-dim', text: C.t('dailySunny') }));
+      body.appendChild(el('p', { class: 'ch-dim', text: C.t('dailyBike') }));
       C.ui.modal({ title: C.t('settings'), closeButton: true, body: [body], actions: [{ label: C.t('done'), kind: 'primary' }] });
       return;
     }
@@ -547,10 +598,37 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     body.appendChild(el('div', { class: 'mr-label', text: C.t('sceneL') }));
     body.appendChild(C.ui.segmented(SCENE_IDS.map(function (id) { return { value: id, label: sceneName(id) }; }), pickScene, function (v) { pickScene = v; }));
     body.appendChild(el('p', { class: 'ch-xs ch-dim', style: { 'text-align': 'center', margin: '0' }, text: C.t('sceneHint') }));
+    // the bikes: an owned one is picked for the next ride, a locked one shows its price
+    var pickBike = prefs.bike, bikeList = el('div', { class: 'ch-list mr-bikes' });
+    function bikeRows() {
+      bikeList.innerHTML = '';
+      E.BIKE_IDS.forEach(function (id) {
+        var has = owned.indexOf(id) >= 0, on = id === pickBike, b = E.BIKES[id];
+        var btn = el('button', { type: 'button', class: 'ch-btn ch-btn--sm ' + (on ? 'ch-btn--primary' : 'ch-btn--soft') }, has ? [el('span', { text: on ? C.t('bikeRiding') : C.t('bikeRide') })] : [C.icon('lock', 14), el('span', { text: C.t('bikePrice', { n: C.num(b.price) }) })]);
+        btn.addEventListener('click', function () {
+          if (!has) {
+            var r = tryBuy(id, C.coins, owned);
+            if (r === 'short') { C.ui.toast({ icon: 'coin', title: C.t('notEnoughCoins'), sub: C.t('playToEarn') }); return; }
+            ctx.store.set('bikes', owned);
+            C.audio.sfx('coin');
+            C.ui.toast({ icon: 'check', title: C.t('bikeBought', { name: bikeName(id) }) });
+          }
+          pickBike = id; bikeRows();
+        });
+        bikeList.appendChild(el('div', { class: 'ch-item' }, [
+          el('span', { class: 'mr-dot', style: { background: b.color } }),
+          el('div', { class: 'ch-item__label' }, [el('div', { text: bikeName(id) }), el('div', { class: 'ch-item__hint', text: bikeDesc(id) })]),
+          btn
+        ]));
+      });
+    }
+    bikeRows();
+    body.appendChild(el('div', { class: 'mr-label', text: C.t('bikeL') }));
+    body.appendChild(bikeList);
     if (S && !ended && S.tick > 0) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('resetWarn') }));
     C.ui.modal({
       title: C.t('settings'), closeButton: true, body: [body],
-      actions: [{ label: C.t('cancel') }, { label: C.t('start'), kind: 'primary', onClick: function () { newRun(pick, pickScene); } }]
+      actions: [{ label: C.t('cancel') }, { label: C.t('start'), kind: 'primary', onClick: function () { newRun(pick, pickScene, pickBike); } }]
     });
   }
 
@@ -596,7 +674,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         if (e.combo >= E.COMBO_MAX) C.achievements.unlock('mo-close');
       } else if (e.t === 'pick') {
         C.audio.sfx('coin'); flash = 1;
-        if (e.n > 0 && e.n < 3) pops.push({ text: C.t('nitroN', { n: C.num(e.n), m: C.num(3) }), lane: e.lane, t: 1.1, max: 1.1 });
+        if (e.n > 0 && e.n < e.m) pops.push({ text: C.t('nitroN', { n: C.num(e.n), m: C.num(e.m) }), lane: e.lane, t: 1.1, max: 1.1 });
       } else if (e.t === 'boost') {
         C.audio.sfx('nitro'); C.haptic('success');
         pops.push({ text: C.t('nitroGo'), t: 1.3, max: 1.3, big: true });
@@ -966,7 +1044,8 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     g.fillStyle = '#9A98A2'; rr(g, 2.5, -14, 4.5, 3.6, 1.6); g.fill();
     // mudguard and body
     g.fillStyle = '#2F2D36'; rr(g, -5, -22, 10, 8, 3); g.fill();
-    g.fillStyle = ACCENT; rr(g, -7, -29, 14, 8, 3.5); g.fill();
+    // the bike's body in its own colour (#815); the rider keeps the game's indigo
+    g.fillStyle = E.bikeOf(S.bike).color; rr(g, -7, -29, 14, 8, 3.5); g.fill();
     // tail light
     if (dk) { g.shadowColor = '#FF3B3B'; g.shadowBlur = 10; }
     g.fillStyle = '#FF3B3B'; rr(g, -3.2, -22.5, 6.4, 2.6, 1.2); g.fill();
@@ -1008,16 +1087,18 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     g.fillStyle = S.boostT > 0 ? '#FFB13B' : P.can;
     g.beginPath(); g.moveTo(27, 54); g.lineTo(20, 63); g.lineTo(24, 63); g.lineTo(22, 71); g.lineTo(30, 61); g.lineTo(26, 61); g.closePath(); g.fill();
     g.fillStyle = P.bar; rr(g, 36, 57, 94, 10, 5); g.fill();
-    var f = S.boostT > 0 ? S.boostT / E.BOOST_T : S.bar;
+    var BK = E.bikeOf(S.bike), f = S.boostT > 0 ? S.boostT / BK.boostT : S.bar;
     if (f > 0) { g.fillStyle = S.boostT > 0 ? '#FFB13B' : P.can; rr(g, 36, 57, Math.max(10, 94 * Math.min(1, f)), 10, 5); g.fill(); }
-    g.fillStyle = P.panel; g.fillRect(36 + 94 / 3 - 1, 57, 2, 10); g.fillRect(36 + 188 / 3 - 1, 57, 2, 10);
+    // one step of the bar for each can the bike needs (#815)
+    g.fillStyle = P.panel;
+    for (var ci = 1; ci < BK.cans; ci++) g.fillRect(36 + 94 * ci / BK.cans - 1, 57, 2, 10);
     if (flash > 0) { g.strokeStyle = 'rgba(246,185,59,' + flash + ')'; g.lineWidth = 2; rr(g, 34, 55, 98, 14, 7); g.stroke(); }
     // the speedometer, top right
     var v = E.speed(S), cx = VW - 52, cy = 50, R = 34;
     g.fillStyle = P.panel; rr(g, VW - 98, 8, 90, 64, 12); g.fill();
     g.lineCap = 'round'; g.lineWidth = 5;
     g.strokeStyle = P.bar; g.beginPath(); g.arc(cx, cy, R - 6, Math.PI * 0.85, Math.PI * 2.15); g.stroke();
-    var fr = Math.min(1, (v - 15) / (E.topSpeed(S.diff) - 15));
+    var fr = Math.min(1, (v - 15) / (E.topSpeed(S.diff, S.bike) - 15));
     g.strokeStyle = S.boostT > 0 ? '#FFB13B' : ACCENT; g.beginPath(); g.arc(cx, cy, R - 6, Math.PI * 0.85, Math.PI * (0.85 + 1.3 * fr)); g.stroke();
     g.lineCap = 'butt';
     g.fillStyle = P.text; g.textAlign = 'center';
