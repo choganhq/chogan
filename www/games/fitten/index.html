@@ -1,0 +1,799 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>چیدمان — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* One colour per piece family; the game's own tokens, because nine pieces need nine
+     colours the core does not have. Each is drawn on the empty cell of both themes, so
+     tools/tests/fitten.js asks for 2:1 against both surfaces. */
+  :root {
+    --ft-1: #E99A22; --ft-2: #3FB39B; --ft-3: #5B8DEF; --ft-4: #E0637A; --ft-5: #C04E9A;
+    --ft-6: #7DB548; --ft-7: #4C5FC7; --ft-8: #EE7A45; --ft-9: #9A6FD6;
+  }
+  /* 10 cells at a 9.8-unit pitch inside a 100-unit board, then the tray of three
+     pieces under it: 100 units across, 137 down */
+  .ft-wrap > .ch-fit { --fit-ar: calc(100 / 137); }
+  .ch-fit > .ft-box { display: grid; place-items: center; }
+  /* the grid is the same on screen in every language, so it never follows the page's direction */
+  .ft-board { --u: 3.6px; position: relative; direction: ltr; width: 100%; aspect-ratio: 100 / 137;
+    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .ft-board:focus-visible { outline: 3px solid var(--c-accent); outline-offset: 3px; border-radius: 4%; }
+  .ft-grid { position: absolute; left: 0; top: 0; width: calc(var(--u) * 100); height: calc(var(--u) * 100);
+    border-radius: calc(var(--u) * 3); background: var(--c-surface-2); }
+  .ft-cell, .ft-fx { position: absolute; width: calc(var(--u) * 9); height: calc(var(--u) * 9);
+    left: calc(var(--u) * (1.4 + var(--c) * 9.8)); top: calc(var(--u) * (1.4 + var(--r) * 9.8));
+    border-radius: 18%; box-sizing: border-box; pointer-events: none; }
+  .ft-cell { background: var(--c-surface); transition: background-color .12s, box-shadow .12s; }
+  .ft-blk { background: var(--k); box-shadow: inset 0 calc(var(--u) * -0.9) 0 rgba(0, 0, 0, .18), inset 0 calc(var(--u) * 0.7) 0 rgba(255, 255, 255, .22); }
+  .ft-k1 { --k: var(--ft-1); } .ft-k2 { --k: var(--ft-2); } .ft-k3 { --k: var(--ft-3); }
+  .ft-k4 { --k: var(--ft-4); } .ft-k5 { --k: var(--ft-5); } .ft-k6 { --k: var(--ft-6); }
+  .ft-k7 { --k: var(--ft-7); } .ft-k8 { --k: var(--ft-8); } .ft-k9 { --k: var(--ft-9); }
+  /* where the piece would land, and the lines it would clear */
+  .ft-cell.is-ghost { background: color-mix(in srgb, var(--k) 45%, var(--c-surface)); }
+  .ft-cell.is-hit { outline: calc(var(--u) * 0.5) solid var(--k); outline-offset: calc(var(--u) * 0.3); z-index: 1; }
+  .ft-cell.is-end { background: color-mix(in srgb, var(--k) 35%, var(--c-surface-2)); transition: background-color .5s; }
+  .ft-slot { position: absolute; top: calc(var(--u) * 103); height: calc(var(--u) * 34); width: calc(var(--u) * 33.333);
+    left: calc(var(--u) * 33.333 * var(--s)); border-radius: calc(var(--u) * 3); }
+  .ft-slot.is-sel { background: color-mix(in srgb, var(--game, var(--c-accent)) 14%, transparent);
+    outline: 2px solid var(--game, var(--c-accent)); outline-offset: -2px; }
+  .ft-piece { position: absolute; left: 0; top: 0; pointer-events: none; }
+  .ft-piece .ft-pc { position: absolute; border-radius: 18%; }
+  .ft-piece.is-out { opacity: .32; }
+  .ft-piece.is-lifted { visibility: hidden; }
+  .ft-drag { z-index: 5; will-change: transform; filter: drop-shadow(0 calc(var(--u) * 1) calc(var(--u) * 1.4) rgba(0, 0, 0, .28)); }
+  .ft-layer { position: absolute; top: 0; right: 0; bottom: 0; left: 0; pointer-events: none; }
+  .ft-fx { z-index: 3; }
+  .ft-side { align-items: center; }
+  .ft-scores { display: flex; gap: var(--s-2); justify-content: center; flex-wrap: wrap; }
+  .ft-score { position: relative; min-width: 84px; padding: var(--s-2) var(--s-3); border-radius: var(--r-md, 14px);
+    background: var(--c-surface); box-shadow: var(--sh-1); text-align: center; }
+  .ft-score__l { font-size: .8rem; color: var(--c-text-dim); font-weight: 700; }
+  .ft-score__v { font-size: 1.35rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--c-text); }
+  .ft-gain { position: absolute; left: 0; right: 0; top: 0; font-weight: 800; color: var(--game-text, var(--c-accent)); pointer-events: none; }
+  .ft-top { display: flex; justify-content: center; }
+  .ft-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function FitTenEngineFactory() {
+  'use strict';
+
+  var N = 10, CELLS = N * N;
+
+  // The classic nineteen: a single, lines of two to five both ways, squares of two and
+  // three, and the small and big corners in all four turns. Pieces never turn in play,
+  // so each turn is its own piece. w is how often it is drawn; k its colour family.
+  var SHAPES = [
+    { c: [[0, 0]], w: 1, k: 1 },
+    { c: [[0, 0], [0, 1]], w: 2, k: 2 }, { c: [[0, 0], [1, 0]], w: 2, k: 2 },
+    { c: [[0, 0], [0, 1], [0, 2]], w: 2, k: 3 }, { c: [[0, 0], [1, 0], [2, 0]], w: 2, k: 3 },
+    { c: [[0, 0], [0, 1], [0, 2], [0, 3]], w: 2, k: 4 }, { c: [[0, 0], [1, 0], [2, 0], [3, 0]], w: 2, k: 4 },
+    { c: [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4]], w: 2, k: 5 }, { c: [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0]], w: 2, k: 5 },
+    { c: [[0, 0], [0, 1], [1, 0], [1, 1]], w: 2, k: 6 },
+    { c: [[0, 0], [0, 1], [0, 2], [1, 0], [1, 1], [1, 2], [2, 0], [2, 1], [2, 2]], w: 2, k: 7 },
+    { c: [[0, 0], [1, 0], [1, 1]], w: 2, k: 8 }, { c: [[0, 0], [0, 1], [1, 0]], w: 2, k: 8 },
+    { c: [[0, 0], [0, 1], [1, 1]], w: 2, k: 8 }, { c: [[0, 1], [1, 0], [1, 1]], w: 2, k: 8 },
+    { c: [[0, 0], [1, 0], [2, 0], [2, 1], [2, 2]], w: 2, k: 9 }, { c: [[0, 0], [0, 1], [0, 2], [1, 0], [2, 0]], w: 2, k: 9 },
+    { c: [[0, 0], [0, 1], [0, 2], [1, 2], [2, 2]], w: 2, k: 9 }, { c: [[0, 2], [1, 2], [2, 0], [2, 1], [2, 2]], w: 2, k: 9 }
+  ];
+  SHAPES.forEach(function (s) {
+    s.h = 1 + Math.max.apply(null, s.c.map(function (p) { return p[0]; }));
+    s.wd = 1 + Math.max.apply(null, s.c.map(function (p) { return p[1]; }));
+  });
+  var WSUM = SHAPES.reduce(function (a, s) { return a + s.w; }, 0);
+
+  // A small seeded generator whose whole state is one integer, so a saved game (and the
+  // daily game) goes on drawing exactly the pieces it would have drawn
+  function rand(S) {
+    var t = (S.seed = (S.seed + 0x6D2B79F5) | 0);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  function pickFrom(S, list) {
+    var total = 0, i;
+    for (i = 0; i < list.length; i++) total += SHAPES[list[i]].w;
+    var x = rand(S) * total;
+    for (i = 0; i < list.length; i++) { x -= SHAPES[list[i]].w; if (x < 0) return list[i]; }
+    return list[list.length - 1];
+  }
+  var ALL = SHAPES.map(function (s, i) { return i; });
+
+  function canPlace(g, si, r, c) {
+    var s = SHAPES[si];
+    if (!s || r < 0 || c < 0 || r + s.h > N || c + s.wd > N) return false;
+    for (var k = 0; k < s.c.length; k++) if (g[(r + s.c[k][0]) * N + c + s.c[k][1]]) return false;
+    return true;
+  }
+  function fits(g, si) {
+    var s = SHAPES[si];
+    if (!s) return false;
+    for (var r = 0; r + s.h <= N; r++) for (var c = 0; c + s.wd <= N; c++) if (canPlace(g, si, r, c)) return true;
+    return false;
+  }
+  function anyFits(g, tray) { for (var i = 0; i < tray.length; i++) if (tray[i] >= 0 && fits(g, tray[i])) return true; return false; }
+
+  // A new set of three. Fairness: when the board has room for any piece at all, the set
+  // always holds at least one that fits; a set that does not is drawn again, and after
+  // a few tries one of its pieces is swapped for a piece that fits.
+  function deal(S) {
+    for (var tries = 0; tries < 12; tries++) {
+      S.tray = [pickFrom(S, ALL), pickFrom(S, ALL), pickFrom(S, ALL)];
+      if (anyFits(S.g, S.tray)) return S.tray;
+    }
+    var ok = ALL.filter(function (i) { return fits(S.g, i); });
+    if (ok.length) S.tray[Math.floor(rand(S) * 3)] = pickFrom(S, ok);
+    return S.tray;
+  }
+
+  function newGame(seed) {
+    var S = { g: new Array(CELLS).fill(0), tray: [-1, -1, -1], score: 0, placed: 0, lines: 0, streak: 0, best: 0, seed: seed | 0 };
+    deal(S);
+    return S;
+  }
+
+  // The rows and columns a piece at (r, c) would fill, without changing the board
+  function preview(g, si, r, c) {
+    if (!canPlace(g, si, r, c)) return null;
+    var t = g.slice(), s = SHAPES[si], rows = [], cols = [], i, j;
+    s.c.forEach(function (p) { t[(r + p[0]) * N + c + p[1]] = s.k; });
+    for (i = 0; i < N; i++) {
+      var fr = true, fc = true;
+      for (j = 0; j < N; j++) { if (!t[i * N + j]) fr = false; if (!t[j * N + i]) fc = false; }
+      if (fr) rows.push(i);
+      if (fc) cols.push(i);
+    }
+    return { rows: rows, cols: cols, g: t };
+  }
+
+  // n lines with one piece score 10, 30, 60, 100…; every clearing piece right before this
+  // one adds 10 a line, so a streak pays
+  function bonus(n, streak) { return n ? 10 * n * (n + 1) / 2 + 10 * n * streak : 0; }
+
+  // One move: null when the slot is empty or the piece does not fit there (nothing changes)
+  function place(S, slot, r, c) {
+    var si = S.tray[slot];
+    if (!(slot >= 0 && slot < 3) || si < 0) return null;
+    var p = preview(S.g, si, r, c);
+    if (!p) return null;
+    var s = SHAPES[si], cells = s.c.map(function (q) { return (r + q[0]) * N + c + q[1]; });
+    var g = p.g, cleared = [], seen = {};
+    p.rows.forEach(function (row) { for (var j = 0; j < N; j++) seen[row * N + j] = 1; });
+    p.cols.forEach(function (col) { for (var j = 0; j < N; j++) seen[j * N + col] = 1; });
+    Object.keys(seen).forEach(function (key) { var i = +key; cleared.push({ i: i, k: g[i] }); g[i] = 0; });
+    cleared.sort(function (a, b) { return a.i - b.i; });
+    var n = p.rows.length + p.cols.length, b = bonus(n, S.streak), gain = cells.length + b;
+    S.g = g;
+    S.streak = n ? S.streak + 1 : 0;
+    S.score += gain; S.placed++; S.lines += n;
+    S.tray[slot] = -1;
+    var refilled = false;
+    if (S.tray[0] < 0 && S.tray[1] < 0 && S.tray[2] < 0) { deal(S); refilled = true; }
+    return { slot: slot, shape: si, k: s.k, r: r, c: c, cells: cells, rows: p.rows, cols: p.cols, cleared: cleared,
+      gain: gain, bonus: b, streak: S.streak, refilled: refilled, over: isOver(S) };
+  }
+
+  function isOver(S) { return !anyFits(S.g, S.tray); }
+
+  function full(g) {
+    for (var i = 0; i < N; i++) {
+      var fr = true, fc = true;
+      for (var j = 0; j < N; j++) { if (!g[i * N + j]) fr = false; if (!g[j * N + i]) fc = false; }
+      if (fr || fc) return true;
+    }
+    return false;
+  }
+  function count(v, lo) { return Number.isInteger(v) && v >= lo; }
+  function valid(s) {
+    if (!s || !Array.isArray(s.g) || s.g.length !== CELLS || !Array.isArray(s.tray) || s.tray.length !== 3) return false;
+    for (var i = 0; i < CELLS; i++) if (!(Number.isInteger(s.g[i]) && s.g[i] >= 0 && s.g[i] <= 9)) return false;
+    for (var t = 0; t < 3; t++) if (!(Number.isInteger(s.tray[t]) && s.tray[t] >= -1 && s.tray[t] < SHAPES.length)) return false;
+    return !full(s.g) && count(s.score, 0) && count(s.placed, 0) && count(s.lines, 0) && count(s.streak, 0) &&
+      Number.isInteger(s.seed) && !isOver(s);
+  }
+
+  return { N: N, SHAPES: SHAPES, rand: rand, deal: deal, newGame: newGame, canPlace: canPlace, fits: fits, anyFits: anyFits,
+    preview: preview, bonus: bonus, place: place, isOver: isOver, full: full, valid: valid };
+}
+if (typeof module !== 'undefined') module.exports = FitTenEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = FitTenEngineFactory();
+  var N = E.N, SH = E.SHAPES;
+  // board geometry in units of a hundredth of the board's width (mirrors the CSS above)
+  var PITCH = 9.8, OFF = 1.4, CELL = 9, TRAY_TOP = 103, TRAY_H = 34, TPITCH = 5.6, TCELL = 5.1;
+  var DAILY_GOAL = 400;
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'fitten',
+    name: { fa: 'چیدمان', en: 'Fit Ten', zh: '十格拼放', de: 'Einpassen', es: 'Encaje', pl: 'Dopasuj', fr: 'Emboîte', ar: 'ركّب عشرة' },
+    accent: '#6C4EA5',
+    mood: 'menu',
+    strings: {
+      fa: {
+        board: 'صفحه‌ی ده در ده', boardN: 'امتیاز {s}، {n} قطعه در سینی', trayL: 'سینی قطعه‌ها', pieceN: 'قطعه‌ی {n}',
+        dailyFt: 'چیدمان روزانه', scoreN: 'امتیاز {s}', overT: 'دیگر جا نیست', newBest: 'رکورد تازه!',
+        linesL: 'خط پاک‌شده', placedL: 'قطعه', clearN: '{n} خط!', streakN: 'پشت سر هم ×{n}', noFit: 'این قطعه آنجا جا نمی‌شود',
+        goalN: 'هدف امروز: {g} امتیاز', hintIdle: 'یک قطعه را روی صفحه بکش',
+        kPick: 'انتخاب قطعه', kMove: 'جابه‌جا کردن قطعه', kPlace: 'گذاشتن قطعه', kBack: 'برگرداندن قطعه', kNew: 'بازی تازه',
+        rules: 'همیشه سه قطعه در سینی زیر صفحه منتظرند. یکی را بکش و روی صفحه‌ی ده در ده رها کن؛ قطعه بالاتر از انگشتت می‌ماند تا دیده شود، و سایه‌اش نشان می‌دهد کجا می‌نشیند و کدام خط‌ها پاک می‌شوند. قطعه‌ها نمی‌چرخند. هر ردیف یا ستونی که پر شود پاک می‌شود. هر خانه‌ای که می‌گذاری یک امتیاز دارد؛ پاک کردن چند خط با یک قطعه امتیاز بیشتری دارد (۱۰، ۳۰، ۶۰ و …) و اگر با قطعه پشت قطعه خط پاک کنی، جایزه‌ی پشت سر هم هم می‌گیری. وقتی هر سه قطعه گذاشته شدند، سه قطعه‌ی تازه می‌آید. وقتی هیچ‌کدام از قطعه‌های باقی‌مانده جا نشود، بازی تمام است. زمان ندارد و برگشت به عقب ندارد. می‌توانی قطعه‌ای را بزنی تا انتخاب شود، بعد صفحه را بزنی تا سایه‌اش جابه‌جا شود و روی سایه بزنی تا بنشیند.',
+        tutTitle1: 'بکش و رها کن', tutText1: 'یک قطعه را از سینی روی صفحه بکش؛ سایه نشان می‌دهد کجا می‌نشیند.',
+        tutTitle2: 'خط پر، پاک', tutText2: 'هر ردیف یا ستون پر پاک می‌شود. چند خط با هم امتیاز بیشتری دارد.',
+        tutTitle3: 'تا جا هست', tutText3: 'بعد از هر سه قطعه، سه قطعه‌ی تازه می‌آید. وقتی هیچ‌کدام جا نشود، بازی تمام است.'
+      },
+      en: {
+        board: '10 by 10 board', boardN: 'Score {s}, {n} pieces in the tray', trayL: 'Piece tray', pieceN: 'Piece {n}',
+        dailyFt: 'Daily Fit Ten', scoreN: 'Score {s}', overT: 'No room left', newBest: 'New best!',
+        linesL: 'Lines cleared', placedL: 'Pieces', clearN: '{n} lines!', streakN: 'Streak ×{n}', noFit: 'That piece does not fit there',
+        goalN: 'Today’s goal: {g} points', hintIdle: 'Drag a piece onto the board',
+        kPick: 'Pick a piece', kMove: 'Move the piece', kPlace: 'Place the piece', kBack: 'Put the piece back', kNew: 'New game',
+        rules: 'Three pieces always wait in the tray under the board. Drag one and let go over the 10 by 10 board; the piece stays above your finger so you can see it, and its shadow shows where it lands and which lines it clears. Pieces do not turn. Every full row or column is cleared. Each cell you place scores a point; clearing several lines with one piece scores more (10, 30, 60, …), and clearing lines with piece after piece adds a streak bonus. When all three are placed, three new pieces come. When none of the pieces left fits, the game is over. There is no timer and no undo. You can also tap a piece to pick it, tap the board to move its shadow, and tap the shadow to place it.',
+        tutTitle1: 'Drag and drop', tutText1: 'Drag a piece from the tray onto the board; its shadow shows where it lands.',
+        tutTitle2: 'Full lines clear', tutText2: 'Every full row or column is cleared. Several lines at once score more.',
+        tutTitle3: 'While there is room', tutText3: 'After all three pieces, three new ones come. When none fits, the game is over.'
+      },
+      zh: {
+        board: '10×10 棋盘', boardN: '分数 {s}，托盘里还有 {n} 块', trayL: '方块托盘', pieceN: '第 {n} 块',
+        dailyFt: '每日十格拼放', scoreN: '分数 {s}', overT: '放不下了', newBest: '新纪录！',
+        linesL: '消除行列', placedL: '方块数', clearN: '{n} 条线！', streakN: '连消 ×{n}', noFit: '这块放不进那里',
+        goalN: '今日目标：{g} 分', hintIdle: '把一块拖到棋盘上',
+        kPick: '选一块', kMove: '移动方块', kPlace: '放下方块', kBack: '放回方块', kNew: '新游戏',
+        rules: '棋盘下方的托盘里总有三块。把一块拖到 10×10 棋盘上松开；方块会停在手指上方方便看清，影子会显示它落在哪里以及会消除哪些行列。方块不能旋转。填满的行或列会被消除。每放一格得 1 分；一块同时消除多条线得分更多（10、30、60……），一块接一块地消除还有连消奖励。三块都放完后会来三块新的。剩下的方块都放不进去时，游戏结束。没有计时，也不能悔棋。也可以点一块选中它，点棋盘移动影子，再点影子放下。',
+        tutTitle1: '拖动放下', tutText1: '把托盘里的一块拖到棋盘上；影子显示它落在哪里。',
+        tutTitle2: '满线消除', tutText2: '填满的行或列会被消除。一次消除多条得分更多。',
+        tutTitle3: '还有空位就继续', tutText3: '三块放完会来三块新的。都放不进去时，游戏结束。'
+      },
+      de: {
+        board: 'Brett 10 × 10', boardN: 'Punkte {s}, {n} Teile in der Ablage', trayL: 'Ablage', pieceN: 'Teil {n}',
+        dailyFt: 'Einpassen des Tages', scoreN: 'Punkte {s}', overT: 'Kein Platz mehr', newBest: 'Neuer Rekord!',
+        linesL: 'Linien geräumt', placedL: 'Teile', clearN: '{n} Linien!', streakN: 'Serie ×{n}', noFit: 'Dieses Teil passt dort nicht',
+        goalN: 'Ziel heute: {g} Punkte', hintIdle: 'Zieh ein Teil aufs Brett',
+        kPick: 'Teil wählen', kMove: 'Teil verschieben', kPlace: 'Teil setzen', kBack: 'Teil zurücklegen', kNew: 'Neues Spiel',
+        rules: 'Unter dem Brett liegen immer drei Teile in der Ablage. Zieh eines aufs 10×10-Brett und lass los; das Teil bleibt über deinem Finger, damit du es siehst, und sein Schatten zeigt, wo es landet und welche Linien es räumt. Teile drehen sich nicht. Jede volle Reihe oder Spalte wird geräumt. Jedes gesetzte Feld bringt einen Punkt; mehrere Linien mit einem Teil bringen mehr (10, 30, 60, …), und Räumen mit Teil um Teil gibt einen Serienbonus. Sind alle drei gesetzt, kommen drei neue. Passt keines der übrigen Teile mehr, ist das Spiel vorbei. Es gibt keine Zeit und kein Rückgängig. Du kannst auch ein Teil antippen, aufs Brett tippen, um seinen Schatten zu verschieben, und auf den Schatten tippen, um es zu setzen.',
+        tutTitle1: 'Ziehen und loslassen', tutText1: 'Zieh ein Teil aus der Ablage aufs Brett; der Schatten zeigt, wo es landet.',
+        tutTitle2: 'Volle Linien verschwinden', tutText2: 'Jede volle Reihe oder Spalte wird geräumt. Mehrere auf einmal bringen mehr.',
+        tutTitle3: 'Solange Platz ist', tutText3: 'Nach drei Teilen kommen drei neue. Passt keines mehr, ist das Spiel vorbei.'
+      },
+      es: {
+        board: 'Tablero de 10 × 10', boardN: 'Puntos {s}, {n} piezas en la bandeja', trayL: 'Bandeja de piezas', pieceN: 'Pieza {n}',
+        dailyFt: 'Encaje diario', scoreN: 'Puntos {s}', overT: 'No queda sitio', newBest: '¡Nuevo récord!',
+        linesL: 'Líneas borradas', placedL: 'Piezas', clearN: '¡{n} líneas!', streakN: 'Racha ×{n}', noFit: 'Esa pieza no cabe ahí',
+        goalN: 'Meta de hoy: {g} puntos', hintIdle: 'Arrastra una pieza al tablero',
+        kPick: 'Elegir pieza', kMove: 'Mover la pieza', kPlace: 'Colocar la pieza', kBack: 'Devolver la pieza', kNew: 'Partida nueva',
+        rules: 'Bajo el tablero siempre esperan tres piezas en la bandeja. Arrastra una y suéltala sobre el tablero de 10×10; la pieza queda por encima de tu dedo para que la veas, y su sombra muestra dónde cae y qué líneas borra. Las piezas no giran. Cada fila o columna llena se borra. Cada casilla colocada da un punto; borrar varias líneas con una pieza da más (10, 30, 60, …), y borrar pieza tras pieza suma una bonificación de racha. Cuando colocas las tres, llegan tres nuevas. Cuando ninguna de las que quedan cabe, la partida termina. No hay reloj ni deshacer. También puedes tocar una pieza para elegirla, tocar el tablero para mover su sombra y tocar la sombra para colocarla.',
+        tutTitle1: 'Arrastra y suelta', tutText1: 'Arrastra una pieza de la bandeja al tablero; su sombra muestra dónde cae.',
+        tutTitle2: 'Línea llena, fuera', tutText2: 'Cada fila o columna llena se borra. Varias a la vez dan más puntos.',
+        tutTitle3: 'Mientras quepa', tutText3: 'Tras las tres piezas llegan tres nuevas. Si ninguna cabe, la partida termina.'
+      },
+      pl: {
+        board: 'Plansza 10 × 10', boardN: 'Wynik {s}, {n} klocki na tacy', trayL: 'Taca z klockami', pieceN: 'Klocek {n}',
+        dailyFt: 'Codzienne Dopasuj', scoreN: 'Wynik {s}', overT: 'Brak miejsca', newBest: 'Nowy rekord!',
+        linesL: 'Usunięte linie', placedL: 'Klocki', clearN: 'Linie: {n}!', streakN: 'Seria ×{n}', noFit: 'Ten klocek tam nie pasuje',
+        goalN: 'Cel na dziś: {g} pkt', hintIdle: 'Przeciągnij klocek na planszę',
+        kPick: 'Wybierz klocek', kMove: 'Przesuń klocek', kPlace: 'Połóż klocek', kBack: 'Odłóż klocek', kNew: 'Nowa gra',
+        rules: 'Pod planszą zawsze czekają trzy klocki na tacy. Przeciągnij jeden i puść nad planszą 10×10; klocek zostaje nad palcem, żeby był widoczny, a jego cień pokazuje, gdzie wyląduje i które linie usunie. Klocki się nie obracają. Każdy pełny wiersz lub kolumna znika. Każde położone pole daje punkt; kilka linii jednym klockiem daje więcej (10, 30, 60, …), a usuwanie linii klockiem za klockiem dodaje premię za serię. Gdy położysz wszystkie trzy, przychodzą trzy nowe. Gdy żaden z pozostałych klocków się nie mieści, gra się kończy. Nie ma czasu ani cofania. Możesz też stuknąć klocek, by go wybrać, stuknąć planszę, by przesunąć jego cień, i stuknąć cień, by go położyć.',
+        tutTitle1: 'Przeciągnij i puść', tutText1: 'Przeciągnij klocek z tacy na planszę; cień pokazuje, gdzie wyląduje.',
+        tutTitle2: 'Pełne linie znikają', tutText2: 'Każdy pełny wiersz lub kolumna znika. Kilka naraz daje więcej.',
+        tutTitle3: 'Póki jest miejsce', tutText3: 'Po trzech klockach przychodzą trzy nowe. Gdy żaden się nie mieści, gra się kończy.'
+      },
+      fr: {
+        board: 'Plateau 10 × 10', boardN: 'Score {s}, {n} pièces en réserve', trayL: 'Réserve de pièces', pieceN: 'Pièce {n}',
+        dailyFt: 'Emboîte du jour', scoreN: 'Score {s}', overT: 'Plus de place', newBest: 'Nouveau record !',
+        linesL: 'Lignes effacées', placedL: 'Pièces', clearN: '{n} lignes !', streakN: 'Série ×{n}', noFit: 'Cette pièce ne rentre pas là',
+        goalN: 'Objectif du jour : {g} points', hintIdle: 'Glisse une pièce sur le plateau',
+        kPick: 'Choisir une pièce', kMove: 'Déplacer la pièce', kPlace: 'Poser la pièce', kBack: 'Reposer la pièce', kNew: 'Nouvelle partie',
+        rules: 'Trois pièces attendent toujours dans la réserve sous le plateau. Glisses-en une et relâche-la sur le plateau de 10×10 ; la pièce reste au-dessus de ton doigt pour que tu la voies, et son ombre montre où elle se pose et quelles lignes elle efface. Les pièces ne tournent pas. Chaque ligne ou colonne pleine est effacée. Chaque case posée rapporte un point ; effacer plusieurs lignes d’un coup rapporte plus (10, 30, 60, …), et effacer des lignes pièce après pièce ajoute un bonus de série. Quand les trois sont posées, trois nouvelles arrivent. Quand aucune pièce restante ne rentre, la partie est finie. Pas de chrono ni d’annulation. Tu peux aussi toucher une pièce pour la choisir, toucher le plateau pour déplacer son ombre, puis toucher l’ombre pour la poser.',
+        tutTitle1: 'Glisse et relâche', tutText1: 'Glisse une pièce de la réserve sur le plateau ; son ombre montre où elle se pose.',
+        tutTitle2: 'Lignes pleines effacées', tutText2: 'Chaque ligne ou colonne pleine est effacée. Plusieurs d’un coup rapportent plus.',
+        tutTitle3: 'Tant qu’il y a de la place', tutText3: 'Après les trois pièces, trois nouvelles arrivent. Si aucune ne rentre, la partie est finie.'
+      },
+      ar: {
+        board: 'لوحة 10 × 10', boardN: 'النتيجة {s}، {n} قطع في الصينية', trayL: 'صينية القطع', pieceN: 'القطعة {n}',
+        dailyFt: 'ركّب عشرة اليومية', scoreN: 'النتيجة {s}', overT: 'لا مكان متبقٍّ', newBest: 'رقم قياسي جديد!',
+        linesL: 'الخطوط الممسوحة', placedL: 'القطع', clearN: '{n} خطوط!', streakN: 'سلسلة ×{n}', noFit: 'هذه القطعة لا تتسع هنا',
+        goalN: 'هدف اليوم: {g} نقطة', hintIdle: 'اسحب قطعة إلى اللوحة',
+        kPick: 'اختيار قطعة', kMove: 'تحريك القطعة', kPlace: 'وضع القطعة', kBack: 'إعادة القطعة', kNew: 'لعبة جديدة',
+        rules: 'تنتظر ثلاث قطع دائمًا في الصينية تحت اللوحة. اسحب واحدة وأفلتها فوق اللوحة 10×10؛ تبقى القطعة فوق إصبعك لتراها، ويُظهر ظلّها أين ستقع وأي خطوط ستمسح. القطع لا تدور. يُمسح كل صف أو عمود ممتلئ. تمنحك كل خلية تضعها نقطة؛ ومسح عدة خطوط بقطعة واحدة يمنح أكثر (10، 30، 60، …)، ومسح الخطوط قطعةً بعد قطعة يضيف مكافأة سلسلة. عند وضع الثلاث تأتي ثلاث قطع جديدة. وحين لا تتسع أي قطعة متبقية تنتهي اللعبة. لا مؤقّت ولا تراجع. يمكنك أيضًا لمس قطعة لاختيارها، ولمس اللوحة لتحريك ظلّها، ولمس الظل لوضعها.',
+        tutTitle1: 'اسحب وأفلت', tutText1: 'اسحب قطعة من الصينية إلى اللوحة؛ يُظهر ظلّها أين ستقع.',
+        tutTitle2: 'تُمسح الخطوط الممتلئة', tutText2: 'يُمسح كل صف أو عمود ممتلئ. ومسح عدة خطوط دفعة واحدة يمنح نقاطًا أكثر.',
+        tutTitle3: 'ما دام هناك مكان', tutText3: 'بعد القطع الثلاث تأتي ثلاث جديدة. وإذا لم تتسع أي قطعة تنتهي اللعبة.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+
+  var S = null, startedAt = 0, ended = false;
+  // the picked slot (tap or keys) and where its shadow is; -1 when nothing is picked
+  var sel = -1, cur = { r: 0, c: 0 }, shown = null;
+
+  var board = el('div', { class: 'ft-board', role: 'application', tabindex: '0', 'aria-label': C.t('board') });
+  var box = el('div', { class: 'ft-box' }, [board]);
+  var top = el('div', { class: 'ft-top ch-above' });
+  var scoreV = el('div', { class: 'ft-score__v', text: '0' }), bestV = el('div', { class: 'ft-score__v', text: '0' });
+  var scoreBox = el('div', { class: 'ft-score' }, [el('div', { class: 'ft-score__l', text: C.t('score') }), scoreV]);
+  var bestBox = el('div', { class: 'ft-score' }, [el('div', { class: 'ft-score__l', text: C.t('best') }), bestV]);
+  var status = el('div', { class: 'ft-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'ft-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]),
+    el('div', { class: 'ch-side ft-side' }, [top, el('div', { class: 'ft-scores' }, [scoreBox, bestBox]), status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  if (!dailyDate) ctx.button({ icon: 'refresh', label: C.t('newGame'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  board.appendChild(el('div', { class: 'ft-grid' }));
+  var cells = [], cellCls = [];
+  for (var ci = 0; ci < N * N; ci++) {
+    var cn = el('div', { class: 'ft-cell', style: { '--c': ci % N, '--r': Math.floor(ci / N) } });
+    cells.push(cn); cellCls.push('ft-cell'); board.appendChild(cn);
+  }
+  var slots = [], pieces = [null, null, null];
+  for (var sk = 0; sk < 3; sk++) {
+    var sn = el('div', { class: 'ft-slot', style: { '--s': sk }, 'aria-label': C.t('pieceN', { n: C.num(sk + 1) }) });
+    slots.push(sn); board.appendChild(sn);
+  }
+  var layer = el('div', { class: 'ft-layer', 'aria-hidden': 'true' });
+  board.appendChild(layer);
+
+  /* ------------------------------------------------------------- game */
+
+  function seedFor() {
+    var r = dailyDate ? C.daily('fitten', dailyDate).rng : Math.random;
+    return Math.floor(r() * 4294967296) | 0;
+  }
+  function newGame() {
+    cancelDrag();
+    S = E.newGame(seedFor());
+    S.daily = dailyDate || null;
+    startedAt = Date.now(); ended = false; sel = -1;
+    paintBoard(); buildTray(true);
+    render();
+    status.textContent = S.daily ? C.t('goalN', { g: C.num(DAILY_GOAL) }) : C.t('hintIdle');
+    save();
+  }
+  function askNew() {
+    if (S && !ended && S.placed > 0) C.ui.confirm({ title: C.t('newGame'), body: C.t('resetWarn'), onOk: newGame });
+    else newGame();
+  }
+  function best() { return C.stats.getBest('fitten', 'score') || 0; }
+
+  function placeAt(slot, r, c, from) {
+    if (!S || ended) return false;
+    var t = E.place(S, slot, r, c);
+    if (!t) { C.feedback('bad'); C.ui.shake(board); status.textContent = C.t('noFit'); return false; }
+    sel = -1; shown = null;
+    var n = t.rows.length + t.cols.length;
+    C.feedback(n ? 'good' : 'place');
+    C.stats.best('fitten', 'score', S.score);
+    if (n >= 3) C.achievements.unlock('ft-triple');
+    if (t.streak >= 5) C.achievements.unlock('ft-streak');
+    if (S.score >= 1000) C.achievements.unlock('ft-1000');
+    if (S.daily && S.score >= DAILY_GOAL) C.achievements.unlock('ft-daily');
+    play(t, from);
+    floatGain(t.gain);
+    if (n) status.textContent = (n > 1 ? C.t('clearN', { n: C.num(n) }) : '') + (t.streak > 1 ? (n > 1 ? ' · ' : '') + C.t('streakN', { n: C.num(t.streak) }) : '');
+    else status.textContent = S.daily ? C.t('goalN', { g: C.num(DAILY_GOAL) }) : '';
+    render();
+    if (t.over) { over(); return true; }
+    save();
+    return true;
+  }
+
+  function rewards() {
+    return { coins: Math.max(1, Math.round(S.score / 150)), points: Math.max(1, Math.min(160, Math.round(S.score / 20))) };
+  }
+  function over() {
+    ended = true;
+    var rw = rewards(), won = S.daily ? S.score >= DAILY_GOAL : null;
+    if (S.daily && !C.stats.daily('fitten', S.daily, { label: C.t('scoreN', { s: C.num(S.score) }), win: !!won })) {
+      rw.coins = Math.max(1, Math.round(rw.coins * 0.2)); rw.points = Math.max(1, Math.round(rw.points * 0.2));
+    }
+    var isBest = S.score > 0 && S.score >= best();
+    ctx.clearSave();
+    // the cells fade to show the board is spent, then the result
+    setTimeout(function () {
+      for (var i = 0; i < cells.length; i++) if (S.g[i]) cells[i].classList.add('is-end');
+    }, C.ui.reduceMotion() ? 0 : 520);
+    setTimeout(function () {
+      C.feedback('bad');
+      ctx.finish({
+        won: won, title: C.t('overT'), note: isBest ? C.t('newBest') : null,
+        timeMs: Date.now() - startedAt, coins: rw.coins, points: rw.points,
+        lines: lines(), shareText: share(),
+        againLabel: S.daily ? null : C.t('newGame'), onAgain: S.daily ? null : newGame
+      });
+    }, C.ui.reduceMotion() ? 300 : 1300);
+  }
+  function lines() {
+    var out = [];
+    if (S.daily) out.push({ label: C.t('daily'), value: C.num(S.daily) });
+    out.push({ label: C.t('score'), value: C.num(S.score) });
+    out.push({ label: C.t('best'), value: C.num(Math.max(best(), S.score)) });
+    out.push({ label: C.t('linesL'), value: C.num(S.lines) });
+    out.push({ label: C.t('placedL'), value: C.num(S.placed) });
+    return out;
+  }
+  function share() {
+    return 'چوگان · چیدمان' + (S.daily ? '\nروزانه ' + S.daily : '') + '\n' + S.score + ' · ' + S.lines;
+  }
+
+  /* --------------------------------------------------------------- view */
+
+  function unit() { return board.getBoundingClientRect().width / 100 || 3.6; }
+  // cells change class only when their look changes, so a tap is never lost to a repaint
+  function setCell(i, cls, k) {
+    var want = cls + (k ? ' ft-k' + k : '');
+    if (cellCls[i] !== want) { cellCls[i] = want; cells[i].className = want; }
+  }
+  function paintBoard() {
+    for (var i = 0; i < N * N; i++) setCell(i, S.g[i] ? 'ft-cell ft-blk' : 'ft-cell', S.g[i]);
+    if (shown) {
+      var s = SH[shown.si], p = E.preview(S.g, shown.si, shown.r, shown.c);
+      if (p) {
+        var hit = {};
+        p.rows.forEach(function (row) { for (var j = 0; j < N; j++) hit[row * N + j] = 1; });
+        p.cols.forEach(function (col) { for (var j = 0; j < N; j++) hit[j * N + col] = 1; });
+        s.c.forEach(function (q) { var i2 = (shown.r + q[0]) * N + shown.c + q[1]; setCell(i2, 'ft-cell is-ghost' + (hit[i2] ? ' is-hit' : ''), s.k); });
+        Object.keys(hit).forEach(function (key) { var j2 = +key; if (S.g[j2]) setCell(j2, 'ft-cell ft-blk is-hit', s.k); });
+      }
+    }
+  }
+  function show(si, r, c) {
+    var next = si >= 0 && E.canPlace(S.g, si, r, c) ? { si: si, r: r, c: c } : null;
+    if ((next && shown && next.si === shown.si && next.r === shown.r && next.c === shown.c) || (!next && !shown)) return;
+    shown = next;
+    paintBoard();
+  }
+  function pieceNode(si, pitch, size) {
+    var s = SH[si], u = 'var(--u)';
+    var n = el('div', { class: 'ft-piece ft-k' + s.k, style: { width: 'calc(' + u + ' * ' + (s.wd * pitch) + ')', height: 'calc(' + u + ' * ' + (s.h * pitch) + ')' } });
+    s.c.forEach(function (q) {
+      n.appendChild(el('div', { class: 'ft-pc ft-blk', style: { left: 'calc(' + u + ' * ' + (q[1] * pitch) + ')', top: 'calc(' + u + ' * ' + (q[0] * pitch) + ')',
+        width: 'calc(' + u + ' * ' + size + ')', height: 'calc(' + u + ' * ' + size + ')' } }));
+    });
+    return n;
+  }
+  function trayPos(slot, si) {
+    var s = SH[si];
+    return { x: 33.333 * slot + 16.667 - (s.wd * TPITCH - (TPITCH - TCELL)) / 2, y: TRAY_TOP + TRAY_H / 2 - (s.h * TPITCH - (TPITCH - TCELL)) / 2 };
+  }
+  function buildTray(fresh) {
+    for (var k = 0; k < 3; k++) {
+      if (pieces[k] && pieces[k].parentNode) pieces[k].parentNode.removeChild(pieces[k]);
+      pieces[k] = null;
+      var si = S.tray[k];
+      if (si < 0) continue;
+      var p = pieceNode(si, TPITCH, TCELL), at = trayPos(k, si);
+      p.style.left = 'calc(var(--u) * ' + at.x.toFixed(2) + ')';
+      p.style.top = 'calc(var(--u) * ' + at.y.toFixed(2) + ')';
+      board.appendChild(p);
+      pieces[k] = p;
+      if (fresh && !C.ui.reduceMotion()) p.animate([{ transform: 'translateY(40%) scale(.6)', opacity: 0 }, { transform: 'none', opacity: 1 }],
+        { duration: 320, delay: 70 * k, easing: 'cubic-bezier(.2,.7,.3,1.2)', fill: 'backwards' });
+    }
+    markTray();
+  }
+  // a piece that fits nowhere is dimmed, so the end never comes as a surprise
+  function markTray() {
+    for (var k = 0; k < 3; k++) {
+      slots[k].classList.toggle('is-sel', k === sel);
+      if (pieces[k]) pieces[k].classList.toggle('is-out', !E.fits(S.g, S.tray[k]));
+    }
+  }
+
+  // The move as a short film: the piece pops into its cells, then every cleared line
+  // breaks up from where the piece sat outward, with a burst on each line
+  function play(t, from) {
+    paintBoard();
+    if (pieces[t.slot] && pieces[t.slot].parentNode) pieces[t.slot].parentNode.removeChild(pieces[t.slot]);
+    pieces[t.slot] = null;
+    var rm = C.ui.reduceMotion();
+    if (!rm) {
+      if (from) {
+        // the piece lands from where the finger let it go
+        var fx = el('div', { class: 'ft-layer' }); layer.appendChild(fx);
+        var land = pieceNode(t.shape, PITCH, CELL);
+        land.style.left = 'calc(var(--u) * ' + (OFF + t.c * PITCH).toFixed(2) + ')';
+        land.style.top = 'calc(var(--u) * ' + (OFF + t.r * PITCH).toFixed(2) + ')';
+        fx.appendChild(land);
+        var a = C.ui.fly(land, from, { ms: 130 });
+        var drop = function () { if (fx.parentNode) fx.parentNode.removeChild(fx); };
+        if (a) a.onfinish = drop; else drop();
+      }
+      t.cells.forEach(function (i) {
+        if (S.g[i]) cells[i].animate([{ transform: 'scale(.72)' }, { transform: 'scale(1.08)', offset: .6 }, { transform: 'none' }], { duration: 220, easing: 'ease-out' });
+      });
+      var midR = t.r + SH[t.shape].h / 2 - 0.5, midC = t.c + SH[t.shape].wd / 2 - 0.5;
+      t.cleared.forEach(function (q) {
+        var r = Math.floor(q.i / N), c = q.i % N;
+        var d = Math.max(Math.abs(r - midR), Math.abs(c - midC));
+        var bit = el('div', { class: 'ft-fx ft-blk ft-k' + q.k, style: { '--r': r, '--c': c } });
+        layer.appendChild(bit);
+        bit.animate([{ transform: 'none', opacity: 1 }, { transform: 'scale(1.12)', opacity: 1, offset: .25 },
+          { transform: 'scale(0) rotate(' + (d % 2 ? 50 : -50) + 'deg)', opacity: 0 }],
+          { duration: 420, delay: 40 + d * 34, easing: 'ease-in', fill: 'both' }).onfinish = function () { if (bit.parentNode) bit.parentNode.removeChild(bit); };
+      });
+      var rect = board.getBoundingClientRect(), u = rect.width / 100;
+      var at = function (r, c) { return { x: rect.left + (OFF + c * PITCH + CELL / 2) * u, y: rect.top + (OFF + r * PITCH + CELL / 2) * u }; };
+      var col = getComputedStyle(board).getPropertyValue('--ft-' + t.k).trim() || '#FFFFFF';
+      t.rows.forEach(function (row, j) { setTimeout(function () { C.ui.burst(at(row, midC), { colors: [col, '#FFFFFF'], count: 22, speed: 260, life: 560, ring: 40 }); }, 60 * j); });
+      t.cols.forEach(function (cc, j) { setTimeout(function () { C.ui.burst(at(midR, cc), { colors: [col, '#FFFFFF'], count: 22, speed: 260, life: 560, ring: 40 }); }, 60 * (j + t.rows.length)); });
+    }
+    if (t.refilled) setTimeout(function () { if (S) buildTray(true); }, rm ? 0 : 260);
+    else markTray();
+  }
+  function floatGain(g) {
+    if (C.ui.reduceMotion()) return;
+    var f = el('div', { class: 'ft-gain', text: '+' + C.num(g) });
+    scoreBox.appendChild(f);
+    f.animate([{ transform: 'translateY(0)', opacity: 1 }, { transform: 'translateY(-28px)', opacity: 0 }], { duration: 650, easing: 'ease-out' })
+      .onfinish = function () { if (f.parentNode) f.parentNode.removeChild(f); };
+  }
+  function render() {
+    scoreV.textContent = C.num(S.score);
+    bestV.textContent = C.num(Math.max(best(), S.score));
+    var left = S.tray.filter(function (x) { return x >= 0; }).length;
+    board.setAttribute('aria-label', C.t('board') + ' — ' + C.t('boardN', { s: C.num(S.score), n: C.num(left) }));
+    top.innerHTML = '';
+    if (S.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyFt') + ' — ' + C.num(S.daily) })]));
+    markTray();
+  }
+  // the board is laid out in units of a hundredth of its width; measured rather than set in
+  // cq units, which the Android WebViews before Chrome 105 drop (#611). Both sides are
+  // compared, so a turn of the phone that keeps the width still refits (lesson 2026-10-19).
+  var lastW = 0, lastH = 0;
+  function fit() {
+    var r = board.getBoundingClientRect();
+    if (r.width && (r.width !== lastW || r.height !== lastH)) { lastW = r.width; lastH = r.height; board.style.setProperty('--u', (r.width / 100).toFixed(3) + 'px'); }
+  }
+  if (window.ResizeObserver) new ResizeObserver(fit).observe(board); else window.addEventListener('resize', fit);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { lastW = 0; fit(); });
+
+  /* -------------------------------------------------------------- input */
+
+  // A finger on a tray piece lifts it at board size above the finger, so the finger never
+  // hides it; its shadow follows on the board. Let go over a place it fits and it lands;
+  // anywhere else it flies back. Everything is read against the board as drawn now.
+  var drag = null;
+  function units(e) {
+    var r = board.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * 100 / r.width, y: (e.clientY - r.top) * 100 / r.width, u: r.width / 100 };
+  }
+  function slotAt(p) { return p.y >= TRAY_TOP - 2 && p.y <= TRAY_TOP + TRAY_H + 2 ? Math.max(0, Math.min(2, Math.floor(p.x / 33.333))) : -1; }
+  function cellAt(p) {
+    var c = Math.floor((p.x - OFF + (PITCH - CELL) / 2) / PITCH), r = Math.floor((p.y - OFF + (PITCH - CELL) / 2) / PITCH);
+    return r >= 0 && r < N && c >= 0 && c < N ? { r: r, c: c } : null;
+  }
+  // where the lifted piece sits (its top-left, in units) for a finger at p
+  function liftAt(p, si, touch) {
+    var s = SH[si], w = s.wd * PITCH, h = s.h * PITCH;
+    return { x: p.x - w / 2, y: touch ? p.y - h - 9 : p.y - h / 2 };
+  }
+  function anchor(pos) { return { r: Math.round((pos.y - OFF) / PITCH), c: Math.round((pos.x - OFF) / PITCH) }; }
+  function moveDrag(p) {
+    var pos = liftAt(p, drag.si, drag.touch);
+    drag.pos = pos;
+    drag.node.style.transform = 'translate(' + (pos.x * p.u).toFixed(1) + 'px,' + (pos.y * p.u).toFixed(1) + 'px)';
+    var a = anchor(pos);
+    show(drag.si, a.r, a.c);
+  }
+  function cancelDrag() {
+    if (!drag) return;
+    if (drag.node.parentNode) drag.node.parentNode.removeChild(drag.node);
+    if (pieces[drag.slot]) pieces[drag.slot].classList.remove('is-lifted');
+    drag = null; shown = null;
+    if (S) paintBoard();
+  }
+  board.addEventListener('pointerdown', function (e) {
+    if (drag || !S || ended || document.querySelector('.ch-scrim')) return;
+    var p = units(e), k = slotAt(p);
+    if (k >= 0 && S.tray[k] >= 0) {
+      e.preventDefault();
+      try { board.setPointerCapture(e.pointerId); } catch (err) { /* already released */ }
+      var node = pieceNode(S.tray[k], PITCH, CELL);
+      node.classList.add('ft-drag');
+      board.appendChild(node);
+      drag = { id: e.pointerId, slot: k, si: S.tray[k], node: node, touch: e.pointerType !== 'mouse', x0: p.x, y0: p.y, moved: false };
+      if (pieces[k]) pieces[k].classList.add('is-lifted');
+      moveDrag(p);
+      C.feedback('select');
+      return;
+    }
+    // with a piece picked, a tap on the board moves its shadow; a tap on the shadow places it
+    var cell = cellAt(p);
+    if (sel >= 0 && cell) {
+      var s = SH[S.tray[sel]];
+      if (shown && cell.r >= shown.r && cell.r < shown.r + s.h && cell.c >= shown.c && cell.c < shown.c + s.wd) { placeAt(sel, shown.r, shown.c); render(); return; }
+      cur = { r: Math.max(0, Math.min(N - s.h, cell.r - Math.floor(s.h / 2))), c: Math.max(0, Math.min(N - s.wd, cell.c - Math.floor(s.wd / 2))) };
+      showSel();
+    }
+  });
+  board.addEventListener('pointermove', function (e) {
+    if (!drag || e.pointerId !== drag.id) return;
+    var p = units(e);
+    if (Math.abs(p.x - drag.x0) + Math.abs(p.y - drag.y0) > 3) drag.moved = true;
+    moveDrag(p);
+  });
+  board.addEventListener('pointerup', function (e) {
+    if (!drag || e.pointerId !== drag.id) return;
+    var d = drag, p = units(e);
+    moveDrag(p);
+    var a = anchor(d.pos), target = shown;
+    if (!d.moved) {
+      // a tap on a piece picks it for tapping or the keys
+      cancelDrag();
+      pick(d.slot);
+      return;
+    }
+    if (target && target.si === d.si) {
+      var from = d.node.getBoundingClientRect();
+      if (d.node.parentNode) d.node.parentNode.removeChild(d.node);
+      drag = null;
+      placeAt(d.slot, a.r, a.c, from);
+      return;
+    }
+    // dropped where it does not fit: it flies home
+    drag = null; shown = null; paintBoard();
+    var home = pieces[d.slot];
+    if (home) {
+      home.classList.remove('is-lifted');
+      C.ui.fly(home, d.node.getBoundingClientRect(), { ms: 220 });
+    }
+    if (d.node.parentNode) d.node.parentNode.removeChild(d.node);
+    if (cellAt(p) || cellAt({ x: d.pos.x + 4, y: d.pos.y + 4 })) { C.feedback('bad'); status.textContent = C.t('noFit'); }
+  });
+  board.addEventListener('pointercancel', function (e) { if (drag && e.pointerId === drag.id) cancelDrag(); });
+
+  function pick(k) {
+    if (!S || ended || k < 0 || k > 2 || S.tray[k] < 0) return;
+    if (sel === k) { sel = -1; shown = null; paintBoard(); markTray(); return; }
+    sel = k;
+    var s = SH[S.tray[k]];
+    cur = { r: Math.max(0, Math.min(N - s.h, cur.r)), c: Math.max(0, Math.min(N - s.wd, cur.c)) };
+    // start the shadow on the first place the piece fits, so it is never hidden at once
+    if (!E.canPlace(S.g, S.tray[k], cur.r, cur.c)) {
+      outer: for (var r = 0; r + s.h <= N; r++) for (var c = 0; c + s.wd <= N; c++) if (E.canPlace(S.g, S.tray[k], r, c)) { cur = { r: r, c: c }; break outer; }
+    }
+    C.feedback('select');
+    markTray();
+    showSel();
+  }
+  function showSel() {
+    if (sel < 0) return;
+    var si = S.tray[sel];
+    shown = { si: si, r: cur.r, c: cur.c };
+    if (!E.canPlace(S.g, si, cur.r, cur.c)) {
+      // a place it does not fit still shows where it is, in the plain empty colour, with a shake on placing
+      shown = null;
+      paintBoard();
+      var s = SH[si];
+      s.c.forEach(function (q) { var i = (cur.r + q[0]) * N + cur.c + q[1]; if (!S.g[i]) setCell(i, 'ft-cell is-ghost', s.k); });
+      return;
+    }
+    paintBoard();
+  }
+  function moveSel(dr, dc) {
+    if (sel < 0) { pick(S.tray.findIndex(function (x) { return x >= 0; })); return; }
+    var s = SH[S.tray[sel]];
+    cur = { r: Math.max(0, Math.min(N - s.h, cur.r + dr)), c: Math.max(0, Math.min(N - s.wd, cur.c + dc)) };
+    showSel();
+  }
+
+  // The grid is drawn the same way in every language, so the arrows are never flipped
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim') || e.ctrlKey || e.metaKey || e.altKey || !S || ended) return;
+    if (e.key === 'ArrowLeft') { e.preventDefault(); moveSel(0, -1); return; }
+    if (e.key === 'ArrowRight') { e.preventDefault(); moveSel(0, 1); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); moveSel(-1, 0); return; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); moveSel(1, 0); return; }
+    if (/^[1-3]$/.test(e.key)) { e.preventDefault(); pick(+e.key - 1); return; }
+    // Tab walks the pieces in the tray; past the last one it lets go, so the keys never trap the focus
+    if (e.key === 'Tab' && document.activeElement === board) {
+      var step = e.shiftKey ? -1 : 1;
+      for (var n = (sel < 0 ? (e.shiftKey ? 3 : -1) : sel) + step; n >= 0 && n <= 2; n += step) {
+        if (S.tray[n] >= 0) { e.preventDefault(); pick(n); return; }
+      }
+      if (sel >= 0) { sel = -1; shown = null; paintBoard(); markTray(); }
+      return;
+    }
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      if (e.repeat) return;
+      if (sel < 0) { moveSel(0, 0); return; }
+      placeAt(sel, cur.r, cur.c);
+      return;
+    }
+    if (e.key === 'Escape') { if (sel >= 0) { e.preventDefault(); sel = -1; shown = null; paintBoard(); markTray(); } return; }
+    if (C.keyIs(e, 'n') && !dailyDate) { e.preventDefault(); askNew(); }
+  });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    var keys = [kb(C.num(1) + '–' + C.num(3) + ' · Tab', C.t('kPick')), kb('← → ↑ ↓', C.t('kMove')), kb('Space · Enter', C.t('kPlace')), kb('Esc', C.t('kBack'))];
+    if (!dailyDate) keys.push(kb('N', C.t('kNew')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, keys)
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // a 6×6 corner of the board for the tutorial: filled cells as [row, col, colour family],
+  // a piece above it and an arrow, ghost cells and lines about to clear. The colours are the
+  // game's own variables, so the picture follows the theme of the dialog.
+  function tArt(filled, ghost, gk, piece, hitRow) {
+    var s = '<svg viewBox="0 0 200 130" width="100%">';
+    s += '<rect x="58" y="22" width="84" height="84" rx="6" fill="var(--c-surface-2)"/>';
+    var X = function (c) { return 61 + c * 13.5; }, Y = function (r) { return 25 + r * 13.5; };
+    var cellAtS = function (r, c, fill, extra) { return '<rect x="' + X(c) + '" y="' + Y(r) + '" width="12" height="12" rx="2.4" fill="' + fill + '"' + (extra || '') + '/>'; };
+    var on = {};
+    filled.forEach(function (f) { on[f[0] * 6 + f[1]] = f[2]; });
+    ghost.forEach(function (g) { on[g[0] * 6 + g[1]] = -1; });
+    for (var r = 0; r < 6; r++) for (var c = 0; c < 6; c++) {
+      var v = on[r * 6 + c];
+      if (v === -1) s += cellAtS(r, c, 'var(--ft-' + gk + ')', ' opacity=".5"');
+      else if (v) s += cellAtS(r, c, 'var(--ft-' + v + ')');
+      else s += cellAtS(r, c, 'var(--c-surface)');
+    }
+    if (hitRow >= 0) s += '<rect x="59" y="' + (Y(hitRow) - 1.5) + '" width="82" height="15" rx="3" fill="none" stroke="var(--ft-' + gk + ')" stroke-width="2"/>';
+    if (piece) {
+      piece.forEach(function (q) { s += '<rect x="' + (160 + q[1] * 13.5) + '" y="' + (8 + q[0] * 13.5) + '" width="12" height="12" rx="2.4" fill="var(--ft-' + gk + ')"/>'; });
+      s += '<path d="M158 30 C 150 40, 140 44, 128 46" stroke="#6C4EA5" stroke-width="2.5" fill="none" stroke-linecap="round"/><path d="M133 41 l-6 5 7 3" stroke="#6C4EA5" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>';
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt([[5, 0, 3], [5, 1, 3], [5, 2, 3], [4, 0, 6], [4, 1, 6]], [[1, 3], [2, 3], [2, 4]], 8, [[0, 0], [1, 0], [1, 1]], -1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt([[5, 0, 3], [5, 1, 3], [5, 2, 3], [5, 5, 1], [4, 0, 6], [4, 1, 6]], [[5, 3], [5, 4]], 2, null, 5) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt([[0, 0, 7], [0, 1, 7], [1, 0, 7], [1, 1, 7], [2, 3, 5], [3, 3, 5], [4, 3, 5], [5, 3, 5], [3, 5, 9], [4, 5, 9], [5, 5, 9], [5, 4, 9], [5, 0, 4], [4, 1, 8]], [], 9, null, -1) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // saved after every piece; the daily game has its own slot
+  ctx.autosave(function () {
+    if (!S || ended) return { inProgress: false };
+    return { g: S.g, tray: S.tray, score: S.score, placed: S.placed, lines: S.lines, streak: S.streak, seed: S.seed, daily: S.daily,
+      elapsed: Date.now() - startedAt };
+  });
+  function save() { ctx.save(); }
+  fit();
+  var saved = ctx.loadSave();
+  if (saved && E.valid(saved) && (saved.daily || null) === (dailyDate || null)) {
+    S = { g: saved.g.slice(), tray: saved.tray.slice(), score: saved.score, placed: saved.placed, lines: saved.lines, streak: saved.streak,
+      seed: saved.seed, daily: saved.daily || null };
+    startedAt = Date.now() - (saved.elapsed || 0);
+    paintBoard(); buildTray(false);
+    render();
+    status.textContent = S.daily ? C.t('goalN', { g: C.num(DAILY_GOAL) }) : C.t('hintIdle');
+  } else newGame();
+  if (dailyDate && C.stats.dailyDone('fitten', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).fitten;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>

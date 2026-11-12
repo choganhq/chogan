@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 9072;
+const MIN_CHECKS = 9238;
 
 function ok(cond, msg) {
   checks++;
@@ -11246,7 +11246,7 @@ function testFootball() {
   const disc = (id, x, y) => ({ id, x, y, vx: 0, vy: 0, inPlay: true, r: E.RD, m: E.MD });
   const ballAt = (x, y) => ({ id: 0, x, y, vx: 0, vy: 0, inPlay: true, r: E.RB, m: E.MB });
   // a match with only these bodies on the pitch
-  const setup = (bodies, turn) => { const M = E.match(); M.b = bodies; M.turn = turn || 0; return M; };
+  const setup = (bodies, turn) => { const M = E.match(); M.b = bodies; M.turn = turn || 0; M.kick = false; return M; };
   // the ball rolled on its own, as if struck, for the goal-line checks
   const roll = (x, y, angle, power) => { const s = Cue.start(E.T, [ballAt(x, y)], { angle, power }, 0); s.by = 0; s.goal = -1; s.goalAt = 0; return E.run(s); };
 
