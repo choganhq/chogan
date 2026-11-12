@@ -26,7 +26,7 @@ const CACHE_HOST = 'https://issues-cache.invalid/';
 export const LANGS = [
   ['fa', 'فارسی', 'rtl', 'fa-IR'], ['en', 'English', 'ltr', 'en-GB'], ['zh', '中文', 'ltr', 'zh-Hans'],
   ['de', 'Deutsch', 'ltr', 'de-DE'], ['es', 'Español', 'ltr', 'es-ES'], ['pl', 'Polski', 'ltr', 'pl-PL'],
-  ['fr', 'Français', 'ltr', 'fr-FR'],
+  ['fr', 'Français', 'ltr', 'fr-FR'], ['ar', 'العربية', 'rtl', 'ar-u-nu-latn'],
 ];
 
 export const S = {
@@ -113,6 +113,18 @@ export const S = {
     refresh: 'La liste se met à jour toutes les cinq minutes. Le texte est affiché tel qu’il a été écrit.',
     theme: 'Thème (auto, clair, sombre)', langGo: 'OK', back: 'Retour à Chogan', page: 'Page {n}',
     filter: 'État', labels: 'Étiquettes',
+  },
+  ar: {
+    title: 'بلاغات Chogan', lead: 'نسخة للقراءة فقط من بلاغات Chogan وأفكاره العامة.',
+    report: 'أبلغ عن مشكلة أو فكرة', all: 'الكل', open: 'مفتوحة', closed: 'مغلقة',
+    stOpen: 'مفتوح', stDone: 'أُنجز', stNotPlanned: 'غير مخطط له',
+    opened: 'فُتح في {d}', closedOn: 'أُغلق في {d}', noBody: '(بلا وصف)',
+    allOnGithub: 'كل البلاغات على GitHub', newer: 'الأحدث', older: 'الأقدم', empty: 'لا بلاغات هنا.',
+    error: 'تعذّر تحميل القائمة من GitHub. حاول بعد بضع دقائق.',
+    stale: 'لا يمكن الوصول إلى GitHub؛ هذه آخر نسخة محفوظة.',
+    refresh: 'تتحدث القائمة كل خمس دقائق. يظهر النص كما كُتب.',
+    theme: 'المظهر (تلقائي، فاتح، داكن)', langGo: 'اذهب', back: 'العودة إلى Chogan', page: 'الصفحة {n}',
+    filter: 'الحالة', labels: 'الوسوم',
   },
 };
 
