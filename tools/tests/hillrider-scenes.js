@@ -86,7 +86,7 @@ module.exports = function (T) {
     // strings in every language, none named like a core key
     const keys = ['scT', 'scSun', 'scSnow', 'scRain', 'scNight', 'gripSun', 'gripWet', 'gripSnow', 'gripNight', 'dailySun', 'sceneRule'];
     const blocks = LOCALE_CODES.map((l) => { const m = html.match(new RegExp('\\n {6}' + l + ': \\{([\\s\\S]*?)\\n {6}\\}')); return m ? m[1] : ''; });
-    ok(LOCALE_CODES.length === 7 && blocks.every((b) => keys.every((k) => new RegExp('\\b' + k + ": '[^']+'").test(b))), 'the scene strings exist in all ' + LOCALE_CODES.length + ' languages');
+    ok(LOCALE_CODES.length > 0 && blocks.length === LOCALE_CODES.length && blocks.every((b) => keys.every((k) => new RegExp('\\b' + k + ": '[^']+'").test(b))), 'the scene strings exist in all ' + LOCALE_CODES.length + ' languages');
     ok(keys.every((k) => core.indexOf(k + ':') < 0), 'no scene string reuses a core key name');
 
     // colours: the HUD digits read on the whole sky of every scene, in light and dark

@@ -26,7 +26,7 @@ const CACHE_HOST = 'https://issues-cache.invalid/';
 export const LANGS = [
   ['fa', 'فارسی', 'rtl', 'fa-IR'], ['en', 'English', 'ltr', 'en-GB'], ['zh', '中文', 'ltr', 'zh-Hans'],
   ['de', 'Deutsch', 'ltr', 'de-DE'], ['es', 'Español', 'ltr', 'es-ES'], ['pl', 'Polski', 'ltr', 'pl-PL'],
-  ['fr', 'Français', 'ltr', 'fr-FR'],
+  ['fr', 'Français', 'ltr', 'fr-FR'], ['hi', 'हिन्दी', 'ltr', 'hi-IN'],
 ];
 
 export const S = {
@@ -113,6 +113,18 @@ export const S = {
     refresh: 'La liste se met à jour toutes les cinq minutes. Le texte est affiché tel qu’il a été écrit.',
     theme: 'Thème (auto, clair, sombre)', langGo: 'OK', back: 'Retour à Chogan', page: 'Page {n}',
     filter: 'État', labels: 'Étiquettes',
+  },
+  hi: {
+    title: 'Chogan की शिकायतें', lead: 'Chogan की सार्वजनिक शिकायतों और सुझावों की केवल पढ़ने वाली प्रति।',
+    report: 'समस्या या सुझाव भेजें', all: 'सभी', open: 'खुली', closed: 'बंद',
+    stOpen: 'खुली', stDone: 'हो गई', stNotPlanned: 'योजना में नहीं',
+    opened: 'खोली गई {d}', closedOn: 'बंद हुई {d}', noBody: '(कोई विवरण नहीं)',
+    allOnGithub: 'GitHub पर सभी शिकायतें', newer: 'नई', older: 'पुरानी', empty: 'यहाँ कोई शिकायत नहीं।',
+    error: 'GitHub से सूची नहीं आ सकी। कुछ मिनट बाद फिर कोशिश करें।',
+    stale: 'GitHub तक नहीं पहुँच सके; यह आख़िरी सहेजी गई प्रति है।',
+    refresh: 'सूची हर पाँच मिनट में ताज़ा होती है। शिकायतों का टेक्स्ट वैसा ही दिखाया जाता है जैसा लिखा गया था।',
+    theme: 'थीम (अपने-आप, हल्की, गहरी)', langGo: 'जाएँ', back: 'Chogan पर वापस', page: 'पेज {n}',
+    filter: 'स्थिति', labels: 'लेबल',
   },
 };
 
