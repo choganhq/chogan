@@ -1455,7 +1455,8 @@
     air: 'airhockey', smn: 'simon', lit: 'lights', cor: 'corridor', lnk: 'linkup', sum: 'sums',
     tw: 'towerup', dom: 'dominoes', ws: 'watersort', fb: 'football', wg: 'wrigglers', tri: 'trio',
     fr: 'fourrow', pk: 'peak', tr: 'territories', pw: 'pipes', db: 'doubles', sk: 'storekeeper',
-    sr: 'starraid', cx: 'crossing', cm: 'carrom', nd: 'numberdrop', ci: 'circuit'
+    sr: 'starraid', cx: 'crossing', cm: 'carrom', nd: 'numberdrop', ci: 'circuit',
+    hr: 'hillrider', fl: 'flood', mo: 'motorush', mu: 'muncher'
   };
   // Darts kept Dots' prefix for this one award when #464 renamed the others
   var ACH_GAME_ID = { 'dt-180': 'darts' };
