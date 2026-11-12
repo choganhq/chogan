@@ -10,6 +10,10 @@
 <style>
   .mr-wrap > .ch-fit { --fit-ar: calc(360 / 540); }
   .ch-fit > .mr-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+  .ch-fit > .mr-box { position: relative; }
+  .mr-buy { position: absolute; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border: 0; border-radius: 999px; background: #FFB13B; color: #2A1A00; font: inherit; font-weight: 800; font-size: var(--fs-sm); box-shadow: 0 2px 6px rgba(0, 0, 0, .25); cursor: pointer; white-space: nowrap; }
+  .mr-buy[hidden] { display: none; }
+  .mr-buy .ch-icon { pointer-events: none; }
   .mr-canvas { display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; user-select: none; -webkit-user-select: none; }
   .mr-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
   .mr-label { font-weight: 700; font-size: var(--fs-sm); color: var(--c-text-dim); }
@@ -133,6 +137,27 @@ function MotoRushEngineFactory() {
     else if (R.bot.cur >= 0 && R.tl !== R.bot.f) steer(R, R.bot.f > R.tl ? 1 : -1);
     // its share of the gas is held in stretches out of every ten seconds
     R.gas = B.gas >= 1 || (B.gas > 0 && R.tick % 600 < B.gas * 600);
+  }
+  // A nitro refill bought with the app's coins (#817): only when the bar is empty and no
+  // boost runs, and only on a clear stretch, NITRO_CLEAR metres with no car ahead, so a
+  // tap on the button never comes while a row has to be dodged. Not in the daily, whose
+  // score is compared between players. The gaps are built for the bike's nitro already,
+  // so a bought one can never make a row impassable.
+  var NITRO_PRICE = 15, NITRO_CLEAR = 60;
+  function clearAhead(S) {
+    var rear = S.p - BIKE_L, i, w;
+    for (i = 0; i < S.waves.length; i++) {
+      w = S.waves[i];
+      if (w.y + w.span > rear && w.y < S.p + NITRO_CLEAR) return false;
+    }
+    return true;
+  }
+  function nitroOffered(S) { return !!S && !S.over && !S.won && !S.daily && S.boostT === 0 && S.bar === 0 && clearAhead(S); }
+  function buyNitro(S) {
+    if (!nitroOffered(S)) return false;
+    S.boostT = bikeOf(S.bike).boostT;
+    S.ev.push({ t: 'boost', bought: true });
+    return true;
   }
   function raceStep(S) {
     var R = S.rival;
@@ -427,6 +452,7 @@ function MotoRushEngineFactory() {
     PICK_ADD: PICK_ADD, LEN: LEN, DIFF: DIFF, GAS_V: GAS_V, GAS_MULT: GAS_MULT, BLINK: BLINK, MOVE: MOVE,
     ACC: ACC, DEC: DEC, target: target, SCENES: SCENES, laneSpeed: laneSpeed,
     RACE_P: RACE_P, BOTS: BOTS, botDrive: botDrive,
+    NITRO_PRICE: NITRO_PRICE, NITRO_CLEAR: NITRO_CLEAR, nitroOffered: nitroOffered, buyNitro: buyNitro,
     BIKES: BIKES, BIKE_IDS: BIKE_IDS, bikeOf: bikeOf, pickAdd: pickAdd,
     BIOMES: BIOMES, KINDS: KINDS, SIDE_STEP: SIDE_STEP, SIDE_MIN: SIDE_MIN, biomeAt: biomeAt, props: props,
     base: base, speed: speed, need: need, warnAt: warnAt, closing: closing, topSpeed: topSpeed, levelAt: levelAt,
@@ -457,6 +483,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     mood: 'dots',
     strings: {
       fa: {
+        buyNitro: 'نیترو · {n} سکه', nitroBought: 'نیترو خریدی', nitroHelp: 'وقتی نوار نیترو خالی است و جاده جلویت باز است، می‌توانی با {n} سکه یک نیترو بخری (کلید N). در چالش روزانه نیست.',
         modeL: 'بازی', modeRide: 'بی‌پایان', modeRace: 'مسابقه', raceHint: 'در مسابقه با یک موتورسوار رقیب در همین جاده تا ۳ کیلومتر می‌رانی؛ سختی، زرنگی رقیب را تعیین می‌کند و او همیشه «پیک» می‌راند.', raceWin: 'مسابقه را بردی!', raceLose: 'رقیب زودتر رسید', raceTag: 'مسابقه', rivalAhead: 'رقیب {n} متر جلوتر', rivalBehind: 'رقیب {n} متر عقب‌تر',
         bikeL: 'موتور', bkCourier: 'پیک', bkGale: 'تندباد', bkThunder: 'تندر', bkArrow: 'تیر', bkCourierD: 'موتور اول، برای همه', bkGaleD: 'گاز قوی‌تر', bkThunderD: 'نیتروی بیشتر؛ با دو قوطی پر می‌شود', bkArrowD: 'از همه تندتر، با بانده‌عوض‌کردن سریع‌تر', bikeRide: 'سوار شو', bikeRiding: 'سواری', bikePrice: '{n} سکه', bikeBought: '{name} مال تو شد', dailyBike: 'در موتورسوار روزانه همه با «پیک» می‌رانند.',
         sceneL: 'هوا', sceneSunny: 'آفتابی', sceneRainy: 'بارانی', sceneSnowy: 'برفی', sceneNight: 'شب', gripN: 'چسبندگی {n}٪', dailySunny: 'هوای موتورسوار روزانه همیشه آفتابی است.', sceneHint: 'در باران و برف بانده عوض کردن کندتر است و موتور کمی از بانده رد می‌شود و برمی‌گردد؛ شب‌ها جاده‌ی جلو را کوتاه‌تر می‌بینی.',
@@ -471,6 +498,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         tutTitle3: 'نیترو', tutText3: 'قوطی‌های زرد را بردار. نوار که پر شد، نیترو سرعت و امتیازت را بالا می‌برد.'
       },
       en: {
+        buyNitro: 'Nitro · {n} coins', nitroBought: 'Nitro bought', nitroHelp: 'When the nitro bar is empty and the road ahead is clear, you can buy a nitro for {n} coins (key N). Not in the daily.',
         modeL: 'Mode', modeRide: 'Endless', modeRace: 'Race', raceHint: 'In a race you ride against a rival on the same road to 3 km; the difficulty sets how sharp the rival is, and it always rides the Courier.', raceWin: 'You won the race!', raceLose: 'The rival got there first', raceTag: 'Race', rivalAhead: 'Rival {n} m ahead', rivalBehind: 'Rival {n} m behind',
         bikeL: 'Bike', bkCourier: 'Courier', bkGale: 'Gale', bkThunder: 'Thunder', bkArrow: 'Arrow', bkCourierD: 'The first bike, for everyone', bkGaleD: 'A stronger throttle', bkThunderD: 'More nitro; two cans fill it', bkArrowD: 'The fastest, with quicker lane changes', bikeRide: 'Ride', bikeRiding: 'Riding', bikePrice: '{n} coins', bikeBought: 'The {name} is yours', dailyBike: 'In the daily ride everyone rides the Courier.',
         sceneL: 'Weather', sceneSunny: 'Sunny', sceneRainy: 'Rain', sceneSnowy: 'Snow', sceneNight: 'Night', gripN: 'Grip {n}%', dailySunny: 'The daily ride is always sunny.', sceneHint: 'In rain and snow a lane change is slower and the bike slides a little past the lane; at night you see less of the road ahead.',
@@ -485,6 +513,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         tutTitle3: 'Nitro', tutText3: 'Pick up the yellow cans. When the bar is full, nitro raises your speed and your score.'
       },
       pl: {
+        buyNitro: 'Nitro · {n} monet', nitroBought: 'Kupiono nitro', nitroHelp: 'Gdy pasek nitro jest pusty, a droga przed tobą wolna, możesz kupić nitro za {n} monet (klawisz N). Nie w wyzwaniu dnia.',
         modeL: 'Tryb', modeRide: 'Bez końca', modeRace: 'Wyścig', raceHint: 'W wyścigu jedziesz z rywalem tą samą drogą do 3 km; poziom trudności decyduje, jak sprytny jest rywal, a on zawsze jedzie Kurierem.', raceWin: 'Wygrałeś wyścig!', raceLose: 'Rywal dojechał pierwszy', raceTag: 'Wyścig', rivalAhead: 'Rywal {n} m z przodu', rivalBehind: 'Rywal {n} m z tyłu',
         bikeL: 'Motocykl', bkCourier: 'Kurier', bkGale: 'Wicher', bkThunder: 'Grom', bkArrow: 'Strzała', bkCourierD: 'Pierwszy motocykl, dla każdego', bkGaleD: 'Mocniejszy gaz', bkThunderD: 'Więcej nitro; napełniają je dwa kanistry', bkArrowD: 'Najszybszy, szybciej zmienia pas', bikeRide: 'Jedź', bikeRiding: 'W użyciu', bikePrice: '{n} monet', bikeBought: '{name} jest twój', dailyBike: 'W jeździe dnia wszyscy jadą Kurierem.',
         sceneL: 'Pogoda', sceneSunny: 'Słońce', sceneRainy: 'Deszcz', sceneSnowy: 'Śnieg', sceneNight: 'Noc', gripN: 'Przyczepność {n}%', dailySunny: 'Jazda dnia jest zawsze w słońcu.', sceneHint: 'W deszczu i śniegu zmiana pasa trwa dłużej, a motocykl lekko wyjeżdża za pas; nocą widzisz mniej drogi przed sobą.',
@@ -499,6 +528,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         tutTitle3: 'Nitro', tutText3: 'Zbieraj żółte kanistry. Gdy pasek jest pełny, nitro podnosi prędkość i punkty.'
       },
       fr: {
+        buyNitro: 'Nitro · {n} pièces', nitroBought: 'Nitro acheté', nitroHelp: 'Quand la barre de nitro est vide et que la route devant toi est libre, tu peux acheter un nitro pour {n} pièces (touche N). Pas dans le défi du jour.',
         modeL: 'Mode', modeRide: 'Sans fin', modeRace: 'Course', raceHint: 'En course, tu affrontes un rival sur la même route jusqu’à 3 km ; la difficulté règle son habileté, et il roule toujours en Coursier.', raceWin: 'Tu as gagné la course !', raceLose: 'Le rival est arrivé avant toi', raceTag: 'Course', rivalAhead: 'Rival {n} m devant', rivalBehind: 'Rival {n} m derrière',
         bikeL: 'Moto', bkCourier: 'Coursier', bkGale: 'Rafale', bkThunder: 'Tonnerre', bkArrow: 'Flèche', bkCourierD: 'La première moto, pour tous', bkGaleD: 'Des gaz plus puissants', bkThunderD: 'Plus de nitro ; deux bidons la remplissent', bkArrowD: 'La plus rapide, avec des changements de voie plus vifs', bikeRide: 'Rouler', bikeRiding: 'En selle', bikePrice: '{n} pièces', bikeBought: '{name} est à toi', dailyBike: 'Dans la balade du jour, tout le monde roule en Coursier.',
         sceneL: 'Météo', sceneSunny: 'Soleil', sceneRainy: 'Pluie', sceneSnowy: 'Neige', sceneNight: 'Nuit', gripN: 'Adhérence {n} %', dailySunny: 'La balade du jour est toujours au soleil.', sceneHint: 'Sous la pluie et la neige, changer de voie prend plus de temps et la moto glisse un peu au-delà de la voie ; la nuit, tu vois moins loin devant toi.',
@@ -513,6 +543,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         tutTitle3: 'Nitro', tutText3: 'Ramasse les bidons jaunes. Quand la jauge est pleine, le nitro augmente ta vitesse et ton score.'
       },
       zh: {
+        buyNitro: '氮气 · {n} 金币', nitroBought: '已购买氮气', nitroHelp: '当氮气条为空且前方道路通畅时，可以花 {n} 枚金币买一次氮气（N 键）。每日挑战中不可用。',
         modeL: '模式', modeRide: '无尽', modeRace: '比赛', raceHint: '比赛中你和一名对手在同一条路上骑到 3 公里；难度决定对手有多灵活，对手总是骑“信使”。', raceWin: '你赢了比赛！', raceLose: '对手先到了', raceTag: '比赛', rivalAhead: '对手领先 {n} 米', rivalBehind: '对手落后 {n} 米',
         bikeL: '摩托', bkCourier: '信使', bkGale: '疾风', bkThunder: '雷霆', bkArrow: '飞箭', bkCourierD: '第一辆摩托，人人都有', bkGaleD: '油门更强', bkThunderD: '氮气更多；两个油罐就能充满', bkArrowD: '最快，换道也更灵活', bikeRide: '骑这辆', bikeRiding: '正在骑', bikePrice: '{n} 金币', bikeBought: '{name}归你了', dailyBike: '每日飞驰中大家都骑“信使”。',
         sceneL: '天气', sceneSunny: '晴天', sceneRainy: '雨天', sceneSnowy: '雪天', sceneNight: '夜晚', gripN: '抓地力 {n}%', dailySunny: '每日飞驰总是晴天。', sceneHint: '雨天和雪天换道更慢，摩托还会稍微滑过车道；夜里能看到的前方路面更短。',
@@ -527,6 +558,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         tutTitle3: '氮气', tutText3: '捡起黄色油罐。氮气条满了，速度和得分都会提高。'
       },
       de: {
+        buyNitro: 'Nitro · {n} Münzen', nitroBought: 'Nitro gekauft', nitroHelp: 'Wenn die Nitroleiste leer und die Straße vor dir frei ist, kannst du ein Nitro für {n} Münzen kaufen (Taste N). Nicht in der Tagesaufgabe.',
         modeL: 'Modus', modeRide: 'Endlos', modeRace: 'Rennen', raceHint: 'Im Rennen fährst du auf derselben Straße gegen einen Rivalen bis 3 km; die Schwierigkeit bestimmt, wie geschickt er ist, und er fährt immer den Kurier.', raceWin: 'Du hast das Rennen gewonnen!', raceLose: 'Der Rivale war zuerst da', raceTag: 'Rennen', rivalAhead: 'Rivale {n} m vorn', rivalBehind: 'Rivale {n} m hinten',
         bikeL: 'Motorrad', bkCourier: 'Kurier', bkGale: 'Sturm', bkThunder: 'Donner', bkArrow: 'Pfeil', bkCourierD: 'Das erste Motorrad, für alle', bkGaleD: 'Kräftigeres Gas', bkThunderD: 'Mehr Nitro; zwei Kanister füllen es', bkArrowD: 'Das schnellste, mit flinkeren Spurwechseln', bikeRide: 'Fahren', bikeRiding: 'Im Sattel', bikePrice: '{n} Münzen', bikeBought: '{name} gehört dir', dailyBike: 'Bei der Fahrt des Tages fahren alle den Kurier.',
         sceneL: 'Wetter', sceneSunny: 'Sonne', sceneRainy: 'Regen', sceneSnowy: 'Schnee', sceneNight: 'Nacht', gripN: 'Grip {n} %', dailySunny: 'Die Fahrt des Tages ist immer sonnig.', sceneHint: 'Bei Regen und Schnee dauert ein Spurwechsel länger und das Motorrad rutscht etwas über die Spur hinaus; nachts siehst du weniger von der Straße vor dir.',
@@ -541,6 +573,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         tutTitle3: 'Nitro', tutText3: 'Sammle die gelben Kanister. Ist die Leiste voll, erhöht Nitro Tempo und Punkte.'
       },
       es: {
+        buyNitro: 'Nitro · {n} monedas', nitroBought: 'Nitro comprado', nitroHelp: 'Cuando la barra de nitro está vacía y la carretera de delante está libre, puedes comprar un nitro por {n} monedas (tecla N). No en el reto diario.',
         modeL: 'Modo', modeRide: 'Sin fin', modeRace: 'Carrera', raceHint: 'En la carrera compites con un rival por la misma carretera hasta los 3 km; la dificultad decide lo hábil que es, y siempre va en la Mensajero.', raceWin: '¡Ganaste la carrera!', raceLose: 'El rival llegó antes', raceTag: 'Carrera', rivalAhead: 'Rival {n} m por delante', rivalBehind: 'Rival {n} m por detrás',
         bikeL: 'Moto', bkCourier: 'Mensajero', bkGale: 'Ráfaga', bkThunder: 'Trueno', bkArrow: 'Flecha', bkCourierD: 'La primera moto, para todos', bkGaleD: 'Más potencia', bkThunderD: 'Más nitro; dos latas la llenan', bkArrowD: 'La más rápida, con cambios de carril más ágiles', bikeRide: 'Montar', bikeRiding: 'En uso', bikePrice: '{n} monedas', bikeBought: '{name} es tuya', dailyBike: 'En la carrera del día todos van en la Mensajero.',
         sceneL: 'Tiempo', sceneSunny: 'Sol', sceneRainy: 'Lluvia', sceneSnowy: 'Nieve', sceneNight: 'Noche', gripN: 'Agarre {n} %', dailySunny: 'La carrera del día siempre es con sol.', sceneHint: 'Con lluvia y nieve cambiar de carril cuesta más y la moto se pasa un poco del carril; de noche ves menos carretera por delante.',
@@ -565,7 +598,9 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
   var pops = [], crashAt = 0, flash = 0, runAwarded = false;
 
   var cv = el('canvas', { class: 'mr-canvas', role: 'img', 'aria-label': C.t('scene') });
-  var box = el('div', { class: 'mr-box' }, [cv]);
+  var buyLabel = el('span');
+  var buyBtn = el('button', { class: 'mr-buy', type: 'button', hidden: true }, [C.icon('coin', 16), buyLabel]);
+  var box = el('div', { class: 'mr-box' }, [cv, buyBtn]);
   var top = el('div', { class: 'mr-top ch-above' });
   var status = el('div', { class: 'mr-status', role: 'status', 'aria-live': 'polite' });
   var pauseBtn = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('pause') }, [C.icon('pause', 22)]);
@@ -737,6 +772,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         if (e.n > 0 && e.n < e.m) pops.push({ text: C.t('nitroN', { n: C.num(e.n), m: C.num(e.m) }), lane: e.lane, t: 1.1, max: 1.1 });
       } else if (e.t === 'boost') {
         C.audio.sfx('nitro'); C.haptic('success');
+        if (e.bought) C.ui.toast({ icon: 'coin', title: C.t('nitroBought') });
         pops.push({ text: C.t('nitroGo'), t: 1.3, max: 1.3, big: true });
       } else if (e.t === 'level') {
         // a short pop when the level changes (#783), above the nitro word so both can show
@@ -1227,6 +1263,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     g.save(); rr(g, 0, 0, VW, VH, 0); g.clip();
     scene(g, P, t, dk);
     hud(g, P, font);
+    placeBuy(k);
     // floating words over the bike, in the page's direction: the canvas is left to right,
     // which put the "!" of «مرحله‌ی ۴!» and «خطر از بیخ گوش!» before the words in Persian
     g.direction = document.documentElement.dir === 'rtl' ? 'rtl' : 'ltr';
@@ -1562,6 +1599,28 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
 
   /* -------------------------------------------------------------- input */
 
+  // The nitro refill (#817) is a real button under the HUD panel, so the wrap's steering
+  // never sees its taps; it shows only while the engine offers a refill.
+  function buyNitro() {
+    if (!S || ended || waiting || held || !E.nitroOffered(S)) return;
+    if (!C.coins.can(E.NITRO_PRICE)) { C.ui.toast({ icon: 'coin', title: C.t('notEnoughCoins'), sub: C.t('playToEarn') }); return; }
+    if (!C.coins.spend(E.NITRO_PRICE)) return;
+    E.buyNitro(S);
+    draw();
+  }
+  buyBtn.addEventListener('click', buyNitro);
+  buyLabel.textContent = C.t('buyNitro', { n: C.num(E.NITRO_PRICE) });
+  buyBtn.setAttribute('aria-label', buyLabel.textContent);
+  function placeBuy(k) {
+    var show = !!S && !ended && !waiting && !held && E.nitroOffered(S);
+    if (buyBtn.hidden === show) buyBtn.hidden = !show;
+    if (!show) return;
+    // under the score panel, which ends at y 76 of the 360-wide drawing
+    var st = buyBtn.style;
+    st.left = Math.round(cv.offsetLeft + 8 * k) + 'px'; st.top = Math.round(cv.offsetTop + 84 * k) + 'px';
+    st.height = Math.max(32, Math.round(30 * k)) + 'px';
+  }
+
   // A swipe steers as soon as it has gone far enough sideways; a touch that never does
   // is a tap, which steers toward its side of the road. The canvas is drawn left to
   // right in every language, so its left is the road's left.
@@ -1622,6 +1681,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); go(); }
     else if (e.key === 'Escape' || C.keyIs(e, 'p')) { e.preventDefault(); if (held || waiting) go(); else hold(); }
     else if (C.keyIs(e, 'r')) { e.preventDefault(); newRun(); }
+    else if (C.keyIs(e, 'n')) { e.preventDefault(); buyNitro(); }
   });
   window.addEventListener('keyup', function (e) {
     if (e.key === 'ArrowUp' || C.keyIs(e, 'w')) { keyGas = false; setGas(); }
@@ -1646,8 +1706,9 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
       title: C.t('help'),
       body: [
         el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('p', { class: 'ch-dim', text: C.t('nitroHelp', { n: C.num(E.NITRO_PRICE) }) }),
         el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
-        el('div', { class: 'ch-list' }, [kb('← → / A D', C.t('kSteer')), kb('↑ / W', C.t('kGas')), kb('Space', C.t('kStart')), kb('P / Esc', C.t('kPause')), kb('R', C.t('kAgain'))])
+        el('div', { class: 'ch-list' }, [kb('← → / A D', C.t('kSteer')), kb('↑ / W', C.t('kGas')), kb('Space', C.t('kStart')), kb('P / Esc', C.t('kPause')), kb('R', C.t('kAgain')), kb('N', C.t('buyNitro', { n: C.num(E.NITRO_PRICE) }))])
       ],
       actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
     });
