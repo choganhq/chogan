@@ -104,7 +104,7 @@ module.exports = function (T) {
       el: () => { const n = fakeNode(); made.push(n); return n; },
       setTimeout: (f) => { timers.set(++id, f); return id; },
       clearTimeout: (t) => timers.delete(t),
-      pressTimer: null, longFired: false, shownCls: [], shownBody: []
+      pressTimer: null, longFired: false, shownCls: [], shownBody: [], pinches: 0
     };
     vm.createContext(build2);
     vm.runInContext(build + '\nbuildBoard();', build2);

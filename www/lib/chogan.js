@@ -3207,6 +3207,44 @@
     return Math.max(lo, Math.min(hi, roomW / w, roomH / h));
   };
 
+  // Two-finger pinch, and Ctrl+wheel (a laptop trackpad's pinch), on node (#850). Game pages
+  // set user-scalable=no, so the browser's own pinch never comes and a board that the game
+  // could zoom had no gesture for it. One finger is left alone: taps and the board's own
+  // scrolling. h.start(mid) when a pinch begins; h.move(scale, mid) with the scale since that
+  // start and the fingers' midpoint in client coordinates; h.end() when a finger lifts.
+  ui.pinch = function (node, h) {
+    var d0 = 0, on = false;
+    function mid(a, b) { return { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 }; }
+    function dist(a, b) { return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1; }
+    node.addEventListener('touchstart', function (e) {
+      if (on || e.touches.length < 2) return;
+      on = true;
+      d0 = dist(e.touches[0], e.touches[1]);
+      if (h.start) h.start(mid(e.touches[0], e.touches[1]));
+    }, { passive: true });
+    node.addEventListener('touchmove', function (e) {
+      if (!on || e.touches.length < 2) return;
+      // two fingers would otherwise scroll the board as well as zoom it
+      if (e.cancelable) e.preventDefault();
+      h.move(dist(e.touches[0], e.touches[1]) / d0, mid(e.touches[0], e.touches[1]));
+    }, { passive: false });
+    function stop(e) {
+      if (!on || e.touches.length >= 2) return;
+      on = false;
+      if (h.end) h.end();
+    }
+    node.addEventListener('touchend', stop);
+    node.addEventListener('touchcancel', stop);
+    node.addEventListener('wheel', function (e) {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      var m = { x: e.clientX, y: e.clientY };
+      if (h.start) h.start(m);
+      h.move(Math.exp(-e.deltaY * 0.0025), m);
+      if (h.end) h.end();
+    }, { passive: false });
+  };
+
   // Scales a game laid out at fixed pixel sizes (pegs, cards) to fill the game area
   // (#359). Those layouts stopped at their phone size, so a tablet or a laptop
   // showed them in a third of the screen, and in phone landscape their bottom
