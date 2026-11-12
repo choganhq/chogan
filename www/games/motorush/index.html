@@ -96,6 +96,38 @@ function MotoRushEngineFactory() {
   function topSpeed(diff) { return cfg(diff).vmax + GAS_V + BOOST_V; }
   function levelAt(p, diff) { return 1 + Math.floor(Math.max(0, p) / cfg(diff).lap); }
   function goal(S) { return S.daily ? DAILY_P : Infinity; }
+  // The roadside (#814): every SIDE_STEP metres of ground holds one thing on each side,
+  // chosen from the ride's seed and the slot alone, so the count on screen never grows.
+  // What stands there follows the level: fields, forest, a mountain pass, desert, then
+  // round again; the page hands each slot the level's biome when it first comes into
+  // view, so new scenery streams in from the horizon at a level up. Nothing stands
+  // nearer the middle than SIDE_MIN metres, past the road's edge (6.5) and its posts (7.6).
+  var BIOMES = ['fields', 'forest', 'pass', 'desert'], SIDE_STEP = 16, SIDE_MIN = 8.6, SIDE_SPAN = 9;
+  var KINDS = {
+    fields: ['tree', 'tree', 'bush', 'house', 'animal', 'sign', 'pole'],
+    forest: ['pine', 'pine', 'pine', 'tree', 'animal', 'sign', 'bush'],
+    pass: ['rock', 'pine', 'rock', 'animal', 'sign', 'pole', 'pine'],
+    desert: ['cactus', 'rock', 'cactus', 'house', 'animal', 'sign', 'bush']
+  };
+  function biomeAt(p, diff) { return BIOMES[(levelAt(p, diff) - 1) % BIOMES.length]; }
+  function mix(a, b) {
+    var t = Math.imul((a >>> 0) ^ Math.imul((b + 0x9E3779B9) | 0, 0x85EBCA6B), 0xC2B2AE35);
+    t ^= t >>> 15; t = Math.imul(t, 0x27D4EB2F); t ^= t >>> 13;
+    return (t >>> 0) / 4294967296;
+  }
+  // the two things of slot k: side -1 is left, 1 right; y is metres of ground, X metres
+  // from the middle of the road
+  function props(sd, k, biome) {
+    var out = [], L = KINDS[biome] || KINDS.fields;
+    for (var s = 0; s < 2; s++) {
+      var h0 = mix(sd, k * 8 + s * 4), h1 = mix(sd, k * 8 + s * 4 + 1), h2 = mix(sd, k * 8 + s * 4 + 2), h3 = mix(sd, k * 8 + s * 4 + 3);
+      var kind = L[Math.floor(h1 * L.length)], side = s ? 1 : -1;
+      // a sign or a pole stands just off the verge, a house further back, the rest anywhere
+      var off = kind === 'house' ? 2.5 + h2 * (SIDE_SPAN - 2.5) : kind === 'sign' || kind === 'pole' ? 0.4 + h2 * 0.8 : h2 * SIDE_SPAN;
+      out.push({ k: k, y: Math.round((k * SIDE_STEP + h0 * SIDE_STEP * 0.7) * 100) / 100, side: side, X: Math.round(side * (SIDE_MIN + off) * 100) / 100, kind: kind, biome: KINDS[biome] ? biome : 'fields', v: h3 });
+    }
+    return out;
+  }
   // how far behind a wave the next one must start so that a rider who waits for the
   // first to pass can still reach the next free lane in time, even with gas and nitro
   // (with the overshoot of a slippery scene counted as part of the way, in case the bike
@@ -117,7 +149,7 @@ function MotoRushEngineFactory() {
     diff = daily || !DIFF[diff] ? 'medium' : diff;
     scene = daily || !SCENES[scene] ? 'sunny' : scene;
     var S = {
-      r: seed >>> 0, daily: !!daily, diff: diff, scene: scene, p: 0, d: 0, x: START_LANE, tl: START_LANE, ox: 0,
+      r: seed >>> 0, sd: seed >>> 0, daily: !!daily, diff: diff, scene: scene, p: 0, d: 0, x: START_LANE, tl: START_LANE, ox: 0,
       bar: 0, boostT: 0, gas: false, combo: 0, comboT: 0, bestCombo: 0, nears: 0, picks: 0,
       score: 0, tick: 0, v: DIFF[diff].v0, top: DIFF[diff].v0, lvl: 1, over: false, won: false, hit: null,
       waves: [], items: [], ny: FIRST, nf: 0, ev: []
@@ -308,6 +340,8 @@ function MotoRushEngineFactory() {
     // saves from before #813 ride in the sun
     if (!SCENES[S.scene] || S.daily) S.scene = 'sunny';
     if (!num(S.ox)) S.ox = 0;
+    // the roadside's seed; a save from before #814 grows its scenery from the traffic's
+    if (!num(S.sd)) S.sd = S.r >>> 0;
     S.gas = false;
     S.waves.forEach(function (w) { w.cars.forEach(function (q) { if (q.x === undefined) q.x = q.lane; }); });
     ['bestCombo', 'nears', 'picks'].forEach(function (k) { if (!num(S[k])) S[k] = 0; });
@@ -324,6 +358,7 @@ function MotoRushEngineFactory() {
     LANE_SPEED: LANE_SPEED, REACT: REACT, TV: TV, BOOST_V: BOOST_V, BOOST_T: BOOST_T, COMBO_T: COMBO_T, COMBO_MAX: COMBO_MAX,
     PICK_ADD: PICK_ADD, LEN: LEN, DIFF: DIFF, GAS_V: GAS_V, GAS_MULT: GAS_MULT, BLINK: BLINK, MOVE: MOVE,
     ACC: ACC, DEC: DEC, target: target, SCENES: SCENES, laneSpeed: laneSpeed,
+    BIOMES: BIOMES, KINDS: KINDS, SIDE_STEP: SIDE_STEP, SIDE_MIN: SIDE_MIN, biomeAt: biomeAt, props: props,
     base: base, speed: speed, need: need, warnAt: warnAt, closing: closing, topSpeed: topSpeed, levelAt: levelAt,
     newGame: newGame, fromSeed: fromSeed, step: step, steer: steer, gas: gas,
     drain: drain, snapshot: snapshot, restore: restore, clone: clone, ensure: ensure
@@ -488,7 +523,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     tries++;
     startedAt = Date.now();
     ended = false; waiting = true; held = false; last = 0; acc = 0;
-    pops = []; crashAt = 0; flash = 0; runAwarded = false;
+    pops = []; crashAt = 0; flash = 0; runAwarded = false; slotBiome = {};
     gasPtr = null; keyGas = false;
     ctx.clearSave();
     renderTop(); renderStatus();
@@ -723,7 +758,8 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         g.beginPath(); g.ellipse(x, c[1], 22 * s, 7 * s, 0, 0, Math.PI * 2); g.ellipse(x + 12 * s, c[1] - 5 * s, 13 * s, 8 * s, 0, 0, Math.PI * 2); g.fill();
       });
     }
-    // two rows of hills that drift a little with the camera
+    // the far mountains of the land (#814), then two rows of hills that drift with the camera
+    mountains(g, P);
     [[P.hill2, 0.6, 22, 0.011], [P.hill, 1.2, 14, 0.019]].forEach(function (L) {
       g.fillStyle = L[0];
       g.beginPath(); g.moveTo(0, HZ + 1);
@@ -1016,6 +1052,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
     cv.style.width = Z.w + 'px'; cv.style.height = Z.h + 'px';
     var g = cv.getContext('2d'), k = Z.w / VW, P = palette(dark(), S.scene), dk = P.dark, t = S.tick * E.DT;
+    applyLand(P, landNow());
     var font = getComputedStyle(document.body).fontFamily || 'sans-serif';
     g.setTransform(dpr * k, 0, 0, dpr * k, 0, 0);
     g.clearRect(0, 0, VW, VH);
@@ -1070,12 +1107,176 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
   }
   function setGas() { if (S && !ended) E.gas(S, gasPtr !== null || keyGas); }
 
+  /* ----------------------------------------------------------- roadside */
+
+  // The land of each biome (#814): ground, the two rows of hills and the far mountains.
+  // Night and the dark theme darken it, rain dulls it, snow keeps its white.
+  var LAND = {
+    fields: { grass: '#93C273', grass2: '#82B263', hill: '#8DB97A', hill2: '#A6CB8E', mount: '#9FB4C6' },
+    forest: { grass: '#6FA35A', grass2: '#62954E', hill: '#4F7F4A', hill2: '#6A9660', mount: '#8BA2B3' },
+    pass: { grass: '#A3AE8A', grass2: '#949F7B', hill: '#8A8E84', hill2: '#A5A89E', mount: '#7D8CA2' },
+    desert: { grass: '#E0C48C', grass2: '#D4B57A', hill: '#D2A266', hill2: '#E3BC82', mount: '#C6976A' }
+  };
+  function hex(c) { var n = parseInt(c.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+  function lerpCol(a, b, t) {
+    var A = hex(a), B = hex(b), o = '#';
+    for (var i = 0; i < 3; i++) o += ('0' + Math.round(A[i] + (B[i] - A[i]) * t).toString(16)).slice(-2);
+    return o;
+  }
+  // the biome of this level and the last one, and how far the land has turned: a level up
+  // repaints the land over its first 150 m, so the change is seen, not snapped
+  function landNow() {
+    var lap = E.DIFF[S.diff].lap, lv = E.levelAt(S.p, S.diff), into = S.p - (lv - 1) * lap;
+    var to = E.biomeAt(S.p, S.diff), from = lv > 1 ? E.biomeAt(S.p - into - 1, S.diff) : to;
+    return { from: from, to: to, t: Math.max(0, Math.min(1, into / 150)) };
+  }
+  function applyLand(P, ln) {
+    var A = LAND[ln.from], B = LAND[ln.to], k;
+    for (k in B) {
+      var c = lerpCol(A[k], B[k], ln.t);
+      if (P.scene === 'snowy') { if (k === 'mount') P[k] = lerpCol(c, '#E8EEF4', P.dark ? 0.25 : 0.7); continue; }
+      if (P.dark) c = shade(c, -0.62); else if (P.scene === 'rainy') c = shade(c, -0.22);
+      P[k] = c;
+    }
+    P.land = ln;
+  }
+  // the far mountains' height at screen x for a biome: gentle in the fields, wooded in the
+  // forest, tall and jagged on the pass, flat-topped mesas in the desert
+  function ridge(b, x) {
+    var u = (x + cam.X * 2) * 0.017, s = Math.sin(u) * Math.sin(u * 0.41 + 2.1);
+    if (b === 'pass') { var tri = function (q) { q = q - Math.floor(q); return 1 - Math.abs(q * 2 - 1); }; return 26 + 50 * tri(u * 0.55) * (0.6 + 0.4 * tri(u * 1.3 + 0.3)); }
+    if (b === 'desert') return 12 + 24 * Math.max(0, Math.min(1, 1.8 * s + 0.4));
+    if (b === 'forest') return 20 + 16 * (0.5 + 0.5 * s) + 3 * Math.abs(Math.sin(u * 7));
+    return 22 + 16 * (0.5 + 0.5 * s);
+  }
+  function mountains(g, P) {
+    var ln = P.land;
+    if (!ln) return;
+    var top = HZ - 80, gr = g.createLinearGradient(0, top, 0, HZ);
+    // snow on the high peaks of the pass
+    gr.addColorStop(0, ln.to === 'pass' || ln.from === 'pass' ? lerpCol(P.mount, '#FFFFFF', P.dark ? 0.25 : 0.75) : P.mount);
+    gr.addColorStop(0.45, P.mount); gr.addColorStop(1, P.mount);
+    g.fillStyle = gr;
+    g.beginPath(); g.moveTo(0, HZ + 1);
+    for (var x = 0; x <= VW; x += 4) g.lineTo(x, HZ - (ridge(ln.from, x) * (1 - ln.t) + ridge(ln.to, x) * ln.t));
+    g.lineTo(VW, HZ + 1); g.closePath(); g.fill();
+  }
+
+  // Each slot gets the biome of the level it first came into view in, so new scenery comes
+  // in from the horizon at a level up and nothing already in view changes under the eye.
+  var slotBiome = {};
+  function roadside(g, P) {
+    var d = S.d, k0 = Math.max(0, Math.floor((d - D0 - 4) / E.SIDE_STEP)), k1 = Math.floor((d + 300) / E.SIDE_STEP), now = E.biomeAt(S.p, S.diff), list = [], k, i;
+    for (k in slotBiome) if (+k < k0) delete slotBiome[k];
+    for (k = k0; k <= k1; k++) {
+      if (!slotBiome[k]) slotBiome[k] = now;
+      var ps = E.props(S.sd, k, slotBiome[k]);
+      for (i = 0; i < ps.length; i++) { var a = ps[i].y - d; if (a > -D0 + 1 && a < 300) list.push({ p: ps[i], a: a }); }
+    }
+    list.sort(function (x, y) { return y.a - x.a; });
+    for (i = 0; i < list.length; i++) prop(g, P, list[i].p, list[i].a);
+  }
+  function col(P, c) { return P.dark ? shade(c, -0.58) : P.scene === 'rainy' ? shade(c, -0.15) : c; }
+  function prop(g, P, o, a) {
+    var b = P3(o.X, a, 0), s = b.s, x = b.x, y = b.y, snow = P.scene === 'snowy', far = o.X > 0 ? 1 : -1, w, h, i;
+    if (s < 0.6 || x < -40 || x > VW + 40) return;
+    var ellipse = function (cx, cy, rx, ry) { g.beginPath(); g.ellipse(cx, cy, Math.max(0.3, rx), Math.max(0.3, ry), 0, 0, Math.PI * 2); g.fill(); };
+    var tri = function (x0, y0, x1, y1, x2, y2) { g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.lineTo(x2, y2); g.closePath(); g.fill(); };
+    g.fillStyle = P.shadow; ellipse(x, y, (o.kind === 'house' ? 2.6 : o.kind === 'pine' || o.kind === 'tree' ? 1.3 : 0.8) * s, 0.22 * s);
+    if (o.kind === 'tree') {
+      g.fillStyle = col(P, '#7A5634'); g.fillRect(x - 0.18 * s, y - 2.2 * s, 0.36 * s, 2.2 * s);
+      g.fillStyle = col(P, o.biome === 'forest' ? '#3E7A3A' : '#4E9A45'); ellipse(x, y - 3.1 * s, 1.5 * s, 1.4 * s);
+      g.fillStyle = col(P, o.biome === 'forest' ? '#4C8C45' : '#62AD55'); ellipse(x - 0.4 * s, y - 3.4 * s, 0.8 * s, 0.7 * s);
+      if (snow) { g.fillStyle = '#F4F7FA'; ellipse(x, y - 4.1 * s, 1.1 * s, 0.4 * s); }
+    } else if (o.kind === 'pine') {
+      g.fillStyle = col(P, '#6B4A2E'); g.fillRect(x - 0.15 * s, y - 1.1 * s, 0.3 * s, 1.1 * s);
+      h = 5 + 2 * o.v;
+      for (i = 0; i < 3; i++) {
+        var yb = y - (1 + i * h * 0.24) * s, wb = (1.5 - i * 0.35) * s;
+        g.fillStyle = col(P, i % 2 ? '#2F6B3C' : '#285F35'); tri(x - wb, yb, x + wb, yb, x, yb - h * 0.42 * s);
+        if (snow) { g.fillStyle = '#F4F7FA'; tri(x - wb * 0.35, yb - h * 0.28 * s, x + wb * 0.35, yb - h * 0.28 * s, x, yb - h * 0.42 * s); }
+      }
+    } else if (o.kind === 'bush') {
+      g.fillStyle = col(P, o.biome === 'desert' ? '#9C9A5C' : '#5C9A4A'); ellipse(x, y - 0.55 * s, 1.2 * s, 0.6 * s);
+      if (snow) { g.fillStyle = '#F4F7FA'; ellipse(x, y - 0.95 * s, 0.9 * s, 0.25 * s); }
+    } else if (o.kind === 'rock') {
+      g.fillStyle = col(P, o.biome === 'desert' ? '#B98A5E' : '#8D8A86');
+      g.beginPath(); g.moveTo(x - 1.1 * s, y); g.lineTo(x - 0.8 * s, y - 0.8 * s); g.lineTo(x - 0.1 * s, y - 1.2 * s); g.lineTo(x + 0.7 * s, y - 0.9 * s); g.lineTo(x + 1.1 * s, y); g.closePath(); g.fill();
+      g.fillStyle = 'rgba(255,255,255,' + (snow ? 0.9 : 0.18) + ')'; tri(x - 0.8 * s, y - 0.8 * s, x - 0.1 * s, y - 1.2 * s, x + 0.2 * s, y - 0.8 * s);
+    } else if (o.kind === 'cactus') {
+      g.fillStyle = col(P, '#4E8A4A');
+      rr(g, x - 0.22 * s, y - 2.8 * s, 0.44 * s, 2.8 * s, 0.22 * s); g.fill();
+      rr(g, x - 0.85 * s, y - 2.1 * s, 0.3 * s, 1 * s, 0.15 * s); g.fill(); g.fillRect(x - 0.85 * s, y - 1.35 * s, 0.7 * s, 0.26 * s);
+      rr(g, x + 0.55 * s, y - 2.4 * s, 0.3 * s, 1.1 * s, 0.15 * s); g.fill(); g.fillRect(x + 0.15 * s, y - 1.55 * s, 0.7 * s, 0.26 * s);
+    } else if (o.kind === 'house') {
+      // a village: one house, or two side by side on wider plots
+      var n = o.v > 0.55 ? 2 : 1;
+      for (i = n - 1; i >= 0; i--) {
+        var hb = i ? P3(o.X + far * 4.6, a + 3, 0) : b, hs = hb.s, hx = hb.x, hy = hb.y;
+        w = 3.6 * hs; h = 2.4 * hs;
+        if (o.biome === 'desert') {
+          g.fillStyle = col(P, '#D9B98A'); g.fillRect(hx - w / 2, hy - h, w, h);
+          g.fillStyle = col(P, '#C9A574'); g.beginPath(); g.arc(hx, hy - h, w * 0.3, Math.PI, 0); g.fill();
+        } else {
+          g.fillStyle = col(P, '#F1E3C8'); g.fillRect(hx - w / 2, hy - h, w, h);
+          g.fillStyle = snow ? '#F4F7FA' : col(P, i ? '#B24C3A' : '#C4553F'); tri(hx - w * 0.6, hy - h, hx + w * 0.6, hy - h, hx, hy - h - 1.5 * hs);
+        }
+        // a lit window at night
+        g.fillStyle = P.dark ? '#FFD27A' : col(P, '#5A6B80'); g.fillRect(hx - w * 0.12, hy - h * 0.62, w * 0.24, h * 0.28);
+      }
+    } else if (o.kind === 'animal') {
+      animal(g, P, o, x, y, s, snow);
+    } else if (o.kind === 'sign') {
+      g.fillStyle = col(P, '#8C8A92'); g.fillRect(x - 0.06 * s, y - 2.2 * s, 0.12 * s, 2.2 * s);
+      if (o.v < 0.5) {
+        g.fillStyle = col(P, '#2E7D4F'); rr(g, x - 0.85 * s, y - 2.9 * s, 1.7 * s, 0.9 * s, 0.12 * s); g.fill();
+        g.fillStyle = col(P, '#FFFFFF'); g.fillRect(x - 0.6 * s, y - 2.55 * s, 1.2 * s, Math.max(0.6, 0.12 * s));
+      } else {
+        g.fillStyle = col(P, '#2B2930'); tri(x - 0.62 * s, y - 2 * s, x + 0.62 * s, y - 2 * s, x, y - 3.1 * s);
+        g.fillStyle = col(P, '#F2C230'); tri(x - 0.48 * s, y - 2.08 * s, x + 0.48 * s, y - 2.08 * s, x, y - 2.94 * s);
+      }
+    } else if (o.kind === 'pole') {
+      g.fillStyle = col(P, '#7A5A3A'); g.fillRect(x - 0.1 * s, y - 7 * s, 0.2 * s, 7 * s);
+      g.fillRect(x - 0.8 * s, y - 6.4 * s, 1.6 * s, Math.max(0.6, 0.14 * s));
+    }
+  }
+  // a sheep in the fields, a deer in the forest, a goat on the pass, a camel in the desert,
+  // standing side on and facing either way
+  function animal(g, P, o, x, y, s, snow) {
+    var f = o.v < 0.5 ? 1 : -1, b = o.biome, body, head;
+    var ellipse = function (cx, cy, rx, ry) { g.beginPath(); g.ellipse(cx, cy, Math.max(0.3, rx), Math.max(0.3, ry), 0, 0, Math.PI * 2); g.fill(); };
+    if (b === 'desert') {
+      body = col(P, '#C8955A');
+      g.fillStyle = body;
+      g.fillRect(x - 0.7 * s, y - 1.4 * s, 0.14 * s, 1.4 * s); g.fillRect(x + 0.55 * s, y - 1.4 * s, 0.14 * s, 1.4 * s);
+      ellipse(x, y - 1.6 * s, 0.95 * s, 0.4 * s); ellipse(x - 0.1 * s, y - 2.0 * s, 0.4 * s, 0.35 * s);
+      g.fillRect(x + f * 0.75 * s - 0.08 * s, y - 2.5 * s, 0.16 * s, 0.9 * s); ellipse(x + f * 0.95 * s, y - 2.5 * s, 0.28 * s, 0.14 * s);
+      return;
+    }
+    var sz = b === 'forest' ? 1.15 : 0.9;
+    body = col(P, b === 'fields' ? '#F4F1EA' : b === 'forest' ? '#9A6234' : '#D9D4C8');
+    head = col(P, b === 'fields' ? '#2B2930' : b === 'forest' ? '#86532B' : '#BDB6A8');
+    g.fillStyle = col(P, '#3A3540');
+    g.fillRect(x - 0.45 * sz * s, y - 0.7 * sz * s, 0.1 * s, 0.7 * sz * s); g.fillRect(x + 0.35 * sz * s, y - 0.7 * sz * s, 0.1 * s, 0.7 * sz * s);
+    g.fillStyle = body; ellipse(x, y - 0.85 * sz * s, 0.6 * sz * s, 0.32 * sz * s);
+    g.fillStyle = head; ellipse(x + f * 0.65 * sz * s, y - 1.1 * sz * s, 0.2 * sz * s, 0.16 * sz * s);
+    if (b !== 'fields') {
+      // antlers or horns
+      g.strokeStyle = col(P, b === 'forest' ? '#5E3B1E' : '#6E675C'); g.lineWidth = Math.max(0.6, 0.06 * s);
+      g.beginPath(); g.moveTo(x + f * 0.6 * sz * s, y - 1.22 * sz * s); g.lineTo(x + f * (b === 'forest' ? 0.45 : 0.5) * sz * s, y - 1.6 * sz * s);
+      if (b === 'forest') { g.moveTo(x + f * 0.52 * sz * s, y - 1.42 * sz * s); g.lineTo(x + f * 0.7 * sz * s, y - 1.62 * sz * s); }
+      g.stroke();
+    }
+    if (snow) { g.fillStyle = 'rgba(255,255,255,.6)'; ellipse(x, y - 1.08 * sz * s, 0.4 * sz * s, 0.08 * sz * s); }
+  }
+
   // the road and everything on it, without the HUD
   function scene(g, P, t, dk) {
     cam.rear = S.p - E.BIKE_L;
     cam.X = laneX(S.x) * 0.6;
     sky(g, P, t);
     ground(g, P, S.d);
+    roadside(g, P);
     if (S.daily) finishLine(g, E.DAILY_P - cam.rear);
     if (S.scene === 'night') nightFade(g);
     var list = [], i, j;
@@ -1138,6 +1339,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
   // the share card: the road as the run ended
   function paintShare(g, w, h) {
     var P = palette(dark(), S.scene);
+    applyLand(P, landNow());
     g.fillStyle = P.grass; g.fillRect(0, 0, w, h);
     var k = Math.min(w / VW, h / VH);
     g.save();
@@ -1312,7 +1514,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     var R = E.restore(sv.s);
     if (!R || R.over || R.daily !== !!dailyDate) return false;
     S = R; seed = sv.seed; tries = sv.tries || 1; startedAt = Date.now() - (sv.elapsed || 0);
-    ended = false; waiting = true; held = false; last = 0; acc = 0; pops = []; crashAt = 0;
+    ended = false; waiting = true; held = false; last = 0; acc = 0; pops = []; crashAt = 0; slotBiome = {};
     runAwarded = S.d >= 10000;
     renderTop(); renderStatus(); draw(); kick();
     return true;
