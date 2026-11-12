@@ -33,7 +33,8 @@
     background: var(--c-line); border-radius: var(--ms-inner-r);
     touch-action: pan-x pan-y;
   }
-  .ms-board { display: grid; grid-template-columns: repeat(var(--cols), var(--cs)); gap: 2px; }
+  /* as wide as its cells, not its frame: zoom keeps the point under the fingers by the board's box (#850) */
+  .ms-board { display: grid; grid-template-columns: repeat(var(--cols), var(--cs)); gap: 2px; width: max-content; }
   .ms-cell {
     width: var(--cs); height: var(--cs); border: 0; padding: 0; cursor: pointer;
     background: var(--c-surface-3); border-radius: 4px;
@@ -298,17 +299,35 @@ function MinesEngineFactory() {
   // the board keeps MIN and scrolls inside its frame, limited to the height there is.
   // Cells grow to 64px on a big screen; at 42 a laptop showed the board in half its height (#359)
   var CELL_MIN = 26, CELL_MAX = 64, GAP = 2;
-  function fit(roomW, roomH, rows, cols) {
+  // A zoom over 1 grows the fitted cells, up to ZOOM_MAX times and ZOOM_CELL cells, and the
+  // board scrolls inside its frame as it already does when it is too big. A fitted board was
+  // too small to read or hit for a player with low vision, and the page's
+  // user-scalable=no left them no way to make it bigger (#850).
+  var ZOOM_MAX = 3, ZOOM_CELL = 160, ZOOM_STEPS = [1, 1.5, 2, 2.5, 3];
+  function fit(roomW, roomH, rows, cols, zoom) {
     var byW = Math.floor((roomW - cols * GAP) / cols), byH = Math.floor((roomH - rows * GAP) / rows);
     var cs = Math.max(CELL_MIN, Math.min(CELL_MAX, byW, byH > 0 ? byH : CELL_MAX));
+    var z = clampZoom(zoom);
+    if (z > 1) cs = Math.max(cs, Math.min(ZOOM_CELL, Math.round(cs * z)));
     var h = rows * (cs + GAP);
     return { cs: cs, maxH: h > roomH && roomH > 0 ? Math.max(roomH, 4 * (CELL_MIN + GAP)) : 0 };
+  }
+  function clampZoom(z) { return z > 1 ? Math.min(ZOOM_MAX, z) : 1; }
+  // The next zoom the + (dir 1) or − (dir -1) button goes to from z
+  function zoomStep(z, dir) {
+    var i;
+    if (dir > 0) {
+      for (i = 0; i < ZOOM_STEPS.length; i++) if (ZOOM_STEPS[i] > z + 0.01) return ZOOM_STEPS[i];
+      return ZOOM_MAX;
+    }
+    for (i = ZOOM_STEPS.length - 1; i >= 0; i--) if (ZOOM_STEPS[i] < z - 0.01) return ZOOM_STEPS[i];
+    return 1;
   }
 
   var api = {
     makeNeighbors: makeNeighbors, layMines: layMines, counts: counts,
     floodOpen: floodOpen, solvable: solvable, generate: generate, safeHint: safeHint,
-    scrollEdges: scrollEdges, step: step, fit: fit
+    scrollEdges: scrollEdges, step: step, fit: fit, clampZoom: clampZoom, zoomStep: zoomStep, ZOOM_MAX: ZOOM_MAX
   };
   if (typeof self !== 'undefined') self.MinesEngine = api;
   return api;
@@ -344,6 +363,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
         chordHint: 'روی عدد باز بزن تا خانه‌های اطرافش باز شوند', move: 'جابه‌جایی',
         longPress: 'لمس طولانی برای پرچم', holdFlag: 'نگه داشتن برای پرچم', safeShown: 'یک خانه‌ی امن نشان داده شد',
         dailyMines: 'مین‌روب روزانه',
+        zoomIn: 'بزرگ‌نمایی', zoomOut: 'کوچک‌نمایی', pinchZoom: 'با دو انگشت بزرگ و کوچک کن، با یک انگشت جابه‌جا کن',
         tutTitle1: 'هدف', tutText1: 'همه‌ی خانه‌های بدون مین را باز کن. هر عدد می‌گوید چند مین دور تا دورش هست.',
         tutTitle2: 'پرچم', tutText2: 'روی خانه‌ای که مطمئنی مین است پرچم بگذار: دکمه‌ی حالت پرچم یا لمس طولانی.',
         tutTitle3: 'بدون حدس', tutText3: 'زمین‌ها طوری ساخته می‌شوند که همیشه با استدلال حل شوند. لازم نیست شانسی بزنی.'
@@ -356,6 +376,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
         chordHint: 'Tap an open number to clear around it', move: 'Move',
         longPress: 'Long press to flag', holdFlag: 'Hold to flag', safeShown: 'A safe cell was revealed',
         dailyMines: 'Daily minesweeper',
+        zoomIn: 'Zoom in', zoomOut: 'Zoom out', pinchZoom: 'Pinch with two fingers to zoom, drag with one to move',
         tutTitle1: 'The goal', tutText1: 'Open every cell without a mine. Each number tells you how many mines touch that cell.',
         tutTitle2: 'Flags', tutText2: 'Mark a cell you are sure about: use flag mode or a long press.',
         tutTitle3: 'No guessing', tutText3: 'Boards are generated so they are always solvable by reasoning alone.'
@@ -368,6 +389,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
         chordHint: 'Dotknij odkrytej cyfry, aby odsłonić pola wokół niej', move: 'Przemieść',
         longPress: 'Naciśnij i przytrzymaj, aby oflagować', holdFlag: 'Przytrzymaj, aby oflagować', safeShown: 'Odsłonięto bezpieczne pole',
         dailyMines: 'Codzienny Saper',
+        zoomIn: 'Powiększ', zoomOut: 'Pomniejsz', pinchZoom: 'Rozsuń dwa palce, aby powiększyć, przeciągnij jednym, aby przesunąć',
         tutTitle1: 'Cel gry', tutText1: 'Odkryj każde pole, na którym nie ma miny. Każda cyfra informuje, ile min styka się z tym polem.',
         tutTitle2: 'Flagi', tutText2: 'Oznacz pole, którego jesteś pewien: użyj trybu flagi lub naciśnij i przytrzymaj.',
         tutTitle3: 'Bez zgadywania', tutText3: 'Plansze są generowane w taki sposób, że zawsze można je rozwiązać za pomocą samego logicznego myślenia.'
@@ -380,6 +402,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
         chordHint: 'Touche un nombre ouvert pour dégager autour', move: 'Déplacer',
         longPress: 'Appui long pour un drapeau', holdFlag: 'Maintiens pour un drapeau', safeShown: 'Une case sûre a été révélée',
         dailyMines: 'Démineur du jour',
+        zoomIn: 'Zoomer', zoomOut: 'Dézoomer', pinchZoom: 'Pince à deux doigts pour zoomer, glisse d’un doigt pour te déplacer',
         tutTitle1: 'Le but', tutText1: 'Ouvre toutes les cases sans mine. Chaque nombre indique combien de mines touchent cette case.',
         tutTitle2: 'Drapeaux', tutText2: 'Marque une case dont tu es sûr : avec le mode drapeau ou un appui long.',
         tutTitle3: 'Sans hasard', tutText3: 'Les grilles sont créées pour toujours se résoudre par la seule logique.'
@@ -392,6 +415,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
         chordHint: '点击已翻开的数字可打开周围格子', move: '移动',
         longPress: '长按插旗', holdFlag: '按住插旗', safeShown: '已显示一个安全格',
         dailyMines: '每日扫雷',
+        zoomIn: '放大', zoomOut: '缩小', pinchZoom: '双指捏合缩放，单指拖动移动',
         tutTitle1: '目标', tutText1: '翻开所有没有地雷的格子。每个数字表示它周围有几颗雷。',
         tutTitle2: '旗帜', tutText2: '确定是雷的格子插上旗：用旗帜模式或长按。',
         tutTitle3: '无需猜测', tutText3: '棋盘保证可以完全靠推理解开，不用碰运气。'
@@ -404,6 +428,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
         chordHint: 'Tippe auf eine offene Zahl, um ringsum aufzudecken', move: 'Bewegen',
         longPress: 'Lange drücken für Flagge', holdFlag: 'Halten für Flagge', safeShown: 'Ein sicheres Feld wurde aufgedeckt',
         dailyMines: 'Tages-Minesweeper',
+        zoomIn: 'Vergrößern', zoomOut: 'Verkleinern', pinchZoom: 'Mit zwei Fingern zoomen, mit einem verschieben',
         tutTitle1: 'Das Ziel', tutText1: 'Deck alle Felder ohne Mine auf. Jede Zahl sagt dir, wie viele Minen das Feld berühren.',
         tutTitle2: 'Flaggen', tutText2: 'Markier ein Feld, bei dem du sicher bist: mit dem Flaggenmodus oder lange drücken.',
         tutTitle3: 'Ohne Raten', tutText3: 'Die Bretter sind so erzeugt, dass sie immer allein durch Logik lösbar sind.'
@@ -416,6 +441,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
         chordHint: 'Toca un número abierto para despejar a su alrededor', move: 'Mover',
         longPress: 'Mantén pulsado para poner bandera', holdFlag: 'Mantén pulsado para bandera', safeShown: 'Se reveló una casilla segura',
         dailyMines: 'Buscaminas diario',
+        zoomIn: 'Acercar', zoomOut: 'Alejar', pinchZoom: 'Pellizca con dos dedos para hacer zoom y arrastra con uno para moverte',
         tutTitle1: 'El objetivo', tutText1: 'Abre todas las casillas sin mina. Cada número indica cuántas minas tocan esa casilla.',
         tutTitle2: 'Banderas', tutText2: 'Marca una casilla de la que estés seguro: con el modo bandera o manteniendo pulsado.',
         tutTitle3: 'Sin adivinar', tutText3: 'Los tableros se generan para que siempre se puedan resolver solo con lógica.'
@@ -432,6 +458,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
   var shownCls = [], shownBody = [];
   // how long a press must last to flag, on the screen and on Space or Enter alike (#346)
   var LONG_MS = 420, keyHold = null;
+  // the board's zoom over its fitted size, and how many pinches have begun (#850); this
+  // session only, never saved: the next visit starts at the size that fits
+  var zoom = 1, pinches = 0;
 
   var board = el('div', { class: 'ms-board', role: 'grid' });
   var scroll = el('div', { class: 'ms-scroll' }, [board]);
@@ -452,8 +481,17 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
   var hintBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button' },
     [C.icon('bulb', 20), el('span', { text: C.t('hint') }), el('span', { class: 'ch-badge ch-badge--gold', text: C.num(HINT_COST) })]);
   hintBtn.addEventListener('click', function () { hint(); });
+  // Buttons as well as the pinch: a player who finds a pinch hard can still zoom (#850)
+  var zoomOutBtn = el('button', { class: 'ch-btn ch-btn--soft ms-zoombtn', type: 'button', 'aria-label': C.t('zoomOut'), title: C.t('zoomOut') },
+    [C.icon('minus', 20)]);
+  var zoomInBtn = el('button', { class: 'ch-btn ch-btn--soft ms-zoombtn', type: 'button', 'aria-label': C.t('zoomIn'), title: C.t('zoomIn') },
+    [C.icon('plus', 20)]);
+  zoomOutBtn.addEventListener('click', function () { zoomBy(-1); });
+  zoomInBtn.addEventListener('click', function () { zoomBy(1); });
   tools.appendChild(flagBtn);
   tools.appendChild(hintBtn);
+  tools.appendChild(zoomOutBtn);
+  tools.appendChild(zoomInBtn);
 
   ctx.stat('mines', C.t('minesLeft'));
   ctx.stat('time', C.t('time'));
@@ -539,8 +577,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
         // Each cell has its own press. With one shared timer a second finger overwrote the
         // first press's timer, which then could not be cancelled and flagged its cell
         // a moment later, unasked (#750).
-        var pressTimer = null, longFired = false;
+        var pressTimer = null, longFired = false, pressAt = -1;
         var b = el('button', { class: 'ms-cell', type: 'button', role: 'gridcell' });
+        // A pinch starts with a finger on a cell, often two: those presses must neither
+        // flag on their timer nor open on their click (#850). pinches counts pinches
+        // begun, so a press from before the latest one is known without a time window.
+        var pinchedSince = function () { return pressAt >= 0 && pressAt !== pinches; };
         // Tab and the arrows used to select two different cells, and Enter opened the
         // tabbed one (#331): focus and the cursor are now always the same cell
         b.addEventListener('focus', function () {
@@ -548,9 +590,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
         });
         b.addEventListener('pointerdown', function (e) {
           longFired = false;
+          pressAt = pinches;
           clearTimeout(pressTimer);
           if (e.pointerType !== 'mouse') {
-            pressTimer = setTimeout(function () { longFired = true; toggleFlag(idx); }, LONG_MS);
+            pressTimer = setTimeout(function () { if (!pinchedSince()) { longFired = true; toggleFlag(idx); } }, LONG_MS);
           }
         });
         b.addEventListener('pointerup', function () { clearTimeout(pressTimer); });
@@ -563,11 +606,14 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
           // محافظ را اینجا صفر نمی‌کنیم: click بعدی هم باید مسدود بماند، وگرنه
           // برداشتن پرچم با لمس طولانی همان خانه را هم باز می‌کرد.
           // longFired در هر pointerdown خودش صفر می‌شود.
-          if (longFired) return;
+          if (longFired || pinchedSince()) return;
           toggleFlag(idx);
         });
         b.addEventListener('click', function () {
           if (longFired) { longFired = false; return; }
+          var pinched = pinchedSince();
+          pressAt = -1;
+          if (pinched) return;
           cursor = idx;
           if (flagMode && !S.revealed[idx]) toggleFlag(idx);
           else tap(idx);
@@ -611,12 +657,48 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
   }
   function sizeCells() {
     var sp = S.spec;
-    var f = E.fit(roomW(), roomH(), sp.rows, sp.cols);
+    var f = E.fit(roomW(), roomH(), sp.rows, sp.cols, zoom);
     board.style.setProperty('--cs', f.cs + 'px');
     scroll.style.maxHeight = f.maxH ? f.maxH + 'px' : '';
+    zoomOutBtn.disabled = zoom <= 1;
+    zoomInBtn.disabled = zoom >= E.ZOOM_MAX || E.fit(roomW(), roomH(), sp.rows, sp.cols, E.ZOOM_MAX).cs <= f.cs;
     markEdges();
   }
   window.addEventListener('resize', function () { if (S) sizeCells(); });
+
+  /* ------------------------------------------------- zoom (#850) */
+  // The cells themselves grow, and the frame scrolls as it does for a board too big to fit,
+  // so one finger pans natively and the arrow keys' focus() still brings a cell into view.
+  // The board point at fx, fy (fractions of its size) is kept under the client point at.
+  function zoomTo(z, at, fx, fy) {
+    var r = board.getBoundingClientRect();
+    if (fx === undefined) { fx = r.width ? (at.x - r.left) / r.width : 0.5; fy = r.height ? (at.y - r.top) / r.height : 0.5; }
+    zoom = E.clampZoom(z);
+    sizeCells();
+    var n = board.getBoundingClientRect();
+    scroll.scrollLeft += n.left + fx * n.width - at.x;
+    scroll.scrollTop += n.top + fy * n.height - at.y;
+    markEdges();
+  }
+  function frameMid() {
+    var r = scroll.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
+  function zoomBy(dir) {
+    zoomTo(E.zoomStep(zoom, dir), frameMid());
+    C.feedback('select');
+  }
+  var pinch0 = null;
+  C.ui.pinch(scroll, {
+    start: function (m) {
+      pinches++;
+      var r = board.getBoundingClientRect();
+      pinch0 = { z: zoom, fx: r.width ? (m.x - r.left) / r.width : 0.5, fy: r.height ? (m.y - r.top) / r.height : 0.5 };
+    },
+    // the board point that was under the fingers follows them, so a pinch also pans
+    move: function (k, m) { if (pinch0) zoomTo(pinch0.z * k, m, pinch0.fx, pinch0.fy); },
+    end: function () { pinch0 = null; }
+  });
 
   function markEdges() {
     var rtl = getComputedStyle(scroll).direction === 'rtl';
@@ -1037,7 +1119,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
         el('p', { class: 'ch-dim', text: C.t('tutText1') }),
         el('div', { class: 'ch-list' }, [
           row(C.t('longPress'), C.t('flagMode')),
-          row(C.t('chordHint'), '')
+          row(C.t('chordHint'), ''),
+          row(C.t('pinchZoom'), '')
         ]),
         el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
         el('div', { class: 'ch-list' }, [
@@ -1045,7 +1128,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
           row(C.t('flagCell'), 'F'),
           row(C.t('holdFlag'), 'Space / Enter'),
           row(C.t('hint'), 'H'),
-          row(C.t('move'), '← ↑ → ↓')
+          row(C.t('move'), '← ↑ → ↓'),
+          row(C.t('zoomIn'), '+'),
+          row(C.t('zoomOut'), '−')
         ])
       ],
       actions: [
@@ -1115,6 +1200,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
     if (to >= 0) { cursor = to; paint(); cells[cursor].focus(); e.preventDefault(); return; }
     if (C.keyIs(e, 'f')) { toggleFlag(cursor); e.preventDefault(); }
     else if (C.keyIs(e, 'h')) { hint(); e.preventDefault(); }
+    else if ((e.key === '+' || e.key === '=') && !e.ctrlKey && !e.metaKey) { zoomBy(1); e.preventDefault(); }
+    else if (e.key === '-' && !e.ctrlKey && !e.metaKey) { zoomBy(-1); e.preventDefault(); }
   });
   window.addEventListener('keyup', function (e) {
     if (!keyHold || e.key !== keyHold.key) return;
