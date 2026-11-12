@@ -26,7 +26,7 @@ export const LIMITS = {
   keepDays: 3,           // the cron deletes inbox releases older than this
 };
 
-export const LANGS = ['fa', 'en', 'zh', 'de', 'es', 'pl', 'fr', 'hi'];
+export const LANGS = ['fa', 'en', 'zh', 'de', 'es', 'pl', 'fr', 'ar', 'hi'];
 const KINDS = { bug: 'bug report', idea: 'suggestion' };
 const TAG_PREFIX = 'report-';
 // GitHub gives a draft release a placeholder tag ("untagged-<hex>") whatever tag_name we

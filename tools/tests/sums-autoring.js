@@ -50,7 +50,7 @@ module.exports = function (T) {
     ok(auto.won === 1 && auto.S.st.every((v) => v), 'with the setting on the last erasure rings the rest and wins (' + auto.S.st.join() + ')');
     // every language's help says the rings are part of the finish
     const rules = LOCALE_CODES.map((l) => ((html.match(new RegExp('\\n      ' + l + ': \\{([\\s\\S]*?)\\n      \\}')) || [])[1] || '').match(/rules: '([^']*)'/));
-    ok(rules.length === LOCALE_CODES.length && rules.every((r) => r && /حلقه شوند|is ringed|zakreślone|圈上|einen Ring hat|tiene su aro|restent sont entourés|पर घेरा हो/.test(r[1])),
+    ok(rules.length === LOCALE_CODES.length && rules.every((r) => r && /حلقه شوند|is ringed|zakreślone|圈上|einen Ring hat|tiene su aro|restent sont entourés|تُحاط كل الأرقام الباقية بدائرة|पर घेरा हो/.test(r[1])),
       'the help names the rings in the finish in all ' + LOCALE_CODES.length + ' languages');
 
     ok(/var prefs = ctx\.store\.get\('prefs', null\);[\s\S]{0,200}prefs = \{ n: 5 \}/.test(html) && !/autoRing: true/.test(html),

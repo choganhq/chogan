@@ -229,7 +229,7 @@ module.exports = function (T) {
     };
     const en = keysOf('en');
     ok(tableAt > 0 && en.split(',').length >= 20, 'the page has a string table (' + en.split(',').length + ' English keys)');
-    const codes = ['fa', 'en', 'zh', 'de', 'es', 'pl', 'fr', 'hi'];
+    const codes = ['fa', 'en', 'zh', 'de', 'es', 'pl', 'fr', 'ar', 'hi'];
     ok(LOCALE_CODES.length === codes.length, 'as many languages as the app (' + LOCALE_CODES.length + ')');
     for (const code of codes) ok(keysOf(code) === en, 'every string in ' + code);
 

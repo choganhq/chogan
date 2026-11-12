@@ -14,7 +14,7 @@ const { Worker, isMainThread, workerData } = require('worker_threads');
 
 const ROOT = path.join(__dirname, '..');
 // زبان‌های اپ، به همان ترتیب جدول LOCALES در هسته
-const LOCALE_CODES = ['fa', 'en', 'zh', 'de', 'es', 'pl', 'fr', 'hi'];
+const LOCALE_CODES = ['fa', 'en', 'zh', 'de', 'es', 'pl', 'fr', 'ar', 'hi'];
 let failures = 0;
 let checks = 0;
 // A floor for the whole run: if a group lost most of its checks, the total would still
@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 9072;
+const MIN_CHECKS = 9238;
 
 function ok(cond, msg) {
   checks++;
@@ -1658,7 +1658,7 @@ function testBackgammon() {
   ok(title('Sara', 1) === '<starts:Sara>', 'با نام پروفایل: «{n} شروع می‌کند»');
   ok(title('', 2) === '<starts:<rival> · <hard>>', 'حریف: سوم‌شخص می‌ماند');
   const str = (lang, key) => { const m = bgHtml.match(new RegExp(key + ": '([^']*)'", 'g')); return m ? m.map((x) => x.split(": '")[1].slice(0, -1)) : []; };
-  ok(JSON.stringify(str('', 'youStart')) === JSON.stringify(['تو شروع می‌کنی', 'You start', 'Zaczynasz', 'Tu commences', 'आप शुरू करेंगे', '你先走', 'Du fängst an', 'Empiezas tú']), 'youStart reads right in every language');
+  ok(JSON.stringify(str('', 'youStart')) === JSON.stringify(['تو شروع می‌کنی', 'You start', 'Zaczynasz', 'Tu commences', 'أنت تبدأ', 'आप शुरू करेंगे', '你先走', 'Du fängst an', 'Empiezas tú']), 'youStart reads right in every language');
 
   // Rotating the board (#378): the page's own geometry and mapping. Every point's centre, the bar
   // and each tray, carried to the screen and back in each quarter turn, must hit the same target.
@@ -3060,7 +3060,7 @@ function testFiles() {
     ok(man[k] && man[k].fa, 'منیفست ' + k + ' فارسی دارد');
   }
   // An installed app's description follows the device language; Spanish was missing until #256
-  const manLang = { fa: 'fa', zh: 'zh-Hans', de: 'de', es: 'es', pl: 'pl', fr: 'fr', hi: 'hi' };
+  const manLang = { fa: 'fa', zh: 'zh-Hans', de: 'de', es: 'es', pl: 'pl', fr: 'fr', ar: 'ar', hi: 'hi' };
   ok(LOCALE_CODES.filter((c) => c !== 'en').every((c) => man.description_localized[manLang[c]] && man.description_localized[manLang[c]].value), 'the manifest describes the app in every language');
   ok(man.name_localized.fa.value === 'چوگان', 'نام فارسی در منیفست درست است');
   // Chrome on Android installed a WebAPK beside the Play app; the owner chose to send people to Play (#550)
@@ -3461,7 +3461,7 @@ function testLocales() {
   const codes = (table.match(/code:\s*'([a-z-]+)'/g) || []).map((m) => m.split("'")[1]);
   ok(codes.join(',') === LOCALE_CODES.join(','), 'کدهای زبان: ' + codes.join(','));
   ok(/code: 'fa'[^}]*dir: 'rtl'/.test(table), 'فارسی راست‌به‌چپ است');
-  ok((table.match(/dir: 'rtl'/g) || []).length === 1, 'فقط فارسی راست‌به‌چپ است');
+  ok(/code: 'ar'[^}]*dir: 'rtl'/.test(table) && (table.match(/dir: 'rtl'/g) || []).length === 2, 'فقط فارسی و عربی راست‌به‌چپ‌اند');
   for (const c of codes) ok(new RegExp("code: '" + c + "'[^}]*date: '").test(table), c + ': قالب تاریخ دارد');
 
   const iEn = core.indexOf('localStrings.en[key]');
@@ -3480,6 +3480,7 @@ function testLocales() {
     ['es-ES', 'es'], ['es', 'es'], ['es-MX', 'es'], ['es-419', 'es'],
     ['pl-PL', 'pl'], ['pl', 'pl'],
     ['fr-FR', 'fr'], ['fr', 'fr'], ['fr-CA', 'fr'], ['fr-BE', 'fr'],
+    ['ar', 'ar'], ['ar-SA', 'ar'], ['ar-EG', 'ar'],
     ['hi-IN', 'hi'], ['hi', 'hi'],
     ['en-GB', 'en'], ['da-DK', 'en'], ['', 'en']
   ];
@@ -3871,7 +3872,7 @@ function testWayOut() {
   ok(['make', 'tap', 'restart', 'carryOn', 'useHint', 'levelDone', 'chain', 'pick', 'generate', 'restore'].every((f) => typeof E[f] === 'function'), 'the engine has its API');
   // People who know the genre as "arrow puzzle" did not recognise Way Out (#326); the name stays, the summary says it
   const woMeta = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games.find((g) => g.id === 'wayout');
-  const woWord = { fa: 'پازل پیکانی', en: 'arrow puzzle', zh: '箭头谜题', de: 'Pfeil-Puzzle', es: 'puzle de flechas', pl: 'łamigłówka ze strzałkami', fr: 'puzzle de flèches', hi: 'तीर पहेली' };
+  const woWord = { fa: 'پازل پیکانی', en: 'arrow puzzle', zh: '箭头谜题', de: 'Pfeil-Puzzle', es: 'puzle de flechas', pl: 'łamigłówka ze strzałkami', fr: 'puzzle de flèches', ar: 'لغز أسهم', hi: 'तीर पहेली' };
   ok(woMeta && LOCALE_CODES.every((c) => woWord[c]), 'Way Out is listed and every language has a genre word');
   ok(woMeta && LOCALE_CODES.every((c) => woMeta.summary[c].toLowerCase().includes(woWord[c].toLowerCase())), 'its summary names the genre in every language');
   ok(woMeta && woMeta.name.fa === 'راه دررو' && woMeta.name.en === 'Way Out', 'the name stays Way Out / راه دررو');
@@ -11227,7 +11228,7 @@ function testFootball() {
   const disc = (id, x, y) => ({ id, x, y, vx: 0, vy: 0, inPlay: true, r: E.RD, m: E.MD });
   const ballAt = (x, y) => ({ id: 0, x, y, vx: 0, vy: 0, inPlay: true, r: E.RB, m: E.MB });
   // a match with only these bodies on the pitch
-  const setup = (bodies, turn) => { const M = E.match(); M.b = bodies; M.turn = turn || 0; return M; };
+  const setup = (bodies, turn) => { const M = E.match(); M.b = bodies; M.turn = turn || 0; M.kick = false; return M; };
   // the ball rolled on its own, as if struck, for the goal-line checks
   const roll = (x, y, angle, power) => { const s = Cue.start(E.T, [ballAt(x, y)], { angle, power }, 0); s.by = 0; s.goal = -1; s.goalAt = 0; return E.run(s); };
 
@@ -11434,7 +11435,7 @@ function testFootball() {
   ok(/C\.daily\('football', G\.daily \+ '\|t' \+ G\.M\.turns\)\.rng/.test(html) && /level: daily \? 'medium' : o\.level/.test(html) && /winTo: daily \? 3 : o\.winTo/.test(html), 'the daily match is against the medium bot, to three goals, its dice seeded by the day and the turn');
   const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
   const ids = ['fb-win', 'fb-hard', 'fb-shut'];
-  ok(ids.every((id) => (core.match(new RegExp("\\{ id: '" + id + "'[^\\n]*", 'g')) || []).length === 1 && /dhi: '[^']+' \}/.test(core.match(new RegExp("\\{ id: '" + id + "'[^\\n]*"))[0]) && html.indexOf("unlock('" + id + "')") > 0), 'the three Button Football awards exist once, in every language, and are unlocked');
+  ok(ids.every((id) => (core.match(new RegExp("\\{ id: '" + id + "'[^\\n]*", 'g')) || []).length === 1 && /dfr: '[^']+', ar: '[^']+', dar: '[^']+', hi: '[^']+', dhi: '[^']+' \}/.test(core.match(new RegExp("\\{ id: '" + id + "'[^\\n]*"))[0]) && html.indexOf("unlock('" + id + "')") > 0), 'the three Button Football awards exist once, in every language, and are unlocked');
   ok(/<script src="\.\.\/\.\.\/lib\/cue\.js"><\/script>/.test(html) && !/function tick\(|rollA \* |\(1 \+ T\.ball\)/.test(m[1]), 'the page loads lib/cue.js and keeps no copy of its physics');
   ok(/ctx\.autosave\(/.test(html) && /ctx\.tutorialIfNew\(TUT\)/.test(html) && (html.match(/tArt\(\d\)/g) || []).length === 3, 'the match saves between flicks and the three-page tutorial shows once');
   ok(!/[\s{,]again: '/.test(html), 'the page leaves the core\'s "again" label alone');
@@ -12461,7 +12462,7 @@ function testXiangqi() {
   const lum = (x) => rgb(x).map((c) => c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)).reduce((a, c, i) => a + c * [0.2126, 0.7152, 0.0722][i], 0);
   const near = games.filter((g) => g.id !== 'xiangqi').map((g) => [g.id, dE(g.color, gm.color)]).sort((x, y) => x[1] - y[1])[0];
   ok(near[1] >= 15 && 1.05 / (lum(gm.color) + 0.05) >= 4.5, 'the accent differs from every other game by ΔE ≥ 15 (nearest ' + near[0] + ', ' + near[1].toFixed(1) + ') and keeps white text at 4.5:1');
-  ok(/name: \{ fa: 'شطرنج چینی', en: 'Chinese chess', zh: '中国象棋', de: 'Chinesisches Schach', es: 'Ajedrez chino', pl: 'Szachy chińskie', fr: 'Échecs chinois', hi: 'चीनी शतरंज' \}/.test(html), 'the names match games.json in every language');
+  ok(/name: \{ fa: 'شطرنج چینی', en: 'Chinese chess', zh: '中国象棋', de: 'Chinesisches Schach', es: 'Ajedrez chino', pl: 'Szachy chińskie', fr: 'Échecs chinois', ar: 'الشطرنج الصيني', hi: 'चीनी शतरंज' \}/.test(html), 'the names match games.json in every language');
   ok(/newGame\(\{ daily: dailyDate, level: 2, mode: 'ai' \}\)/.test(html) && /C\.stats\.daily\('xiangqi', S\.daily/.test(html), 'the daily game uses the same deterministic AI for everyone');
   ok(/kb\('U \/ Ctrl\+Z'/.test(html) && /if \(C\.undoKey\(e\)\) \{ undo\(\);/.test(html), 'the undo key is labelled and handled');
   ok(/E\.validState\(saved\.s\)/.test(html) && /ctx\.autosave\(function/.test(html), 'the game saves and restores a checked state');

@@ -11,10 +11,14 @@
   /* Dragging on the board moves the piece; without this the browser took the same
      drag as a scroll or a zoom. */
   .ch-gamemain { touch-action: none; user-select: none; -webkit-user-select: none; }
-  .bd-wrap { width: 100%; height: 100%; display: flex; flex-direction: column; gap: var(--s-2); align-items: center; }
+  /* The board sits in the core's .ch-split (#853): in a wide window the mode switch and
+     the pad move to a column beside it, so the board takes the full height. Stacked
+     above and below it, a landscape phone left the board a third of its height. The
+     slot's shape is the drawn field, board plus the hold and next column: FW / FH. */
+  .bd-wrap > .ch-fit { --fit-ar: calc(334 / 480); }
+  .ch-fit > .bd-canvasbox { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
   .bd-top { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
   .bd-top:empty { display: none; }
-  .bd-canvasbox { flex: 1; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
   .bd-canvas { display: block; touch-action: none; }
   /* a hard drop lands with a small thud of the whole board (#407) */
   .bd-thud { animation: bd-thud 150ms var(--ease); }
@@ -27,6 +31,16 @@
   }
   .bd-btn:active { background: var(--game-soft); color: var(--game); }
   @media (max-width: 360px) { .bd-btn { width: 46px; } }
+  /* Beside the board the column is too narrow for one row of six, so the pad becomes
+     three by two: moves and rotation on top, hold and the two drops below */
+  @container game (min-aspect-ratio: 5 / 4) {
+    .bd-pad { display: grid; grid-template-columns: repeat(3, auto); justify-content: center; }
+    .bd-btn--hold { order: 1; }
+    .bd-btn--soft, .bd-btn--drop { order: 2; }
+  }
+  .ch-nocq .ch-gamemain.ch-wide .bd-pad { display: grid; grid-template-columns: repeat(3, auto); justify-content: center; }
+  .ch-nocq .ch-gamemain.ch-wide .bd-btn--hold { order: 1; }
+  .ch-nocq .ch-gamemain.ch-wide .bd-btn--soft, .ch-nocq .ch-gamemain.ch-wide .bd-btn--drop { order: 2; }
 </style>
 </head>
 <body>
@@ -292,7 +306,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = BlockDropE
   C.boot({});
   var ctx = C.game({
     id: 'blockdrop',
-    name: { fa: 'بلوک‌ریز', en: 'Block Drop', zh: '落块', de: 'Blocksturz', es: 'Lluvia de bloques', pl: 'Block Drop', fr: 'Chute de blocs', hi: 'गिरते ब्लॉक' },
+    name: { fa: 'بلوک‌ریز', en: 'Block Drop', zh: '落块', de: 'Blocksturz', es: 'Lluvia de bloques', pl: 'Block Drop', fr: 'Chute de blocs', ar: 'الكتل المتساقطة', hi: 'गिरते ब्लॉक' },
     accent: '#4F6BD8',
     mood: 'dots',
     strings: {
@@ -335,6 +349,16 @@ if (typeof module !== 'undefined' && module.exports) module.exports = BlockDropE
         tutTitle1: 'Efface des lignes', tutText1: 'Les pièces tombent du haut. Chaque ligne pleine disparaît. Si les pièces atteignent le haut, la manche est finie.',
         tutTitle2: 'Au toucher', tutText2: 'Touche le plateau pour tourner, glisse pour déplacer, balaie vers le bas pour lâcher et vers le haut pour mettre une pièce en réserve. Les boutons en dessous font pareil.',
         tutTitle3: 'Deux types de manche', tutText3: 'Sprint : efface 40 lignes au plus vite. Marathon : 100 lignes, plus rapide toutes les 10. Quatre lignes d’un coup rapportent le plus.'
+      },
+      ar: {
+        lines: 'الصفوف', time: 'الوقت', level: 'المستوى', sprint: 'عدو 40', marathon: 'ماراثون 100',
+        holdLbl: 'احتفاظ', nextLbl: 'التالية', tapStart: 'انقر للبدء', tapResume: 'متوقف مؤقتًا — انقر للمتابعة',
+        sprintDone: 'أزيل 40 صفًّا', marathonDone: 'اكتمل الماراثون!', toppedOut: 'لا مكان', pieces: 'القطع',
+        dailyBd: 'الكتل المتساقطة اليومية', newRound: 'جولة جديدة',
+        left: 'يسار', right: 'يمين', rotate: 'تدوير', rotateBack: 'تدوير عكسي', softDrop: 'نزول بطيء', hardDrop: 'إسقاط', holdKey: 'احتفاظ', pauseKey: 'إيقاف مؤقت',
+        tutTitle1: 'أزل الصفوف', tutText1: 'تسقط القطع من الأعلى. كل صف مكتمل يختفي. إذا بلغت القطع القمة، تنتهي الجولة.',
+        tutTitle2: 'باللمس', tutText2: 'انقر اللوحة للتدوير، واسحب للتحريك، واسحب بسرعة إلى الأسفل للإسقاط وإلى الأعلى للاحتفاظ بقطعة. الأزرار في الأسفل تفعل الشيء نفسه.',
+        tutTitle3: 'نوعان من الجولات', tutText3: 'العدو: أزل 40 صفًّا بأسرع ما يمكن. الماراثون: 100 صف، تزداد السرعة كل 10. أربعة صفوف دفعة واحدة تمنح أعلى نقاط.'
       },
       hi: {
         lines: 'पंक्तियाँ', time: 'समय', level: 'स्तर', sprint: 'स्प्रिंट 40', marathon: 'मैराथन 100',
@@ -392,9 +416,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = BlockDropE
 
   var canvas = el('canvas', { class: 'bd-canvas' });
   var cbox = el('div', { class: 'bd-canvasbox' }, [canvas]);
-  var topRow = el('div', { class: 'bd-top' });
+  var topRow = el('div', { class: 'bd-top ch-above' });
   var pad = el('div', { class: 'bd-pad' });
-  var wrap = el('div', { class: 'bd-wrap' }, [topRow, cbox, pad]);
+  var wrap = el('div', { class: 'bd-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [cbox]), el('div', { class: 'ch-side' }, [topRow, pad])]);
 
   ctx.stat('lines', C.t('lines'));
   // the second counter is the clock in a sprint and the score in a marathon
@@ -435,6 +459,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = BlockDropE
     draw();
   }
   window.addEventListener('resize', resize);
+  // the slot changes size without a window resize when the side column moves beside the
+  // board or the mode row changes height
+  if (window.ResizeObserver) new ResizeObserver(function () { resize(); }).observe(cbox);
 
   /* ------------------------------------------------------------ rounds */
   function seedNow() { return (Math.random() * 4294967296) | 0; }
@@ -773,6 +800,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = BlockDropE
   function padBtn(kind, label, repeat) {
     var b = el('button', { class: 'bd-btn', type: 'button', 'aria-label': label, title: label,
       html: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' + GLYPHS[kind] + '</svg>' });
+    // its kind places it on the three-by-two pad beside the board (#853)
+    b.classList.add('bd-btn--' + kind);
     b.addEventListener('pointerdown', function (ev) {
       ev.preventDefault();
       if (kind === 'soft') { if (wake()) held.soft = true; return; }
