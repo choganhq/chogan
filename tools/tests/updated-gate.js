@@ -70,6 +70,11 @@ module.exports = function (T) {
       ok(r.status === 1 && /- b\b/.test(r.out) && !/- c\b/.test(r.out), 'only the game that kept its date is listed (exit ' + r.status + ')');
       r = run('moved', { touch: ['b'], dates: { b: '2026-11-11' } });
       ok(r.status === 0 && /moved its date/.test(r.out), 'a changed game with a moved date passes (exit ' + r.status + ')');
+      // a second change on the same day: the base already carries today's date
+      r = run('same day', { touch: ['b'], env: { GATE_TODAY: '2026-11-01' } });
+      ok(r.status === 0, 'a game whose date on the base is already today passes a second change that day (exit ' + r.status + ')');
+      r = run('other day', { touch: ['b'], env: { GATE_TODAY: '2026-11-02' } });
+      ok(r.status === 1 && /- b\b/.test(r.out), 'an unmoved date from an earlier day still fails (exit ' + r.status + ')');
       r = run('global', { touch: ['a', 'b', 'c', 'd'] });
       ok(r.status === 0 && /global change/.test(r.out), 'a change across more than three games is global and passes (exit ' + r.status + ')');
       r = run('new game', { add: ['z'] });
