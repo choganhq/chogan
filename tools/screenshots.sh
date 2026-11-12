@@ -84,7 +84,7 @@ shot() {
 TODAY=$(date +%Y-%m-%d)
 # LANGS picks some languages, e.g. LANGS=pl for a new store listing without
 # re-shooting (and re-committing) every other one
-LANGS="${LANGS:-fa en zh de es pl fr}"
+LANGS="${LANGS:-fa en zh de es pl fr ar}"
 for lang in $LANGS; do
   mkdir -p "$OUT/$lang"
   # the menu, then one game of each kind (cards, table physics, a neon arcade game,
@@ -114,6 +114,7 @@ copy_to de-DE de
 copy_to es-ES es
 copy_to pl-PL pl
 copy_to fr-FR fr
+copy_to ar ar
 mkdir -p fastlane/metadata/android/en-US/images
 "$CHROME" --headless --disable-gpu --no-sandbox --hide-scrollbars --virtual-time-budget=5000 \
   --window-size=1024,500 --screenshot="fastlane/metadata/android/en-US/images/featureGraphic.png" \
