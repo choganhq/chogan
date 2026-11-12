@@ -78,7 +78,7 @@ module.exports = function (T) {
       'the scene is picked behind the gear and saved with the other settings');
     const help = (html.match(/function showHelp\(\) \{[\s\S]*?\n {2}\}/) || [''])[0];
     ok(help.length > 0 && !/segmented/.test(help), 'the help holds no options, only the scene rules');
-    ok(/E\.newGame\(seedFor\(\), dailyDate \? FINISH : 0, dailyDate \? 'sun' : prefs\.scene\)/.test(html), 'the daily road is sunny for everyone, an endless run takes the chosen scene');
+    ok(/E\.newGame\(seedFor\(\), dailyDate \? FINISH : 0, dailyDate \? 'sun' : prefs\.scene(, [^)]*)?\)/.test(html), 'the daily road is sunny for everyone, an endless run takes the chosen scene');
     ok(/if \(S && S\.scene !== 'sun'\) top\.appendChild\(el\('span', \{ class: 'ch-badge hr-grip', text: gripText\(S\.scene\) \}\)\)/.test(html), 'a rainy, snowy or night run shows its grip as a label');
     ok(/weather\(g, Z, P, ppm\)/.test(html) && /clock = now \/ 1000/.test(html) && /C\.ui\.reduceMotion\(\) \? 0 : clock/.test(html) && /nightSky\(g, Z, P\)/.test(html) && /headlamp\(g, P, V\)/.test(html),
       'rain and snow fall with the clock (still when motion is reduced), night has its sky and a headlamp');
