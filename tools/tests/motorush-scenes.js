@@ -147,10 +147,10 @@ module.exports = function (T) {
     ok(keys.every((k) => !new RegExp('\\b' + k + ':').test(core)), 'none of them is named like a core string');
     ok((html.match(/gripN: '[^']*\{n\}[^']*'/g) || []).length === LOCALE_CODES.length, 'the grip label carries its number in every language');
     const settings = (html.match(/function settings\(\) \{[\s\S]*?\n {2}\}/) || [''])[0];
-    ok(/C\.ui\.segmented\(SCENE_IDS\.map/.test(settings) && /newRun\(pick, pickScene\)/.test(settings) && /C\.t\('dailySunny'\)/.test(settings), 'the scene is picked behind the gear, and the daily says it is always sunny');
+    ok(/C\.ui\.segmented\(SCENE_IDS\.map/.test(settings) && /newRun\(pick, pickScene[,)]/.test(settings) && /C\.t\('dailySunny'\)/.test(settings), 'the scene is picked behind the gear, and the daily says it is always sunny');
     const help = (html.match(/function showHelp\(\) \{[\s\S]*?\n {2}\}/) || [''])[0];
     ok(help.length > 0 && !/segmented|SCENE|scene/.test(help), 'and never inside the help');
-    ok(/prefs\.scene = scene; ctx\.store\.set\('prefs', prefs\)/.test(html) && /E\.newGame\(rngFor\(seed\), !!dailyDate, prefs\.diff, prefs\.scene\)/.test(html), 'the scene is saved and starts the ride');
+    ok(/prefs\.scene = scene; ctx\.store\.set\('prefs', prefs\)/.test(html) && /E\.newGame\(rngFor\(seed\), !!dailyDate, prefs\.diff, prefs\.scene[,)]/.test(html), 'the scene is saved and starts the ride');
     ok(/C\.t\('gripN'/.test(html) && /weather\(g, P\)/.test(html) && /nightFade\(g\)/.test(html) && /farLights\(/.test(html), 'the page shows the grip, draws rain and snow, and hides the road past the headlights at night');
   }
   return { testMotoRushScenes };

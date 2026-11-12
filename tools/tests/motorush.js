@@ -69,7 +69,7 @@ module.exports = function (T) {
     // #781: a pickup says how many of the three cans the bar holds, and the page shows it in every language
     const pk = evb.filter((e) => e.t === 'pick').map((e) => e.n);
     ok(pk.join(',') === '1,2,3', 'each pickup event carries the count of cans in the bar (' + pk.join(',') + ')');
-    ok((html.match(/nitroN: '[^']*\{n\}[^']*\{m\}[^']*'/g) || []).length === LOCALE_CODES.length && /e\.n > 0 && e\.n < 3/.test(html), 'the pickup pop "Nitro n/3" exists in every language');
+    ok((html.match(/nitroN: '[^']*\{n\}[^']*\{m\}[^']*'/g) || []).length === LOCALE_CODES.length && /e\.n > 0 && e\.n < e\.m/.test(html), 'the pickup pop "Nitro n/3" exists in every language');
     // #782 follow-up: the speed eases toward nitro's target instead of jumping, so the
     // check reads the target at once and the speed only after the burst has had time to build
     ok(Math.abs(E.target(S) - E.base(S.p) - E.BOOST_V) < 1e-9 && E.speed(S) < E.target(S), 'nitro raises the speed\'s target by ' + E.BOOST_V + ' m/s');
