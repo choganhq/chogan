@@ -42,6 +42,8 @@
   .hr-canvas { display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; user-select: none; -webkit-user-select: none; }
   .hr-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
   .hr-gear .ch-icon { pointer-events: none; }
+  .hr-scene { flex-wrap: wrap; }
+  .hr-gripnote { flex-basis: 100%; font-size: var(--fs-sm); }
   .hr-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
 </style>
 </head>
@@ -67,6 +69,13 @@ function HillriderEngineFactory() {
   // a full tank lasts 30 s of gas, or 110 s rolling
   var BURN_GAS = 1 / 30, BURN_IDLE = 1 / 110;
   var START = 4, STEP = 1, ORIGIN = 40;
+  /* Scenes (#805, owner's wish; night is the fourth, decided 2026-11-11). mu is the wheel's
+     grip on the ground, sunny's 1.15 the reference: on a wet road a wheel spins and slides
+     sooner, on snow sooner still, so climbs take more care and the brake needs more room.
+     Night keeps a dry road and only takes the light away. The daily is always sunny. */
+  var SCENES = { sun: { mu: MU }, rain: { mu: 0.34 }, snow: { mu: 0.2 }, night: { mu: MU } };
+  var SCENE_IDS = ['sun', 'snow', 'rain', 'night'];
+  function sceneOf(id) { return SCENES.hasOwnProperty(id) ? id : 'sun'; }
 
   function hash(seed, i) {
     var h = Math.imul((seed >>> 0) ^ Math.imul(i | 0, 0x9E3779B1), 0x85EBCA6B);
@@ -150,9 +159,11 @@ function HillriderEngineFactory() {
 
   /* -------------------------------------------------------------- game */
 
-  // seed: whole number; finish: metres for the daily course, 0 for an endless run
-  function newGame(seed, finish) {
-    var S = { seed: seed >>> 0, finish: finish || 0, ter: { c: [], p: [] }, fx: [], got: {}, t: 0,
+  // seed: whole number; finish: metres for the daily course, 0 for an endless run; scene:
+  // one of SCENE_IDS, sunny when missing
+  function newGame(seed, finish, scene) {
+    var sc = sceneOf(scene);
+    var S = { seed: seed >>> 0, finish: finish || 0, scene: sc, mu: SCENES[sc].mu, ter: { c: [], p: [] }, fx: [], got: {}, t: 0,
       x: START, y: 0, a: 0, vx: 0, vy: 0, w: 0,
       wh: [], fuel: 1, coins: 0, cans: 0, best: 0, air: 0, airBest: 0, flips: 0, spin: 0, still: 0,
       over: false, won: false, cause: '', touch: [false, false] };
@@ -257,7 +268,7 @@ function HillriderEngineFactory() {
         // grip: the wheel's turning and its sliding meet, up to what the load allows
         jn += WM * G * D.ny * H * 0.5;
         var tx = D.ny, ty = -D.nx, vt = V.vx * tx + V.vy * ty;
-        var slip = V.sp - vt, meff = 1 / (1 / WM + 1 / WROT), jt = clamp(slip * meff, -MU * jn, MU * jn);
+        var slip = V.sp - vt, meff = 1 / (1 / WM + 1 / WROT), jt = clamp(slip * meff, -S.mu * jn, S.mu * jn);
         V.vx += jt / WM * tx; V.vy += jt / WM * ty; V.sp -= jt / WROT;
       }
       V.rot -= V.sp * H / WR;
@@ -277,7 +288,7 @@ function HillriderEngineFactory() {
       var pvx = S.vx - S.w * ry, pvy = S.vy + S.w * rx, pn = pvx * Q.nx + pvy * Q.ny;
       if (pn >= 0) continue;
       var rn = rx * Q.ny - ry * Q.nx, j = -pn / (1 / M + rn * rn / INERTIA);
-      var tX = Q.ny, tY = -Q.nx, pt2 = pvx * tX + pvy * tY, rt = rx * tY - ry * tX, jt2 = clamp(-pt2 / (1 / M + rt * rt / INERTIA), -0.5 * j, 0.5 * j);
+      var tX = Q.ny, tY = -Q.nx, pt2 = pvx * tX + pvy * tY, rt = rx * tY - ry * tX, jt2 = clamp(-pt2 / (1 / M + rt * rt / INERTIA), -0.5 * S.mu / MU * j, 0.5 * S.mu / MU * j);
       var ix = Q.nx * j + tX * jt2, iy = Q.ny * j + tY * jt2;
       S.vx += ix / M; S.vy += iy / M; S.w += (rx * iy - ry * ix) / INERTIA;
     }
@@ -285,7 +296,7 @@ function HillriderEngineFactory() {
 
   var KEEP = ['x', 'y', 'a', 'vx', 'vy', 'w', 'fuel', 'coins', 'cans', 'best', 't', 'air', 'airBest', 'flips', 'spin', 'still', 'finish', 'seed'];
   function snapshot(S) {
-    var o = { wh: S.wh.map(function (W) { return { x: W.x, y: W.y, vx: W.vx, vy: W.vy, sp: W.sp, rot: W.rot }; }), got: Object.keys(S.got), fuelOut: !!S.fuelOut, touch: S.touch.slice() };
+    var o = { wh: S.wh.map(function (W) { return { x: W.x, y: W.y, vx: W.vx, vy: W.vy, sp: W.sp, rot: W.rot }; }), got: Object.keys(S.got), fuelOut: !!S.fuelOut, touch: S.touch.slice(), scene: S.scene };
     KEEP.forEach(function (k) { o[k] = S[k]; });
     return o;
   }
@@ -294,6 +305,8 @@ function HillriderEngineFactory() {
     if (v.fuel < 0 || v.fuel > 1 || v.seed < 0 || v.seed > 4294967295 || v.finish < 0) return null;
     var S = { ter: { c: [], p: [] }, fx: [], got: {}, over: false, won: false, cause: '', fuelOut: !!v.fuelOut, touch: Array.isArray(v.touch) ? [!!v.touch[0], !!v.touch[1]] : [false, false] };
     KEEP.forEach(function (k) { S[k] = v[k]; });
+    // a save from before the scenes (#805) drives on in the sun
+    S.scene = sceneOf(v.scene); S.mu = SCENES[S.scene].mu;
     S.wh = v.wh.map(function (W) { return { x: +W.x, y: +W.y, vx: +W.vx || 0, vy: +W.vy || 0, sp: +W.sp || 0, rot: +W.rot || 0 }; });
     if (S.wh.some(function (W) { return !isFinite(W.x) || !isFinite(W.y); })) return null;
     v.got.forEach(function (id) { if (/^[fc]\d+$/.test(id)) S.got[id] = 1; });
@@ -370,16 +383,37 @@ function HillriderEngineFactory() {
   /* The daily course is one the steady driver above finishes: from the day's seed, the
      first of the next few seeds whose hills it drives to the flag. A course nobody can
      finish would cost every player the day's star. */
-  function courseSeed(seed, finish, tries) {
+  function courseSeed(seed, finish, tries, scene) {
     for (var k = 0; k < (tries || 12); k++) {
-      var s = (seed + k * 7919) >>> 0, S = newGame(s, finish);
+      var s = (seed + k * 7919) >>> 0, S = newGame(s, finish, scene);
       while (!S.over && !S.won && S.t < 300) step(S, botControl(S));
       if (S.won) return s;
     }
     return seed >>> 0;
   }
 
-  return { DT: DT, courseSeed: courseSeed, WR: WR, START: START, HEAD: HEAD, HEAD_R: HEAD_R, ANCH: ANCH, newGame: newGame, step: step, ground: ground, height: height, pickups: pickups, fuelAt: fuelAt, world: world, headPos: headPos, snapshot: snapshot, restore: restore, metres: metres, speedOf: speedOf, FUEL_PRICE: FUEL_PRICE, FUEL_BUY: FUEL_BUY, FUEL_LOW: FUEL_LOW, fuelOffered: fuelOffered, refuel: refuel, hudLayout: hudLayout, dialFrac: dialFrac, botControl: botControl, hard: hard, maxSlope: maxSlope };
+  function grip(scene) { return SCENES[sceneOf(scene)].mu; }
+  // Each scene's colours over the page's palette, light and dark. text is the HUD's
+  // digits on the sky, so it must read on both ends of the sky's gradient; night keeps
+  // light digits in both themes.
+  var LOOKS = {
+    sun: { light: {}, dark: {} },
+    snow: {
+      light: { sky0: '#B9CCDD', sky1: '#EEF3F7', far: '#E4ECF2', near: '#C9D8E3', dirt: '#DCE5EC', dirtDk: '#B5C3CF', grass: '#FFFFFF', grassLt: '#F2F6FA', text: '#1F1A17', flake: '#FFFFFF', capDk: '#B8C7D3' },
+      dark: { sky0: '#141C2B', sky1: '#33415A', far: '#4A5870', near: '#5D6E86', dirt: '#8E9CAD', dirtDk: '#6F7D8E', grass: '#E3EAF1', grassLt: '#C9D3DE', text: '#F4EEE4', flake: '#E8EEF5', capDk: '#9DAABA' }
+    },
+    rain: {
+      light: { sky0: '#8E9BA8', sky1: '#CDD4DA', far: '#93A59D', near: '#6F8F74', dirt: '#6E4B30', dirtDk: '#553921', grass: '#2F7A30', grassLt: '#4F9B48', text: '#1F1A17', drop: 'rgba(40,60,90,0.45)', sheen: 'rgba(255,255,255,0.55)' },
+      dark: { sky0: '#151B23', sky1: '#323C49', far: '#2A3540', near: '#22362C', dirt: '#33251A', dirtDk: '#261A12', grass: '#2E6E2E', grassLt: '#4A8E44', text: '#F4EEE4', drop: 'rgba(190,210,235,0.4)', sheen: 'rgba(220,235,255,0.45)' }
+    },
+    night: {
+      light: { sky0: '#0A0F24', sky1: '#27325C', far: '#1B2342', near: '#17302A', dirt: '#3A2A1E', dirtDk: '#2A1E15', grass: '#2C6A2A', grassLt: '#438A3E', text: '#F4EEE4', pedal: 'rgba(255,255,255,', gauge: '#2A2F3A', post: '#AEB4BD', star: '#F4EEE4', moon: '#F2E6C4', beam: 'rgba(255,226,122,' },
+      dark: { sky0: '#06091A', sky1: '#1E2748', far: '#161D38', near: '#132823', dirt: '#2E2218', dirtDk: '#211810', grass: '#275E26', grassLt: '#3C7C37', text: '#F4EEE4', pedal: 'rgba(255,255,255,', gauge: '#2A2F3A', post: '#AEB4BD', star: '#F4EEE4', moon: '#F2E6C4', beam: 'rgba(255,226,122,' }
+    }
+  };
+  function look(scene, dark) { return LOOKS[sceneOf(scene)][dark ? 'dark' : 'light']; }
+
+  return { SCENE_IDS: SCENE_IDS, sceneOf: sceneOf, grip: grip, look: look, DT: DT, courseSeed: courseSeed, WR: WR, START: START, HEAD: HEAD, HEAD_R: HEAD_R, ANCH: ANCH, newGame: newGame, step: step, ground: ground, height: height, pickups: pickups, fuelAt: fuelAt, world: world, headPos: headPos, snapshot: snapshot, restore: restore, metres: metres, speedOf: speedOf, FUEL_PRICE: FUEL_PRICE, FUEL_BUY: FUEL_BUY, FUEL_LOW: FUEL_LOW, fuelOffered: fuelOffered, refuel: refuel, hudLayout: hudLayout, dialFrac: dialFrac, botControl: botControl, hard: hard, maxSlope: maxSlope };
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = HillriderEngineFactory;
 /* ==== ENGINE END ==== */
@@ -409,7 +443,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         tutTitle2: 'در هوا', tutText2: 'در هوا گاز دماغه را بالا می‌برد و ترمز پایین. روی چرخ‌ها فرود بیا، نه روی سر.',
         tutTitle3: 'بنزین', tutText3: 'گاز دادن بنزین می‌سوزاند. باک‌های قرمز را بگیر تا باک پر شود.',
         buyFuel: 'بنزین · {n} سکه', fuelBought: 'یک‌چهارم باک پر شد', buyRule: 'وقتی کمتر از یک‌پنجم باک مانده، دکمه‌ی قرمز زیر باک با {n} سکه‌ی خودت یک‌چهارم باک بنزین می‌دهد، هر چند بار که سکه داری. تا آن دکمه هست و سکه‌اش را داری، تمام شدن بنزین بازی را تمام نمی‌کند.',
-        spdT: 'سرعت', spdKmh: 'کیلومتر بر ساعت', spdMph: 'مایل بر ساعت', optKmh: 'کیلومتر', optMph: 'مایل', spdOff: 'خاموش'
+        spdT: 'سرعت', spdKmh: 'کیلومتر بر ساعت', spdMph: 'مایل بر ساعت', optKmh: 'کیلومتر', optMph: 'مایل', spdOff: 'خاموش',
+        scT: 'هوا', scSun: 'آفتابی', scSnow: 'برفی', scRain: 'بارانی', scNight: 'شب', gripSun: 'جاده‌ی خشک: چسبندگی کامل', gripWet: 'خیس: چسبندگی کمتر', gripSnow: 'برف: لغزنده', gripNight: 'شب: جاده‌ی خشک، چسبندگی کامل', dailySun: 'جاده‌ی روزانه همیشه آفتابی است.',
+        sceneRule: 'هوا را در تنظیمات انتخاب کن: باران جاده را لیز می‌کند و برف لیزتر؛ چرخ‌ها زودتر درجا می‌چرخند و ترمز جای بیشتری می‌خواهد. شب جاده خشک است و فقط چراغ ماشین راه را روشن می‌کند. جاده‌ی روزانه همیشه آفتابی است.'
       },
       en: {
         tapGo: 'Tap to go on.', hills: 'Hills and car', distM: '{n} m', bestM: 'Best: {n} m', flagM: 'Flag: {n} m', dailyHr: 'Daily Hillrider', newRun: 'Start over',
@@ -420,7 +456,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         tutTitle2: 'In the air', tutText2: 'In the air, gas tips the nose up and brake tips it down. Land on your wheels, not your head.',
         tutTitle3: 'Fuel', tutText3: 'Gas burns fuel. Pick up the red cans to fill the tank.',
         buyFuel: 'Fuel · {n} coins', fuelBought: 'A quarter tank added', buyRule: 'Under a fifth of a tank, the red button under the tank gives a quarter tank for {n} of your coins, as often as your coins last. While it is there and you have the coins, running dry does not end the run.',
-        spdT: 'Speed', spdKmh: 'km/h', spdMph: 'mph', optKmh: 'km/h', optMph: 'mph', spdOff: 'Off'
+        spdT: 'Speed', spdKmh: 'km/h', spdMph: 'mph', optKmh: 'km/h', optMph: 'mph', spdOff: 'Off',
+        scT: 'Weather', scSun: 'Sunny', scSnow: 'Snowy', scRain: 'Rainy', scNight: 'Night', gripSun: 'Dry road: full grip', gripWet: 'Wet: less grip', gripSnow: 'Snow: slippery', gripNight: 'Night: dry road, full grip', dailySun: 'The daily road is always sunny.',
+        sceneRule: 'Pick the weather in the settings: rain makes the road slippery and snow more so; the wheels spin sooner and the brake needs more room. At night the road is dry and only your headlamp lights the way. The daily road is always sunny.'
       },
       pl: {
         tapGo: 'Stuknij, aby przejść dalej.', hills: 'Wzgórza i auto', distM: '{n} m', bestM: 'Najlepszy: {n} m', flagM: 'Flaga: {n} m', dailyHr: 'Codzienny Jeździec wzgórz', newRun: 'Zacznij od nowa',
@@ -431,7 +469,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         tutTitle2: 'W powietrzu', tutText2: 'W powietrzu gaz unosi przód, a hamulec go opuszcza. Ląduj na kołach, nie na głowie.',
         tutTitle3: 'Paliwo', tutText3: 'Gaz zużywa paliwo. Zbieraj czerwone kanistry, aby napełnić bak.',
         buyFuel: 'Paliwo · {n} monet', fuelBought: 'Dolano ćwierć baku', buyRule: 'Poniżej jednej piątej baku czerwony przycisk pod bakiem daje ćwierć baku za {n} twoich monet, tyle razy, na ile starczy monet. Dopóki przycisk jest widoczny i masz monety, brak paliwa nie kończy przejazdu.',
-        spdT: 'Prędkość', spdKmh: 'km/h', spdMph: 'mph', optKmh: 'km/h', optMph: 'mph', spdOff: 'Wył.'
+        spdT: 'Prędkość', spdKmh: 'km/h', spdMph: 'mph', optKmh: 'km/h', optMph: 'mph', spdOff: 'Wył.',
+        scT: 'Pogoda', scSun: 'Słonecznie', scSnow: 'Śnieg', scRain: 'Deszcz', scNight: 'Noc', gripSun: 'Sucho: pełna przyczepność', gripWet: 'Mokro: mniejsza przyczepność', gripSnow: 'Śnieg: ślisko', gripNight: 'Noc: sucho, pełna przyczepność', dailySun: 'Codzienna trasa jest zawsze słoneczna.',
+        sceneRule: 'Wybierz pogodę w ustawieniach: deszcz robi drogę śliską, a śnieg jeszcze bardziej; koła szybciej buksują, a hamowanie wymaga więcej miejsca. W nocy droga jest sucha i tylko reflektor oświetla trasę. Codzienna trasa jest zawsze słoneczna.'
       },
       fr: {
         tapGo: 'Touche pour continuer.', hills: 'Les collines et la voiture', distM: '{n} m', bestM: 'Record : {n} m', flagM: 'Drapeau : {n} m', dailyHr: 'Grimpe-colline du jour', newRun: 'Recommencer',
@@ -442,7 +482,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         tutTitle2: 'En l’air', tutText2: 'En l’air, le gaz lève le nez et le frein le baisse. Atterris sur tes roues, pas sur la tête.',
         tutTitle3: 'Carburant', tutText3: 'Le gaz consomme du carburant. Ramasse les bidons rouges pour remplir le réservoir.',
         buyFuel: 'Carburant · {n} pièces', fuelBought: 'Un quart de réservoir en plus', buyRule: 'Sous un cinquième de réservoir, le bouton rouge sous la jauge donne un quart de réservoir pour {n} de tes pièces, autant de fois que tes pièces le permettent. Tant qu’il est là et que tu as les pièces, la panne sèche ne termine pas la course.',
-        spdT: 'Vitesse', spdKmh: 'km/h', spdMph: 'mph', optKmh: 'km/h', optMph: 'mph', spdOff: 'Non'
+        spdT: 'Vitesse', spdKmh: 'km/h', spdMph: 'mph', optKmh: 'km/h', optMph: 'mph', spdOff: 'Non',
+        scT: 'Météo', scSun: 'Soleil', scSnow: 'Neige', scRain: 'Pluie', scNight: 'Nuit', gripSun: 'Sec : adhérence totale', gripWet: 'Mouillé : moins d’adhérence', gripSnow: 'Neige : glissant', gripNight: 'Nuit : sec, adhérence totale', dailySun: 'Le parcours du jour est toujours ensoleillé.',
+        sceneRule: 'Choisis la météo dans les réglages : la pluie rend la route glissante, la neige encore plus ; les roues patinent plus tôt et le freinage demande plus de place. La nuit, la route est sèche et seul ton phare éclaire le chemin. Le parcours du jour est toujours ensoleillé.'
       },
       zh: {
         tapGo: '点一下继续。', hills: '山丘和车', distM: '{n} 米', bestM: '最佳：{n} 米', flagM: '旗子：{n} 米', dailyHr: '每日山丘车手', newRun: '重新开始',
@@ -453,7 +495,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         tutTitle2: '在空中', tutText2: '在空中，油门让车头抬起，刹车让车头压低。用车轮着地，别用头。',
         tutTitle3: '燃油', tutText3: '踩油门会耗油。捡起红色油桶加满油箱。',
         buyFuel: '加油 · {n} 金币', fuelBought: '加了四分之一箱油', buyRule: '油箱不到五分之一时，油箱下方的红色按钮可用 {n} 个金币加四分之一箱油，金币够就能一直加。按钮还在且金币足够时，没油不会结束本局。',
-        spdT: '速度', spdKmh: '公里/时', spdMph: '英里/时', optKmh: '公里', optMph: '英里', spdOff: '不显示'
+        spdT: '速度', spdKmh: '公里/时', spdMph: '英里/时', optKmh: '公里', optMph: '英里', spdOff: '不显示',
+        scT: '天气', scSun: '晴天', scSnow: '雪天', scRain: '雨天', scNight: '夜晚', gripSun: '干燥路面：抓地力满', gripWet: '湿滑：抓地力较低', gripSnow: '雪地：很滑', gripNight: '夜晚：路面干燥，抓地力满', dailySun: '每日挑战总是晴天。',
+        sceneRule: '在设置里选择天气：雨天路面湿滑，雪天更滑；车轮更容易打滑，刹车需要更长距离。夜晚路面干燥，只有车灯照亮前路。每日挑战总是晴天。'
       },
       de: {
         tapGo: 'Tippe, um weiterzumachen.', hills: 'Hügel und Auto', distM: '{n} m', bestM: 'Bestwert: {n} m', flagM: 'Fahne: {n} m', dailyHr: 'Hügelflitzer des Tages', newRun: 'Neu starten',
@@ -464,7 +508,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         tutTitle2: 'In der Luft', tutText2: 'In der Luft hebt Gas die Nase und die Bremse senkt sie. Lande auf den Rädern, nicht auf dem Kopf.',
         tutTitle3: 'Benzin', tutText3: 'Gas verbraucht Benzin. Sammle die roten Kanister, um den Tank zu füllen.',
         buyFuel: 'Benzin · {n} Münzen', fuelBought: 'Ein Viertel Tank getankt', buyRule: 'Unter einem Fünftel Tank gibt der rote Knopf unter dem Tank ein Viertel Tank für {n} deiner Münzen, so oft deine Münzen reichen. Solange er da ist und du die Münzen hast, beendet ein leerer Tank die Fahrt nicht.',
-        spdT: 'Tempo', spdKmh: 'km/h', spdMph: 'mph', optKmh: 'km/h', optMph: 'mph', spdOff: 'Aus'
+        spdT: 'Tempo', spdKmh: 'km/h', spdMph: 'mph', optKmh: 'km/h', optMph: 'mph', spdOff: 'Aus',
+        scT: 'Wetter', scSun: 'Sonnig', scSnow: 'Schnee', scRain: 'Regen', scNight: 'Nacht', gripSun: 'Trocken: volle Haftung', gripWet: 'Nass: weniger Haftung', gripSnow: 'Schnee: rutschig', gripNight: 'Nacht: trocken, volle Haftung', dailySun: 'Die Tagesstrecke ist immer sonnig.',
+        sceneRule: 'Wähle das Wetter in den Einstellungen: Regen macht die Straße rutschig, Schnee noch mehr; die Räder drehen früher durch und die Bremse braucht mehr Platz. Nachts ist die Straße trocken, und nur dein Scheinwerfer leuchtet den Weg. Die Tagesstrecke ist immer sonnig.'
       },
       es: {
         tapGo: 'Toca para seguir.', hills: 'Colinas y coche', distM: '{n} m', bestM: 'Mejor: {n} m', flagM: 'Bandera: {n} m', dailyHr: 'Trepacolinas del día', newRun: 'Empezar de nuevo',
@@ -475,7 +521,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
         tutTitle2: 'En el aire', tutText2: 'En el aire, acelerar levanta el morro y frenar lo baja. Aterriza sobre las ruedas, no de cabeza.',
         tutTitle3: 'Gasolina', tutText3: 'Acelerar gasta gasolina. Recoge los bidones rojos para llenar el depósito.',
         buyFuel: 'Gasolina · {n} monedas', fuelBought: 'Un cuarto de depósito más', buyRule: 'Con menos de un quinto de depósito, el botón rojo bajo el depósito da un cuarto de depósito por {n} de tus monedas, tantas veces como te alcancen. Mientras esté ahí y tengas las monedas, quedarte sin gasolina no acaba la partida.',
-        spdT: 'Velocidad', spdKmh: 'km/h', spdMph: 'mph', optKmh: 'km/h', optMph: 'mph', spdOff: 'No'
+        spdT: 'Velocidad', spdKmh: 'km/h', spdMph: 'mph', optKmh: 'km/h', optMph: 'mph', spdOff: 'No',
+        scT: 'Clima', scSun: 'Soleado', scSnow: 'Nevado', scRain: 'Lluvioso', scNight: 'Noche', gripSun: 'Seco: agarre total', gripWet: 'Mojado: menos agarre', gripSnow: 'Nieve: resbala', gripNight: 'Noche: seco, agarre total', dailySun: 'El recorrido diario siempre es soleado.',
+        sceneRule: 'Elige el clima en los ajustes: la lluvia hace resbalar la carretera y la nieve aún más; las ruedas patinan antes y el freno necesita más espacio. De noche la carretera está seca y solo tu faro alumbra el camino. El recorrido diario siempre es soleado.'
       }
     }
   });
@@ -484,6 +532,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
   var prefs = ctx.store.get('prefs', null);
   if (!prefs || typeof prefs !== 'object') prefs = {};
   if (prefs.speed !== 'mph' && prefs.speed !== 'off') prefs.speed = 'kmh';
+  // the scene, behind the gear too (#805); sunny for a new player
+  prefs.scene = E.sceneOf(prefs.scene);
   // the shown speed in m/s, eased so the suspension's bounce does not flicker the digits
   var spd = 0;
 
@@ -524,7 +574,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
   }
 
   function newRun() {
-    S = E.newGame(seedFor(), dailyDate ? FINISH : 0);
+    // the daily road is sunny for everyone, so the scores compare (#805)
+    S = E.newGame(seedFor(), dailyDate ? FINISH : 0, dailyDate ? 'sun' : prefs.scene);
     // a new run stands still until the first touch, so the tank is full when it starts
     waiting = true; resumed = false; flipPending = false;
     tries++;
@@ -561,6 +612,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
   function tick(now) {
     raf = 0;
     if (!S) return;
+    clock = now / 1000;
     var blocked = paused || waiting || document.hidden || !!document.querySelector('.ch-scrim');
     if (!last || blocked) last = now;
     frameDt = Math.min(0.1, (now - last) / 1000);
@@ -663,7 +715,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     if (t === 'light') return false;
     return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
   }
+  // the theme's colours with the scene's on top (#805)
   function palette() {
+    var P = basePalette(), o = E.look(S ? S.scene : 'sun', dark());
+    for (var k in o) P[k] = o[k];
+    return P;
+  }
+  function basePalette() {
     return dark()
       ? { sky0: '#121A30', sky1: '#2B3354', far: '#26314A', near: '#1F3A2C', dirt: '#3B2A1E', dirtDk: '#2C1F16', grass: '#3F8A3A', grassLt: '#5FA954', body: '#E0603A', bodyDk: '#A8401F', cage: '#C9CED6', tyre: '#0E0E10', hub: '#9AA1AB', skin: '#E8B98F', helmet: '#F2C230', can: '#E04236', canDk: '#9E2A22', coin: '#F2C230', coinDk: '#B88A12', post: '#C9CED6', text: '#F4EEE4', pedal: 'rgba(255,255,255,', gauge: '#2A2F3A',
           skinDk: '#C99A70', shirt: '#4FB07D', shirtDk: '#3A8A60', legs: '#3A4868', cap: '#4A78C8', mouth: '#8A4A33', eye: '#1A1A1A', steer: '#AEB4BD', tread: '#3A3E45', lamp: '#FFE27A', exhaust: '#8B919A', stripe: '#F4EEE4' }
@@ -705,6 +763,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     var sky = g.createLinearGradient(0, 0, 0, Z.h);
     sky.addColorStop(0, P.sky0); sky.addColorStop(1, P.sky1);
     g.fillStyle = sky; g.fillRect(0, 0, Z.w, Z.h);
+    if (S.scene === 'night') nightSky(g, Z, P);
     // two rows of hills far off, moving slower than the road
     backHills(g, Z, P.far, 0.15, Z.h * 0.62, Z.h * 0.12, 0.011);
     backHills(g, Z, P.near, 0.35, Z.h * 0.76, Z.h * 0.1, 0.019);
@@ -726,6 +785,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     for (x = x0; x <= x1 + stepX; x += stepX) { var hh = E.height(S, x) - 0.1; if (x === x0) g.moveTo(x, hh); else g.lineTo(x, hh); }
     g.lineWidth = 0.32; g.lineJoin = 'round'; g.strokeStyle = P.grass; g.stroke();
     g.lineWidth = 0.08; g.strokeStyle = P.grassLt; g.stroke();
+    // a wet road shines along its top (#805)
+    if (P.sheen) { g.lineWidth = 0.05; g.strokeStyle = P.sheen; g.setLineDash([0.9, 0.6]); g.stroke(); g.setLineDash([]); }
 
     // a post every 100 m, and the flag of the daily road
     var posts = [];
@@ -750,11 +811,64 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
       }
     });
 
+    if (P.beam) headlamp(g, P, V);
     drawCar(g, P, V);
 
     // the dials on top, in screen pixels
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    weather(g, Z, P, ppm);
     hud(g, Z, P);
+  }
+  /* The weather of the scene (#805), in screen pixels over the world and under the dials.
+     The drops and flakes are a fixed set placed by index, moved by the clock and against
+     the camera, so they fall and drift past as the car drives; nothing is kept per frame.
+     With reduced motion they stand still. */
+  var clock = 0;
+  function frac(v) { return v - Math.floor(v); }
+  function weather(g, Z, P, ppm) {
+    var t = C.ui.reduceMotion() ? 0 : clock, cx = cam.x * ppm, i, x, y;
+    if (S.scene === 'rain') {
+      var n = Math.round(Z.w * Z.h / 4200);
+      g.strokeStyle = P.drop; g.lineWidth = 1.4; g.lineCap = 'round'; g.beginPath();
+      for (i = 0; i < n; i++) {
+        var sp = 0.9 + 0.5 * frac(i * 0.618);
+        x = frac(i * 0.7548 - (cx * 0.9 + t * 120) / Z.w) * (Z.w + 40) - 20;
+        y = frac(i * 0.5698 + t * sp * 1.6) * (Z.h + 40) - 20;
+        g.moveTo(x, y); g.lineTo(x - 5, y + 16);
+      }
+      g.stroke();
+    } else if (S.scene === 'snow') {
+      var m = Math.round(Z.w * Z.h / 5200);
+      g.fillStyle = P.flake;
+      for (i = 0; i < m; i++) {
+        var r = 1.2 + 1.8 * frac(i * 0.381), fall = 0.12 + 0.1 * frac(i * 0.271);
+        x = frac(i * 0.7548 - cx * 0.6 / Z.w + 0.02 * Math.sin(t * 1.3 + i)) * (Z.w + 20) - 10;
+        y = frac(i * 0.5698 + t * fall) * (Z.h + 20) - 10;
+        g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+      }
+    }
+  }
+  // stars and a moon, fixed in the sky (they are far enough not to move with the road)
+  function nightSky(g, Z, P) {
+    g.fillStyle = P.star;
+    for (var i = 0; i < 46; i++) {
+      var x = frac(i * 0.7548 + 0.13) * Z.w, y = frac(i * 0.5698 + 0.31) * Z.h * 0.55, r = 0.6 + frac(i * 0.381) * 1.1;
+      g.globalAlpha = 0.45 + 0.5 * frac(i * 0.271); g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+    }
+    g.globalAlpha = 1;
+    var mr = Math.min(Z.w, Z.h) * 0.05, mx = Z.w * 0.66, my = Z.h * 0.4;
+    // a crescent: the disc with a smaller one cut out, so the sky shows through the cut
+    g.save(); g.beginPath(); g.rect(0, 0, Z.w, Z.h); g.arc(mx + mr * 0.45, my - mr * 0.2, mr * 0.85, 0, Math.PI * 2); g.clip('evenodd');
+    g.fillStyle = P.moon; g.beginPath(); g.arc(mx, my, mr, 0, Math.PI * 2); g.fill();
+    g.restore();
+  }
+  // the headlamp's beam ahead of the car at night, in the car's own frame
+  function headlamp(g, P, V) {
+    g.save(); g.translate(V.x, V.y); g.rotate(V.a);
+    var beam = g.createLinearGradient(1.3, 0, 8.5, 0);
+    beam.addColorStop(0, P.beam + '0.5)'); beam.addColorStop(1, P.beam + '0)');
+    g.fillStyle = beam; g.beginPath(); g.moveTo(1.3, 0.2); g.lineTo(8.5, 1.6); g.lineTo(8.5, -2.4); g.lineTo(1.3, 0.05); g.closePath(); g.fill();
+    g.restore();
   }
   function backHills(g, Z, color, speed, base, amp, freq) {
     var off = cam.x * 30 * speed;
@@ -904,6 +1018,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     top.appendChild(distEl);
     var best = C.stats.getBest('hillrider', 'metres');
     if (!dailyDate && best) top.appendChild(el('span', { class: 'ch-badge', text: C.t('bestM', { n: C.num(best) }) }));
+    // the scene's grip, so a slippery road is never a surprise (#805); sunny is the plain case
+    if (S && S.scene !== 'sun') top.appendChild(el('span', { class: 'ch-badge hr-grip', text: gripText(S.scene) }));
     var gear = el('button', { class: 'ch-iconbtn hr-gear', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
     gear.addEventListener('click', showSettings);
     top.appendChild(gear);
@@ -925,16 +1041,26 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
   }
   function go() { if (waiting) { waiting = false; last = 0; renderStatus(); kick(); } }
 
-  // The speed dial's unit lives behind the gear, never in the help (#777)
+  function gripText(sc) { return sc === 'rain' ? C.t('gripWet') : sc === 'snow' ? C.t('gripSnow') : sc === 'night' ? C.t('gripNight') : C.t('gripSun'); }
+  // The speed dial's unit and the scene live behind the gear, never in the help (#777, #805)
   function showSettings() {
     var seg = C.ui.segmented([{ value: 'kmh', label: C.t('optKmh') }, { value: 'mph', label: C.t('optMph') }, { value: 'off', label: C.t('spdOff') }], prefs.speed, function (v) {
       prefs.speed = v === 'mph' || v === 'off' ? v : 'kmh';
       ctx.store.set('prefs', prefs);
       draw();
     });
+    var gripEl = el('div', { class: 'ch-dim hr-gripnote', text: dailyDate ? C.t('dailySun') : gripText(prefs.scene) });
+    // a new scene starts a new run: grip that changed under a running car would be unfair
+    var scSeg = C.ui.segmented([{ value: 'sun', label: C.t('scSun') }, { value: 'snow', label: C.t('scSnow') }, { value: 'rain', label: C.t('scRain') }, { value: 'night', label: C.t('scNight') }], prefs.scene, function (v) {
+      prefs.scene = E.sceneOf(v);
+      ctx.store.set('prefs', prefs);
+      if (!dailyDate) { gripEl.textContent = gripText(prefs.scene); ctx.clearSave(); newRun(); }
+    });
     C.ui.modal({
       title: C.t('settings'),
-      body: [el('div', { class: 'ch-list' }, [el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('spdT') }), seg])])],
+      body: [el('div', { class: 'ch-list' }, [
+        el('div', { class: 'ch-item hr-scene' }, [el('div', { class: 'ch-item__label', text: C.t('scT') }), scSeg, gripEl]),
+        el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('spdT') }), seg])])],
       actions: [{ label: C.t('done'), kind: 'primary' }]
     });
   }
@@ -992,6 +1118,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
       body: [
         el('p', { class: 'ch-dim', text: C.t('rules') }),
         el('p', { class: 'ch-dim', text: C.t('buyRule', { n: C.num(E.FUEL_PRICE) }) }),
+        el('p', { class: 'ch-dim', text: C.t('sceneRule') }),
         el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
         el('div', { class: 'ch-list' }, [kb('→ ↑ / D W', C.t('kGas')), kb('← ↓ / A S', C.t('kBrake')), kb('R', C.t('kAgain'))])
       ],
