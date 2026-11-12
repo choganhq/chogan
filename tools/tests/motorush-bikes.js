@@ -139,10 +139,10 @@ module.exports = function (T) {
     ok(keys.every((k) => (html.match(new RegExp('\\b' + k + ": '[^']+'", 'g')) || []).length === LOCALE_CODES.length), 'the bike strings exist in all ' + LOCALE_CODES.length + ' languages');
     ok(keys.every((k) => !new RegExp('\\b' + k + ':').test(core)), 'none of them is named like a core string');
     const settings = (html.match(/function settings\(\) \{[\s\S]*?\n {2}\}/) || [''])[0];
-    ok(/tryBuy\(id, C\.coins, owned\)/.test(settings) && /ctx\.store\.set\('bikes', owned\)/.test(settings) && /C\.t\('notEnoughCoins'\)/.test(settings) && /newRun\(pick, pickScene, pickBike\)/.test(settings) && /C\.t\('dailyBike'\)/.test(settings), 'bikes are bought and picked behind the gear with the app\'s coins, kept, and the daily says it rides the courier');
+    ok(/tryBuy\(id, C\.coins, owned\)/.test(settings) && /ctx\.store\.set\('bikes', owned\)/.test(settings) && /C\.t\('notEnoughCoins'\)/.test(settings) && /newRun\(pick, pickScene, pickBike[,)]/.test(settings) && /C\.t\('dailyBike'\)/.test(settings), 'bikes are bought and picked behind the gear with the app\'s coins, kept, and the daily says it rides the courier');
     const help = (html.match(/function showHelp\(\) \{[\s\S]*?\n {2}\}/) || [''])[0];
     ok(help.length > 0 && !/bike|tryBuy/i.test(help), 'and never inside the help');
-    ok(/E\.newGame\(rngFor\(seed\), !!dailyDate, prefs\.diff, prefs\.scene, prefs\.bike\)/.test(html) && /owned\.indexOf\(prefs\.bike\) < 0\) prefs\.bike = 'courier'/.test(html), 'a ride starts on the chosen bike, and only an owned one');
+    ok(/E\.newGame\(rngFor\(seed\), !!dailyDate, prefs\.diff, prefs\.scene, prefs\.bike[,)]/.test(html) && /owned\.indexOf\(prefs\.bike\) < 0\) prefs\.bike = 'courier'/.test(html), 'a ride starts on the chosen bike, and only an owned one');
   }
   return { testMotoRushBikes };
 };
