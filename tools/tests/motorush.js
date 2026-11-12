@@ -69,7 +69,7 @@ module.exports = function (T) {
     // #781: a pickup says how many of the three cans the bar holds, and the page shows it in every language
     const pk = evb.filter((e) => e.t === 'pick').map((e) => e.n);
     ok(pk.join(',') === '1,2,3', 'each pickup event carries the count of cans in the bar (' + pk.join(',') + ')');
-    ok((html.match(/nitroN: '[^']*\{n\}[^']*\{m\}[^']*'/g) || []).length === LOCALE_CODES.length && /e\.n > 0 && e\.n < 3/.test(html), 'the pickup pop "Nitro n/3" exists in every language');
+    ok((html.match(/nitroN: '[^']*\{n\}[^']*\{m\}[^']*'/g) || []).length === LOCALE_CODES.length && /e\.n > 0 && e\.n < e\.m/.test(html), 'the pickup pop "Nitro n/3" exists in every language');
     // #782 follow-up: the speed eases toward nitro's target instead of jumping, so the
     // check reads the target at once and the speed only after the burst has had time to build
     ok(Math.abs(E.target(S) - E.base(S.p) - E.BOOST_V) < 1e-9 && E.speed(S) < E.target(S), 'nitro raises the speed\'s target by ' + E.BOOST_V + ' m/s');
@@ -407,7 +407,7 @@ module.exports = function (T) {
     ok(/ctx\.button\(\{ icon: 'gear'/.test(html) && /C\.ui\.segmented\(DIFFS\.map/.test(html) && /ctx\.store\.set\('prefs', prefs\)/.test(html) && /prefs = \{ diff: 'medium' \}/.test(html), 'the difficulty is picked behind a gear, saved, Medium by default');
     const help = (html.match(/function showHelp\(\) \{[\s\S]*?\n {2}\}/) || [''])[0];
     ok(help.length > 0 && !/segmented|DIFFS|difficulty/.test(help), 'and never inside the help');
-    ok(/E\.newGame\(rngFor\(seed\), !!dailyDate, prefs\.diff\)/.test(html) && /C\.t\('dailyMed'\)/.test(html), 'the daily ride says it is always Medium');
+    ok(/E\.newGame\(rngFor\(seed\), !!dailyDate, prefs\.diff[,)]/.test(html) && /C\.t\('dailyMed'\)/.test(html), 'the daily ride says it is always Medium');
     ok(/e\.key === 'ArrowUp' \|\| C\.keyIs\(e, 'w'\)/.test(html) && /addEventListener\('keyup'/.test(html) && /onPedal\(e\)/.test(html) && /pedal\(g, P, font\)/.test(html), 'the gas is a pedal on screen and Up or W on a keyboard, released on key up');
     ok(/C\.t\('lvlN'/.test(html) && /e\.t === 'level'/.test(html) && /C\.t\('lvlUp'/.test(html), 'the level is on the HUD and pops when it changes');
     ok(/c\.ph === 1 \|\| c\.ph === 2\) indicator\(/.test(html), 'a lane changer is drawn with its indicator before and while it moves');
