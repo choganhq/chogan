@@ -1,0 +1,940 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>سیل — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* slate pipes on pale stone; the water is the one bright blue on the board, so how far
+     it has come reads at a glance in both themes */
+  :root { --fl-tile: #E6ECEE; --fl-tile2: #DCE4E7; --fl-line: #B9C7CD; --fl-case: #3E4D56; --fl-flange: #2A353C; --fl-chan: #F5F8F9;
+    --fl-water: #1C86D1; --fl-rock: #8A8478; --fl-rockhi: #B4AEA2; --fl-frame: #2A353C; --fl-cursor: #E8A33A; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --fl-tile: #1E282D; --fl-tile2: #222D33; --fl-line: #11181C;
+    --fl-case: #8EA2AC; --fl-flange: #B7C6CD; --fl-chan: #26333A; --fl-water: #47AEF0; --fl-rock: #5D584F; --fl-rockhi: #7C766B; --fl-frame: #0C1215; --fl-cursor: #F2B556; } }
+  :root[data-theme="dark"] { --fl-tile: #1E282D; --fl-tile2: #222D33; --fl-line: #11181C;
+    --fl-case: #8EA2AC; --fl-flange: #B7C6CD; --fl-chan: #26333A; --fl-water: #47AEF0; --fl-rock: #5D584F; --fl-rockhi: #7C766B; --fl-frame: #0C1215; --fl-cursor: #F2B556; }
+  .fl-wrap > .ch-fit { --fit-ar: 1; }
+  .ch-fit > .fl-box { width: 100%; height: 100%; position: relative; display: grid; place-items: center; }
+  /* the board is drawn left to right in every language, so the arrow keys are geometric */
+  .fl-board { width: 100%; height: 100%; display: block; direction: ltr; touch-action: none; user-select: none; -webkit-user-select: none;
+    -webkit-touch-callout: none; border-radius: var(--r-md); box-shadow: var(--sh-2); cursor: pointer; }
+  .fl-board:focus-visible { outline: 3px solid var(--game, var(--c-accent)); outline-offset: 2px; }
+  .fl-tile { fill: var(--fl-tile); stroke: var(--fl-line); stroke-width: 1.5; }
+  .fl-tile--b { fill: var(--fl-tile2); }
+  .fl-case { fill: none; stroke: var(--fl-case); stroke-width: 46; }
+  .fl-chan { fill: none; stroke: var(--fl-chan); stroke-width: 24; }
+  .fl-hub { fill: var(--fl-case); }
+  .fl-hubc { fill: var(--fl-chan); }
+  .fl-flange { fill: var(--fl-flange); }
+  .fl-arrow { fill: var(--fl-case); }
+  .fl-wat { fill: none; stroke: var(--fl-water); stroke-width: 17; stroke-linejoin: round; }
+  .fl-rockb { fill: var(--fl-rock); }
+  .fl-rockh { fill: var(--fl-rockhi); }
+  .fl-src { fill: var(--game, var(--c-accent)); }
+  .fl-srcw { fill: var(--fl-water); }
+  .fl-ring { fill: none; stroke: var(--fl-cursor); stroke-width: 7; stroke-linecap: round; }
+  .fl-cur { fill: none; stroke: var(--fl-cursor); stroke-width: 6; }
+  .fl-puddle { fill: var(--fl-water); opacity: .75; }
+  .fl-cell--poof { animation: fl-poof 420ms var(--ease); transform-box: fill-box; transform-origin: center; }
+  @keyframes fl-poof { 0% { opacity: .2; transform: scale(.7); } 100% { opacity: 1; transform: none; } }
+  .fl-cell--no { animation: fl-no 300ms var(--ease); transform-box: fill-box; transform-origin: center; }
+  @keyframes fl-no { 0%, 100% { transform: none; } 25% { transform: translateX(-5%); } 75% { transform: translateX(5%); } }
+  /* a word over the board between levels; pointer events pass through to the board,
+     which reads any tap as "go on" in these states */
+  /* the note sits at the edge away from the source, so the source can be seen before the
+     water starts (in the middle it hid the source on the first screenshots) */
+  .fl-note { position: absolute; bottom: 4%; left: 50%; transform: translateX(-50%); width: max-content; max-width: 92%; box-sizing: border-box;
+    background: var(--c-surface); color: var(--c-text); border-radius: var(--r-lg); box-shadow: var(--sh-3);
+    padding: var(--s-3) var(--s-4); text-align: center; display: flex; flex-direction: column; gap: var(--s-2); align-items: center; }
+  .fl-note--top { bottom: auto; top: 4%; }
+  .fl-note[hidden] { display: none; }
+  .fl-note__t { font-weight: 800; font-size: 1.2rem; }
+  .fl-note__s { color: var(--c-text-dim); font-size: .95rem; }
+  /* the label sits above the tiles, so five tiles fit the 240px side column in phone landscape */
+  .fl-queue { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
+  .fl-queue__l { font-weight: 700; color: var(--c-text-dim); font-size: .9rem; }
+  .fl-qrow { display: flex; align-items: center; gap: 6px; direction: ltr; position: relative; }
+  .fl-qt { width: 38px; height: 38px; border-radius: var(--r-sm); background: var(--fl-tile); border: 1.5px solid var(--fl-line); box-sizing: border-box; display: block; flex: none; }
+  .fl-qt svg { width: 100%; height: 100%; display: block; }
+  .fl-qt--next { width: 52px; height: 52px; border: 3px solid var(--game, var(--c-accent)); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .fl-qt--next { border-color: var(--game-text-dark, var(--game, var(--c-accent))); } }
+  :root[data-theme="dark"] .fl-qt--next { border-color: var(--game-text-dark, var(--game, var(--c-accent))); }
+  .fl-qrow--busy .fl-qt--next { opacity: .45; }
+  .fl-busy { position: absolute; left: 0; bottom: -6px; height: 3px; border-radius: 2px; background: var(--fl-cursor); width: 0; }
+  .fl-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-variant-numeric: tabular-nums; }
+  .fl-acts { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; min-height: 44px; }
+  .fl-timer { font-weight: 700; font-variant-numeric: tabular-nums; min-width: 7em; text-align: center; }
+  @media (prefers-reduced-motion: reduce) { .fl-cell--poof, .fl-cell--no { animation: none; } }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function FloodEngineFactory() {
+  'use strict';
+
+  var COLS = 8, ROWS = 8, NN = COLS * ROWS, DT = 1 / 60, QUEUE = 5;
+  // a cell's sides as bits; one clockwise step turns N→E→S→W
+  var N = 1, E = 2, S = 4, W = 8, DIRS = [N, E, S, W];
+  // replacing a piece the water has not reached costs this long with no placing, and points
+  var REPLACE_T = 0.6, HURRY_T = 0.12;
+  var P_CELL = 10, P_EXTRA = 20, P_CROSS = 50, P_REPLACE = 5;
+  var SPEEDS = { calm: 1.3, normal: 1, brisk: 0.8 };
+
+  function opp(d) { return d === N ? S : d === E ? W : d === S ? N : E; }
+  function cw(d) { return ((d << 1) | (d >> 3)) & 15; }
+  function nb(i, d) {
+    var r = Math.floor(i / COLS) + (d === N ? -1 : d === S ? 1 : 0), c = i % COLS + (d === W ? -1 : d === E ? 1 : 0);
+    return r < 0 || c < 0 || r >= ROWS || c >= COLS ? -1 : r * COLS + c;
+  }
+
+  // The pieces. A tee is named by its stem. Water that comes in by either end of a tee's
+  // bar runs straight through; water that comes in by the stem turns to its own right
+  // (clockwise), and the page draws an arrow at that end, so the branch is never a guess.
+  var PIECES = {
+    h: { m: E | W, k: 'straight' }, v: { m: N | S, k: 'straight' },
+    ne: { m: N | E, k: 'bend' }, es: { m: E | S, k: 'bend' }, sw: { m: S | W, k: 'bend' }, wn: { m: W | N, k: 'bend' },
+    tn: { m: N | E | W, k: 'tee', stem: N }, te: { m: E | N | S, k: 'tee', stem: E },
+    ts: { m: S | E | W, k: 'tee', stem: S }, tw: { m: W | N | S, k: 'tee', stem: W },
+    x: { m: 15, k: 'cross' }
+  };
+  var KINDS = ['h', 'v', 'ne', 'es', 'sw', 'wn', 'tn', 'te', 'ts', 'tw', 'x'];
+  var WEIGHTS = [3, 3, 2, 2, 2, 2, 1, 1, 1, 1, 2];
+  for (var key in PIECES) if (PIECES[key].k === 'tee') PIECES[key].turn = cw(opp(PIECES[key].stem));
+
+  // the side the water leaves a piece by, given the side it came in by; 0 if it cannot come in there
+  function exitOf(p, inSide) {
+    var P = PIECES[p];
+    if (!P || !(P.m & inSide)) return 0;
+    if (P.k === 'cross') return opp(inSide);
+    if (P.k === 'tee') return inSide === P.stem ? P.turn : opp(inSide);
+    return P.m & ~inSide;
+  }
+  function axis(side) { return side === N || side === S ? 'v' : 'h'; }
+
+  // the core's seeded generator, kept as a number so a level saves and restores exactly
+  function draw32(st) {
+    var a = (st.s + 0x6D2B79F5) | 0; st.s = a;
+    var t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  function mulberry(seed) { var st = { s: seed | 0 }; return function () { return draw32(st); }; }
+  function nextPiece(S) {
+    var st = { s: S.qs }, r = draw32(st) * 20, k = 0;
+    S.qs = st.s;
+    while (r >= WEIGHTS[k]) { r -= WEIGHTS[k]; k++; }
+    return KINDS[k];
+  }
+
+  // Each level asks for more pipe, gives less time before the water and lets it run
+  // faster, with a rock more on the board, up to a ceiling where it stays.
+  function params(lv, speed) {
+    var k = SPEEDS[speed] || 1, L = Math.max(0, lv - 1);
+    return { goal: Math.min(28, 8 + 2 * L), cd: Math.round(Math.max(12, 26 - 1.5 * L) * k * 10) / 10,
+      cellT: Math.round(Math.max(1, 3 - 0.18 * L) * k * 100) / 100, rocks: Math.min(10, L) };
+  }
+  function clearBonus(lv) { return 50 + 10 * lv; }
+
+  // A self-avoiding walk of `len` cells from `start` over free cells, or null. The
+  // generator keeps only boards where one exists, so the goal can always be laid.
+  function findPath(rock, src, start, len, rnd, limit) {
+    if (start < 0 || rock[start] || start === src) return null;
+    var seen = new Array(NN).fill(false), path = [start], nodes = 0;
+    seen[start] = true; seen[src] = true;
+    function go() {
+      if (path.length >= len) return true;
+      if (++nodes > (limit || 6000)) return false;
+      var c = path[path.length - 1], ds = DIRS.slice();
+      for (var k = 3; k > 0; k--) { var j = Math.floor(rnd() * (k + 1)), t = ds[k]; ds[k] = ds[j]; ds[j] = t; }
+      for (var q = 0; q < 4; q++) {
+        var n = nb(c, ds[q]);
+        if (n < 0 || seen[n] || rock[n]) continue;
+        seen[n] = true; path.push(n);
+        if (go()) return true;
+        path.pop(); seen[n] = false;
+      }
+      return false;
+    }
+    return go() ? path : null;
+  }
+
+  // A level from its number and seed: a source with one outlet away from the edge, rocks
+  // that never sit on the outlet, and the first five pieces. A board on which no walk
+  // of goal + 4 cells leaves the outlet is thrown away.
+  function level(lv, seed, speed, base) {
+    var rnd = mulberry(seed), P = params(lv, speed);
+    for (var attempt = 0; attempt < 80; attempt++) {
+      var rocksN = attempt < 50 ? P.rocks : Math.floor(P.rocks / 2);
+      var src = (1 + Math.floor(rnd() * (ROWS - 2))) * COLS + 1 + Math.floor(rnd() * (COLS - 2));
+      var srcDir = DIRS[Math.floor(rnd() * 4)], out = nb(src, srcDir);
+      var rock = new Array(NN).fill(false), placed = 0, tries = 0;
+      while (placed < rocksN && tries++ < 200) {
+        var c = Math.floor(rnd() * NN);
+        if (c === src || c === out || rock[c]) continue;
+        rock[c] = true; placed++;
+      }
+      if (!findPath(rock, src, out, P.goal + 4, rnd)) continue;
+      var St = {
+        v: 1, level: lv, seed: seed | 0, speed: SPEEDS[speed] ? speed : 'normal', goal: P.goal, cd: P.cd, cd0: P.cd, cellT: P.cellT,
+        grid: new Array(NN).fill(''), rock: rock, src: src, srcDir: srcDir,
+        segs: [], qs: (seed ^ 0x5bd1e995) | 0, queue: [], busy: 0, hurry: false, head: null,
+        filled: 0, score: Math.max(0, base | 0), crosses: 0, replaced: 0, placed: 0, over: false, passed: false, spill: null, t: 0, ev: []
+      };
+      for (var i = 0; i < NN; i++) St.segs.push([]);
+      for (var q = 0; q < QUEUE; q++) St.queue.push(nextPiece(St));
+      return St;
+    }
+    return null;
+  }
+
+  // can the water come into cell j by side inSide? A piece the water has been through
+  // is full, except a cross, which takes a second pass along its other line
+  function canEnter(St, j, inSide) {
+    var p = St.grid[j];
+    if (!p || St.rock[j] || j === St.src || !exitOf(p, inSide)) return false;
+    var segs = St.segs[j];
+    if (!segs.length) return true;
+    if (PIECES[p].k !== 'cross' || segs.length > 1) return false;
+    return axis(segs[0][0]) !== axis(inSide);
+  }
+
+  // Lay the next piece on cell i, or swap a laid piece for it. Refused on rocks, the
+  // source and anything the water has entered; a swap waits REPLACE_T and costs points.
+  function place(St, i) {
+    if (St.over) return 'over';
+    if (!(i >= 0 && i < NN)) return 'off';
+    if (St.rock[i] || i === St.src) return 'blocked';
+    if (St.segs[i].length) return 'wet';
+    if (St.busy > 0) return 'busy';
+    var was = St.grid[i], p = St.queue.shift();
+    St.queue.push(nextPiece(St));
+    St.grid[i] = p;
+    if (was) {
+      St.busy = REPLACE_T; St.score = Math.max(0, St.score - P_REPLACE); St.replaced++;
+      St.ev.push({ t: 'replace', i: i, was: was, p: p });
+      return 'replaced';
+    }
+    St.placed++;
+    St.ev.push({ t: 'place', i: i, p: p });
+    return 'placed';
+  }
+
+  function start(St) {
+    St.cd = 0;
+    St.head = { i: St.src, from: 0, to: St.srcDir, p: 0.5 };
+    St.segs[St.src] = [[0, St.srcDir]];
+    St.ev.push({ t: 'go' });
+  }
+  // open the tap now: the countdown ends and the water runs fast to the end
+  function hurry(St) {
+    if (St.over || St.hurry) return false;
+    St.hurry = true;
+    if (St.cd > 0) start(St);
+    St.ev.push({ t: 'hurry' });
+    return true;
+  }
+
+  function step(St, dt) {
+    if (St.over) return;
+    St.t += dt;
+    if (St.busy > 0) St.busy = Math.max(0, St.busy - dt);
+    if (St.cd > 0) {
+      var before = Math.ceil(St.cd - 1e-9);
+      St.cd -= dt;
+      if (St.cd > 1e-9) {
+        var now = Math.ceil(St.cd - 1e-9);
+        if (now !== before && now <= 3) St.ev.push({ t: 'count', n: now });
+        return;
+      }
+      dt = -St.cd; start(St);
+    }
+    var h = St.head;
+    h.p += dt / (St.hurry ? HURRY_T : St.cellT);
+    while (h.p >= 1 && !St.over) {
+      if (h.i !== St.src) {
+        St.filled++;
+        var pts = St.filled > St.goal ? P_EXTRA : P_CELL;
+        St.score += pts;
+        St.ev.push({ t: 'fill', i: h.i, n: St.filled, pts: pts });
+        if (St.filled === St.goal) St.ev.push({ t: 'goal' });
+      }
+      var j = nb(h.i, h.to), inSide = opp(h.to);
+      if (j < 0 || !canEnter(St, j, inSide)) {
+        St.over = true; St.passed = St.filled >= St.goal; h.p = 1;
+        St.spill = { i: h.i, side: h.to, into: j };
+        if (St.passed) St.score += clearBonus(St.level);
+        St.ev.push({ t: 'over', passed: St.passed, filled: St.filled });
+        break;
+      }
+      var second = St.segs[j].length === 1;
+      var out = exitOf(St.grid[j], inSide);
+      St.segs[j].push([inSide, out]);
+      if (second) { St.crosses++; St.score += P_CROSS; St.ev.push({ t: 'cross', i: j }); }
+      h.p -= 1; h.i = j; h.from = inSide; h.to = out;
+    }
+  }
+  function drain(St) { var e = St.ev; St.ev = []; return e; }
+
+  function snapshot(St) {
+    var o = JSON.parse(JSON.stringify(St));
+    delete o.ev;
+    return o;
+  }
+  function restore(o) {
+    if (!o || o.v !== 1 || typeof o !== 'object') return null;
+    var num = function (x, lo, hi) { return typeof x === 'number' && isFinite(x) && x >= lo && x <= hi; };
+    if (!num(o.level, 1, 999) || !num(o.goal, 1, NN) || !num(o.cd, 0, 120) || !num(o.cd0, 0, 120) || !num(o.cellT, 0.1, 10) || !num(o.busy, 0, 5) ||
+      !num(o.src, 0, NN - 1) || DIRS.indexOf(o.srcDir) < 0 || !num(o.filled, 0, 999) || !num(o.score, 0, 1e7) || typeof o.qs !== 'number' || !SPEEDS[o.speed]) return null;
+    if (!Array.isArray(o.grid) || o.grid.length !== NN || !Array.isArray(o.rock) || o.rock.length !== NN || !Array.isArray(o.segs) || o.segs.length !== NN) return null;
+    if (!Array.isArray(o.queue) || o.queue.length !== QUEUE || o.queue.some(function (p) { return !PIECES[p]; })) return null;
+    for (var i = 0; i < NN; i++) {
+      if (o.grid[i] !== '' && !PIECES[o.grid[i]]) return null;
+      if (typeof o.rock[i] !== 'boolean' || !Array.isArray(o.segs[i]) || o.segs[i].length > 2) return null;
+      if ((o.rock[i] || i === o.src) && o.grid[i]) return null;
+      for (var s = 0; s < o.segs[i].length; s++) {
+        var g = o.segs[i][s];
+        if (!Array.isArray(g) || g.length !== 2 || DIRS.indexOf(g[1]) < 0 || (g[0] !== 0 && DIRS.indexOf(g[0]) < 0)) return null;
+        if (i !== o.src && exitOf(o.grid[i], g[0]) !== g[1]) return null;
+      }
+    }
+    if (o.cd > 0 ? o.head !== null : !(o.head && num(o.head.i, 0, NN - 1) && num(o.head.p, 0, 1) && o.segs[o.head.i].length > 0)) return null;
+    var St = JSON.parse(JSON.stringify(o));
+    St.ev = [];
+    return St;
+  }
+
+  return {
+    COLS: COLS, ROWS: ROWS, NN: NN, DT: DT, QUEUE: QUEUE, N: N, E: E, S: S, W: W, DIRS: DIRS, PIECES: PIECES, KINDS: KINDS,
+    REPLACE_T: REPLACE_T, HURRY_T: HURRY_T, P_CELL: P_CELL, P_EXTRA: P_EXTRA, P_CROSS: P_CROSS, P_REPLACE: P_REPLACE, SPEEDS: SPEEDS,
+    opp: opp, cw: cw, nb: nb, exitOf: exitOf, mulberry: mulberry, params: params, clearBonus: clearBonus, findPath: findPath,
+    level: level, canEnter: canEnter, place: place, hurry: hurry, step: step, drain: drain, snapshot: snapshot, restore: restore
+  };
+}
+if (typeof module !== 'undefined') module.exports = FloodEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = FloodEngineFactory();
+  var ACCENT = '#003C9F';
+  var SVGNS = 'http://www.w3.org/2000/svg';
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'flood',
+    name: { fa: 'سیل', en: 'Flood', zh: '洪水', de: 'Flut', es: 'Riada', pl: 'Powódź', fr: 'Crue' },
+    accent: ACCENT,
+    mood: 'dots',
+    strings: {
+      fa: {
+        flBoard: 'صفحه‌ی لوله‌کشی سیل', flNext: 'بعدی', flQueue: 'لوله‌هایی که می‌آیند',
+        flLevelN: 'مرحله‌ی {n}', flGoalN: 'آب: {a} از {b}', flScoreN: 'امتیاز: {n}', flWaterIn: 'آب تا {s} ثانیه', flFlowing: 'آب راه افتاد', flRushing: 'آب با شتاب',
+        flHurry: 'آب را باز کن', flStartL: 'شروع', flGoOn: 'برای ادامه صفحه را لمس کن.', flLevelGoal: 'دست‌کم {n} خانه لوله بگذار تا آب از آن بگذرد.',
+        flCleared: 'مرحله‌ی {n} تمام شد!', flNextLevel: 'مرحله‌ی {n}', flSpilled: 'آب بیرون ریخت', flShort: 'آب به هدف نرسید',
+        flGoalHit: 'به هدف رسیدی!', flCrossBonus: 'دوبار از چهارراه!', flNewRun: 'دور تازه', flDaily: 'سیل روزانه',
+        flSpeed: 'سرعت آب', flCalm: 'آرام', flNormal: 'معمولی', flBrisk: 'تند',
+        flReachedL: 'مرحله‌ای که رسیدی', flClearedL: 'مرحله‌های تمام‌شده', flScoreL: 'امتیاز', flBestL: 'بهترین امتیاز', flBestN: 'رکورد تازه: {n}', flTriesL: 'تلاش‌ها',
+        flEmpty: 'خالی', flRock: 'سنگ', flSource: 'منبع آب', flWet: 'آب دارد', flStraight: 'لوله‌ی صاف', flBend: 'زانویی', flTee: 'سه‌راهی', flCross: 'چهارراه', flCellN: 'ردیف {r} ستون {c}',
+        kMove: 'جابه‌جا کردن نشانگر', kPlace: 'گذاشتن یا عوض کردن لوله', kHurry: 'باز کردن آب', kNew: 'دور تازه',
+        rules: 'لوله‌ی بعدی از صف کنار صفحه می‌آید. هر خانه‌ی خالی را بزن تا لوله آنجا بنشیند. شمارش معکوس که تمام شود، آب از منبع راه می‌افتد و با سرعتی ثابت در لوله‌هایی که گذاشته‌ای جلو می‌رود. هر جا لوله تمام شود یا سرش به دیوار یا لوله‌ای ناجور برسد، آب بیرون می‌ریزد و مرحله تمام است. اگر تا آن موقع آب از هدفِ مرحله بیشتر خانه را پر کرده باشد، به مرحله‌ی بعد می‌روی: هدف بلندتر، آب تندتر و سنگ بیشتر. لوله‌ای را که آب هنوز به آن نرسیده می‌شود دوباره زد تا با لوله‌ی بعدی عوض شود؛ این کار کمی وقت و پنج امتیاز می‌گیرد. لوله‌ای که آب در آن رفته دیگر عوض نمی‌شود. آب در سه‌راهی اگر از دو سرِ میله بیاید صاف رد می‌شود و اگر از پایه بیاید به سمت فلش می‌پیچد. چهارراه را آب می‌تواند دوبار، یک بار افقی و یک بار عمودی، رد کند و پنجاه امتیاز جایزه دارد. هر خانه ده امتیاز و بعد از هدف بیست امتیاز دارد. وقتی کارت تمام شد آب را باز کن تا تند برود. دور با اولین مرحله‌ای که به هدف نرسد تمام می‌شود. چالش روزانه برای همه یکی است.',
+        tutTitle1: 'لوله بگذار', tutText1: 'لوله‌ی بعدی صف را با زدن هر خانه‌ی خالی بگذار. دوباره زدن یک لوله آن را با بعدی عوض می‌کند.',
+        tutTitle2: 'آب می‌آید', tutText2: 'شمارش که تمام شود آب از منبع راه می‌افتد. پیش از آنکه بیرون بریزد، به اندازه‌ی هدف لوله پر کن.',
+        tutTitle3: 'سه‌راهی و چهارراه', tutText3: 'آبی که از پایه‌ی سه‌راهی بیاید به سمت فلش می‌پیچد. چهارراه دوبار آب می‌گیرد و جایزه دارد.'
+      },
+      en: {
+        flBoard: 'The Flood pipe board', flNext: 'Next', flQueue: 'Pieces coming up',
+        flLevelN: 'Level {n}', flGoalN: 'Water: {a} of {b}', flScoreN: 'Score: {n}', flWaterIn: 'Water in {s} s', flFlowing: 'The water is running', flRushing: 'Water rushing',
+        flHurry: 'Open the tap', flStartL: 'Start', flGoOn: 'Tap to go on.', flLevelGoal: 'Lay at least {n} cells of pipe for the water to run through.',
+        flCleared: 'Level {n} cleared!', flNextLevel: 'Level {n}', flSpilled: 'The water spilled', flShort: 'Short of the goal',
+        flGoalHit: 'Goal reached!', flCrossBonus: 'Twice through a cross!', flNewRun: 'New run', flDaily: 'Daily Flood',
+        flSpeed: 'Water speed', flCalm: 'Calm', flNormal: 'Normal', flBrisk: 'Brisk',
+        flReachedL: 'Level reached', flClearedL: 'Levels cleared', flScoreL: 'Score', flBestL: 'Best score', flBestN: 'New best: {n}', flTriesL: 'Tries',
+        flEmpty: 'empty', flRock: 'rock', flSource: 'water source', flWet: 'has water', flStraight: 'straight pipe', flBend: 'bend', flTee: 'tee', flCross: 'cross', flCellN: 'Row {r} column {c}',
+        kMove: 'Move the cursor', kPlace: 'Lay or swap a piece', kHurry: 'Open the tap', kNew: 'New run',
+        rules: 'The next piece comes from the queue beside the board. Tap any empty cell to lay it there. When the countdown ends, the water leaves the source and runs through the pipe you have laid at a steady speed. Wherever the pipe stops, or its end meets the wall or a piece that does not fit, the water spills and the level is over. If by then the water has filled at least the level\'s goal, you go on to the next level: a longer goal, faster water and more rocks. Tap a piece the water has not reached yet to swap it for the next one; that costs a moment and five points. A piece the water has entered can never be swapped. In a tee, water coming in at either end of the bar runs straight through, and water coming in by the stem turns toward the arrow. Water can run through a cross twice, once across and once down, for a bonus of fifty. Each cell is worth ten points, twenty past the goal. When you are done, open the tap and the water rushes on. A run ends with the first level that falls short. The daily challenge is the same for everyone.',
+        tutTitle1: 'Lay pipe', tutText1: 'Tap any empty cell to lay the next piece from the queue. Tap a piece again to swap it for the next one.',
+        tutTitle2: 'Here comes the water', tutText2: 'When the countdown ends, the water leaves the source. Fill the goal before it spills.',
+        tutTitle3: 'Tees and crosses', tutText3: 'Water coming in by a tee\'s stem turns toward the arrow. A cross takes water twice, for a bonus.'
+      },
+      pl: {
+        flBoard: 'Plansza rur Powodzi', flNext: 'Następna', flQueue: 'Nadchodzące elementy',
+        flLevelN: 'Poziom {n}', flGoalN: 'Woda: {a} z {b}', flScoreN: 'Wynik: {n}', flWaterIn: 'Woda za {s} s', flFlowing: 'Woda płynie', flRushing: 'Woda pędzi',
+        flHurry: 'Odkręć kran', flStartL: 'Start', flGoOn: 'Stuknij, aby kontynuować.', flLevelGoal: 'Ułóż co najmniej {n} pól rury, przez które popłynie woda.',
+        flCleared: 'Poziom {n} ukończony!', flNextLevel: 'Poziom {n}', flSpilled: 'Woda się wylała', flShort: 'Zabrakło do celu',
+        flGoalHit: 'Cel osiągnięty!', flCrossBonus: 'Dwa razy przez krzyżak!', flNewRun: 'Nowa runda', flDaily: 'Powódź dnia',
+        flSpeed: 'Prędkość wody', flCalm: 'Spokojnie', flNormal: 'Normalnie', flBrisk: 'Żwawo',
+        flReachedL: 'Osiągnięty poziom', flClearedL: 'Ukończone poziomy', flScoreL: 'Wynik', flBestL: 'Najlepszy wynik', flBestN: 'Nowy rekord: {n}', flTriesL: 'Próby',
+        flEmpty: 'puste', flRock: 'kamień', flSource: 'źródło wody', flWet: 'z wodą', flStraight: 'prosta rura', flBend: 'kolanko', flTee: 'trójnik', flCross: 'krzyżak', flCellN: 'Rząd {r} kolumna {c}',
+        kMove: 'Przesuń kursor', kPlace: 'Połóż lub wymień element', kHurry: 'Odkręć kran', kNew: 'Nowa runda',
+        rules: 'Następny element przychodzi z kolejki obok planszy. Stuknij dowolne puste pole, aby go tam położyć. Gdy odliczanie się skończy, woda wypływa ze źródła i płynie przez ułożoną rurę ze stałą prędkością. Tam, gdzie rura się kończy albo jej koniec trafia na ścianę lub niepasujący element, woda się wylewa i poziom się kończy. Jeśli do tego czasu woda wypełniła co najmniej cel poziomu, przechodzisz dalej: dłuższy cel, szybsza woda i więcej kamieni. Stuknij element, do którego woda jeszcze nie dotarła, aby wymienić go na następny; kosztuje to chwilę i pięć punktów. Elementu, do którego weszła woda, nie można już wymienić. W trójniku woda wpływająca z któregoś końca belki płynie prosto, a wpływająca od nóżki skręca w stronę strzałki. Przez krzyżak woda może przepłynąć dwa razy, raz w poprzek i raz w dół, za premię pięćdziesięciu. Każde pole daje dziesięć punktów, a za celem dwadzieścia. Gdy skończysz, odkręć kran, a woda popędzi. Runda kończy się na pierwszym poziomie bez celu. Codzienne wyzwanie jest takie samo dla wszystkich.',
+        tutTitle1: 'Układaj rury', tutText1: 'Stuknij puste pole, aby położyć następny element z kolejki. Stuknij element ponownie, aby wymienić go na następny.',
+        tutTitle2: 'Nadchodzi woda', tutText2: 'Po odliczaniu woda wypływa ze źródła. Wypełnij cel, zanim się wyleje.',
+        tutTitle3: 'Trójniki i krzyżaki', tutText3: 'Woda wpływająca od nóżki trójnika skręca w stronę strzałki. Krzyżak przyjmuje wodę dwa razy, za premię.'
+      },
+      fr: {
+        flBoard: 'Le plateau de tuyaux de Crue', flNext: 'Suivante', flQueue: 'Pièces à venir',
+        flLevelN: 'Niveau {n}', flGoalN: 'Eau : {a} sur {b}', flScoreN: 'Score : {n}', flWaterIn: 'Eau dans {s} s', flFlowing: 'L’eau coule', flRushing: 'L’eau se précipite',
+        flHurry: 'Ouvre le robinet', flStartL: 'Commencer', flGoOn: 'Touche pour continuer.', flLevelGoal: 'Pose au moins {n} cases de tuyau pour que l’eau y passe.',
+        flCleared: 'Niveau {n} terminé !', flNextLevel: 'Niveau {n}', flSpilled: 'L’eau a débordé', flShort: 'Objectif manqué',
+        flGoalHit: 'Objectif atteint !', flCrossBonus: 'Deux fois par une croix !', flNewRun: 'Nouvelle partie', flDaily: 'Crue du jour',
+        flSpeed: 'Vitesse de l’eau', flCalm: 'Calme', flNormal: 'Normale', flBrisk: 'Vive',
+        flReachedL: 'Niveau atteint', flClearedL: 'Niveaux terminés', flScoreL: 'Score', flBestL: 'Meilleur score', flBestN: 'Nouveau record : {n}', flTriesL: 'Essais',
+        flEmpty: 'vide', flRock: 'rocher', flSource: 'source d’eau', flWet: 'a de l’eau', flStraight: 'tuyau droit', flBend: 'coude', flTee: 'té', flCross: 'croix', flCellN: 'Ligne {r} colonne {c}',
+        kMove: 'Déplacer le curseur', kPlace: 'Poser ou échanger une pièce', kHurry: 'Ouvrir le robinet', kNew: 'Nouvelle partie',
+        rules: 'La pièce suivante vient de la file à côté du plateau. Touche n’importe quelle case vide pour l’y poser. À la fin du compte à rebours, l’eau quitte la source et avance à vitesse constante dans le tuyau que tu as posé. Là où le tuyau s’arrête, ou si son bout touche le mur ou une pièce qui ne raccorde pas, l’eau déborde et le niveau est fini. Si l’eau a rempli au moins l’objectif du niveau, tu passes au suivant : un objectif plus long, une eau plus rapide et plus de rochers. Touche une pièce que l’eau n’a pas encore atteinte pour l’échanger contre la suivante ; cela coûte un instant et cinq points. Une pièce où l’eau est entrée ne peut plus être échangée. Dans un té, l’eau qui entre par un bout de la barre passe tout droit, et celle qui entre par le pied tourne vers la flèche. L’eau peut traverser une croix deux fois, une fois en travers et une fois en long, pour un bonus de cinquante. Chaque case vaut dix points, vingt au-delà de l’objectif. Quand tu as fini, ouvre le robinet et l’eau file. Une partie s’arrête au premier niveau manqué. Le défi du jour est le même pour tous.',
+        tutTitle1: 'Pose des tuyaux', tutText1: 'Touche une case vide pour poser la pièce suivante de la file. Touche une pièce à nouveau pour l’échanger contre la suivante.',
+        tutTitle2: 'L’eau arrive', tutText2: 'À la fin du compte à rebours, l’eau quitte la source. Remplis l’objectif avant qu’elle déborde.',
+        tutTitle3: 'Tés et croix', tutText3: 'L’eau qui entre par le pied d’un té tourne vers la flèche. Une croix prend l’eau deux fois, avec un bonus.'
+      },
+      zh: {
+        flBoard: '洪水的管道棋盘', flNext: '下一个', flQueue: '即将到来的管子',
+        flLevelN: '第 {n} 关', flGoalN: '水：{a} / {b}', flScoreN: '得分：{n}', flWaterIn: '{s} 秒后来水', flFlowing: '水流起来了', flRushing: '水在奔涌',
+        flHurry: '打开水阀', flStartL: '开始', flGoOn: '点一下继续。', flLevelGoal: '至少铺 {n} 格管道让水流过。',
+        flCleared: '第 {n} 关完成！', flNextLevel: '第 {n} 关', flSpilled: '水漫出来了', flShort: '没达到目标',
+        flGoalHit: '达到目标！', flCrossBonus: '两次穿过十字管！', flNewRun: '新一局', flDaily: '每日洪水',
+        flSpeed: '水速', flCalm: '平缓', flNormal: '普通', flBrisk: '湍急',
+        flReachedL: '到达关卡', flClearedL: '完成关卡', flScoreL: '得分', flBestL: '最高分', flBestN: '新纪录：{n}', flTriesL: '尝试次数',
+        flEmpty: '空', flRock: '石头', flSource: '水源', flWet: '有水', flStraight: '直管', flBend: '弯管', flTee: '三通', flCross: '十字管', flCellN: '第 {r} 行第 {c} 列',
+        kMove: '移动光标', kPlace: '放下或替换管子', kHurry: '打开水阀', kNew: '新一局',
+        rules: '下一个管子来自棋盘旁边的队列。点任意空格把它放在那里。倒计时结束后，水从水源出发，以固定速度流过你铺好的管道。管道在哪里断开，或者管口碰到墙或接不上的管子，水就会漫出来，这一关结束。如果此时水已经填满了这一关的目标格数，就进入下一关：目标更长，水更快，石头更多。点一下水还没到达的管子，可以用下一个管子替换它，这要花一点时间和五分。水已经流进的管子不能再替换。在三通里，从横杆两端进来的水直着穿过，从竖脚进来的水朝箭头方向转弯。水可以两次穿过十字管，一次横着一次竖着，奖励五十分。每格十分，超过目标后每格二十分。铺完了就打开水阀，让水快速流过。第一次没达到目标的关卡结束这一局。每日挑战对所有人都一样。',
+        tutTitle1: '铺管子', tutText1: '点任意空格放下队列里的下一个管子。再点一次已放的管子就用下一个替换它。',
+        tutTitle2: '水来了', tutText2: '倒计时结束，水从水源出发。在它漫出之前填满目标。',
+        tutTitle3: '三通和十字管', tutText3: '从三通竖脚进来的水朝箭头方向转弯。十字管能过两次水，有奖励。'
+      },
+      de: {
+        flBoard: 'Das Rohrbrett von Flut', flNext: 'Nächstes', flQueue: 'Kommende Teile',
+        flLevelN: 'Level {n}', flGoalN: 'Wasser: {a} von {b}', flScoreN: 'Punkte: {n}', flWaterIn: 'Wasser in {s} s', flFlowing: 'Das Wasser fließt', flRushing: 'Wasser rauscht',
+        flHurry: 'Hahn aufdrehen', flStartL: 'Los', flGoOn: 'Tippe, um weiterzumachen.', flLevelGoal: 'Lege mindestens {n} Felder Rohr, durch die das Wasser fließt.',
+        flCleared: 'Level {n} geschafft!', flNextLevel: 'Level {n}', flSpilled: 'Das Wasser ist übergelaufen', flShort: 'Ziel verfehlt',
+        flGoalHit: 'Ziel erreicht!', flCrossBonus: 'Zweimal durchs Kreuz!', flNewRun: 'Neuer Lauf', flDaily: 'Flut des Tages',
+        flSpeed: 'Wassertempo', flCalm: 'Ruhig', flNormal: 'Normal', flBrisk: 'Flott',
+        flReachedL: 'Erreichtes Level', flClearedL: 'Geschaffte Level', flScoreL: 'Punkte', flBestL: 'Bestwert', flBestN: 'Neuer Bestwert: {n}', flTriesL: 'Versuche',
+        flEmpty: 'leer', flRock: 'Fels', flSource: 'Wasserquelle', flWet: 'mit Wasser', flStraight: 'gerades Rohr', flBend: 'Bogen', flTee: 'T-Stück', flCross: 'Kreuz', flCellN: 'Reihe {r} Spalte {c}',
+        kMove: 'Cursor bewegen', kPlace: 'Teil legen oder tauschen', kHurry: 'Hahn aufdrehen', kNew: 'Neuer Lauf',
+        rules: 'Das nächste Teil kommt aus der Reihe neben dem Brett. Tippe auf ein leeres Feld, um es dort hinzulegen. Wenn der Countdown endet, verlässt das Wasser die Quelle und fließt mit gleichem Tempo durch das Rohr, das du gelegt hast. Wo das Rohr aufhört oder sein Ende an die Wand oder ein Teil stößt, das nicht passt, läuft das Wasser über und das Level ist vorbei. Hat das Wasser bis dahin mindestens das Ziel des Levels gefüllt, geht es ins nächste: längeres Ziel, schnelleres Wasser und mehr Felsen. Tippe ein Teil an, das das Wasser noch nicht erreicht hat, um es gegen das nächste zu tauschen; das kostet einen Moment und fünf Punkte. Ein Teil, in das Wasser geflossen ist, lässt sich nie mehr tauschen. Im T-Stück fließt Wasser, das an einem Ende des Balkens hineinkommt, geradeaus durch, und Wasser vom Fuß biegt zum Pfeil ab. Durch ein Kreuz kann das Wasser zweimal fließen, einmal quer und einmal längs, für fünfzig Bonuspunkte. Jedes Feld bringt zehn Punkte, nach dem Ziel zwanzig. Wenn du fertig bist, dreh den Hahn auf und das Wasser rauscht los. Ein Lauf endet mit dem ersten Level, das sein Ziel verfehlt. Die Tagesaufgabe ist für alle gleich.',
+        tutTitle1: 'Rohre legen', tutText1: 'Tippe auf ein leeres Feld, um das nächste Teil aus der Reihe zu legen. Tippe ein Teil nochmal an, um es gegen das nächste zu tauschen.',
+        tutTitle2: 'Das Wasser kommt', tutText2: 'Nach dem Countdown verlässt das Wasser die Quelle. Fülle das Ziel, bevor es überläuft.',
+        tutTitle3: 'T-Stücke und Kreuze', tutText3: 'Wasser vom Fuß eines T-Stücks biegt zum Pfeil ab. Ein Kreuz nimmt zweimal Wasser auf, mit Bonus.'
+      },
+      es: {
+        flBoard: 'El tablero de tuberías de Riada', flNext: 'Siguiente', flQueue: 'Piezas que vienen',
+        flLevelN: 'Nivel {n}', flGoalN: 'Agua: {a} de {b}', flScoreN: 'Puntos: {n}', flWaterIn: 'Agua en {s} s', flFlowing: 'El agua corre', flRushing: 'El agua se precipita',
+        flHurry: 'Abre el grifo', flStartL: 'Empezar', flGoOn: 'Toca para seguir.', flLevelGoal: 'Pon al menos {n} casillas de tubería para que pase el agua.',
+        flCleared: '¡Nivel {n} superado!', flNextLevel: 'Nivel {n}', flSpilled: 'El agua se derramó', flShort: 'No llegaste al objetivo',
+        flGoalHit: '¡Objetivo alcanzado!', flCrossBonus: '¡Dos veces por una cruz!', flNewRun: 'Nueva partida', flDaily: 'Riada diaria',
+        flSpeed: 'Velocidad del agua', flCalm: 'Tranquila', flNormal: 'Normal', flBrisk: 'Rápida',
+        flReachedL: 'Nivel alcanzado', flClearedL: 'Niveles superados', flScoreL: 'Puntos', flBestL: 'Mejor puntuación', flBestN: 'Nuevo récord: {n}', flTriesL: 'Intentos',
+        flEmpty: 'vacía', flRock: 'roca', flSource: 'fuente de agua', flWet: 'con agua', flStraight: 'tubo recto', flBend: 'codo', flTee: 'T', flCross: 'cruz', flCellN: 'Fila {r} columna {c}',
+        kMove: 'Mover el cursor', kPlace: 'Poner o cambiar una pieza', kHurry: 'Abrir el grifo', kNew: 'Nueva partida',
+        rules: 'La siguiente pieza sale de la fila junto al tablero. Toca cualquier casilla vacía para ponerla ahí. Cuando acaba la cuenta atrás, el agua sale de la fuente y avanza a velocidad constante por la tubería que has puesto. Donde la tubería se acaba, o su extremo da con la pared o con una pieza que no encaja, el agua se derrama y el nivel termina. Si para entonces el agua ha llenado al menos el objetivo del nivel, pasas al siguiente: objetivo más largo, agua más rápida y más rocas. Toca una pieza a la que el agua aún no ha llegado para cambiarla por la siguiente; cuesta un momento y cinco puntos. Una pieza por la que ya entró el agua no se puede cambiar. En una T, el agua que entra por un extremo de la barra pasa recta, y la que entra por el pie gira hacia la flecha. El agua puede cruzar una cruz dos veces, una de lado y otra de arriba abajo, con un premio de cincuenta. Cada casilla vale diez puntos, veinte pasado el objetivo. Cuando termines, abre el grifo y el agua corre deprisa. La partida acaba en el primer nivel que no llega al objetivo. El reto diario es igual para todos.',
+        tutTitle1: 'Pon tubería', tutText1: 'Toca una casilla vacía para poner la siguiente pieza de la fila. Toca una pieza otra vez para cambiarla por la siguiente.',
+        tutTitle2: 'Llega el agua', tutText2: 'Al acabar la cuenta atrás, el agua sale de la fuente. Llena el objetivo antes de que se derrame.',
+        tutTitle3: 'Tes y cruces', tutText3: 'El agua que entra por el pie de una T gira hacia la flecha. Una cruz recibe agua dos veces, con premio.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var DAILY_WIN = 3, PIECE_KEY = { straight: 'flStraight', bend: 'flBend', tee: 'flTee', cross: 'flCross' };
+
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || typeof prefs !== 'object' || !E.SPEEDS[prefs.speed]) prefs = { speed: 'normal' };
+
+  // the run: its speed, the day for a daily one, the levels cleared so far; S is the level
+  var run = null, S = null, mode = 'ready', raf = 0, last = 0, acc = 0, paused = false, tries = 0, startedAt = 0;
+  var cursor = 0, kbMode = false, pop = null, awarded = {};
+
+  /* ------------------------------------------------------------- board */
+
+  var svg = document.createElementNS(SVGNS, 'svg');
+  svg.setAttribute('class', 'fl-board');
+  svg.setAttribute('viewBox', '-8 -8 816 816');
+  svg.setAttribute('tabindex', '0');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', C.t('flBoard'));
+  var layers = {};
+  ['tiles', 'cells', 'fx'].forEach(function (k) { layers[k] = document.createElementNS(SVGNS, 'g'); svg.appendChild(layers[k]); });
+  var frame = '<rect x="-8" y="-8" width="816" height="816" rx="20" fill="var(--fl-frame)"/>';
+  var tiles = '';
+  for (var ti = 0; ti < E.NN; ti++) tiles += '<rect class="fl-tile' + (((ti % E.COLS) + Math.floor(ti / E.COLS)) % 2 ? ' fl-tile--b' : '') + '" x="' + (ti % E.COLS) * 100 + '" y="' + Math.floor(ti / E.COLS) * 100 + '" width="100" height="100"/>';
+  layers.tiles.innerHTML = frame + tiles;
+  var cellG = [], cellKey = [];
+  for (var ci = 0; ci < E.NN; ci++) {
+    // the cell's place is on an outer group; the swap and refusal animations run on the
+    // inner one, since a CSS transform on the outer group replaced its translate and the
+    // swapped piece flashed in the top-left corner
+    var g0 = document.createElementNS(SVGNS, 'g'), g = document.createElementNS(SVGNS, 'g');
+    g0.setAttribute('transform', 'translate(' + (ci % E.COLS) * 100 + ' ' + Math.floor(ci / E.COLS) * 100 + ')');
+    g0.appendChild(g); layers.cells.appendChild(g0); cellG.push(g); cellKey.push(null);
+  }
+  var note = el('div', { class: 'fl-note', hidden: 'hidden' });
+  var box = el('div', { class: 'fl-box' }, [svg, note]);
+
+  var qrow = el('div', { class: 'fl-qrow', role: 'img', 'aria-label': C.t('flQueue') });
+  var busyBar = el('div', { class: 'fl-busy' });
+  var queue = el('div', { class: 'fl-queue ch-above' }, [el('span', { class: 'fl-queue__l', text: C.t('flNext') }), qrow]);
+  var status = el('div', { class: 'fl-status', role: 'status', 'aria-live': 'polite' });
+  var timer = el('span', { class: 'fl-timer' });
+  var hurryBtn = el('button', { class: 'ch-btn ch-btn--primary', type: 'button', text: C.t('flHurry') });
+  var acts = el('div', { class: 'fl-acts' }, [timer, hurryBtn]);
+  var wrap = el('div', { class: 'fl-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [queue, status, acts])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  if (!dailyDate) {
+    // the water speed lives behind a gear, never in the help window
+    ctx.button({ icon: 'gear', label: C.t('settings'), onClick: function () { settings(); } });
+    ctx.button({ icon: 'refresh', label: C.t('flNewRun'), onClick: function () { askNew(); } });
+  }
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ pieces */
+
+  var EDGE = { 1: [50, 0], 2: [100, 50], 4: [50, 100], 8: [0, 50] };
+  var ROT = { 1: -90, 2: 0, 4: 90, 8: 180 };
+  function sides(m) { return E.DIRS.filter(function (d) { return m & d; }); }
+  // a path from side a to side b in a 100×100 cell: a quarter circle for a bend, through
+  // the middle for anything else; a = 0 starts in the middle (the source)
+  function segD(a, b, bend) {
+    if (!a) return 'M50 50L' + EDGE[b].join(' ');
+    var A = EDGE[a], B = EDGE[b];
+    if (bend) {
+      var Cx = A[0] === 50 ? B[0] : A[0], Cy = A[1] === 50 ? B[1] : A[1];
+      var cr = (A[0] - Cx) * (B[1] - Cy) - (A[1] - Cy) * (B[0] - Cx);
+      return 'M' + A.join(' ') + 'A50 50 0 0 ' + (cr > 0 ? 1 : 0) + ' ' + B.join(' ');
+    }
+    return 'M' + A.join(' ') + 'L50 50L' + B.join(' ');
+  }
+  function pipeD(p) {
+    var P = E.PIECES[p], s = sides(P.m);
+    if (P.k === 'bend') return segD(s[0], s[1], true);
+    return s.map(function (d) { return 'M50 50L' + EDGE[d].join(' '); }).join('');
+  }
+  var FLANGE = { 1: [24, 0, 52, 8], 2: [92, 24, 8, 52], 4: [24, 92, 52, 8], 8: [0, 24, 8, 52] };
+  function pieceSvg(p) {
+    var P = E.PIECES[p], d = pipeD(p), hub = P.k === 'tee' || P.k === 'cross', s = '<path class="fl-case" d="' + d + '"/>';
+    if (hub) s += '<circle class="fl-hub" cx="50" cy="50" r="27"/>';
+    sides(P.m).forEach(function (q) { var f = FLANGE[q]; s += '<rect class="fl-flange" x="' + f[0] + '" y="' + f[1] + '" width="' + f[2] + '" height="' + f[3] + '" rx="2"/>'; });
+    s += '<path class="fl-chan" d="' + d + '"/>';
+    if (hub) s += '<circle class="fl-hubc" cx="50" cy="50" r="15"/>';
+    // the tee's arrow: where water from the stem goes
+    if (P.k === 'tee') s += '<path class="fl-arrow" transform="rotate(' + ROT[P.turn] + ' 50 50)" d="M70 40L86 50L70 60Z"/>';
+    return s;
+  }
+  function rockSvg(i) {
+    var k = (i * 7919) % 5;
+    return '<path class="fl-rockb" d="M18 70Q14 44 34 30Q52 ' + (16 + k * 2) + ' 70 28Q88 40 84 66Q80 84 52 84Q24 86 18 70Z"/>' +
+      '<path class="fl-rockh" d="M32 40Q44 28 58 32Q46 36 38 48Z"/><path class="fl-rockh" d="M60 66Q70 62 74 54Q74 66 64 72Z" opacity=".6"/>';
+  }
+  function sourceSvg(dir) {
+    var e = EDGE[dir];
+    return '<path class="fl-case" d="M50 50L' + e.join(' ') + '"/><rect class="fl-flange" x="' + FLANGE[dir][0] + '" y="' + FLANGE[dir][1] + '" width="' + FLANGE[dir][2] + '" height="' + FLANGE[dir][3] + '" rx="2"/>' +
+      '<path class="fl-chan" d="M50 50L' + e.join(' ') + '"/>' +
+      '<circle class="fl-src" cx="50" cy="50" r="36"/><circle class="fl-srcw" cx="50" cy="50" r="25"/>' +
+      '<path d="M33 47q4.25-6 8.5 0t8.5 0 8.5 0 8.5 0M33 58q4.25-6 8.5 0t8.5 0 8.5 0 8.5 0" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" opacity=".9"/>';
+  }
+  function waterSvg(p, segs, headPart) {
+    var s = '', bend = p && E.PIECES[p].k === 'bend';
+    for (var k = 0; k < segs.length; k++) {
+      var last = k === segs.length - 1 && headPart != null;
+      s += '<path class="fl-wat' + (last ? ' fl-headw' : '') + '" pathLength="100" d="' + segD(segs[k][0], segs[k][1], bend) + '"' +
+        (last ? ' stroke-dasharray="' + (headPart * 100).toFixed(1) + ' 200"' : '') + '/>';
+    }
+    return s;
+  }
+
+  /* ------------------------------------------------------------- runs */
+
+  function seedFor(lv) {
+    if (!run.daily) return (Math.random() * 4294967296) | 0;
+    var rnd = C.daily('flood', run.daily).rng, s = 0;
+    for (var k = 0; k < lv; k++) s = (rnd() * 4294967296) | 0;
+    return s;
+  }
+  function newRun() {
+    run = { daily: dailyDate || null, speed: dailyDate ? 'normal' : prefs.speed, cleared: 0, bestFill: 0 };
+    tries++;
+    startedAt = Date.now(); awarded = {};
+    startLevel(1, 0);
+  }
+  function startLevel(lv, base) {
+    S = E.level(lv, seedFor(lv), run.speed, base);
+    cursor = S.src; mode = 'ready'; pop = null;
+    ctx.save();
+    renderAll();
+  }
+  function askNew() {
+    if (run && !run.daily && (run.cleared > 0 || (S && S.placed > 0)) && mode !== 'end') C.ui.confirm({ title: C.t('flNewRun'), body: C.t('resetWarn'), onOk: newRun });
+    else newRun();
+  }
+  function settings() {
+    var v = prefs.speed, body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
+    body.appendChild(el('div', { class: 'fl-queue__l', text: C.t('flSpeed') }));
+    body.appendChild(C.ui.segmented([{ value: 'calm', label: C.t('flCalm') }, { value: 'normal', label: C.t('flNormal') }, { value: 'brisk', label: C.t('flBrisk') }], v, function (x) { v = x; }));
+    if (run && (run.cleared > 0 || (S && S.placed > 0))) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('resetWarn') }));
+    C.ui.modal({
+      title: C.t('settings'), closeButton: true, body: [body],
+      actions: [{ label: C.t('cancel') }, { label: C.t('start'), kind: 'primary', onClick: function () { prefs.speed = v; ctx.store.set('prefs', prefs); newRun(); } }]
+    });
+  }
+
+  // a tap on the board: go on when the game waits, else lay the next piece
+  function act(i) {
+    if (!S) return;
+    C.audio.unlock();
+    if (mode === 'ready') { mode = 'play'; renderAll(); kick(); return; }
+    if (mode === 'paused') { mode = 'play'; renderAll(); kick(); return; }
+    if (mode === 'between') { nextLevel(); return; }
+    if (mode !== 'play' || i < 0) return;
+    cursor = i;
+    var r = E.place(S, i);
+    if (r === 'placed') C.audio.sfx('place');
+    else if (r === 'replaced') { C.audio.sfx('dig'); C.haptic && C.haptic(15); }
+    else if (r !== 'over') { C.audio.sfx('error'); nudge(i); }
+    drainEvents();
+    renderAll();
+    ctx.save();
+  }
+  function nudge(i) { var g = cellG[i]; g.classList.remove('fl-cell--no'); void g.getBBox; g.classList.add('fl-cell--no'); setTimeout(function () { g.classList.remove('fl-cell--no'); }, 320); }
+  function doHurry() {
+    if (!S || mode === 'between' || mode === 'end') return;
+    if (mode !== 'play') mode = 'play';
+    if (E.hurry(S)) { C.audio.sfx('pop'); drainEvents(); renderAll(); kick(); }
+  }
+  hurryBtn.addEventListener('click', function () {
+    if (mode === 'between') nextLevel();
+    else if (mode === 'ready' || mode === 'paused') act(-1);
+    else doHurry();
+  });
+
+  function nextLevel() {
+    if (!S || mode !== 'between') return;
+    startLevel(S.level + 1, S.score);
+  }
+
+  /* ------------------------------------------------------------- time */
+
+  function blocked() { return paused || document.hidden || !!document.querySelector('.ch-scrim'); }
+  function tick(now) {
+    raf = 0;
+    if (!S) return;
+    var dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
+    last = now;
+    if (mode === 'play' && !blocked()) {
+      acc += dt;
+      var n = 0;
+      while (acc >= E.DT && n < 8 && !S.over) { E.step(S, E.DT); acc -= E.DT; n++; drainEvents(); }
+      if (n >= 8) acc = 0;
+    }
+    if (pop) { pop.t -= dt; if (pop.t <= 0) { pop = null; renderNote(); } }
+    renderAll();
+    if (mode === 'play' && !document.hidden && !paused) raf = requestAnimationFrame(tick);
+  }
+  function kick() { if (!raf) { last = 0; acc = 0; raf = requestAnimationFrame(tick); } }
+
+  function drainEvents() {
+    var ev = E.drain(S);
+    for (var k = 0; k < ev.length; k++) {
+      var e = ev[k];
+      if (e.t === 'count') C.audio.sfx('tick');
+      else if (e.t === 'go') C.audio.sfx('select');
+      else if (e.t === 'fill' && !S.hurry) C.audio.sfx('tap');
+      else if (e.t === 'goal') { C.feedback('good'); pop = { text: C.t('flGoalHit'), t: 1.4 }; renderNote(); }
+      else if (e.t === 'cross') { C.audio.sfx('coin'); pop = { text: C.t('flCrossBonus'), t: 1.4 }; renderNote(); unlockOnce('fl-cross'); }
+      else if (e.t === 'replace') { var g = cellG[e.i]; g.classList.remove('fl-cell--poof'); void g.getBBox; g.classList.add('fl-cell--poof'); }
+      else if (e.t === 'over') levelOver(e);
+    }
+  }
+  function unlockOnce(id) { if (!awarded[id]) { awarded[id] = true; C.achievements.unlock(id); } }
+
+  function levelOver(e) {
+    run.bestFill = Math.max(run.bestFill, e.filled);
+    if (e.filled >= 25) unlockOnce('fl-long');
+    if (e.passed) {
+      run.cleared = S.level;
+      if (S.level >= 5) unlockOnce('fl-five');
+      if (run.daily && run.cleared >= DAILY_WIN) unlockOnce('fl-daily');
+      C.audio.sfx('win');
+      mode = 'between'; pop = null;
+      ctx.save();
+    } else {
+      C.feedback('bad');
+      mode = 'end'; pop = null;
+      ctx.clearSave();
+      setTimeout(finish, C.ui.reduceMotion() ? 400 : 1500);
+    }
+    renderAll();
+  }
+
+  function finish() {
+    var score = S.score, reached = S.level, cleared = run.cleared, note = null;
+    var coins = Math.max(1, Math.min(40, 2 + cleared * 4)), points = Math.max(5, Math.min(150, 10 + Math.floor(score / 20)));
+    var lines = [
+      { label: C.t('flReachedL'), value: C.num(reached) },
+      { label: C.t('flClearedL'), value: C.num(cleared) },
+      { label: C.t('flScoreL'), value: C.num(score) }
+    ];
+    if (run.daily) {
+      if (cleared >= DAILY_WIN) C.achievements.unlock('fl-daily');
+      if (!C.stats.daily('flood', run.daily, { label: C.t('flLevelN', { n: C.num(reached) }) + ' · ' + C.num(score), win: cleared >= DAILY_WIN, tries: tries })) { coins = Math.max(1, Math.round(coins * 0.2)); points = Math.max(1, Math.round(points * 0.2)); }
+      lines.push({ label: C.t('flTriesL'), value: C.num(tries) });
+    } else {
+      var bestKey = 'score_' + run.speed;
+      if (C.stats.best('flood', bestKey, score) && score > 0) note = C.t('flBestN', { n: C.num(score) });
+      C.stats.best('flood', 'level_' + run.speed, reached);
+      lines.push({ label: C.t('flBestL'), value: C.num(C.stats.getBest('flood', bestKey) || score) });
+    }
+    var snap = E.snapshot(S);
+    ctx.finish({
+      won: run.daily ? cleared >= DAILY_WIN : null,
+      title: C.t('flShort'), note: note, timeMs: Date.now() - startedAt, coins: coins, points: points,
+      lines: lines,
+      shareText: 'چوگان · سیل' + (run.daily ? ('\nروزانه ' + run.daily) : '') + '\nمرحله ' + reached + ' · ' + score,
+      paint: function (g2, w, h) { paintShare(g2, w, h, snap); },
+      againLabel: C.t('flNewRun'),
+      onAgain: function () { newRun(); }
+    });
+  }
+
+  /* ------------------------------------------------------------- view */
+
+  function cellLabel(i) {
+    var t = C.t('flCellN', { r: C.num(Math.floor(i / E.COLS) + 1), c: C.num(i % E.COLS + 1) }) + ' · ';
+    if (S.rock[i]) return t + C.t('flRock');
+    if (i === S.src) return t + C.t('flSource');
+    if (!S.grid[i]) return t + C.t('flEmpty');
+    return t + C.t(PIECE_KEY[E.PIECES[S.grid[i]].k]) + (S.segs[i].length ? ' · ' + C.t('flWet') : '');
+  }
+  function headPart() {
+    var h = S.head;
+    if (!h) return null;
+    return h.i === S.src ? Math.max(0, Math.min(1, (h.p - 0.5) * 2)) : Math.max(0, Math.min(1, h.p));
+  }
+  function renderBoard() {
+    var h = S.head, hp = headPart();
+    for (var i = 0; i < E.NN; i++) {
+      var isHead = !!h && h.i === i;
+      var key = (S.rock[i] ? 'r' : i === S.src ? 's' + S.srcDir : S.grid[i]) + '|' + S.segs[i].length + (isHead ? '|h' : '');
+      if (cellKey[i] !== key) {
+        cellKey[i] = key;
+        var s = S.rock[i] ? rockSvg(i) : i === S.src ? sourceSvg(S.srcDir) : S.grid[i] ? pieceSvg(S.grid[i]) : '';
+        s += waterSvg(S.grid[i], S.segs[i], isHead ? hp : null);
+        if (i === S.src) s += '<path d="M33 47q4.25-6 8.5 0t8.5 0 8.5 0 8.5 0M33 58q4.25-6 8.5 0t8.5 0 8.5 0 8.5 0" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" opacity=".9"/>';
+        cellG[i].innerHTML = s;
+      } else if (isHead) {
+        var w = cellG[i].querySelector('.fl-headw');
+        if (w) w.setAttribute('stroke-dasharray', (hp * 100).toFixed(1) + ' 200');
+      }
+    }
+    // the countdown ring round the source, the spill and the keyboard cursor
+    var fx = '', sx = (S.src % E.COLS) * 100 + 50, sy = Math.floor(S.src / E.COLS) * 100 + 50;
+    if (S.cd > 0 && mode !== 'end') fx += '<circle class="fl-ring" cx="' + sx + '" cy="' + sy + '" r="44" pathLength="100" stroke-dasharray="' + (S.cd / S.cd0 * 100).toFixed(1) + ' 200" transform="rotate(-90 ' + sx + ' ' + sy + ')"/>';
+    if (S.over && !S.passed && S.spill) {
+      var sp = S.spill, e = EDGE[sp.side], px = (sp.i % E.COLS) * 100 + e[0], py = Math.floor(sp.i / E.COLS) * 100 + e[1];
+      fx += '<ellipse class="fl-puddle" cx="' + px + '" cy="' + py + '" rx="34" ry="24"/><circle class="fl-puddle" cx="' + (px + 22) + '" cy="' + (py - 18) + '" r="9"/><circle class="fl-puddle" cx="' + (px - 26) + '" cy="' + (py + 14) + '" r="7"/>';
+    }
+    if (kbMode && mode !== 'end') fx += '<rect class="fl-cur" x="' + ((cursor % E.COLS) * 100 + 4) + '" y="' + (Math.floor(cursor / E.COLS) * 100 + 4) + '" width="92" height="92" rx="10"/>';
+    if (layers.fx._k !== fx) { layers.fx._k = fx; layers.fx.innerHTML = fx; }
+  }
+  var qKey = '';
+  function renderQueue() {
+    var k = S.queue.join(',');
+    if (k !== qKey) {
+      qKey = k;
+      qrow.innerHTML = '';
+      S.queue.forEach(function (p, n) {
+        var t = el('span', { class: 'fl-qt' + (n === 0 ? ' fl-qt--next' : '') });
+        t.innerHTML = '<svg viewBox="-4 -4 108 108" aria-hidden="true">' + pieceSvg(p) + '</svg>';
+        qrow.appendChild(t);
+      });
+      qrow.appendChild(busyBar);
+      qrow.setAttribute('aria-label', C.t('flQueue') + ': ' + S.queue.map(function (p) { return C.t(PIECE_KEY[E.PIECES[p].k]); }).join(', '));
+    }
+    qrow.classList.toggle('fl-qrow--busy', S.busy > 0);
+    busyBar.style.width = (S.busy / E.REPLACE_T * 52).toFixed(1) + 'px';
+  }
+  var sKey = '';
+  function renderSide() {
+    var st = [C.t('flLevelN', { n: C.num(S.level) }), C.t('flGoalN', { a: C.num(Math.min(S.filled, S.goal)), b: C.num(S.goal) }), C.t('flScoreN', { n: C.num(S.score) })]
+      .map(function (t) { return t.replace(/ /g, ' '); }).join(' · ');
+    var tm = S.over ? '' : S.cd > 0 ? C.t('flWaterIn', { s: C.num(Math.ceil(S.cd)) }) : S.hurry ? C.t('flRushing') : C.t('flFlowing');
+    var hb = mode === 'between' ? C.t('flNextLevel', { n: C.num(S.level + 1) }) : mode === 'ready' ? C.t('flStartL') : mode === 'paused' ? C.t('resumeGame') : C.t('flHurry');
+    var dis = mode === 'end' || (mode === 'play' && (S.hurry || S.over));
+    var key = st + '|' + tm + '|' + hb + '|' + dis;
+    if (key === sKey) return;
+    sKey = key;
+    status.textContent = st;
+    timer.textContent = tm;
+    hurryBtn.textContent = hb;
+    hurryBtn.disabled = dis;
+  }
+  var nKey = '';
+  function renderNote() {
+    var t = '', s = '';
+    if (mode === 'ready') { t = run.daily && S.level === 1 ? C.t('flDaily') + ' — ' + C.t('flLevelN', { n: C.num(S.level) }) : C.t('flLevelN', { n: C.num(S.level) }); s = C.t('flLevelGoal', { n: C.num(S.goal) }) + ' ' + C.t('flGoOn'); }
+    else if (mode === 'paused') { t = C.t('pause'); s = C.t('flGoOn'); }
+    else if (mode === 'between') { t = C.t('flCleared', { n: C.num(S.level) }); s = '+' + C.num(E.clearBonus(S.level)) + ' · ' + C.t('flGoOn'); }
+    else if (mode === 'end') { t = C.t('flSpilled'); }
+    else if (pop) { t = pop.text; }
+    var key = t + '|' + s;
+    if (key === nKey) return;
+    nKey = key;
+    note.innerHTML = '';
+    note.classList.toggle('fl-note--top', Math.floor(S.src / E.COLS) >= E.ROWS / 2);
+    if (!t) { note.setAttribute('hidden', 'hidden'); return; }
+    note.removeAttribute('hidden');
+    note.appendChild(el('div', { class: 'fl-note__t', text: t }));
+    if (s) note.appendChild(el('div', { class: 'fl-note__s', text: s }));
+  }
+  function renderAll() {
+    if (!S) return;
+    renderBoard(); renderQueue(); renderSide(); renderNote();
+    svg.setAttribute('aria-label', C.t('flBoard') + (kbMode ? ' · ' + cellLabel(cursor) : ''));
+  }
+
+  // the board on the result card: pipes and water in the light colours
+  function paintShare(g2, w, h, St) {
+    var sz = Math.min(w, h) * 0.86, k = sz / 800, ox = (w - sz) / 2, oy = (h - sz) / 2;
+    g2.save();
+    g2.fillStyle = '#2A353C'; g2.fillRect(ox - 6, oy - 6, sz + 12, sz + 12);
+    for (var i = 0; i < E.NN; i++) {
+      var x = ox + (i % E.COLS) * 100 * k, y = oy + Math.floor(i / E.COLS) * 100 * k;
+      g2.fillStyle = ((i % E.COLS) + Math.floor(i / E.COLS)) % 2 ? '#DCE4E7' : '#E6ECEE';
+      g2.fillRect(x, y, 100 * k + 0.5, 100 * k + 0.5);
+      g2.save(); g2.translate(x, y); g2.scale(k, k); g2.lineCap = 'butt'; g2.lineJoin = 'round';
+      if (St.rock[i]) { g2.fillStyle = '#8A8478'; g2.beginPath(); g2.arc(50, 56, 32, 0, Math.PI * 2); g2.fill(); }
+      else if (i === St.src) { g2.fillStyle = ACCENT; g2.beginPath(); g2.arc(50, 50, 36, 0, Math.PI * 2); g2.fill(); g2.fillStyle = '#1C86D1'; g2.beginPath(); g2.arc(50, 50, 25, 0, Math.PI * 2); g2.fill(); }
+      else if (St.grid[i] && typeof Path2D === 'function') {
+        var d = new Path2D(pipeD(St.grid[i]));
+        g2.strokeStyle = '#3E4D56'; g2.lineWidth = 46; g2.stroke(d);
+        g2.strokeStyle = '#F5F8F9'; g2.lineWidth = 24; g2.stroke(d);
+        var bend = E.PIECES[St.grid[i]].k === 'bend';
+        St.segs[i].forEach(function (sg) { g2.strokeStyle = '#1C86D1'; g2.lineWidth = 17; g2.stroke(new Path2D(segD(sg[0], sg[1], bend))); });
+      }
+      g2.restore();
+    }
+    g2.restore();
+  }
+
+  /* ------------------------------------------------------------- input */
+
+  function cellAt(ev) {
+    var r = svg.getBoundingClientRect();
+    if (!r.width || !r.height) return -1;
+    var x = (ev.clientX - r.left) / r.width * 816 - 8, y = (ev.clientY - r.top) / r.height * 816 - 8;
+    var c = Math.floor(x / 100), rr = Math.floor(y / 100);
+    return c < 0 || rr < 0 || c >= E.COLS || rr >= E.ROWS ? -1 : rr * E.COLS + c;
+  }
+  // pointerdown, not click: the board redraws as the water moves, and a click whose press
+  // and release land on different redrawn nodes is not sent (#750)
+  svg.addEventListener('pointerdown', function (ev) {
+    if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+    ev.preventDefault();
+    kbMode = false;
+    act(cellAt(ev));
+  });
+  svg.addEventListener('contextmenu', function (ev) { ev.preventDefault(); });
+  note.addEventListener('pointerdown', function (ev) { ev.preventDefault(); act(-1); });
+
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || !S) return;
+    var d = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.key];
+    if (d) {
+      e.preventDefault();
+      kbMode = true;
+      var r = Math.floor(cursor / E.COLS), c = cursor % E.COLS;
+      r = Math.max(0, Math.min(E.ROWS - 1, r + d[1])); c = Math.max(0, Math.min(E.COLS - 1, c + d[0]));
+      cursor = r * E.COLS + c;
+      if (document.activeElement !== svg) svg.focus();
+      renderAll();
+      return;
+    }
+    if ((e.key === ' ' || e.key === 'Enter') && !(document.activeElement && /^(BUTTON|INPUT|A|SELECT)$/.test(document.activeElement.tagName))) {
+      e.preventDefault();
+      if (e.repeat) return;
+      kbMode = true;
+      act(mode === 'play' ? cursor : -1);
+      return;
+    }
+    if (C.keyIs(e, 'f')) { e.preventDefault(); doHurry(); return; }
+    if (C.keyIs(e, 'n') && !dailyDate) { e.preventDefault(); askNew(); }
+  });
+
+  /* ------------------------------------------------------------ dialogs */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    var keys = [kb('← ↑ → ↓', C.t('kMove')), kb('Space / Enter', C.t('kPlace')), kb('F', C.t('kHurry'))];
+    if (!dailyDate) keys.push(kb('N', C.t('kNew')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, keys)
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // tutorial boards: a 4×2 strip in the light theme's colours, cells given as
+  // [piece or 's'/'r', water segments]
+  var LIGHT = '--fl-tile:#E6ECEE;--fl-tile2:#DCE4E7;--fl-line:#B9C7CD;--fl-case:#3E4D56;--fl-flange:#2A353C;--fl-chan:#F5F8F9;--fl-water:#1C86D1;--fl-rock:#8A8478;--fl-rockhi:#B4AEA2;--fl-cursor:#E8A33A;--game:' + ACCENT;
+  function tArt(cells, extra) {
+    var s = '<svg viewBox="-4 -4 408 208" width="100%" style="' + LIGHT + '"><rect x="-4" y="-4" width="408" height="208" rx="10" fill="#2A353C"/>';
+    for (var i = 0; i < 8; i++) {
+      var x = (i % 4) * 100, y = Math.floor(i / 4) * 100, c = cells[i] || [''];
+      s += '<rect class="fl-tile' + ((i % 4 + Math.floor(i / 4)) % 2 ? ' fl-tile--b' : '') + '" x="' + x + '" y="' + y + '" width="100" height="100"/><g transform="translate(' + x + ' ' + y + ')">';
+      if (c[0] === 's') s += sourceSvg(c[2]) + waterSvg('', c[1] || [], null);
+      else if (c[0] === 'r') s += rockSvg(i);
+      else if (c[0]) s += pieceSvg(c[0]) + waterSvg(c[0], c[1] || [], null);
+      s += '</g>';
+    }
+    return s + (extra || '') + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt([['s', [], 2], ['h'], ['sw'], [''], [''], ['ne'], [''], ['r']],
+      '<rect x="306" y="6" width="88" height="88" rx="10" fill="none" stroke="#E8A33A" stroke-width="6"/>') },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt([['s', [[0, 2]], 2], ['h', [[8, 2]]], ['sw', [[8, 4]]], [''], ['r'], ['ne'], ['wn', [[1, 8]]], ['']]) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt([['s', [[0, 2]], 2], ['ts', [[8, 2]]], ['x', [[8, 2]]], ['sw'], [''], ['ne'], ['x', [[1, 4], [8, 2]]], ['wn']]) }
+  ];
+
+  /* ------------------------------------------------------------- start */
+
+  // the level is saved after every piece and at each change of state; a game that comes
+  // back waits for a tap before the water moves again
+  ctx.autosave(function () {
+    if (!S || !run || mode === 'end') return { inProgress: false };
+    return { run: run, S: E.snapshot(S), between: mode === 'between', elapsed: Date.now() - startedAt, tries: tries };
+  });
+  var saved = ctx.loadSave(), back = saved && saved.run && E.restore(saved.S);
+  if (back && !back.over === !saved.between && (saved.run.daily || null) === (dailyDate || null) && E.SPEEDS[saved.run.speed] && typeof saved.run.cleared === 'number') {
+    run = { daily: saved.run.daily || null, speed: saved.run.speed, cleared: saved.run.cleared, bestFill: saved.run.bestFill || 0 };
+    S = back; tries = saved.tries || 1; startedAt = Date.now() - (saved.elapsed || 0);
+    cursor = S.src;
+    mode = saved.between ? 'between' : (S.cd < S.cd0 || S.placed > 0 || S.head) ? 'paused' : 'ready';
+    renderAll();
+  } else newRun();
+  if (dailyDate && C.stats.dailyDone('flood', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).flood;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+
+  C.onPause(function () { paused = true; if (mode === 'play') mode = 'paused'; ctx.save(); renderAll(); });
+  C.onResume(function () { paused = false; renderAll(); });
+  document.addEventListener('visibilitychange', function () { if (document.hidden && mode === 'play') { mode = 'paused'; ctx.save(); renderAll(); } });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { renderAll(); });
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>

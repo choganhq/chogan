@@ -1,0 +1,957 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>لقمه‌خور — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  .mu-wrap > .ch-fit { --fit-ar: calc(380 / 420); }
+  .ch-fit > .mu-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+  .mu-canvas { display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; user-select: none; -webkit-user-select: none; }
+  .mu-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .mu-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+  /* ltr because a grid under dir="rtl" would swap the left and right arrows */
+  .mu-pad { display: none; direction: ltr; justify-content: center; grid-template: repeat(3, 52px) / repeat(3, 60px); gap: var(--s-1);
+    grid-template-areas: ". up ." "left . right" ". down ."; touch-action: none; }
+  .mu-pad.is-on { display: grid; }
+  .mu-arrow { display: grid; place-items: center; border: 0; border-radius: var(--r-md, 14px); background: var(--c-surface);
+    box-shadow: var(--sh-1); color: var(--c-text); cursor: pointer; touch-action: none; -webkit-user-select: none; user-select: none; }
+  .mu-arrow svg { pointer-events: none; }
+  .mu-arrow.is-on { background: var(--game-soft, var(--c-accent-soft)); }
+  .mu-arrow--up { grid-area: up; } .mu-arrow--down { grid-area: down; } .mu-arrow--left { grid-area: left; } .mu-arrow--right { grid-area: right; }
+  .mu-label { font-weight: 700; font-size: var(--fs-sm); color: var(--c-text-dim); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function MuncherEngineFactory() {
+  'use strict';
+
+  // A maze is 19 tiles wide and 21 high. Each one is written as its left half plus the
+  // middle column; the right half is the mirror. '#' hedge, '.' seed, 'o' berry, ' ' path
+  // without a seed, 'P' the muncher's start, 'H' the beetles' den, '-' the den's gate.
+  // A row open at both edges is a tunnel to the other side.
+  var W = 19, H = 21, DT = 1 / 60, LIVES = 3, STAGES = 5;
+  // ticks: the pause before each life, the muncher's fall, the pause after a cleared maze
+  var READY = 108, DYING = 84, CLEAR = 96;
+  var DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+  var NAMES = ['up', 'right', 'down', 'left'];
+  var HALVES = [
+    ['##########', '#o...#....', '#.##.#.##.', '#.........', '#.##.#.###', '#....#...#', '####.###.#',
+      '####.#    ', '####.# ##-', '    .  #HH', '####.# ###', '####.#    ', '####.# ###',
+      '#........#', '#.##.###.#', '#o.#.....P', '##.#.#.###', '#....#...#', '#.######.#', '#.........', '##########'],
+    ['##########', '#....##...', '#o##.##.#.', '#.........', '#.#.###.##', '#.#.#...##', '#...#.####',
+      '###.#     ', '###.## ##-', '   .   #HH', '###.## ###', '###.##    ', '###.## ###',
+      '#.........', '#.##.#.#.#', '#o...#.#.P', '##.###.#.#', '#.........', '#.###.##.#', '#.........', '##########'],
+    ['##########', '#o.......#', '#.#.##.#.#', '#.#.......', '#...###.#.', '###.#.....', '#...#.####',
+      '#.#.#     ', '#.#.## ##-', '#...   #HH', '#.#.## ###', '#.#.##    ', '#.#.## ###',
+      '#.#.......', '#...#.##.#', '##.##.#..P', '#o....#.##', '#.##.##...', '#.##.##.#.', '#.........', '##########'],
+    ['##########', '#o..#.....', '#.#.#.###.', '#.#...#...', '#.###.#.##', '#.....#.##', '####.##.##',
+      '####.#    ', '####.# ##-', '    .  #HH', '####.# ###', '####.#    ', '##...# ###',
+      '#o.#.....#', '#.##.#.#.#', '#....#.#.P', '##.#.#.###', '#..#...#..', '#.##.#.#.#', '#.........', '##########'],
+    ['##########', '#....#...#', '#o##.#.#.#', '#.........', '##.##.#.##', '   .....##', '####.#.###',
+      '####.#    ', '####.# ##-', '####.  #HH', '####.# ###', '####.#    ', '####.# ###',
+      '   .......', '##.#.#.###', '##o#...#.P', '##.#.#.#.#', '#.........', '#.##.###.#', '#.........', '##########']
+  ];
+  // per level: speeds in tiles a second, how long a berry lasts (s), when each beetle leaves the den (s)
+  var LEVELS = {
+    // red waits a moment on the easier levels, so a first-time player has time to start
+    easy: { me: 7.2, bug: 5.0, fr: 3.4, eyes: 11, frS: 8, out: [1.5, 5, 9, 13] },
+    medium: { me: 7.4, bug: 6.0, fr: 3.8, eyes: 11, frS: 6, out: [0.5, 2.5, 5.5, 8.5] },
+    hard: { me: 7.6, bug: 6.9, fr: 4.2, eyes: 12, frS: 4.2, out: [0, 1.2, 3, 5] }
+  };
+  // red follows the muncher, violet heads for where it is going, blue makes the rounds
+  // of the four corners, green turns at random
+  var KINDS = ['direct', 'ambush', 'patrol', 'random'];
+  var CORNERS = [{ x: 1, y: 1 }, { x: 17, y: 1 }, { x: 17, y: 19 }, { x: 1, y: 19 }];
+
+  function wrapX(x) { return ((x % W) + W) % W; }
+  function build(i) {
+    var rows = HALVES[i].map(function (r) { return r + r.slice(0, 9).split('').reverse().join(''); });
+    var M = { i: i, rows: rows, start: null, den: [], door: null, exit: null, seeds: 0 };
+    for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+      var c = rows[y][x];
+      if (c === 'P') M.start = { x: x, y: y };
+      else if (c === 'H') M.den.push({ x: x, y: y });
+      else if (c === '-') M.door = { x: x, y: y };
+      else if (c === '.' || c === 'o') M.seeds++;
+    }
+    M.exit = { x: M.door.x, y: M.door.y - 1 };
+    // the way home for a caught beetle: steps to the den's gate from every tile
+    M.home = [];
+    for (var k = 0; k < W * H; k++) M.home.push(-1);
+    var q = [M.exit], at = 0;
+    M.home[M.exit.y * W + M.exit.x] = 0;
+    while (at < q.length) {
+      var p = q[at++];
+      for (var d = 0; d < 4; d++) {
+        if (!walk(M, p.x, p.y, d)) continue;
+        var n = ahead(p.x, p.y, d), id = n.y * W + n.x;
+        if (M.home[id] < 0) { M.home[id] = M.home[p.y * W + p.x] + 1; q.push(n); }
+      }
+    }
+    return M;
+  }
+  function cell(M, x, y) { return y < 0 || y >= H ? '#' : M.rows[y][wrapX(x)]; }
+  function walkable(c) { return c !== '#' && c !== '-' && c !== 'H'; }
+  function ahead(x, y, d) { return { x: wrapX(x + DIRS[d][0]), y: y + DIRS[d][1] }; }
+  function walk(M, x, y, d) { var n = ahead(x, y, d); return walkable(cell(M, n.x, n.y)); }
+  var MAZES = HALVES.map(function (h, i) { return build(i); });
+
+  function rnd(S) {
+    S.rs = (S.rs + 0x6D2B79F5) >>> 0;
+    var t = Math.imul(S.rs ^ (S.rs >>> 15), 1 | S.rs);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  function newGame(seed, level) {
+    var S = { seed: seed >>> 0, rs: seed >>> 0, level: LEVELS[level] ? level : 'medium', lives: LIVES, score: 0, stage: 0, cleared: 0,
+      deaths: 0, bugs: 0, over: false, won: false, ev: [], tick: 0 };
+    // the order of the five mazes comes from the seed, so the daily order is the same for everyone
+    var o = [0, 1, 2, 3, 4];
+    for (var i = o.length - 1; i > 0; i--) { var j = Math.floor(rnd(S) * (i + 1)), t = o[i]; o[i] = o[j]; o[j] = t; }
+    S.order = o;
+    startStage(S, 0);
+    return S;
+  }
+  function startStage(S, k) {
+    var M = MAZES[S.order[k]];
+    S.stage = k; S.M = M; S.food = []; S.left = 0; S.stageDeaths = 0;
+    for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+      var c = M.rows[y][x], f = c === '.' ? 1 : c === 'o' ? 2 : 0;
+      S.food.push(f); if (f) S.left++;
+    }
+    resetActors(S);
+  }
+  function resetActors(S) {
+    var M = S.M, L = LEVELS[S.level];
+    S.p = { x: M.start.x, y: M.start.y, d: -1, t: 0, face: 3 };
+    S.want = -1; S.fright = 0; S.chain = 0; S.ready = READY; S.dying = 0; S.clear = 0;
+    S.ch = KINDS.map(function (kind, i) {
+      var at = i === 0 ? M.exit : M.den[[1, 0, 2][i - 1]];
+      var wait = Math.round(L.out[i] / DT);
+      return { kind: kind, i: i, x: at.x, y: at.y, d: 3, t: 0, st: i === 0 && !wait ? 'out' : 'home', fr: false, wait: wait, k: 2 };
+    });
+  }
+
+  function setWant(S, d) {
+    if (typeof d === 'string') d = NAMES.indexOf(d);
+    if (d < 0 || d > 3) return false;
+    S.want = d;
+    return true;
+  }
+
+  function turnAt(S, p) {
+    if (S.want >= 0 && walk(S.M, p.x, p.y, S.want)) { p.d = S.want; p.face = p.d; } else if (p.d >= 0 && !walk(S.M, p.x, p.y, p.d)) p.d = -1;
+  }
+  function movePlayer(S, sp) {
+    var p = S.p;
+    // turning back needs no corner: the muncher reverses on the spot
+    if (p.d >= 0 && p.t > 0 && S.want === (p.d + 2) % 4) {
+      var n = ahead(p.x, p.y, p.d);
+      p.x = n.x; p.y = n.y; p.t = 1 - p.t; p.d = S.want; p.face = p.d;
+    }
+    if (p.t === 0) turnAt(S, p);
+    if (p.d < 0) return;
+    p.t += sp;
+    if (p.t >= 1) {
+      var m = ahead(p.x, p.y, p.d);
+      p.x = m.x; p.y = m.y; p.t -= 1;
+      eat(S, p.x, p.y);
+      if (S.clear) { p.t = 0; return; }
+      turnAt(S, p);
+      if (p.d < 0) p.t = 0;
+    }
+  }
+
+  function eat(S, x, y) {
+    var id = y * W + x, f = S.food[id];
+    if (!f) return;
+    S.food[id] = 0; S.left--;
+    if (f === 1) { S.score += 10; S.ev.push({ t: 'seed' }); } else {
+      S.score += 50;
+      S.fright = Math.round(LEVELS[S.level].frS / DT); S.chain = 0;
+      // every beetle out in the maze turns pale and turns round
+      S.ch.forEach(function (c) {
+        if (c.st !== 'out') return;
+        c.fr = true;
+        if (c.t > 0) { var n = ahead(c.x, c.y, c.d); c.x = n.x; c.y = n.y; c.t = 1 - c.t; c.d = (c.d + 2) % 4; } else if (walk(S.M, c.x, c.y, (c.d + 2) % 4)) c.d = (c.d + 2) % 4;
+      });
+      S.ev.push({ t: 'berry' });
+    }
+    if (S.left === 0) {
+      S.score += 500; S.cleared++; S.clear = CLEAR; S.fright = 0;
+      S.ch.forEach(function (c) { c.fr = false; });
+      S.ev.push({ t: 'clear', stage: S.stage, clean: S.stageDeaths === 0 });
+    }
+  }
+
+  function target(S, c) {
+    var p = S.p;
+    if (c.kind === 'direct') return { x: p.x, y: p.y };
+    if (c.kind === 'ambush') return { x: p.x + 4 * DIRS[p.face][0], y: p.y + 4 * DIRS[p.face][1] };
+    if (c.kind === 'patrol') return CORNERS[c.k];
+    return null;
+  }
+  // At each tile a beetle picks its next way; it never turns straight back unless it is a
+  // caught one finding the shortest way home
+  function choose(S, c) {
+    var M = S.M, back = (c.d + 2) % 4, opts = [], d;
+    for (d = 0; d < 4; d++) if (walk(M, c.x, c.y, d) && (d !== back || c.st === 'eyes')) opts.push(d);
+    if (!opts.length) return back;
+    if (c.st === 'eyes') {
+      var bd = opts[0], bv = 1e9;
+      opts.forEach(function (o) { var n = ahead(c.x, c.y, o), v = M.home[n.y * W + n.x]; if (v >= 0 && v < bv) { bv = v; bd = o; } });
+      return bd;
+    }
+    if (c.kind === 'patrol' && Math.abs(c.x - CORNERS[c.k].x) + Math.abs(c.y - CORNERS[c.k].y) <= 3) c.k = (c.k + 1) % 4;
+    if (c.fr || c.kind === 'random') return opts[Math.floor(rnd(S) * opts.length)];
+    var tg = target(S, c), best = opts[0], bdist = 1e9;
+    opts.forEach(function (o) {
+      var n = ahead(c.x, c.y, o), dd = (n.x - tg.x) * (n.x - tg.x) + (n.y - tg.y) * (n.y - tg.y);
+      if (dd < bdist) { bdist = dd; best = o; }
+    });
+    return best;
+  }
+  function moveBug(S, c, L, f) {
+    var M = S.M;
+    if (c.st === 'home') {
+      if (c.wait > 0) { c.wait--; return; }
+      // out through the gate, and on its way in the same step
+      c.x = M.exit.x; c.y = M.exit.y; c.t = 0; c.d = c.i % 2 ? 1 : 3; c.st = 'out'; c.fr = false;
+    }
+    c.t += (c.st === 'eyes' ? L.eyes : c.fr ? L.fr : L.bug * f) * DT;
+    if (c.t >= 1) {
+      var m = ahead(c.x, c.y, c.d);
+      c.x = m.x; c.y = m.y; c.t -= 1;
+      if (c.st === 'eyes' && c.x === M.exit.x && c.y === M.exit.y) {
+        var den = M.den[1];
+        c.st = 'home'; c.x = den.x; c.y = den.y; c.t = 0; c.d = 0; c.wait = 60;
+        return;
+      }
+      c.d = choose(S, c);
+    }
+  }
+
+  function pos(e) {
+    if (e.d < 0 || !e.t) return { x: e.x, y: e.y };
+    return { x: e.x + DIRS[e.d][0] * e.t, y: e.y + DIRS[e.d][1] * e.t };
+  }
+  function collide(S) {
+    var a = pos(S.p);
+    for (var i = 0; i < S.ch.length; i++) {
+      var c = S.ch[i];
+      if (c.st !== 'out') continue;
+      var b = pos(c), dx = Math.abs(a.x - b.x);
+      dx = Math.min(dx, W - dx);
+      if (dx + Math.abs(a.y - b.y) >= 0.6) continue;
+      if (c.fr) {
+        c.st = 'eyes'; c.fr = false; S.chain++; S.bugs++;
+        var pts = 200 * Math.pow(2, S.chain - 1);
+        S.score += pts;
+        S.ev.push({ t: 'bug', pts: pts, x: b.x, y: b.y, kind: c.kind });
+        if (S.chain === 4) S.ev.push({ t: 'feast' });
+      } else {
+        S.lives--; S.deaths++; S.stageDeaths++; S.dying = DYING; S.fright = 0;
+        S.ch.forEach(function (o) { o.fr = false; });
+        S.ev.push({ t: 'die', by: c.kind });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function step(S) {
+    if (S.over) return;
+    S.tick++;
+    if (S.dying) {
+      if (--S.dying === 0) {
+        if (S.lives <= 0) { S.over = true; S.ev.push({ t: 'over' }); } else resetActors(S);
+      }
+      return;
+    }
+    if (S.clear) {
+      if (--S.clear === 0) {
+        if (S.stage + 1 >= STAGES) {
+          S.score += 300 * S.lives;
+          S.over = true; S.won = true;
+          S.ev.push({ t: 'win' });
+        } else { startStage(S, S.stage + 1); S.ev.push({ t: 'stage', stage: S.stage }); }
+      }
+      return;
+    }
+    if (S.ready) { S.ready--; return; }
+    var L = LEVELS[S.level], f = 1 + 0.025 * S.stage;
+    movePlayer(S, L.me * DT);
+    if (S.clear || collide(S)) return;
+    if (S.fright > 0 && --S.fright === 0) { S.chain = 0; S.ch.forEach(function (c) { c.fr = false; }); }
+    for (var i = 0; i < S.ch.length; i++) moveBug(S, S.ch[i], L, f);
+    collide(S);
+  }
+
+  function drain(S) { var e = S.ev; S.ev = []; return e; }
+
+  var KEYS = ['seed', 'rs', 'lives', 'score', 'stage', 'cleared', 'deaths', 'bugs', 'stageDeaths'];
+  function snapshot(S) {
+    var o = { level: S.level, order: S.order.slice(), food: S.food.join('') };
+    KEYS.forEach(function (k) { o[k] = S[k]; });
+    return o;
+  }
+  // A saved run comes back at the start of a life in the same maze, with the seeds it had left
+  function restore(o) {
+    if (!o || !LEVELS[o.level] || typeof o.food !== 'string' || o.food.length !== W * H || !/^[012]+$/.test(o.food)) return null;
+    if (!KEYS.every(function (k) { return typeof o[k] === 'number' && isFinite(o[k]); })) return null;
+    if (!Array.isArray(o.order) || o.order.slice().sort().join() !== '0,1,2,3,4') return null;
+    if (o.stage < 0 || o.stage >= STAGES || o.lives < 1 || o.lives > LIVES) return null;
+    var S = { level: o.level, order: o.order.slice(), over: false, won: false, ev: [], tick: 0 };
+    KEYS.forEach(function (k) { S[k] = o[k]; });
+    var sd = S.stageDeaths;
+    startStage(S, o.stage);
+    S.stageDeaths = sd;
+    S.food = o.food.split('').map(Number); S.left = 0;
+    for (var i = 0; i < S.food.length; i++) {
+      if (S.food[i] && !walkable(S.M.rows[Math.floor(i / W)][i % W])) return null;
+      if (S.food[i]) S.left++;
+    }
+    return S.left ? S : null;
+  }
+
+  return {
+    W: W, H: H, DT: DT, LIVES: LIVES, STAGES: STAGES, READY: READY, DYING: DYING, CLEAR: CLEAR,
+    DIRS: DIRS, NAMES: NAMES, LEVELS: LEVELS, KINDS: KINDS, CORNERS: CORNERS, MAZES: MAZES,
+    newGame: newGame, step: step, setWant: setWant, drain: drain, snapshot: snapshot, restore: restore,
+    cell: cell, walkable: walkable, walk: walk, ahead: ahead, pos: pos, target: target
+  };
+}
+if (typeof module !== 'undefined') module.exports = MuncherEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = MuncherEngineFactory();
+  // the logical view: 20 units a tile
+  var T = 20, VW = E.W * T, VH = E.H * T;
+  var ACCENT = '#004B63';
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'muncher',
+    name: { fa: 'لقمه‌خور', en: 'Muncher', zh: '迷宫吞吞', de: 'Mampfer', es: 'Comilón', pl: 'Łakomczuch', fr: 'Croqueur' },
+    accent: ACCENT,
+    mood: 'dots',
+    strings: {
+      fa: {
+        scene: 'هزارتوی پرچین با دانه، توت و چهار سوسک', muHint: 'انگشت را بکش تا بپیچد. همه‌ی دانه‌ها را بخور.', padHint: 'با دکمه‌های جهت بپیچ. همه‌ی دانه‌ها را بخور.', tapGo: 'برای ادامه صفحه را لمس کن.',
+        mazeN: 'هزارتوی {n} از {m}', livesN: 'جان: {n}', ptsN: 'امتیاز: {n}', bestN: 'بهترین: {n}', dailyMu: 'لقمه‌خور روزانه', newRun: 'دور تازه',
+        ready: 'آماده!', caught: 'گیر افتادی!', cleared: 'هزارتو تمام شد!', allClear: 'هر پنج هزارتو تمام شد!', outLives: 'جان‌ها تمام شد',
+        ptsL: 'امتیاز', mazesL: 'هزارتوهای تمام‌شده', bugsL: 'سوسک‌های برگشته به لانه', tries: 'تلاش‌ها',
+        ctrlL: 'کنترل', ctrlSwipe: 'کشیدن انگشت', ctrlPad: 'دکمه‌های جهت', mvUp: 'بالا', mvDown: 'پایین', mvLeft: 'چپ', mvRight: 'راست', kMove: 'پیچیدن', kAgain: 'دور تازه',
+        rules: 'لقمه‌خور خودش در هزارتو جلو می‌رود؛ انگشت را به هر طرف بکش تا سر اولین پیچ به همان طرف بپیچد. برگشتن از همان راه همیشه فوری است. همه‌ی دانه‌ها را بخور تا هزارتو تمام شود. چهار سوسک در هزارتو می‌گردند و هر کدام راه خودش را دارد: سرخ مستقیم دنبالت می‌آید، بنفش جلوی راهت را می‌گیرد، آبی گوشه‌ها را دور می‌زند و سبز سر هر دوراهی راهی را بی‌حساب انتخاب می‌کند. اگر سوسکی به تو برسد، یک جان می‌رود. با خوردن هر کدام از چهار توت بزرگ، سوسک‌ها چند ثانیه رنگ‌پریده و بی‌خطر می‌شوند؛ اگر بگیری‌شان به لانه برمی‌گردند و هر کدام امتیاز بیشتری از قبلی دارد. پنج هزارتو داری و سه جان برای همه‌شان. سطح آسان، متوسط یا سخت را از چرخ‌دنده انتخاب کن؛ آنجا می‌توانی به‌جای کشیدن انگشت دکمه‌های جهت را هم روشن کنی. ترتیب هزارتوها و رفتار سوسک‌ها در لقمه‌خور روزانه برای همه یکی است.',
+        tutTitle1: 'بخور', tutText1: 'انگشت را بکش تا لقمه‌خور بپیچد. خودش جلو می‌رود؛ همه‌ی دانه‌ها را بخور.',
+        tutTitle2: 'توت', tutText2: 'چهار سوسک در هزارتو می‌گردند. با یک توت بزرگ چند ثانیه رنگ‌پریده می‌شوند؛ بگیرشان تا به لانه برگردند.',
+        tutTitle3: 'پنج هزارتو', tutText3: 'هر هزارتو را تمام کنی، بعدی می‌آید. برای هر پنج تا سه جان داری.'
+      },
+      en: {
+        scene: 'A hedge maze with seeds, berries and four beetles', muHint: 'Swipe to turn. Eat every seed.', padHint: 'Use the arrows to turn. Eat every seed.', tapGo: 'Tap to go on.',
+        mazeN: 'Maze {n} of {m}', livesN: 'Lives: {n}', ptsN: 'Score: {n}', bestN: 'Best: {n}', dailyMu: 'Daily muncher', newRun: 'New run',
+        ready: 'Ready!', caught: 'Caught!', cleared: 'Maze cleared!', allClear: 'All five mazes cleared!', outLives: 'Out of lives',
+        ptsL: 'Score', mazesL: 'Mazes cleared', bugsL: 'Beetles sent home', tries: 'Tries',
+        ctrlL: 'Control', ctrlSwipe: 'Swipe', ctrlPad: 'Arrow buttons', mvUp: 'Up', mvDown: 'Down', mvLeft: 'Left', mvRight: 'Right', kMove: 'Turn', kAgain: 'New run',
+        rules: 'The muncher runs through the maze by itself; swipe in any direction and it turns that way at the next corner. Turning back is always instant. Eat every seed to clear the maze. Four beetles roam the maze, each in its own way: red follows you, violet heads for where you are going, blue makes the rounds of the corners and green picks a way at random at every fork. If a beetle reaches you, you lose a life. Eat one of the four big berries and the beetles turn pale and harmless for a few seconds; catch them to send them home, each one worth more than the last. There are five mazes and three lives for all of them. Pick Easy, Medium or Hard behind the gear, where you can also switch on arrow buttons instead of swiping. The order of the mazes and the beetles\' moves in the daily muncher are the same for everyone.',
+        tutTitle1: 'Eat', tutText1: 'Swipe to turn the muncher. It runs on by itself; eat every seed.',
+        tutTitle2: 'Berries', tutText2: 'Four beetles roam the maze. A big berry turns them pale for a few seconds: catch them to send them home.',
+        tutTitle3: 'Five mazes', tutText3: 'Clear a maze to reach the next. You have three lives for all five.'
+      },
+      pl: {
+        scene: 'Labirynt z żywopłotu z nasionami, jagodami i czterema chrząszczami', muHint: 'Przesuń palcem, aby skręcić. Zjedz wszystkie nasiona.', padHint: 'Skręcaj strzałkami. Zjedz wszystkie nasiona.', tapGo: 'Stuknij, aby kontynuować.',
+        mazeN: 'Labirynt {n} z {m}', livesN: 'Życia: {n}', ptsN: 'Punkty: {n}', bestN: 'Najlepszy: {n}', dailyMu: 'Łakomczuch dnia', newRun: 'Nowa gra',
+        ready: 'Gotowy!', caught: 'Złapany!', cleared: 'Labirynt zaliczony!', allClear: 'Wszystkie pięć labiryntów zaliczone!', outLives: 'Koniec żyć',
+        ptsL: 'Punkty', mazesL: 'Zaliczone labirynty', bugsL: 'Chrząszcze odesłane do domu', tries: 'Próby',
+        ctrlL: 'Sterowanie', ctrlSwipe: 'Przesuwanie', ctrlPad: 'Przyciski strzałek', mvUp: 'W górę', mvDown: 'W dół', mvLeft: 'W lewo', mvRight: 'W prawo', kMove: 'Skręt', kAgain: 'Nowa gra',
+        rules: 'Łakomczuch sam biegnie przez labirynt; przesuń palcem w dowolną stronę, a skręci tam na najbliższym zakręcie. Zawrócenie działa zawsze od razu. Zjedz wszystkie nasiona, aby zaliczyć labirynt. Po labiryncie krążą cztery chrząszcze, każdy po swojemu: czerwony idzie za tobą, fioletowy zmierza tam, dokąd biegniesz, niebieski obchodzi narożniki, a zielony na każdym rozwidleniu wybiera drogę losowo. Gdy chrząszcz cię dogoni, tracisz życie. Zjedz jedną z czterech dużych jagód, a chrząszcze na kilka sekund bledną i stają się niegroźne; złap je, aby odesłać je do domu, każdy wart więcej niż poprzedni. Jest pięć labiryntów i trzy życia na wszystkie. Poziom łatwy, średni lub trudny wybierzesz pod zębatką; tam też włączysz przyciski strzałek zamiast przesuwania. Kolejność labiryntów i ruchy chrząszczy w Łakomczuchu dnia są takie same dla wszystkich.',
+        tutTitle1: 'Jedz', tutText1: 'Przesuń palcem, aby Łakomczuch skręcił. Biegnie sam; zjedz wszystkie nasiona.',
+        tutTitle2: 'Jagody', tutText2: 'Po labiryncie krążą cztery chrząszcze. Duża jagoda na kilka sekund je wybiela: złap je, aby wróciły do domu.',
+        tutTitle3: 'Pięć labiryntów', tutText3: 'Zalicz labirynt, aby przejść do następnego. Masz trzy życia na wszystkie pięć.'
+      },
+      fr: {
+        scene: 'Un labyrinthe de haies avec des graines, des baies et quatre scarabées', muHint: 'Balaie pour tourner. Mange toutes les graines.', padHint: 'Tourne avec les flèches. Mange toutes les graines.', tapGo: 'Touche pour continuer.',
+        mazeN: 'Labyrinthe {n} sur {m}', livesN: 'Vies : {n}', ptsN: 'Score : {n}', bestN: 'Record : {n}', dailyMu: 'Croqueur du jour', newRun: 'Nouvelle partie',
+        ready: 'Prêt ?', caught: 'Attrapé !', cleared: 'Labyrinthe vidé !', allClear: 'Les cinq labyrinthes sont vidés !', outLives: 'Plus de vies',
+        ptsL: 'Score', mazesL: 'Labyrinthes vidés', bugsL: 'Scarabées renvoyés au nid', tries: 'Essais',
+        ctrlL: 'Contrôle', ctrlSwipe: 'Balayer', ctrlPad: 'Boutons fléchés', mvUp: 'Haut', mvDown: 'Bas', mvLeft: 'Gauche', mvRight: 'Droite', kMove: 'Tourner', kAgain: 'Nouvelle partie',
+        rules: 'Le croqueur avance tout seul dans le labyrinthe ; balaie dans une direction et il tourne par là au prochain virage. Faire demi-tour est toujours immédiat. Mange toutes les graines pour vider le labyrinthe. Quatre scarabées y rôdent, chacun à sa façon : le rouge te suit, le violet file vers l’endroit où tu vas, le bleu fait le tour des coins et le vert choisit un chemin au hasard à chaque embranchement. Si un scarabée t’attrape, tu perds une vie. Mange une des quatre grosses baies et les scarabées pâlissent et deviennent inoffensifs pendant quelques secondes ; attrape-les pour les renvoyer au nid, chacun rapporte plus que le précédent. Il y a cinq labyrinthes et trois vies pour tous. Choisis Facile, Moyen ou Difficile derrière l’engrenage, où tu peux aussi activer des boutons fléchés au lieu de balayer. L’ordre des labyrinthes et les mouvements des scarabées du croqueur du jour sont les mêmes pour tous.',
+        tutTitle1: 'Mange', tutText1: 'Balaie pour faire tourner le croqueur. Il avance tout seul ; mange toutes les graines.',
+        tutTitle2: 'Les baies', tutText2: 'Quatre scarabées rôdent. Une grosse baie les fait pâlir quelques secondes : attrape-les pour les renvoyer au nid.',
+        tutTitle3: 'Cinq labyrinthes', tutText3: 'Vide un labyrinthe pour passer au suivant. Tu as trois vies pour les cinq.'
+      },
+      zh: {
+        scene: '树篱迷宫，有种子、浆果和四只甲虫', muHint: '滑动转向。吃光所有种子。', padHint: '用方向键转向。吃光所有种子。', tapGo: '点一下继续。',
+        mazeN: '迷宫 {n}/{m}', livesN: '生命：{n}', ptsN: '得分：{n}', bestN: '最佳：{n}', dailyMu: '每日吞吞', newRun: '重新开始',
+        ready: '准备！', caught: '被抓住了！', cleared: '迷宫清空了！', allClear: '五个迷宫全部清空！', outLives: '生命用完了',
+        ptsL: '得分', mazesL: '清空的迷宫', bugsL: '送回窝的甲虫', tries: '尝试次数',
+        ctrlL: '操作', ctrlSwipe: '滑动', ctrlPad: '方向按钮', mvUp: '上', mvDown: '下', mvLeft: '左', mvRight: '右', kMove: '转向', kAgain: '重新开始',
+        rules: '吞吞会自己在迷宫里跑；向任意方向滑动，它会在下一个路口转向那边。掉头总是立刻生效。吃光所有种子就清空了迷宫。四只甲虫在迷宫里转，各有各的走法：红色跟着你，紫色赶到你要去的地方，蓝色绕着四个角巡逻，绿色在每个岔路随便选一条。被甲虫碰到就会失去一条命。吃掉四颗大浆果之一，甲虫会变白几秒，变得无害；抓住它们就把它们送回窝，每只比上一只得分更多。一共五个迷宫，三条命要用到底。在齿轮里选择简单、中等或困难，也可以改用方向按钮代替滑动。每日吞吞的迷宫顺序和甲虫的走法对所有人都一样。',
+        tutTitle1: '吃', tutText1: '滑动让吞吞转向。它会自己往前跑；吃光所有种子。',
+        tutTitle2: '浆果', tutText2: '四只甲虫在迷宫里转。吃一颗大浆果，它们会变白几秒：抓住它们就送回窝。',
+        tutTitle3: '五个迷宫', tutText3: '清空一个迷宫就进入下一个。五个迷宫一共三条命。'
+      },
+      de: {
+        scene: 'Ein Heckenlabyrinth mit Körnern, Beeren und vier Käfern', muHint: 'Wische, um abzubiegen. Iss alle Körner.', padHint: 'Bieg mit den Pfeiltasten ab. Iss alle Körner.', tapGo: 'Tippe, um weiterzumachen.',
+        mazeN: 'Labyrinth {n} von {m}', livesN: 'Leben: {n}', ptsN: 'Punkte: {n}', bestN: 'Bestwert: {n}', dailyMu: 'Mampfer des Tages', newRun: 'Neuer Lauf',
+        ready: 'Los geht’s!', caught: 'Erwischt!', cleared: 'Labyrinth leer!', allClear: 'Alle fünf Labyrinthe leer!', outLives: 'Keine Leben mehr',
+        ptsL: 'Punkte', mazesL: 'Leere Labyrinthe', bugsL: 'Heimgeschickte Käfer', tries: 'Versuche',
+        ctrlL: 'Steuerung', ctrlSwipe: 'Wischen', ctrlPad: 'Pfeiltasten', mvUp: 'Hoch', mvDown: 'Runter', mvLeft: 'Links', mvRight: 'Rechts', kMove: 'Abbiegen', kAgain: 'Neuer Lauf',
+        rules: 'Der Mampfer läuft von allein durchs Labyrinth; wische in eine Richtung, und er biegt an der nächsten Ecke dorthin ab. Umkehren geht immer sofort. Iss alle Körner, um das Labyrinth zu leeren. Vier Käfer streifen umher, jeder auf seine Art: Rot folgt dir, Violett läuft dorthin, wohin du willst, Blau macht die Runde durch die Ecken, und Grün wählt an jeder Gabelung einen Weg aufs Geratewohl. Erwischt dich ein Käfer, verlierst du ein Leben. Iss eine der vier großen Beeren, und die Käfer werden für ein paar Sekunden blass und harmlos; fang sie, um sie heimzuschicken, jeder bringt mehr als der vorige. Es gibt fünf Labyrinthe und drei Leben für alle. Leicht, Mittel oder Schwer wählst du hinter dem Zahnrad, wo du auch Pfeiltasten statt Wischen einschalten kannst. Die Reihenfolge der Labyrinthe und die Züge der Käfer im Mampfer des Tages sind für alle gleich.',
+        tutTitle1: 'Iss', tutText1: 'Wische, damit der Mampfer abbiegt. Er läuft von allein; iss alle Körner.',
+        tutTitle2: 'Beeren', tutText2: 'Vier Käfer streifen umher. Eine große Beere macht sie ein paar Sekunden blass: Fang sie, um sie heimzuschicken.',
+        tutTitle3: 'Fünf Labyrinthe', tutText3: 'Leere ein Labyrinth, um zum nächsten zu kommen. Du hast drei Leben für alle fünf.'
+      },
+      es: {
+        scene: 'Un laberinto de setos con semillas, bayas y cuatro escarabajos', muHint: 'Desliza para girar. Cómete todas las semillas.', padHint: 'Gira con las flechas. Cómete todas las semillas.', tapGo: 'Toca para seguir.',
+        mazeN: 'Laberinto {n} de {m}', livesN: 'Vidas: {n}', ptsN: 'Puntos: {n}', bestN: 'Mejor: {n}', dailyMu: 'Comilón del día', newRun: 'Partida nueva',
+        ready: '¡Listo!', caught: '¡Atrapado!', cleared: '¡Laberinto limpio!', allClear: '¡Los cinco laberintos limpios!', outLives: 'Sin vidas',
+        ptsL: 'Puntos', mazesL: 'Laberintos limpios', bugsL: 'Escarabajos enviados al nido', tries: 'Intentos',
+        ctrlL: 'Control', ctrlSwipe: 'Deslizar', ctrlPad: 'Botones de flecha', mvUp: 'Arriba', mvDown: 'Abajo', mvLeft: 'Izquierda', mvRight: 'Derecha', kMove: 'Girar', kAgain: 'Partida nueva',
+        rules: 'El comilón corre solo por el laberinto; desliza hacia un lado y girará hacia allí en la próxima esquina. Dar media vuelta es siempre inmediato. Cómete todas las semillas para limpiar el laberinto. Cuatro escarabajos lo recorren, cada uno a su manera: el rojo te sigue, el violeta va hacia donde te diriges, el azul hace la ronda de las esquinas y el verde elige un camino al azar en cada cruce. Si un escarabajo te alcanza, pierdes una vida. Cómete una de las cuatro bayas grandes y los escarabajos se ponen pálidos e inofensivos unos segundos; atrápalos para mandarlos al nido, cada uno vale más que el anterior. Hay cinco laberintos y tres vidas para todos. Elige Fácil, Medio o Difícil tras el engranaje, donde también puedes activar botones de flecha en lugar de deslizar. El orden de los laberintos y los movimientos de los escarabajos en el comilón del día son iguales para todos.',
+        tutTitle1: 'Come', tutText1: 'Desliza para que el comilón gire. Corre solo; cómete todas las semillas.',
+        tutTitle2: 'Bayas', tutText2: 'Cuatro escarabajos recorren el laberinto. Una baya grande los pone pálidos unos segundos: atrápalos para mandarlos al nido.',
+        tutTitle3: 'Cinco laberintos', tutText3: 'Limpia un laberinto para pasar al siguiente. Tienes tres vidas para los cinco.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var LEVEL_KEYS = ['easy', 'medium', 'hard'];
+
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || typeof prefs !== 'object') prefs = {};
+  if (LEVEL_KEYS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+  if (prefs.ctrl !== 'pad') prefs.ctrl = 'swipe';
+
+  var S = null, raf = 0, last = 0, acc = 0, paused = false, waiting = false, ended = false, tries = 0, startedAt = 0;
+  // drawing state: the floating words, a short flash when a maze is cleared, the time of the last seed sound
+  var pops = [], lastSeedAt = 0, clock = 0, newBest = false;
+
+  var cv = el('canvas', { class: 'mu-canvas', role: 'img', 'aria-label': C.t('scene') });
+  var box = el('div', { class: 'mu-box' }, [cv]);
+  var top = el('div', { class: 'mu-top ch-above' });
+  var status = el('div', { class: 'mu-status', role: 'status', 'aria-live': 'polite' });
+  var ARROW = '<svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5 L19 14 H14.5 V19 H9.5 V14 H5 Z" fill="currentColor"/></svg>';
+  var ROT = { up: 0, right: 90, down: 180, left: 270 };
+  function arrowBtn(dir, label) {
+    var b = el('button', { class: 'mu-arrow mu-arrow--' + dir, type: 'button', 'aria-label': label });
+    b.innerHTML = ARROW;
+    b.firstChild.style.transform = 'rotate(' + ROT[dir] + 'deg)';
+    // the turn is taken on the press, not the release, so a quick thumb is never late
+    b.addEventListener('pointerdown', function (e) { e.preventDefault(); C.audio.unlock(); if (waiting) go(); turn(dir); });
+    b.addEventListener('click', function (e) { if (e.detail === 0) turn(dir); });
+    return b;
+  }
+  var pad = el('div', { class: 'mu-pad' }, [arrowBtn('up', C.t('mvUp')), arrowBtn('left', C.t('mvLeft')), arrowBtn('right', C.t('mvRight')), arrowBtn('down', C.t('mvDown'))]);
+  var wrap = el('div', { class: 'mu-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, status, pad])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  // the level and the control live behind a gear, never inside help
+  ctx.button({ icon: 'gear', label: C.t('settings'), onClick: function () { settings(); } });
+  ctx.button({ icon: 'refresh', label: C.t('newRun'), onClick: function () { askNew(); } });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- runs */
+
+  function level() { return dailyDate ? 'medium' : prefs.level; }
+  // the daily run's maze order and beetles come from the day, the same for everyone
+  function seedFor() { return Math.floor((dailyDate ? C.daily('muncher', dailyDate).rng() : Math.random()) * 4294967296); }
+
+  function newRun() {
+    S = E.newGame(seedFor(), level());
+    tries++;
+    startedAt = Date.now();
+    ended = false; waiting = false; last = 0; acc = 0; pops = []; newBest = false;
+    ctx.clearSave();
+    renderTop(); renderStatus();
+    kick();
+  }
+  function askNew() {
+    if (!S || ended || (S.stage === 0 && S.left === E.MAZES[S.order[0]].seeds)) { newRun(); return; }
+    C.ui.confirm({ title: C.t('newRun'), body: C.t('resetWarn'), onOk: newRun });
+  }
+  function settings() {
+    var lv = prefs.level, body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
+    if (!dailyDate) {
+      body.appendChild(el('div', { class: 'mu-label', text: C.t('difficulty') }));
+      body.appendChild(C.ui.segmented([{ value: 'easy', label: C.t('easy') }, { value: 'medium', label: C.t('medium') }, { value: 'hard', label: C.t('hard') }], lv, function (v) { lv = v; }));
+    }
+    body.appendChild(el('div', { class: 'mu-label', text: C.t('ctrlL') }));
+    // the control applies at once and keeps the run going
+    body.appendChild(C.ui.segmented([{ value: 'swipe', label: C.t('ctrlSwipe') }, { value: 'pad', label: C.t('ctrlPad') }], prefs.ctrl, function (v) { prefs.ctrl = v; ctx.store.set('prefs', prefs); applyCtrl(); }));
+    var actions = [{ label: C.t('cancel') }];
+    if (!dailyDate) {
+      if (S && !ended) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('resetWarn') }));
+      actions.push({ label: C.t('start'), kind: 'primary', onClick: function () { prefs.level = lv; ctx.store.set('prefs', prefs); newRun(); } });
+    }
+    C.ui.modal({ title: C.t('settings'), closeButton: true, body: [body], actions: actions });
+  }
+  function applyCtrl() { pad.classList.toggle('is-on', prefs.ctrl === 'pad'); renderStatus(); }
+
+  function blocked() { return paused || waiting || document.hidden || !!document.querySelector('.ch-scrim'); }
+  function tick(now) {
+    raf = 0;
+    if (!S) return;
+    var dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
+    last = now;
+    if (!blocked() && !ended) {
+      // a fixed step, so a run plays the same on every screen
+      acc += dt;
+      var n = 0;
+      while (acc >= E.DT && n < 8) {
+        E.step(S); acc -= E.DT; n++;
+        events();
+        if (ended) break;
+      }
+      if (n >= 8) acc = 0;
+      clock += dt;
+    }
+    for (var i = pops.length - 1; i >= 0; i--) { pops[i].t -= dt * 0.9; if (pops[i].t <= 0) pops.splice(i, 1); }
+    draw();
+    raf = requestAnimationFrame(tick);
+  }
+  function kick() { if (!raf) { last = 0; raf = requestAnimationFrame(tick); } }
+
+  function turn(dir) {
+    if (!S || ended) return;
+    E.setWant(S, dir);
+    pad.querySelectorAll('.mu-arrow').forEach(function (b) { b.classList.toggle('is-on', b.classList.contains('mu-arrow--' + dir)); });
+  }
+
+  function events() {
+    var ev = E.drain(S), save = false, top2 = false;
+    for (var i = 0; i < ev.length; i++) {
+      var e = ev[i];
+      if (e.t === 'seed') {
+        // a seed every few frames: one soft tick at most every 90 ms, never a buzz
+        var now = Date.now();
+        if (now - lastSeedAt > 90) { C.audio.sfx('tick'); lastSeedAt = now; }
+        top2 = true;
+      } else if (e.t === 'berry') { C.audio.sfx('pop'); C.haptic('tap'); top2 = true; }
+      else if (e.t === 'bug') {
+        C.audio.sfx('chain'); C.haptic('success');
+        pops.push({ text: C.num(e.pts), x: (e.x + 0.5) * T, y: (e.y + 0.5) * T, t: 1, small: true });
+        top2 = true;
+      } else if (e.t === 'feast') C.achievements.unlock('mu-feast');
+      else if (e.t === 'die') { C.feedback('bad'); pops.push({ text: C.t('caught'), t: 1.2 }); save = true; top2 = true; }
+      else if (e.t === 'clear') {
+        C.audio.sfx('win'); C.haptic('success');
+        if (e.stage + 1 < E.STAGES) pops.push({ text: C.t('cleared'), t: 1.4 });
+        top2 = true;
+      } else if (e.t === 'stage') { save = true; top2 = true; }
+      else if (e.t === 'win' || e.t === 'over') {
+        ended = true;
+        ctx.clearSave();
+        if (e.t === 'win') pops.push({ text: C.t('allClear'), t: 2 });
+        setTimeout(finish, C.ui.reduceMotion() ? 300 : 1100);
+      }
+    }
+    if (top2) renderTop();
+    if (save && !ended) ctx.save();
+  }
+
+  function finish() {
+    var won = S.won, sc = S.score, note = null, lv = level();
+    var coins = won ? 30 : Math.min(24, 2 + S.cleared * 4), points = won ? 120 : Math.min(100, 8 + S.cleared * 18);
+    if (won) C.achievements.unlock('mu-clear');
+    if (won && lv === 'hard' && !dailyDate) C.achievements.unlock('mu-hard');
+    var lines = [{ label: C.t('ptsL'), value: C.num(sc) }, { label: C.t('mazesL'), value: C.num(S.cleared) + ' / ' + C.num(E.STAGES) }, { label: C.t('bugsL'), value: C.num(S.bugs) }];
+    if (dailyDate) {
+      if (won) C.achievements.unlock('mu-daily');
+      if (!C.stats.daily('muncher', dailyDate, { label: C.t('ptsN', { n: C.num(sc) }), win: won, tries: tries })) { coins = Math.max(1, Math.round(coins * 0.2)); points = Math.max(1, Math.round(points * 0.2)); }
+      lines.push({ label: C.t('tries'), value: C.num(tries) });
+    } else {
+      if (C.stats.best('muncher', 'score_' + lv, sc) && sc > 0) note = C.t('bestN', { n: C.num(sc) });
+      lines.push({ label: C.t('best'), value: C.num(C.stats.getBest('muncher', 'score_' + lv) || sc) });
+    }
+    ctx.finish({
+      won: won,
+      title: won ? C.t('allClear') : C.t('outLives'),
+      note: note, timeMs: Date.now() - startedAt, coins: coins, points: points,
+      lines: lines,
+      shareText: 'چوگان · لقمه‌خور' + (dailyDate ? ('\nروزانه ' + dailyDate) : '') + '\nامتیاز ' + sc,
+      paint: function (g, w, h) { paintShare(g, w, h); },
+      againLabel: C.t('newRun'),
+      onAgain: function () { newRun(); }
+    });
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  // the muncher is a saffron bean with a sprout; the beetles are red, violet, blue and green
+  function palette(dk) {
+    return dk ? {
+      floor: '#0D1A1F', hedge: '#1C5867', hedge2: '#2A7486', leaf: 'rgba(160,220,200,.16)', gate: '#E7A0B0',
+      seed: '#E9C27E', berry: '#FF6F86', berry2: '#7DD08A',
+      me: '#F5B941', me2: '#C8862A', sprout: '#7DD08A', mouth: '#3A1A0A', eyeW: '#FFFFFF', eye: '#1B1310',
+      bugs: ['#F0625C', '#B07CF0', '#4C8FEF', '#62C25A'], pale: '#8EA6C6', pale2: '#E8F0FF', leg: '#0A0F12',
+      text: 'rgba(244,238,228,.96)', shade: 'rgba(0,0,0,.6)'
+    } : {
+      floor: '#EEF6F4', hedge: '#2F7F90', hedge2: '#56A3B2', leaf: 'rgba(255,255,255,.22)', gate: '#C2557A',
+      seed: '#B8762A', berry: '#D93B57', berry2: '#3E9A4E',
+      me: '#F2B33D', me2: '#B9771A', sprout: '#3E9A4E', mouth: '#5A2A12', eyeW: '#FFFFFF', eye: '#241A15',
+      bugs: ['#D8423D', '#8A55D6', '#2F72D8', '#3F9A36'], pale: '#9DB3CF', pale2: '#FFFFFF', leg: '#2A2730',
+      text: 'rgba(31,26,23,.92)', shade: 'rgba(255,255,255,.8)'
+    };
+  }
+
+  function size() {
+    var r = box.getBoundingClientRect(), h = Math.floor(Math.min(r.height, r.width * VH / VW));
+    h = Math.max(120, h || 0);
+    return { w: Math.round(h * VW / VH), h: h };
+  }
+
+  function rr(g, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    g.beginPath();
+    g.moveTo(x + r, y); g.lineTo(x + w - r, y); g.quadraticCurveTo(x + w, y, x + w, y + r);
+    g.lineTo(x + w, y + h - r); g.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    g.lineTo(x + r, y + h); g.quadraticCurveTo(x, y + h, x, y + h - r);
+    g.lineTo(x, y + r); g.quadraticCurveTo(x, y, x + r, y); g.closePath();
+  }
+
+  // The hedges: each wall tile a rounded clump, joined to its wall neighbours, with a
+  // lighter top. Drawn once per maze, theme and size, then copied every frame.
+  var layer = null, layerKey = '';
+  function hedges(M, P, px) {
+    var key = M.i + '|' + (P === palette(true) ? 'd' : P.floor) + '|' + px;
+    if (layer && layerKey === key) return layer;
+    var c = document.createElement('canvas');
+    c.width = Math.round(VW * px); c.height = Math.round(VH * px);
+    var g = c.getContext('2d');
+    g.setTransform(px, 0, 0, px, 0, 0);
+    paintHedges(g, M, P);
+    layer = c; layerKey = key;
+    return c;
+  }
+  function isWall(M, x, y) { return x >= 0 && x < E.W && y >= 0 && y < E.H && M.rows[y][x] === '#'; }
+  function paintHedges(g, M, P) {
+    var x, y, k = 3;
+    [[P.hedge, 0], [P.hedge2, 4]].forEach(function (pass) {
+      g.fillStyle = pass[0];
+      var s = pass[1];
+      for (y = 0; y < E.H; y++) for (x = 0; x < E.W; x++) {
+        if (!isWall(M, x, y)) continue;
+        var X = x * T, Y = y * T;
+        rr(g, X + k + s / 2, Y + k + s / 2, T - 2 * k - s, T - 2 * k - s, 6 - s / 2); g.fill();
+        if (isWall(M, x + 1, y)) g.fillRect(X + T / 2, Y + k + s / 2, T, T - 2 * k - s);
+        if (isWall(M, x, y + 1)) g.fillRect(X + k + s / 2, Y + T / 2, T - 2 * k - s, T);
+        if (isWall(M, x + 1, y) && isWall(M, x, y + 1) && isWall(M, x + 1, y + 1)) g.fillRect(X + T / 2, Y + T / 2, T, T);
+      }
+    });
+    // a few leaf flecks so the hedge reads as a hedge
+    g.fillStyle = P.leaf;
+    for (y = 0; y < E.H; y++) for (x = 0; x < E.W; x++) {
+      if (!isWall(M, x, y) || (x * 7 + y * 13) % 3) continue;
+      g.beginPath(); g.ellipse(x * T + 7 + (y % 3) * 2, y * T + 8 + (x % 2) * 3, 2.6, 1.5, (x + y) % 3, 0, Math.PI * 2); g.fill();
+    }
+  }
+
+  function scene(g, P, t) {
+    var M = S.M, x, y;
+    g.fillStyle = P.floor; g.fillRect(0, 0, VW, VH);
+    var px = g.getTransform ? g.getTransform().a : 1;
+    if (px > 0 && px < 8) g.drawImage(hedges(M, P, px), 0, 0, VW, VH);
+    else paintHedges(g, M, P);
+    // the den's gate
+    g.fillStyle = P.gate; g.fillRect(M.door.x * T - T, M.door.y * T + T / 2 - 2, T * 3, 4);
+    // seeds and berries; a berry pulses so it is easy to find
+    for (y = 0; y < E.H; y++) for (x = 0; x < E.W; x++) {
+      var f = S.food[y * E.W + x];
+      if (!f) continue;
+      var cx = x * T + T / 2, cy = y * T + T / 2;
+      if (f === 1) { g.fillStyle = P.seed; g.beginPath(); g.ellipse(cx, cy, 2.6, 2, 0.6, 0, Math.PI * 2); g.fill(); } else {
+        var r = 5.4 + Math.sin(t * 6) * 0.9;
+        g.fillStyle = P.berry; g.beginPath(); g.arc(cx, cy + 1, r, 0, Math.PI * 2); g.fill();
+        g.fillStyle = 'rgba(255,255,255,.5)'; g.beginPath(); g.arc(cx - r * 0.35, cy - r * 0.25, r * 0.3, 0, Math.PI * 2); g.fill();
+        g.fillStyle = P.berry2; g.beginPath(); g.ellipse(cx + 2, cy - r - 0.5, 3.2, 1.6, -0.5, 0, Math.PI * 2); g.fill();
+      }
+    }
+  }
+
+  // A beetle from above: an oval shell split down the middle, a head with two feelers
+  // toward where it goes, six legs that paddle as it walks
+  var ANG = [-Math.PI / 2, 0, Math.PI / 2, Math.PI];
+  function beetle(g, c, P, t) {
+    var p = E.pos(c), cx = (p.x + 0.5) * T, cy = (p.y + 0.5) * T, a = ANG[c.d] + Math.PI / 2;
+    if (c.st === 'home') { cy += Math.sin(t * 5 + c.i) * 2; a = 0; }
+    var flash = S.fright > 0 && S.fright < 120 && Math.floor(S.fright / 10) % 2 === 0;
+    var body = c.fr ? (flash ? P.pale2 : P.pale) : P.bugs[c.i];
+    g.save(); g.translate(cx, cy); g.rotate(a);
+    if (c.st !== 'eyes') {
+      var w = Math.sin(t * 18 + c.i) * 1.6;
+      g.strokeStyle = P.leg; g.lineWidth = 1.4; g.lineCap = 'round';
+      [-4, 0, 4].forEach(function (ly, k) {
+        var s = (k % 2 ? w : -w);
+        g.beginPath(); g.moveTo(-5, ly); g.lineTo(-9, ly + s); g.moveTo(5, ly); g.lineTo(9, ly - s); g.stroke();
+      });
+      g.fillStyle = P.leg; g.beginPath(); g.arc(0, -6.5, 3.4, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.moveTo(-1.5, -9); g.quadraticCurveTo(-4, -12, -5.5, -12.5); g.moveTo(1.5, -9); g.quadraticCurveTo(4, -12, 5.5, -12.5); g.stroke();
+      g.fillStyle = body; g.beginPath(); g.ellipse(0, 1.5, 6.6, 7.8, 0, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(0, -5.5); g.lineTo(0, 9); g.stroke();
+      g.fillStyle = 'rgba(255,255,255,.35)';
+      g.beginPath(); g.arc(-2.8, -1, 1.3, 0, Math.PI * 2); g.arc(2.8, 3, 1.1, 0, Math.PI * 2); g.fill();
+    }
+    g.restore();
+    // eyes stay upright: dizzy squiggles when pale, plain eyes looking ahead otherwise
+    var dx = c.st === 'home' ? 0 : E.DIRS[c.d][0] * 1.3, dy = c.st === 'home' ? 0 : E.DIRS[c.d][1] * 1.3;
+    var ex = cx + (c.st === 'eyes' ? 0 : E.DIRS[c.d][0] * 6.5), ey = cy + (c.st === 'eyes' ? 0 : E.DIRS[c.d][1] * 6.5);
+    if (c.st === 'home') { ex = cx; ey = cy - 6.5; }
+    if (c.fr) {
+      g.strokeStyle = P.leg; g.lineWidth = 1.2;
+      [-2.4, 2.4].forEach(function (o) { g.beginPath(); g.arc(ex + o, ey, 1.4, t * 8, t * 8 + 4.5); g.stroke(); });
+      return;
+    }
+    [-2.4, 2.4].forEach(function (o) {
+      var qx = ex + (E.DIRS[c.d][1] ? o : 0), qy = ey + (E.DIRS[c.d][1] ? 0 : o);
+      if (c.st === 'home') { qx = ex + o; qy = ey; }
+      g.fillStyle = P.eyeW; g.beginPath(); g.arc(qx, qy, c.st === 'eyes' ? 3 : 1.8, 0, Math.PI * 2); g.fill();
+      g.fillStyle = P.eye; g.beginPath(); g.arc(qx + dx * (c.st === 'eyes' ? 1 : 0.5), qy + dy * (c.st === 'eyes' ? 1 : 0.5), c.st === 'eyes' ? 1.5 : 1, 0, Math.PI * 2); g.fill();
+    });
+  }
+
+  // The muncher: a round saffron bean with a sprout on top, two eyes looking where it
+  // goes and a round mouth on that side that opens and closes as it eats
+  function muncher(g, x, y, face, chomp, P, s, spin) {
+    var R = 7.4 * s, fx = E.DIRS[face][0], fy = E.DIRS[face][1];
+    g.save(); g.translate(x, y); if (spin) g.rotate(spin);
+    g.fillStyle = 'rgba(0,0,0,.16)'; g.beginPath(); g.ellipse(0, R * 0.9, R * 0.85, R * 0.35, 0, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = P.sprout; g.lineWidth = 1.6 * s; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(0, -R * 0.85); g.quadraticCurveTo(-0.5, -R * 1.25, 0.5, -R * 1.45); g.stroke();
+    g.fillStyle = P.sprout; g.beginPath(); g.ellipse(R * 0.32, -R * 1.42, R * 0.32, R * 0.15, -0.5, 0, Math.PI * 2); g.fill();
+    g.fillStyle = P.me2; g.beginPath(); g.arc(0, 0.6 * s, R, 0, Math.PI * 2); g.fill();
+    g.fillStyle = P.me; g.beginPath(); g.arc(0, 0, R, 0, Math.PI * 2); g.fill();
+    // the mouth: a dark oval on the front side
+    var mo = Math.max(0.12, chomp);
+    g.fillStyle = P.mouth;
+    g.beginPath(); g.ellipse(fx * R * 0.48, fy * R * 0.48 + (fy ? 0 : R * 0.18), (fx ? 0.22 + 0.2 * mo : 0.42) * R, (fy ? 0.22 + 0.2 * mo : 0.18 + 0.28 * mo) * R, 0, 0, Math.PI * 2); g.fill();
+    var ox = fx ? -fx * R * 0.05 : 0, oy = fy ? -fy * R * 0.38 : -R * 0.32;
+    [-1, 1].forEach(function (k) {
+      var qx = ox + (fy ? k * R * 0.36 : k * R * 0.3 + fx * R * 0.12), qy = oy + (fy ? 0 : 0);
+      if (fx) qx = ox + fx * R * 0.12 + k * R * 0.28;
+      g.fillStyle = P.eyeW; g.beginPath(); g.arc(qx, qy, R * 0.22, 0, Math.PI * 2); g.fill();
+      g.fillStyle = P.eye; g.beginPath(); g.arc(qx + fx * R * 0.07, qy + fy * R * 0.07, R * 0.12, 0, Math.PI * 2); g.fill();
+    });
+    g.restore();
+  }
+
+  function draw() {
+    if (!S) return;
+    var Z = size(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
+    cv.style.width = Z.w + 'px'; cv.style.height = Z.h + 'px';
+    var g = cv.getContext('2d'), k = Z.w / VW, P = palette(dark()), t = clock;
+    g.setTransform(dpr * k, 0, 0, dpr * k, 0, 0);
+    g.clearRect(0, 0, VW, VH);
+    scene(g, P, t);
+    var i;
+    if (!S.dying || S.dying > E.DYING - 30) for (i = 0; i < S.ch.length; i++) beetle(g, S.ch[i], P, t);
+    var p = E.pos(S.p), mx = (p.x + 0.5) * T, my = (p.y + 0.5) * T;
+    // in a tunnel the muncher shows on both edges
+    var moving = S.p.d >= 0 && !S.ready && !S.clear && !S.dying;
+    var chomp = moving ? Math.abs(Math.sin(S.tick * 0.35)) : 0.3;
+    if (S.dying) {
+      var a = 1 - S.dying / E.DYING;
+      if (a < 0.85) muncher(g, mx, my, S.p.face, 1, P, 1 - a, a * 9);
+    } else if (!(S.over && S.won)) {
+      muncher(g, mx, my, S.p.face, chomp, P, 1);
+      if (mx < T) muncher(g, mx + VW, my, S.p.face, chomp, P, 1);
+      if (mx > VW - T) muncher(g, mx - VW, my, S.p.face, chomp, P, 1);
+    }
+    var font = getComputedStyle(document.body).fontFamily || 'sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    // the words sit on the empty ring below the den, where no seed hides under them
+    var wy = (S.M.door.y + 3.5) * T;
+    if (S.ready && !S.dying) word(g, P, font, C.t('ready'), VW / 2, wy, 1, 17);
+    for (i = 0; i < pops.length; i++) {
+      var o = pops[i];
+      if (o.small) word(g, P, font, o.text, o.x, o.y - (1 - o.t) * 10, Math.min(1, o.t * 2), 11);
+      else word(g, P, font, o.text, VW / 2, wy - (1 - Math.min(1, o.t)) * 6, Math.min(1, o.t * 2), 17);
+    }
+  }
+  function word(g, P, font, text, x, y, alpha, px) {
+    g.globalAlpha = Math.max(0, alpha);
+    var sz = px;
+    g.font = '800 ' + sz + 'px ' + font;
+    // a long word in a narrow language still fits the maze's width
+    while (sz > 9 && g.measureText(text).width > VW - 24) { sz--; g.font = '800 ' + sz + 'px ' + font; }
+    g.lineWidth = 4; g.strokeStyle = P.shade; g.strokeText(text, x, y);
+    g.fillStyle = P.text; g.fillText(text, x, y);
+    g.globalAlpha = 1;
+  }
+
+  // the share card: the maze as the run ended
+  function paintShare(g, w, h) {
+    var P = palette(dark());
+    g.fillStyle = P.floor; g.fillRect(0, 0, w, h);
+    var k = Math.min(w / VW, h / VH);
+    g.save();
+    g.translate((w - VW * k) / 2, (h - VH * k) / 2); g.scale(k, k);
+    scene(g, P, 0);
+    g.restore();
+  }
+
+  /* ----------------------------------------------------------------- ui */
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (dailyDate) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyMu') + ' — ' + C.num(dailyDate) })]));
+    else top.appendChild(el('span', { class: 'ch-badge ch-badge--accent', text: C.t(prefs.level === 'easy' ? 'easy' : prefs.level === 'hard' ? 'hard' : 'medium') }));
+    if (!S) return;
+    top.appendChild(el('span', { class: 'ch-badge', text: C.t('mazeN', { n: C.num(S.stage + 1), m: C.num(E.STAGES) }) }));
+    top.appendChild(el('span', { class: 'ch-badge', text: C.t('livesN', { n: C.num(Math.max(0, S.lives)) }) }));
+    top.appendChild(el('span', { class: 'ch-badge', text: C.t('ptsN', { n: C.num(S.score) }) }));
+    var best = dailyDate ? 0 : C.stats.getBest('muncher', 'score_' + level());
+    if (best) top.appendChild(el('span', { class: 'ch-badge', text: C.t('bestN', { n: C.num(best) }) }));
+  }
+  function renderStatus() { status.textContent = waiting ? C.t('tapGo') : prefs.ctrl === 'pad' ? C.t('padHint') : C.t('muHint'); }
+  function go() { if (waiting) { waiting = false; last = 0; acc = 0; renderStatus(); kick(); } }
+
+  /* -------------------------------------------------------------- input */
+
+  // A swipe turns as soon as it has gone far enough, and a finger kept down can swipe
+  // again from where it is: the whole game area listens, so a thumb need not find the muncher
+  var ptr = null, SWIPE = 18;
+  wrap.addEventListener('pointerdown', function (e) {
+    if (!S || (e.target.closest && e.target.closest('button'))) return;
+    if (e.button !== undefined && e.button > 0) return;
+    e.preventDefault();
+    C.audio.unlock();
+    if (waiting) { go(); return; }
+    ptr = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  });
+  window.addEventListener('pointermove', function (e) {
+    if (!ptr || e.pointerId !== ptr.id) return;
+    var dx = e.clientX - ptr.x, dy = e.clientY - ptr.y;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE) return;
+    turn(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
+    ptr.x = e.clientX; ptr.y = e.clientY;
+  });
+  window.addEventListener('pointerup', function (e) { if (ptr && e.pointerId === ptr.id) ptr = null; });
+  window.addEventListener('pointercancel', function () { ptr = null; });
+  wrap.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  wrap.style.touchAction = 'none';
+  // the maze is drawn left to right in every language, so the arrows are never flipped
+  var KEYDIR = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim')) return;
+    if (e.target && e.target.closest && e.target.closest('button') && (e.key === ' ' || e.key === 'Enter')) return;
+    var dir = KEYDIR[e.key] || (C.keyIs(e, 'w') ? 'up' : C.keyIs(e, 's') ? 'down' : C.keyIs(e, 'a') ? 'left' : C.keyIs(e, 'd') ? 'right' : null);
+    if (dir) {
+      e.preventDefault();
+      if (waiting) go();
+      turn(dir);
+    } else if (e.key === ' ' && waiting) { e.preventDefault(); go(); } else if (C.keyIs(e, 'r') && !e.repeat) { e.preventDefault(); askNew(); }
+  });
+  // a run waits while the app is away, and comes back waiting for a tap
+  C.onPause(function () { paused = true; if (S && !ended) waiting = true; ctx.save(); renderStatus(); });
+  C.onResume(function () { paused = false; kick(); });
+  document.addEventListener('visibilitychange', function () { if (document.hidden) { if (S && !ended) { waiting = true; renderStatus(); } } else kick(); });
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw); } catch (er) { /* old WebViews */ } }
+  // the floating words use the app's font, which may arrive after the first frame
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { draw(); });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← ↑ → ↓ / W A S D', C.t('kMove')), kb('R', C.t('kAgain'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // little pictures for the tutorial: a strip of maze, the muncher, a berry and beetles
+  function svgMe(x, y) {
+    return '<g transform="translate(' + x + ',' + y + ')"><path d="M0 -11 q-1 -6 2 -9" stroke="#3E9A4E" stroke-width="2.4" fill="none" stroke-linecap="round"/><ellipse cx="4" cy="-19" rx="4" ry="2" fill="#3E9A4E"/>' +
+      '<circle r="11" cy="1" fill="#B9771A"/><circle r="11" fill="#F2B33D"/><ellipse cx="5.5" cy="2" rx="4" ry="4.5" fill="#5A2A12"/>' +
+      '<circle cx="1" cy="-4" r="2.6" fill="#fff"/><circle cx="1" cy="4" r="0" fill="#fff"/><circle cx="2" cy="-4" r="1.4" fill="#241A15"/></g>';
+  }
+  function svgBug(x, y, col) {
+    return '<g transform="translate(' + x + ',' + y + ')"><g stroke="#2A2730" stroke-width="1.6" stroke-linecap="round"><path d="M-6 -4 h-5 M-6 1 h-5 M-6 6 h-5 M6 -4 h5 M6 1 h5 M6 6 h5"/></g>' +
+      '<circle cy="-8" r="4" fill="#2A2730"/><ellipse cy="2" rx="8" ry="9" fill="' + col + '"/><path d="M0 -6 V11" stroke="rgba(0,0,0,.35)"/></g>';
+  }
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 120" width="100%" direction="ltr"><rect width="200" height="120" rx="10" fill="#DCEBEF"/>' +
+      '<g fill="#2F7F90"><rect x="10" y="10" width="180" height="14" rx="7"/><rect x="10" y="96" width="180" height="14" rx="7"/></g>';
+    var seeds = function (from, to) { var o = ''; for (var x = from; x <= to; x += 16) o += '<ellipse cx="' + x + '" cy="60" rx="3" ry="2.3" fill="#B8762A"/>'; return o; };
+    if (kind === 1) {
+      s += '<rect x="10" y="40" width="70" height="12" rx="6" fill="#56A3B2"/><rect x="120" y="68" width="70" height="12" rx="6" fill="#56A3B2"/>' + seeds(86, 182) + svgMe(60, 64) +
+        '<path d="M100 92 h40 M132 86 l8 6 -8 6" stroke="' + ACCENT + '" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>';
+    } else if (kind === 2) {
+      s += seeds(30, 60) + '<circle cx="86" cy="60" r="8" fill="#D93B57"/><ellipse cx="89" cy="51" rx="4" ry="2" fill="#3E9A4E"/>' + svgMe(60, 64) +
+        svgBug(130, 60, '#9DB3CF') + svgBug(165, 60, '#9DB3CF');
+    } else {
+      s += seeds(30, 120) + svgMe(150, 64) + svgBug(30, 40, '#D8423D') + svgBug(60, 82, '#8A55D6') +
+        '<path d="M176 40 l4 8 8 1 -6 6 2 8 -8 -4 -8 4 2 -8 -6 -6 8 -1z" fill="#F2B33D"/>';
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // A run in progress is saved after each lost life and each new maze and when the app
+  // goes away; it comes back at the start of a life with the seeds it had left. The
+  // daily run has its own slot.
+  ctx.autosave(function () {
+    if (!S || S.over || ended) return { inProgress: false };
+    return { s: E.snapshot(S), tries: tries, daily: dailyDate || null, elapsed: Date.now() - startedAt };
+  });
+  function resumeRun(sv) {
+    var R = E.restore(sv.s);
+    if (!R) return false;
+    S = R; tries = sv.tries || 1; startedAt = Date.now() - (sv.elapsed || 0);
+    ended = false; waiting = true; last = 0; acc = 0;
+    renderTop(); renderStatus(); draw(); kick();
+    return true;
+  }
+  applyCtrl();
+  var saved = ctx.loadSave();
+  if (dailyDate) {
+    if (!(saved && saved.s && saved.daily === dailyDate && resumeRun(saved))) newRun();
+    if (C.stats.dailyDone('muncher', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).muncher;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (!(saved && saved.s && !saved.daily && saved.s.level === prefs.level && resumeRun(saved))) {
+    newRun();
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
