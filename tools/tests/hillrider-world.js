@@ -83,7 +83,7 @@ module.exports = function (T) {
     ok(/mountains\(g, Z, P\);/.test(html) && /var RANGES = \[\{ sp: 0\.04[^\]]*sp: 0\.08[^\]]*sp: 0\.16/.test(html) && /mixHex\(P\.mtn, P\.sky1, L\.haze\)/.test(html),
       'three mountain ranges, each slower and hazier than the one in front');
     const draw = (html.match(/\n {2}function draw\(\) \{[\s\S]*?\n {2}\}\n/) || [''])[0];
-    ok(draw.length > 0 && draw.indexOf('roadside(g, P, x0, x1)') > 0 && draw.indexOf('roadside(g, P, x0, x1)') < draw.indexOf('g.fillStyle = P.dirt; g.fill();') && draw.indexOf('E.bumps(S, x0, x1)') < draw.indexOf('drawCar(g, P, V)'),
+    ok(draw.length > 0 && draw.indexOf('roadside(g, P, x0, x1)') > 0 && draw.indexOf('roadside(g, P, x0, x1)') < draw.indexOf('g.fillStyle = P.dirt; g.fill();') && draw.indexOf('E.bumps(S, x0, x1)') < draw.indexOf('drawCar(g, P, V'),
       'the roadside is drawn before the ground, so the road covers its feet, and the bumps before the car');
     ok(/E\.scenery\(S\.seed,/.test(html) && /E\.animals\(S\.seed,/.test(html) && /C\.ui\.reduceMotion\(\) \? 0 : clock/.test(html), 'the page draws the engine\'s scenery and animals, still when motion is reduced');
     ok(/snowy = S\.scene === 'snow'/.test(html) && /if \(wet\)/.test(html) && E.look('night', false).tree && E.look('snow', false).mtn && E.look('rain', true).mtn, 'snow lies on trees and stones, wet stones shine, and night darkens the roadside');

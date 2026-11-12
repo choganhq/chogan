@@ -98,7 +98,7 @@ module.exports = function (T) {
     ok(/ctx\.tutorialIfNew\(TUT\)/.test(html) && !/history\.(push|replace)State|localStorage/.test(html), 'a tutorial, no history or direct storage');
     // The car blurred under gas: a frame holding 0, 1 or 2 physics steps moved it in uneven jumps
     // (up to 0.25 m at speed). The page draws between the last two steps and chases by time.
-    ok(/prev = pose\(S\);\s*ev = ev\.concat\(E\.step\(/.test(html) && /var V = view\(\)/.test(html) && /drawCar\(g, P, V\)/.test(html) && /Math\.pow\(1 - 0\.12, frameDt \* 60\)/.test(html), 'the car is drawn between the last two physics steps and the camera chases by time, so it does not blur under gas (#763)');
+    ok(/prev = pose\(S\);\s*ev = ev\.concat\(E\.step\(/.test(html) && /var V = view\(\)/.test(html) && /drawCar\(g, P, V(, S\.car)?\)/.test(html) && /Math\.pow\(1 - 0\.12, frameDt \* 60\)/.test(html), 'the car is drawn between the last two physics steps and the camera chases by time, so it does not blur under gas (#763)');
     // #777: the speed on the screen. The engine is in real metres and seconds, so the
     // scale is fixed: 1 m/s is 3.6 km/h or 2.237 mph, by the horizontal speed alone.
     const sp = typeof E.speedOf === 'function' ? E.speedOf : () => NaN;
