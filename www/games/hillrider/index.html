@@ -157,13 +157,92 @@ function HillriderEngineFactory() {
   }
   function nearFuel(S, x) { var n = 0; while (fuelAt(S, n + 1) < x) n++; return Math.abs(fuelAt(S, n + 1) - x) < Math.abs(fuelAt(S, n) - x) ? n + 1 : n; }
 
+  /* ---------------------------------------------------- the world (#806) */
+
+  /* Small things on the road, a rock or a branch, about one every 150 m from about 50 m on, at the
+     same rate however far the car gets. Each follows from the seed alone, like the cans. One
+     is never put on a steep stretch or within 10 m of a can, so it never stands between a
+     car and a climb or its fuel. A wheel rolling over one is thrown up a little and loses a
+     little speed: a jolt, never a wall. */
+  var BUMP_GAP = 150, BUMP_FLAT = 0.3, BUMP_CAN = 10;
+  function bumpAt(S, n) {
+    var B = S.bx;
+    while (B.length <= n) {
+      var i = B.length, x0 = Math.round(80 + i * BUMP_GAP + (hash(S.seed + 91, i) - 0.5) * 60), x = null;
+      // the nearest fitting spot within 35 m of its place, so steep country keeps its share
+      for (var o = 0; o <= 70 && x === null; o++) { var c = x0 + (o % 2 ? (o + 1) / 2 : -o / 2); if (bumpFits(S, c)) x = c; }
+      B.push(x === null ? null : { x: x, kind: hash(S.seed + 92, i) < 0.5 ? 'rock' : 'branch' });
+    }
+    return B[n];
+  }
+  function bumpFits(S, x) {
+    for (var d = -3; d <= 3; d++) if (Math.abs(ground(S, x + d).s) > BUMP_FLAT) return false;
+    return Math.abs(fuelAt(S, nearFuel(S, x)) - x) >= BUMP_CAN;
+  }
+  function bumps(S, x0, x1) {
+    var out = [], n = Math.max(0, Math.floor((x0 - 120) / BUMP_GAP)), b;
+    for (; 80 + n * BUMP_GAP - 70 <= x1 + 1; n++) { b = bumpAt(S, n); if (b && b.x >= x0 - 1 && b.x <= x1 + 1) out.push(b); }
+    return out;
+  }
+  // a wheel that crossed a bump this step, on the ground, is jolted up along the normal
+  function jolt(S, x0s, ev) {
+    var hit = false;
+    for (var k = 0; k < 2; k++) {
+      var W = S.wh[k], a = Math.min(x0s[k], W.x), b = Math.max(x0s[k], W.x);
+      if (b - a < 1e-6) continue;
+      var near = bumps(S, a, b);
+      for (var i = 0; i < near.length; i++) {
+        if (near[i].x < a || near[i].x > b || depth(S, W.x, W.y, WR + 0.08).pen <= 0) continue;
+        var D = depth(S, W.x, W.y, WR), sp = Math.abs(W.vx), up = Math.min(2.4, 0.6 + 0.22 * sp);
+        W.vx += D.nx * up - W.vx * 0.06; W.vy += D.ny * up;
+        S.vx *= 0.97;
+        hit = true;
+      }
+    }
+    if (hit) ev.push('bump');
+  }
+
+  /* Scenery beside the road (#806), a pure function of the seed: the same course always
+     has the same trees, bushes, rocks, signs and fences, one slot every 6 m, so it is as
+     full at 5 km as at the start. Nothing here touches the car. Animals have a home every
+     40 m or so and move around it by the clock alone. */
+  var SCN_CELL = 6, ANI_CELL = 40;
+  function scenery(seed, x0, x1) {
+    var out = [], i, r, x;
+    for (i = Math.floor(x0 / SCN_CELL) - 1; i * SCN_CELL <= x1 + SCN_CELL; i++) {
+      if (i * SCN_CELL < 10 - START) continue;
+      r = hash(seed + 101, i); x = i * SCN_CELL + hash(seed + 102, i) * (SCN_CELL - 1);
+      var kind = r < 0.3 ? 'tree' : r < 0.45 ? 'bush' : r < 0.55 ? 'stone' : r < 0.6 ? 'sign' : r < 0.72 ? 'fence' : null;
+      if (kind && x >= x0 - 3 && x <= x1 + 3) out.push({ kind: kind, x: x, s: 0.75 + 0.5 * hash(seed + 103, i), v: hash(seed + 104, i) });
+    }
+    return out;
+  }
+  var ANIMALS = ['rabbit', 'bird', 'deer'];
+  function animals(seed, x0, x1) {
+    var out = [];
+    for (var i = Math.max(1, Math.floor(x0 / ANI_CELL) - 1); i * ANI_CELL <= x1 + ANI_CELL; i++) {
+      if (hash(seed + 111, i) > 0.45) continue;
+      var x = i * ANI_CELL + hash(seed + 112, i) * 30;
+      if (x >= x0 - 8 && x <= x1 + 8) out.push({ kind: ANIMALS[Math.floor(hash(seed + 113, i) * 3) % 3], x: x, ph: hash(seed + 114, i) * 6.283 });
+    }
+    return out;
+  }
+  // where an animal is at time t: an offset from its home and a hop or flight height, both
+  // bounded, so it never wanders far from its own patch of road side
+  function animalAt(A, t) {
+    var w = t * (A.kind === 'bird' ? 0.9 : A.kind === 'deer' ? 0.25 : 0.6) + A.ph;
+    var dx = (A.kind === 'bird' ? 6 : A.kind === 'deer' ? 2.5 : 3) * Math.sin(w), dir = Math.cos(w) >= 0 ? 1 : -1;
+    var up = A.kind === 'bird' ? 3.2 + 0.6 * Math.sin(w * 2.3) : A.kind === 'rabbit' ? 0.35 * Math.abs(Math.sin(t * 5 + A.ph)) : 0;
+    return { x: A.x + dx, up: up, dir: dir };
+  }
+
   /* -------------------------------------------------------------- game */
 
   // seed: whole number; finish: metres for the daily course, 0 for an endless run; scene:
   // one of SCENE_IDS, sunny when missing
   function newGame(seed, finish, scene) {
     var sc = sceneOf(scene);
-    var S = { seed: seed >>> 0, finish: finish || 0, scene: sc, mu: SCENES[sc].mu, ter: { c: [], p: [] }, fx: [], got: {}, t: 0,
+    var S = { seed: seed >>> 0, finish: finish || 0, scene: sc, mu: SCENES[sc].mu, ter: { c: [], p: [] }, fx: [], bx: [], got: {}, t: 0,
       x: START, y: 0, a: 0, vx: 0, vy: 0, w: 0,
       wh: [], fuel: 1, coins: 0, cans: 0, best: 0, air: 0, airBest: 0, flips: 0, spin: 0, still: 0,
       over: false, won: false, cause: '', touch: [false, false] };
@@ -194,8 +273,10 @@ function HillriderEngineFactory() {
     if (S.over || S.won) return [];
     var ev = [], gas = ctl > 0 && S.fuel > 0, brake = ctl < 0;
     var a0 = S.a;
+    var wx = [S.wh[0].x, S.wh[1].x];
     for (var sub = 0; sub < SUB; sub++) substep(S, gas, brake, ev);
     if (settling) return ev;
+    jolt(S, wx, ev);
     S.t += DT;
     S.fuel = Math.max(0, S.fuel - DT * (gas ? BURN_GAS : BURN_IDLE));
     if (S.fuel === 0 && S.fuelOut !== true) { S.fuelOut = true; ev.push('empty'); }
@@ -303,7 +384,7 @@ function HillriderEngineFactory() {
   function restore(v) {
     if (!v || !Array.isArray(v.wh) || v.wh.length !== 2 || !Array.isArray(v.got) || KEEP.some(function (k) { return typeof v[k] !== 'number' || !isFinite(v[k]); })) return null;
     if (v.fuel < 0 || v.fuel > 1 || v.seed < 0 || v.seed > 4294967295 || v.finish < 0) return null;
-    var S = { ter: { c: [], p: [] }, fx: [], got: {}, over: false, won: false, cause: '', fuelOut: !!v.fuelOut, touch: Array.isArray(v.touch) ? [!!v.touch[0], !!v.touch[1]] : [false, false] };
+    var S = { ter: { c: [], p: [] }, fx: [], bx: [], got: {}, over: false, won: false, cause: '', fuelOut: !!v.fuelOut, touch: Array.isArray(v.touch) ? [!!v.touch[0], !!v.touch[1]] : [false, false] };
     KEEP.forEach(function (k) { S[k] = v[k]; });
     // a save from before the scenes (#805) drives on in the sun
     S.scene = sceneOf(v.scene); S.mu = SCENES[S.scene].mu;
@@ -399,21 +480,21 @@ function HillriderEngineFactory() {
   var LOOKS = {
     sun: { light: {}, dark: {} },
     snow: {
-      light: { sky0: '#B9CCDD', sky1: '#EEF3F7', far: '#E4ECF2', near: '#C9D8E3', dirt: '#DCE5EC', dirtDk: '#B5C3CF', grass: '#FFFFFF', grassLt: '#F2F6FA', text: '#1F1A17', flake: '#FFFFFF', capDk: '#B8C7D3' },
-      dark: { sky0: '#141C2B', sky1: '#33415A', far: '#4A5870', near: '#5D6E86', dirt: '#8E9CAD', dirtDk: '#6F7D8E', grass: '#E3EAF1', grassLt: '#C9D3DE', text: '#F4EEE4', flake: '#E8EEF5', capDk: '#9DAABA' }
+      light: { sky0: '#B9CCDD', sky1: '#EEF3F7', far: '#E4ECF2', near: '#C9D8E3', dirt: '#DCE5EC', dirtDk: '#B5C3CF', grass: '#FFFFFF', grassLt: '#F2F6FA', text: '#1F1A17', flake: '#FFFFFF', capDk: '#B8C7D3', mtn: '#B4C6D5' },
+      dark: { sky0: '#141C2B', sky1: '#33415A', far: '#4A5870', near: '#5D6E86', dirt: '#8E9CAD', dirtDk: '#6F7D8E', grass: '#E3EAF1', grassLt: '#C9D3DE', text: '#F4EEE4', flake: '#E8EEF5', capDk: '#9DAABA', mtn: '#55657C' }
     },
     rain: {
-      light: { sky0: '#8E9BA8', sky1: '#CDD4DA', far: '#93A59D', near: '#6F8F74', dirt: '#6E4B30', dirtDk: '#553921', grass: '#2F7A30', grassLt: '#4F9B48', text: '#1F1A17', drop: 'rgba(40,60,90,0.45)', sheen: 'rgba(255,255,255,0.55)' },
-      dark: { sky0: '#151B23', sky1: '#323C49', far: '#2A3540', near: '#22362C', dirt: '#33251A', dirtDk: '#261A12', grass: '#2E6E2E', grassLt: '#4A8E44', text: '#F4EEE4', drop: 'rgba(190,210,235,0.4)', sheen: 'rgba(220,235,255,0.45)' }
+      light: { sky0: '#8E9BA8', sky1: '#CDD4DA', far: '#93A59D', near: '#6F8F74', dirt: '#6E4B30', dirtDk: '#553921', grass: '#2F7A30', grassLt: '#4F9B48', text: '#1F1A17', drop: 'rgba(40,60,90,0.45)', sheen: 'rgba(255,255,255,0.55)', mtn: '#5F737E' },
+      dark: { sky0: '#151B23', sky1: '#323C49', far: '#2A3540', near: '#22362C', dirt: '#33251A', dirtDk: '#261A12', grass: '#2E6E2E', grassLt: '#4A8E44', text: '#F4EEE4', drop: 'rgba(190,210,235,0.4)', sheen: 'rgba(220,235,255,0.45)', mtn: '#2A3440' }
     },
     night: {
-      light: { sky0: '#0A0F24', sky1: '#27325C', far: '#1B2342', near: '#17302A', dirt: '#3A2A1E', dirtDk: '#2A1E15', grass: '#2C6A2A', grassLt: '#438A3E', text: '#F4EEE4', pedal: 'rgba(255,255,255,', gauge: '#2A2F3A', post: '#AEB4BD', star: '#F4EEE4', moon: '#F2E6C4', beam: 'rgba(255,226,122,' },
-      dark: { sky0: '#06091A', sky1: '#1E2748', far: '#161D38', near: '#132823', dirt: '#2E2218', dirtDk: '#211810', grass: '#275E26', grassLt: '#3C7C37', text: '#F4EEE4', pedal: 'rgba(255,255,255,', gauge: '#2A2F3A', post: '#AEB4BD', star: '#F4EEE4', moon: '#F2E6C4', beam: 'rgba(255,226,122,' }
+      light: { sky0: '#0A0F24', sky1: '#27325C', far: '#1B2342', near: '#17302A', dirt: '#3A2A1E', dirtDk: '#2A1E15', grass: '#2C6A2A', grassLt: '#438A3E', text: '#F4EEE4', pedal: 'rgba(255,255,255,', gauge: '#2A2F3A', post: '#AEB4BD', star: '#F4EEE4', moon: '#F2E6C4', beam: 'rgba(255,226,122,', mtn: '#1D2645', tree: '#173322', treeDk: '#10261A', trunk: '#2E2018', bush: '#1B3A22', stone: '#3A3D48', stoneDk: '#2A2C35', sign: '#8A7020', signDk: '#0E0E10', fence: '#3E3024', rabbit: '#5A4E44', bird: '#C9CED6', deer: '#4E3826', deerDk: '#36261A', rock: '#4A4D58', rockDk: '#33353E', branch: '#3E2C1E' },
+      dark: { sky0: '#06091A', sky1: '#1E2748', far: '#161D38', near: '#132823', dirt: '#2E2218', dirtDk: '#211810', grass: '#275E26', grassLt: '#3C7C37', text: '#F4EEE4', pedal: 'rgba(255,255,255,', gauge: '#2A2F3A', post: '#AEB4BD', star: '#F4EEE4', moon: '#F2E6C4', beam: 'rgba(255,226,122,', mtn: '#1D2645', tree: '#173322', treeDk: '#10261A', trunk: '#2E2018', bush: '#1B3A22', stone: '#3A3D48', stoneDk: '#2A2C35', sign: '#8A7020', signDk: '#0E0E10', fence: '#3E3024', rabbit: '#5A4E44', bird: '#C9CED6', deer: '#4E3826', deerDk: '#36261A', rock: '#4A4D58', rockDk: '#33353E', branch: '#3E2C1E' }
     }
   };
   function look(scene, dark) { return LOOKS[sceneOf(scene)][dark ? 'dark' : 'light']; }
 
-  return { SCENE_IDS: SCENE_IDS, sceneOf: sceneOf, grip: grip, look: look, DT: DT, courseSeed: courseSeed, WR: WR, START: START, HEAD: HEAD, HEAD_R: HEAD_R, ANCH: ANCH, newGame: newGame, step: step, ground: ground, height: height, pickups: pickups, fuelAt: fuelAt, world: world, headPos: headPos, snapshot: snapshot, restore: restore, metres: metres, speedOf: speedOf, FUEL_PRICE: FUEL_PRICE, FUEL_BUY: FUEL_BUY, FUEL_LOW: FUEL_LOW, fuelOffered: fuelOffered, refuel: refuel, hudLayout: hudLayout, dialFrac: dialFrac, botControl: botControl, hard: hard, maxSlope: maxSlope };
+  return { SCENE_IDS: SCENE_IDS, sceneOf: sceneOf, grip: grip, look: look, DT: DT, courseSeed: courseSeed, WR: WR, START: START, HEAD: HEAD, HEAD_R: HEAD_R, ANCH: ANCH, newGame: newGame, step: step, ground: ground, height: height, pickups: pickups, fuelAt: fuelAt, world: world, headPos: headPos, snapshot: snapshot, restore: restore, metres: metres, speedOf: speedOf, FUEL_PRICE: FUEL_PRICE, FUEL_BUY: FUEL_BUY, FUEL_LOW: FUEL_LOW, fuelOffered: fuelOffered, refuel: refuel, hudLayout: hudLayout, dialFrac: dialFrac, botControl: botControl, hard: hard, maxSlope: maxSlope, bumps: bumps, scenery: scenery, animals: animals, animalAt: animalAt, BUMP_GAP: BUMP_GAP, BUMP_FLAT: BUMP_FLAT, BUMP_CAN: BUMP_CAN };
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = HillriderEngineFactory;
 /* ==== ENGINE END ==== */
@@ -663,6 +744,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     if (!ev.length) return;
     if (ev.indexOf('coin') >= 0) C.audio.sfx('tap');
     if (ev.indexOf('fuel') >= 0) C.feedback('good');
+    if (ev.indexOf('bump') >= 0 && ev.indexOf('land') < 0) C.feedback('thud');
     if (ev.indexOf('flip') >= 0) { flipPending = true; C.feedback('whoosh'); }
     if (ev.indexOf('land') >= 0) {
       C.feedback('thud');
@@ -724,9 +806,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
   function basePalette() {
     return dark()
       ? { sky0: '#121A30', sky1: '#2B3354', far: '#26314A', near: '#1F3A2C', dirt: '#3B2A1E', dirtDk: '#2C1F16', grass: '#3F8A3A', grassLt: '#5FA954', body: '#E0603A', bodyDk: '#A8401F', cage: '#C9CED6', tyre: '#0E0E10', hub: '#9AA1AB', skin: '#E8B98F', helmet: '#F2C230', can: '#E04236', canDk: '#9E2A22', coin: '#F2C230', coinDk: '#B88A12', post: '#C9CED6', text: '#F4EEE4', pedal: 'rgba(255,255,255,', gauge: '#2A2F3A',
-          skinDk: '#C99A70', shirt: '#4FB07D', shirtDk: '#3A8A60', legs: '#3A4868', cap: '#4A78C8', mouth: '#8A4A33', eye: '#1A1A1A', steer: '#AEB4BD', tread: '#3A3E45', lamp: '#FFE27A', exhaust: '#8B919A', stripe: '#F4EEE4' }
+          skinDk: '#C99A70', shirt: '#4FB07D', shirtDk: '#3A8A60', legs: '#3A4868', cap: '#4A78C8', mouth: '#8A4A33', eye: '#1A1A1A', steer: '#AEB4BD', tread: '#3A3E45', lamp: '#FFE27A', exhaust: '#8B919A', stripe: '#F4EEE4',
+          mtn: '#3A4766', tree: '#2C6B34', treeDk: '#1F5128', trunk: '#5A3E28', bush: '#346E30', stone: '#6E7079', stoneDk: '#55575F', sign: '#D9A417', signDk: '#1A1A1A', fence: '#7A5C40', rabbit: '#B49A80', bird: '#C9CED6', deer: '#9A6A3E', deerDk: '#6E4A2A', branch: '#6B4A2E', rock: '#8D8F94', rockDk: '#5E6066' }
       : {sky0: '#A9DCF2', sky1: '#F4F8EE', far: '#B9D7C2', near: '#8DBF8F', dirt: '#9A6B45', dirtDk: '#7A5233', grass: '#3E9C3A', grassLt: '#6CC25A', body: '#D94F2B', bodyDk: '#9E3418', cage: '#4A505A', tyre: '#1A1A1C', hub: '#B8BEC6', skin: '#E3AE82', helmet: '#E8B21A', can: '#D8382C', canDk: '#8E231B', coin: '#F0BC1C', coinDk: '#A67C0A', post: '#5A5F68', text: '#1F1A17', pedal: 'rgba(31,26,23,', gauge: '#E9E2D6',
-          skinDk: '#C4906A', shirt: '#3E9C6A', shirtDk: '#2C7550', legs: '#2F3B57', cap: '#2D5BA8', mouth: '#8A4A33', eye: '#1A1A1A', steer: '#22262C', tread: '#44484E', lamp: '#FFE27A', exhaust: '#8B919A', stripe: '#FFFFFF' };
+          skinDk: '#C4906A', shirt: '#3E9C6A', shirtDk: '#2C7550', legs: '#2F3B57', cap: '#2D5BA8', mouth: '#8A4A33', eye: '#1A1A1A', steer: '#22262C', tread: '#44484E', lamp: '#FFE27A', exhaust: '#8B919A', stripe: '#FFFFFF',
+          mtn: '#7F9BB0', tree: '#2F7A3A', treeDk: '#245E2D', trunk: '#6B4A2E', bush: '#3E8A3C', stone: '#9A9CA2', stoneDk: '#7A7C82', sign: '#E8B21A', signDk: '#1F1A17', fence: '#8A6A48', rabbit: '#A88B6E', bird: '#3B3F48', deer: '#9A6A3E', deerDk: '#6E4A2A', branch: '#6B4A2E', rock: '#8D8F94', rockDk: '#6C6E73' };
   }
 
   function size() {
@@ -764,12 +848,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     sky.addColorStop(0, P.sky0); sky.addColorStop(1, P.sky1);
     g.fillStyle = sky; g.fillRect(0, 0, Z.w, Z.h);
     if (S.scene === 'night') nightSky(g, Z, P);
-    // two rows of hills far off, moving slower than the road
-    backHills(g, Z, P.far, 0.15, Z.h * 0.62, Z.h * 0.12, 0.011);
+    // three ranges of mountains, hazier the further they are, then the near hills (#806)
+    mountains(g, Z, P);
     backHills(g, Z, P.near, 0.35, Z.h * 0.76, Z.h * 0.1, 0.019);
 
     // the world in metres, y up
     g.setTransform(dpr * ppm, 0, 0, -dpr * ppm, dpr * (ox - cam.x * ppm), dpr * (oy + cam.y * ppm));
+    roadside(g, P, x0, x1);
     g.beginPath();
     var stepX = 0.5, x;
     g.moveTo(x0, yLow);
@@ -802,6 +887,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
       for (var r = 0; r < 3; r++) for (var c = 0; c < 4; c++) { g.fillStyle = (r + c) % 2 ? '#FFFFFF' : '#1A1A1A'; g.fillRect(fx + 0.06 + c * 0.35, fy + 2.15 + r * 0.35, 0.35, 0.35); }
     }
 
+    E.bumps(S, x0, x1).forEach(function (b) { bump(g, P, b); });
     E.pickups(S, x0, x1).forEach(function (p) {
       if (p.kind === 'fuel') {
         fuelCan(g, P, p.x, p.y, 1, 1);
@@ -856,7 +942,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
       g.globalAlpha = 0.45 + 0.5 * frac(i * 0.271); g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
     }
     g.globalAlpha = 1;
-    var mr = Math.min(Z.w, Z.h) * 0.05, mx = Z.w * 0.66, my = Z.h * 0.4;
+    var mr = Math.min(Z.w, Z.h) * 0.05, mx = Z.w * 0.75, my = Z.h * 0.25;
     // a crescent: the disc with a smaller one cut out, so the sky shows through the cut
     g.save(); g.beginPath(); g.rect(0, 0, Z.w, Z.h); g.arc(mx + mr * 0.45, my - mr * 0.2, mr * 0.85, 0, Math.PI * 2); g.clip('evenodd');
     g.fillStyle = P.moon; g.beginPath(); g.arc(mx, my, mr, 0, Math.PI * 2); g.fill();
@@ -868,6 +954,128 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HillriderE
     var beam = g.createLinearGradient(1.3, 0, 8.5, 0);
     beam.addColorStop(0, P.beam + '0.5)'); beam.addColorStop(1, P.beam + '0)');
     g.fillStyle = beam; g.beginPath(); g.moveTo(1.3, 0.2); g.lineTo(8.5, 1.6); g.lineTo(8.5, -2.4); g.lineTo(1.3, 0.05); g.closePath(); g.fill();
+    g.restore();
+  }
+  /* ---------------------------------------------------- the world (#806) */
+
+  // a colour part of the way to another, for the haze of distance
+  function mixHex(a, b, t) {
+    var A = parseInt(a.slice(1), 16), B = parseInt(b.slice(1), 16), o = '#';
+    for (var sh = 16; sh >= 0; sh -= 8) { var v = Math.round(((A >> sh) & 255) * (1 - t) + ((B >> sh) & 255) * t); o += (v < 16 ? '0' : '') + v.toString(16); }
+    return o;
+  }
+  // Three ranges of peaks, each slower and hazier than the one in front, so the sky is full
+  // and the depth reads. One path of a point every 6 px per range.
+  var RANGES = [{ sp: 0.04, base: 0.5, amp: 0.3, f: 0.0042, haze: 0.62, o: 0 }, { sp: 0.08, base: 0.58, amp: 0.24, f: 0.0065, haze: 0.4, o: 2.1 }, { sp: 0.16, base: 0.66, amp: 0.17, f: 0.0105, haze: 0.18, o: 4.7 }];
+  function mountains(g, Z, P) {
+    for (var r = 0; r < RANGES.length; r++) {
+      var L = RANGES[r], off = cam.x * 30 * L.sp, base = Z.h * L.base + cam.y * L.sp * 2;
+      g.beginPath(); g.moveTo(0, Z.h);
+      for (var px = 0; px <= Z.w + 6; px += 6) {
+        var t = (px + off) * L.f + L.o;
+        // ridges: peaks from folded waves, softened by a wider one
+        var hgt = 0.55 * (1 - Math.abs(Math.sin(t))) + 0.3 * (1 - Math.abs(Math.sin(t * 2.3 + 1.1))) + 0.15 * Math.sin(t * 0.37 + 0.5);
+        g.lineTo(px, base - Z.h * L.amp * hgt);
+      }
+      g.lineTo(Z.w, Z.h); g.closePath();
+      g.fillStyle = mixHex(P.mtn, P.sky1, L.haze); g.fill();
+    }
+  }
+  // Trees, bushes, stones, signs and fences beside the road, and the animals around them,
+  // all from the seed (E.scenery). They stand a little behind the road's edge, so the road
+  // covers their feet and they never look as if they were on it.
+  var SINK = 0.35;
+  function roadside(g, P, x0, x1) {
+    var snowy = S.scene === 'snow', wet = !!P.sheen;
+    E.scenery(S.seed, x0 - 3, x1 + 3).forEach(function (o) {
+      var y = E.height(S, o.x) - SINK, k = o.s;
+      if (o.kind === 'tree') tree(g, P, o.x, y, k, o.v < 0.5, snowy);
+      else if (o.kind === 'bush') {
+        g.fillStyle = P.bush;
+        g.beginPath(); g.arc(o.x - 0.35 * k, y + 0.4 * k, 0.38 * k, 0, Math.PI * 2); g.arc(o.x + 0.3 * k, y + 0.42 * k, 0.4 * k, 0, Math.PI * 2); g.arc(o.x, y + 0.7 * k, 0.42 * k, 0, Math.PI * 2); g.fill();
+        if (snowy) { g.fillStyle = P.grass; g.beginPath(); g.ellipse(o.x, y + 1.05 * k, 0.42 * k, 0.12 * k, 0, 0, Math.PI * 2); g.fill(); }
+      } else if (o.kind === 'stone') {
+        g.fillStyle = P.stoneDk; g.beginPath(); g.ellipse(o.x, y + 0.3 * k, 0.6 * k, 0.45 * k, 0, 0, Math.PI * 2); g.fill();
+        g.fillStyle = P.stone; g.beginPath(); g.ellipse(o.x - 0.08 * k, y + 0.36 * k, 0.48 * k, 0.36 * k, 0, 0, Math.PI * 2); g.fill();
+        if (snowy) { g.fillStyle = P.grass; g.beginPath(); g.ellipse(o.x - 0.05 * k, y + 0.68 * k, 0.4 * k, 0.12 * k, 0, 0, Math.PI * 2); g.fill(); }
+        if (wet) { g.strokeStyle = P.sheen; g.lineWidth = 0.06; g.beginPath(); g.arc(o.x - 0.1 * k, y + 0.36 * k, 0.32 * k, 1.9, 2.8); g.stroke(); }
+      } else if (o.kind === 'sign') {
+        g.fillStyle = P.fence; g.fillRect(o.x - 0.05, y, 0.1, 1.9);
+        // a warning diamond with a hill on it
+        g.save(); g.translate(o.x, y + 1.95); g.rotate(Math.PI / 4);
+        g.fillStyle = P.signDk; g.fillRect(-0.36, -0.36, 0.72, 0.72); g.fillStyle = P.sign; g.fillRect(-0.3, -0.3, 0.6, 0.6); g.restore();
+        g.fillStyle = P.signDk; g.beginPath(); g.moveTo(o.x - 0.24, y + 1.82); g.lineTo(o.x + 0.24, y + 1.82); g.lineTo(o.x + 0.24, y + 2.08); g.closePath(); g.fill();
+        if (snowy) { g.fillStyle = P.grass; g.fillRect(o.x - 0.12, y + 2.42, 0.24, 0.06); }
+      } else if (o.kind === 'fence') {
+        g.strokeStyle = P.fence; g.lineCap = 'round';
+        var ys = [0, 1, 2, 3].map(function (i) { return E.height(S, o.x + i * 1.2) - SINK; });
+        g.lineWidth = 0.12; g.beginPath();
+        ys.forEach(function (yy, i) { g.moveTo(o.x + i * 1.2, yy); g.lineTo(o.x + i * 1.2, yy + 1.05); }); g.stroke();
+        g.lineWidth = 0.08; g.beginPath();
+        [0.5, 0.88].forEach(function (h) { ys.forEach(function (yy, i) { if (i) g.lineTo(o.x + i * 1.2, yy + h); else g.moveTo(o.x, yy + h); }); }); g.stroke();
+      }
+    });
+    var t = C.ui.reduceMotion() ? 0 : clock;
+    E.animals(S.seed, x0 - 8, x1 + 8).forEach(function (A) {
+      var at = E.animalAt(A, t), y = E.height(S, at.x) - SINK + at.up;
+      animal(g, P, A.kind, at.x, y, at.dir, t + A.ph);
+    });
+  }
+  function tree(g, P, x, y, k, pine, snowy) {
+    g.fillStyle = P.trunk; g.fillRect(x - 0.1 * k, y, 0.2 * k, 1.1 * k);
+    g.fillStyle = P.tree;
+    if (pine) {
+      for (var i = 0; i < 3; i++) {
+        var b = y + (0.8 + i * 0.75) * k, w = (1.0 - i * 0.24) * k;
+        g.fillStyle = i % 2 ? P.treeDk : P.tree;
+        g.beginPath(); g.moveTo(x - w, b); g.lineTo(x + w, b); g.lineTo(x, b + 1.2 * k); g.closePath(); g.fill();
+        if (snowy) { g.fillStyle = P.grass; g.beginPath(); g.moveTo(x - w * 0.4, b + 0.72 * k); g.lineTo(x + w * 0.4, b + 0.72 * k); g.lineTo(x, b + 1.2 * k); g.closePath(); g.fill(); }
+      }
+    } else {
+      g.fillStyle = P.treeDk; g.beginPath(); g.arc(x + 0.3 * k, y + 1.6 * k, 0.7 * k, 0, Math.PI * 2); g.fill();
+      g.fillStyle = P.tree; g.beginPath(); g.arc(x - 0.25 * k, y + 1.75 * k, 0.75 * k, 0, Math.PI * 2); g.arc(x + 0.1 * k, y + 2.25 * k, 0.65 * k, 0, Math.PI * 2); g.fill();
+      if (snowy) { g.fillStyle = P.grass; g.beginPath(); g.ellipse(x - 0.05 * k, y + 2.75 * k, 0.5 * k, 0.16 * k, 0, 0, Math.PI * 2); g.ellipse(x - 0.6 * k, y + 2.2 * k, 0.32 * k, 0.11 * k, 0, 0, Math.PI * 2); g.fill(); }
+    }
+  }
+  // a rabbit hopping, a bird flying, a deer grazing; dir is the way it faces
+  function animal(g, P, kind, x, y, dir, t) {
+    g.save(); g.translate(x, y); g.scale(dir, 1);
+    if (kind === 'rabbit') {
+      g.fillStyle = P.rabbit;
+      g.beginPath(); g.ellipse(0, 0.22, 0.28, 0.2, 0, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.arc(0.26, 0.38, 0.13, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.ellipse(0.24, 0.6, 0.04, 0.16, -0.2, 0, Math.PI * 2); g.ellipse(0.32, 0.6, 0.04, 0.16, 0.15, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#FFFFFF'; g.beginPath(); g.arc(-0.27, 0.27, 0.07, 0, Math.PI * 2); g.fill();
+    } else if (kind === 'bird') {
+      var fl = Math.sin(t * 9) * 0.22;
+      g.strokeStyle = P.bird; g.lineWidth = 0.08; g.lineCap = 'round'; g.lineJoin = 'round';
+      g.beginPath(); g.moveTo(-0.45, 0.1 + fl); g.lineTo(0, 0); g.lineTo(0.45, 0.1 + fl); g.stroke();
+    } else {
+      g.fillStyle = P.deer; g.strokeStyle = P.deerDk; g.lineWidth = 0.09; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(-0.45, 0.05); g.lineTo(-0.45, 0.7); g.moveTo(-0.25, 0.05); g.lineTo(-0.28, 0.7); g.moveTo(0.3, 0.05); g.lineTo(0.3, 0.7); g.moveTo(0.48, 0.05); g.lineTo(0.5, 0.7); g.stroke();
+      g.beginPath(); g.ellipse(0, 0.85, 0.62, 0.26, 0, 0, Math.PI * 2); g.fill();
+      // the head goes down to graze and up again
+      var nod = 0.5 + 0.5 * Math.sin(t * 0.7), hx = 0.72, hy = 0.95 + 0.55 * nod;
+      g.lineWidth = 0.16; g.strokeStyle = P.deer; g.beginPath(); g.moveTo(0.45, 0.95); g.lineTo(hx, hy); g.stroke();
+      g.beginPath(); g.ellipse(hx + 0.12, hy, 0.18, 0.1, 0.3 - 0.6 * nod, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = P.deerDk; g.lineWidth = 0.05; g.beginPath(); g.moveTo(hx, hy + 0.08); g.lineTo(hx - 0.08, hy + 0.36); g.moveTo(hx - 0.04, hy + 0.24); g.lineTo(hx - 0.2, hy + 0.3); g.stroke();
+    }
+    g.restore();
+  }
+  // a rock or a branch lying on the road (E.bumps): it jolts the car, no more
+  function bump(g, P, b) {
+    var y = E.height(S, b.x), s = E.ground(S, b.x).s;
+    g.save(); g.translate(b.x, y); g.rotate(Math.atan(s));
+    if (b.kind === 'rock') {
+      g.fillStyle = P.rockDk; g.beginPath(); g.ellipse(0, 0, 0.36, 0.26, 0, 0, Math.PI); g.fill();
+      g.fillStyle = P.rock; g.beginPath(); g.ellipse(-0.04, 0.02, 0.28, 0.2, 0, 0, Math.PI); g.fill();
+      if (P.sheen) { g.strokeStyle = P.sheen; g.lineWidth = 0.04; g.beginPath(); g.arc(-0.06, 0.02, 0.17, 1.9, 2.7); g.stroke(); }
+      if (S.scene === 'snow') { g.fillStyle = P.grass; g.beginPath(); g.ellipse(-0.04, 0.18, 0.2, 0.06, 0, 0, Math.PI * 2); g.fill(); }
+    } else {
+      g.strokeStyle = P.branch; g.lineCap = 'round';
+      g.lineWidth = 0.13; g.beginPath(); g.moveTo(-0.6, 0.07); g.lineTo(0.6, 0.1); g.stroke();
+      g.lineWidth = 0.06; g.beginPath(); g.moveTo(0.1, 0.1); g.lineTo(0.35, 0.32); g.moveTo(-0.25, 0.08); g.lineTo(-0.42, 0.26); g.stroke();
+    }
     g.restore();
   }
   function backHills(g, Z, color, speed, base, amp, freq) {
