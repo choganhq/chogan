@@ -407,7 +407,7 @@ module.exports = function (T) {
     ok(/ctx\.button\(\{ icon: 'gear'/.test(html) && /C\.ui\.segmented\(DIFFS\.map/.test(html) && /ctx\.store\.set\('prefs', prefs\)/.test(html) && /prefs = \{ diff: 'medium' \}/.test(html), 'the difficulty is picked behind a gear, saved, Medium by default');
     const help = (html.match(/function showHelp\(\) \{[\s\S]*?\n {2}\}/) || [''])[0];
     ok(help.length > 0 && !/segmented|DIFFS|difficulty/.test(help), 'and never inside the help');
-    ok(/E\.newGame\(rngFor\(seed\), !!dailyDate, prefs\.diff\)/.test(html) && /C\.t\('dailyMed'\)/.test(html), 'the daily ride says it is always Medium');
+    ok(/E\.newGame\(rngFor\(seed\), !!dailyDate, prefs\.diff[,)]/.test(html) && /C\.t\('dailyMed'\)/.test(html), 'the daily ride says it is always Medium');
     ok(/e\.key === 'ArrowUp' \|\| C\.keyIs\(e, 'w'\)/.test(html) && /addEventListener\('keyup'/.test(html) && /onPedal\(e\)/.test(html) && /pedal\(g, P, font\)/.test(html), 'the gas is a pedal on screen and Up or W on a keyboard, released on key up');
     ok(/C\.t\('lvlN'/.test(html) && /e\.t === 'level'/.test(html) && /C\.t\('lvlUp'/.test(html), 'the level is on the HUD and pops when it changes');
     ok(/c\.ph === 1 \|\| c\.ph === 2\) indicator\(/.test(html), 'a lane changer is drawn with its indicator before and while it moves');
