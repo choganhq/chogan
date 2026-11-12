@@ -57,6 +57,17 @@ function MotoRushEngineFactory() {
   // than NEAR_X (a car in the next lane, ridden past centred, is 1.0 away and does not count)
   var HIT_X = 0.5, NEAR_X = 0.9, COMBO_T = 240, COMBO_MAX = 8, NEAR_PTS = 25;
   var DAILY_P = 5000, HORIZON = 300, PICK_ADD = 0.34, FIRST = 90;
+  // Scenes (#813). grip scales the steering speed, so on a wet or snowy road a lane change
+  // takes longer; ov is how far past the new lane the bike slides before it comes back
+  // (kept well under 1 − HIT_X, so it never reaches a car in the lane beyond). At night
+  // the rider sees only view metres ahead, so the generator adds react seconds to every
+  // gap. The daily ride is always sunny.
+  var SCENES = {
+    sunny: { grip: 1, ov: 0, react: 0, view: 0 },
+    rainy: { grip: 0.8, ov: 0.12, react: 0, view: 0 },
+    snowy: { grip: 0.65, ov: 0.24, react: 0, view: 0 },
+    night: { grip: 1, ov: 0, react: 0.15, view: 110 }
+  };
   var LEN = { car: 4.4, van: 5.6, truck: 9.5 };
 
   function rand(S) {
@@ -66,6 +77,9 @@ function MotoRushEngineFactory() {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   }
   function cfg(diff) { return DIFF[diff] || DIFF.medium; }
+  function sceneOf(sc) { return SCENES[sc] || SCENES.sunny; }
+  // lanes a second the bike steers at in a scene
+  function laneSpeed(sc) { return LANE_SPEED * sceneOf(sc).grip; }
   function base(p, diff) { var c = cfg(diff); return Math.min(c.vmax, c.v0 + (c.vmax - c.v0) * Math.max(0, p) / c.ramp); }
   // where the speed is heading, and the speed the bike really rides at
   function target(S) { return base(S.p, S.diff) + (S.gas ? GAS_V : 0) + (S.boostT > 0 ? BOOST_V : 0); }
@@ -84,21 +98,26 @@ function MotoRushEngineFactory() {
   function goal(S) { return S.daily ? DAILY_P : Infinity; }
   // how far behind a wave the next one must start so that a rider who waits for the
   // first to pass can still reach the next free lane in time, even with gas and nitro
-  function need(from, to, y, diff) {
-    return BIKE_L + (Math.abs(from - to) / LANE_SPEED + cfg(diff).react) * closing(y + 200, diff) + 2;
+  // (with the overshoot of a slippery scene counted as part of the way, in case the bike
+  // is still sliding back from it)
+  function need(from, to, y, diff, sc) {
+    var Q = sceneOf(sc);
+    return BIKE_L + ((Math.abs(from - to) + Q.ov) / laneSpeed(sc) + cfg(diff).react + Q.react) * closing(y + 200, diff) + 2;
   }
   // How far ahead of the bike a lane changer starts to blink. Blinking and sliding take a
   // fixed time; after that, a rider at the fastest closing speed still has its reaction
   // time and one lane change to step into the lane the car just left, which is always
   // free. A slower rider only gets more room.
-  function warnAt(y, diff) {
-    return ((BLINK + MOVE) * DT + 1 / LANE_SPEED + cfg(diff).react) * closing(y, diff) + BIKE_L + 2;
+  function warnAt(y, diff, sc) {
+    var Q = sceneOf(sc);
+    return ((BLINK + MOVE) * DT + (1 + Q.ov) / laneSpeed(sc) + cfg(diff).react + Q.react) * closing(y, diff) + BIKE_L + 2;
   }
 
-  function fromSeed(seed, daily, diff) {
+  function fromSeed(seed, daily, diff, scene) {
     diff = daily || !DIFF[diff] ? 'medium' : diff;
+    scene = daily || !SCENES[scene] ? 'sunny' : scene;
     var S = {
-      r: seed >>> 0, daily: !!daily, diff: diff, p: 0, d: 0, x: START_LANE, tl: START_LANE,
+      r: seed >>> 0, daily: !!daily, diff: diff, scene: scene, p: 0, d: 0, x: START_LANE, tl: START_LANE, ox: 0,
       bar: 0, boostT: 0, gas: false, combo: 0, comboT: 0, bestCombo: 0, nears: 0, picks: 0,
       score: 0, tick: 0, v: DIFF[diff].v0, top: DIFF[diff].v0, lvl: 1, over: false, won: false, hit: null,
       waves: [], items: [], ny: FIRST, nf: 0, ev: []
@@ -107,7 +126,7 @@ function MotoRushEngineFactory() {
     ensure(S);
     return S;
   }
-  function newGame(rnd, daily, diff) { return fromSeed(Math.floor(rnd() * 4294967296), daily, diff); }
+  function newGame(rnd, daily, diff, scene) { return fromSeed(Math.floor(rnd() * 4294967296), daily, diff, scene); }
 
   // One wave: one to three cars side by side (staggered a little), always leaving the
   // lane f free. The next wave's free lane is drawn now, so the gap after this wave
@@ -141,13 +160,13 @@ function MotoRushEngineFactory() {
       }
       if (opts.length) {
         var pick = opts[Math.floor(rand(S) * opts.length)], lc = cars[pick[0]];
-        lc.to = pick[1]; lc.ph = 0; lc.k = 0; lc.at = Math.round(warnAt(y + lc.o, S.diff) * 10) / 10;
+        lc.to = pick[1]; lc.ph = 0; lc.k = 0; lc.at = Math.round(warnAt(y + lc.o, S.diff, S.scene) * 10) / 10;
       }
     }
     S.waves.push({ y: y, span: span, f: f, cars: cars });
     if (rand(S) < 0.3) S.items.push({ lane: f, y: y + span / 2, got: false });
     var gs = 3.2 - 1.6 * t;
-    var gap = Math.max(need(f, S.nf, y + span, S.diff), gs * (base(y + span, S.diff) - TV) * (0.85 + 0.4 * rand(S)));
+    var gap = Math.max(need(f, S.nf, y + span, S.diff, S.scene), gs * (base(y + span, S.diff) - TV) * (0.85 + 0.4 * rand(S)));
     // rounded up: rounding down could take a few centimetres off the margin need() asks for
     S.ny = Math.ceil((y + span + gap) * 10) / 10;
   }
@@ -163,6 +182,8 @@ function MotoRushEngineFactory() {
     var nt = Math.max(0, Math.min(LANES - 1, S.tl + (dir > 0 ? 1 : -1)));
     if (nt === S.tl) return false;
     S.tl = nt;
+    // on a slippery road the bike runs a little past the lane before it settles (#813)
+    S.ox = (dir > 0 ? 1 : -1) * sceneOf(S.scene).ov;
     return true;
   }
   function gas(S, on) { if (!S.over) S.gas = !!on; }
@@ -190,10 +211,13 @@ function MotoRushEngineFactory() {
     changers(S);
     var v = speed(S), rel = v - TV;
     S.top = Math.max(S.top, v);
-    // steering: the bike slides toward its lane
-    if (S.x < S.tl) S.x = Math.min(S.tl, S.x + LANE_SPEED * DT);
-    else if (S.x > S.tl) S.x = Math.max(S.tl, S.x - LANE_SPEED * DT);
+    // steering: the bike slides toward its lane at the scene's grip, past it by the
+    // overshoot, and back
+    var ls = laneSpeed(S.scene), aim = Math.round((S.tl + S.ox) * 1e6) / 1e6;
+    if (S.x < aim) S.x = Math.min(aim, S.x + ls * DT);
+    else if (S.x > aim) S.x = Math.max(aim, S.x - ls * DT);
     S.x = Math.round(S.x * 1e6) / 1e6;
+    if (S.ox && S.x === aim) S.ox = 0;
     S.p += rel * DT;
     S.d += v * DT;
     var mult = 1 + 0.25 * Math.min(S.combo, COMBO_MAX);
@@ -262,7 +286,9 @@ function MotoRushEngineFactory() {
     var keys = ['r', 'p', 'd', 'x', 'tl', 'bar', 'boostT', 'combo', 'comboT', 'score', 'tick', 'ny', 'nf'];
     for (var i = 0; i < keys.length; i++) if (!num(o[keys[i]])) return null;
     if (!Array.isArray(o.waves) || !Array.isArray(o.items)) return null;
-    if (o.tl < 0 || o.tl >= LANES || o.tl !== Math.floor(o.tl) || o.x < 0 || o.x > LANES - 1 || o.nf < 0 || o.nf >= LANES) return null;
+    // x may sit up to half a lane past the outer lanes while the bike slides back from an overshoot
+    if (o.tl < 0 || o.tl >= LANES || o.tl !== Math.floor(o.tl) || o.x < -0.5 || o.x > LANES - 0.5 || o.nf < 0 || o.nf >= LANES) return null;
+    if (o.ox !== undefined && (!num(o.ox) || Math.abs(o.ox) > 0.5)) return null;
     for (i = 0; i < o.waves.length; i++) {
       var w = o.waves[i];
       if (!w || !num(w.y) || !num(w.span) || !Array.isArray(w.cars)) return null;
@@ -279,6 +305,9 @@ function MotoRushEngineFactory() {
     S.daily = !!S.daily; S.over = !!S.over; S.won = !!S.won;
     // saves from before #782/#783 ride on medium with the gas released
     if (!DIFF[S.diff] || S.daily) S.diff = 'medium';
+    // saves from before #813 ride in the sun
+    if (!SCENES[S.scene] || S.daily) S.scene = 'sunny';
+    if (!num(S.ox)) S.ox = 0;
     S.gas = false;
     S.waves.forEach(function (w) { w.cars.forEach(function (q) { if (q.x === undefined) q.x = q.lane; }); });
     ['bestCombo', 'nears', 'picks'].forEach(function (k) { if (!num(S[k])) S[k] = 0; });
@@ -294,7 +323,7 @@ function MotoRushEngineFactory() {
     LANES: LANES, DT: DT, START_LANE: START_LANE, BIKE_L: BIKE_L, DAILY_P: DAILY_P, HIT_X: HIT_X, NEAR_X: NEAR_X,
     LANE_SPEED: LANE_SPEED, REACT: REACT, TV: TV, BOOST_V: BOOST_V, BOOST_T: BOOST_T, COMBO_T: COMBO_T, COMBO_MAX: COMBO_MAX,
     PICK_ADD: PICK_ADD, LEN: LEN, DIFF: DIFF, GAS_V: GAS_V, GAS_MULT: GAS_MULT, BLINK: BLINK, MOVE: MOVE,
-    ACC: ACC, DEC: DEC, target: target,
+    ACC: ACC, DEC: DEC, target: target, SCENES: SCENES, laneSpeed: laneSpeed,
     base: base, speed: speed, need: need, warnAt: warnAt, closing: closing, topSpeed: topSpeed, levelAt: levelAt,
     newGame: newGame, fromSeed: fromSeed, step: step, steer: steer, gas: gas,
     drain: drain, snapshot: snapshot, restore: restore, clone: clone, ensure: ensure
@@ -323,6 +352,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     mood: 'dots',
     strings: {
       fa: {
+        sceneL: 'هوا', sceneSunny: 'آفتابی', sceneRainy: 'بارانی', sceneSnowy: 'برفی', sceneNight: 'شب', gripN: 'چسبندگی {n}٪', dailySunny: 'هوای موتورسوار روزانه همیشه آفتابی است.', sceneHint: 'در باران و برف بانده عوض کردن کندتر است و موتور کمی از بانده رد می‌شود و برمی‌گردد؛ شب‌ها جاده‌ی جلو را کوتاه‌تر می‌بینی.',
         scene: 'موتورسوار در جاده‌ای چهاربانده میان ماشین‌ها', hint: 'انگشت را بکش یا سمت چپ و راست را لمس کن تا بانده عوض کنی. پدال گاز را نگه دار تا تندتر بروی.', tapStart: 'برای حرکت لمس کن',
         gasL: 'گاز', kGas: 'گاز', lvlN: 'مرحله‌ی {n}', lvlUp: 'مرحله‌ی {n}!', lvlL: 'مرحله', dailyMed: 'موتورسوار روزانه همیشه روی سختی متوسط است و برای همه یکسان.',
         pausedTxt: 'مکث', ptsN: 'امتیاز: {n}', bestN: 'بهترین: {n}', kmh: 'کیلومتر/ساعت', kmN: '{n} کیلومتر', crash: 'تصادف!', finishLine: 'به خط پایان رسیدی!',
@@ -334,6 +364,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         tutTitle3: 'نیترو', tutText3: 'قوطی‌های زرد را بردار. نوار که پر شد، نیترو سرعت و امتیازت را بالا می‌برد.'
       },
       en: {
+        sceneL: 'Weather', sceneSunny: 'Sunny', sceneRainy: 'Rain', sceneSnowy: 'Snow', sceneNight: 'Night', gripN: 'Grip {n}%', dailySunny: 'The daily ride is always sunny.', sceneHint: 'In rain and snow a lane change is slower and the bike slides a little past the lane; at night you see less of the road ahead.',
         scene: 'A motorbike on a four-lane road among the traffic', hint: 'Swipe, or tap the left or right side, to change lanes. Hold the pedal to speed up.', tapStart: 'Tap to ride',
         gasL: 'GAS', kGas: 'Gas', lvlN: 'Level {n}', lvlUp: 'Level {n}!', lvlL: 'Level', dailyMed: 'The daily ride is always on Medium, the same for everyone.',
         pausedTxt: 'Paused', ptsN: 'Score: {n}', bestN: 'Best: {n}', kmh: 'km/h', kmN: '{n} km', crash: 'Crash!', finishLine: 'You reached the finish!',
@@ -345,6 +376,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         tutTitle3: 'Nitro', tutText3: 'Pick up the yellow cans. When the bar is full, nitro raises your speed and your score.'
       },
       pl: {
+        sceneL: 'Pogoda', sceneSunny: 'Słońce', sceneRainy: 'Deszcz', sceneSnowy: 'Śnieg', sceneNight: 'Noc', gripN: 'Przyczepność {n}%', dailySunny: 'Jazda dnia jest zawsze w słońcu.', sceneHint: 'W deszczu i śniegu zmiana pasa trwa dłużej, a motocykl lekko wyjeżdża za pas; nocą widzisz mniej drogi przed sobą.',
         scene: 'Motocykl na czteropasmowej drodze wśród samochodów', hint: 'Przesuń palcem albo stuknij lewą lub prawą stronę, aby zmienić pas. Przytrzymaj pedał, aby przyspieszyć.', tapStart: 'Stuknij, aby jechać',
         gasL: 'GAZ', kGas: 'Gaz', lvlN: 'Poziom {n}', lvlUp: 'Poziom {n}!', lvlL: 'Poziom', dailyMed: 'Jazda dnia jest zawsze na poziomie Średni, taka sama dla wszystkich.',
         pausedTxt: 'Pauza', ptsN: 'Punkty: {n}', bestN: 'Najlepszy: {n}', kmh: 'km/h', kmN: '{n} km', crash: 'Kraksa!', finishLine: 'Dojechałeś do mety!',
@@ -356,6 +388,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         tutTitle3: 'Nitro', tutText3: 'Zbieraj żółte kanistry. Gdy pasek jest pełny, nitro podnosi prędkość i punkty.'
       },
       fr: {
+        sceneL: 'Météo', sceneSunny: 'Soleil', sceneRainy: 'Pluie', sceneSnowy: 'Neige', sceneNight: 'Nuit', gripN: 'Adhérence {n} %', dailySunny: 'La balade du jour est toujours au soleil.', sceneHint: 'Sous la pluie et la neige, changer de voie prend plus de temps et la moto glisse un peu au-delà de la voie ; la nuit, tu vois moins loin devant toi.',
         scene: 'Une moto sur une route à quatre voies, au milieu de la circulation', hint: 'Balaie, ou touche le côté gauche ou droit, pour changer de voie. Maintiens la pédale pour accélérer.', tapStart: 'Touche pour rouler',
         gasL: 'GAZ', kGas: 'Gaz', lvlN: 'Niveau {n}', lvlUp: 'Niveau {n} !', lvlL: 'Niveau', dailyMed: 'La balade du jour est toujours en Moyen, la même pour tous.',
         pausedTxt: 'Pause', ptsN: 'Score : {n}', bestN: 'Record : {n}', kmh: 'km/h', kmN: '{n} km', crash: 'Accident !', finishLine: 'Tu as atteint l’arrivée !',
@@ -367,6 +400,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         tutTitle3: 'Nitro', tutText3: 'Ramasse les bidons jaunes. Quand la jauge est pleine, le nitro augmente ta vitesse et ton score.'
       },
       zh: {
+        sceneL: '天气', sceneSunny: '晴天', sceneRainy: '雨天', sceneSnowy: '雪天', sceneNight: '夜晚', gripN: '抓地力 {n}%', dailySunny: '每日飞驰总是晴天。', sceneHint: '雨天和雪天换道更慢，摩托还会稍微滑过车道；夜里能看到的前方路面更短。',
         scene: '四车道公路上穿行在车流中的摩托车', hint: '滑动，或点屏幕左侧或右侧来换道。按住踏板加速。', tapStart: '点一下出发',
         gasL: '油门', kGas: '油门', lvlN: '第 {n} 关', lvlUp: '第 {n} 关！', lvlL: '关卡', dailyMed: '每日飞驰始终是中等难度，对所有人都一样。',
         pausedTxt: '已暂停', ptsN: '得分：{n}', bestN: '最佳：{n}', kmh: '公里/时', kmN: '{n} 公里', crash: '撞车了！', finishLine: '到达终点！',
@@ -378,6 +412,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         tutTitle3: '氮气', tutText3: '捡起黄色油罐。氮气条满了，速度和得分都会提高。'
       },
       de: {
+        sceneL: 'Wetter', sceneSunny: 'Sonne', sceneRainy: 'Regen', sceneSnowy: 'Schnee', sceneNight: 'Nacht', gripN: 'Grip {n} %', dailySunny: 'Die Fahrt des Tages ist immer sonnig.', sceneHint: 'Bei Regen und Schnee dauert ein Spurwechsel länger und das Motorrad rutscht etwas über die Spur hinaus; nachts siehst du weniger von der Straße vor dir.',
         scene: 'Ein Motorrad auf einer vierspurigen Straße im Verkehr', hint: 'Wische oder tippe links bzw. rechts, um die Spur zu wechseln. Halte das Pedal, um schneller zu fahren.', tapStart: 'Tippe zum Losfahren',
         gasL: 'GAS', kGas: 'Gas', lvlN: 'Stufe {n}', lvlUp: 'Stufe {n}!', lvlL: 'Stufe', dailyMed: 'Die Fahrt des Tages ist immer auf Mittel, für alle gleich.',
         pausedTxt: 'Pause', ptsN: 'Punkte: {n}', bestN: 'Bestwert: {n}', kmh: 'km/h', kmN: '{n} km', crash: 'Unfall!', finishLine: 'Du hast das Ziel erreicht!',
@@ -389,6 +424,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
         tutTitle3: 'Nitro', tutText3: 'Sammle die gelben Kanister. Ist die Leiste voll, erhöht Nitro Tempo und Punkte.'
       },
       es: {
+        sceneL: 'Tiempo', sceneSunny: 'Sol', sceneRainy: 'Lluvia', sceneSnowy: 'Nieve', sceneNight: 'Noche', gripN: 'Agarre {n} %', dailySunny: 'La carrera del día siempre es con sol.', sceneHint: 'Con lluvia y nieve cambiar de carril cuesta más y la moto se pasa un poco del carril; de noche ves menos carretera por delante.',
         scene: 'Una moto en una carretera de cuatro carriles entre el tráfico', hint: 'Desliza o toca el lado izquierdo o derecho para cambiar de carril. Mantén el pedal para acelerar.', tapStart: 'Toca para arrancar',
         gasL: 'GAS', kGas: 'Acelerar', lvlN: 'Nivel {n}', lvlUp: '¡Nivel {n}!', lvlL: 'Nivel', dailyMed: 'La carrera del día es siempre en Media, igual para todos.',
         pausedTxt: 'En pausa', ptsN: 'Puntos: {n}', bestN: 'Mejor: {n}', kmh: 'km/h', kmN: '{n} km', crash: '¡Choque!', finishLine: '¡Llegaste a la meta!',
@@ -421,6 +457,10 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
   var prefs = ctx.store.get('prefs', null);
   if (!prefs || typeof prefs !== 'object') prefs = { diff: 'medium' };
   if (DIFFS.indexOf(prefs.diff) < 0) prefs.diff = 'medium';
+  // the weather (#813), beside the difficulty and kept with it
+  var SCENE_IDS = ['sunny', 'rainy', 'snowy', 'night'];
+  if (SCENE_IDS.indexOf(prefs.scene) < 0) prefs.scene = 'sunny';
+  function sceneName(id) { return id === 'rainy' ? C.t('sceneRainy') : id === 'snowy' ? C.t('sceneSnowy') : id === 'night' ? C.t('sceneNight') : C.t('sceneSunny'); }
   // the gas: held by a finger on the pedal or by Up / W (#782)
   var gasPtr = null, keyGas = false;
 
@@ -439,11 +479,12 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
   // the daily road comes from the day, the same for everyone
   function rngFor(sd) { return dailyDate ? C.daily('motorush', dailyDate).rng : seeded(sd); }
 
-  function newRun(diff) {
+  function newRun(diff, scene) {
     if (diff) { prefs.diff = diff; ctx.store.set('prefs', prefs); }
+    if (scene) { prefs.scene = scene; ctx.store.set('prefs', prefs); }
     seed = Math.floor(Math.random() * 4294967296);
-    // the engine rides the daily on medium whatever is passed here
-    S = E.newGame(rngFor(seed), !!dailyDate, prefs.diff);
+    // the engine rides the daily on medium and in the sun whatever is passed here
+    S = E.newGame(rngFor(seed), !!dailyDate, prefs.diff, prefs.scene);
     tries++;
     startedAt = Date.now();
     ended = false; waiting = true; held = false; last = 0; acc = 0;
@@ -462,14 +503,19 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     if (dailyDate) {
       // the daily ride is the same road for everyone, so it has no choice to make
       body.appendChild(el('p', { class: 'ch-dim', text: C.t('dailyMed') }));
+      body.appendChild(el('p', { class: 'ch-dim', text: C.t('dailySunny') }));
       C.ui.modal({ title: C.t('settings'), closeButton: true, body: [body], actions: [{ label: C.t('done'), kind: 'primary' }] });
       return;
     }
     body.appendChild(C.ui.segmented(DIFFS.map(function (d) { return { value: d, label: C.t(d) }; }), pick, function (v) { pick = v; }));
+    var pickScene = prefs.scene;
+    body.appendChild(el('div', { class: 'mr-label', text: C.t('sceneL') }));
+    body.appendChild(C.ui.segmented(SCENE_IDS.map(function (id) { return { value: id, label: sceneName(id) }; }), pickScene, function (v) { pickScene = v; }));
+    body.appendChild(el('p', { class: 'ch-xs ch-dim', style: { 'text-align': 'center', margin: '0' }, text: C.t('sceneHint') }));
     if (S && !ended && S.tick > 0) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('resetWarn') }));
     C.ui.modal({
       title: C.t('settings'), closeButton: true, body: [body],
-      actions: [{ label: C.t('cancel') }, { label: C.t('start'), kind: 'primary', onClick: function () { newRun(pick); } }]
+      actions: [{ label: C.t('cancel') }, { label: C.t('start'), kind: 'primary', onClick: function () { newRun(pick, pickScene); } }]
     });
   }
 
@@ -584,7 +630,33 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     if (t === 'light') return false;
     return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
   }
-  function palette(dk) {
+  // The colours of a scene (#813): the sunny road follows the app's theme as before,
+  // night is always the dark road, and rain and snow repaint the sky and the land in
+  // either theme.
+  var WEATHER = {
+    rainy: [{
+      sky0: '#6E7884', sky1: '#AEB7C0', hill: '#5F7A60', hill2: '#7A917A', grass: '#5F8A50', grass2: '#567F47', road: '#45444C',
+      cloud: 'rgba(92,100,112,.85)', drop: 'rgba(225,235,248,.55)'
+    }, {
+      sky0: '#141A24', sky1: '#323B4A', hill: '#1C2620', hill2: '#25302A', grass: '#1F3024', grass2: '#26392B', road: '#26252D',
+      cloud: 'rgba(60,68,82,.85)', drop: 'rgba(190,205,225,.4)'
+    }],
+    snowy: [{
+      sky0: '#A9B7C4', sky1: '#E4EAF0', hill: '#D3DCE5', hill2: '#E9EEF3', grass: '#EDF1F5', grass2: '#DEE5EC', road: '#66656E', post: '#3E3C46',
+      cloud: 'rgba(240,244,248,.9)', drop: 'rgba(255,255,255,.95)'
+    }, {
+      sky0: '#121A2A', sky1: '#34405A', hill: '#56627A', hill2: '#66728A', grass: '#8792A5', grass2: '#7B8699', road: '#34333C',
+      cloud: 'rgba(80,90,110,.8)', drop: 'rgba(240,244,255,.85)'
+    }]
+  };
+  function palette(dk, sc) {
+    var P = basePalette(dk || sc === 'night'), W = WEATHER[sc];
+    if (W) { var o = W[dk ? 1 : 0]; for (var k in o) P[k] = o[k]; P.star = null; P.moon = null; }
+    P.scene = sc || 'sunny';
+    P.dark = !!(dk || sc === 'night');
+    return P;
+  }
+  function basePalette(dk) {
     return dk ? {
       sky0: '#0B1230', sky1: '#28345E', hill: '#18213C', hill2: '#1F2B48', star: 'rgba(255,255,240,.8)', moon: '#F3E9C8',
       grass: '#1E3326', grass2: '#26402F', road: '#2A2932', edge: '#8C8798', dash: 'rgba(255,255,255,.55)', post: '#C9C2D4', reflector: '#FF6A4D',
@@ -645,7 +717,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
       g.fillStyle = P.moon; g.beginPath(); g.arc(232, 98, 13, 0, Math.PI * 2); g.fill();
       g.fillStyle = P.sky1; g.beginPath(); g.arc(238, 93, 11, 0, Math.PI * 2); g.globalAlpha = 0.85; g.fill(); g.globalAlpha = 1;
     } else {
-      g.fillStyle = 'rgba(255,255,255,.75)';
+      g.fillStyle = P.cloud || 'rgba(255,255,255,.75)';
       [[60, 104, 1], [250, 86, 1.3], [180, 120, 0.8]].forEach(function (c) {
         var x = c[0] - (cam.X * 2) % 40, s = c[2];
         g.beginPath(); g.ellipse(x, c[1], 22 * s, 7 * s, 0, 0, Math.PI * 2); g.ellipse(x + 12 * s, c[1] - 5 * s, 13 * s, 8 * s, 0, 0, Math.PI * 2); g.fill();
@@ -707,6 +779,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     if (a0 > 420 || a1 < -D0 + 1) return;
     var col = P.cars[c.paint % P.cars.length];
     var body = c.kind === 'truck' ? P.box : col;
+    if (S.scene === 'night' && y0 - S.p > E.SCENES.night.view) { farLights(g, P, c, a0, X, hw, ht); return; }
     // shadow
     g.fillStyle = P.shadow;
     quad(g, P3(X - hw - 0.1, a0 - 0.3, 0), P3(X + hw + 0.1, a0 - 0.3, 0), P3(X + hw + 0.1, a1, 0), P3(X - hw - 0.1, a1, 0));
@@ -740,6 +813,16 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     if (dk) { g.shadowColor = P.tail; g.shadowBlur = Math.min(14, w * 0.2); }
     g.fillStyle = P.tail;
     g.fillRect(L.x + w * 0.04, ly, w * 0.16, lh); g.fillRect(L.x + w * 0.8, ly, w * 0.16, lh);
+    g.shadowBlur = 0;
+    if (c.ph === 1 || c.ph === 2) indicator(g, c, L, T, w, h, ly, lh);
+  }
+  // a car beyond the headlights at night: only its tail lights, and its indicator
+  function farLights(g, P, c, a0, X, hw, ht) {
+    var L = P3(X - hw, a0, 0), R = P3(X + hw, a0, 0), T = P3(X - hw, a0, ht), w = R.x - L.x, h = L.y - T.y;
+    var ly = c.kind === 'truck' ? L.y - h * 0.24 : L.y - h * 0.4, lh = Math.max(1.2, h * 0.12), lw = Math.max(1.4, w * 0.16);
+    g.shadowColor = P.tail; g.shadowBlur = 6;
+    g.fillStyle = P.tail;
+    g.fillRect(L.x + w * 0.04, ly, lw, lh); g.fillRect(L.x + w * 0.96 - lw, ly, lw, lh);
     g.shadowBlur = 0;
     if (c.ph === 1 || c.ph === 2) indicator(g, c, L, T, w, h, ly, lh);
   }
@@ -932,7 +1015,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     // both sides: a new canvas is 300×150 (#359)
     if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
     cv.style.width = Z.w + 'px'; cv.style.height = Z.h + 'px';
-    var g = cv.getContext('2d'), k = Z.w / VW, dk = dark(), P = palette(dk), t = S.tick * E.DT;
+    var g = cv.getContext('2d'), k = Z.w / VW, P = palette(dark(), S.scene), dk = P.dark, t = S.tick * E.DT;
     var font = getComputedStyle(document.body).fontFamily || 'sans-serif';
     g.setTransform(dpr * k, 0, 0, dpr * k, 0, 0);
     g.clearRect(0, 0, VW, VH);
@@ -975,7 +1058,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     g.fillStyle = on ? ACCENT : '#8F8C99'; rr(g, px, py, pw, ph, 9); g.fill();
     g.fillStyle = on ? 'rgba(255,255,255,.35)' : 'rgba(255,255,255,.4)';
     for (i = 0; i < 4; i++) g.fillRect(px + 6, py + 8 + i * (ph - 16) / 3 - 1.5, pw - 12, 3);
-    g.fillStyle = on ? (P.star ? '#FFFFFF' : ACCENT) : P.text; g.font = '800 12px ' + font; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+    g.fillStyle = on ? (P.dark ? '#FFFFFF' : ACCENT) : P.text; g.font = '800 12px ' + font; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
     g.fillText(C.t('gasL'), x + w / 2, y + h - 9);
   }
   function onPedal(e) {
@@ -994,6 +1077,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     sky(g, P, t);
     ground(g, P, S.d);
     if (S.daily) finishLine(g, E.DAILY_P - cam.rear);
+    if (S.scene === 'night') nightFade(g);
     var list = [], i, j;
     for (i = 0; i < S.waves.length; i++) for (j = 0; j < S.waves[i].cars.length; j++) {
       var c = S.waves[i].cars[j];
@@ -1006,6 +1090,7 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     for (i = S.items.length - 1; i >= 0; i--) if (!S.items[i].got && S.items[i].y >= cam.rear) can(g, P, S.items[i], t);
     bike(g, P, t, dk);
     for (i = 0; i < behind.length; i++) vehicle(g, P, behind[i].c, behind[i].y, dk);
+    weather(g, P);
     // speed lines at the edges on nitro
     if (S.boostT > 0 && !S.over) {
       g.strokeStyle = dk ? 'rgba(255,255,255,.35)' : 'rgba(255,255,255,.7)'; g.lineWidth = 2;
@@ -1016,15 +1101,49 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     }
   }
 
+  // Night (#813): past the headlights' reach the road fades to black, and a car out there
+  // shows only its lights (vehicle() draws it so); the generator leaves the extra
+  // reaction time this costs.
+  function viewY() { return P3(0, E.SCENES.night.view + E.BIKE_L, 0).y; }
+  function nightFade(g) {
+    var y1 = viewY(), gr = g.createLinearGradient(0, HZ, 0, y1 + 6);
+    gr.addColorStop(0, 'rgba(4,6,14,.97)'); gr.addColorStop(0.7, 'rgba(4,6,14,.85)'); gr.addColorStop(1, 'rgba(4,6,14,0)');
+    g.fillStyle = gr; g.fillRect(0, HZ, VW, y1 + 6 - HZ);
+  }
+  // rain falls in slanted streaks, snow in drifting flakes; both are drawn over the road
+  // and under the HUD, from the tick, so a paused frame stands still
+  function weather(g, P) {
+    if (!P.drop) return;
+    var n = S.tick, i, x, y;
+    g.save();
+    if (P.scene === 'rainy') {
+      g.strokeStyle = P.drop; g.lineWidth = 1.2; g.beginPath();
+      for (i = 0; i < 70; i++) {
+        x = (i * 89 + n * 3) % (VW + 40) - 20; y = (i * 137 + n * 17) % VH;
+        g.moveTo(x, y); g.lineTo(x - 4, y + 14);
+      }
+      g.stroke();
+    } else {
+      g.fillStyle = P.drop;
+      for (i = 0; i < 60; i++) {
+        var r = 1 + (i % 3) * 0.7;
+        x = (i * 61 + n * (0.4 + (i % 4) * 0.15) + 12 * Math.sin(n / 40 + i)) % VW; y = (i * 97 + n * (1 + (i % 3) * 0.6)) % VH;
+        if (x < 0) x += VW;
+        g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+      }
+    }
+    g.restore();
+  }
+
   // the share card: the road as the run ended
   function paintShare(g, w, h) {
-    var P = palette(dark());
+    var P = palette(dark(), S.scene);
     g.fillStyle = P.grass; g.fillRect(0, 0, w, h);
     var k = Math.min(w / VW, h / VH);
     g.save();
     g.translate((w - VW * k) / 2, (h - VH * k) / 2); g.scale(k, k);
     g.beginPath(); g.rect(0, 0, VW, VH); g.clip();
-    scene(g, P, S.tick * E.DT, dark());
+    scene(g, P, S.tick * E.DT, P.dark);
     g.restore();
   }
 
@@ -1035,6 +1154,9 @@ if (typeof module !== 'undefined') module.exports = MotoRushEngineFactory;
     if (dailyDate) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyMr') + ' — ' + C.num(dailyDate) })]));
     if (!S) return;
     top.appendChild(el('span', { class: 'ch-badge', text: C.t('kmN', { n: C.num((S.d / 1000).toFixed(1)) }) }));
+    // the weather and, where it is less than full, the grip it leaves (#813)
+    var grip = Math.round(E.SCENES[S.scene].grip * 100);
+    if (S.scene !== 'sunny') top.appendChild(el('span', { class: 'ch-badge', text: sceneName(S.scene) + (grip < 100 ? ' · ' + C.t('gripN', { n: C.num(grip) }) : '') }));
     var best = dailyDate ? 0 : C.stats.getBest('motorush', 'score' + diffTag());
     if (best) top.appendChild(el('span', { class: 'ch-badge', text: C.t('bestN', { n: C.num(best) }) }));
     var on = !waiting && !held && !ended;
