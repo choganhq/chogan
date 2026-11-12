@@ -552,6 +552,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
           // #752: after an app switch either phone may have restarted or missed a turn;
           // each says where its match is, with its own last shot, and the one behind catches up
           sendSync();
+          // a restarted phone has none of my aim: say it again
+          aimSent = '';
         }
         render();
       },
@@ -573,6 +575,40 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
     else if (d.t === 'sync') onSync(d);
     else if (d.t === 'turn') { if ((d.g | 0) === (G.g | 0)) { G.inbox = d; pump(); } }
     else if (d.t === 'want') { if (G.side === 0) sendSync(); }
+    else if (d.t === 'aim') onAim(d);
+  }
+
+  // The other phone's aim, live (#861, the owner: "I want to see the other one aim too").
+  // It is only a picture: kept apart from the match (never in G.M, so never in a digest or
+  // a shot), tied to the shot number it was aimed for, and dropped once that shot is fired.
+  // The turn message alone says where a shot goes; a late or lost aim changes nothing.
+  var peerAim = null, aimSent = '', aimAt = -1e9, aimTimer = null, AIM_GAP = 66;
+  function onAim(d) {
+    var angle = +d.angle, power = +d.power;
+    if ((d.g | 0) !== (G.g | 0) || d.n !== G.M0.n || G.M0.turn === G.side || flight || G.done) return;
+    if (!(angle >= 0 && angle <= 90) || !(power >= 0 && power <= 100)) return;
+    peerAim = { g: G.g | 0, n: d.n, angle: angle, power: power };
+    draw();
+  }
+  function theirAim() {
+    var a = peerAim;
+    return a && G && G.mode === 'net' && !flight && !G.done && a.g === (G.g | 0) && a.n === G.M0.n && G.M.turn !== G.side ? a : null;
+  }
+  // sends my aim while I set it: at most one message every AIM_GAP ms, and the last
+  // position always goes out after a pause, so the other phone ends where I stopped
+  function aimOut() {
+    if (!G || G.mode !== 'net' || G.side == null || G.link !== 'connected' || flight || G.done || G.phase !== 'aim' || G.M.turn !== G.side) return;
+    var L = G.M.last[G.side], a = prefs.control === 'drag' && aiming && aiming.aim ? aiming.aim : L;
+    var m = { t: 'aim', g: G.g | 0, n: G.M0.n, angle: Math.round(a.angle * 10) / 10, power: Math.round(a.power * 10) / 10 };
+    var key = m.g + '|' + m.n + '|' + m.angle + '|' + m.power;
+    if (key === aimSent) return;
+    var now = performance.now();
+    if (now - aimAt < AIM_GAP) {
+      if (!aimTimer) aimTimer = setTimeout(function () { aimTimer = null; aimOut(); }, AIM_GAP - (now - aimAt));
+      return;
+    }
+    aimSent = key; aimAt = now;
+    C.link.send(m);
   }
   function onSync(d) {
     // #861: a phone counts a shot only once it has landed (G.M0), so while one flies, or a
@@ -653,7 +689,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
     var M = G.M;
     if (E.left(M, who, a) <= 0) return;
     G.phase = 'busy';
-    msg = ''; aiming = null;
+    msg = ''; aiming = null; peerAim = null;
     var sim = E.simulate(M, who, a, angle, power);
     C.feedback('whoosh');
     flight = { who: who, arm: a, sim: sim, t0: performance.now(), angle: angle, power: power, sum: sum || null };
@@ -943,6 +979,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
     var g = cv.getContext('2d');
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     paint(g, S.w, S.h, now);
+    if (G.mode === 'net') aimOut();
     if (flight && flight.done) landed();
   }
   function loop() {
@@ -965,6 +1002,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
   /* ----------------------------------------------------------------- ui */
 
   function aimNow() {
+    // two phones: on the other's turn, their aim as it last came in (#861)
+    if (G && G.mode === 'net' && G.side != null && G.M.turn !== G.side) return theirAim();
     if (!G || G.phase !== 'aim' || isBot(G.M.turn)) return null;
     if (prefs.control === 'drag') return aiming && aiming.aim ? aiming.aim : null;
     return G.M.last[G.M.turn];

@@ -25,7 +25,10 @@ module.exports = function (T) {
   function region(page) {
     const a = page.indexOf('  function isBot(seat)');
     const b = page.indexOf('  /* ------------------------------------------------------------ result */');
-    return a > 0 && b > a ? page.slice(a, b) : '';
+    if (!(a > 0 && b > a)) return '';
+    // aimNow lives with the drawing; the two-phone aim view (#861) reads the other's aim through it
+    const aimNow = (page.match(/  function aimNow\(\) \{[\s\S]*?\n  \}\n/) || [''])[0];
+    return page.slice(a, b) + aimNow;
   }
 
   // One phone: the page's code in its own closure, with a fake clock and timers
@@ -38,7 +41,7 @@ module.exports = function (T) {
     };
     const env = {
       E, C, RNG: rngFor, clone: (x) => JSON.parse(JSON.stringify(x)),
-      render() {}, renderStatus() {}, renderPlayers() {}, renderArms() {}, renderPad() {}, renderTop() {}, kick() {}, save() {},
+      render() {}, draw() {}, prefs: { control: 'nums' }, renderStatus() {}, renderPlayers() {}, renderArms() {}, renderPad() {}, renderTop() {}, kick() {}, save() {},
       finish() { log.push(['finish']); },
       performance: { now: () => clock.t },
       setTimeout: (fn, ms) => { const id = nextId++; timers.set(id, { at: clock.t + ms, fn }); return id; },
@@ -47,7 +50,8 @@ module.exports = function (T) {
     const body = 'var G = null, timer = null, raf = 0, flight = null, blasts = [], floaters = [], aiming = null, msg = "", arm = "shell";\n' +
       'function seeded(tag) { return RNG("net|" + G.seed + "|" + tag); }\n' + code +
       '\nreturn { setG: function (g) { G = g; }, G: function () { return G; }, flight: function () { return flight; }, onNet: onNet, sendSync: sendSync,' +
-      ' startTurn: startTurn, shoot: shoot, landed: landed, render: function () {} };';
+      ' startTurn: startTurn, shoot: shoot, landed: landed,' +
+      ' aimOut: typeof aimOut === "function" ? aimOut : null, aimNow: typeof aimNow === "function" ? aimNow : null };';
     const api = new Function(...Object.keys(env), body)(...Object.values(env));
     api.tick = () => {
       for (const [id, x] of [...timers]) if (x.at <= clock.t && timers.has(id)) { timers.delete(id); x.fn(); }
@@ -58,13 +62,20 @@ module.exports = function (T) {
   // Plays one match. opt.drops: chance per 20 ms step that the link drops for a while;
   // opt.slow: chance that a phone takes up to 4 s more to finish a flight (it looked away);
   // opt.bend: at this shot, the guest's ground is bent by a pixel before it fires.
+  // opt.aim: the shooter moves its aim before firing and the page streams it (aimOut); old
+  // aim messages are now and then delivered again, late, to the other phone.
   function match(code, E, seed, opt) {
     const R = rngFor('match|' + seed);
     const clock = { t: 0 };
     const logs = [[], []], shown = [[], []];
     const q = [[], []]; // messages on the way to phone i, in order
     const up = { v: true };
+    const aims = { sent: [[], []], seen: [0, 0], wrong: [], stale: 0, gaps: [1e9, 1e9], last: [-1e9, -1e9] };
     const send = (from, d) => {
+      if (d.t === 'aim') {
+        aims.sent[from].push(JSON.parse(JSON.stringify(d)));
+        aims.gaps[from] = Math.min(aims.gaps[from], clock.t - aims.last[from]); aims.last[from] = clock.t;
+      }
       const to = 1 - from, last = q[to].length ? q[to][q[to].length - 1].at : 0;
       q[to].push({ at: Math.max(last + 1, clock.t + 20 + Math.floor(R() * 380)), data: JSON.stringify(d) });
     };
@@ -75,7 +86,7 @@ module.exports = function (T) {
         sent: null, steps: [], inbox: null, link: 'connected', linkWhy: null, peerName: '', done: false, phase: 'aim', best: 0, startedAt: 0 });
       P[s].startTurn();
     }
-    const dur = [0, 0], plan = [null, null];
+    const dur = [0, 0], plan = [null, null], shots = [[], []];
     let downUntil = 0, drops = 0, slows = 0, bent = false, holdHost = false;
     while (clock.t < 400000) {
       clock.t += 20;
@@ -104,7 +115,7 @@ module.exports = function (T) {
         const f = P[s].flight();
         if (!f) { dur[s] = 0; continue; }
         if (!dur[s]) { dur[s] = 1000 + (opt.slow && R() < opt.slow ? (slows++, 1000 + Math.floor(R() * 3000)) : 0); }
-        if (clock.t - f.t0 >= dur[s]) { shown[s].push(P[s].G().M.n); dur[s] = 0; P[s].landed(); }
+        if (clock.t - f.t0 >= dur[s]) { shown[s].push(P[s].G().M.n); shots[s].push(P[s].G().M.n + ':' + f.who + ':' + f.angle + ':' + f.power); dur[s] = 0; P[s].landed(); }
       }
       if (P[0].G().done && P[1].G().done) break;
       for (let s = 0; s < 2; s++) {
@@ -116,18 +127,39 @@ module.exports = function (T) {
           // a phone that drifted: one pixel of its ground differs from the host's
           bent = true; G.M0.h[300] += 1; G.M.h[300] += 1; holdHost = true;
         }
-        if (plan[s] == null) plan[s] = clock.t + Math.floor(R() * 800);
+        if (plan[s] == null) plan[s] = clock.t + Math.floor(R() * 800) + (opt.aim ? 600 : 0);
+        if (opt.aim && P[s].aimOut) {
+          // the player turns the barrel and sets the power, a little each frame
+          const L = G.M.last[s];
+          L.angle = Math.max(5, Math.min(85, L.angle + Math.floor(R() * 7) - 3));
+          L.power = Math.max(20, Math.min(100, L.power + Math.floor(R() * 7) - 3));
+          P[s].aimOut();
+        }
         if (clock.t < plan[s]) continue;
         plan[s] = null;
         const arms = E.ORDER.filter((a) => E.left(G.M, s, a) > 0);
-        G.M.last[s] = { angle: 20 + Math.floor(R() * 60), power: 35 + Math.floor(R() * 60) };
+        if (!opt.aim) G.M.last[s] = { angle: 20 + Math.floor(R() * 60), power: 35 + Math.floor(R() * 60) };
         P[s].shoot(s, arms[Math.floor(R() * arms.length)], G.M.last[s].angle, G.M.last[s].power);
+      }
+      if (opt.aim) {
+        for (let s = 0; s < 2; s++) {
+          const G = P[s].G(), other = 1 - s;
+          // a stale aim of an earlier shot, late, must change nothing
+          const old = aims.sent[other].filter((m) => m.n < G.M0.n);
+          if (old.length && R() < 0.03) { aims.stale++; P[s].onNet(JSON.parse(JSON.stringify(old[Math.floor(R() * old.length)]))); }
+          if (G.M.turn === s || !P[s].aimNow) continue;
+          const v = P[s].aimNow();
+          if (!v) continue;
+          // what this phone shows of the other's aim is one the other really sent for this shot
+          const real = aims.sent[other].some((m) => m.n === G.M0.n && m.angle === v.angle && m.power === v.power);
+          if (real) aims.seen[s]++; else aims.wrong.push(s + '@' + G.M0.n + ':' + v.angle + '/' + v.power);
+        }
       }
       // the bend check: the guest has fired its bent shot and both phones are quiet again
       if (holdHost && bent && !P[0].flight() && !P[1].flight() && !q[0].length && !q[1].length && P[0].G().M0.n === opt.bend + 1 && P[1].G().M0.n === opt.bend + 1) break;
     }
     const sum = (s) => E.digest(P[s].G().M0);
-    return { P, shown, sum: [sum(0), sum(1)], n: [P[0].G().M0.n, P[1].G().M0.n], done: [P[0].G().done, P[1].G().done], drops, slows };
+    return { P, shown, shots, aims, sum: [sum(0), sum(1)], n: [P[0].G().M0.n, P[1].G().M0.n], done: [P[0].G().done, P[1].G().done], drops, slows };
   }
 
   function testTanksLinkShots() {
@@ -159,6 +191,23 @@ module.exports = function (T) {
       ok(drops >= seeds.length && slows >= seeds.length, 'the faults happened (' + drops + ' drops, ' + slows + ' slow flights in ' + seeds.length + ' matches)');
       ok(same === seeds.length, 'every faulty match ends on the same 20-shot match on both phones (' + same + '/' + seeds.length + ')');
       ok(good === seeds.length, 'every shot flies exactly once on both phones, in order (' + good + '/' + seeds.length + ')' + (bad.length ? '; ' + bad[0] : ''));
+
+      // The other's aim, live (#861, the owner's wish): each phone sees the other turn its
+      // barrel and set its power, the stream is throttled, a late aim of an earlier shot is
+      // never shown, and the turn message stays the only thing that says where a shot goes.
+      const aimSeeds = [21, 22, 23, 24];
+      ok(aimSeeds.length > 0, 'the list of aim matches is not empty');
+      const am = aimSeeds.map((s, i) => match(code, E, s, i === 0 ? { aim: true } : { aim: true, drops: 0.002, slow: 0.25 }));
+      const sent = am.reduce((t, r) => t + r.aims.sent[0].length + r.aims.sent[1].length, 0);
+      ok(sent > 0, 'the page streams the aim to the other phone (' + sent + ' aim messages in ' + am.length + ' matches)');
+      ok(am[0].aims.seen[0] > 0 && am[0].aims.seen[1] > 0, 'each phone sees the other\'s aim while the other aims (host saw ' + am[0].aims.seen[0] + ' frames, guest ' + am[0].aims.seen[1] + ')');
+      const gap = Math.min(...am.map((r) => Math.min(r.aims.gaps[0], r.aims.gaps[1])));
+      ok(sent > 0 && gap >= 60, 'at most one aim message every ~66 ms from a phone (shortest gap ' + gap + ' ms)');
+      const stale = am.reduce((t, r) => t + r.aims.stale, 0), wrong = [].concat(...am.map((r) => r.aims.wrong));
+      ok(stale > 0, 'late aims of earlier shots were delivered (' + stale + ')');
+      ok(sent > 0 && !wrong.length, 'no phone ever shows an aim the other did not send for the current shot' + (wrong.length ? ' (' + wrong.slice(0, 3).join(', ') + ')' : ''));
+      ok(am.every((r) => r.shots[0].length === 20 && r.shots[0].join() === r.shots[1].join()), 'with the aim stream, both phones fly the same 20 shots, each at the angle and power of its turn message');
+      ok(am.every((r) => r.sum[0] === r.sum[1] && full(r.shown[0]) && full(r.shown[1])), 'with the aim stream, the digest and sync still agree and every shot flies once on both phones');
 
       // a guest that drifted is put right by the host after the guest's own shot
       const b = match(code, E, 11, { bend: 5 });
