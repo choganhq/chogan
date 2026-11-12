@@ -3112,6 +3112,21 @@
     return wrap;
   };
 
+  // Four on-screen arrows for games a mouse player would otherwise have to drag (#745 Doubles,
+  // #854 Sliding Puzzle). labels: { up, down, left, right }; onDir gets 'up', 'down', 'left'
+  // or 'right'. The CSS shows it only where a mouse is the main pointer.
+  var PAD_ARROW = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20V5M5.5 11.5L12 5l6.5 6.5"/></svg>';
+  ui.arrowPad = function (labels, onDir) {
+    var pad = el('div', { class: 'ch-pad' });
+    ['up', 'left', 'right', 'down'].forEach(function (dir) {
+      var b = el('button', { class: 'ch-pad__btn ch-pad__btn--' + dir, type: 'button', 'aria-label': labels[dir] });
+      b.innerHTML = PAD_ARROW;
+      b.addEventListener('click', function () { onDir(dir); });
+      pad.appendChild(b);
+    });
+    return pad;
+  };
+
   ui.help = function (title, rows) {
     var list = el('div', { class: 'ch-list' });
     rows.forEach(function (r) {
