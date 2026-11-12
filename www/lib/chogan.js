@@ -3163,6 +3163,21 @@
     return wrap;
   };
 
+  // Four on-screen arrows for games a mouse player would otherwise have to drag (#745 Doubles,
+  // #854 Sliding Puzzle). labels: { up, down, left, right }; onDir gets 'up', 'down', 'left'
+  // or 'right'. The CSS shows it only where a mouse is the main pointer.
+  var PAD_ARROW = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20V5M5.5 11.5L12 5l6.5 6.5"/></svg>';
+  ui.arrowPad = function (labels, onDir) {
+    var pad = el('div', { class: 'ch-pad' });
+    ['up', 'left', 'right', 'down'].forEach(function (dir) {
+      var b = el('button', { class: 'ch-pad__btn ch-pad__btn--' + dir, type: 'button', 'aria-label': labels[dir] });
+      b.innerHTML = PAD_ARROW;
+      b.addEventListener('click', function () { onDir(dir); });
+      pad.appendChild(b);
+    });
+    return pad;
+  };
+
   ui.help = function (title, rows) {
     var list = el('div', { class: 'ch-list' });
     rows.forEach(function (r) {
@@ -3241,6 +3256,44 @@
   ui.fitScale = function (w, h, roomW, roomH, lo, hi) {
     if (!(w > 0 && h > 0 && roomW > 0 && roomH > 0)) return 1;
     return Math.max(lo, Math.min(hi, roomW / w, roomH / h));
+  };
+
+  // Two-finger pinch, and Ctrl+wheel (a laptop trackpad's pinch), on node (#850). Game pages
+  // set user-scalable=no, so the browser's own pinch never comes and a board that the game
+  // could zoom had no gesture for it. One finger is left alone: taps and the board's own
+  // scrolling. h.start(mid) when a pinch begins; h.move(scale, mid) with the scale since that
+  // start and the fingers' midpoint in client coordinates; h.end() when a finger lifts.
+  ui.pinch = function (node, h) {
+    var d0 = 0, on = false;
+    function mid(a, b) { return { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 }; }
+    function dist(a, b) { return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1; }
+    node.addEventListener('touchstart', function (e) {
+      if (on || e.touches.length < 2) return;
+      on = true;
+      d0 = dist(e.touches[0], e.touches[1]);
+      if (h.start) h.start(mid(e.touches[0], e.touches[1]));
+    }, { passive: true });
+    node.addEventListener('touchmove', function (e) {
+      if (!on || e.touches.length < 2) return;
+      // two fingers would otherwise scroll the board as well as zoom it
+      if (e.cancelable) e.preventDefault();
+      h.move(dist(e.touches[0], e.touches[1]) / d0, mid(e.touches[0], e.touches[1]));
+    }, { passive: false });
+    function stop(e) {
+      if (!on || e.touches.length >= 2) return;
+      on = false;
+      if (h.end) h.end();
+    }
+    node.addEventListener('touchend', stop);
+    node.addEventListener('touchcancel', stop);
+    node.addEventListener('wheel', function (e) {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      var m = { x: e.clientX, y: e.clientY };
+      if (h.start) h.start(m);
+      h.move(Math.exp(-e.deltaY * 0.0025), m);
+      if (h.end) h.end();
+    }, { passive: false });
   };
 
   // Scales a game laid out at fixed pixel sizes (pegs, cards) to fill the game area

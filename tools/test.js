@@ -254,7 +254,7 @@ function testMines() {
     ok(E.fit(1340, 700, 9, 9).cs === 64 && E.fit(1340, 700, 9, 9).maxH === 0, 'a small board on a big screen grows to 64px cells and does not scroll (#359)');
     ok(E.fit(1236, 620, 16, 16).cs === 36, 'medium on a 1280×800 laptop gets 36px cells, not the old 42px-capped 394px board (#359)');
   }
-  ok(/var f = E\.fit\(roomW\(\), roomH\(\), sp\.rows, sp\.cols\);/.test(msHtml) && !/640\)/.test(msHtml) && /scroll\.style\.maxHeight = f\.maxH \? f\.maxH \+ 'px' : '';/.test(msHtml), 'the page sizes the board by the room left under the picker and above the tools, at the game area\'s full width (#359)');
+  ok(/var f = E\.fit\(roomW\(\), roomH\(\), sp\.rows, sp\.cols, zoom\);/.test(msHtml) && !/640\)/.test(msHtml) && /scroll\.style\.maxHeight = f\.maxH \? f\.maxH \+ 'px' : '';/.test(msHtml), 'the page sizes the board by the room left under the picker and above the tools, at the game area\'s full width (#359)');
   // Holding Space or Enter opened the cell at once instead of flagging it like a long press (#346)
   ok(/var LONG_MS = 420/.test(msHtml) && (msHtml.match(/\}, LONG_MS\);/g) || []).length === 2, 'a long press on the screen and a held key share one delay');
   ok(/hold\.timer = setTimeout\(function \(\) \{ hold\.fired = true; if \(S && !S\.done\) toggleFlag\(hold\.at\); \}, LONG_MS\);\s*keyHold = hold;\s*return;/.test(msHtml) &&
