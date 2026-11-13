@@ -6754,7 +6754,7 @@ function testCheckers() {
   ok(tFree < 1500, 'a hard move from the start with optional capture takes under 1.5 s here (' + tFree + ' ms)');
   // (#391 Huevo: every move list also gets the state, for the Queen's edge clock, and Huevo is always optional)
   ok(/prefs\.free = v === 'free';/.test(html) && /free = !daily && \(prefs\.free === true \|\| rules === 'huevo'\);/.test(html) && /E\.aiMove\(S\.board, 2, S\.level, rnd, S\.rules, S\.free, S\)/.test(html) &&
-    (html.match(/E\.moves\(S\.board, S\.turn, S\.rules, S\.free, S\)/g) || []).length === 3 && !/E\.moves\(S\.board, S\.turn, S\.rules\)/.test(html) && !/E\.moves\(S\.board, S\.turn, S\.rules, S\.free\)/.test(html) &&
+    (html.match(/E\.moves\(S\.board, S\.turn, S\.rules, S\.free, S\)/g) || []).length === 4 && !/E\.moves\(S\.board, S\.turn, S\.rules\)/.test(html) && !/E\.moves\(S\.board, S\.turn, S\.rules, S\.free\)/.test(html) &&
     /var jump = !S\.done && !busy\(\) && !S\.free && /.test(html) && /free: !v\.daily && \(v\.free === true \|\| v\.rules === 'huevo'\),/.test(html),
     'the page offers the choice, keeps the daily game forced, saves it, gives it to the AI and every move list, and drops the "must jump" note');
   ok(/prefs\.rules = v;/.test(html) && /var rules = daily \? 'classic' : prefRules\(\),/.test(html) && /E\.aiMove\(S\.board, 2, S\.level, rnd, S\.rules[,)]/.test(html), 'the page offers both rule sets, keeps the daily game classic and gives the AI the rules in play');
