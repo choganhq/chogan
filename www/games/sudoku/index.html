@@ -135,6 +135,8 @@
   .sd-tool[aria-pressed="true"] { background: var(--game); color: #fff; }
   .sd-tool svg { width: 20px; height: 20px; }
   .sd-tool b { font-size: 9px; color: var(--c-gold); font-weight: 800; }
+  .sd-tool .sd-price { display: inline-flex; align-items: center; gap: 2px; }
+  .sd-tool .sd-price svg { width: 10px; height: 10px; }
   .sd-tool[aria-pressed="true"] b { color: #fff; }
   /* روی گوشی باریک، انتخابگر سختی و نشان تعداد سرنخ کنار هم جا نمی‌شوند و
      نشان از لبه‌ی صفحه بیرون می‌زد. اجازه‌ی شکستن خط می‌دهیم. */
@@ -917,8 +919,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngi
   noteBtn.setAttribute('aria-pressed', 'false');
   tool('eraser', 'erase', function () { enter(0); });
   tool('undo', 'undo', function () { undo(); });
+  // The bare "10" under the bulb read as hints left, and a player reported that
+  // it never went down (#892); it is the price in coins, so it carries the coin.
   var hintBtn = tool('bulb', 'hint', function () { hint(); },
-    el('b', { text: C.num(HINT_COST) }));
+    el('b', { class: 'sd-price' }, [C.icon('coin', 10), el('span', { text: C.num(HINT_COST) })]));
   // The options had lived inside the help sheet, where the owner could not find
   // them (#409); a fourth game-bar button cut the title on a phone, and a gear
   // beside the difficulty wrapped to a line of its own (#413). It is a tool.
@@ -1101,17 +1105,22 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngi
         C.ui.shake(cells[selected]);
       } else {
         C.feedback('place');
-        // یادداشت‌های همسایه‌ها که دیگر ممکن نیستند پاک شوند
-        E.PEERS[selected].forEach(function (p) {
-          var a = S.notes[p], k = a ? a.indexOf(v) : -1;
-          if (k >= 0) a.splice(k, 1);
-        });
+        dropPeerNotes(selected, v);
       }
     }
     paint();
     if (v && !noteMode && v === S.solution[selected]) ripple(selected);
     save();
     checkWin();
+  }
+
+  // A correct digit rules itself out of its row, column and box notes. A hint
+  // places a correct digit too, but left those notes standing (#892).
+  function dropPeerNotes(i, v) {
+    E.PEERS[i].forEach(function (p) {
+      var a = S.notes[p], k = a ? a.indexOf(v) : -1;
+      if (k >= 0) a.splice(k, 1);
+    });
   }
 
   // Every row, column and box that the digit at i has just finished ripples out
@@ -1154,6 +1163,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngi
     if (pickCell === undefined) return;
     S.grid[pickCell] = S.solution[pickCell];
     S.notes[pickCell] = [];
+    dropPeerNotes(pickCell, S.solution[pickCell]);
     S.hinted[pickCell] = 1;
     S.hints++;
     selected = pickCell;
