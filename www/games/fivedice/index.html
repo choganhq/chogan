@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>پنج‌تاس — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* the table is the dice, the roll button and the sheet in one slot; its sizes are in
+     --u (a hundredth of its width), measured in code rather than set in cq units, which
+     the Android WebViews before Chrome 105 drop (#611) */
+  .fd-wrap > .ch-fit { --fit-ar: 0.7; }
+  .ch-fit > .fd-table { --u: 3.6px; aspect-ratio: 0.7; max-height: 100%; box-sizing: border-box;
+    display: flex; flex-direction: column; gap: calc(var(--u) * 2.4); padding-top: calc(var(--u) * 3);
+    font-size: calc(var(--u) * 4.3); }
+  /* die 1 is always the leftmost, so the keys 1-5 match what is on screen in every language */
+  .fd-dice { direction: ltr; display: grid; grid-template-columns: repeat(5, 1fr); gap: calc(var(--u) * 3); }
+  .fd-die { position: relative; aspect-ratio: 1; padding: 0; border: 0; background: none; cursor: pointer;
+    border-radius: 20%; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    transition: transform var(--t-fast, .15s) ease; }
+  .fd-die:disabled { cursor: default; }
+  .fd-die:focus-visible { outline: 3px solid var(--game, var(--c-accent)); outline-offset: 2px; }
+  .fd-die[aria-pressed="true"] { transform: translateY(calc(var(--u) * -2.6)); }
+  /* the picture never takes the tap: a repaint mid-press would otherwise eat the click (#750) */
+  .fd-die svg { display: block; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+  .fd-face { fill: var(--c-surface); stroke: var(--c-line); stroke-width: 3; }
+  .fd-pip { fill: var(--c-text); }
+  .fd-die[aria-pressed="true"] .fd-face { fill: var(--game, var(--c-accent)); stroke: var(--game, var(--c-accent)); }
+  .fd-die[aria-pressed="true"] .fd-pip { fill: var(--c-accent-ink); }
+  .fd-blank .fd-face { fill: var(--c-surface-2); stroke-dasharray: 8 6; }
+  .fd-roll { min-height: 0; height: calc(var(--u) * 12); font-size: calc(var(--u) * 4.6); flex: none; }
+  .fd-roll small { font-weight: 600; opacity: .85; font-size: .85em; margin-inline-start: .6em; }
+  .fd-roll small:empty { display: none; }
+  .fd-sheet { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr;
+    grid-template-rows: repeat(8, minmax(0, 1fr)); gap: calc(var(--u) * 1.2) calc(var(--u) * 2.4); }
+  .fd-row { font: inherit; display: flex; align-items: center; justify-content: space-between; gap: calc(var(--u) * 1.5);
+    min-width: 0; padding: 0 calc(var(--u) * 2.6); border: 0; border-radius: calc(var(--u) * 2.4);
+    background: var(--c-surface); color: var(--c-text); box-shadow: var(--sh-1); text-align: start;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  button.fd-row { cursor: pointer; }
+  button.fd-row:disabled { cursor: default; }
+  .fd-row:focus-visible { outline: 3px solid var(--game, var(--c-accent)); outline-offset: 2px; }
+  .fd-row > span { pointer-events: none; }
+  .fd-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .fd-val { flex: none; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .fd-row.fd-open { background: var(--c-surface-2); box-shadow: none; }
+  .fd-row.fd-can { background: var(--game-soft, var(--c-accent-soft)); box-shadow: inset 0 0 0 2px var(--game, var(--c-accent)); }
+  .fd-pot { color: var(--game, var(--c-accent)); }
+  .fd-zero { color: var(--c-text-dim); font-weight: 600; }
+  .fd-dash { color: var(--c-text-faint); font-weight: 600; }
+  .fd-row.fd-sum { background: transparent; box-shadow: none; color: var(--c-text-dim); }
+  .fd-row.fd-sum .fd-val { color: var(--c-text-dim); }
+  .fd-row.fd-sum.fd-got .fd-val { color: var(--c-good); }
+  .fd-row.fd-total { grid-column: 1 / -1; background: var(--c-surface-3); font-size: 1.15em; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .fd-pot { color: var(--game-text-dark, var(--game)); }
+  }
+  :root[data-theme="dark"] .fd-pot { color: var(--game-text-dark, var(--game)); }
+  .fd-side { align-items: center; }
+  .fd-top { display: flex; justify-content: center; }
+  .fd-scores { display: flex; gap: var(--s-2); justify-content: center; }
+  .fd-score { min-width: 84px; padding: var(--s-2) var(--s-3); border-radius: var(--r-md, 14px);
+    background: var(--c-surface); box-shadow: var(--sh-1); text-align: center; }
+  .fd-score__l { font-size: .8rem; color: var(--c-text-dim); font-weight: 700; }
+  .fd-score__v { font-size: 1.3rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--c-text); }
+  .fd-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function FiveDiceEngineFactory() {
+  'use strict';
+
+  var CATS = ['ones', 'twos', 'threes', 'fours', 'fives', 'sixes', 'three', 'four', 'full', 'small', 'large', 'yacht', 'chance'];
+  var UPPER = 6, ROUNDS = 13, ROLLS = 3, BONUS_AT = 63, BONUS = 35;
+
+  function counts(d) { var c = [0, 0, 0, 0, 0, 0, 0]; for (var i = 0; i < d.length; i++) c[d[i]]++; return c; }
+  function sum(d) { var s = 0; for (var i = 0; i < d.length; i++) s += d[i]; return s; }
+  // `len` faces in a row: 1-2-3-4 is a small straight whatever the fifth die shows
+  function run(c, len) { var n = 0; for (var f = 1; f <= 6; f++) { n = c[f] ? n + 1 : 0; if (n >= len) return true; } return false; }
+
+  // What the five dice score in one row. No joker rule: five alike is not a full house
+  // or a straight, it counts only where its own pattern does
+  function score(cat, d) {
+    var k = CATS.indexOf(cat);
+    if (k < 0) return 0;
+    var c = counts(d), most = Math.max.apply(null, c);
+    if (k < UPPER) return c[k + 1] * (k + 1);
+    switch (cat) {
+      case 'three': return most >= 3 ? sum(d) : 0;
+      case 'four': return most >= 4 ? sum(d) : 0;
+      case 'full': return c.indexOf(3) > 0 && c.indexOf(2) > 0 ? 25 : 0;
+      case 'small': return run(c, 4) ? 30 : 0;
+      case 'large': return run(c, 5) ? 40 : 0;
+      case 'yacht': return most === 5 ? 50 : 0;
+      default: return sum(d);
+    }
+  }
+
+  // Every die is a fixed function of the game's seed and where it is rolled (round, roll,
+  // position). Reopening the game can never roll again for a better result, and the daily
+  // game gives everyone the same dice for the same choices
+  function fmix(x) {
+    x = Math.imul(x ^ (x >>> 16), 0x85EBCA6B);
+    x = Math.imul(x ^ (x >>> 13), 0xC2B2AE35);
+    return (x ^ (x >>> 16)) | 0;
+  }
+  // the seed is mixed on its own first: adding it raw to the position let seeds in a
+  // pattern favour a face (one face came up 18.3% over a thousand such seeds)
+  function die(seed, round, roll, i) {
+    var x = fmix(fmix(seed ^ 0x5F3759DF) + Math.imul((round * 4 + roll) * 8 + i + 1, 0x9E3779B1));
+    return Math.floor((fmix(x) >>> 0) / 4294967296 * 6) + 1;
+  }
+
+  function emptySheet() { var s = {}; CATS.forEach(function (c) { s[c] = null; }); return s; }
+  function newGame(seed) {
+    return { dice: [1, 2, 3, 4, 5], held: [false, false, false, false, false], rolls: 0, round: 0, sheet: emptySheet(), seed: seed | 0 };
+  }
+  function over(S) { return S.round >= ROUNDS; }
+
+  // Rolls every die that is not kept (all five on a round's first roll); the indexes
+  // that rolled, or null when no roll is left
+  function roll(S) {
+    if (over(S) || S.rolls >= ROLLS) return null;
+    if (S.rolls === 0) S.held = [false, false, false, false, false];
+    var rolled = [];
+    for (var i = 0; i < 5; i++) {
+      if (S.held[i]) continue;
+      S.dice[i] = die(S.seed, S.round, S.rolls, i);
+      rolled.push(i);
+    }
+    if (!rolled.length) return null;
+    S.rolls++;
+    return rolled;
+  }
+  // Keeping a die only means something between rolls
+  function toggle(S, i) {
+    if (over(S) || S.rolls === 0 || S.rolls >= ROLLS || i < 0 || i > 4) return false;
+    S.held[i] = !S.held[i];
+    return true;
+  }
+
+  function upper(sheet) { var s = 0; for (var k = 0; k < UPPER; k++) s += sheet[CATS[k]] || 0; return s; }
+  function bonus(sheet) { return upper(sheet) >= BONUS_AT ? BONUS : 0; }
+  function total(sheet) { var s = 0; CATS.forEach(function (c) { s += sheet[c] || 0; }); return s + bonus(sheet); }
+
+  // Writes the dice into an empty row; a round must have been rolled at least once
+  function place(S, cat) {
+    if (over(S) || S.rolls === 0 || !Object.prototype.hasOwnProperty.call(S.sheet, cat) || S.sheet[cat] !== null) return null;
+    var had = bonus(S.sheet) > 0, pts = score(cat, S.dice);
+    S.sheet[cat] = pts;
+    S.round++; S.rolls = 0; S.held = [false, false, false, false, false];
+    return { cat: cat, points: pts, bonus: !had && bonus(S.sheet) > 0, over: over(S) };
+  }
+
+  function potentials(S) {
+    var out = {};
+    CATS.forEach(function (c) { out[c] = S.rolls > 0 && S.sheet[c] === null ? score(c, S.dice) : null; });
+    return out;
+  }
+
+  // A value a row can really hold, so a damaged save is not restored
+  function possible(cat, v) {
+    var k = CATS.indexOf(cat);
+    if (!Number.isInteger(v) || v < 0) return false;
+    if (k < UPPER) return v % (k + 1) === 0 && v <= 5 * (k + 1);
+    if (cat === 'three' || cat === 'four' || cat === 'chance') return v === 0 || (v >= 5 && v <= 30);
+    return v === 0 || v === { full: 25, small: 30, large: 40, yacht: 50 }[cat];
+  }
+  function valid(s) {
+    if (!s || !Array.isArray(s.dice) || s.dice.length !== 5 || !Array.isArray(s.held) || s.held.length !== 5 || !s.sheet) return false;
+    if (!s.dice.every(function (v) { return Number.isInteger(v) && v >= 1 && v <= 6; })) return false;
+    if (!s.held.every(function (v) { return typeof v === 'boolean'; })) return false;
+    if (!Number.isInteger(s.round) || s.round < 0 || s.round >= ROUNDS || !Number.isInteger(s.rolls) || s.rolls < 0 || s.rolls > ROLLS || !Number.isInteger(s.seed)) return false;
+    var filled = 0;
+    for (var k = 0; k < CATS.length; k++) {
+      var v = s.sheet[CATS[k]];
+      if (v === null) continue;
+      if (!possible(CATS[k], v)) return false;
+      filled++;
+    }
+    return filled === s.round && Object.keys(s.sheet).length === CATS.length;
+  }
+
+  return { CATS: CATS, UPPER: UPPER, ROUNDS: ROUNDS, ROLLS: ROLLS, BONUS_AT: BONUS_AT, BONUS: BONUS,
+    score: score, die: die, newGame: newGame, over: over, roll: roll, toggle: toggle, place: place,
+    upper: upper, bonus: bonus, total: total, potentials: potentials, valid: valid };
+}
+if (typeof module !== 'undefined') module.exports = FiveDiceEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = FiveDiceEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'fivedice',
+    name: { fa: 'پنج‌تاس', en: 'Five Dice', zh: '五骰', de: 'Fünf Würfel', es: 'Cinco Dados', pl: 'Pięć Kości', fr: 'Cinq Dés', ar: 'خمسة نرد', hi: 'पाँच पासे' },
+    accent: '#962A00',
+    mood: 'menu',
+    strings: {
+      fa: {
+        fdOnes: 'یک‌ها', fdTwos: 'دوها', fdThrees: 'سه‌ها', fdFours: 'چهارها', fdFives: 'پنج‌ها', fdSixes: 'شش‌ها',
+        fdThree: 'سه یکسان', fdFour: 'چهار یکسان', fdFull: 'سه و دو', fdSmall: 'ردیف کوتاه', fdLarge: 'ردیف بلند', fdYacht: 'پنج یکسان', fdChance: 'شانس',
+        fdBonus: 'جایزه', fdTotal: 'جمع', fdRound: 'دور', fdRoll: 'بریز', fdLeft: '{n} بار مانده', fdNoRoll: 'یک ردیف را انتخاب کن',
+        fdHintRoll: 'تاس‌ها را بریز', fdHintHold: 'تاسی را که می‌خواهی نگه دار یا یک ردیف را انتخاب کن', fdHintPick: 'یک ردیف را برای امتیاز انتخاب کن',
+        fdDie: 'تاس {i}: {v}', fdDieBlank: 'تاس {i}، هنوز ریخته نشده', fdRowDone: '{c}: {v} امتیاز', fdRowOpen: '{c}: خالی، الان {v} امتیاز', fdRowEmpty: '{c}: خالی',
+        fdDaily: 'پنج‌تاس روزانه', fdScoreN: 'امتیاز {s}', fdDoneT: 'برگه کامل شد', fdNewBest: 'رکورد تازه!', fdPrevBest: 'رکورد قبلی', fdBelow: '{d} امتیاز تا رکوردت', fdBonusL: 'جایزه‌ی بالا',
+        fdKRoll: 'ریختن تاس‌ها', fdKHold: 'نگه داشتن تاس (از چپ)', fdKNew: 'بازی تازه',
+        fdRules: 'هر بازی ۱۳ دور است. در هر دور تا سه بار پنج تاس را می‌ریزی: بعد از هر ریختن، روی هر تاسی که می‌خواهی بزن تا نگهش داری و بقیه را دوباره بریز. بعد یک ردیف خالی برگه را انتخاب کن تا تاس‌ها در آن حساب شوند؛ هر ردیف فقط یک بار پر می‌شود و ردیفی که جور نباشد صفر می‌گیرد. یک‌ها تا شش‌ها جمع همان عدد را می‌گیرند و اگر این شش ردیف روی هم ۶۳ یا بیشتر شوند، ۳۵ امتیاز جایزه داری. سه یکسان و چهار یکسان جمع همه‌ی تاس‌ها را می‌گیرند. سه و دو (سه تا از یک عدد و دو تا از عددی دیگر) ۲۵، ردیف کوتاه (چهار عدد پشت سر هم) ۳۰، ردیف بلند (پنج عدد پشت سر هم) ۴۰، پنج یکسان ۵۰ و شانس جمع همه‌ی تاس‌ها. بعد از ۱۳ دور برگه پر است و جمعش امتیاز توست.',
+        fdTut1T: 'بریز و نگه دار', fdTut1: 'در هر دور تا سه بار بریز. روی تاس بزن تا بماند؛ بقیه دوباره ریخته می‌شوند.',
+        fdTut2T: 'یک ردیف را پر کن', fdTut2: 'هر ردیف نشان می‌دهد الان چند امتیاز می‌گیرد. یکی را بزن؛ هر ردیف یک بار.',
+        fdTut3T: '۱۳ دور', fdTut3: 'همه‌ی ۱۳ ردیف را پر کن. ۶۳ یا بیشتر در شش ردیف بالا ۳۵ امتیاز جایزه دارد.'
+      },
+      en: {
+        fdOnes: 'Ones', fdTwos: 'Twos', fdThrees: 'Threes', fdFours: 'Fours', fdFives: 'Fives', fdSixes: 'Sixes',
+        fdThree: '3 of a kind', fdFour: '4 of a kind', fdFull: 'Full house', fdSmall: 'Small straight', fdLarge: 'Large straight', fdYacht: 'Five alike', fdChance: 'Chance',
+        fdBonus: 'Bonus', fdTotal: 'Total', fdRound: 'Round', fdRoll: 'Roll', fdLeft: '{n} left', fdNoRoll: 'Pick a row',
+        fdHintRoll: 'Roll the dice', fdHintHold: 'Tap dice to keep them, or pick a row', fdHintPick: 'Pick a row to score',
+        fdDie: 'Die {i}: {v}', fdDieBlank: 'Die {i}, not rolled yet', fdRowDone: '{c}: {v} points', fdRowOpen: '{c}: open, {v} points now', fdRowEmpty: '{c}: open',
+        fdDaily: 'Daily Five Dice', fdScoreN: 'Score {s}', fdDoneT: 'Sheet complete', fdNewBest: 'New best!', fdPrevBest: 'Previous best', fdBelow: '{d} short of your best', fdBonusL: 'Top bonus',
+        fdKRoll: 'Roll the dice', fdKHold: 'Keep a die (from the left)', fdKNew: 'New game',
+        fdRules: 'A game has 13 rounds. In each round you roll the five dice up to three times: after a roll, tap any dice to keep them and roll the rest again. Then pick an empty row of the sheet to score the dice there; each row is filled once, and a row the dice do not fit scores 0. Ones to Sixes score the total of that number, and if those six rows add up to 63 or more you get a 35 bonus. 3 and 4 of a kind score the sum of all dice. Full house (three of one number and two of another) scores 25, a small straight (four in a row) 30, a large straight (five in a row) 40, Five alike 50, and Chance the sum of all dice. After 13 rounds the sheet is full and its total is your score.',
+        fdTut1T: 'Roll and keep', fdTut1: 'Roll up to three times a round. Tap a die to keep it; the rest roll again.',
+        fdTut2T: 'Fill a row', fdTut2: 'Each row shows what it would score now. Tap one to write it down; each row is used once.',
+        fdTut3T: '13 rounds', fdTut3: 'Fill all 13 rows. 63 or more in the top six earns a 35 bonus.'
+      },
+      pl: {
+        fdOnes: 'Jedynki', fdTwos: 'Dwójki', fdThrees: 'Trójki', fdFours: 'Czwórki', fdFives: 'Piątki', fdSixes: 'Szóstki',
+        fdThree: 'Trójka', fdFour: 'Kareta', fdFull: 'Full', fdSmall: 'Mały strit', fdLarge: 'Duży strit', fdYacht: 'Pięć takich', fdChance: 'Szansa',
+        fdBonus: 'Premia', fdTotal: 'Suma', fdRound: 'Runda', fdRoll: 'Rzuć', fdLeft: 'zostało {n}', fdNoRoll: 'Wybierz wiersz',
+        fdHintRoll: 'Rzuć kośćmi', fdHintHold: 'Dotknij kości, aby je zatrzymać, albo wybierz wiersz', fdHintPick: 'Wybierz wiersz do zapisania',
+        fdDie: 'Kość {i}: {v}', fdDieBlank: 'Kość {i}, jeszcze nie rzucona', fdRowDone: '{c}: {v} pkt', fdRowOpen: '{c}: wolne, teraz {v} pkt', fdRowEmpty: '{c}: wolne',
+        fdDaily: 'Codzienne Pięć Kości', fdScoreN: 'Wynik {s}', fdDoneT: 'Tabela pełna', fdNewBest: 'Nowy rekord!', fdPrevBest: 'Poprzedni rekord', fdBelow: '{d} do rekordu', fdBonusL: 'Premia za górę',
+        fdKRoll: 'Rzuć kośćmi', fdKHold: 'Zatrzymaj kość (od lewej)', fdKNew: 'Nowa gra',
+        fdRules: 'Gra ma 13 rund. W każdej rundzie rzucasz pięcioma kośćmi do trzech razy: po rzucie dotknij kości, które chcesz zatrzymać, i rzuć resztą ponownie. Potem wybierz pusty wiersz tabeli i zapisz w nim wynik; każdy wiersz wypełniasz raz, a wiersz, do którego kości nie pasują, dostaje 0. Jedynki do Szóstek liczą sumę danej liczby, a jeśli te sześć wierszy da razem 63 lub więcej, dostajesz premię 35. Trójka i Kareta liczą sumę wszystkich kości. Full (trzy jednej liczby i dwie innej) daje 25, mały strit (cztery po kolei) 30, duży strit (pięć po kolei) 40, Pięć takich 50, a Szansa sumę wszystkich kości. Po 13 rundach tabela jest pełna, a jej suma to twój wynik.',
+        fdTut1T: 'Rzucaj i zatrzymuj', fdTut1: 'Rzucaj do trzech razy w rundzie. Dotknij kości, aby ją zatrzymać; reszta leci ponownie.',
+        fdTut2T: 'Wypełnij wiersz', fdTut2: 'Każdy wiersz pokazuje, ile dałby teraz. Dotknij go, aby zapisać; każdy wiersz raz.',
+        fdTut3T: '13 rund', fdTut3: 'Wypełnij wszystkie 13 wierszy. 63 lub więcej w górnych sześciu daje premię 35.'
+      },
+      fr: {
+        fdOnes: 'As', fdTwos: 'Deux', fdThrees: 'Trois', fdFours: 'Quatre', fdFives: 'Cinq', fdSixes: 'Six',
+        fdThree: 'Brelan', fdFour: 'Carré', fdFull: 'Full', fdSmall: 'Petite suite', fdLarge: 'Grande suite', fdYacht: 'Cinq pareils', fdChance: 'Chance',
+        fdBonus: 'Bonus', fdTotal: 'Total', fdRound: 'Tour', fdRoll: 'Lancer', fdLeft: 'encore {n}', fdNoRoll: 'Choisis une ligne',
+        fdHintRoll: 'Lance les dés', fdHintHold: 'Touche des dés pour les garder, ou choisis une ligne', fdHintPick: 'Choisis une ligne à marquer',
+        fdDie: 'Dé {i} : {v}', fdDieBlank: 'Dé {i}, pas encore lancé', fdRowDone: '{c} : {v} points', fdRowOpen: '{c} : libre, {v} points maintenant', fdRowEmpty: '{c} : libre',
+        fdDaily: 'Cinq Dés du jour', fdScoreN: 'Score {s}', fdDoneT: 'Feuille remplie', fdNewBest: 'Nouveau record !', fdPrevBest: 'Record précédent', fdBelow: '{d} sous ton record', fdBonusL: 'Bonus du haut',
+        fdKRoll: 'Lancer les dés', fdKHold: 'Garder un dé (depuis la gauche)', fdKNew: 'Nouvelle partie',
+        fdRules: 'Une partie compte 13 tours. À chaque tour tu lances les cinq dés jusqu’à trois fois : après un lancer, touche les dés à garder et relance les autres. Puis choisis une ligne vide de la feuille pour y marquer les dés ; chaque ligne sert une fois, et une ligne qui ne correspond pas vaut 0. As à Six comptent la somme de ce nombre, et si ces six lignes font 63 ou plus, tu gagnes un bonus de 35. Brelan et Carré comptent la somme de tous les dés. Le full (trois d’un nombre et deux d’un autre) vaut 25, la petite suite (quatre qui se suivent) 30, la grande suite (cinq qui se suivent) 40, Cinq pareils 50, et Chance la somme de tous les dés. Après 13 tours la feuille est pleine et son total est ton score.',
+        fdTut1T: 'Lance et garde', fdTut1: 'Lance jusqu’à trois fois par tour. Touche un dé pour le garder ; les autres sont relancés.',
+        fdTut2T: 'Remplis une ligne', fdTut2: 'Chaque ligne montre ce qu’elle vaudrait maintenant. Touche-la pour marquer ; chaque ligne sert une fois.',
+        fdTut3T: '13 tours', fdTut3: 'Remplis les 13 lignes. 63 ou plus dans les six du haut donne un bonus de 35.'
+      },
+      ar: {
+        fdOnes: 'الآحاد', fdTwos: 'الاثنينات', fdThrees: 'الثلاثات', fdFours: 'الأربعات', fdFives: 'الخمسات', fdSixes: 'الستات',
+        fdThree: 'ثلاثة متشابهة', fdFour: 'أربعة متشابهة', fdFull: 'ثلاثة واثنان', fdSmall: 'تسلسل قصير', fdLarge: 'تسلسل طويل', fdYacht: 'خمسة متشابهة', fdChance: 'الحظ',
+        fdBonus: 'المكافأة', fdTotal: 'المجموع', fdRound: 'الجولة', fdRoll: 'ارمِ', fdLeft: 'باقٍ {n}', fdNoRoll: 'اختر سطرًا',
+        fdHintRoll: 'ارمِ النرد', fdHintHold: 'المس النرد لتُبقيه، أو اختر سطرًا', fdHintPick: 'اختر سطرًا لتسجيل النقاط',
+        fdDie: 'النرد {i}: {v}', fdDieBlank: 'النرد {i}، لم يُرمَ بعد', fdRowDone: '{c}: {v} نقطة', fdRowOpen: '{c}: فارغ، {v} نقطة الآن', fdRowEmpty: '{c}: فارغ',
+        fdDaily: 'خمسة نرد اليومية', fdScoreN: 'النتيجة {s}', fdDoneT: 'اكتملت الورقة', fdNewBest: 'رقم قياسي جديد!', fdPrevBest: 'الرقم السابق', fdBelow: 'ينقصك {d} عن رقمك', fdBonusL: 'مكافأة الأعلى',
+        fdKRoll: 'ارمِ النرد', fdKHold: 'أبقِ نردًا (من اليسار)', fdKNew: 'لعبة جديدة',
+        fdRules: 'في اللعبة 13 جولة. في كل جولة ترمي النرد الخمسة حتى ثلاث مرات: بعد كل رمية المس ما تريد إبقاءه من النرد وارمِ الباقي من جديد. ثم اختر سطرًا فارغًا في الورقة لتسجّل فيه النرد؛ كل سطر يُملأ مرة واحدة، والسطر الذي لا يطابقه النرد يأخذ 0. الآحاد حتى الستات تأخذ مجموع ذلك الرقم، وإذا بلغ مجموع هذه الأسطر الستة 63 أو أكثر نلت مكافأة 35. ثلاثة متشابهة وأربعة متشابهة تأخذان مجموع كل النرد. ثلاثة واثنان (ثلاثة من رقم واثنان من رقم آخر) 25، والتسلسل القصير (أربعة متتالية) 30، والتسلسل الطويل (خمسة متتالية) 40، وخمسة متشابهة 50، والحظ مجموع كل النرد. بعد 13 جولة تمتلئ الورقة ومجموعها نتيجتك.',
+        fdTut1T: 'ارمِ وأبقِ', fdTut1: 'ارمِ حتى ثلاث مرات في الجولة. المس نردًا لتُبقيه؛ والباقي يُرمى من جديد.',
+        fdTut2T: 'املأ سطرًا', fdTut2: 'كل سطر يعرض ما سيأخذه الآن. المس واحدًا لتسجّله؛ كل سطر مرة واحدة.',
+        fdTut3T: '13 جولة', fdTut3: 'املأ الأسطر الـ13 كلها. 63 أو أكثر في الأسطر الستة العليا تمنحك مكافأة 35.'
+      },
+      hi: {
+        fdOnes: 'इक्के', fdTwos: 'दुक्के', fdThrees: 'तिक्के', fdFours: 'चौके', fdFives: 'पंजे', fdSixes: 'छक्के',
+        fdThree: 'तीन एक जैसे', fdFour: 'चार एक जैसे', fdFull: 'फुल हाउस', fdSmall: 'छोटा क्रम', fdLarge: 'बड़ा क्रम', fdYacht: 'पाँचों एक जैसे', fdChance: 'चांस',
+        fdBonus: 'बोनस', fdTotal: 'कुल', fdRound: 'दौर', fdRoll: 'फेंकें', fdLeft: '{n} बाकी', fdNoRoll: 'एक पंक्ति चुनें',
+        fdHintRoll: 'पासे फेंकें', fdHintHold: 'रखने के लिए पासे छुएँ, या एक पंक्ति चुनें', fdHintPick: 'अंक लिखने के लिए एक पंक्ति चुनें',
+        fdDie: 'पासा {i}: {v}', fdDieBlank: 'पासा {i}, अभी फेंका नहीं गया', fdRowDone: '{c}: {v} अंक', fdRowOpen: '{c}: ख़ाली, अभी {v} अंक', fdRowEmpty: '{c}: ख़ाली',
+        fdDaily: 'रोज़ के पाँच पासे', fdScoreN: 'स्कोर {s}', fdDoneT: 'शीट पूरी हुई', fdNewBest: 'नया रिकॉर्ड!', fdPrevBest: 'पिछला रिकॉर्ड', fdBelow: 'रिकॉर्ड से {d} कम', fdBonusL: 'ऊपर का बोनस',
+        fdKRoll: 'पासे फेंकें', fdKHold: 'पासा रखें (बाएँ से)', fdKNew: 'नया खेल',
+        fdRules: 'एक खेल में 13 दौर होते हैं। हर दौर में आप पाँचों पासे तीन बार तक फेंकते हैं: हर बार के बाद जिन पासों को रखना है उन्हें छुएँ और बाक़ी फिर से फेंकें। फिर शीट की कोई ख़ाली पंक्ति चुनें और पासों के अंक वहाँ लिखें; हर पंक्ति एक ही बार भरती है, और जो पंक्ति पासों से मेल न खाए उसे 0 मिलता है। इक्के से छक्के तक उस अंक का जोड़ गिनते हैं, और अगर ये छह पंक्तियाँ मिलकर 63 या ज़्यादा हों तो 35 का बोनस मिलता है। तीन एक जैसे और चार एक जैसे सभी पासों का जोड़ गिनते हैं। फुल हाउस (एक अंक के तीन और दूसरे के दो) 25, छोटा क्रम (लगातार चार) 30, बड़ा क्रम (लगातार पाँच) 40, पाँचों एक जैसे 50, और चांस सभी पासों का जोड़। 13 दौर के बाद शीट भर जाती है और उसका कुल आपका स्कोर है।',
+        fdTut1T: 'फेंकें और रखें', fdTut1: 'हर दौर में तीन बार तक फेंकें। पासा रखने के लिए उसे छुएँ; बाक़ी फिर फेंके जाते हैं।',
+        fdTut2T: 'एक पंक्ति भरें', fdTut2: 'हर पंक्ति दिखाती है कि अभी कितने अंक मिलेंगे। लिखने के लिए छुएँ; हर पंक्ति एक बार।',
+        fdTut3T: '13 दौर', fdTut3: 'सभी 13 पंक्तियाँ भरें। ऊपर की छह में 63 या ज़्यादा पर 35 का बोनस।'
+      },
+      zh: {
+        fdOnes: '一点', fdTwos: '二点', fdThrees: '三点', fdFours: '四点', fdFives: '五点', fdSixes: '六点',
+        fdThree: '三条', fdFour: '四条', fdFull: '葫芦', fdSmall: '小顺', fdLarge: '大顺', fdYacht: '五同', fdChance: '机会',
+        fdBonus: '奖励', fdTotal: '总分', fdRound: '回合', fdRoll: '掷骰', fdLeft: '还剩 {n} 次', fdNoRoll: '选择一行',
+        fdHintRoll: '掷骰子', fdHintHold: '点骰子保留它们，或选择一行', fdHintPick: '选择一行记分',
+        fdDie: '骰子 {i}：{v}', fdDieBlank: '骰子 {i}，还没掷', fdRowDone: '{c}：{v} 分', fdRowOpen: '{c}：空，现在 {v} 分', fdRowEmpty: '{c}：空',
+        fdDaily: '每日五骰', fdScoreN: '分数 {s}', fdDoneT: '计分表已填满', fdNewBest: '新纪录！', fdPrevBest: '之前的最高分', fdBelow: '离最高分还差 {d}', fdBonusL: '上半区奖励',
+        fdKRoll: '掷骰子', fdKHold: '保留骰子（从左数）', fdKNew: '新游戏',
+        fdRules: '一局共 13 回合。每回合最多掷五颗骰子三次：每次掷完后，点选想保留的骰子，再重掷其余的。然后选计分表中的一个空行记下这次的分数；每行只能填一次，骰子不符合的行记 0 分。一点到六点记该点数之和，这六行合计达到 63 或以上，可获得 35 分奖励。三条和四条记所有骰子之和。葫芦（三个相同加另一对）25 分，小顺（四个连续）30 分，大顺（五个连续）40 分，五同 50 分，机会记所有骰子之和。13 回合后计分表填满，总分就是你的成绩。',
+        fdTut1T: '掷骰与保留', fdTut1: '每回合最多掷三次。点骰子保留它，其余的重掷。',
+        fdTut2T: '填一行', fdTut2: '每行显示现在能得几分。点一行记下；每行只用一次。',
+        fdTut3T: '13 回合', fdTut3: '填满全部 13 行。上面六行达到 63 分可得 35 分奖励。'
+      },
+      de: {
+        fdOnes: 'Einer', fdTwos: 'Zweier', fdThrees: 'Dreier', fdFours: 'Vierer', fdFives: 'Fünfer', fdSixes: 'Sechser',
+        fdThree: 'Dreierpasch', fdFour: 'Viererpasch', fdFull: 'Full House', fdSmall: 'Kleine Straße', fdLarge: 'Große Straße', fdYacht: 'Fünf gleiche', fdChance: 'Chance',
+        fdBonus: 'Bonus', fdTotal: 'Summe', fdRound: 'Runde', fdRoll: 'Würfeln', fdLeft: 'noch {n}', fdNoRoll: 'Wähle eine Zeile',
+        fdHintRoll: 'Würfle', fdHintHold: 'Tippe Würfel an, um sie zu behalten, oder wähle eine Zeile', fdHintPick: 'Wähle eine Zeile zum Eintragen',
+        fdDie: 'Würfel {i}: {v}', fdDieBlank: 'Würfel {i}, noch nicht gewürfelt', fdRowDone: '{c}: {v} Punkte', fdRowOpen: '{c}: frei, jetzt {v} Punkte', fdRowEmpty: '{c}: frei',
+        fdDaily: 'Fünf Würfel des Tages', fdScoreN: 'Punkte {s}', fdDoneT: 'Block voll', fdNewBest: 'Neuer Rekord!', fdPrevBest: 'Bisheriger Rekord', fdBelow: '{d} unter deinem Rekord', fdBonusL: 'Bonus oben',
+        fdKRoll: 'Würfeln', fdKHold: 'Würfel behalten (von links)', fdKNew: 'Neues Spiel',
+        fdRules: 'Ein Spiel hat 13 Runden. In jeder Runde würfelst du bis zu dreimal mit fünf Würfeln: Tippe nach einem Wurf die Würfel an, die du behalten willst, und würfle den Rest neu. Dann wählst du eine freie Zeile des Blocks und trägst die Würfel dort ein; jede Zeile wird einmal gefüllt, und eine Zeile, zu der die Würfel nicht passen, bekommt 0. Einer bis Sechser zählen die Summe dieser Zahl, und ergeben diese sechs Zeilen zusammen 63 oder mehr, gibt es 35 Bonuspunkte. Dreier- und Viererpasch zählen die Summe aller Würfel. Full House (drei einer Zahl und zwei einer anderen) zählt 25, die kleine Straße (vier in Folge) 30, die große Straße (fünf in Folge) 40, Fünf gleiche 50 und Chance die Summe aller Würfel. Nach 13 Runden ist der Block voll, und seine Summe ist dein Ergebnis.',
+        fdTut1T: 'Würfeln und behalten', fdTut1: 'Würfle bis zu dreimal pro Runde. Tippe einen Würfel an, um ihn zu behalten; der Rest wird neu gewürfelt.',
+        fdTut2T: 'Eine Zeile füllen', fdTut2: 'Jede Zeile zeigt, was sie jetzt brächte. Tippe eine an, um einzutragen; jede Zeile einmal.',
+        fdTut3T: '13 Runden', fdTut3: 'Fülle alle 13 Zeilen. 63 oder mehr in den oberen sechs bringen 35 Bonuspunkte.'
+      },
+      es: {
+        fdOnes: 'Unos', fdTwos: 'Doses', fdThrees: 'Treses', fdFours: 'Cuatros', fdFives: 'Cincos', fdSixes: 'Seises',
+        fdThree: 'Trío', fdFour: 'Póquer', fdFull: 'Full', fdSmall: 'Escalera corta', fdLarge: 'Escalera larga', fdYacht: 'Cinco iguales', fdChance: 'Libre',
+        fdBonus: 'Bono', fdTotal: 'Total', fdRound: 'Ronda', fdRoll: 'Tirar', fdLeft: 'quedan {n}', fdNoRoll: 'Elige una fila',
+        fdHintRoll: 'Tira los dados', fdHintHold: 'Toca dados para guardarlos, o elige una fila', fdHintPick: 'Elige una fila para anotar',
+        fdDie: 'Dado {i}: {v}', fdDieBlank: 'Dado {i}, aún sin tirar', fdRowDone: '{c}: {v} puntos', fdRowOpen: '{c}: libre, ahora {v} puntos', fdRowEmpty: '{c}: libre',
+        fdDaily: 'Cinco Dados diario', fdScoreN: 'Puntos {s}', fdDoneT: 'Hoja completa', fdNewBest: '¡Nuevo récord!', fdPrevBest: 'Récord anterior', fdBelow: '{d} por debajo de tu récord', fdBonusL: 'Bono de arriba',
+        fdKRoll: 'Tirar los dados', fdKHold: 'Guardar un dado (desde la izquierda)', fdKNew: 'Partida nueva',
+        fdRules: 'Una partida tiene 13 rondas. En cada ronda tiras los cinco dados hasta tres veces: tras cada tirada, toca los dados que quieras guardar y vuelve a tirar los demás. Luego elige una fila vacía de la hoja para anotar los dados; cada fila se llena una vez, y una fila que los dados no cumplen vale 0. Unos a Seises suman ese número, y si esas seis filas llegan a 63 o más ganas un bono de 35. Trío y Póquer suman todos los dados. El full (tres de un número y dos de otro) vale 25, la escalera corta (cuatro seguidos) 30, la escalera larga (cinco seguidos) 40, Cinco iguales 50 y Libre la suma de todos los dados. Tras 13 rondas la hoja está llena y su total es tu puntuación.',
+        fdTut1T: 'Tira y guarda', fdTut1: 'Tira hasta tres veces por ronda. Toca un dado para guardarlo; los demás se vuelven a tirar.',
+        fdTut2T: 'Llena una fila', fdTut2: 'Cada fila muestra lo que valdría ahora. Toca una para anotarla; cada fila, una vez.',
+        fdTut3T: '13 rondas', fdTut3: 'Llena las 13 filas. 63 o más en las seis de arriba dan un bono de 35.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var CATS = E.CATS;
+  var NAME = { ones: 'fdOnes', twos: 'fdTwos', threes: 'fdThrees', fours: 'fdFours', fives: 'fdFives', sixes: 'fdSixes',
+    three: 'fdThree', four: 'fdFour', full: 'fdFull', small: 'fdSmall', large: 'fdLarge', yacht: 'fdYacht', chance: 'fdChance' };
+  // literal keys, so the string check in tools/test.js can see each one
+  var LABEL = { ones: C.t('fdOnes'), twos: C.t('fdTwos'), threes: C.t('fdThrees'), fours: C.t('fdFours'), fives: C.t('fdFives'), sixes: C.t('fdSixes'),
+    three: C.t('fdThree'), four: C.t('fdFour'), full: C.t('fdFull'), small: C.t('fdSmall'), large: C.t('fdLarge'), yacht: C.t('fdYacht'), chance: C.t('fdChance') };
+
+  var S = null, startedAt = 0, ended = false;
+
+  /* --------------------------------------------------------------- view */
+
+  var dieBtns = [], diceShown = [];
+  for (var di = 0; di < 5; di++) {
+    (function (i) {
+      var b = el('button', { class: 'fd-die', type: 'button', onclick: function () { hold(i); } });
+      dieBtns.push(b);
+    })(di);
+  }
+  var diceRow = el('div', { class: 'fd-dice' }, dieBtns);
+  var rollLabel = el('span'), rollSub = el('small');
+  var rollBtn = el('button', { class: 'ch-btn ch-btn--primary fd-roll', type: 'button', onclick: doRoll }, [rollLabel, rollSub]);
+  var sheet = el('div', { class: 'fd-sheet' });
+  var rows = {};
+  CATS.forEach(function (c, k) {
+    var name = el('span', { class: 'fd-name', text: LABEL[c] }), val = el('span', { class: 'fd-val' });
+    var b = el('button', { class: 'fd-row', type: 'button', style: { 'grid-column': k < 6 ? '1' : '2', 'grid-row': String((k < 6 ? k : k - 6) + 1) },
+      onclick: function () { pick(c); } }, [name, val]);
+    rows[c] = { b: b, v: val, shown: '' };
+    sheet.appendChild(b);
+  });
+  var bonusV = el('span', { class: 'fd-val' });
+  var bonusRow = el('div', { class: 'fd-row fd-sum', style: { 'grid-column': '1', 'grid-row': '7' } }, [el('span', { class: 'fd-name', text: C.t('fdBonus') }), bonusV]);
+  var totalV = el('span', { class: 'fd-val' });
+  var totalRow = el('div', { class: 'fd-row fd-total', style: { 'grid-row': '8' } }, [el('span', { class: 'fd-name', text: C.t('fdTotal') }), totalV]);
+  sheet.appendChild(bonusRow); sheet.appendChild(totalRow);
+  var table = el('div', { class: 'fd-table' }, [diceRow, rollBtn, sheet]);
+
+  var top = el('div', { class: 'fd-top ch-above' });
+  var roundV = el('div', { class: 'fd-score__v', text: '1' }), scoreV = el('div', { class: 'fd-score__v', text: '0' }), bestV = el('div', { class: 'fd-score__v', text: '0' });
+  function box(label, v) { return el('div', { class: 'fd-score' }, [el('div', { class: 'fd-score__l', text: label }), v]); }
+  var scores = el('div', { class: 'fd-scores ch-above' }, [box(C.t('fdRound'), roundV), box(C.t('score'), scoreV), box(C.t('best'), bestV)]);
+  var status = el('div', { class: 'fd-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'fd-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [table]), el('div', { class: 'ch-side fd-side' }, [top, scores, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  if (!dailyDate) ctx.button({ icon: 'refresh', label: C.t('newGame'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  // pips on a 100-unit face: the positions of each value
+  var PIPS = { 1: [[50, 50]], 2: [[28, 28], [72, 72]], 3: [[28, 28], [50, 50], [72, 72]], 4: [[28, 28], [72, 28], [28, 72], [72, 72]],
+    5: [[28, 28], [72, 28], [50, 50], [28, 72], [72, 72]], 6: [[28, 26], [72, 26], [28, 50], [72, 50], [28, 74], [72, 74]] };
+  function faceSvg(v) {
+    var s = '<svg viewBox="0 0 100 100" aria-hidden="true"><rect class="fd-face" x="3" y="3" width="94" height="94" rx="20"/>';
+    if (v) PIPS[v].forEach(function (p) { s += '<circle class="fd-pip" cx="' + p[0] + '" cy="' + p[1] + '" r="9"/>'; });
+    return s + '</svg>';
+  }
+
+  function best() { return C.stats.getBest('fivedice', 'score') || 0; }
+
+  // Writes only what changed: rebuilding a die or a row under a finger eats the tap (#750)
+  function render() {
+    var blank = S.rolls === 0 || E.over(S);
+    for (var i = 0; i < 5; i++) {
+      var b = dieBtns[i], v = blank ? 0 : S.dice[i], key = v + (blank ? 'b' : '');
+      if (diceShown[i] !== key) { b.innerHTML = faceSvg(v); diceShown[i] = key; }
+      b.classList.toggle('fd-blank', blank);
+      b.setAttribute('aria-pressed', !blank && S.held[i] ? 'true' : 'false');
+      b.disabled = blank || S.rolls >= E.ROLLS || ended;
+      b.setAttribute('aria-label', blank ? C.t('fdDieBlank', { i: i + 1 }) : C.t('fdDie', { i: i + 1, v: v }));
+    }
+    var left = E.ROLLS - S.rolls;
+    rollLabel.textContent = C.t('fdRoll');
+    // no "·" separator: beside a Persian digit it reads as the zero «۰» ("۱۰ بار مانده")
+    rollSub.textContent = left > 0 ? C.t('fdLeft', { n: C.num(left) }) : '';
+    rollBtn.disabled = left <= 0 || ended;
+    if (left <= 0) { rollLabel.textContent = C.t('fdNoRoll'); }
+    var pot = E.potentials(S);
+    CATS.forEach(function (c) {
+      var r = rows[c], done = S.sheet[c] !== null, p = pot[c];
+      var text = done ? C.num(S.sheet[c]) : p === null ? '–' : C.num(p);
+      if (r.v.textContent !== text) r.v.textContent = text;
+      r.v.className = 'fd-val' + (done ? '' : p === null ? ' fd-dash' : p === 0 ? ' fd-zero' : ' fd-pot');
+      r.b.classList.toggle('fd-open', !done && p === null);
+      r.b.classList.toggle('fd-can', !done && p !== null && p > 0);
+      r.b.disabled = done || p === null || ended;
+      r.b.setAttribute('aria-label', done ? C.t('fdRowDone', { c: LABEL[c], v: S.sheet[c] }) : p === null ? C.t('fdRowEmpty', { c: LABEL[c] }) : C.t('fdRowOpen', { c: LABEL[c], v: p }));
+    });
+    var up = E.upper(S.sheet), bon = E.bonus(S.sheet);
+    bonusV.textContent = bon ? '+' + C.num(bon) : C.num(up) + '/' + C.num(E.BONUS_AT);
+    bonusRow.classList.toggle('fd-got', bon > 0);
+    totalV.textContent = C.num(E.total(S.sheet));
+    roundV.textContent = C.num(Math.min(S.round + 1, E.ROUNDS)) + '/' + C.num(E.ROUNDS);
+    scoreV.textContent = C.num(E.total(S.sheet));
+    bestV.textContent = C.num(best());
+    top.innerHTML = '';
+    if (S.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('fdDaily') + ' — ' + C.num(S.daily) })]));
+    status.textContent = ended ? '' : S.rolls === 0 ? C.t('fdHintRoll') : S.rolls < E.ROLLS ? C.t('fdHintHold') : C.t('fdHintPick');
+  }
+
+  function fitSize() {
+    var w = table.getBoundingClientRect().width;
+    if (w) table.style.setProperty('--u', (w / 100).toFixed(2) + 'px');
+  }
+  if (window.ResizeObserver) new ResizeObserver(fitSize).observe(table); else window.addEventListener('resize', fitSize);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitSize);
+
+  /* ------------------------------------------------------------- game */
+
+  function seedFor() {
+    var r = dailyDate ? C.daily('fivedice', dailyDate).rng : Math.random;
+    return Math.floor(r() * 4294967296) | 0;
+  }
+  function newGame() {
+    S = E.newGame(seedFor());
+    S.daily = dailyDate || null;
+    startedAt = Date.now(); ended = false;
+    diceShown = [];
+    render();
+    save();
+  }
+  function askNew() {
+    if (S && !ended && (S.round > 0 || S.rolls > 0)) C.ui.confirm({ title: C.t('newGame'), body: C.t('resetWarn'), onOk: newGame });
+    else newGame();
+  }
+
+  function doRoll() {
+    if (!S || ended) return;
+    var rolled = E.roll(S);
+    if (!rolled) return;
+    C.feedback('clack');
+    render();
+    save();
+    if (!C.ui.reduceMotion()) {
+      // each die tumbles in from the button: the move on the button, the spin on its picture
+      rolled.forEach(function (i, n) {
+        C.ui.fly(dieBtns[i], rollBtn, { ms: 380, delay: n * 45 });
+        var svg = dieBtns[i].firstChild;
+        if (svg && svg.animate) svg.animate([{ transform: 'rotate(' + (n % 2 ? 260 : -260) + 'deg) scale(.7)' }, { transform: 'rotate(' + (n % 2 ? -12 : 12) + 'deg) scale(1.06)', offset: .75 }, { transform: 'none' }],
+          { duration: 480, delay: n * 45, easing: 'cubic-bezier(.2,.8,.3,1)', fill: 'backwards' });
+      });
+    }
+    var c = [0, 0, 0, 0, 0, 0, 0];
+    S.dice.forEach(function (v) { c[v]++; });
+    if (c.indexOf(5) > 0) setTimeout(function () { C.ui.burst(diceRow, { colors: ['#962A00', '#E8A15C', '#FFD27A'], count: 40, ring: true }); }, C.ui.reduceMotion() ? 0 : 450);
+  }
+
+  function hold(i) {
+    if (!S || ended || !E.toggle(S, i)) return;
+    C.feedback('select');
+    render();
+    save();
+  }
+
+  function pick(cat) {
+    if (!S || ended) return;
+    var t = E.place(S, cat);
+    if (!t) return;
+    C.feedback(t.points > 0 ? 'place' : 'tap');
+    render();
+    if (t.points > 0) C.ui.fly(rows[cat].v, diceRow, { ms: 340 });
+    if (cat === 'yacht' && t.points === 50) { C.achievements.unlock('fd-yacht'); C.ui.burst(rows[cat].b, { colors: ['#962A00', '#FFD27A'], count: 30 }); }
+    if (t.bonus) { C.achievements.unlock('fd-bonus'); C.ui.burst(bonusRow, { colors: ['#5C9A6B', '#FFD27A'], count: 24 }); }
+    if (t.over) { finishGame(); return; }
+    save();
+    rollBtn.focus({ preventScroll: true });
+  }
+
+  function finishGame() {
+    ended = true;
+    var tot = E.total(S.sheet), prev = best(), isBest = tot > prev;
+    C.stats.best('fivedice', 'score', tot);
+    if (tot >= 250) C.achievements.unlock('fd-250');
+    var coins = Math.max(2, Math.round(tot / 25)), points = Math.max(1, Math.min(120, Math.round(tot / 3)));
+    if (S.daily) {
+      C.achievements.unlock('fd-daily');
+      if (!C.stats.daily('fivedice', S.daily, { label: C.t('fdScoreN', { s: C.num(tot) }), win: true })) {
+        coins = Math.round(coins * 0.2); points = Math.round(points * 0.2);
+      }
+    }
+    ctx.clearSave();
+    render();
+    var lines = [];
+    if (S.daily) lines.push({ label: C.t('daily'), value: C.num(S.daily) });
+    lines.push({ label: C.t('score'), value: C.num(tot) });
+    lines.push({ label: C.t('fdBonusL'), value: E.bonus(S.sheet) ? '+' + C.num(E.BONUS) : C.num(E.upper(S.sheet)) + '/' + C.num(E.BONUS_AT) });
+    lines.push({ label: C.t('fdPrevBest'), value: prev ? C.num(prev) : '–' });
+    var note = isBest ? C.t('fdNewBest') : tot < prev ? C.t('fdBelow', { d: C.num(prev - tot) }) : null;
+    setTimeout(function () {
+      ctx.finish({
+        won: true, title: C.t('fdDoneT'), note: note, timeMs: Date.now() - startedAt, coins: coins, points: points,
+        lines: lines,
+        shareText: 'چوگان · پنج‌تاس' + (S.daily ? '\nروزانه ' + S.daily : '') + '\n' + tot,
+        againLabel: S.daily ? null : C.t('newGame'), onAgain: S.daily ? null : newGame
+      });
+    }, C.ui.reduceMotion() ? 200 : 700);
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim') || e.ctrlKey || e.metaKey || e.altKey) return;
+    var t = e.target;
+    var onButton = t && t.tagName === 'BUTTON';
+    if ((e.key === ' ' && !onButton) || C.keyIs(e, 'r')) { e.preventDefault(); doRoll(); return; }
+    var n = '12345'.indexOf(e.key);
+    if (n < 0 && /^Digit[1-5]$/.test(e.code || '')) n = +e.code.slice(5) - 1;
+    if (n >= 0) { e.preventDefault(); hold(n); return; }
+    if (C.keyIs(e, 'n') && !dailyDate) { e.preventDefault(); askNew(); }
+  });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    var keys = [kb('Space · R', C.t('fdKRoll')), kb('1–5', C.t('fdKHold'))];
+    if (!dailyDate) keys.push(kb('N', C.t('fdKNew')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('fdRules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, keys)
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // five dice for the tutorial; kept dice are raised and filled with the game's colour.
+  // Colours are the theme's own variables, so the art fits the dark dialog too
+  function tArt(vals, kept, rowsArt) {
+    var s = '<svg viewBox="0 0 200 120" width="100%" font-family="sans-serif" font-weight="700">';
+    vals.forEach(function (v, i) {
+      var x = 12 + i * 37, y = kept && kept[i] ? 8 : 18, on = kept && kept[i];
+      s += '<rect x="' + x + '" y="' + y + '" width="30" height="30" rx="6" fill="' + (on ? '#962A00' : 'var(--c-surface)') + '" stroke="' + (on ? '#962A00' : 'var(--c-line)') + '" stroke-width="1.2"/>';
+      PIPS[v].forEach(function (p) { s += '<circle cx="' + (x + p[0] * 0.3) + '" cy="' + (y + p[1] * 0.3) + '" r="2.8" fill="' + (on ? '#FFFFFF' : 'var(--c-text)') + '"/>'; });
+    });
+    (rowsArt || []).forEach(function (r, k) {
+      var y = 60 + k * 19;
+      s += '<rect x="20" y="' + y + '" width="160" height="15" rx="4" fill="' + (r[2] ? 'var(--game-soft, #F1E3DE)' : 'var(--c-surface)') + '"' + (r[2] ? ' stroke="#962A00" stroke-width="1.2"' : '') + '/>';
+      s += '<rect x="28" y="' + (y + 5) + '" width="' + r[0] + '" height="5" rx="2.5" fill="var(--c-text-dim)"/>';
+      s += '<text x="172" y="' + (y + 11) + '" font-size="10" text-anchor="end" fill="' + (r[2] ? '#962A00' : 'var(--c-text)') + '">' + C.num(r[1]) + '</text>';
+    });
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('fdTut1T'), text: C.t('fdTut1'), art: tArt([5, 5, 2, 5, 6], [true, true, false, true, false]) },
+    { title: C.t('fdTut2T'), text: C.t('fdTut2'), art: tArt([5, 5, 2, 5, 5], null, [[50, 20, true], [70, 22, false], [40, 0, false]]) },
+    { title: C.t('fdTut3T', {}), text: C.t('fdTut3'), art: tArt([3, 3, 3, 4, 4], null, [[60, 63, false], [44, 35, true]]) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // saved after every roll, keep and row; the daily game has its own slot
+  ctx.autosave(function () {
+    if (!S || ended) return { inProgress: false };
+    return { dice: S.dice, held: S.held, rolls: S.rolls, round: S.round, sheet: S.sheet, seed: S.seed, daily: S.daily, elapsed: Date.now() - startedAt };
+  });
+  function save() { ctx.save(); }
+  var saved = ctx.loadSave();
+  if (saved && E.valid(saved) && (saved.daily || null) === (dailyDate || null)) {
+    S = { dice: saved.dice.slice(), held: saved.held.slice(), rolls: saved.rolls, round: saved.round, seed: saved.seed, daily: saved.daily || null, sheet: {} };
+    CATS.forEach(function (c) { S.sheet[c] = saved.sheet[c]; });
+    startedAt = Date.now() - (saved.elapsed || 0);
+    render();
+  } else newGame();
+  if (dailyDate && C.stats.dailyDone('fivedice', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).fivedice;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  fitSize();
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>

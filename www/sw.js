@@ -25,7 +25,8 @@ const SHELL = [
   './lib/chogan.js',
   './lib/cue.js',
   './fonts/vazirmatn-variable.woff2',
-  './fonts/nunito-latin.woff2'
+  './fonts/nunito-latin.woff2',
+  './fonts/noto-devanagari.woff2'
 ];
 
 async function buildList() {

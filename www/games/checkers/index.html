@@ -35,7 +35,7 @@
   .ck-canvas { width: 100%; height: 100%; display: block; touch-action: manipulation; cursor: pointer; border-radius: var(--r-md); box-shadow: var(--sh-2); }
   .ck-thinking { animation: ck-blink 900ms infinite; }
   @keyframes ck-blink { 50% { opacity: .45; } }
-  @media (prefers-reduced-motion: reduce) { .ck-thinking { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { :root:not([data-motion="on"]) .ck-thinking { animation: none; } }
 </style>
 </head>
 <body>
@@ -387,7 +387,61 @@ function CheckersEngineFactory() {
     return { board: S.board, turn: S.turn, last: S.history.length ? S.history[S.history.length - 1].m : null };
   }
 
+  // Picking a move by taps. ms: the picked piece's moves; sel: { steps, goal }.
+  // Elsewhere each landing is tapped in turn until one move is left. Huevo's
+  // chains may stop after any landing, and that rule made the old tap-by-tap
+  // play the first hop at once, so no chain could ever be continued (#391,
+  // reported by HuevosKicker). There, as the rules' write-up asks, every landing
+  // of every chain is a dot and a tap plays the move that stops on it. Only when
+  // different captures stop on the same square (a loop taken either way) is
+  // that square kept as the goal and the route picked hop by hop.
+  function pickOf(ms, sel, hv) {
+    var n = sel.steps.length, g = sel.goal;
+    var cands = ms.filter(function (m) {
+      for (var k = 0; k < n; k++) if (m.path[k] !== sel.steps[k]) return false;
+      return g === undefined || (m.path[m.path.length - 1] === g && m.path.length >= n);
+    });
+    var targets = [];
+    var add = function (t) { if (t !== undefined && targets.indexOf(t) < 0) targets.push(t); };
+    cands.forEach(function (m) {
+      if (hv && g === undefined) for (var k = n; k < m.path.length; k++) add(m.path[k]);
+      else add(m.path[n]);
+      // on the way to a goal the chain may also stop where it stands
+      if (hv && g !== undefined && n && m.path.length === n) add(sel.steps[n - 1]);
+    });
+    return { cands: cands, targets: targets };
+  }
+  // Moves with different results: the same capture set lands the same way
+  function distinct(ms) {
+    var seen = {}, out = [];
+    ms.forEach(function (m) { var key = m.caps.slice().sort(function (a, b) { return a - b; }).join(','); if (!seen[key]) { seen[key] = 1; out.push(m); } });
+    return out;
+  }
+  // A tap on square i: { move } to play, { sel } to wait for the next tap, or
+  // null when i is not one of the dots
+  function tapPick(ms, sel, i, hv) {
+    var ps = pickOf(ms, sel, hv), n = sel.steps.length;
+    if (ps.targets.indexOf(i) < 0) return null;
+    var next = { from: sel.from, steps: sel.steps.concat([i]), goal: sel.goal };
+    if (!hv) {
+      var done = pickOf(ms, next, false).cands.filter(function (m) { return m.path.length === n + 1; });
+      return done.length ? { move: done[0] } : { sel: next };
+    }
+    if (sel.goal === undefined) {
+      var ends = distinct(ps.cands.filter(function (m) { return m.path.length > n && m.path[m.path.length - 1] === i; }));
+      if (ends.length === 1) return { move: ends[0] };
+      return { sel: { from: sel.from, steps: sel.steps.slice(), goal: i } };
+    }
+    if (n && i === sel.steps[n - 1]) {
+      var here = ps.cands.filter(function (m) { return m.path.length === n; });
+      return { move: here[0] };
+    }
+    var left = distinct(pickOf(ms, next, true).cands);
+    return left.length === 1 ? { move: left[0] } : { sel: next };
+  }
+
   var api = {
+    pickOf: pickOf, tapPick: tapPick,
     N: N, DRAW_PLIES: DRAW_PLIES, LEVELS: LEVELS, EDGE_TURNS: EDGE_TURNS, QUEEN_AT: QUEEN_AT,
     owner: owner, isKing: isKing, isQueen: isQueen, isEmpress: isEmpress, isRoyal: isRoyal, edge: edge,
     dark: dark, initial: initial, moves: moves, same: same, royalAt: royalAt,
@@ -409,7 +463,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = CheckersEn
   C.boot({});
   var ctx = C.game({
     id: 'checkers',
-    name: { fa: 'چکرز', en: 'Checkers', zh: '西洋跳棋', de: 'Dame', es: 'Damas', pl: 'Warcaby', fr: 'Dames' },
+    name: { fa: 'چکرز', en: 'Checkers', zh: '西洋跳棋', de: 'Dame', es: 'Damas', pl: 'Warcaby', fr: 'Dames', ar: 'الداما', hi: 'चेकर्स' },
     accent: '#B82066',
     // a thinking game, like reversi
     mood: 'sudoku',
@@ -481,6 +535,40 @@ if (typeof module !== 'undefined' && module.exports) module.exports = CheckersEn
         tutTitle1: 'Se déplacer', tutText1: 'Les pions avancent d’une case en diagonale, sur les cases foncées seulement. Touche ton pion, puis la case d’arrivée.',
         tutTitle2: 'Prendre', tutText2: 'Si un pion adverse est à côté du tien avec une case vide derrière, saute par-dessus pour le prendre. La prise est obligatoire, et si tu peux encore sauter, tu dois continuer.',
         tutTitle3: 'Les dames', tutText3: 'Un pion qui atteint la dernière rangée devient dame et peut aussi reculer. Un joueur qui ne peut plus jouer perd.'
+      },
+      ar: {
+        twoPlayers: 'لاعبان', vsAi: 'ضد الروبوت',
+        you: 'أنت', rival: 'الخصم', player2: 'اللاعب 2', renameP2: 'اسم اللاعب 2',
+        draw: 'تعادل', playerWon: 'فاز {n}', move: 'نقلة', pieces: 'القطع',
+        newMatch: 'مباراة جديدة', undoMove: 'تراجع عن النقلة', cancelPick: 'ألغِ الاختيار',
+        dailyCheckers: 'داما اليوم', vsHard: 'ضد الروبوت الصعب',
+        classic: 'كلاسيكية', spanish: 'إسبانية', huevo: 'أسلوب هويفو',
+        huevoNote: 'أسلوب هويفو من تصميم HuevosKicker: الأكل اختياري دائمًا ويمكن أن تتوقف السلسلة بعد أي هبوط؛ كل أكل يهبط خلف القطعة المأكولة مباشرة، والملك لا يطير إلا في القفزة الأولى. لكل طرف ملكة (القطعة الأفتح ذات الجوهرة): تتحرك مربعًا واحدًا في أي اتجاه وتأكل كالقطعة العادية في كل الاتجاهات، وأكلها يحسم اللعبة. وفي الصف الأخير تصبح إمبراطورة تطير كالملك في كل قفزة. للملكة أو الإمبراطورة على حافة الرقعة خمسة عشر دورًا؛ بعدها يجب أن تغادر الحافة وإلا خسرت. اللاعب الذي لا يستطيع التحرك، أو لا يستطيع إلا تحريك الملكة، يُحكم عليه بعدد القطع: الأكثر يفوز، والتساوي تعادل. إن لم يبقَ لك إلا ملكتك فلك نقلة أخيرة واحدة. ستون نقلة بلا أكل ولا تحريك قطعة عادية تعني التعادل.', qEdge: 'الملكة على الحافة: بقي {n} أدوار', qMust: 'يجب أن تغادر الملكة الحافة', endQueen: 'أُكلت الملكة', endCount: 'لا نقلة متاحة: الحسم بعدد القطع', endTimer: 'لم تستطع الملكة مغادرة الحافة', endLone: 'النقلة الأخيرة للملكة الوحيدة',
+        capForced: 'أكل إجباري', capFree: 'أكل اختياري',
+        freeNote: 'مع الأكل الاختياري، القفز مجرد خيار ويمكنك أن تلعب نقلة أخرى بدلًا منه؛ لكن القفزة التي تبدأها تستمر حتى نهايتها.',
+        rulesNote: 'في القواعد الإسبانية يطير الملك على القطر كله ويأكل من بعيد، وعليك أن تأكل أكبر عدد من القطع، ثم أكبر عدد من الملوك.',
+        mustJump: 'عليك أن تأكل', drawNote: 'نقلات كثيرة بلا أكل: تعادل',
+        boardLabel: 'رقعة الداما',
+        tutTitle1: 'الحركة', tutText1: 'تتحرك القطع مربعًا واحدًا قطريًا إلى الأمام، على المربعات الداكنة فقط. انقر قطعتك، ثم المربع الذي تريده.',
+        tutTitle2: 'القفز', tutText2: 'إذا كانت قطعة للخصم بجوار قطعتك وخلفها مربع فارغ، اقفز فوقها لتأكلها. القفز إجباري، وإن استطعت القفز مجددًا فعليك أن تواصل.',
+        tutTitle3: 'الملوك', tutText3: 'القطعة التي تبلغ الصف الأخير تُتوَّج ملكًا وتستطيع التحرك إلى الخلف أيضًا. اللاعب الذي لا يبقى له أي نقلة يخسر.'
+      },
+      hi: {
+        twoPlayers: 'दो खिलाड़ी', vsAi: 'कंप्यूटर से',
+        you: 'आप', rival: 'विरोधी', player2: 'खिलाड़ी 2', renameP2: 'खिलाड़ी 2 का नाम',
+        draw: 'बराबरी', playerWon: '{n} जीत गए', move: 'चलना', pieces: 'गोटियाँ',
+        newMatch: 'नया मुक़ाबला', undoMove: 'चाल वापस', cancelPick: 'चुनाव रद्द करें',
+        dailyCheckers: 'रोज़ का चेकर्स', vsHard: 'कठिन कंप्यूटर के ख़िलाफ़',
+        classic: 'क्लासिक', spanish: 'स्पेनी', huevo: 'हुएवो शैली',
+        huevoNote: 'हुएवो शैली, HuevosKicker की बनाई: काटना हमेशा मर्ज़ी पर है और कड़ी किसी भी उतरान के बाद रुक सकती है; हर कटान कटी गोटी के ठीक पीछे उतरती है, और राजा सिर्फ़ पहली छलाँग में दूर तक उड़ता है। हर पक्ष के पास एक रानी है (नग वाली हल्की गोटी): वह किसी भी ओर एक खाना चलती है और हर दिशा में सादी गोटी की तरह काटती है, और उसे काटने वाला खेल जीत जाता है। आख़िरी पंक्ति पर वह महारानी बन जाती है, जो हर छलाँग में राजा की तरह उड़ती है। बोर्ड के किनारे पर रानी या महारानी के पास पंद्रह बारियाँ हैं; फिर उसे किनारे से हटना होगा, वरना आप हार जाते हैं। जो खिलाड़ी चल न सके, या सिर्फ़ रानी को चला सके, उसका फ़ैसला गोटियों की गिनती से होता है: ज़्यादा वाला जीतता है, बराबर पर बराबरी। सिर्फ़ आपकी रानी बची हो तो आपको एक आख़िरी चाल मिलती है। बिना कटान और बिना सादी गोटी चले साठ अर्ध-चालें बराबरी हैं।', qEdge: 'रानी किनारे पर: {n} बारियाँ बाक़ी', qMust: 'रानी को किनारे से हटना होगा', endQueen: 'रानी कट गई', endCount: 'कोई चाल नहीं बची: गिनती से फ़ैसला', endTimer: 'रानी किनारे से नहीं हट सकी', endLone: 'अकेली रानी की आख़िरी चाल',
+        capForced: 'काटना ज़रूरी', capFree: 'काटना मर्ज़ी से',
+        freeNote: 'काटना मर्ज़ी से हो तो छलाँग सिर्फ़ एक विकल्प है और आप उसकी जगह कोई और चाल चल सकते हैं; पर शुरू हुई छलाँग आख़िर तक जाती है।',
+        rulesNote: 'स्पेनी नियमों में राजा पूरे विकर्ण पर उड़ता है और दूर से काटता है, और आपको सबसे ज़्यादा गोटियाँ काटनी होंगी, फिर सबसे ज़्यादा राजा।',
+        mustJump: 'आपको काटना होगा', drawNote: 'बिना कटान के बहुत चालें: बराबरी',
+        boardLabel: 'चेकर्स बोर्ड',
+        tutTitle1: 'चलना', tutText1: 'गोटियाँ सिर्फ़ गहरे खानों पर, तिरछे आगे एक खाना चलती हैं। अपनी गोटी छुएँ, फिर जाने वाला खाना।',
+        tutTitle2: 'काटना', tutText2: 'अगर विरोधी की गोटी आपकी गोटी के पास हो और उसके पीछे खाना ख़ाली हो, तो उसके ऊपर से कूदकर उसे काटें। काटना ज़रूरी है, और फिर से काट सकें तो आगे काटते रहना होगा।',
+        tutTitle3: 'राजा', tutText3: 'आख़िरी पंक्ति तक पहुँची गोटी राजा बन जाती है और पीछे भी चल सकती है। जिस खिलाड़ी के पास कोई चाल न बचे, वह हार जाता है।'
       },
       zh: {
         twoPlayers: '双人', vsAi: '对战电脑',
@@ -731,14 +819,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = CheckersEn
   // The moves still open to the picked piece, and where the next tap may land
   function pickState() {
     if (!sel) return { cands: [], targets: [] };
-    var cands = E.moves(S.board, S.turn, S.rules, S.free, S).filter(function (m) {
-      if (m.from !== sel.from) return false;
-      for (var k = 0; k < sel.steps.length; k++) if (m.path[k] !== sel.steps[k]) return false;
-      return true;
-    });
-    var targets = [];
-    cands.forEach(function (m) { var t = m.path[sel.steps.length]; if (t !== undefined && targets.indexOf(t) < 0) targets.push(t); });
-    return { cands: cands, targets: targets };
+    var mine = E.moves(S.board, S.turn, S.rules, S.free, S).filter(function (m) { return m.from === sel.from; });
+    return E.pickOf(mine, sel, S.rules === 'huevo');
   }
 
   function movable() {
@@ -899,17 +981,16 @@ if (typeof module !== 'undefined' && module.exports) module.exports = CheckersEn
   });
 
   // One tap: pick a piece, then the square it goes to; on a multiple jump, each
-  // landing square in turn, until only one move is left and it is played
+  // landing square in turn, until only one move is left and it is played. In
+  // Huevo a tap on any landing of a chain plays the move that stops there
+  // (E.tapPick).
   function tapSquare(i) {
     if (!S || S.done || busy() || anim) return;
-    var ps = pickState();
-    if (sel && ps.targets.indexOf(i) >= 0) {
-      sel.steps.push(i);
-      var done = pickState().cands.filter(function (m) { return m.path.length === sel.steps.length; });
-      if (done.length) { var m = done[0]; sel = null; doMove(m, true); return; }
-      C.feedback('tap');
-      draw();
-      return;
+    if (sel) {
+      var mine = E.moves(S.board, S.turn, S.rules, S.free, S).filter(function (m) { return m.from === sel.from; });
+      var t = E.tapPick(mine, sel, i, S.rules === 'huevo');
+      if (t && t.move) { sel = null; doMove(t.move, true); return; }
+      if (t) { sel = t.sel; C.feedback('tap'); draw(); return; }
     }
     if (movable().indexOf(i) >= 0 && !(sel && sel.steps.length)) {
       sel = { from: i, steps: [] };

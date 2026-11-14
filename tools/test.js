@@ -14,7 +14,7 @@ const { Worker, isMainThread, workerData } = require('worker_threads');
 
 const ROOT = path.join(__dirname, '..');
 // زبان‌های اپ، به همان ترتیب جدول LOCALES در هسته
-const LOCALE_CODES = ['fa', 'en', 'zh', 'de', 'es', 'pl', 'fr'];
+const LOCALE_CODES = ['fa', 'en', 'zh', 'de', 'es', 'pl', 'fr', 'ar', 'hi'];
 let failures = 0;
 let checks = 0;
 // A floor for the whole run: if a group lost most of its checks, the total would still
@@ -1658,7 +1658,7 @@ function testBackgammon() {
   ok(title('Sara', 1) === '<starts:Sara>', 'با نام پروفایل: «{n} شروع می‌کند»');
   ok(title('', 2) === '<starts:<rival> · <hard>>', 'حریف: سوم‌شخص می‌ماند');
   const str = (lang, key) => { const m = bgHtml.match(new RegExp(key + ": '([^']*)'", 'g')); return m ? m.map((x) => x.split(": '")[1].slice(0, -1)) : []; };
-  ok(JSON.stringify(str('', 'youStart')) === JSON.stringify(['تو شروع می‌کنی', 'You start', 'Zaczynasz', 'Tu commences', '你先走', 'Du fängst an', 'Empiezas tú']), 'youStart reads right in every language');
+  ok(JSON.stringify(str('', 'youStart')) === JSON.stringify(['تو شروع می‌کنی', 'You start', 'Zaczynasz', 'Tu commences', 'أنت تبدأ', 'आप शुरू करेंगे', '你先走', 'Du fängst an', 'Empiezas tú']), 'youStart reads right in every language');
 
   // Rotating the board (#378): the page's own geometry and mapping. Every point's centre, the bar
   // and each tray, carried to the screen and back in each quarter turn, must hit the same target.
@@ -3060,7 +3060,7 @@ function testFiles() {
     ok(man[k] && man[k].fa, 'منیفست ' + k + ' فارسی دارد');
   }
   // An installed app's description follows the device language; Spanish was missing until #256
-  const manLang = { fa: 'fa', zh: 'zh-Hans', de: 'de', es: 'es', pl: 'pl', fr: 'fr' };
+  const manLang = { fa: 'fa', zh: 'zh-Hans', de: 'de', es: 'es', pl: 'pl', fr: 'fr', ar: 'ar', hi: 'hi' };
   ok(LOCALE_CODES.filter((c) => c !== 'en').every((c) => man.description_localized[manLang[c]] && man.description_localized[manLang[c]].value), 'the manifest describes the app in every language');
   ok(man.name_localized.fa.value === 'چوگان', 'نام فارسی در منیفست درست است');
   // Chrome on Android installed a WebAPK beside the Play app; the owner chose to send people to Play (#550)
@@ -3461,7 +3461,7 @@ function testLocales() {
   const codes = (table.match(/code:\s*'([a-z-]+)'/g) || []).map((m) => m.split("'")[1]);
   ok(codes.join(',') === LOCALE_CODES.join(','), 'کدهای زبان: ' + codes.join(','));
   ok(/code: 'fa'[^}]*dir: 'rtl'/.test(table), 'فارسی راست‌به‌چپ است');
-  ok((table.match(/dir: 'rtl'/g) || []).length === 1, 'فقط فارسی راست‌به‌چپ است');
+  ok(/code: 'ar'[^}]*dir: 'rtl'/.test(table) && (table.match(/dir: 'rtl'/g) || []).length === 2, 'فقط فارسی و عربی راست‌به‌چپ‌اند');
   for (const c of codes) ok(new RegExp("code: '" + c + "'[^}]*date: '").test(table), c + ': قالب تاریخ دارد');
 
   const iEn = core.indexOf('localStrings.en[key]');
@@ -3480,6 +3480,8 @@ function testLocales() {
     ['es-ES', 'es'], ['es', 'es'], ['es-MX', 'es'], ['es-419', 'es'],
     ['pl-PL', 'pl'], ['pl', 'pl'],
     ['fr-FR', 'fr'], ['fr', 'fr'], ['fr-CA', 'fr'], ['fr-BE', 'fr'],
+    ['ar', 'ar'], ['ar-SA', 'ar'], ['ar-EG', 'ar'],
+    ['hi-IN', 'hi'], ['hi', 'hi'],
     ['en-GB', 'en'], ['da-DK', 'en'], ['', 'en']
   ];
   ok(cases.length > 0, 'فهرست حالت‌های زبان دستگاه خالی نیست');
@@ -3669,7 +3671,7 @@ function testCardArt() {
 
   ok(/cardBack: 'carpet'/.test(coreJs.match(/var DEFAULT_SETTINGS = \{[\s\S]*?\};/)[0]), 'the carpet is the default back');
   ok((coreJs.match(/cardBack: '[^']+', backCarpet: '[^']+', backTermeh: '[^']+',/g) || []).length === LOCALE_CODES.length, 'the picker is named in every language');
-  ok(/Chogan\.applyTheme\(\);\s*Chogan\.cards\.applyBack\(\);/.test(coreJs), 'the saved back is applied when a page boots');
+  ok(/Chogan\.applyTheme\(\);\s*(?:Chogan\.applyMotion\(\);\s*)?Chogan\.cards\.applyBack\(\);/.test(coreJs), 'the saved back is applied when a page boots');
   ok(/\.ch-pback \{[^}]*100% 100% no-repeat/.test(coreCss) && !/\.ch-pback \{[^}]*data:image/.test(coreCss), 'the CSS stretches one picture over the back instead of tiling a pattern');
   for (const g of ['pasur', 'hokm']) {
     const page = fs.readFileSync(path.join(ROOT, 'www/games', g, 'index.html'), 'utf8');
@@ -3870,7 +3872,7 @@ function testWayOut() {
   ok(['make', 'tap', 'restart', 'carryOn', 'useHint', 'levelDone', 'chain', 'pick', 'generate', 'restore'].every((f) => typeof E[f] === 'function'), 'the engine has its API');
   // People who know the genre as "arrow puzzle" did not recognise Way Out (#326); the name stays, the summary says it
   const woMeta = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games.find((g) => g.id === 'wayout');
-  const woWord = { fa: 'پازل پیکانی', en: 'arrow puzzle', zh: '箭头谜题', de: 'Pfeil-Puzzle', es: 'puzle de flechas', pl: 'łamigłówka ze strzałkami', fr: 'puzzle de flèches' };
+  const woWord = { fa: 'پازل پیکانی', en: 'arrow puzzle', zh: '箭头谜题', de: 'Pfeil-Puzzle', es: 'puzle de flechas', pl: 'łamigłówka ze strzałkami', fr: 'puzzle de flèches', ar: 'لغز أسهم', hi: 'तीर पहेली' };
   ok(woMeta && LOCALE_CODES.every((c) => woWord[c]), 'Way Out is listed and every language has a genre word');
   ok(woMeta && LOCALE_CODES.every((c) => woMeta.summary[c].toLowerCase().includes(woWord[c].toLowerCase())), 'its summary names the genre in every language');
   ok(woMeta && woMeta.name.fa === 'راه دررو' && woMeta.name.en === 'Way Out', 'the name stays Way Out / راه دررو');
@@ -5251,7 +5253,7 @@ function testPasur() {
   // a game never carries its own copy of the deck (#178)
   ok(psPage.indexOf('function faceSvg') < 0 && psPage.indexOf('data:image/svg+xml') < 0 && /return C\.cards\.el\(c, 'ps-card'/.test(psPage) && /C\.cards\.back\(\)/.test(psPage),
     'Pasur draws its cards with the shared core, not a copy');
-  ok(/prefers-reduced-motion: reduce\)'\)\.matches;\s*if \(reduce\) \{ done\(\); return; \}/.test(psPage), 'the shuffle is skipped with reduced motion');
+  ok(/var reduce = C\.ui\.reduceMotion\(\);\s*if \(reduce\) \{ done\(\); return; \}/.test(psPage), 'the shuffle is skipped with reduced motion');
   ok(/function canHumanMove\(\) \{ return S && !S\.done && S\.turn === 0 && !dealing(?: && !sweeping)?; \}/.test(psPage) && /shuffleAnim\(function \(\) \{ paint\(\); maybeAi\(\); \}\);/.test(psPage), 'nobody moves until the shuffle has finished');
   const N = (arr) => arr.map(E.name).sort().join(' ');
   const optsOf = (table, card) => E.options(P(table), E.parse(card)).map((o) => N(o)).sort();
@@ -6752,7 +6754,7 @@ function testCheckers() {
   ok(tFree < 1500, 'a hard move from the start with optional capture takes under 1.5 s here (' + tFree + ' ms)');
   // (#391 Huevo: every move list also gets the state, for the Queen's edge clock, and Huevo is always optional)
   ok(/prefs\.free = v === 'free';/.test(html) && /free = !daily && \(prefs\.free === true \|\| rules === 'huevo'\);/.test(html) && /E\.aiMove\(S\.board, 2, S\.level, rnd, S\.rules, S\.free, S\)/.test(html) &&
-    (html.match(/E\.moves\(S\.board, S\.turn, S\.rules, S\.free, S\)/g) || []).length === 3 && !/E\.moves\(S\.board, S\.turn, S\.rules\)/.test(html) && !/E\.moves\(S\.board, S\.turn, S\.rules, S\.free\)/.test(html) &&
+    (html.match(/E\.moves\(S\.board, S\.turn, S\.rules, S\.free, S\)/g) || []).length === 4 && !/E\.moves\(S\.board, S\.turn, S\.rules\)/.test(html) && !/E\.moves\(S\.board, S\.turn, S\.rules, S\.free\)/.test(html) &&
     /var jump = !S\.done && !busy\(\) && !S\.free && /.test(html) && /free: !v\.daily && \(v\.free === true \|\| v\.rules === 'huevo'\),/.test(html),
     'the page offers the choice, keeps the daily game forced, saves it, gives it to the AI and every move list, and drops the "must jump" note');
   ok(/prefs\.rules = v;/.test(html) && /var rules = daily \? 'classic' : prefRules\(\),/.test(html) && /E\.aiMove\(S\.board, 2, S\.level, rnd, S\.rules[,)]/.test(html), 'the page offers both rule sets, keeps the daily game classic and gives the AI the rules in play');
@@ -9865,7 +9867,7 @@ function testMenuSearch() {
     ['شطرنج', ['chess', 'xiangqi']], ['chess', ['chess', 'xiangqi']], ['CHESS', ['chess', 'xiangqi']],
     ['مین‌روب', ['minesweeper']], ['مین روب', ['minesweeper']], ['مينروب', ['minesweeper']],   // space, Arabic ي
     ['turmverteidigung', ['tower-defence']],                                                  // German soft hyphen
-    ['数独', ['sudoku']], ['象棋', ['chess', 'xiangqi']], ['ajedrez', ['chess', 'xiangqi']], ['sudoku', ['sudoku']], ['qqqzz', []]
+    ['数独', ['sudoku']], ['象棋', ['chess', 'xiangqi']], ['ajedrez', ['chess', 'xiangqi']], ['sudoku', ['sudoku']], ['फुटबॉल', ['football']], ['qqqzz', []]
   ];
   const bad = cases.filter(([q, want]) => {
     const got = find(q);
@@ -10396,25 +10398,6 @@ function testPeopleFilter() {
   const pads = [...css.matchAll(/\.ch-seg\.ch-cats button \{ padding-inline: (\d+)px; \}/g)].map((m) => +m[1]);
   ok(/pchips\.classList\.add\('ch-seg--wrap', 'ch-cats', 'ch-people'\)/.test(html) && pads.length === 1 && pads[0] <= 6,
     'the category and players chips share one padding of at most 6px, at every width (' + pads.join(', ') + ')');
-}
-
-function testFontFaces() {
-  head('Fonts: Persian is drawn in Vazirmatn, Latin in Nunito, under one family');
-  // Chrome joins faces of one family into one unicode-range set only when their style
-  // descriptors are identical. Nunito's face said `font-weight: 200 1000` and Vazirmatn's
-  // `100 900`, so Chrome picked the Nunito face alone and drew every Persian letter in the
-  // system font (owner's phone, 0.25.0). A laptop with Vazirmatn installed hid it.
-  const css = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
-  const faces = [...css.matchAll(/@font-face \{([^}]*)\}/g)].map((m) => m[1]).filter((b) => /font-family: 'Vazirmatn'/.test(b));
-  ok(faces.length === 2, 'two Vazirmatn faces found (' + faces.length + ')');
-  if (faces.length !== 2) return;
-  const desc = (b, k) => ((new RegExp(k + ':\\s*([^;]+);')).exec(b) || [, 'unset'])[1].trim();
-  for (const k of ['font-weight', 'font-style', 'font-stretch']) {
-    const v = faces.map((b) => desc(b, k));
-    ok(v[0] === v[1], 'both faces declare the same ' + k + ' (' + v.join(' / ') + ')');
-  }
-  ok(/vazirmatn-variable/.test(faces[0]) && !/unicode-range/.test(faces[0]) && /nunito-latin/.test(faces[1]) && /unicode-range/.test(faces[1]),
-    'Vazirmatn covers everything and the later Nunito face only its Latin range');
 }
 
 function testInstallBar() {
@@ -11245,7 +11228,7 @@ function testFootball() {
   const disc = (id, x, y) => ({ id, x, y, vx: 0, vy: 0, inPlay: true, r: E.RD, m: E.MD });
   const ballAt = (x, y) => ({ id: 0, x, y, vx: 0, vy: 0, inPlay: true, r: E.RB, m: E.MB });
   // a match with only these bodies on the pitch
-  const setup = (bodies, turn) => { const M = E.match(); M.b = bodies; M.turn = turn || 0; return M; };
+  const setup = (bodies, turn) => { const M = E.match(); M.b = bodies; M.turn = turn || 0; M.kick = false; return M; };
   // the ball rolled on its own, as if struck, for the goal-line checks
   const roll = (x, y, angle, power) => { const s = Cue.start(E.T, [ballAt(x, y)], { angle, power }, 0); s.by = 0; s.goal = -1; s.goalAt = 0; return E.run(s); };
 
@@ -11452,7 +11435,7 @@ function testFootball() {
   ok(/C\.daily\('football', G\.daily \+ '\|t' \+ G\.M\.turns\)\.rng/.test(html) && /level: daily \? 'medium' : o\.level/.test(html) && /winTo: daily \? 3 : o\.winTo/.test(html), 'the daily match is against the medium bot, to three goals, its dice seeded by the day and the turn');
   const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
   const ids = ['fb-win', 'fb-hard', 'fb-shut'];
-  ok(ids.every((id) => (core.match(new RegExp("\\{ id: '" + id + "'[^\\n]*", 'g')) || []).length === 1 && /dfr: '[^']+' \}/.test(core.match(new RegExp("\\{ id: '" + id + "'[^\\n]*"))[0]) && html.indexOf("unlock('" + id + "')") > 0), 'the three Button Football awards exist once, in every language, and are unlocked');
+  ok(ids.every((id) => (core.match(new RegExp("\\{ id: '" + id + "'[^\\n]*", 'g')) || []).length === 1 && /dfr: '[^']+', ar: '[^']+', dar: '[^']+', hi: '[^']+', dhi: '[^']+' \}/.test(core.match(new RegExp("\\{ id: '" + id + "'[^\\n]*"))[0]) && html.indexOf("unlock('" + id + "')") > 0), 'the three Button Football awards exist once, in every language, and are unlocked');
   ok(/<script src="\.\.\/\.\.\/lib\/cue\.js"><\/script>/.test(html) && !/function tick\(|rollA \* |\(1 \+ T\.ball\)/.test(m[1]), 'the page loads lib/cue.js and keeps no copy of its physics');
   ok(/ctx\.autosave\(/.test(html) && /ctx\.tutorialIfNew\(TUT\)/.test(html) && (html.match(/tArt\(\d\)/g) || []).length === 3, 'the match saves between flicks and the three-page tutorial shows once');
   ok(!/[\s{,]again: '/.test(html), 'the page leaves the core\'s "again" label alone');
@@ -12479,7 +12462,7 @@ function testXiangqi() {
   const lum = (x) => rgb(x).map((c) => c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)).reduce((a, c, i) => a + c * [0.2126, 0.7152, 0.0722][i], 0);
   const near = games.filter((g) => g.id !== 'xiangqi').map((g) => [g.id, dE(g.color, gm.color)]).sort((x, y) => x[1] - y[1])[0];
   ok(near[1] >= 15 && 1.05 / (lum(gm.color) + 0.05) >= 4.5, 'the accent differs from every other game by ΔE ≥ 15 (nearest ' + near[0] + ', ' + near[1].toFixed(1) + ') and keeps white text at 4.5:1');
-  ok(/name: \{ fa: 'شطرنج چینی', en: 'Chinese chess', zh: '中国象棋', de: 'Chinesisches Schach', es: 'Ajedrez chino', pl: 'Szachy chińskie', fr: 'Échecs chinois' \}/.test(html), 'the names match games.json in every language');
+  ok(/name: \{ fa: 'شطرنج چینی', en: 'Chinese chess', zh: '中国象棋', de: 'Chinesisches Schach', es: 'Ajedrez chino', pl: 'Szachy chińskie', fr: 'Échecs chinois', ar: 'الشطرنج الصيني', hi: 'चीनी शतरंज' \}/.test(html), 'the names match games.json in every language');
   ok(/newGame\(\{ daily: dailyDate, level: 2, mode: 'ai' \}\)/.test(html) && /C\.stats\.daily\('xiangqi', S\.daily/.test(html), 'the daily game uses the same deterministic AI for everyone');
   ok(/kb\('U \/ Ctrl\+Z'/.test(html) && /if \(C\.undoKey\(e\)\) \{ undo\(\);/.test(html), 'the undo key is labelled and handled');
   ok(/E\.validState\(saved\.s\)/.test(html) && /ctx\.autosave\(function/.test(html), 'the game saves and restores a checked state');

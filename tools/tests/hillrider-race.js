@@ -83,7 +83,7 @@ module.exports = function (T) {
 
     const keys = ['rcT', 'rcSolo', 'rcRace', 'rcBot', 'rcBotM', 'rcWin', 'rcLose', 'rcYou', 'rcBotTime', 'rcBadge', 'rcDaily', 'rcRule'];
     const blocks = LOCALE_CODES.map((l) => { const m = html.match(new RegExp('\\n {6}' + l + ': \\{([\\s\\S]*?)\\n {6}\\}')); return m ? m[1] : ''; });
-    ok(LOCALE_CODES.length === 7 && blocks.every((bl) => keys.every((k) => new RegExp('\\b' + k + ": '[^']+'").test(bl))) && blocks.every((bl) => /rcBotM: '[^']*\{n\}/.test(bl) && /rcBadge: '[^']*\{lv\}/.test(bl)), 'the race strings exist in all ' + LOCALE_CODES.length + ' languages');
+    ok(LOCALE_CODES.length > 0 && blocks.length === LOCALE_CODES.length && blocks.every((bl) => keys.every((k) => new RegExp('\\b' + k + ": '[^']+'").test(bl))) && blocks.every((bl) => /rcBotM: '[^']*\{n\}/.test(bl) && /rcBadge: '[^']*\{lv\}/.test(bl)), 'the race strings exist in all ' + LOCALE_CODES.length + ' languages');
     ok(keys.every((k) => core.indexOf(k + ':') < 0), 'no race string reuses a core key name');
 
     const ms = Date.now() - t0;

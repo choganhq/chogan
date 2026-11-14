@@ -70,7 +70,7 @@ So both sources carry the identical, identically-signed APK. You can install fro
 
 ### License
 
-MIT, see [LICENSE](LICENSE). The Vazirmatn font and the Latin subset of Nunito are under the OFL; their licence texts ship beside the fonts in `www/fonts/OFL.txt` and `www/fonts/OFL-Nunito.txt`.
+MIT, see [LICENSE](LICENSE). The Vazirmatn font, the Latin subset of Nunito and the Devanagari subset of Noto Sans Devanagari are under the OFL; their licence texts ship beside the fonts in `www/fonts/OFL.txt`, `www/fonts/OFL-Nunito.txt` and `www/fonts/OFL-NotoSansDevanagari.txt`.
 
 ---
 
@@ -118,7 +118,7 @@ www/
   sw.js                    سرویس‌ورکر آفلاین، کش-اول
   lib/chogan.css           سیستم طراحی: توکن‌های رنگ و شعاع و سایه و فاصله
   lib/chogan.js            هسته‌ی مشترک همه‌ی بازی‌ها
-  fonts/                   وزیرمتن و حروف لاتین نونیتو، داخل بسته
+  fonts/                   وزیرمتن، حروف لاتین نونیتو و حروف دوناگری نوتو، داخل بسته
   games/<id>/              هر بازی یک پوشه: index.html و icon.svg
 android/                   پروژه‌ی اندروید، فقط یک فایل جاوا
 template/game/             اسکلت بازی جدید
@@ -176,6 +176,6 @@ git tag v0.2.0 && git push origin v0.2.0
 
 ### مجوز
 
-MIT. متن کامل در [LICENSE](LICENSE). فونت وزیرمتن و زیرمجموعه‌ی لاتین نونیتو زیر مجوز OFL هستند، متنشان کنار خود فونت‌ها در `www/fonts/OFL.txt` و `www/fonts/OFL-Nunito.txt`.
+MIT. متن کامل در [LICENSE](LICENSE). فونت وزیرمتن، زیرمجموعه‌ی لاتین نونیتو و زیرمجموعه‌ی دوناگری Noto Sans Devanagari زیر مجوز OFL هستند، متنشان کنار خود فونت‌ها در `www/fonts/OFL.txt`، `www/fonts/OFL-Nunito.txt` و `www/fonts/OFL-NotoSansDevanagari.txt`.
 
 </div>

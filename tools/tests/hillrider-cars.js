@@ -77,7 +77,7 @@ module.exports = function (T) {
 
     const keys = ['carT', 'carBuggy', 'carJeep', 'carTruck', 'carRacer', 'dBuggy', 'dJeep', 'dTruck', 'dRacer', 'carOn', 'carPick', 'buyCarT', 'buyCarText', 'carBought', 'dailyBuggy', 'carRule'];
     const blocks = LOCALE_CODES.map((l) => { const m = html.match(new RegExp('\\n {6}' + l + ': \\{([\\s\\S]*?)\\n {6}\\}')); return m ? m[1] : ''; });
-    ok(LOCALE_CODES.length === 7 && blocks.every((bl) => keys.every((k) => new RegExp('\\b' + k + ": '[^']+'").test(bl))) && blocks.every((bl) => /buyCarText: '[^']*\{n\}/.test(bl) && /buyCarT: '[^']*\{car\}/.test(bl)), 'the garage strings exist in all ' + LOCALE_CODES.length + ' languages, with the price and the car');
+    ok(LOCALE_CODES.length > 0 && blocks.length === LOCALE_CODES.length && blocks.every((bl) => keys.every((k) => new RegExp('\\b' + k + ": '[^']+'").test(bl))) && blocks.every((bl) => /buyCarText: '[^']*\{n\}/.test(bl) && /buyCarT: '[^']*\{car\}/.test(bl)), 'the garage strings exist in all ' + LOCALE_CODES.length + ' languages, with the price and the car');
     ok(keys.every((k) => core.indexOf(k + ':') < 0), 'no garage string reuses a core key name');
 
     const ms = Date.now() - t0;
