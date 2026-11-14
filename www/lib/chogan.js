@@ -202,6 +202,7 @@
   var DEFAULT_SETTINGS = {
     lang: deviceLang(),
     theme: 'auto',   // auto | light | dark
+    motion: 'auto',  // auto | on | off: Auto follows the system, On ignores its reduce-motion flag (#881)
     sfx: true,
     music: true,
     haptics: true,
@@ -326,7 +327,7 @@
       playBoard: 'جدول هفته', playBoardIn: 'بازیکن‌های واقعی در پلی گیمز. امتیاز این هفته‌ات آن‌جا فرستاده می‌شود.', playBoardOut: 'برای دیدن بازیکن‌های واقعی وارد پلی گیمز شو.', playSeeAll: 'همه در پلی گیمز', playBoardEmpty: 'هنوز کسی این هفته امتیاز نگرفته.',
       streak: 'پیوستگی', dayStreak: 'روز پیوسته', locked: 'قفل',
       unlockedAt: 'باز شد', totalPlays: 'بازی', playTime: 'زمان بازی', thisWeek: 'این هفته', lastWeek: 'هفته‌ی قبل', weekMinutes: 'زمان بازی (دقیقه)', weekWins: 'برد', weekDays: 'روز بازی', weekGames: 'بازی‌های مختلف',
-      language: 'زبان', theme: 'تم', themeAuto: 'خودکار', themeLight: 'روشن', themeDark: 'تاریک',
+      language: 'زبان', theme: 'تم', themeAuto: 'خودکار', themeLight: 'روشن', themeDark: 'تاریک', motion: 'انیمیشن', motionAuto: 'خودکار', motionOn: 'روشن', motionOff: 'خاموش',
       sfx: 'افکت صوتی', music: 'موسیقی', haptics: 'لرزش',
       resetGame: 'بازنشانی داده‌ی بازی', resetAsk: 'داده‌ی این بازی کامل پاک شود؟',
       resetWarn: 'این کار برگشت ندارد.', resetDone: 'پاک شد',
@@ -373,7 +374,7 @@
       playBoard: 'Weekly leaderboard', playBoardIn: 'Real players on Google Play Games. Your points this week are sent there.', playBoardOut: 'Sign in to Play Games to see real players.', playSeeAll: 'See all in Play Games', playBoardEmpty: 'No scores yet this week.',
       streak: 'Streak', dayStreak: 'day streak', locked: 'Locked',
       unlockedAt: 'Unlocked', totalPlays: 'Games', playTime: 'Play time', thisWeek: 'This week', lastWeek: 'Last week', weekMinutes: 'Play time (min)', weekWins: 'Wins', weekDays: 'Days played', weekGames: 'Different games',
-      language: 'Language', theme: 'Theme', themeAuto: 'Auto', themeLight: 'Light', themeDark: 'Dark',
+      language: 'Language', theme: 'Theme', themeAuto: 'Auto', themeLight: 'Light', themeDark: 'Dark', motion: 'Animations', motionAuto: 'Auto', motionOn: 'On', motionOff: 'Off',
       sfx: 'Sound effects', music: 'Music', haptics: 'Vibration',
       resetGame: 'Reset game data', resetAsk: 'Erase all data for this game?',
       resetWarn: 'This cannot be undone.', resetDone: 'Erased',
@@ -420,7 +421,7 @@
       playBoard: 'Ranking tygodnia', playBoardIn: 'Prawdziwi gracze w Grach Google Play. Twoje punkty z tego tygodnia trafiają tam.', playBoardOut: 'Zaloguj się do Gier Play, aby zobaczyć prawdziwych graczy.', playSeeAll: 'Wszyscy w Grach Play', playBoardEmpty: 'W tym tygodniu nikt jeszcze nie ma punktów.',
       streak: 'Seria', dayStreak: 'dni z rzędu', locked: 'Zablokowane',
       unlockedAt: 'Odblokowano', totalPlays: 'Rozegrane gry', playTime: 'Czas gry', thisWeek: 'Ten tydzień', lastWeek: 'Poprzedni tydzień', weekMinutes: 'Czas gry (min)', weekWins: 'Wygrane', weekDays: 'Dni gry', weekGames: 'Różne gry',
-      language: 'Język', theme: 'Motyw', themeAuto: 'Automatyczny', themeLight: 'Jasny', themeDark: 'Ciemny',
+      language: 'Język', theme: 'Motyw', themeAuto: 'Automatyczny', themeLight: 'Jasny', themeDark: 'Ciemny', motion: 'Animacje', motionAuto: 'Auto', motionOn: 'Włączone', motionOff: 'Wyłączone',
       sfx: 'Efekty dźwiękowe', music: 'Muzyka', haptics: 'Wibracje',
       resetGame: 'Resetuj dane gry', resetAsk: 'Usunąć wszystkie dane tej gry?',
       resetWarn: 'Tej operacji nie można cofnąć.', resetDone: 'Usunięto',
@@ -467,7 +468,7 @@
       playBoard: 'Classement de la semaine', playBoardIn: 'De vrais joueurs sur Google Play Jeux. Tes points de la semaine y sont envoyés.', playBoardOut: 'Connecte-toi à Play Jeux pour voir de vrais joueurs.', playSeeAll: 'Tout voir dans Play Jeux', playBoardEmpty: 'Aucun score cette semaine.',
       streak: 'Série', dayStreak: 'jours d’affilée', locked: 'Verrouillé',
       unlockedAt: 'Débloqué', totalPlays: 'Parties', playTime: 'Temps de jeu', thisWeek: 'Cette semaine', lastWeek: 'Semaine dernière', weekMinutes: 'Temps de jeu (min)', weekWins: 'Victoires', weekDays: 'Jours joués', weekGames: 'Jeux différents',
-      language: 'Langue', theme: 'Thème', themeAuto: 'Auto', themeLight: 'Clair', themeDark: 'Sombre',
+      language: 'Langue', theme: 'Thème', themeAuto: 'Auto', themeLight: 'Clair', themeDark: 'Sombre', motion: 'Animations', motionAuto: 'Auto', motionOn: 'Activées', motionOff: 'Désactivées',
       sfx: 'Effets sonores', music: 'Musique', haptics: 'Vibrations',
       resetGame: 'Effacer les données du jeu', resetAsk: 'Effacer toutes les données de ce jeu ?',
       resetWarn: 'Impossible de revenir en arrière.', resetDone: 'Effacé',
@@ -514,7 +515,7 @@
       playBoard: 'لوحة الصدارة الأسبوعية', playBoardIn: 'لاعبون حقيقيون على Google Play Games. تُرسل نقاطك لهذا الأسبوع إلى هناك.', playBoardOut: 'سجّل الدخول إلى Play Games لترى لاعبين حقيقيين.', playSeeAll: 'عرض الكل في Play Games', playBoardEmpty: 'لا نتائج بعد هذا الأسبوع.',
       streak: 'السلسلة', dayStreak: 'أيام متتالية', locked: 'مقفل',
       unlockedAt: 'فُتح', totalPlays: 'الألعاب', playTime: 'وقت اللعب', thisWeek: 'هذا الأسبوع', lastWeek: 'الأسبوع الماضي', weekMinutes: 'وقت اللعب (دقيقة)', weekWins: 'الانتصارات', weekDays: 'أيام اللعب', weekGames: 'ألعاب مختلفة',
-      language: 'اللغة', theme: 'المظهر', themeAuto: 'تلقائي', themeLight: 'فاتح', themeDark: 'داكن',
+      language: 'اللغة', theme: 'المظهر', themeAuto: 'تلقائي', themeLight: 'فاتح', themeDark: 'داكن', motion: 'الحركة', motionAuto: 'تلقائي', motionOn: 'تشغيل', motionOff: 'إيقاف',
       sfx: 'المؤثرات الصوتية', music: 'الموسيقى', haptics: 'الاهتزاز',
       resetGame: 'مسح بيانات اللعبة', resetAsk: 'أتمسح كل بيانات هذه اللعبة؟',
       resetWarn: 'لا يمكن التراجع عن هذا.', resetDone: 'مُسحت',
@@ -561,7 +562,7 @@
       playBoard: 'हफ़्ते की लीडरबोर्ड', playBoardIn: 'Google Play Games के असली खिलाड़ी। इस हफ़्ते के आपके अंक वहाँ भेजे जाते हैं।', playBoardOut: 'असली खिलाड़ी देखने के लिए Play Games में साइन इन करें।', playSeeAll: 'Play Games में सब देखें', playBoardEmpty: 'इस हफ़्ते अभी कोई स्कोर नहीं।',
       streak: 'लगातार', dayStreak: 'दिन लगातार', locked: 'बंद',
       unlockedAt: 'खुला', totalPlays: 'खेल', playTime: 'खेलने का समय', thisWeek: 'इस हफ़्ते', lastWeek: 'पिछले हफ़्ते', weekMinutes: 'खेलने का समय (मिनट)', weekWins: 'जीत', weekDays: 'खेले गए दिन', weekGames: 'अलग-अलग खेल',
-      language: 'भाषा', theme: 'थीम', themeAuto: 'अपने-आप', themeLight: 'हल्की', themeDark: 'गहरी',
+      language: 'भाषा', theme: 'थीम', themeAuto: 'अपने-आप', themeLight: 'हल्की', themeDark: 'गहरी', motion: 'एनिमेशन', motionAuto: 'अपने-आप', motionOn: 'चालू', motionOff: 'बंद',
       sfx: 'ध्वनि प्रभाव', music: 'संगीत', haptics: 'कंपन',
       resetGame: 'खेल का डेटा मिटाएँ', resetAsk: 'इस खेल का सारा डेटा मिटा दें?',
       resetWarn: 'यह वापस नहीं हो सकता।', resetDone: 'मिटा दिया',
@@ -608,7 +609,7 @@
       playBoard: '每周排行榜', playBoardIn: 'Google Play 游戏上的真实玩家。你本周的积分会提交到那里。', playBoardOut: '登录 Play 游戏即可看到真实玩家。', playSeeAll: '在 Play 游戏中查看全部', playBoardEmpty: '本周还没有人得分。',
       streak: '连续', dayStreak: '天连续', locked: '未解锁',
       unlockedAt: '解锁于', totalPlays: '局数', playTime: '游戏时长', thisWeek: '本周', lastWeek: '上周', weekMinutes: '游戏时长（分钟）', weekWins: '胜局', weekDays: '游戏天数', weekGames: '玩过的游戏',
-      language: '语言', theme: '主题', themeAuto: '自动', themeLight: '浅色', themeDark: '深色',
+      language: '语言', theme: '主题', themeAuto: '自动', themeLight: '浅色', themeDark: '深色', motion: '动画', motionAuto: '自动', motionOn: '开', motionOff: '关',
       sfx: '音效', music: '音乐', haptics: '振动',
       resetGame: '重置游戏数据', resetAsk: '确定清除这个游戏的全部数据？',
       resetWarn: '此操作无法撤销。', resetDone: '已清除',
@@ -655,7 +656,7 @@
       playBoard: 'Wochenrangliste', playBoardIn: 'Echte Spieler in Google Play Spiele. Deine Punkte dieser Woche werden dorthin gesendet.', playBoardOut: 'Melde dich bei Play Spiele an, um echte Spieler zu sehen.', playSeeAll: 'Alle in Play Spiele', playBoardEmpty: 'Diese Woche noch keine Punkte.',
       streak: 'Serie', dayStreak: 'Tage in Folge', locked: 'Gesperrt',
       unlockedAt: 'Freigeschaltet', totalPlays: 'Spiele', playTime: 'Spielzeit', thisWeek: 'Diese Woche', lastWeek: 'Letzte Woche', weekMinutes: 'Spielzeit (Min.)', weekWins: 'Siege', weekDays: 'Spieltage', weekGames: 'Verschiedene Spiele',
-      language: 'Sprache', theme: 'Design', themeAuto: 'Auto', themeLight: 'Hell', themeDark: 'Dunkel',
+      language: 'Sprache', theme: 'Design', themeAuto: 'Auto', themeLight: 'Hell', themeDark: 'Dunkel', motion: 'Animationen', motionAuto: 'Auto', motionOn: 'An', motionOff: 'Aus',
       sfx: 'Soundeffekte', music: 'Musik', haptics: 'Vibration',
       resetGame: 'Spieldaten zurücksetzen', resetAsk: 'Alle Daten dieses Spiels löschen?',
       resetWarn: 'Das lässt sich nicht rückgängig machen.', resetDone: 'Gelöscht',
@@ -702,7 +703,7 @@
       playBoard: 'Clasificación semanal', playBoardIn: 'Jugadores reales en Google Play Juegos. Tus puntos de esta semana se envían allí.', playBoardOut: 'Entra en Play Juegos para ver a jugadores reales.', playSeeAll: 'Ver todos en Play Juegos', playBoardEmpty: 'Aún no hay puntos esta semana.',
       streak: 'Racha', dayStreak: 'días seguidos', locked: 'Bloqueado',
       unlockedAt: 'Desbloqueado', totalPlays: 'Partidas', playTime: 'Tiempo de juego', thisWeek: 'Esta semana', lastWeek: 'Semana pasada', weekMinutes: 'Tiempo de juego (min)', weekWins: 'Victorias', weekDays: 'Días jugados', weekGames: 'Juegos distintos',
-      language: 'Idioma', theme: 'Tema', themeAuto: 'Auto', themeLight: 'Claro', themeDark: 'Oscuro',
+      language: 'Idioma', theme: 'Tema', themeAuto: 'Auto', themeLight: 'Claro', themeDark: 'Oscuro', motion: 'Animaciones', motionAuto: 'Auto', motionOn: 'Activadas', motionOff: 'Desactivadas',
       sfx: 'Efectos de sonido', music: 'Música', haptics: 'Vibración',
       resetGame: 'Borrar datos del juego', resetAsk: '¿Borrar todos los datos de este juego?',
       resetWarn: 'No se puede deshacer.', resetDone: 'Borrado',
@@ -860,6 +861,20 @@
     state.settings.theme = t;
     saveSettings();
     Chogan.applyTheme();
+  };
+
+  // Chrome on Android reports "reduce" when the system animation scale is 0, which some
+  // people set only to make the phone snappier; the app then lost every animation (#881).
+  // Auto keeps following the system, On and Off are the player's own word.
+  Chogan.applyMotion = function () {
+    var m = state.settings.motion;
+    if (m === 'on' || m === 'off') document.documentElement.setAttribute('data-motion', m);
+    else document.documentElement.removeAttribute('data-motion');
+  };
+  Chogan.setMotion = function (m) {
+    state.settings.motion = m;
+    saveSettings();
+    Chogan.applyMotion();
   };
 
   // رنگ شش‌رقمی به rgba با شفافیت دلخواه. عمداً از color-mix استفاده نمی‌کنیم
@@ -2971,7 +2986,9 @@
   };
 
   ui.reduceMotion = function () {
-    if (document.documentElement.getAttribute('data-motion') === 'off') return true;
+    var m = document.documentElement.getAttribute('data-motion');
+    if (m === 'off') return true;
+    if (m === 'on') return false;
     return !!(global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches);
   };
 
@@ -3824,6 +3841,7 @@
     if (!Chogan.pageTitle) Chogan.pageTitle = function () { return Chogan.t('appName'); };
     Chogan.applyLang();
     Chogan.applyTheme();
+    Chogan.applyMotion();
     Chogan.cards.applyBack();
     rollSeason();
     if (o.accent) Chogan.setAccent(o.accent, o.accentSoft);
