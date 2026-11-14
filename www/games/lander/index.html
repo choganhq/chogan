@@ -1,0 +1,949 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>فرودگر — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* upright on a phone, wide beside the side rows on a wide screen */
+  .ln-wrap > .ch-fit { --fit-ar: calc(3 / 4); }
+  @container game (min-aspect-ratio: 5 / 4) { .ln-wrap > .ch-fit { --fit-ar: calc(4 / 3); } }
+  .ch-nocq .ch-gamemain.ch-wide .ln-wrap > .ch-fit { --fit-ar: calc(4 / 3); }
+  .ch-fit > .ln-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+  /* the turn buttons and the engine are halves of the screen in every language, so the
+     canvas is never mirrored */
+  .ln-canvas { display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; user-select: none; -webkit-user-select: none; }
+  .ln-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .ln-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function LanderEngineFactory() {
+  'use strict';
+
+  // Metres and seconds, y up, on a moon: one fixed step of 1/60 s, so the same buttons
+  // give the same flight on every device and a test can replay it exactly.
+  var DT = 1 / 60, G = 1.62, THRUST = 4.0, TURN = 2.2;
+  // the world the screen shows: 48 m across, the ship never above TOP
+  var W = 48, TOP = 44, START_Y = 38, WALL = 1.6, FLOOR = -4;
+  // a landing: both feet on the pad, nearly upright, slow down and slow sideways
+  var LIM = { a: 15 * Math.PI / 180, vy: 2.5, vx: 1.5 };
+  // the ship in its own metres, nose up: the feet touch the ground, the hull must not
+  var FEET = [[-1.6, -1.6], [1.6, -1.6]];
+  var HULL = [[-1.2, -0.7], [1.2, -0.7], [0, -1.1], [-1, 1.1], [1, 1.1], [0, 1.7]];
+  var FOOT_HALF = 1.6;
+  // the three pads of the daily game, as level numbers of the endless run
+  var DAILY = [3, 5, 7];
+
+  function rng(seed) {
+    var s = seed >>> 0;
+    return function () {
+      s = (s + 0x6D2B79F5) >>> 0;
+      var t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+
+  // Every new pad is smaller, with less spare fuel, rougher ground and a longer way to
+  // fly; from the fourth pad on the wind blows. Pad 15 and later are the same hard pad.
+  function params(level) {
+    var k = Math.min(Math.max(1, level | 0) - 1, 14);
+    return {
+      padW: Math.max(5.5, 10 - 0.33 * k),
+      margin: Math.max(1.35, 2.2 - 0.06 * k),
+      rough: Math.min(1, 0.25 + 0.06 * k),
+      dist: Math.min(24, 4 + 1.8 * k),
+      wind: level >= 4 ? Math.min(0.35, 0.1 + 0.025 * (level - 4)) : 0,
+      vx: Math.min(3, 0.25 * k)
+    };
+  }
+
+  function heightAt(pts, x) {
+    if (x <= pts[0].x) return pts[0].y;
+    for (var i = 1; i < pts.length; i++) {
+      var b = pts[i];
+      if (x <= b.x) {
+        var a = pts[i - 1], f = (x - a.x) / (b.x - a.x || 1);
+        return a.y + (b.y - a.y) * f;
+      }
+    }
+    return pts[pts.length - 1].y;
+  }
+  function height(L, x) { return heightAt(L.pts, x); }
+
+  // The ground of one seed and level, without its fuel (newLevel works that out)
+  function terrain(seed, level) {
+    seed = seed >>> 0;
+    var R = rng(seed), P = params(level), N = 16, pts = [];
+    var base = 5 + R() * 4, f1 = 0.12 + R() * 0.1, f2 = 0.3 + R() * 0.2, p1 = R() * 6.283, p2 = R() * 6.283;
+    for (var i = 0; i <= N; i++) {
+      var x = i * W / N;
+      var y = base + P.rough * (8 * (1 + Math.sin(f1 * x + p1)) + 4 * Math.sin(f2 * x + p2) + 5 * (R() - 0.5));
+      pts.push({ x: x, y: clamp(y, 2, 26) });
+    }
+    var startX = 6 + R() * (W - 12), half = P.padW / 2, lo = 2 + half, hi = W - 2 - half;
+    // the pad lies at least `dist` away from the start, on either side that has room
+    var sides = [];
+    if (startX - P.dist >= lo) sides.push([lo, startX - P.dist]);
+    if (startX + P.dist <= hi) sides.push([startX + P.dist, hi]);
+    var cx;
+    if (sides.length) { var sd = sides[Math.floor(R() * sides.length)]; cx = sd[0] + R() * (sd[1] - sd[0]); }
+    else cx = startX - lo > hi - startX ? lo : hi;
+    var py = clamp(heightAt(pts, cx), 3, 6 + 12 * P.rough);
+    // rounded, because a pad pushed against the wall came out at x0 = 1.9999999999999996
+    var x0 = Math.round((cx - half) * 1e6) / 1e6, x1 = Math.round((x0 + P.padW) * 1e6) / 1e6;
+    cx = (x0 + x1) / 2;
+    // the ground right beside the pad is cleared, so its edges are never a sheer wall
+    pts = pts.filter(function (p) { return p.x < x0 - 1.2 || p.x > x1 + 1.2; });
+    pts.push({ x: x0, y: py }, { x: x1, y: py });
+    pts.sort(function (a, b) { return a.x - b.x; });
+    var dir = R() < 0.5 ? -1 : 1, wdir = R() < 0.5 ? -1 : 1;
+    return {
+      seed: seed, level: Math.max(1, level | 0), pts: pts,
+      pad: { x0: x0, x1: x1, y: py, cx: cx, w: P.padW },
+      startX: startX, vx0: P.vx * dir, wind: P.wind * wdir, windPh: R() * 6.283, fuel: 0
+    };
+  }
+
+  // the wind breathes a little, so a hover against it needs a hand on the buttons
+  function windAt(L, t) { return L.wind ? L.wind * (1 + 0.4 * Math.sin(0.9 * t + L.windPh)) : 0; }
+
+  function ship(L) {
+    return { L: L, x: L.startX, y: START_Y, vx: L.vx0, vy: 0, a: 0, fuel: L.fuel, t: 0, burn: false, empty: false, landed: false, over: false, cause: null, hit: null };
+  }
+
+  // a point of the ship in world metres; `a` is the tilt, clockwise, nose right positive
+  function world(S, p) {
+    var c = Math.cos(S.a), s = Math.sin(S.a);
+    return [S.x + p[0] * c + p[1] * s, S.y - p[0] * s + p[1] * c];
+  }
+
+  // One step. turn: -1 left, 1 right, 0 none; thrust: true or false. Returns the events.
+  function step(S, turn, thrust) {
+    var ev = [];
+    if (S.over || S.landed) return ev;
+    var L = S.L;
+    S.a = clamp(S.a + (turn > 0 ? 1 : turn < 0 ? -1 : 0) * TURN * DT, -Math.PI / 2, Math.PI / 2);
+    var ax = windAt(L, S.t), ay = -G;
+    S.burn = !!thrust && S.fuel > 0;
+    if (S.burn) {
+      ax += THRUST * Math.sin(S.a); ay += THRUST * Math.cos(S.a);
+      S.fuel = Math.max(0, S.fuel - DT);
+      if (S.fuel <= 0 && !S.empty) { S.empty = true; ev.push('empty'); }
+    }
+    S.vx += ax * DT; S.vy += ay * DT;
+    S.x += S.vx * DT; S.y += S.vy * DT; S.t += DT;
+    if (S.y > TOP) { S.y = TOP; if (S.vy > 0) S.vy = 0; }
+    if (S.x < WALL) { S.x = WALL; if (S.vx < 0) S.vx = 0; }
+    if (S.x > W - WALL) { S.x = W - WALL; if (S.vx > 0) S.vx = 0; }
+    var hull = false, touch = false, feet = [], i, p;
+    for (i = 0; i < HULL.length; i++) { p = world(S, HULL[i]); if (p[1] <= height(L, p[0])) hull = true; }
+    for (i = 0; i < FEET.length; i++) { p = world(S, FEET[i]); feet.push(p); if (p[1] <= height(L, p[0])) touch = true; }
+    if (!hull && !touch) return ev;
+    var P = L.pad, cause = null;
+    S.hit = { vx: S.vx, vy: S.vy, a: S.a };
+    if (hull) cause = 'rough';
+    else if (!feet.every(function (f) { return f[0] >= P.x0 && f[0] <= P.x1; })) cause = 'rough';
+    else if (Math.abs(S.a) > LIM.a) cause = 'tilt';
+    else if (S.vy < -LIM.vy) cause = 'fast';
+    else if (Math.abs(S.vx) > LIM.vx) cause = 'drift';
+    if (cause) { S.over = true; S.cause = cause; S.burn = false; ev.push('crash'); return ev; }
+    // standing on the pad: the lower foot is put exactly on it
+    S.y += P.y - Math.min(feet[0][1], feet[1][1]);
+    S.vx = 0; S.vy = 0; S.landed = true; S.burn = false;
+    ev.push('land');
+    return ev;
+  }
+
+  // the highest ground under the ship's width anywhere between two x's
+  function highest(L, xa, xb) {
+    var lo = Math.min(xa, xb) - 2.5, hi = Math.max(xa, xb) + 2.5, m = -1e9;
+    for (var x = lo; x <= hi; x += 0.5) m = Math.max(m, height(L, x));
+    return m;
+  }
+
+  /* The test pilot: plays by the same buttons a player has. It climbs over everything
+     between itself and the pad, flies across, stops over the pad and comes down slowly.
+     newLevel keeps only ground it lands on, and the tests replay it on every level. */
+  function bot(S) {
+    var L = S.L, P = L.pad, dx = P.cx - S.x, adx = Math.abs(dx);
+    var alt = S.y - FOOT_HALF - P.y, under = S.y - FOOT_HALF - highest(L, S.x, S.x);
+    var vxT, vyT;
+    var travel = adx > (alt < 6 ? 1.0 : 0.5) || (alt >= 6 && Math.abs(S.vx) > 0.8);
+    if (travel) {
+      var clear = highest(L, S.x, P.cx) + FOOT_HALF + 4;
+      vyT = clamp(0.8 * (clear + 1 - S.y), -2.5, 2);
+      vxT = clamp(0.45 * dx, -4, 4);
+      if (S.y < clear - 1) vxT *= 0.4;
+    } else {
+      vyT = alt < 2.5 ? -0.8 : -clamp(0.6 + 0.3 * alt, 0.6, 4);
+      vxT = clamp(0.45 * dx, -1, 1);
+    }
+    var ax = 1.4 * (vxT - S.vx) - windAt(L, S.t), ay = 1.6 * (vyT - S.vy) + G;
+    var aD = Math.atan2(ax, Math.max(ay, 0.4));
+    // near the ground it leans only as far as the wind needs, inside the landing limit
+    if (under < 4) { var aw = Math.atan2(-windAt(L, S.t), G); aD = clamp(clamp(aD, aw - 0.1, aw + 0.1), -0.22, 0.22); }
+    else aD = clamp(aD, -0.6, 0.6);
+    var err = aD - S.a;
+    var turn = err > 0.02 ? 1 : err < -0.02 ? -1 : 0;
+    var proj = ax * Math.sin(S.a) + ay * Math.cos(S.a);
+    return { turn: turn, thrust: proj > 0.5 * THRUST };
+  }
+
+  // flies the bot until it lands, crashes or runs out of time
+  function fly(S, maxT) {
+    while (!S.landed && !S.over && S.t < maxT) { var c = bot(S); step(S, c.turn, c.thrust); }
+    return S;
+  }
+
+  /* A level the bot lands on, with the fuel it used times the level's margin. Ground it
+     cannot land on, or only slowly, is thrown away for the next seed, so every level a
+     player meets has been flown down once by the rules. */
+  var MAX_T = 45;
+  function nextSeed(s, i) { return (Math.imul((s ^ 0x9E3779B9) >>> 0, 2654435761) + i + 1) >>> 0; }
+  function newLevel(seed, level) {
+    var s = seed >>> 0, L = null;
+    for (var i = 0; i < 80; i++) {
+      L = terrain(s, level);
+      L.fuel = 1e6;
+      var S = fly(ship(L), MAX_T);
+      if (S.landed) {
+        var used = 1e6 - S.fuel, P = params(level);
+        L.fuel = Math.ceil(Math.max(used * P.margin, used + 4) * 10) / 10;
+        L.botT = S.t;
+        return L;
+      }
+      s = nextSeed(s, i);
+    }
+    L.fuel = 0;
+    return L;
+  }
+
+  // The pad's points: a base for the level, fuel left, the middle of the pad and softness
+  function grade(S) {
+    if (!S.landed || !S.hit) return null;
+    var P = S.L.pad, room = Math.max(0.01, P.w / 2 - FOOT_HALF);
+    var off = Math.min(1, Math.abs(S.x - P.cx) / room), soft = 1 - Math.min(1, Math.abs(S.hit.vy) / LIM.vy);
+    var points = Math.round(10 + 5 * S.L.level + 5 * S.fuel + 40 * (1 - off) + 40 * soft);
+    return { points: points, off: off, soft: soft, ace: off < 0.15 && Math.abs(S.hit.vy) < 1.2 && Math.abs(S.hit.a) < 0.05 };
+  }
+
+  function snapshot(S) {
+    return { seed: S.L.seed, level: S.L.level, fuel0: S.L.fuel, x: S.x, y: S.y, vx: S.vx, vy: S.vy, a: S.a, fuel: S.fuel, t: S.t, empty: S.empty };
+  }
+  function num(v) { return typeof v === 'number' && isFinite(v); }
+  function restore(o) {
+    if (!o || typeof o !== 'object') return null;
+    if (!['seed', 'level', 'fuel0', 'x', 'y', 'vx', 'vy', 'a', 'fuel', 't'].every(function (k) { return num(o[k]); })) return null;
+    if (o.seed !== (o.seed >>> 0) || o.level !== (o.level | 0) || o.level < 1 || o.level > 9999) return null;
+    if (o.fuel0 <= 0 || o.fuel0 > 1000 || o.fuel < 0 || o.fuel > o.fuel0 || o.t < 0) return null;
+    if (o.x < WALL || o.x > W - WALL || o.y > TOP || Math.abs(o.a) > Math.PI / 2 || Math.abs(o.vx) > 100 || Math.abs(o.vy) > 100) return null;
+    var L = terrain(o.seed, o.level);
+    L.fuel = o.fuel0;
+    var S = ship(L);
+    S.x = o.x; S.y = o.y; S.vx = o.vx; S.vy = o.vy; S.a = o.a; S.fuel = o.fuel; S.t = o.t; S.empty = !!o.empty;
+    // a ship saved inside the ground is no flight to come back to
+    for (var i = 0; i < HULL.length; i++) { var p = world(S, HULL[i]); if (p[1] <= height(L, p[0])) return null; }
+    return S;
+  }
+
+  var api = {
+    DT: DT, G: G, THRUST: THRUST, TURN: TURN, W: W, TOP: TOP, START_Y: START_Y, FLOOR: FLOOR, WALL: WALL, LIM: LIM, FEET: FEET, HULL: HULL, DAILY: DAILY,
+    rng: rng, params: params, terrain: terrain, height: height, windAt: windAt, ship: ship, world: world, step: step, bot: bot, fly: fly,
+    newLevel: newLevel, grade: grade, snapshot: snapshot, restore: restore
+  };
+  if (typeof self !== 'undefined') self.LanderEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = LanderEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = LanderEngineFactory();
+  // a deep night blue; white text on it is far past 4.5:1, and it stands apart from every
+  // other game's colour (#887)
+  var ACCENT = '#122A5D';
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'lander',
+    name: { fa: 'فرودگر', en: 'Lander', zh: '登月舱', de: 'Mondlander', es: 'Alunizador', pl: 'Lądownik', fr: 'Alunisseur', ar: 'مركبة الهبوط', hi: 'लैंडर' },
+    accent: ACCENT,
+    mood: 'dots',
+    strings: {
+      fa: {
+        lnScene: 'سطح ماه و فرودگر', lnTapGo: 'برای شروع صفحه را لمس کن.', lnTapNext: 'برای سکوی بعدی صفحه را لمس کن.',
+        lnHowTo: 'نیمه‌ی چپ: چرخش · نیمه‌ی راست: موتور', lnHowToSw: 'نیمه‌ی راست: چرخش · نیمه‌ی چپ: موتور',
+        lnPadN: 'سکوی {n}', lnDailyPad: 'سکوی {n} از {m}', lnScoreN: 'امتیاز: {n}', lnBestN: 'بهترین: {n}', lnDaily: 'فرودگر روزانه', lnNewRun: 'از نو',
+        lnLandT: 'فرود آمدی! {n} امتیاز', lnAceT: 'فرود پَری! {n} امتیاز', lnEmpty: 'سوخت تمام شد!',
+        lnRough: 'بیرون از سکو سقوط کردی!', lnTilt: 'زیادی کج بود و واژگون شد!', lnFast: 'خیلی تند به زمین خوردی!', lnDrift: 'به پهلو سُر خورد و واژگون شد!', lnWin: 'روی هر سه سکو فرود آمدی!',
+        lnPads: 'سکوهای فرود', lnScore: 'امتیاز', lnBest: 'بهترین', lnTries: 'تلاش‌ها',
+        lnKLeft: 'چرخش به چپ', lnKRight: 'چرخش به راست', lnKThrust: 'موتور', lnKAgain: 'از نو',
+        lnSideT: 'دکمه‌ی موتور', lnSideL: 'چپ', lnSideR: 'راست',
+        lnRules: 'فرودگر را روی سکوی چراغ‌دار بنشان. دکمه‌های چرخش (◀ ▶) در یک نیمه‌ی صفحه‌اند و نیمه‌ی دیگر موتور است؛ جای موتور را در تنظیمات عوض کن. موتور همیشه به سمتی هل می‌دهد که دماغه رو به آن است. فرود فقط وقتی درست است که هر دو پایه روی سکو باشند، فرودگر تقریباً صاف باشد (حداکثر ۱۵ درجه)، کندتر از ۲٫۵ متر بر ثانیه پایین بیاید و کندتر از ۱٫۵ متر بر ثانیه به پهلو برود؛ عددهای بالای صفحه وقتی در این حدها هستی سبز می‌شوند. هر چیز دیگری سقوط است و بازی تمام می‌شود. موتور سوخت می‌سوزاند و باک محدود است. هر سکو برای سوخت باقی‌مانده، نزدیکی به وسط سکو و نرمی فرود امتیاز می‌دهد. هر سکوی تازه کوچک‌تر است، سوخت اضافه‌اش کمتر و زمینش ناهموارتر، و از سکوی چهارم باد هم می‌وزد. بازی روزانه سه سکوی یکسان برای همه است؛ با سقوط از سکوی اول دوباره شروع می‌شود.',
+        lnTut1: 'چرخش و موتور', lnTutText1: 'دکمه‌های ◀ ▶ را نگه دار تا فرودگر بچرخد و نیمه‌ی دیگر صفحه را تا موتور روشن شود.',
+        lnTut2: 'نرم بنشین', lnTutText2: 'فقط روی سکوی چراغ‌دار، صاف و آرام فرود بیا. عددهای بالای صفحه وقتی سرعت و کجی امن است سبز می‌شوند.',
+        lnTut3: 'سوخت و باد', lnTutText3: 'موتور سوخت می‌سوزاند. سوخت باقی‌مانده و فرود نرم وسط سکو امتیاز دارد. از سکوی چهارم باد هلت می‌دهد.'
+      },
+      en: {
+        lnScene: 'Moon surface and lander', lnTapGo: 'Tap to start.', lnTapNext: 'Tap for the next pad.',
+        lnHowTo: 'Left half: turn · right half: engine', lnHowToSw: 'Right half: turn · left half: engine',
+        lnPadN: 'Pad {n}', lnDailyPad: 'Pad {n} of {m}', lnScoreN: 'Score: {n}', lnBestN: 'Best: {n}', lnDaily: 'Daily Lander', lnNewRun: 'Start over',
+        lnLandT: 'Touchdown! {n} points', lnAceT: 'Feather landing! {n} points', lnEmpty: 'Out of fuel!',
+        lnRough: 'Crashed off the pad!', lnTilt: 'Too tilted, it tipped over!', lnFast: 'Hit the ground too hard!', lnDrift: 'Slid sideways and tipped over!', lnWin: 'All three pads landed!',
+        lnPads: 'Pads landed', lnScore: 'Score', lnBest: 'Best', lnTries: 'Tries',
+        lnKLeft: 'Turn left', lnKRight: 'Turn right', lnKThrust: 'Engine', lnKAgain: 'Start over',
+        lnSideT: 'Engine button', lnSideL: 'Left', lnSideR: 'Right',
+        lnRules: 'Set the lander down on the lit pad. The turn buttons (◀ ▶) are on one half of the screen and the other half fires the engine; swap the sides in the settings. The engine always pushes the way the nose points. A landing counts only with both feet on the pad, the lander nearly upright (15° at most), coming down slower than 2.5 m/s and drifting slower than 1.5 m/s; the numbers at the top turn green inside these limits. Anything else is a crash and the run is over. The engine burns fuel and the tank is limited. Every pad gives points for fuel left, for landing near its middle and for landing softly. Each new pad is smaller, with less spare fuel and rougher ground, and from pad 4 on the wind blows. The daily game is three pads, the same for everyone; a crash starts it again from pad 1.',
+        lnTut1: 'Turn and thrust', lnTutText1: 'Hold ◀ ▶ to turn the lander, and the other half of the screen to fire the engine.',
+        lnTut2: 'Land softly', lnTutText2: 'Land only on the lit pad, upright and slow. The numbers at the top turn green when speed and tilt are safe.',
+        lnTut3: 'Fuel and wind', lnTutText3: 'The engine burns fuel. Fuel left and a soft landing in the middle of the pad score points. From pad 4 on, the wind pushes you.'
+      },
+      zh: {
+        lnScene: '月面与登月舱', lnTapGo: '点击开始。', lnTapNext: '点击前往下一个着陆台。',
+        lnHowTo: '左半边：转向 · 右半边：引擎', lnHowToSw: '右半边：转向 · 左半边：引擎',
+        lnPadN: '着陆台 {n}', lnDailyPad: '着陆台 {n} / {m}', lnScoreN: '得分：{n}', lnBestN: '最佳：{n}', lnDaily: '每日登月舱', lnNewRun: '重新开始',
+        lnLandT: '着陆成功！{n} 分', lnAceT: '羽毛般着陆！{n} 分', lnEmpty: '燃料耗尽！',
+        lnRough: '在着陆台外坠毁！', lnTilt: '倾斜太大，翻倒了！', lnFast: '落地太猛了！', lnDrift: '横向滑动，翻倒了！', lnWin: '三个着陆台全部着陆！',
+        lnPads: '着陆次数', lnScore: '得分', lnBest: '最佳', lnTries: '尝试次数',
+        lnKLeft: '向左转', lnKRight: '向右转', lnKThrust: '引擎', lnKAgain: '重新开始',
+        lnSideT: '引擎按钮', lnSideL: '左', lnSideR: '右',
+        lnRules: '让登月舱降落在亮灯的着陆台上。转向按钮（◀ ▶）在屏幕的一半，另一半点燃引擎；可在设置中交换两边。引擎总是朝机头指向的方向推。只有双脚都在台上、舱体几乎竖直（最多 15°）、下降速度低于 2.5 米/秒且横向速度低于 1.5 米/秒时才算着陆；在这些范围内时，顶部的数字会变绿。其他情况都是坠毁，本局结束。引擎消耗燃料，油箱有限。每个着陆台按剩余燃料、离中心的距离和着陆的轻柔程度给分。每个新台更小，备用燃料更少，地面更崎岖；从第 4 个台起会刮风。每日挑战是所有人相同的三个台；坠毁后从第 1 个台重新开始。',
+        lnTut1: '转向与推力', lnTutText1: '按住 ◀ ▶ 转动登月舱，按住屏幕另一半点燃引擎。',
+        lnTut2: '轻轻着陆', lnTutText2: '只能在亮灯的台上竖直、缓慢地着陆。速度和倾斜安全时，顶部的数字会变绿。',
+        lnTut3: '燃料与风', lnTutText3: '引擎会消耗燃料。剩余燃料和在台中央的轻柔着陆都能得分。从第 4 个台起，风会推你。'
+      },
+      de: {
+        lnScene: 'Mondoberfläche und Lander', lnTapGo: 'Zum Start tippen.', lnTapNext: 'Für die nächste Plattform tippen.',
+        lnHowTo: 'Linke Hälfte: drehen · rechte Hälfte: Triebwerk', lnHowToSw: 'Rechte Hälfte: drehen · linke Hälfte: Triebwerk',
+        lnPadN: 'Plattform {n}', lnDailyPad: 'Plattform {n} von {m}', lnScoreN: 'Punkte: {n}', lnBestN: 'Bestwert: {n}', lnDaily: 'Täglicher Mondlander', lnNewRun: 'Neu starten',
+        lnLandT: 'Aufgesetzt! {n} Punkte', lnAceT: 'Federleicht gelandet! {n} Punkte', lnEmpty: 'Kein Treibstoff mehr!',
+        lnRough: 'Neben der Plattform abgestürzt!', lnTilt: 'Zu schräg, umgekippt!', lnFast: 'Zu hart aufgeschlagen!', lnDrift: 'Seitlich gerutscht und umgekippt!', lnWin: 'Auf allen drei Plattformen gelandet!',
+        lnPads: 'Landungen', lnScore: 'Punkte', lnBest: 'Bestwert', lnTries: 'Versuche',
+        lnKLeft: 'Nach links drehen', lnKRight: 'Nach rechts drehen', lnKThrust: 'Triebwerk', lnKAgain: 'Neu starten',
+        lnSideT: 'Triebwerk-Taste', lnSideL: 'Links', lnSideR: 'Rechts',
+        lnRules: 'Setze den Lander auf der beleuchteten Plattform ab. Die Drehtasten (◀ ▶) liegen auf einer Hälfte des Bildschirms, die andere Hälfte zündet das Triebwerk; die Seiten lassen sich in den Einstellungen tauschen. Das Triebwerk schiebt immer in die Richtung, in die die Nase zeigt. Eine Landung zählt nur mit beiden Füßen auf der Plattform, fast aufrecht (höchstens 15°), langsamer als 2,5 m/s nach unten und langsamer als 1,5 m/s seitwärts; die Zahlen oben werden innerhalb dieser Grenzen grün. Alles andere ist ein Absturz und der Lauf ist vorbei. Das Triebwerk verbraucht Treibstoff, der Tank ist begrenzt. Jede Plattform gibt Punkte für übrigen Treibstoff, für eine Landung nahe der Mitte und für eine sanfte Landung. Jede neue Plattform ist kleiner, mit weniger Reserve und raueren Boden, und ab Plattform 4 weht Wind. Die Tagesaufgabe sind drei Plattformen, für alle gleich; ein Absturz beginnt wieder bei Plattform 1.',
+        lnTut1: 'Drehen und Schub', lnTutText1: 'Halte ◀ ▶, um den Lander zu drehen, und die andere Bildschirmhälfte, um das Triebwerk zu zünden.',
+        lnTut2: 'Sanft landen', lnTutText2: 'Lande nur auf der beleuchteten Plattform, aufrecht und langsam. Die Zahlen oben werden grün, wenn Tempo und Neigung sicher sind.',
+        lnTut3: 'Treibstoff und Wind', lnTutText3: 'Das Triebwerk verbraucht Treibstoff. Übriger Treibstoff und eine sanfte Landung in der Mitte bringen Punkte. Ab Plattform 4 schiebt dich der Wind.'
+      },
+      es: {
+        lnScene: 'Superficie lunar y módulo', lnTapGo: 'Toca para empezar.', lnTapNext: 'Toca para ir a la siguiente plataforma.',
+        lnHowTo: 'Mitad izquierda: girar · mitad derecha: motor', lnHowToSw: 'Mitad derecha: girar · mitad izquierda: motor',
+        lnPadN: 'Plataforma {n}', lnDailyPad: 'Plataforma {n} de {m}', lnScoreN: 'Puntos: {n}', lnBestN: 'Récord: {n}', lnDaily: 'Alunizador diario', lnNewRun: 'Empezar de nuevo',
+        lnLandT: '¡Aterrizaje! {n} puntos', lnAceT: '¡Aterrizaje de pluma! {n} puntos', lnEmpty: '¡Sin combustible!',
+        lnRough: '¡Te estrellaste fuera de la plataforma!', lnTilt: '¡Demasiado inclinado, volcó!', lnFast: '¡Golpeaste el suelo demasiado fuerte!', lnDrift: '¡Se deslizó de lado y volcó!', lnWin: '¡Aterrizaste en las tres plataformas!',
+        lnPads: 'Plataformas', lnScore: 'Puntos', lnBest: 'Récord', lnTries: 'Intentos',
+        lnKLeft: 'Girar a la izquierda', lnKRight: 'Girar a la derecha', lnKThrust: 'Motor', lnKAgain: 'Empezar de nuevo',
+        lnSideT: 'Botón del motor', lnSideL: 'Izquierda', lnSideR: 'Derecha',
+        lnRules: 'Posa el módulo en la plataforma iluminada. Los botones de giro (◀ ▶) están en una mitad de la pantalla y la otra mitad enciende el motor; puedes cambiar los lados en los ajustes. El motor siempre empuja hacia donde apunta el morro. Un aterrizaje solo cuenta con las dos patas sobre la plataforma, el módulo casi recto (15° como mucho), bajando a menos de 2,5 m/s y derivando a menos de 1,5 m/s; los números de arriba se ponen verdes dentro de esos límites. Cualquier otra cosa es un choque y la partida termina. El motor gasta combustible y el depósito es limitado. Cada plataforma da puntos por el combustible que queda, por aterrizar cerca del centro y por hacerlo con suavidad. Cada plataforma nueva es más pequeña, con menos combustible de sobra y un suelo más abrupto, y desde la plataforma 4 sopla el viento. El reto diario son tres plataformas, iguales para todos; un choque vuelve a empezar desde la plataforma 1.',
+        lnTut1: 'Girar y empujar', lnTutText1: 'Mantén ◀ ▶ para girar el módulo y la otra mitad de la pantalla para encender el motor.',
+        lnTut2: 'Aterriza suave', lnTutText2: 'Aterriza solo en la plataforma iluminada, recto y despacio. Los números de arriba se ponen verdes cuando la velocidad y la inclinación son seguras.',
+        lnTut3: 'Combustible y viento', lnTutText3: 'El motor gasta combustible. El combustible que queda y un aterrizaje suave en el centro dan puntos. Desde la plataforma 4, el viento te empuja.'
+      },
+      pl: {
+        lnScene: 'Powierzchnia Księżyca i lądownik', lnTapGo: 'Dotknij, aby zacząć.', lnTapNext: 'Dotknij, aby przejść do następnego lądowiska.',
+        lnHowTo: 'Lewa połowa: obrót · prawa połowa: silnik', lnHowToSw: 'Prawa połowa: obrót · lewa połowa: silnik',
+        lnPadN: 'Lądowisko {n}', lnDailyPad: 'Lądowisko {n} z {m}', lnScoreN: 'Wynik: {n}', lnBestN: 'Rekord: {n}', lnDaily: 'Dzienny lądownik', lnNewRun: 'Od nowa',
+        lnLandT: 'Wylądowano! {n} pkt', lnAceT: 'Lądowanie jak piórko! {n} pkt', lnEmpty: 'Brak paliwa!',
+        lnRough: 'Rozbiłeś się poza lądowiskiem!', lnTilt: 'Za duży przechył, przewrócił się!', lnFast: 'Za mocne uderzenie o ziemię!', lnDrift: 'Zsunął się bokiem i przewrócił!', lnWin: 'Wylądowano na wszystkich trzech lądowiskach!',
+        lnPads: 'Lądowania', lnScore: 'Wynik', lnBest: 'Rekord', lnTries: 'Próby',
+        lnKLeft: 'Obrót w lewo', lnKRight: 'Obrót w prawo', lnKThrust: 'Silnik', lnKAgain: 'Od nowa',
+        lnSideT: 'Przycisk silnika', lnSideL: 'Lewa', lnSideR: 'Prawa',
+        lnRules: 'Posadź lądownik na oświetlonym lądowisku. Przyciski obrotu (◀ ▶) są na jednej połowie ekranu, a druga połowa odpala silnik; strony można zamienić w ustawieniach. Silnik zawsze pcha tam, gdzie wskazuje dziób. Lądowanie liczy się tylko wtedy, gdy obie nogi stoją na lądowisku, lądownik jest prawie pionowo (najwyżej 15°), opada wolniej niż 2,5 m/s i dryfuje wolniej niż 1,5 m/s; liczby na górze zmieniają kolor na zielony w tych granicach. Wszystko inne to katastrofa i koniec gry. Silnik zużywa paliwo, a zbiornik jest ograniczony. Każde lądowisko daje punkty za pozostałe paliwo, za lądowanie blisko środka i za miękkie przyziemienie. Każde nowe lądowisko jest mniejsze, z mniejszym zapasem paliwa i bardziej nierównym terenem, a od lądowiska 4 wieje wiatr. Wyzwanie dnia to trzy lądowiska, takie same dla wszystkich; po katastrofie zaczyna się znowu od lądowiska 1.',
+        lnTut1: 'Obrót i ciąg', lnTutText1: 'Przytrzymaj ◀ ▶, aby obrócić lądownik, a drugą połowę ekranu, aby odpalić silnik.',
+        lnTut2: 'Ląduj miękko', lnTutText2: 'Ląduj tylko na oświetlonym lądowisku, prosto i powoli. Liczby na górze zmieniają kolor na zielony, gdy prędkość i przechył są bezpieczne.',
+        lnTut3: 'Paliwo i wiatr', lnTutText3: 'Silnik zużywa paliwo. Pozostałe paliwo i miękkie lądowanie na środku dają punkty. Od lądowiska 4 pcha cię wiatr.'
+      },
+      fr: {
+        lnScene: 'Surface lunaire et alunisseur', lnTapGo: 'Touchez pour commencer.', lnTapNext: 'Touchez pour la plateforme suivante.',
+        lnHowTo: 'Moitié gauche : tourner · moitié droite : moteur', lnHowToSw: 'Moitié droite : tourner · moitié gauche : moteur',
+        lnPadN: 'Plateforme {n}', lnDailyPad: 'Plateforme {n} sur {m}', lnScoreN: 'Score : {n}', lnBestN: 'Record : {n}', lnDaily: 'Alunisseur du jour', lnNewRun: 'Recommencer',
+        lnLandT: 'Posé ! {n} points', lnAceT: 'Posé comme une plume ! {n} points', lnEmpty: 'Plus de carburant !',
+        lnRough: 'Écrasé hors de la plateforme !', lnTilt: 'Trop penché, il s’est renversé !', lnFast: 'Choc trop violent au sol !', lnDrift: 'Il a glissé de côté et s’est renversé !', lnWin: 'Posé sur les trois plateformes !',
+        lnPads: 'Atterrissages', lnScore: 'Score', lnBest: 'Record', lnTries: 'Essais',
+        lnKLeft: 'Tourner à gauche', lnKRight: 'Tourner à droite', lnKThrust: 'Moteur', lnKAgain: 'Recommencer',
+        lnSideT: 'Bouton du moteur', lnSideL: 'Gauche', lnSideR: 'Droite',
+        lnRules: 'Posez l’alunisseur sur la plateforme éclairée. Les boutons de rotation (◀ ▶) occupent une moitié de l’écran et l’autre moitié allume le moteur ; vous pouvez échanger les côtés dans les réglages. Le moteur pousse toujours dans la direction du nez. Un atterrissage ne compte qu’avec les deux pieds sur la plateforme, l’engin presque droit (15° au plus), une descente plus lente que 2,5 m/s et une dérive plus lente que 1,5 m/s ; les chiffres en haut passent au vert dans ces limites. Tout le reste est un crash et la partie s’arrête. Le moteur brûle du carburant et le réservoir est limité. Chaque plateforme rapporte des points pour le carburant restant, pour un atterrissage près du centre et pour un atterrissage en douceur. Chaque nouvelle plateforme est plus petite, avec moins de carburant de réserve et un sol plus accidenté, et à partir de la plateforme 4 le vent souffle. Le défi du jour compte trois plateformes, les mêmes pour tous ; un crash fait repartir de la plateforme 1.',
+        lnTut1: 'Tourner et pousser', lnTutText1: 'Maintenez ◀ ▶ pour faire tourner l’alunisseur et l’autre moitié de l’écran pour allumer le moteur.',
+        lnTut2: 'Posez-vous en douceur', lnTutText2: 'Posez-vous seulement sur la plateforme éclairée, droit et lentement. Les chiffres en haut passent au vert quand la vitesse et l’inclinaison sont sûres.',
+        lnTut3: 'Carburant et vent', lnTutText3: 'Le moteur brûle du carburant. Le carburant restant et un atterrissage doux au centre rapportent des points. À partir de la plateforme 4, le vent vous pousse.'
+      },
+      ar: {
+        lnScene: 'سطح القمر ومركبة الهبوط', lnTapGo: 'المس الشاشة للبدء.', lnTapNext: 'المس الشاشة للمنصة التالية.',
+        lnHowTo: 'النصف الأيسر: دوران · النصف الأيمن: المحرك', lnHowToSw: 'النصف الأيمن: دوران · النصف الأيسر: المحرك',
+        lnPadN: 'المنصة {n}', lnDailyPad: 'المنصة {n} من {m}', lnScoreN: 'النقاط: {n}', lnBestN: 'الأفضل: {n}', lnDaily: 'مركبة الهبوط اليومية', lnNewRun: 'من جديد',
+        lnLandT: 'هبطت! {n} نقطة', lnAceT: 'هبوط كالريشة! {n} نقطة', lnEmpty: 'نفد الوقود!',
+        lnRough: 'تحطمت خارج المنصة!', lnTilt: 'مائلة أكثر من اللازم فانقلبت!', lnFast: 'اصطدمت بالأرض بقوة!', lnDrift: 'انزلقت جانبًا فانقلبت!', lnWin: 'هبطت على المنصات الثلاث!',
+        lnPads: 'مرات الهبوط', lnScore: 'النقاط', lnBest: 'الأفضل', lnTries: 'المحاولات',
+        lnKLeft: 'دوران لليسار', lnKRight: 'دوران لليمين', lnKThrust: 'المحرك', lnKAgain: 'من جديد',
+        lnSideT: 'زر المحرك', lnSideL: 'يسار', lnSideR: 'يمين',
+        lnRules: 'أنزل المركبة على المنصة المضاءة. زرّا الدوران (◀ ▶) في نصف الشاشة والنصف الآخر يشغّل المحرك؛ يمكنك تبديل الجانبين من الإعدادات. يدفع المحرك دائمًا في الاتجاه الذي تشير إليه مقدمة المركبة. لا يُحسب الهبوط إلا إذا كانت القدمان على المنصة، والمركبة شبه مستقيمة (15° على الأكثر)، وسرعة النزول أقل من 2.5 م/ث والانجراف الجانبي أقل من 1.5 م/ث؛ تصبح الأرقام في الأعلى خضراء داخل هذه الحدود. كل ما عدا ذلك تحطم وتنتهي الجولة. يستهلك المحرك الوقود والخزان محدود. كل منصة تعطي نقاطًا على الوقود المتبقي والهبوط قرب وسطها والهبوط بلطف. كل منصة جديدة أصغر، ووقودها الاحتياطي أقل وأرضها أوعر، ومن المنصة الرابعة تهب الريح. التحدي اليومي ثلاث منصات متطابقة للجميع؛ والتحطم يعيدك إلى المنصة الأولى.',
+        lnTut1: 'الدوران والدفع', lnTutText1: 'اضغط مطولًا على ◀ ▶ لتدوير المركبة، وعلى النصف الآخر من الشاشة لتشغيل المحرك.',
+        lnTut2: 'اهبط بلطف', lnTutText2: 'اهبط على المنصة المضاءة فقط، مستقيمًا وببطء. تصبح الأرقام في الأعلى خضراء حين تكون السرعة والميل آمنين.',
+        lnTut3: 'الوقود والريح', lnTutText3: 'يستهلك المحرك الوقود. الوقود المتبقي والهبوط اللطيف في وسط المنصة يمنحان نقاطًا. من المنصة الرابعة تدفعك الريح.'
+      },
+      hi: {
+        lnScene: 'चाँद की सतह और लैंडर', lnTapGo: 'शुरू करने के लिए छुएँ।', lnTapNext: 'अगले पैड के लिए छुएँ।',
+        lnHowTo: 'बायाँ आधा: घुमाएँ · दायाँ आधा: इंजन', lnHowToSw: 'दायाँ आधा: घुमाएँ · बायाँ आधा: इंजन',
+        lnPadN: 'पैड {n}', lnDailyPad: 'पैड {n} / {m}', lnScoreN: 'अंक: {n}', lnBestN: 'सर्वश्रेष्ठ: {n}', lnDaily: 'रोज़ का लैंडर', lnNewRun: 'फिर से शुरू',
+        lnLandT: 'उतर गए! {n} अंक', lnAceT: 'पंख जैसी लैंडिंग! {n} अंक', lnEmpty: 'ईंधन ख़त्म!',
+        lnRough: 'पैड के बाहर टकरा गए!', lnTilt: 'बहुत तिरछा था, पलट गया!', lnFast: 'ज़मीन से बहुत ज़ोर से टकराए!', lnDrift: 'बग़ल में फिसला और पलट गया!', lnWin: 'तीनों पैड पर उतर गए!',
+        lnPads: 'लैंडिंग', lnScore: 'अंक', lnBest: 'सर्वश्रेष्ठ', lnTries: 'कोशिशें',
+        lnKLeft: 'बाएँ घुमाएँ', lnKRight: 'दाएँ घुमाएँ', lnKThrust: 'इंजन', lnKAgain: 'फिर से शुरू',
+        lnSideT: 'इंजन बटन', lnSideL: 'बायाँ', lnSideR: 'दायाँ',
+        lnRules: 'लैंडर को रोशनी वाले पैड पर उतारें। घुमाने के बटन (◀ ▶) स्क्रीन के एक आधे हिस्से में हैं और दूसरा आधा इंजन चलाता है; सेटिंग में दोनों तरफ़ बदल सकते हैं। इंजन हमेशा उसी ओर धकेलता है जिधर नाक है। लैंडिंग तभी मानी जाती है जब दोनों पैर पैड पर हों, लैंडर लगभग सीधा हो (ज़्यादा से ज़्यादा 15°), 2.5 मी/से से धीमे नीचे आए और 1.5 मी/से से धीमे बग़ल में खिसके; इन सीमाओं में ऊपर के अंक हरे हो जाते हैं। बाक़ी सब टक्कर है और खेल ख़त्म। इंजन ईंधन जलाता है और टंकी सीमित है। हर पैड बचे ईंधन, बीच के पास उतरने और नरम लैंडिंग के लिए अंक देता है। हर नया पैड छोटा है, अतिरिक्त ईंधन कम और ज़मीन ऊबड़-खाबड़, और पैड 4 से हवा चलती है। रोज़ की चुनौती सबके लिए एक जैसे तीन पैड हैं; टक्कर होने पर पैड 1 से फिर शुरू।',
+        lnTut1: 'घुमाना और धक्का', lnTutText1: 'लैंडर घुमाने के लिए ◀ ▶ दबाए रखें, और इंजन चलाने के लिए स्क्रीन का दूसरा आधा।',
+        lnTut2: 'धीरे उतरें', lnTutText2: 'सिर्फ़ रोशनी वाले पैड पर, सीधे और धीरे उतरें। रफ़्तार और झुकाव सुरक्षित होने पर ऊपर के अंक हरे हो जाते हैं।',
+        lnTut3: 'ईंधन और हवा', lnTutText3: 'इंजन ईंधन जलाता है। बचा ईंधन और पैड के बीच नरम लैंडिंग अंक देते हैं। पैड 4 से हवा आपको धकेलती है।'
+      }
+    }
+  });
+
+  // which half fires the engine, behind the gear; the right half for a new player
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || typeof prefs !== 'object') prefs = {};
+  prefs.side = prefs.side === 'left' ? 'left' : 'right';
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  // the day's three pads, the same for everyone: three seeds from the day's own generator
+  var dailySeeds = null;
+  if (dailyDate) {
+    var dr = C.daily('lander', dailyDate).rng;
+    dailySeeds = E.DAILY.map(function () { return Math.floor(dr() * 4294967296) >>> 0; });
+  }
+
+  // the run: pad n (1-based), the points so far, the landings
+  var S = null, n = 1, score = 0, landings = 0, tries = 0, startedAt = 0;
+  var raf = 0, last = 0, acc = 0, prev = null, paused = false, ended = false, waiting = false, resumed = false;
+  var landedAt = 0, nextReady = false, lastGrade = null, lastJet = 0, emptyShown = false, clock = 0;
+  var held = { l: false, r: false, t: false }, keys = { l: false, r: false, t: false };
+  var bits = [];
+
+  var cv = el('canvas', { class: 'ln-canvas', role: 'img', 'aria-label': C.t('lnScene') });
+  var box = el('div', { class: 'ln-box' }, [cv]);
+  var top = el('div', { class: 'ln-top ch-above' });
+  var status = el('div', { class: 'ln-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'ln-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'gear', label: C.t('settings'), onClick: function () { showSettings(); } });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- runs */
+
+  // the level number of pad n: the endless run climbs, the daily one has its three fixed pads
+  function levelOf(k) { return dailyDate ? E.DAILY[k - 1] : k; }
+  function seedOf(k) { return dailyDate ? dailySeeds[k - 1] : Math.floor(Math.random() * 4294967296) >>> 0; }
+
+  function newRun() {
+    n = 1; score = 0; landings = 0; tries++;
+    startedAt = Date.now();
+    startPad();
+  }
+  // every pad is ground the engine's own pilot has landed on (E.newLevel)
+  function startPad() {
+    S = E.ship(E.newLevel(seedOf(n), levelOf(n)));
+    waiting = true; resumed = false; ended = false; nextReady = false; lastGrade = null; emptyShown = false;
+    acc = 0; last = 0; prev = null; bits = [];
+    renderTop(); renderStatus(); draw(); kick();
+  }
+  function nextPad() {
+    if (!S || !S.landed || !nextReady || ended) return;
+    n++;
+    startPad();
+    ctx.save();
+  }
+
+  function turnInput() {
+    var l = held.l || keys.l, r = held.r || keys.r;
+    return l && !r ? -1 : r && !l ? 1 : 0;
+  }
+  function thrustInput() { return held.t || keys.t; }
+
+  // the ship is drawn between its last two steps, so its motion is even on any screen
+  function pose() {
+    if (!prev || S.landed || S.over) return { x: S.x, y: S.y, a: S.a };
+    var f = Math.max(0, Math.min(1, acc / E.DT));
+    return { x: prev.x + (S.x - prev.x) * f, y: prev.y + (S.y - prev.y) * f, a: prev.a + (S.a - prev.a) * f };
+  }
+
+  function tick(now) {
+    raf = 0;
+    if (!S) return;
+    clock = now / 1000;
+    var blocked = paused || waiting || document.hidden || !!document.querySelector('.ch-scrim');
+    if (!last || blocked) last = now;
+    var dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    acc = blocked ? 0 : acc + dt;
+    var ev = [];
+    while (acc >= E.DT && !S.landed && !S.over) {
+      acc -= E.DT;
+      prev = { x: S.x, y: S.y, a: S.a };
+      ev = ev.concat(E.step(S, turnInput(), thrustInput()));
+    }
+    if (S.burn && !blocked && now - lastJet > 150) { lastJet = now; C.audio.sfx('jet'); }
+    events(ev);
+    if (S.landed && !nextReady && now - landedAt > 700) { nextReady = true; renderStatus(); }
+    stepBits(dt);
+    draw();
+    // the loop keeps going while the page shows a pad, so its lights blink and the flame flickers
+    if (!ended) raf = requestAnimationFrame(tick);
+  }
+  function kick() { if (!raf && !document.hidden) raf = requestAnimationFrame(tick); }
+
+  function events(ev) {
+    if (!ev.length) return;
+    if (ev.indexOf('empty') >= 0) { emptyShown = true; C.feedback('thud'); renderStatus(); }
+    if (ev.indexOf('land') >= 0) landed();
+    if (ev.indexOf('crash') >= 0) crashed();
+  }
+
+  function landed() {
+    var gr = E.grade(S);
+    lastGrade = gr;
+    score += gr.points; landings++;
+    landedAt = performance.now(); nextReady = false;
+    C.feedback('good');
+    C.achievements.unlock('ln-first');
+    if (gr.ace) C.achievements.unlock('ln-ace');
+    if (!dailyDate && landings >= 10) C.achievements.unlock('ln-ten');
+    renderTop(); renderStatus();
+    if (dailyDate && n >= E.DAILY.length) { ended = true; setTimeout(finish, C.ui.reduceMotion() ? 300 : 1200); }
+    else ctx.save();
+  }
+
+  function crashed() {
+    C.feedback('bad');
+    renderStatus();
+    // a burst of pieces where the ship hit, drawn by the page only
+    if (!C.ui.reduceMotion()) {
+      for (var i = 0; i < 26; i++) {
+        var ang = Math.random() * Math.PI, sp = 2 + Math.random() * 6;
+        bits.push({ x: S.x, y: S.y, vx: Math.cos(ang) * sp + S.hit.vx * 0.3, vy: Math.sin(ang) * sp, life: 0.6 + Math.random() * 0.6, hot: Math.random() < 0.5 });
+      }
+    }
+    ended = true;
+    setTimeout(finish, C.ui.reduceMotion() ? 200 : 900);
+  }
+  function stepBits(dt) {
+    if (!bits.length) return;
+    bits = bits.filter(function (b) {
+      b.vy -= E.G * 2 * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
+      if (b.y < E.height(S.L, b.x)) { b.y = E.height(S.L, b.x); b.vy *= -0.3; b.vx *= 0.6; }
+      return b.life > 0;
+    });
+  }
+  // the end of a crash comes after the burst, so a frame is still drawn under the result
+  function crashTitle() {
+    var c = S && S.cause;
+    return c === 'tilt' ? C.t('lnTilt') : c === 'fast' ? C.t('lnFast') : c === 'drift' ? C.t('lnDrift') : C.t('lnRough');
+  }
+
+  function finish() {
+    ctx.clearSave();
+    draw();
+    var won = !!(S && S.landed), note = null;
+    var coins = Math.min(40, 2 + 2 * landings), points = Math.min(120, 5 + Math.floor(score / 20));
+    if (dailyDate) {
+      if (won) {
+        C.achievements.unlock('ln-daily');
+        coins += 8; points += 25;
+        if (!C.stats.daily('lander', dailyDate, { label: C.num(score), win: true, tries: tries })) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+      } else { coins = 1; points = 2; }
+    } else {
+      if (C.stats.best('lander', 'score', score) && score > 0) note = C.t('lnBestN', { n: C.num(score) });
+      C.stats.best('lander', 'pads', landings);
+    }
+    var bestEver = C.stats.getBest('lander', 'score');
+    ctx.finish({
+      won: dailyDate ? won : null,
+      title: won ? C.t('lnWin') : crashTitle(),
+      note: note, timeMs: Date.now() - startedAt, coins: coins, points: points,
+      lines: [
+        { label: C.t('lnPads'), value: C.num(landings) },
+        { label: C.t('lnScore'), value: C.num(score) },
+        dailyDate ? { label: C.t('lnTries'), value: C.num(tries) } : { label: C.t('lnBest'), value: C.num(bestEver || score) }
+      ],
+      shareText: 'چوگان · فرودگر' + (dailyDate ? ('\nروزانه ' + dailyDate) : '') + '\n' + landings + ' سکو · ' + score + ' امتیاز',
+      againLabel: C.t('lnNewRun'),
+      onAgain: dailyDate && won ? null : function () { newRun(); }
+    });
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  function palette() {
+    return dark()
+      ? { sky0: '#070B18', sky1: '#1B2442', star: 'rgba(255,255,255,', ground: '#4A4E5A', groundDk: '#383B45', rim: '#767B88', pad: '#A7AFBD', lamp: '#FFC94D', body: '#D8DCE4', line: '#0E1118', foil: '#D9A42B', foilDk: '#9C7418', leg: '#9AA1AD', glass: '#6F93D8', flame: '#FF9A2E', flameIn: '#FFE38A', text: '#EEF1F6', good: '#5BD08A', bad: '#FF7A66', hud: 'rgba(10,14,28,0.72)', zone: 'rgba(255,255,255,', bit: '#C9CED6', earth: '#4E86C9', earthLand: '#5FA45A' }
+      : { sky0: '#B9C7E4', sky1: '#F2EEE6', star: 'rgba(255,255,255,', ground: '#B8B1A4', groundDk: '#9C9486', rim: '#7D7568', pad: '#4F5866', lamp: '#E59A12', body: '#F4F1EA', line: '#2B3140', foil: '#D9A42B', foilDk: '#A57A16', leg: '#5A606B', glass: ACCENT, flame: '#FF8A1E', flameIn: '#FFE07A', text: '#1F2430', good: '#1F7A45', bad: '#B8321F', hud: 'rgba(255,255,255,0.78)', zone: 'rgba(31,36,48,', bit: '#5A606B', earth: '#4E86C9', earthLand: '#5FA45A' };
+  }
+
+  function size() {
+    var r = box.getBoundingClientRect();
+    return { w: Math.max(160, Math.floor(r.width) || 0), h: Math.max(160, Math.floor(r.height) || 0) };
+  }
+  var fontFam = '';
+  function font(px, weight) {
+    if (!fontFam) fontFam = getComputedStyle(document.body).fontFamily || 'sans-serif';
+    return (weight || 700) + ' ' + Math.round(px) + 'px ' + fontFam;
+  }
+  // the size last drawn at, with its scale: a touch is read against what the player saw
+  var drawn = { w: 0, h: 0, k: 1, ox: 0, by: 0 };
+  // the world in canvas pixels: the whole 48 m across and from below the lowest ground to
+  // above the ship's ceiling always fit, so nothing of a pad is ever off the screen
+  function layout(Z) {
+    var k = Math.min(Z.w / E.W, Z.h / (E.TOP + 3 - E.FLOOR));
+    return { k: k, ox: (Z.w - E.W * k) / 2, by: Z.h + E.FLOOR * k };
+  }
+  function sx(V, x) { return V.ox + x * V.k; }
+  function sy(V, y) { return V.by - y * V.k; }
+
+  // fixed stars, placed once by a seeded generator so they never jump between frames
+  var STARS = (function () { var r = E.rng(887), s = []; for (var i = 0; i < 70; i++) s.push([r(), r(), 0.4 + r() * 1.2, r()]); return s; })();
+
+  function draw() {
+    if (!S) return;
+    var Z = size(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
+    cv.style.width = Z.w + 'px'; cv.style.height = Z.h + 'px';
+    var V = layout(Z);
+    drawn = { w: Z.w, h: Z.h, k: V.k, ox: V.ox, by: V.by };
+    var g = cv.getContext('2d'), P = palette(), still = C.ui.reduceMotion(), L = S.L;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    var sky = g.createLinearGradient(0, 0, 0, Z.h);
+    sky.addColorStop(0, P.sky0); sky.addColorStop(1, P.sky1);
+    g.fillStyle = sky; g.fillRect(0, 0, Z.w, Z.h);
+    if (dark()) {
+      for (var i = 0; i < STARS.length; i++) {
+        var st = STARS[i], tw = still ? 0.7 : 0.5 + 0.4 * Math.sin(clock * 1.3 + st[3] * 20);
+        g.fillStyle = P.star + tw.toFixed(2) + ')';
+        g.fillRect(st[0] * Z.w, st[1] * Z.h * 0.7, st[2], st[2]);
+      }
+    }
+    // the earth low in the sky, for scale
+    var ex = sx(V, E.W * 0.82), ey = sy(V, E.TOP - 2), er = Math.max(8, V.k * 2.2);
+    g.fillStyle = P.earth; g.beginPath(); g.arc(ex, ey, er, 0, Math.PI * 2); g.fill();
+    g.fillStyle = P.earthLand; g.beginPath(); g.ellipse(ex - er * 0.25, ey - er * 0.15, er * 0.45, er * 0.3, 0.5, 0, Math.PI * 2); g.fill();
+
+    // the ground, carried flat past both ends of the world on a wide screen
+    g.fillStyle = P.ground;
+    g.beginPath(); g.moveTo(0, Z.h); g.lineTo(0, sy(V, L.pts[0].y));
+    L.pts.forEach(function (p) { g.lineTo(sx(V, p.x), sy(V, p.y)); });
+    g.lineTo(Z.w, sy(V, L.pts[L.pts.length - 1].y)); g.lineTo(Z.w, Z.h); g.closePath(); g.fill();
+    g.strokeStyle = P.rim; g.lineWidth = Math.max(1.5, V.k * 0.25); g.lineJoin = 'round';
+    g.beginPath(); g.moveTo(0, sy(V, L.pts[0].y));
+    L.pts.forEach(function (p) { g.lineTo(sx(V, p.x), sy(V, p.y)); });
+    g.lineTo(Z.w, sy(V, L.pts[L.pts.length - 1].y)); g.stroke();
+    // a few craters, from the level's own seed
+    var cr = E.rng(L.seed ^ 0x5bd1e995);
+    g.fillStyle = P.groundDk;
+    for (var c = 0; c < 6; c++) {
+      var cxw = 2 + cr() * (E.W - 4), cyw = E.FLOOR + 1 + cr() * (E.height(L, cxw) - E.FLOOR - 2.5);
+      if (cxw > L.pad.x0 - 2 && cxw < L.pad.x1 + 2) continue;
+      g.beginPath(); g.ellipse(sx(V, cxw), sy(V, cyw), V.k * (0.6 + cr()), V.k * (0.25 + cr() * 0.3), 0, 0, Math.PI * 2); g.fill();
+    }
+    // a wide screen dims what lies outside the world's walls
+    if (V.ox > 1) { g.fillStyle = P.zone + '0.08)'; g.fillRect(0, 0, V.ox, Z.h); g.fillRect(Z.w - V.ox, 0, V.ox, Z.h); }
+
+    // the pad: a slab with a lamp at each end that blinks until the ship is down
+    var pd = L.pad, pt = sy(V, pd.y), ph = Math.max(4, V.k * 0.5);
+    g.fillStyle = P.pad; C.rrect(g, sx(V, pd.x0), pt, (pd.x1 - pd.x0) * V.k, ph, Math.min(3, ph / 2)); g.fill();
+    var lit = S.landed || still || Math.sin(clock * 6) > -0.3;
+    [pd.x0 + 0.25, pd.x1 - 0.25].forEach(function (x) {
+      g.fillStyle = lit ? P.lamp : P.pad;
+      g.beginPath(); g.arc(sx(V, x), pt - V.k * 0.35, Math.max(2.5, V.k * 0.32), 0, Math.PI * 2); g.fill();
+    });
+
+    if (!S.over) drawShip(g, V, dpr, P, pose(), still);
+    else drawWreck(g, V, P);
+    bits.forEach(function (b) {
+      g.fillStyle = b.hot ? P.flame : P.bit;
+      var r = Math.max(1.5, V.k * 0.18);
+      g.fillRect(sx(V, b.x) - r, sy(V, b.y) - r, r * 2, r * 2);
+    });
+
+    drawHud(g, Z, P);
+    drawZones(g, Z, V, P);
+    if (S.landed && lastGrade) {
+      g.fillStyle = P.text; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.font = font(Math.max(22, Math.min(40, Z.w / 10)), 800);
+      g.fillText('+' + C.num(lastGrade.points), Z.w / 2, Math.max(sy(V, E.TOP - 6), 70));
+    }
+  }
+
+  function drawShip(g, V, dpr, P, p, still) {
+    var c = Math.cos(p.a), s = Math.sin(p.a), k = V.k;
+    // ship metres, y up, turned by its tilt (clockwise with the nose to the right)
+    g.setTransform(dpr * k * c, dpr * k * s, dpr * k * s, -dpr * k * c, dpr * sx(V, p.x), dpr * sy(V, p.y));
+    g.lineJoin = 'round'; g.lineCap = 'round';
+    if (S.burn) {
+      var len = 1.5 + (still ? 0.3 : Math.random() * 0.7);
+      g.fillStyle = P.flame; g.beginPath(); g.moveTo(-0.45, -1.1); g.lineTo(0.45, -1.1); g.lineTo(0, -1.1 - len); g.closePath(); g.fill();
+      g.fillStyle = P.flameIn; g.beginPath(); g.moveTo(-0.22, -1.1); g.lineTo(0.22, -1.1); g.lineTo(0, -1.1 - len * 0.55); g.closePath(); g.fill();
+    }
+    g.lineWidth = 0.16;
+    g.strokeStyle = P.leg;
+    g.beginPath();
+    g.moveTo(-0.9, -0.4); g.lineTo(-1.6, -1.6); g.moveTo(0.9, -0.4); g.lineTo(1.6, -1.6);
+    g.moveTo(-0.6, -0.7); g.lineTo(-1.6, -1.6); g.moveTo(0.6, -0.7); g.lineTo(1.6, -1.6);
+    g.moveTo(-2, -1.6); g.lineTo(-1.2, -1.6); g.moveTo(1.2, -1.6); g.lineTo(2, -1.6);
+    g.stroke();
+    g.strokeStyle = P.line; g.lineWidth = 0.1;
+    // the nozzle under the stage
+    g.fillStyle = P.leg;
+    g.beginPath(); g.moveTo(-0.32, -0.7); g.lineTo(0.32, -0.7); g.lineTo(0.5, -1.1); g.lineTo(-0.5, -1.1); g.closePath(); g.fill(); g.stroke();
+    // the gold landing stage
+    g.fillStyle = P.foil;
+    g.beginPath(); g.rect(-1.2, -0.7, 2.4, 0.85); g.fill(); g.stroke();
+    g.fillStyle = P.foilDk; g.fillRect(-1.2, -0.35, 2.4, 0.12);
+    // the cabin with its window
+    g.fillStyle = P.body;
+    g.beginPath(); g.moveTo(-1, 0.15); g.lineTo(1, 0.15); g.lineTo(0.8, 1.15); g.lineTo(0.3, 1.65); g.lineTo(-0.3, 1.65); g.lineTo(-0.8, 1.15); g.closePath(); g.fill(); g.stroke();
+    g.fillStyle = P.glass; g.beginPath(); g.arc(0, 0.85, 0.3, 0, Math.PI * 2); g.fill(); g.stroke();
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  function drawWreck(g, V, P) {
+    var x = sx(V, S.x), y = sy(V, E.height(S.L, S.x)), k = V.k;
+    g.fillStyle = P.foilDk; g.beginPath(); g.ellipse(x, y, k * 1.6, k * 0.5, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = P.bit; g.fillRect(x - k * 1.2, y - k * 0.6, k * 0.9, k * 0.4); g.fillRect(x + k * 0.3, y - k * 0.45, k * 0.7, k * 0.35);
+  }
+
+  // the readouts top left, green inside the landing limits, and the wind top right
+  function drawHud(g, Z, P) {
+    // sized to its text: a fixed 150px panel covered the ship's start on a landscape phone
+    var pad = 8, fs = Math.max(12, Math.min(15, Z.w / 28)), lh = fs * 1.45;
+    g.font = font(fs); g.textBaseline = 'middle'; g.textAlign = 'left';
+    var vy = S.landed ? 0 : S.vy, vx = S.landed ? 0 : S.vx, deg = Math.round(Math.abs(S.a) * 180 / Math.PI);
+    var rows = [
+      [(vy < 0 ? '↓ ' : '↑ ') + C.num(Math.abs(vy).toFixed(1)), vy >= -E.LIM.vy],
+      [(vx < 0 ? '← ' : '→ ') + C.num(Math.abs(vx).toFixed(1)), Math.abs(vx) <= E.LIM.vx],
+      ['∠ ' + C.num(deg) + '°', Math.abs(S.a) <= E.LIM.a]
+    ];
+    var w = Math.round(Math.max(fs * 5.2, g.measureText('↓ 88.8').width + 20));
+    g.fillStyle = P.hud; C.rrect(g, pad, pad, w, lh * 3 + fs + 16, 10); g.fill();
+    var fx = pad + 10, fy = pad + 9, fw = w - 20, fh = fs * 0.7, fr = S.L.fuel ? Math.max(0, S.fuel / S.L.fuel) : 0;
+    g.fillStyle = P.zone + '0.18)'; C.rrect(g, fx, fy, fw, fh, fh / 2); g.fill();
+    g.fillStyle = fr > 0.25 ? P.good : P.bad;
+    if (fr > 0) { C.rrect(g, fx, fy, Math.max(fh, fw * fr), fh, fh / 2); g.fill(); }
+    rows.forEach(function (r, i) { g.fillStyle = r[1] ? P.good : P.bad; g.fillText(r[0], fx, fy + fh + 8 + lh * (i + 0.5)); });
+    var wd = S.L.wind;
+    if (wd) {
+      var now = E.windAt(S.L, S.t), len = 18 + 60 * Math.abs(now) / 0.5, cx = Z.w - pad - 46, cy = pad + 22, dir = now < 0 ? -1 : 1;
+      g.fillStyle = P.hud; C.rrect(g, Z.w - pad - 92, pad, 92, 44, 10); g.fill();
+      g.strokeStyle = P.text; g.fillStyle = P.text; g.lineWidth = 3; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(cx - dir * len / 2, cy); g.lineTo(cx + dir * len / 2, cy); g.stroke();
+      g.beginPath(); g.moveTo(cx + dir * (len / 2 + 6), cy); g.lineTo(cx + dir * (len / 2 - 4), cy - 7); g.lineTo(cx + dir * (len / 2 - 4), cy + 7); g.closePath(); g.fill();
+    }
+  }
+
+  // the three hold zones, drawn in the ground band at the bottom; lit while held
+  function zones() {
+    return prefs.side === 'left'
+      ? { t: [0, 0.5], l: [0.5, 0.75], r: [0.75, 1] }
+      : { l: [0, 0.25], r: [0.25, 0.5], t: [0.5, 1] };
+  }
+  function drawZones(g, Z, V, P) {
+    if (S.landed || S.over) return;
+    var Q = zones(), h = Math.max(30, Math.min(48, (2 - E.FLOOR) * V.k - 12)), y = Z.h - h - 8;
+    ['l', 'r', 't'].forEach(function (key) {
+      var on = held[key] || keys[key], x0 = Q[key][0] * Z.w, x1 = Q[key][1] * Z.w, cw = Math.min(x1 - x0 - 12, key === 't' ? 120 : 64), x = (x0 + x1) / 2 - cw / 2;
+      g.fillStyle = P.zone + (on ? '0.42)' : '0.16)'); C.rrect(g, x, y, cw, h, 12); g.fill();
+      g.fillStyle = P.zone + (on ? '0.95)' : '0.7)');
+      var mx = x + cw / 2, my = y + h / 2, a = h * 0.22;
+      g.beginPath();
+      if (key === 'l') { g.moveTo(mx - a, my); g.lineTo(mx + a * 0.7, my - a); g.lineTo(mx + a * 0.7, my + a); }
+      else if (key === 'r') { g.moveTo(mx + a, my); g.lineTo(mx - a * 0.7, my - a); g.lineTo(mx - a * 0.7, my + a); }
+      else { g.moveTo(mx, my + a * 1.2); g.quadraticCurveTo(mx + a, my, mx, my - a * 1.3); g.quadraticCurveTo(mx - a, my, mx, my + a * 1.2); }
+      g.closePath(); g.fill();
+    });
+  }
+
+  /* ----------------------------------------------------------------- ui */
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (dailyDate) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('lnDaily') + ' — ' + C.num(dailyDate) })]));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('lnDailyPad', { n: C.num(n), m: C.num(E.DAILY.length) }) }));
+    } else top.appendChild(el('span', { class: 'ch-badge', text: C.t('lnPadN', { n: C.num(n) }) }));
+    top.appendChild(el('span', { class: 'ch-badge', text: C.t('lnScoreN', { n: C.num(score) }) }));
+    var best = C.stats.getBest('lander', 'score');
+    if (!dailyDate && best) top.appendChild(el('span', { class: 'ch-badge', text: C.t('lnBestN', { n: C.num(best) }) }));
+  }
+  function renderStatus() {
+    var t;
+    if (S && S.over) t = crashTitle();
+    else if (S && S.landed) t = (lastGrade && lastGrade.ace ? C.t('lnAceT', { n: C.num(lastGrade.points) }) : C.t('lnLandT', { n: C.num(lastGrade ? lastGrade.points : 0) })) + (nextReady && !ended ? ' ' + C.t('lnTapNext') : '');
+    else if (waiting) t = C.t('lnTapGo');
+    else if (emptyShown) t = C.t('lnEmpty');
+    else t = prefs.side === 'left' ? C.t('lnHowToSw') : C.t('lnHowTo');
+    status.textContent = t;
+  }
+  function go() { if (waiting) { waiting = false; last = 0; renderStatus(); kick(); } }
+
+  // which half is the engine lives behind the gear, never in the help
+  function showSettings() {
+    var seg = C.ui.segmented([{ value: 'left', label: C.t('lnSideL') }, { value: 'right', label: C.t('lnSideR') }], prefs.side, function (v) {
+      prefs.side = v === 'left' ? 'left' : 'right';
+      ctx.store.set('prefs', prefs);
+      renderStatus(); draw();
+    });
+    C.ui.modal({
+      title: C.t('settings'), closeButton: true,
+      body: [el('div', { class: 'ch-list' }, [el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('lnSideT') }), seg])])],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  // the whole game area is the three zones, measured against the canvas as last drawn
+  var touches = {};
+  function zoneAt(e) {
+    var r = cv.getBoundingClientRect(), f = drawn.w ? (e.clientX - r.left) / drawn.w : 0.5, Q = zones();
+    f = Math.max(0, Math.min(0.9999, f));
+    return f < Q.l[1] && f >= Q.l[0] ? 'l' : f < Q.r[1] && f >= Q.r[0] ? 'r' : 't';
+  }
+  function syncHeld() { held.l = held.r = held.t = false; for (var id in touches) held[touches[id]] = true; }
+  wrap.addEventListener('pointerdown', function (e) {
+    if (!S || (e.target.closest && e.target.closest('button'))) return;
+    e.preventDefault();
+    if (ended) return;
+    if (S.landed) { nextPad(); return; }
+    go();
+    touches[e.pointerId] = zoneAt(e); syncHeld();
+    try { wrap.setPointerCapture(e.pointerId); } catch (er) { /* old browsers */ }
+  });
+  wrap.addEventListener('pointermove', function (e) { if (touches[e.pointerId]) { touches[e.pointerId] = zoneAt(e); syncHeld(); } });
+  function lift(e) { delete touches[e.pointerId]; syncHeld(); }
+  wrap.addEventListener('pointerup', lift);
+  wrap.addEventListener('pointercancel', lift);
+  wrap.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  wrap.style.touchAction = 'none';
+
+  // arrows keep their direction in every language: the canvas is never mirrored
+  function keyOf(e) {
+    if (e.key === 'ArrowLeft' || C.keyIs(e, 'a')) return 'l';
+    if (e.key === 'ArrowRight' || C.keyIs(e, 'd')) return 'r';
+    if (e.key === 'ArrowUp' || e.key === ' ' || C.keyIs(e, 'w')) return 't';
+    return null;
+  }
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim') || !S) return;
+    var k = keyOf(e);
+    if (k) {
+      e.preventDefault();
+      if (S.landed) { if (!e.repeat) nextPad(); return; }
+      go(); keys[k] = true;
+    } else if (e.key === 'Enter') { if (S.landed) nextPad(); else go(); }
+    else if (C.keyIs(e, 'r') && !ended) { e.preventDefault(); ctx.clearSave(); newRun(); }
+  });
+  window.addEventListener('keyup', function (e) { var k = keyOf(e); if (k) keys[k] = false; });
+  // a flight waits while the app is away, and no button is held when it comes back
+  C.onPause(function () { paused = true; keys.l = keys.r = keys.t = false; touches = {}; syncHeld(); ctx.save(); });
+  C.onResume(function () { paused = false; last = 0; kick(); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { last = 0; kick(); } });
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { fontFam = ''; draw(); });
+  if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw); } catch (er) { /* old WebViews */ } }
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('lnRules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← / A', C.t('lnKLeft')), kb('→ / D', C.t('lnKRight')), kb('↑ / W / Space', C.t('lnKThrust')), kb('R', C.t('lnKAgain'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 110" width="100%" direction="ltr"><rect width="200" height="110" rx="10" fill="#1B2442"/>';
+    var ground = '<path d="M0 92 L40 80 L70 88 L84 86 L120 86 L134 74 L170 84 L200 78 V110 H0Z" fill="#8F8A80"/><rect x="84" y="84" width="36" height="4" rx="2" fill="#A7AFBD"/>';
+    var ship = function (x, y, a, fire) {
+      return '<g transform="translate(' + x + ' ' + y + ') rotate(' + a + ')">' +
+        (fire ? '<path d="M-4 9 L4 9 L0 22Z" fill="#FF9A2E"/>' : '') +
+        '<path d="M-7 4 L-12 12 M7 4 L12 12 M-14 12 H-10 M10 12 H14" stroke="#9AA1AD" stroke-width="1.6" stroke-linecap="round"/>' +
+        '<rect x="-9" y="0" width="18" height="7" fill="#D9A42B"/><path d="M-8 0 L8 0 L6 -8 L2 -12 L-2 -12 L-6 -8Z" fill="#D8DCE4"/><circle cx="0" cy="-6" r="2.4" fill="#6F93D8"/></g>';
+    };
+    if (kind === 1) s += ground + ship(100, 40, 20, true) + '<rect x="6" y="94" width="22" height="12" rx="4" fill="rgba(255,255,255,.25)"/><rect x="34" y="94" width="22" height="12" rx="4" fill="rgba(255,255,255,.25)"/><rect x="130" y="94" width="50" height="12" rx="4" fill="rgba(255,255,255,.25)"/>' +
+      '<path d="M13 100 L20 96 L20 104Z M49 100 L42 96 L42 104Z" fill="#fff"/><path d="M155 104 Q159 100 155 96 Q151 100 155 104Z" fill="#fff"/>';
+    if (kind === 2) s += ground + ship(102, 72, 0, true) + '<text x="10" y="20" font-size="12" font-family="sans-serif" fill="#5BD08A">↓ 1.2</text><text x="10" y="36" font-size="12" font-family="sans-serif" fill="#5BD08A">∠ 3°</text>';
+    if (kind === 3) s += ground + ship(70, 36, -14, true) + '<rect x="10" y="10" width="60" height="7" rx="3.5" fill="rgba(255,255,255,.2)"/><rect x="10" y="10" width="24" height="7" rx="3.5" fill="#5BD08A"/>' +
+      '<path d="M150 22 H186 M150 22 L156 17 M150 22 L156 27" stroke="#EEF1F6" stroke-width="2.5" stroke-linecap="round" fill="none"/>';
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('lnTut1'), text: C.t('lnTutText1'), art: tArt(1) },
+    { title: C.t('lnTut2'), text: C.t('lnTutText2'), art: tArt(2) },
+    { title: C.t('lnTut3'), text: C.t('lnTutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // A run is saved when the app goes away and comes back waiting for a tap, so the ship
+  // never falls while nobody looks; between pads it comes back at the next pad
+  ctx.autosave(function () {
+    if (!S || S.over || ended || (n === 1 && landings === 0 && S.t < 0.5)) return { inProgress: false };
+    return { s: S.landed ? null : E.snapshot(S), n: S.landed ? n + 1 : n, score: score, landings: landings, tries: tries, daily: dailyDate || null, elapsed: Date.now() - startedAt };
+  });
+  function resumeRun(sv) {
+    var k = sv.n | 0;
+    if (k < 1 || (dailyDate && k > E.DAILY.length) || !(sv.score >= 0) || !(sv.landings >= 0)) return false;
+    var R = null;
+    if (sv.s) {
+      R = E.restore(sv.s);
+      // a daily save must be on the day's own pad
+      if (!R || (dailyDate && (R.L.seed !== E.newLevel(dailySeeds[k - 1], E.DAILY[k - 1]).seed || R.L.level !== E.DAILY[k - 1]))) return false;
+    }
+    n = k; score = sv.score | 0; landings = sv.landings | 0; tries = sv.tries || 1; startedAt = Date.now() - (sv.elapsed || 0);
+    if (R) {
+      S = R; waiting = true; resumed = true; ended = false; nextReady = false; lastGrade = null; emptyShown = S.empty; acc = 0; last = 0; prev = null; bits = [];
+      renderTop(); renderStatus(); draw(); kick();
+    } else startPad();
+    return true;
+  }
+  var saved = ctx.loadSave();
+  if (dailyDate) {
+    if (!(saved && saved.daily === dailyDate && resumeRun(saved))) newRun();
+    if (C.stats.dailyDone('lander', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).lander;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (!(saved && !saved.daily && resumeRun(saved))) {
+    newRun();
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
