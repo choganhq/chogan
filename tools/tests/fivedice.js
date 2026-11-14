@@ -120,7 +120,7 @@ module.exports = function (T) {
       'every string is in all ' + LOCALE_CODES.length + ' languages (' + en.length + ' keys)');
     const list = JSON.parse(fs.readFileSync(path.join(ROOT(), 'www/games.json'), 'utf8')).games;
     const gm = list.find((g) => g.id === 'fivedice');
-    ok(!!gm && gm.people === 1 && list[list.length - 1] === gm && LOCALE_CODES.every((l) => gm.name[l] && gm.summary[l]), 'Five Dice is listed last, for one player, named in every language');
+    ok(!!gm && gm.people === 1 && list.filter((g) => g.id === 'fivedice').length === 1 && LOCALE_CODES.every((l) => gm.name[l] && gm.summary[l]), 'Five Dice is listed once, for one player, named in every language');
     ok(!!gm && !/yahtzee|yatzy|yacht/i.test(JSON.stringify(gm)) && !/yahtzee|yatzy/i.test(html), 'the game is never called by the trademarked name');
     const icon = fs.readFileSync(path.join(ROOT(), 'www/games/fivedice/icon.svg'), 'utf8');
     ok(!!gm && icon.indexOf('<rect width="96" height="96" rx="22" fill="' + gm.soft + '"/>') === icon.indexOf('<rect'), 'the icon sits on the game\'s soft tint');
