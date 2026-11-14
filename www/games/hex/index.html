@@ -1,0 +1,936 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>هگز — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* The board is the game's own: paper cells in the light theme, dark cells in the dark one,
+     and the two sides' colours re-tuned for each so a stone still reads on its cell */
+  :root { --hx-cell: #F3EDE3; --hx-line: #D9CDBB; --hx-r: #C0262D; --hx-r-lt: #F0A5A0; --hx-b: #1F5FAF; --hx-b-lt: #A9C4E8; --hx-ink: #5A4E40; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --hx-cell: #2B2723; --hx-line: #423B33; --hx-r: #EC5A55; --hx-r-lt: #7A2A28; --hx-b: #64A0F0; --hx-b-lt: #2C4A75; --hx-ink: #D3C6B2; }
+  }
+  :root[data-theme="dark"] { --hx-cell: #2B2723; --hx-line: #423B33; --hx-r: #EC5A55; --hx-r-lt: #7A2A28; --hx-b: #64A0F0; --hx-b-lt: #2C4A75; --hx-ink: #D3C6B2; }
+  /* an upright diamond in a tall window, a lying one in a wide window; the script draws
+     whichever one the slot it is given is shaped for */
+  .hx-wrap > .ch-fit { --fit-ar: .58; }
+  @container game (min-aspect-ratio: 5 / 4) { .hx-wrap > .ch-fit { --fit-ar: 1.72; } }
+  .ch-nocq .ch-gamemain.ch-wide .hx-wrap > .ch-fit { --fit-ar: 1.72; }
+  .ch-fit > .hx-box { position: relative; aspect-ratio: var(--fit-ar); }
+  .hx-canvas { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: block; touch-action: manipulation; cursor: pointer; }
+  .hx-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .hx-sides { width: 100%; max-width: 520px; display: flex; gap: var(--s-2); }
+  .hx-side { flex: 1; display: flex; align-items: center; gap: var(--s-2); min-width: 0; background: var(--c-surface);
+    border-radius: var(--r-md); padding: 8px 12px; box-shadow: var(--sh-1); border: 2px solid transparent; min-height: 44px;
+    transition: border-color var(--t-mid) var(--ease), transform var(--t-mid) var(--ease); }
+  .hx-side--on { border-color: var(--game); transform: translateY(-2px); box-shadow: var(--sh-2); }
+  .hx-side__dot { width: 18px; height: 18px; flex: 0 0 18px; clip-path: polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0 50%); }
+  .hx-side__text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .hx-side__name { min-width: 0; font-weight: 700; font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hx-side__goal { font-size: var(--fs-xs); color: var(--c-text-dim); font-weight: 700; }
+  .hx-thinking { animation: hx-blink 900ms infinite; }
+  @keyframes hx-blink { 50% { opacity: .55; } }
+  /* the swap button appears in this row, so the row keeps its height and the board above
+     it never moves between two taps */
+  .hx-status { min-height: 48px; display: flex; align-items: center; justify-content: center; gap: var(--s-2); flex-wrap: wrap;
+    font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function HexEngineFactory() {
+  'use strict';
+
+  // An 11×11 rhombus of hexagonal cells, index r * N + c. Red (side 0) joins row 0 to
+  // row N-1, blue (side 1) joins column 0 to column N-1. Each cell touches six others:
+  // (r, c±1), (r±1, c), (r-1, c+1) and (r+1, c-1). A full board always has exactly one
+  // winner, so the game cannot be drawn.
+  var N = 11, CELLS = N * N, LEVELS = ['easy', 'medium', 'hard'], SWAP = -2;
+  var DIRS = [[0, 1], [0, -1], [1, 0], [-1, 0], [-1, 1], [1, -1]];
+  var NB = [];
+  for (var i0 = 0; i0 < CELLS; i0++) {
+    var r0 = Math.floor(i0 / N), c0 = i0 % N, list = [];
+    DIRS.forEach(function (d) { var r = r0 + d[0], c = c0 + d[1]; if (r >= 0 && r < N && c >= 0 && c < N) list.push(r * N + c); });
+    NB.push(list);
+  }
+  // Two stones this far apart share two empty neighbours (the carriers): a bridge, as good
+  // as joined while both carriers are free, because an intrusion into one is answered in the other
+  var BRIDGES = [[-1, 2, -1, 1, 0, 1], [1, 1, 0, 1, 1, 0], [2, -1, 1, 0, 1, -1], [1, -2, 1, -1, 0, -1], [-1, -1, 0, -1, -1, 0], [-2, 1, -1, 0, -1, 1]];
+
+  function rc(i) { return [Math.floor(i / N), i % N]; }
+  function at(r, c) { return r >= 0 && r < N && c >= 0 && c < N ? r * N + c : -1; }
+  // the side's own coordinate: red counts rows, blue columns
+  function lineOf(t, i) { return t === 0 ? Math.floor(i / N) : i % N; }
+
+  function newGame(swap) {
+    var cells = [];
+    for (var i = 0; i < CELLS; i++) cells.push(-1);
+    return { n: N, cells: cells, turn: 0, plies: 0, winner: -1, last: -1, swap: !!swap, swapped: false };
+  }
+  function clone(S) {
+    return { n: S.n, cells: S.cells.slice(), turn: S.turn, plies: S.plies, winner: S.winner, last: S.last, swap: S.swap, swapped: S.swapped };
+  }
+
+  // The side's stones reached from its first edge through its own stones
+  function reach(cells, t, fromFar) {
+    var seen = new Uint8Array(CELLS), q = [], edge = fromFar ? N - 1 : 0;
+    for (var k = 0; k < N; k++) {
+      var i = t === 0 ? edge * N + k : k * N + edge;
+      if (cells[i] === t) { seen[i] = 1; q.push(i); }
+    }
+    for (var h = 0; h < q.length; h++) {
+      var nb = NB[q[h]];
+      for (var j = 0; j < nb.length; j++) if (!seen[nb[j]] && cells[nb[j]] === t) { seen[nb[j]] = 1; q.push(nb[j]); }
+    }
+    return seen;
+  }
+  function connected(cells, t) {
+    var seen = reach(cells, t, false);
+    for (var k = 0; k < N; k++) if (seen[t === 0 ? (N - 1) * N + k : k * N + N - 1]) return true;
+    return false;
+  }
+  // The shortest chain of the side's stones from edge to edge, for drawing the win
+  function path(S, t) {
+    var prev = new Int16Array(CELLS).fill(-2), q = [];
+    for (var k = 0; k < N; k++) { var i = t === 0 ? k : k * N; if (S.cells[i] === t) { prev[i] = -1; q.push(i); } }
+    for (var h = 0; h < q.length; h++) {
+      var cur = q[h];
+      if (lineOf(t, cur) === N - 1) { var out = []; while (cur >= 0) { out.push(cur); cur = prev[cur]; } return out; }
+      var nb = NB[cur];
+      for (var j = 0; j < nb.length; j++) if (prev[nb[j]] === -2 && S.cells[nb[j]] === t) { prev[nb[j]] = cur; q.push(nb[j]); }
+    }
+    return [];
+  }
+
+  function legal(S, i) { return S.winner < 0 && i >= 0 && i < CELLS && S.cells[i] === -1; }
+  function play(S, i) {
+    if (!legal(S, i)) return false;
+    S.cells[i] = S.turn;
+    S.last = i;
+    S.plies++;
+    if (connected(S.cells, S.turn)) S.winner = S.turn;
+    S.turn = 1 - S.turn;
+    return true;
+  }
+  // The pie rule: instead of a first move, blue takes red's opening stone. It is mirrored
+  // across the long diagonal and turned blue, so red still joins rows and blue columns.
+  function canSwap(S) { return S.swap && !S.swapped && S.plies === 1 && S.winner < 0 && S.turn === 1; }
+  function swap(S) {
+    if (!canSwap(S)) return false;
+    var k = S.cells.indexOf(0), p = rc(k);
+    S.cells[k] = -1;
+    S.cells[p[1] * N + p[0]] = 1;
+    S.swapped = true; S.plies = 2; S.turn = 0; S.last = p[1] * N + p[0];
+    return true;
+  }
+
+  // Stones the side still needs at the least: its own cells cost nothing, free ones one each
+  function distances(cells, t, fromFar) {
+    var dist = new Int16Array(CELLS).fill(999), dq = [], edge = fromFar ? N - 1 : 0;
+    for (var k = 0; k < N; k++) {
+      var i = t === 0 ? edge * N + k : k * N + edge, o = cells[i];
+      if (o === 1 - t) continue;
+      dist[i] = o === t ? 0 : 1; if (o === t) dq.unshift(i); else dq.push(i);
+    }
+    while (dq.length) {
+      var d = dq.shift(), nb = NB[d];
+      for (var j = 0; j < nb.length; j++) {
+        var n = nb[j], o2 = cells[n];
+        if (o2 === 1 - t) continue;
+        var w = o2 === t ? 0 : 1, nd = dist[d] + w;
+        if (nd < dist[n]) { dist[n] = nd; if (w === 0) dq.unshift(n); else dq.push(n); }
+      }
+    }
+    return dist;
+  }
+  function need(cells, t) {
+    var dist = distances(cells, t, false), best = 999;
+    for (var k = 0; k < N; k++) { var i = t === 0 ? (N - 1) * N + k : k * N + N - 1; if (dist[i] < best) best = dist[i]; }
+    return best;
+  }
+
+  /* --------------------------------------------------------------- bot */
+
+  // How hard it is for a side to get across, as the resistance of a net of wires: free
+  // cells are resistors, the other side's stones are cut out, and each group of the side's
+  // own stones is one node, so a group touching an edge carries that edge's voltage.
+  // Two ways across halve it, which a count of stones cannot see.
+  var par = new Int16Array(CELLS);
+  function find(x) { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; }
+  function resistance(cells, t) {
+    var i, j;
+    for (i = 0; i < CELLS; i++) par[i] = i;
+    for (i = 0; i < CELLS; i++) if (cells[i] === t) { var nb0 = NB[i]; for (j = 0; j < nb0.length; j++) if (cells[nb0[j]] === t) { var a = find(i), b = find(nb0[j]); if (a !== b) par[a] = b; } }
+    var node = new Int16Array(CELLS).fill(-1), ids = 0, rep = [];
+    for (i = 0; i < CELLS; i++) {
+      if (cells[i] === 1 - t) continue;
+      var f = cells[i] === t ? find(i) : i;
+      if (node[f] < 0) { node[f] = ids++; rep.push(f); }
+      node[i] = node[f];
+    }
+    var V = new Float64Array(ids).fill(0.5), fixed = new Int8Array(ids), src = new Float64Array(ids), snk = new Float64Array(ids);
+    var adj = []; for (i = 0; i < ids; i++) adj.push([]);
+    for (i = 0; i < CELLS; i++) {
+      if (node[i] < 0) continue;
+      var li = lineOf(t, i), own = cells[i] === t;
+      if (li === 0) { if (own) { fixed[node[i]] = 1; V[node[i]] = 1; } else src[node[i]] += 1; }
+      if (li === N - 1) { if (own) { if (fixed[node[i]] === 1) return 1e-9; fixed[node[i]] = 2; V[node[i]] = 0; } else snk[node[i]] += 1; }
+      var nb = NB[i];
+      for (j = 0; j < nb.length; j++) {
+        var n = nb[j];
+        if (n < i || node[n] < 0 || node[n] === node[i]) continue;
+        var w = own || cells[n] === t ? 1 : 0.5;
+        adj[node[i]].push(node[n], w); adj[node[n]].push(node[i], w);
+      }
+    }
+    for (var it = 0; it < 300; it++) {
+      var moved = 0;
+      for (var k = 0; k < ids; k++) {
+        if (fixed[k]) continue;
+        var e = adj[k], gs = src[k] + snk[k], gv = src[k];
+        for (j = 0; j < e.length; j += 2) { gs += e[j + 1]; gv += e[j + 1] * V[e[j]]; }
+        var nv = gs ? V[k] + 1.6 * (gv / gs - V[k]) : V[k];
+        if (nv < 0) nv = 0; else if (nv > 1) nv = 1;
+        var dv = Math.abs(nv - V[k]); if (dv > moved) moved = dv;
+        V[k] = nv;
+      }
+      if (moved < 2e-4) break;
+    }
+    var I = 0;
+    for (k = 0; k < ids; k++) {
+      if (src[k] && fixed[k] !== 1) I += src[k] * (1 - V[k]);
+      if (fixed[k] === 1) { var e2 = adj[k]; for (j = 0; j < e2.length; j += 2) if (fixed[e2[j]] !== 1) I += e2[j + 1] * (1 - V[e2[j]]); }
+    }
+    return I > 1e-9 ? 1 / I : 1e9;
+  }
+  // From side t's view: positive is good for t
+  function score(cells, t) { return 10 * Math.log(resistance(cells, 1 - t) / resistance(cells, t)); }
+
+  // The free cells that would join the side's two edges at once
+  function winningCells(cells, t) {
+    var a = reach(cells, t, false), b = reach(cells, t, true), out = [];
+    for (var i = 0; i < CELLS; i++) {
+      if (cells[i] !== -1) continue;
+      var l = lineOf(t, i), na = l === 0, nb2 = l === N - 1, nb = NB[i];
+      for (var j = 0; j < nb.length && !(na && nb2); j++) { if (a[nb[j]]) na = true; if (b[nb[j]]) nb2 = true; }
+      if (na && nb2) out.push(i);
+    }
+    return out;
+  }
+  // When the other side has just stepped into one carrier of a bridge of ours, or of a stone
+  // one row from our edge, the other carrier keeps the link; this finds it
+  function bridgeSave(S, t) {
+    var L = S.last;
+    if (L < 0 || S.cells[L] !== 1 - t) return -1;
+    var p = rc(L);
+    for (var s = 0; s < CELLS; s++) {
+      if (S.cells[s] !== t) continue;
+      var q = rc(s);
+      for (var k = 0; k < BRIDGES.length; k++) {
+        var B = BRIDGES[k], o = at(q[0] + B[0], q[1] + B[1]);
+        if (o < 0 || S.cells[o] !== t) continue;
+        var c1 = at(q[0] + B[2], q[1] + B[3]), c2 = at(q[0] + B[4], q[1] + B[5]);
+        if (c1 === L && S.cells[c2] === -1) return c2;
+        if (c2 === L && S.cells[c1] === -1) return c1;
+      }
+      // a stone one line from its edge reaches it through either of two edge cells
+      var l = lineOf(t, s);
+      if (l !== 1 && l !== N - 2) continue;
+      var e1, e2;
+      if (t === 0) { e1 = l === 1 ? at(0, q[1]) : at(N - 1, q[1]); e2 = l === 1 ? at(0, q[1] + 1) : at(N - 1, q[1] - 1); }
+      else { e1 = l === 1 ? at(q[0], 0) : at(q[0], N - 1); e2 = l === 1 ? at(q[0] + 1, 0) : at(q[0] - 1, N - 1); }
+      if (e1 === L && e2 >= 0 && S.cells[e2] === -1) return e2;
+      if (e2 === L && e1 >= 0 && S.cells[e1] === -1) return e1;
+    }
+    return -1;
+  }
+  function free(S) { var out = []; for (var i = 0; i < CELLS; i++) if (S.cells[i] === -1) out.push(i); return out; }
+  // How far a cell sits from the nearest edge of the board
+  function rim(i) { var p = rc(i); return Math.min(p[0], p[1], N - 1 - p[0], N - 1 - p[1]); }
+  // A bot takes red's opening only when it is strong: away from every edge
+  function wantsSwap(S, level) {
+    if (!canSwap(S) || level === 'easy') return false;
+    return rim(S.cells.indexOf(0)) >= 2;
+  }
+
+  function think(S, level, rnd) {
+    if (S.winner >= 0) return -1;
+    var t = S.turn, moves = free(S);
+    if (!moves.length) return -1;
+    if (wantsSwap(S, level)) return SWAP;
+    var pick = function (l) { return l[Math.floor(rnd() * l.length)]; };
+    // a stone that wins is always played, and a cell the other side would win on is taken
+    var mine = winningCells(S.cells, t);
+    if (mine.length) return mine[0];
+    var theirs = winningCells(S.cells, 1 - t);
+    if (level === 'easy') {
+      if (theirs.length && rnd() < 0.5) return pick(theirs);
+      // mostly builds along one of its shortest ways, now and then plays anywhere near
+      var da = distances(S.cells, t, false), db = distances(S.cells, t, true), best = need(S.cells, t);
+      var onPath = moves.filter(function (m) { return da[m] + db[m] - 1 === best; });
+      if (onPath.length && rnd() < 0.7) return pick(onPath);
+      var near = moves.filter(function (m) { return NB[m].some(function (n) { return S.cells[n] !== -1; }); });
+      return near.length ? pick(near) : pick(moves);
+    }
+    if (theirs.length) return theirs[0];
+    var save = bridgeSave(S, t);
+    if (save >= 0) return save;
+    var cells = S.cells.slice();
+    var rated = moves.map(function (m) { cells[m] = t; var v = score(cells, t); cells[m] = -1; return { m: m, v: v }; });
+    if (level === 'medium') {
+      rated.forEach(function (x) { x.v += rnd() * 3; });               // a little uneven, so it is beatable
+      rated.sort(function (a, b) { return b.v - a.v; });
+      return rated[0].m;
+    }
+    // hard: the best few stones, each against the other side's best answers. A cell matters
+    // to both sides alike, so the answers looked at are the strongest cells already rated.
+    rated.sort(function (a, b) { return b.v - a.v; });
+    var top = rated.slice(0, 10), answers = rated.slice(0, 14).map(function (x) { return x.m; });
+    var bestV = -Infinity, out = rated[0].m;
+    top.forEach(function (x) {
+      cells[x.m] = t;
+      var worst = Infinity;
+      answers.forEach(function (r) {
+        if (r === x.m) return;
+        cells[r] = 1 - t;
+        var v = connected(cells, 1 - t) ? -1000 : score(cells, t);
+        cells[r] = -1;
+        if (v < worst) worst = v;
+      });
+      cells[x.m] = -1;
+      var v2 = worst === Infinity ? x.v : worst;
+      if (v2 > bestV + 1e-9) { bestV = v2; out = x.m; }
+    });
+    return out;
+  }
+
+  // The daily game opens with a red stone near an edge, never in the strong middle, so
+  // the day's game is a fair one to play out
+  function dailyOpening(rnd) {
+    var spots = [];
+    for (var i = 0; i < CELLS; i++) { var m = rim(i); if (m === 1 || m === 2) spots.push(i); }
+    return spots[Math.floor(rnd() * spots.length)];
+  }
+
+  function valid(S) {
+    if (!S || S.n !== N || !Array.isArray(S.cells) || S.cells.length !== CELLS) return false;
+    if (S.cells.some(function (o) { return o !== -1 && o !== 0 && o !== 1; })) return false;
+    var r = 0, b = 0;
+    S.cells.forEach(function (o) { if (o === 0) r++; else if (o === 1) b++; });
+    // red moves first; after a swap blue holds one stone more for a moment
+    if (S.swapped) { if (!S.swap || S.plies !== r + b + 1 || !((b === r + 1 && S.turn === 0) || (b === r && S.turn === 1))) return false; }
+    else if (S.plies !== r + b || !((r === b && S.turn === 0) || (r === b + 1 && S.turn === 1))) return false;
+    if (S.last !== -1 && (S.last < 0 || S.last >= CELLS || S.cells[S.last] === -1)) return false;
+    var wr = connected(S.cells, 0), wb = connected(S.cells, 1);
+    if (wr && wb) return false;
+    return S.winner === (wr ? 0 : wb ? 1 : -1);
+  }
+
+  return { N: N, CELLS: CELLS, LEVELS: LEVELS, SWAP: SWAP, NB: NB, BRIDGES: BRIDGES, rc: rc, at: at, newGame: newGame, clone: clone,
+    connected: connected, path: path, legal: legal, play: play, canSwap: canSwap, swap: swap, need: need, distances: distances,
+    resistance: resistance, score: score, winningCells: winningCells, bridgeSave: bridgeSave, free: free, rim: rim,
+    wantsSwap: wantsSwap, think: think, dailyOpening: dailyOpening, valid: valid };
+}
+if (typeof module !== 'undefined') module.exports = HexEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = HexEngineFactory(), N = E.N;
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'hex',
+    name: { fa: 'هگز', en: 'Hex', zh: '六贯棋', de: 'Hex', es: 'Hex', pl: 'Hex', fr: 'Hex', ar: 'هِكس', hi: 'हेक्स' },
+    accent: '#AB0000',
+    mood: 'sudoku',
+    strings: {
+      fa: {
+        board: 'صفحه‌ی هگز', vsBot: 'مقابل ربات', two: 'دو نفره', bot: 'ربات', playerN: 'بازیکن {n}', modeT: 'بازیکن‌ها', levelT: 'سطح ربات',
+        swapT: 'قانون جابه‌جایی', swapOn: 'روشن', swapOff: 'خاموش', swapBtn: 'جابه‌جایی', swapDid: '{n} جابه‌جا کرد',
+        swapNote: 'بعد از اولین مهره‌ی قرمز، آبی می‌تواند به‌جای حرکت همان مهره را مال خودش کند. این‌طوری قرمز حرکت اول را خیلی قوی نمی‌زند.',
+        swapCan: 'آبی می‌تواند مهره‌ی اول قرمز را مال خودش کند',
+        newMatch: 'بازی تازه', begin: 'شروع', undoMove: 'برگرداندن حرکت', endWarn: 'بازی فعلی تمام می‌شود. ادامه؟', settingsT: 'بازی تازه',
+        red: 'قرمز', blue: 'آبی', goalR: 'دو لبه‌ی قرمز را وصل کن', goalB: 'دو لبه‌ی آبی را وصل کن',
+        yourMove: 'روی یک خانه بزن تا مهره‌ی قرمزت را بگذاری', turnOf: 'نوبت {n} ({c})', thinking: 'ربات فکر می‌کند…',
+        dailyHx: 'هگز روزانه', vsMedium: 'مقابل ربات متوسط', playerWon: '{n} برد', stonesL: 'مهره‌ها',
+        rules: 'قرمز می‌خواهد دو لبه‌ی قرمز صفحه را با یک زنجیر پیوسته از مهره‌هایش به هم وصل کند و آبی دو لبه‌ی آبی را. هر نوبت یک مهره روی یک خانه‌ی خالی می‌گذاری؛ مهره‌ها هیچ‌وقت جابه‌جا یا برداشته نمی‌شوند. هر خانه شش همسایه دارد. بازی هیچ‌وقت مساوی نمی‌شود: وقتی یکی راهش را می‌سازد، راه دیگری بسته شده است. اگر قانون جابه‌جایی روشن باشد، آبی بعد از اولین مهره‌ی قرمز می‌تواند به‌جای حرکت آن مهره را مال خودش کند.',
+        kCursor: 'جابه‌جایی بین خانه‌ها', kGo: 'گذاشتن مهره', kSwap: 'جابه‌جایی (وقتی مجاز است)',
+        tutTitle1: 'دو لبه‌ات را وصل کن', tutText1: 'قرمز دو لبه‌ی قرمز صفحه را به هم وصل می‌کند و آبی دو لبه‌ی آبی را.',
+        tutTitle2: 'یک مهره در هر نوبت', tutText2: 'روی هر خانه‌ی خالی بزن. مهره‌ها جابه‌جا نمی‌شوند و برداشته نمی‌شوند.',
+        tutTitle3: 'پل‌ها', tutText3: 'دو مهره با دو خانه‌ی خالی مشترک عملاً وصل‌اند: اگر حریف یکی را گرفت، دیگری را بگیر.'
+      },
+      en: {
+        board: 'Hex board', vsBot: 'Against the bot', two: 'Two players', bot: 'Bot', playerN: 'Player {n}', modeT: 'Players', levelT: 'Bot level',
+        swapT: 'Swap rule', swapOn: 'On', swapOff: 'Off', swapBtn: 'Swap', swapDid: '{n} swapped',
+        swapNote: 'After red’s first stone, blue may take it over instead of playing. That keeps red from opening too strongly.',
+        swapCan: 'Blue may take red’s first stone as its own',
+        newMatch: 'New game', begin: 'Start', undoMove: 'Undo move', endWarn: 'This ends the current game. Continue?', settingsT: 'New game',
+        red: 'red', blue: 'blue', goalR: 'Join the red sides', goalB: 'Join the blue sides',
+        yourMove: 'Tap a cell to place your red stone', turnOf: '{n}’s turn ({c})', thinking: 'The bot is thinking…',
+        dailyHx: 'Daily Hex', vsMedium: 'against the medium bot', playerWon: '{n} wins', stonesL: 'Stones',
+        rules: 'Red wants to join the two red sides of the board with an unbroken chain of red stones, blue the two blue sides. On your turn you place one stone on any empty cell; stones never move and are never taken. Each cell has six neighbours. There are never draws: once one player has a path, the other’s is cut. With the swap rule on, blue may take over red’s first stone instead of playing a move.',
+        kCursor: 'Move between cells', kGo: 'Place a stone', kSwap: 'Swap (when allowed)',
+        tutTitle1: 'Join your two sides', tutText1: 'Red joins the two red sides, blue the two blue sides.',
+        tutTitle2: 'One stone a turn', tutText2: 'Tap any empty cell. Stones never move and are never taken.',
+        tutTitle3: 'Bridges', tutText3: 'Two stones that share two empty neighbours are as good as joined: if your opponent takes one, take the other.'
+      },
+      pl: {
+        board: 'Plansza Hex', vsBot: 'Przeciwko botowi', two: 'Dwóch graczy', bot: 'Bot', playerN: 'Gracz {n}', modeT: 'Gracze', levelT: 'Poziom bota',
+        swapT: 'Zasada zamiany', swapOn: 'Wł.', swapOff: 'Wył.', swapBtn: 'Zamiana', swapDid: '{n}: zamiana',
+        swapNote: 'Po pierwszym kamieniu czerwonych niebiescy mogą go przejąć zamiast wykonać ruch. Dzięki temu czerwoni nie otwierają zbyt mocno.',
+        swapCan: 'Niebiescy mogą przejąć pierwszy kamień czerwonych',
+        newMatch: 'Nowa gra', begin: 'Start', undoMove: 'Cofnij ruch', endWarn: 'To zakończy bieżącą grę. Kontynuować?', settingsT: 'Nowa gra',
+        red: 'czerwoni', blue: 'niebiescy', goalR: 'Połącz czerwone boki', goalB: 'Połącz niebieskie boki',
+        yourMove: 'Dotknij pola, aby postawić czerwony kamień', turnOf: 'Ruch gracza {n} ({c})', thinking: 'Bot myśli…',
+        dailyHx: 'Codzienny Hex', vsMedium: 'przeciwko botowi na średnim poziomie', playerWon: '{n} wygrywa', stonesL: 'Kamienie',
+        rules: 'Czerwoni chcą połączyć dwa czerwone boki planszy nieprzerwanym łańcuchem swoich kamieni, niebiescy dwa niebieskie. W swojej turze stawiasz jeden kamień na dowolnym pustym polu; kamienie nigdy się nie przesuwają i nie są zbijane. Każde pole ma sześciu sąsiadów. Remisów nie ma: gdy jeden gracz ma drogę, droga drugiego jest przecięta. Przy włączonej zasadzie zamiany niebiescy mogą przejąć pierwszy kamień czerwonych zamiast wykonać ruch.',
+        kCursor: 'Ruch między polami', kGo: 'Postaw kamień', kSwap: 'Zamiana (gdy dozwolona)',
+        tutTitle1: 'Połącz swoje boki', tutText1: 'Czerwoni łączą dwa czerwone boki, niebiescy dwa niebieskie.',
+        tutTitle2: 'Jeden kamień na turę', tutText2: 'Dotknij dowolnego pustego pola. Kamienie się nie przesuwają i nie są zbijane.',
+        tutTitle3: 'Mostki', tutText3: 'Dwa kamienie z dwoma wspólnymi pustymi sąsiadami są praktycznie połączone: gdy rywal zajmie jedno pole, zajmij drugie.'
+      },
+      fr: {
+        board: 'Plateau de Hex', vsBot: 'Contre le robot', two: 'Deux joueurs', bot: 'Robot', playerN: 'Joueur {n}', modeT: 'Joueurs', levelT: 'Niveau du robot',
+        swapT: 'Règle d’échange', swapOn: 'Activée', swapOff: 'Désactivée', swapBtn: 'Échanger', swapDid: '{n} a échangé',
+        swapNote: 'Après la première pierre rouge, bleu peut la prendre pour lui au lieu de jouer. Ainsi, rouge n’ouvre pas trop fort.',
+        swapCan: 'Bleu peut prendre la première pierre rouge pour lui',
+        newMatch: 'Nouvelle partie', begin: 'Commencer', undoMove: 'Annuler le coup', endWarn: 'Cela met fin à la partie en cours. Continuer ?', settingsT: 'Nouvelle partie',
+        red: 'rouge', blue: 'bleu', goalR: 'Relie les côtés rouges', goalB: 'Relie les côtés bleus',
+        yourMove: 'Touche une case pour poser ta pierre rouge', turnOf: 'Au tour de {n} ({c})', thinking: 'Le robot réfléchit…',
+        dailyHx: 'Hex du jour', vsMedium: 'contre le robot moyen', playerWon: '{n} gagne', stonesL: 'Pierres',
+        rules: 'Rouge veut relier les deux côtés rouges du plateau par une chaîne continue de pierres rouges, bleu les deux côtés bleus. À ton tour, pose une pierre sur une case vide ; les pierres ne bougent jamais et ne sont jamais prises. Chaque case a six voisines. Il n’y a jamais d’égalité : quand un joueur a un chemin, celui de l’autre est coupé. Avec la règle d’échange, bleu peut prendre la première pierre rouge au lieu de jouer.',
+        kCursor: 'Passer d’une case à l’autre', kGo: 'Poser une pierre', kSwap: 'Échanger (si permis)',
+        tutTitle1: 'Relie tes deux côtés', tutText1: 'Rouge relie les deux côtés rouges, bleu les deux côtés bleus.',
+        tutTitle2: 'Une pierre par tour', tutText2: 'Touche n’importe quelle case vide. Les pierres ne bougent jamais et ne sont jamais prises.',
+        tutTitle3: 'Les ponts', tutText3: 'Deux pierres qui partagent deux voisines vides sont comme reliées : si l’adversaire en prend une, prends l’autre.'
+      },
+      ar: {
+        board: 'لوح هِكس', vsBot: 'ضد الروبوت', two: 'لاعبان', bot: 'الروبوت', playerN: 'اللاعب {n}', modeT: 'اللاعبون', levelT: 'مستوى الروبوت',
+        swapT: 'قاعدة التبديل', swapOn: 'مفعّلة', swapOff: 'معطّلة', swapBtn: 'تبديل', swapDid: '{n} بدّل',
+        swapNote: 'بعد أول حجر أحمر، يمكن للأزرق أن يأخذه لنفسه بدل أن يلعب. هكذا لا يفتتح الأحمر بقوة زائدة.',
+        swapCan: 'يمكن للأزرق أن يأخذ أول حجر أحمر لنفسه',
+        newMatch: 'لعبة جديدة', begin: 'ابدأ', undoMove: 'تراجع', endWarn: 'سينهي هذا اللعبة الحالية. هل تتابع؟', settingsT: 'لعبة جديدة',
+        red: 'الأحمر', blue: 'الأزرق', goalR: 'صِل الجانبين الأحمرين', goalB: 'صِل الجانبين الأزرقين',
+        yourMove: 'انقر خانة لتضع حجرك الأحمر', turnOf: 'دور {n} ({c})', thinking: 'الروبوت يفكر…',
+        dailyHx: 'هِكس اليومي', vsMedium: 'ضد الروبوت المتوسط', playerWon: 'فاز {n}', stonesL: 'الأحجار',
+        rules: 'يريد الأحمر وصل الجانبين الأحمرين من اللوح بسلسلة متصلة من أحجاره، والأزرق الجانبين الأزرقين. في دورك تضع حجرًا واحدًا في أي خانة فارغة؛ الأحجار لا تتحرك ولا تُؤخذ أبدًا. لكل خانة ست جارات. لا تعادل أبدًا: حين يكتمل طريق أحدهما ينقطع طريق الآخر. مع قاعدة التبديل يمكن للأزرق أن يأخذ أول حجر أحمر بدل أن يلعب.',
+        kCursor: 'تنقل بين الخانات', kGo: 'ضع حجرًا', kSwap: 'تبديل (حين يُسمح)',
+        tutTitle1: 'صِل جانبيك', tutText1: 'الأحمر يصل الجانبين الأحمرين، والأزرق الجانبين الأزرقين.',
+        tutTitle2: 'حجر في كل دور', tutText2: 'انقر أي خانة فارغة. الأحجار لا تتحرك ولا تُؤخذ.',
+        tutTitle3: 'الجسور', tutText3: 'حجران يشتركان في جارتين فارغتين متصلان عمليًا: إن أخذ خصمك إحداهما فخذ الأخرى.'
+      },
+      hi: {
+        board: 'हेक्स का बोर्ड', vsBot: 'बॉट से', two: 'दो खिलाड़ी', bot: 'बॉट', playerN: 'खिलाड़ी {n}', modeT: 'खिलाड़ी', levelT: 'बॉट का स्तर',
+        swapT: 'अदला-बदली नियम', swapOn: 'चालू', swapOff: 'बंद', swapBtn: 'अदला-बदली', swapDid: '{n} ने अदला-बदली की',
+        swapNote: 'लाल के पहले पत्थर के बाद नीला चाल चलने के बजाय उसे अपना बना सकता है। इससे लाल बहुत मज़बूत शुरुआत नहीं कर पाता।',
+        swapCan: 'नीला लाल का पहला पत्थर अपना बना सकता है',
+        newMatch: 'नया खेल', begin: 'शुरू करें', undoMove: 'चाल वापस', endWarn: 'इससे मौजूदा खेल ख़त्म हो जाएगा। जारी रखें?', settingsT: 'नया खेल',
+        red: 'लाल', blue: 'नीला', goalR: 'लाल किनारे जोड़ें', goalB: 'नीले किनारे जोड़ें',
+        yourMove: 'अपना लाल पत्थर रखने के लिए किसी ख़ाने को छुएँ', turnOf: '{n} की बारी ({c})', thinking: 'बॉट सोच रहा है…',
+        dailyHx: 'रोज़ का हेक्स', vsMedium: 'मध्यम बॉट के ख़िलाफ़', playerWon: '{n} की जीत', stonesL: 'पत्थर',
+        rules: 'लाल बोर्ड के दोनों लाल किनारों को अपने पत्थरों की अटूट कड़ी से जोड़ना चाहता है, नीला दोनों नीले किनारों को। अपनी बारी में आप किसी भी ख़ाली ख़ाने पर एक पत्थर रखते हैं; पत्थर न कभी हिलते हैं, न हटाए जाते हैं। हर ख़ाने के छह पड़ोसी होते हैं। बराबरी कभी नहीं होती: जब एक का रास्ता बन जाता है, दूसरे का कट चुका होता है। अदला-बदली नियम चालू हो तो नीला चाल चलने के बजाय लाल का पहला पत्थर अपना बना सकता है।',
+        kCursor: 'ख़ानों के बीच जाएँ', kGo: 'पत्थर रखें', kSwap: 'अदला-बदली (जब अनुमति हो)',
+        tutTitle1: 'अपने दोनों किनारे जोड़ें', tutText1: 'लाल दोनों लाल किनारों को जोड़ता है, नीला दोनों नीले किनारों को।',
+        tutTitle2: 'हर बारी एक पत्थर', tutText2: 'किसी भी ख़ाली ख़ाने को छुएँ। पत्थर न हिलते हैं, न हटाए जाते हैं।',
+        tutTitle3: 'पुल', tutText3: 'जिन दो पत्थरों के दो ख़ाली पड़ोसी साझा हों, वे लगभग जुड़े हुए हैं: विरोधी एक ले तो आप दूसरा ले लें।'
+      },
+      zh: {
+        board: '六贯棋棋盘', vsBot: '对战电脑', two: '双人', bot: '电脑', playerN: '玩家 {n}', modeT: '玩家', levelT: '电脑难度',
+        swapT: '交换规则', swapOn: '开', swapOff: '关', swapBtn: '交换', swapDid: '{n}选择了交换',
+        swapNote: '红方下第一子后，蓝方可以不落子，而是把这颗子换成自己的。这样红方的开局不会太强。',
+        swapCan: '蓝方可以把红方的第一子换成自己的',
+        newMatch: '新一局', begin: '开始', undoMove: '悔棋', endWarn: '将结束当前对局，是否继续？', settingsT: '新一局',
+        red: '红方', blue: '蓝方', goalR: '连接两条红边', goalB: '连接两条蓝边',
+        yourMove: '点一个格子，放下你的红子', turnOf: '轮到{n}（{c}）', thinking: '电脑思考中……',
+        dailyHx: '每日六贯棋', vsMedium: '对战中等电脑', playerWon: '{n}获胜', stonesL: '棋子',
+        rules: '红方要用一条不断的红子链把棋盘的两条红边连起来，蓝方要连起两条蓝边。每回合在任意空格放一颗子；棋子不会移动，也不会被吃掉。每个格子有六个邻格。不会有平局：一方连通时，另一方的路必然已被切断。开启交换规则时，蓝方可以不落子，而是把红方的第一子换成自己的。',
+        kCursor: '在格子之间移动', kGo: '落子', kSwap: '交换（允许时）',
+        tutTitle1: '连起你的两条边', tutText1: '红方连两条红边，蓝方连两条蓝边。',
+        tutTitle2: '每回合一子', tutText2: '点任意空格。棋子不会移动，也不会被吃掉。',
+        tutTitle3: '桥', tutText3: '两颗子共享两个空邻格时，几乎等于已经相连：对方占一个，你就占另一个。'
+      },
+      de: {
+        board: 'Hex-Brett', vsBot: 'Gegen den Bot', two: 'Zu zweit', bot: 'Bot', playerN: 'Spieler {n}', modeT: 'Spieler', levelT: 'Bot-Stufe',
+        swapT: 'Tauschregel', swapOn: 'An', swapOff: 'Aus', swapBtn: 'Tauschen', swapDid: '{n}: Tausch',
+        swapNote: 'Nach dem ersten roten Stein darf Blau ihn übernehmen, statt zu ziehen. So eröffnet Rot nicht zu stark.',
+        swapCan: 'Blau darf den ersten roten Stein übernehmen',
+        newMatch: 'Neue Partie', begin: 'Start', undoMove: 'Zug zurück', endWarn: 'Die aktuelle Partie endet. Weiter?', settingsT: 'Neue Partie',
+        red: 'Rot', blue: 'Blau', goalR: 'Verbinde die roten Seiten', goalB: 'Verbinde die blauen Seiten',
+        yourMove: 'Tippe ein Feld, um deinen roten Stein zu setzen', turnOf: 'Am Zug: {n} ({c})', thinking: 'Der Bot überlegt …',
+        dailyHx: 'Hex des Tages', vsMedium: 'gegen den mittleren Bot', playerWon: 'Sieg: {n}', stonesL: 'Steine',
+        rules: 'Rot will die beiden roten Seiten des Bretts mit einer durchgehenden Kette roter Steine verbinden, Blau die beiden blauen. In deinem Zug setzt du einen Stein auf ein beliebiges freies Feld; Steine werden nie bewegt und nie geschlagen. Jedes Feld hat sechs Nachbarn. Ein Unentschieden gibt es nie: Sobald einer einen Weg hat, ist der des anderen abgeschnitten. Mit der Tauschregel darf Blau den ersten roten Stein übernehmen, statt zu ziehen.',
+        kCursor: 'Zwischen Feldern wechseln', kGo: 'Stein setzen', kSwap: 'Tauschen (wenn erlaubt)',
+        tutTitle1: 'Verbinde deine Seiten', tutText1: 'Rot verbindet die beiden roten Seiten, Blau die beiden blauen.',
+        tutTitle2: 'Ein Stein pro Zug', tutText2: 'Tippe ein beliebiges freies Feld. Steine werden nie bewegt und nie geschlagen.',
+        tutTitle3: 'Brücken', tutText3: 'Zwei Steine mit zwei gemeinsamen freien Nachbarn sind so gut wie verbunden: Nimmt der Gegner einen, nimm den anderen.'
+      },
+      es: {
+        board: 'Tablero de Hex', vsBot: 'Contra el bot', two: 'Dos jugadores', bot: 'Bot', playerN: 'Jugador {n}', modeT: 'Jugadores', levelT: 'Nivel del bot',
+        swapT: 'Regla de cambio', swapOn: 'Activada', swapOff: 'Desactivada', swapBtn: 'Cambiar', swapDid: '{n} cambió',
+        swapNote: 'Tras la primera piedra roja, azul puede quedársela en vez de jugar. Así rojo no abre demasiado fuerte.',
+        swapCan: 'Azul puede quedarse la primera piedra roja',
+        newMatch: 'Nueva partida', begin: 'Empezar', undoMove: 'Deshacer jugada', endWarn: 'Esto termina la partida actual. ¿Seguir?', settingsT: 'Nueva partida',
+        red: 'rojo', blue: 'azul', goalR: 'Une los lados rojos', goalB: 'Une los lados azules',
+        yourMove: 'Toca una casilla para poner tu piedra roja', turnOf: 'Turno de {n} ({c})', thinking: 'El bot está pensando…',
+        dailyHx: 'Hex diario', vsMedium: 'contra el bot medio', playerWon: 'Gana: {n}', stonesL: 'Piedras',
+        rules: 'Rojo quiere unir los dos lados rojos del tablero con una cadena continua de piedras rojas, y azul los dos lados azules. En tu turno pones una piedra en cualquier casilla vacía; las piedras nunca se mueven ni se capturan. Cada casilla tiene seis vecinas. Nunca hay empate: cuando uno tiene camino, el del otro ya está cortado. Con la regla de cambio, azul puede quedarse la primera piedra roja en vez de jugar.',
+        kCursor: 'Moverse entre casillas', kGo: 'Poner una piedra', kSwap: 'Cambiar (si se permite)',
+        tutTitle1: 'Une tus dos lados', tutText1: 'Rojo une los dos lados rojos, azul los dos azules.',
+        tutTitle2: 'Una piedra por turno', tutText2: 'Toca cualquier casilla vacía. Las piedras nunca se mueven ni se capturan.',
+        tutTitle3: 'Puentes', tutText3: 'Dos piedras que comparten dos vecinas vacías están casi unidas: si el rival toma una, toma la otra.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var MODES = ['bot', 'two'];
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs) prefs = { mode: 'bot', level: 'medium', swap: false };
+  if (MODES.indexOf(prefs.mode) < 0) prefs.mode = 'bot';
+  if (E.LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+  prefs.swap = prefs.swap === true;
+
+  // G: the game around the engine's state S; cur is the keyboard's cell
+  var G = null, timer = null, kbOn = false, cur = 60;
+
+  var cv = el('canvas', { class: 'hx-canvas', role: 'img', 'aria-label': C.t('board') });
+  var box = el('div', { class: 'hx-box' }, [cv]);
+  var top = el('div', { class: 'hx-top ch-above' });
+  var sides = el('div', { class: 'hx-sides ch-above' });
+  var status = el('div', { class: 'hx-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'hx-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, sides, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ setup */
+
+  function newGame(o) {
+    stop();
+    var daily = o.daily || null;
+    G = { mode: daily ? 'bot' : o.mode, level: daily ? 'medium' : o.level, swap: daily ? false : !!o.swap, daily: daily,
+      S: null, hist: [], startedAt: Date.now(), done: false };
+    G.S = E.newGame(G.swap);
+    // the day's game opens with the same red stone for everyone, then the bot answers
+    if (daily) E.play(G.S, E.dailyOpening(C.daily('hex', daily).rng));
+    else { prefs.mode = o.mode; prefs.level = o.level; prefs.swap = !!o.swap; ctx.store.set('prefs', prefs); }
+    cur = 60;
+    render(); save();
+    maybeBot();
+  }
+  function current() { return { mode: G.mode, level: G.level, swap: G.swap }; }
+
+  function isBot(side) { return G.mode === 'bot' && side === 1; }
+  function busy() { return !G || G.done || isBot(G.S.turn); }
+  function stop() { if (timer) { clearTimeout(timer); timer = null; } }
+
+  function maybeBot() {
+    if (!G || G.done || !isBot(G.S.turn)) return;
+    renderSide();
+    timer = setTimeout(function () {
+      timer = null;
+      if (!G || G.done || !isBot(G.S.turn)) return;
+      // the daily bot plays from the day's seed, so everyone meets the same opponent
+      var rnd = G.daily ? C.daily('hex', G.daily + '|' + G.S.plies).rng : Math.random;
+      var m = E.think(G.S, G.level, rnd);
+      if (m === E.SWAP) doSwap(); else if (m >= 0) act(m);
+    }, C.ui.reduceMotion() ? 200 : 420);
+  }
+
+  /* ------------------------------------------------------------- moves */
+
+  function act(cell) {
+    var before = E.clone(G.S), who = G.S.turn;
+    if (!E.play(G.S, cell)) { C.feedback('bad'); return false; }
+    G.hist.push(before);
+    if (G.hist.length > 140) G.hist.shift();
+    C.feedback(isBot(who) ? 'soft' : 'place');
+    if (G.S.winner >= 0) { G.done = true; render(); finish(); return true; }
+    render(); save();
+    maybeBot();
+    return true;
+  }
+  function doSwap() {
+    var before = E.clone(G.S), who = G.S.turn;
+    if (!E.swap(G.S)) { C.feedback('bad'); return; }
+    G.hist.push(before);
+    C.feedback('soft');
+    C.ui.toast({ icon: 'refresh', title: C.t('swapDid', { n: pname(who) }) });
+    render(); save();
+    maybeBot();
+  }
+
+  // Against the bot one undo takes back its reply and your stone together
+  function undo() {
+    if (!G || G.done || !G.hist.length) return;
+    stop();
+    var steps = G.mode === 'bot' ? (isBot(G.S.turn) ? 1 : 2) : 1;
+    if (G.hist.length < steps) steps = G.hist.length;
+    var h;
+    for (var k = 0; k < steps; k++) h = G.hist.pop();
+    G.S = h;
+    C.feedback('soft');
+    render(); save();
+    maybeBot();
+  }
+
+  /* ------------------------------------------------------------ result */
+
+  function pname(side) {
+    if (G.mode === 'bot') return side === 0 ? (C.state.profile.name || C.t('you')) : C.t('bot') + ' · ' + C.t(G.level);
+    return C.t('playerN', { n: C.num(side + 1) });
+  }
+  function colourName(t) { return C.t(t === 0 ? 'red' : 'blue'); }
+
+  function finish() {
+    stop();
+    var S = G.S, vsBot = G.mode === 'bot', won = vsBot ? S.winner === 0 : true;
+    var stones = [0, 1].map(function (t) { return S.cells.filter(function (o) { return o === t; }).length; });
+    var base = vsBot ? ({ easy: 6, medium: 12, hard: 20 }[G.level] || 12) : 8;
+    var coins = Math.max(2, Math.round(won ? base : base * 0.3)) + (G.daily ? 8 : 0);
+    var points = Math.max(3, Math.round(won ? base * 4 : base * 1.2)) + (G.daily ? 25 : 0);
+    if (vsBot && won) {
+      C.achievements.unlock('hx-win');
+      if (G.level === 'hard') C.achievements.unlock('hx-hard');
+      if (stones[0] <= 18) C.achievements.unlock('hx-lean');
+    }
+    if (G.daily) {
+      var first = C.stats.daily('hex', G.daily, { label: won ? C.t('won') : C.t('lost'), win: won });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    var title = vsBot ? (won ? C.t('won') : C.t('lost')) : C.t('playerWon', { n: pname(S.winner) });
+    setTimeout(function () {
+      ctx.finish({
+        won: vsBot ? won : null,
+        title: title,
+        timeMs: Date.now() - G.startedAt, coins: coins, points: points,
+        lines: [{ label: C.t('stonesL'), value: C.num(stones[0]) + ' / ' + C.num(stones[1]) }],
+        shareText: 'چوگان · هگز' + (G.daily ? ('\nروزانه ' + G.daily) : '') + '\n' + title,
+        paint: cardPaint(),
+        onAgain: G.daily ? null : function () { newGame(current()); }
+      });
+    }, C.ui.reduceMotion() ? 150 : 700);
+  }
+
+  /* ------------------------------------------------------------- saves */
+
+  ctx.autosave(function () {
+    if (!G || G.done || !G.hist.length) return { inProgress: false };
+    return { g: { mode: G.mode, level: G.level, swap: G.swap, daily: G.daily, S: G.S, elapsed: Date.now() - G.startedAt } };
+  });
+  function save() { ctx.save(); }
+  function validSave(sv) {
+    var g = sv && sv.g;
+    return !!(g && MODES.indexOf(g.mode) >= 0 && E.LEVELS.indexOf(g.level) >= 0 && E.valid(g.S) && g.S.winner < 0 && g.S.swap === !!g.swap);
+  }
+  function restore(g) {
+    G = { mode: g.mode, level: g.level, swap: !!g.swap, daily: g.daily || null, S: g.S, hist: [], startedAt: Date.now() - (g.elapsed || 0), done: false };
+    render();
+    maybeBot();
+  }
+
+  function askNew() {
+    if (G && G.daily) { go({ daily: G.daily }); return; }
+    settings();
+    function go(o) { if (!G || G.done || !G.hist.length) newGame(o); else C.ui.confirm({ title: C.t('newMatch'), body: C.t('endWarn'), onOk: function () { newGame(o); } }); }
+  }
+  function settings() {
+    var o = G && !G.daily ? current() : { mode: prefs.mode, level: prefs.level, swap: prefs.swap };
+    var body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
+    function rows() {
+      body.innerHTML = '';
+      body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('modeT') }));
+      body.appendChild(C.ui.segmented([{ value: 'bot', label: C.t('vsBot') }, { value: 'two', label: C.t('two') }], o.mode, function (v) { o.mode = v; rows(); }));
+      if (o.mode === 'bot') {
+        body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('levelT') }));
+        body.appendChild(C.ui.segmented(E.LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), o.level, function (v) { o.level = v; }));
+      }
+      body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('swapT') }));
+      body.appendChild(C.ui.segmented([{ value: 'off', label: C.t('swapOff') }, { value: 'on', label: C.t('swapOn') }], o.swap ? 'on' : 'off', function (v) { o.swap = v === 'on'; }));
+      body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('swapNote') }));
+      if (G && !G.done && G.hist.length) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('endWarn') }));
+    }
+    rows();
+    C.ui.modal({
+      title: C.t('settingsT'), closeButton: true, body: [body],
+      actions: [{ label: C.t('cancel') }, { label: C.t('begin'), kind: 'primary', onClick: function () { newGame(o); } }]
+    });
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function colors() {
+    var cs = getComputedStyle(document.documentElement);
+    var v = function (k, f) { return cs.getPropertyValue(k).trim() || f; };
+    return { cell: v('--hx-cell', '#F3EDE3'), line: v('--hx-line', '#D9CDBB'), r: v('--hx-r', '#C0262D'), rLt: v('--hx-r-lt', '#F0A5A0'),
+      b: v('--hx-b', '#1F5FAF'), bLt: v('--hx-b-lt', '#A9C4E8'), ink: v('--hx-ink', '#5A4E40') };
+  }
+
+  // Grows a convex polygon outward by m, keeping its edges parallel
+  function inflate(poly, m) {
+    var cx = 0, cy = 0;
+    poly.forEach(function (p) { cx += p[0] / poly.length; cy += p[1] / poly.length; });
+    var normal = function (p, q) {
+      var dx = q[0] - p[0], dy = q[1] - p[1], l = Math.hypot(dx, dy), n = [dy / l, -dx / l];
+      if (n[0] * ((p[0] + q[0]) / 2 - cx) + n[1] * ((p[1] + q[1]) / 2 - cy) < 0) n = [-n[0], -n[1]];
+      return n;
+    };
+    return poly.map(function (v, i) {
+      var p = poly[(i + poly.length - 1) % poly.length], q = poly[(i + 1) % poly.length];
+      var n1 = normal(p, v), n2 = normal(v, q), k = m / (1 + n1[0] * n2[0] + n1[1] * n2[1]);
+      return [v[0] + (n1[0] + n2[0]) * k, v[1] + (n1[1] + n2[1]) * k];
+    });
+  }
+  // Shared by drawing and by reading a tap, so a tap lands on what is drawn under it. In a
+  // wide box the diamond lies on its side (flat-topped cells), in a tall one it stands up.
+  var BAND = 0.9, BASE = 0.62;
+  function geo(W, H) {
+    var th = W >= H ? 0 : Math.PI / 2;
+    var a = [Math.cos(th - Math.PI / 6), Math.sin(th - Math.PI / 6)], b = [Math.cos(th + Math.PI / 6), Math.sin(th + Math.PI / 6)];
+    var U = function (r, c) { return [c * a[0] + r * b[0], c * a[1] + r * b[1]]; }, M = N - 1;
+    var corners = [U(0, 0), U(0, M), U(M, M), U(M, 0)], outer = inflate(corners, BAND);
+    var xs = outer.map(function (p) { return p[0]; }), ys = outer.map(function (p) { return p[1]; });
+    var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs), minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
+    var pad = Math.min(W, H) * 0.02, d = Math.min((W - 2 * pad) / (maxX - minX), (H - 2 * pad) / (maxY - minY));
+    var ox = W / 2 - d * (minX + maxX) / 2, oy = H / 2 - d * (minY + maxY) / 2;
+    var px = function (p) { return [ox + d * p[0], oy + d * p[1]]; };
+    return { th: th, a: a, b: b, d: d, ox: ox, oy: oy, corners: corners.map(px), outer: outer.map(px), base: inflate(corners, BASE).map(px),
+      at: function (r, c) { return px(U(r, c)); } };
+  }
+  function hexPath(g, Q, x, y, rad) {
+    g.beginPath();
+    for (var k = 0; k < 6; k++) { var an = Q.th + k * Math.PI / 3; if (k) g.lineTo(x + rad * Math.cos(an), y + rad * Math.sin(an)); else g.moveTo(x + rad * Math.cos(an), y + rad * Math.sin(an)); }
+    g.closePath();
+  }
+  function poly(g, pts) { g.beginPath(); pts.forEach(function (p, k) { if (k) g.lineTo(p[0], p[1]); else g.moveTo(p[0], p[1]); }); g.closePath(); }
+
+  function paintBoard(g, W, H, o, col) {
+    var S = o.S, Q = geo(W, H), R = Q.d / Math.sqrt(3);
+    // each side's two edges: four triangles from the middle, red on the row edges and blue
+    // on the column edges, mostly hidden under the board so only a band shows
+    var cx = (Q.outer[0][0] + Q.outer[2][0]) / 2, cy = (Q.outer[0][1] + Q.outer[2][1]) / 2;
+    for (var e = 0; e < 4; e++) {
+      g.fillStyle = e % 2 ? col.b : col.r;
+      g.beginPath(); g.moveTo(cx, cy); g.lineTo(Q.outer[e][0], Q.outer[e][1]); g.lineTo(Q.outer[(e + 1) % 4][0], Q.outer[(e + 1) % 4][1]); g.closePath(); g.fill();
+    }
+    g.fillStyle = col.line; poly(g, Q.base); g.fill();
+    var win = o.win || [];
+    for (var i = 0; i < E.CELLS; i++) {
+      var p = E.rc(i), xy = Q.at(p[0], p[1]), own = S.cells[i];
+      hexPath(g, Q, xy[0], xy[1], R * 0.93);
+      g.fillStyle = own === 0 ? col.r : own === 1 ? col.b : col.cell;
+      g.fill();
+      if (own >= 0) {
+        // a soft shine on each stone, so the two colours read as stones and not as paint
+        g.fillStyle = own === 0 ? col.rLt : col.bLt; g.globalAlpha = 0.55;
+        g.beginPath(); g.arc(xy[0] - R * 0.22, xy[1] - R * 0.22, R * 0.2, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
+      }
+      if (win.indexOf(i) >= 0) {
+        g.strokeStyle = '#FFFFFF'; g.lineWidth = Math.max(1.5, Q.d * 0.08);
+        hexPath(g, Q, xy[0], xy[1], R * 0.62); g.stroke();
+      }
+    }
+    if (o.ghost >= 0 && S.cells[o.ghost] === -1) {
+      var gp = E.rc(o.ghost), gx = Q.at(gp[0], gp[1]);
+      g.globalAlpha = 0.4; g.fillStyle = o.ghostSide === 0 ? col.r : col.b;
+      hexPath(g, Q, gx[0], gx[1], R * 0.93); g.fill(); g.globalAlpha = 1;
+    }
+    if (o.last >= 0 && S.cells[o.last] >= 0 && win.indexOf(o.last) < 0) {
+      var lp = E.rc(o.last), lx = Q.at(lp[0], lp[1]);
+      g.fillStyle = '#FFFFFF';
+      g.beginPath(); g.arc(lx[0], lx[1], Math.max(2, R * 0.2), 0, Math.PI * 2); g.fill();
+    }
+    if (o.cursor >= 0) {
+      var cp = E.rc(o.cursor), cxy = Q.at(cp[0], cp[1]);
+      g.strokeStyle = col.ink; g.lineWidth = Math.max(2, Q.d * 0.09);
+      hexPath(g, Q, cxy[0], cxy[1], R * 0.86); g.stroke();
+    }
+  }
+
+  function boxSize() {
+    var r = box.getBoundingClientRect();
+    return { w: Math.max(1, Math.floor(r.width)), h: Math.max(1, Math.floor(r.height || r.width)) };
+  }
+  function draw() {
+    if (!G) return;
+    var sz = boxSize(), W = sz.w, H = sz.h, dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    cv.style.width = W + 'px'; cv.style.height = H + 'px';
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    var mine = !busy();
+    paintBoard(g, W, H, {
+      S: G.S, last: G.S.last, win: G.done ? E.path(G.S, G.S.winner) : [],
+      ghost: kbOn && mine ? cur : -1, ghostSide: G.S.turn, cursor: kbOn && mine ? cur : -1
+    }, colors());
+  }
+  function cardPaint() {
+    var o = { S: E.clone(G.S), last: -1, win: E.path(G.S, G.S.winner), ghost: -1, cursor: -1 };
+    return function (g, W, H) { paintBoard(g, W, H, o, colors()); };
+  }
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (G.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyHx') + ' — ' + C.num(G.daily) })]));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('vsMedium') }));
+      return;
+    }
+    top.appendChild(el('button', { class: 'ch-badge ch-tap', type: 'button', onclick: settings,
+      text: (G.mode === 'bot' ? C.t('vsBot') + ' · ' + C.t(G.level) : C.t('two')) + (G.swap ? ' · ' + C.t('swapT') : '') }));
+    var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', settings);
+    top.appendChild(gear);
+  }
+  function renderSide() {
+    sides.innerHTML = '';
+    var t = G.S.turn;
+    [0, 1].forEach(function (k) {
+      sides.appendChild(el('div', { class: 'hx-side' + (t === k && !G.done ? ' hx-side--on' : '') + (isBot(k) && t === 1 && !G.done ? ' hx-thinking' : '') }, [
+        el('div', { class: 'hx-side__dot', style: { background: k === 0 ? 'var(--hx-r)' : 'var(--hx-b)' } }),
+        el('div', { class: 'hx-side__text' }, [
+          el('div', { class: 'hx-side__name', text: pname(k) }),
+          el('div', { class: 'hx-side__goal', text: C.t(k === 0 ? 'goalR' : 'goalB') })
+        ])
+      ]));
+    });
+    status.innerHTML = '';
+    if (G.done) return;
+    var line = isBot(t) ? C.t('thinking') : G.mode === 'bot' ? C.t('yourMove') : C.t('turnOf', { n: pname(t), c: colourName(t) });
+    if (E.canSwap(G.S) && !isBot(t)) {
+      line = C.t('swapCan');
+      status.appendChild(el('span', { text: line }));
+      status.appendChild(el('button', { class: 'ch-btn ch-btn--sm', type: 'button', onclick: doSwap }, [C.icon('refresh', 16), el('span', { text: C.t('swapBtn') })]));
+      return;
+    }
+    status.appendChild(el('span', { text: line }));
+  }
+  function render() { renderTop(); renderSide(); draw(); }
+
+  /* -------------------------------------------------------------- input */
+
+  // The cell under the tap: undo the board's two axes, then round to the nearest hexagon
+  function readTap(x, y) {
+    var r = cv.getBoundingClientRect(), Q = geo(r.width, r.height);
+    var u = (x - r.left - Q.ox) / Q.d, v = (y - r.top - Q.oy) / Q.d, det = Q.a[0] * Q.b[1] - Q.a[1] * Q.b[0];
+    var fc = (u * Q.b[1] - v * Q.b[0]) / det, fr = (Q.a[0] * v - Q.a[1] * u) / det, fy = -fc - fr;
+    var rc0 = Math.round(fc), rr = Math.round(fr), ry = Math.round(fy);
+    var dc = Math.abs(rc0 - fc), dr = Math.abs(rr - fr), dy = Math.abs(ry - fy);
+    if (dc > dr && dc > dy) rc0 = -rr - ry; else if (dr > dy) rr = -rc0 - ry;
+    return rr >= 0 && rr < N && rc0 >= 0 && rc0 < N ? rr * N + rc0 : -1;
+  }
+  cv.addEventListener('pointerdown', function (e) {
+    if (busy()) return;
+    e.preventDefault();
+    kbOn = false;
+    var k = readTap(e.clientX, e.clientY);
+    if (k < 0) return;
+    if (G.S.cells[k] !== -1) { C.feedback('bad'); return; }
+    act(k);
+  });
+
+  window.addEventListener('keydown', function (e) {
+    if (!G || document.querySelector('.ch-scrim')) return;
+    if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
+    if (busy() || e.ctrlKey || e.metaKey || e.altKey) return;
+    var tg = e.target && e.target.tagName;
+    if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT') return;
+    if (C.keyIs(e, 's') && E.canSwap(G.S)) { e.preventDefault(); doSwap(); return; }
+    // the board is drawn the same way in every language, so the arrows are geometric (#338):
+    // each goes to the neighbour lying closest to its direction on the screen
+    var want = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.key];
+    if (want) {
+      e.preventDefault();
+      if (!kbOn) { kbOn = true; draw(); return; }
+      var r = cv.getBoundingClientRect(), Q = geo(r.width, r.height), p = E.rc(cur), best = -1, bd = 0.3;
+      [[0, 1], [0, -1], [1, 0], [-1, 0], [-1, 1], [1, -1]].forEach(function (d) {
+        var to = E.at(p[0] + d[0], p[1] + d[1]);
+        if (to < 0) return;
+        var sx = d[1] * Q.a[0] + d[0] * Q.b[0], sy = d[1] * Q.a[1] + d[0] * Q.b[1], dot = sx * want[0] + sy * want[1];
+        if (dot > bd + 1e-6) { bd = dot; best = to; }
+      });
+      if (best >= 0) cur = best;
+      draw(); return;
+    }
+    if ((e.key === 'Enter' || e.key === ' ') && kbOn && tg !== 'BUTTON') {
+      e.preventDefault();
+      if (G.S.cells[cur] === -1) act(cur); else C.feedback('bad');
+    }
+  });
+
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  else window.addEventListener('resize', draw);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← ↑ → ↓', C.t('kCursor')), kb('Space / Enter', C.t('kGo')), kb('S', C.t('kSwap')), kb('U / Ctrl+Z', C.t('undoMove'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // a small 5×5 board for the tutorial, lying on its side like the wide board
+  function tArt(kind) {
+    var n = 5, d = 17, R = d / Math.sqrt(3), s = '<svg viewBox="0 0 200 110" width="100%">';
+    var X = function (r, c) { return 30 + (c + r) * d * 0.866; }, Y = function (r, c) { return 55 + (r - c) * d * 0.5; };
+    var hex = function (r, c, fill, extra) {
+      var pts = [];
+      for (var k = 0; k < 6; k++) { var an = k * Math.PI / 3; pts.push((X(r, c) + R * 0.93 * Math.cos(an)).toFixed(1) + ',' + (Y(r, c) + R * 0.93 * Math.sin(an)).toFixed(1)); }
+      return '<polygon points="' + pts.join(' ') + '" fill="' + fill + '"' + (extra || '') + '/>';
+    };
+    var red = { 1: ['0,2', '1,2', '2,1', '3,1', '4,1'], 2: ['2,2'], 3: ['1,1', '2,2'] }[kind];
+    var blue = { 1: ['1,0', '2,3'], 2: ['1,3'], 3: ['1,2'] }[kind];
+    var line = function (r1, c1, r2, c2, f) { return '<line x1="' + X(r1, c1).toFixed(1) + '" y1="' + Y(r1, c1).toFixed(1) + '" x2="' + X(r2, c2).toFixed(1) + '" y2="' + Y(r2, c2).toFixed(1) + '" stroke="' + f + '" stroke-width="5" stroke-linecap="round"/>'; };
+    s += line(-0.8, -0.4, -0.8, 4.4, '#C0262D') + line(4.8, -0.4, 4.8, 4.4, '#C0262D') + line(-0.4, -0.8, 4.4, -0.8, '#1F5FAF') + line(-0.4, 4.8, 4.4, 4.8, '#1F5FAF');
+    for (var r = 0; r < n; r++) for (var c = 0; c < n; c++) {
+      var key = r + ',' + c;
+      s += hex(r, c, red.indexOf(key) >= 0 ? '#C0262D' : blue.indexOf(key) >= 0 ? '#1F5FAF' : '#F3EDE3');
+    }
+    if (kind === 2) s += hex(2, 2, 'none', ' stroke="#5A4E40" stroke-width="2.5"');
+    if (kind === 3) s += hex(2, 1, 'none', ' stroke="#5A4E40" stroke-width="2.5" stroke-dasharray="3 2"');
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  var saved = ctx.loadSave();
+  if (validSave(saved) && (saved.g.daily || null) === (dailyDate || null)) restore(saved.g);
+  else newGame(dailyDate ? { daily: dailyDate } : { mode: prefs.mode, level: prefs.level, swap: prefs.swap });
+  if (dailyDate && C.stats.dailyDone('hex', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).hex;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
