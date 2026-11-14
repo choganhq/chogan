@@ -3671,7 +3671,7 @@ function testCardArt() {
 
   ok(/cardBack: 'carpet'/.test(coreJs.match(/var DEFAULT_SETTINGS = \{[\s\S]*?\};/)[0]), 'the carpet is the default back');
   ok((coreJs.match(/cardBack: '[^']+', backCarpet: '[^']+', backTermeh: '[^']+',/g) || []).length === LOCALE_CODES.length, 'the picker is named in every language');
-  ok(/Chogan\.applyTheme\(\);\s*Chogan\.cards\.applyBack\(\);/.test(coreJs), 'the saved back is applied when a page boots');
+  ok(/Chogan\.applyTheme\(\);\s*(?:Chogan\.applyMotion\(\);\s*)?Chogan\.cards\.applyBack\(\);/.test(coreJs), 'the saved back is applied when a page boots');
   ok(/\.ch-pback \{[^}]*100% 100% no-repeat/.test(coreCss) && !/\.ch-pback \{[^}]*data:image/.test(coreCss), 'the CSS stretches one picture over the back instead of tiling a pattern');
   for (const g of ['pasur', 'hokm']) {
     const page = fs.readFileSync(path.join(ROOT, 'www/games', g, 'index.html'), 'utf8');
@@ -5253,7 +5253,7 @@ function testPasur() {
   // a game never carries its own copy of the deck (#178)
   ok(psPage.indexOf('function faceSvg') < 0 && psPage.indexOf('data:image/svg+xml') < 0 && /return C\.cards\.el\(c, 'ps-card'/.test(psPage) && /C\.cards\.back\(\)/.test(psPage),
     'Pasur draws its cards with the shared core, not a copy');
-  ok(/prefers-reduced-motion: reduce\)'\)\.matches;\s*if \(reduce\) \{ done\(\); return; \}/.test(psPage), 'the shuffle is skipped with reduced motion');
+  ok(/var reduce = C\.ui\.reduceMotion\(\);\s*if \(reduce\) \{ done\(\); return; \}/.test(psPage), 'the shuffle is skipped with reduced motion');
   ok(/function canHumanMove\(\) \{ return S && !S\.done && S\.turn === 0 && !dealing(?: && !sweeping)?; \}/.test(psPage) && /shuffleAnim\(function \(\) \{ paint\(\); maybeAi\(\); \}\);/.test(psPage), 'nobody moves until the shuffle has finished');
   const N = (arr) => arr.map(E.name).sort().join(' ');
   const optsOf = (table, card) => E.options(P(table), E.parse(card)).map((o) => N(o)).sort();
