@@ -442,7 +442,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = LanderEngi
   var raf = 0, last = 0, acc = 0, prev = null, paused = false, ended = false, waiting = false, resumed = false;
   var landedAt = 0, nextReady = false, lastGrade = null, lastJet = 0, emptyShown = false, clock = 0;
   var held = { l: false, r: false, t: false }, keys = { l: false, r: false, t: false };
-  var bits = [];
+  var bits = [], boom = null;
 
   var cv = el('canvas', { class: 'ln-canvas', role: 'img', 'aria-label': C.t('lnScene') });
   var box = el('div', { class: 'ln-box' }, [cv]);
@@ -470,7 +470,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = LanderEngi
   function startPad() {
     S = E.ship(E.newLevel(seedOf(n), levelOf(n)));
     waiting = true; resumed = false; ended = false; nextReady = false; lastGrade = null; emptyShown = false;
-    acc = 0; last = 0; prev = null; bits = [];
+    acc = 0; last = 0; prev = null; bits = []; boom = null;
     renderTop(); renderStatus(); draw(); kick();
   }
   function nextPad() {
@@ -514,7 +514,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = LanderEngi
     stepBits(dt);
     draw();
     // the loop keeps going while the page shows a pad, so its lights blink and the flame flickers
-    if (!ended) raf = requestAnimationFrame(tick);
+    if (!ended || boom || bits.length) raf = requestAnimationFrame(tick);
   }
   function kick() { if (!raf && !document.hidden) raf = requestAnimationFrame(tick); }
 
@@ -542,17 +542,21 @@ if (typeof module !== 'undefined' && module.exports) module.exports = LanderEngi
   function crashed() {
     C.feedback('bad');
     renderStatus();
-    // a burst of pieces where the ship hit, drawn by the page only
+    // a fireball, a shock ring and flying pieces where the ship hit, drawn by the page only. The loop used to stop
+    // the moment `ended` was set, so the first version of this burst never moved and the wreck sat still.
     if (!C.ui.reduceMotion()) {
-      for (var i = 0; i < 26; i++) {
-        var ang = Math.random() * Math.PI, sp = 2 + Math.random() * 6;
-        bits.push({ x: S.x, y: S.y, vx: Math.cos(ang) * sp + S.hit.vx * 0.3, vy: Math.sin(ang) * sp, life: 0.6 + Math.random() * 0.6, hot: Math.random() < 0.5 });
+      boom = { t: 0, x: S.x, y: S.y };
+      for (var i = 0; i < 64; i++) {
+        var ang = Math.random() * Math.PI, sp = 2 + Math.random() * 9;
+        bits.push({ x: S.x, y: S.y + 0.4, vx: Math.cos(ang) * sp + S.hit.vx * 0.3, vy: Math.sin(ang) * sp, life: 0.7 + Math.random() * 0.8, c: Math.floor(Math.random() * 5), z: 0.5 + Math.random() * 1.1 });
       }
+      C.audio.sfx('thud');
     }
     ended = true;
-    setTimeout(finish, C.ui.reduceMotion() ? 200 : 900);
+    setTimeout(finish, C.ui.reduceMotion() ? 200 : 1500);
   }
   function stepBits(dt) {
+    if (boom) { boom.t += dt; if (boom.t > 1.3) boom = null; }
     if (!bits.length) return;
     bits = bits.filter(function (b) {
       b.vy -= E.G * 2 * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
@@ -692,10 +696,21 @@ if (typeof module !== 'undefined' && module.exports) module.exports = LanderEngi
     if (!S.over) drawShip(g, V, dpr, P, pose(), still);
     else drawWreck(g, V, P);
     bits.forEach(function (b) {
-      g.fillStyle = b.hot ? P.flame : P.bit;
-      var r = Math.max(1.5, V.k * 0.18);
+      g.fillStyle = [P.flame, P.flameIn, P.foil, P.bit, P.body][b.c];
+      g.globalAlpha = Math.min(1, b.life * 2);
+      var r = Math.max(1.5, V.k * 0.14 * b.z);
       g.fillRect(sx(V, b.x) - r, sy(V, b.y) - r, r * 2, r * 2);
+      g.globalAlpha = 1;
     });
+    if (boom) {
+      var bx = sx(V, boom.x), by = sy(V, boom.y), e = Math.min(1, boom.t / 0.45), fade = Math.max(0, 1 - boom.t / 0.9);
+      g.globalAlpha = fade * 0.85; g.fillStyle = P.flame; g.beginPath(); g.arc(bx, by, V.k * (0.8 + 3.4 * e), 0, Math.PI * 2); g.fill();
+      g.globalAlpha = fade; g.fillStyle = P.flameIn; g.beginPath(); g.arc(bx, by, V.k * (0.4 + 2 * e), 0, Math.PI * 2); g.fill();
+      var e2 = Math.min(1, boom.t / 0.9);
+      g.globalAlpha = Math.max(0, 1 - e2) * 0.8; g.strokeStyle = P.text; g.lineWidth = Math.max(2, V.k * 0.25);
+      g.beginPath(); g.arc(bx, by, V.k * (1 + 8 * e2), 0, Math.PI * 2); g.stroke();
+      g.globalAlpha = 1;
+    }
 
     drawHud(g, Z, P);
     drawZones(g, Z, V, P);
@@ -983,7 +998,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = LanderEngi
     }
     n = k; score = sv.score | 0; landings = sv.landings | 0; tries = sv.tries || 1; startedAt = Date.now() - (sv.elapsed || 0);
     if (R) {
-      S = R; waiting = true; resumed = true; ended = false; nextReady = false; lastGrade = null; emptyShown = S.empty; acc = 0; last = 0; prev = null; bits = [];
+      S = R; waiting = true; resumed = true; ended = false; nextReady = false; lastGrade = null; emptyShown = S.empty; acc = 0; last = 0; prev = null; bits = []; boom = null;
       renderTop(); renderStatus(); draw(); kick();
     } else startPad();
     return true;
