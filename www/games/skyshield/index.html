@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#FBF6EF">
-<title>سپر آسمان — چوگان</title>
+<title>باران شهاب — چوگان</title>
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../../lib/chogan.css">
 <script src="../../lib/early.js"></script>
@@ -14,7 +14,7 @@
   @container game (min-aspect-ratio: 5 / 4) { .ss-wrap > .ch-fit { --fit-ar: calc(4 / 3); } }
   .ch-nocq .ch-gamemain.ch-wide .ss-wrap > .ch-fit { --fit-ar: calc(4 / 3); }
   .ch-fit > .ss-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
-  /* the batteries stand left, middle and right in every language, so the canvas is never mirrored */
+  /* the observatories stand left, middle and right in every language, so the canvas is never mirrored */
   .ss-canvas { display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; user-select: none; -webkit-user-select: none; cursor: crosshair; }
   .ss-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
   .ss-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
@@ -36,13 +36,13 @@ function SkyShieldEngineFactory() {
   var CITY_X = [20, 29, 38, 62, 71, 80];
   var BAT_X = [7, 50, 93], BAT_Y = GROUND + 4;
   var AMMO = 10, SHOT_V = [52, 72, 52];
-  // a counter-missile's blast grows, holds and fades; a warhead it destroys bursts in a
-  // smaller blast of its own, which can take its neighbours with it
+  // a light burst grows, holds and fades; a meteor it shatters flares in a smaller burst of
+  // its own, which can shatter its neighbours too
   var BLAST = { r: 7, grow: 0.42, hold: 0.25, fade: 0.5 }, CHAIN_R = 5;
   var MIN_Y = GROUND + 5, CITY_EVERY = 10000;
   // the daily run: five waves, the levels of the endless run they are drawn from
   var DAILY = [2, 3, 4, 5, 6];
-  // the test player aims where a warhead will be when the blast has grown halfway
+  // the test player aims where a meteor will be when the burst has grown halfway
   var LEAD = BLAST.grow * 0.5;
 
   function rng(seed) {
@@ -60,8 +60,8 @@ function SkyShieldEngineFactory() {
   function dist(ax, ay, bx, by) { var dx = ax - bx, dy = ay - by; return Math.sqrt(dx * dx + dy * dy); }
   function nextSeed(s, i) { return (Math.imul((s ^ 0x9E3779B9) >>> 0, 2654435761) + i + 1) >>> 0; }
 
-  // Each wave brings more warheads, falling faster and closer together; splitting
-  // warheads join on wave 3 and fast ones on wave 4. Level 15 and later are the same wave.
+  // Each wave brings more meteors, falling faster and closer together; splitting
+  // meteors join on wave 3 and fast ones on wave 4. Level 15 and later are the same wave.
   function params(level) {
     var lv = Math.max(1, level | 0), k = Math.min(lv, 20) - 1;
     return {
@@ -75,10 +75,10 @@ function SkyShieldEngineFactory() {
     };
   }
   function targetX(tg) { return tg < 6 ? CITY_X[tg] : BAT_X[tg - 6]; }
-  // most warheads go for a city, some for a battery
+  // most meteors go for a village, some for an observatory
   function pickTarget(r) { return r() < 0.72 ? Math.floor(r() * 6) : 6 + Math.floor(r() * 3); }
 
-  // the raw wave: when each warhead appears, where it starts, what it aims at
+  // the raw wave: when each meteor appears, where it starts, what it aims at
   function makePlan(seed, level) {
     var p = params(level), r = rng(seed), items = [];
     for (var i = 0; i < p.count; i++) {
@@ -108,7 +108,7 @@ function SkyShieldEngineFactory() {
   }
 
   // A wave a player meets is one the test player came through from a full skyline with at
-  // least KEEP cities standing; a wave it could not hold is thrown away for the next seed.
+  // least KEEP villages standing; a wave it could not hold is thrown away for the next seed.
   var KEEP = 4, TRIES = 8;
   function check(P) {
     var T = fresh(0);
@@ -123,13 +123,13 @@ function SkyShieldEngineFactory() {
       if (keep >= KEEP) { P.seed = seed >>> 0; P.keep = keep; P.tries = i + 1; return P; }
       if (keep > bestKeep) { best = P; bestKeep = keep; }
     }
-    // the hardest levels may never be held by KEEP cities; the gentlest of the tries is played
+    // the hardest levels may never be held by KEEP villages; the gentlest of the tries is played
     best.seed = seed >>> 0; best.keep = bestKeep; best.tries = TRIES;
     return best;
   }
 
-  // a new game, and the start of each wave: the batteries are rebuilt and refilled, and
-  // every CITY_EVERY points brings back one lost city
+  // a new game, and the start of each wave: the observatories are rebuilt and refilled, and
+  // every CITY_EVERY points brings back one lost village
   function game(seed) { return fresh(seed); }
   function startWave(S, seed, level) {
     var back = [];
@@ -165,7 +165,7 @@ function SkyShieldEngineFactory() {
   function alive(S) { var n = 0; for (var i = 0; i < 6; i++) n += S.cities[i]; return n; }
   function ammo(S) { var n = 0; S.bats.forEach(function (b) { if (b.alive) n += b.ammo; }); return n; }
 
-  // the battery a tap fires from: the nearest one with a missile left, or (behind the gear)
+  // the observatory a tap fires from: the nearest one with a light burst left, or (behind the gear)
   // the fullest one, the nearest of those on a tie
   function pick(S, x, mode) {
     var best = -1;
@@ -195,13 +195,13 @@ function SkyShieldEngineFactory() {
     var p = params(S.level), i, j;
     S.t += DT;
     while (S.qi < S.plan.length && S.plan[S.qi].at <= S.t) { spawn(S, S.plan[S.qi]); S.qi++; }
-    // counter-missiles fly straight to the point and burst there
+    // light bursts fly straight to the point and burst there
     for (i = S.shots.length - 1; i >= 0; i--) {
       var s = S.shots[i], d = dist(s.x, s.y, s.tx, s.ty), m = s.v * DT;
       if (d <= m) { S.shots.splice(i, 1); S.blasts.push({ x: s.tx, y: s.ty, r: BLAST.r, t: 0, k: 'own' }); ev.push('blast'); }
       else { s.x += (s.tx - s.x) / d * m; s.y += (s.ty - s.y) / d * m; }
     }
-    // warheads fall; a splitter breaks into its children at its height
+    // meteors fall; a splitter breaks into its children at its height
     var born = [];
     for (i = S.war.length - 1; i >= 0; i--) {
       var w = S.war[i];
@@ -222,7 +222,7 @@ function SkyShieldEngineFactory() {
       }
     }
     S.war = S.war.concat(born);
-    // blasts age; any warhead inside a counter-missile's blast, or a chain burst, is gone
+    // bursts age; any meteor inside a light burst, or a chain burst, is gone
     for (i = S.blasts.length - 1; i >= 0; i--) { S.blasts[i].t += DT; if (S.blasts[i].t >= LIFE) S.blasts.splice(i, 1); }
     var chain = [];
     for (i = S.war.length - 1; i >= 0; i--) {
@@ -251,9 +251,9 @@ function SkyShieldEngineFactory() {
     return ev;
   }
 
-  // where warhead w will be in tau seconds, on its straight line
+  // where meteor w will be in tau seconds, on its straight line
   function ahead(w, tau) { return { x: w.x + w.vx * tau, y: w.y + w.vy * tau }; }
-  // a warhead already has a missile or a blast coming for it
+  // a meteor already has a light burst or a burst coming for it
   function covered(S, w) {
     var i;
     for (i = 0; i < S.shots.length; i++) {
@@ -270,8 +270,8 @@ function SkyShieldEngineFactory() {
     }
     return false;
   }
-  // the test player: the warhead nearest to landing that nothing is coming for, met by the
-  // battery whose missile gets there first, aimed with lead. It waits a moment between
+  // the test player: the meteor nearest to landing that nothing is coming for, met by the
+  // observatory whose light burst gets there first, aimed with lead. It waits a moment between
   // shots, like a thumb.
   function bot(S, mem) {
     if (S.phase !== 'play') return null;
@@ -340,147 +340,138 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SkyShieldE
   'use strict';
   var C = window.Chogan, el = C.el;
   var E = SkyShieldEngineFactory();
-  // a signal red, as far from Ping Pong's red as the colour rules allow; white text on it
-  // keeps 5.6:1 (#906)
-  var ACCENT = '#D0002C';
+  // a deep night indigo, clear of every other game's colour (CIE76 15 and more) and of Chain
+  // Reaction's and Ludo's hues; white text on it keeps well over 4.5:1 (#921)
+  var ACCENT = '#341082';
 
   C.boot({});
   var ctx = C.game({
     id: 'skyshield',
-    name: { fa: 'سپر آسمان', en: 'Sky Shield', zh: '天空之盾', de: 'Himmelsschild', es: 'Escudo celeste', pl: 'Tarcza Nieba', fr: 'Bouclier céleste', ar: 'درع السماء', hi: 'आसमानी ढाल' },
+    name: { fa: 'باران شهاب', en: 'Meteor Shower', zh: '流星雨', de: 'Meteorschauer', es: 'Lluvia de meteoros', pl: 'Deszcz meteorów', fr: 'Pluie de météores', ar: 'زخّة الشهب', hi: 'उल्का वर्षा' },
     accent: ACCENT,
-    mood: 'tower-defence',
+    mood: 'sudoku',
     strings: {
       fa: {
-        ssScene: 'آسمان شهر، سه سکوی موشک و شش شهر', ssTapGo: 'برای شروع موج صفحه را لمس کن.', ssTapNext: 'برای موج بعدی صفحه را لمس کن.',
-        ssHowTo: 'هر جای آسمان را لمس کن تا موشک رهگیر همان‌جا منفجر شود.',
-        ssWaveN: 'موج {n}', ssDailyWave: 'موج {n} از {m}', ssScoreN: 'امتیاز: {n}', ssBestN: 'بهترین: {n}', ssDaily: 'سپر آسمان روزانه', ssNewRun: 'از نو',
-        ssClearT: 'موج دفع شد! {n} امتیاز جایزه.', ssCityBack: 'یک شهر از نو ساخته شد.', ssNoAmmo: 'موشک‌ها تمام شد!',
-        ssOver: 'همه‌ی شهرها از دست رفتند!', ssWin: 'هر پنج موج دفع شد!',
-        ssWaves: 'موج‌های دفع‌شده', ssScore: 'امتیاز', ssBest: 'بهترین', ssTries: 'تلاش‌ها',
-        ssKAim: 'جابه‌جایی نشانه', ssKFire: 'شلیک از نزدیک‌ترین سکو', ssKBat: 'شلیک از سکوی ۱، ۲ یا ۳', ssKAgain: 'از نو',
-        ssPickT: 'سکوی شلیک', ssPickN: 'نزدیک‌ترین', ssPickF: 'پرترین',
-        ssRules: 'کلاهک‌ها به سمت شش شهر و سه سکوی موشکت سقوط می‌کنند. آسمان را لمس کن تا موشک رهگیری از نزدیک‌ترین سکویی که موشک دارد بلند شود و همان نقطه منفجر شود. انفجار بزرگ می‌شود، لحظه‌ای می‌ماند و محو می‌شود و هر کلاهکی که داخلش باشد نابود می‌شود؛ هر کلاهک نابودشده هم خودش منفجر می‌شود، پس یک شلیک می‌تواند زنجیره بسازد. کمی جلوتر از کلاهک در حال سقوط را نشانه بگیر. هر سکو در هر موج ده موشک دارد و با شروع موج بعد پر و دوباره ساخته می‌شود. از موج سوم بعضی کلاهک‌ها در هوا چند تکه می‌شوند و از موج چهارم بعضی تندتر می‌آیند. موشک‌ها و شهرهای باقی‌مانده در پایان هر موج جایزه دارند و هر ۱۰٬۰۰۰ امتیاز یک شهر ویران را از نو می‌سازد. وقتی همه‌ی شهرها از دست بروند بازی تمام است. بازی روزانه پنج موج یکسان برای همه است.',
-        ssTut1: 'لمس کن، شلیک کن', ssTutText1: 'آسمان را لمس کن. موشک رهگیر از نزدیک‌ترین سکو بلند می‌شود و همان‌جا منفجر می‌شود.',
-        ssTut2: 'جلوتر را بزن', ssTutText2: 'تا موشکت برسد، کلاهک پایین‌تر آمده. کمی جلوتر را نشانه بگیر و بگذار یک انفجار، بعدی را روشن کند.',
-        ssTut3: 'موشک و شهر', ssTutText3: 'هر سکو در هر موج ده موشک دارد. شهرها و موشک‌های باقی‌مانده جایزه دارند؛ اگر همه‌ی شهرها بروند، بازی تمام است.'
+        ssScene: 'آسمان شب با سه رصدخانه و شش روستا', ssTapGo: 'برای شروع موج صفحه را لمس کن.', ssTapNext: 'برای موج بعدی صفحه را لمس کن.',
+        ssHowTo: 'هر جای آسمان را لمس کن تا همان‌جا پرتوی نور بدرخشد.', ssWaveN: 'موج {n}', ssDailyWave: 'موج {n} از {m}',
+        ssScoreN: 'امتیاز: {n}', ssBestN: 'بهترین: {n}', ssDaily: 'باران شهاب روزانه',
+        ssNewRun: 'از نو', ssClearT: 'موج گذشت! {n} امتیاز جایزه.', ssCityBack: 'یک روستا از نو ساخته شد.',
+        ssNoAmmo: 'پرتوها تمام شد!', ssOver: 'همه‌ی روستاها از دست رفتند!', ssWin: 'هر پنج موج گذشت!',
+        ssWaves: 'موج‌های گذشته', ssScore: 'امتیاز', ssBest: 'بهترین',
+        ssTries: 'تلاش‌ها', ssKAim: 'جابه‌جایی نشانه', ssKFire: 'تابیدن از نزدیک‌ترین رصدخانه',
+        ssKBat: 'تابیدن از رصدخانه‌ی ۱، ۲ یا ۳', ssKAgain: 'از نو', ssPickT: 'رصدخانه‌ی فعال',
+        ssPickN: 'نزدیک‌ترین', ssPickF: 'پرترین', ssRules: 'شهاب‌سنگ‌ها به سمت شش روستا و سه رصدخانه‌ات می‌افتند. آسمان را لمس کن تا از نزدیک‌ترین رصدخانه‌ای که پرتو دارد، پرتوی نور بلند شود و همان نقطه بدرخشد. درخشش بزرگ می‌شود، لحظه‌ای می‌ماند و محو می‌شود و هر شهاب‌سنگی که داخلش باشد به جرقه‌های ستاره‌ای می‌شکند؛ هر شهاب‌سنگ شکسته هم خودش می‌درخشد، پس یک پرتو می‌تواند زنجیره بسازد. کمی جلوتر از شهاب‌سنگ در حال سقوط را نشانه بگیر. هر رصدخانه در هر موج ده پرتو دارد و با شروع موج بعد پر و دوباره ساخته می‌شود. از موج سوم بعضی شهاب‌سنگ‌ها در هوا چند تکه می‌شوند و از موج چهارم بعضی تندتر می‌آیند. پرتوها و روستاهای باقی‌مانده در پایان هر موج جایزه دارند و هر ۱۰٬۰۰۰ امتیاز یک روستای ویران را از نو می‌سازد. وقتی همه‌ی روستاها از دست بروند بازی تمام است. بازی روزانه پنج موج یکسان برای همه است.',
+        ssTut1: 'لمس کن، بتابان', ssTutText1: 'آسمان را لمس کن. پرتوی نور از نزدیک‌ترین رصدخانه بلند می‌شود و همان‌جا می‌درخشد.', ssTut2: 'جلوتر را بزن',
+        ssTutText2: 'تا پرتوت برسد، شهاب‌سنگ پایین‌تر آمده. کمی جلوتر را نشانه بگیر و بگذار یک درخشش، بعدی را روشن کند.', ssTut3: 'پرتو و روستا', ssTutText3: 'هر رصدخانه در هر موج ده پرتو دارد. روستاها و پرتوهای باقی‌مانده جایزه دارند؛ اگر همه‌ی روستاها بروند، بازی تمام است.'
       },
       en: {
-        ssScene: 'City sky with three missile batteries and six cities', ssTapGo: 'Tap to start the wave.', ssTapNext: 'Tap for the next wave.',
-        ssHowTo: 'Tap anywhere in the sky to burst a counter-missile there.',
-        ssWaveN: 'Wave {n}', ssDailyWave: 'Wave {n} of {m}', ssScoreN: 'Score: {n}', ssBestN: 'Best: {n}', ssDaily: 'Daily Sky Shield', ssNewRun: 'Start over',
-        ssClearT: 'Wave held! {n} bonus points.', ssCityBack: 'A city was rebuilt.', ssNoAmmo: 'Out of missiles!',
-        ssOver: 'Every city is gone!', ssWin: 'All five waves held!',
-        ssWaves: 'Waves held', ssScore: 'Score', ssBest: 'Best', ssTries: 'Tries',
-        ssKAim: 'Move the crosshair', ssKFire: 'Fire from the nearest battery', ssKBat: 'Fire from battery 1, 2 or 3', ssKAgain: 'Start over',
-        ssPickT: 'Battery that fires', ssPickN: 'Nearest', ssPickF: 'Fullest',
-        ssRules: 'Warheads fall towards your six cities and three missile batteries. Tap the sky: a counter-missile flies from the nearest battery that has missiles and bursts at that spot. The blast grows, holds and fades, destroying every warhead inside it, and each destroyed warhead bursts too, so one shot can set off a chain. Aim a little ahead of a falling warhead. Every battery has ten missiles a wave; batteries are refilled and rebuilt when the next wave starts. From wave 3 some warheads split in the air, and from wave 4 some fall fast. Missiles and cities left give a bonus at the end of a wave, and every 10,000 points rebuilds a lost city. The game ends when every city is gone. The daily game is five waves, the same for everyone.',
-        ssTut1: 'Tap to fire', ssTutText1: 'Tap the sky. A counter-missile flies from the nearest battery and bursts right there.',
-        ssTut2: 'Lead your shot', ssTutText2: 'Warheads keep falling while your missile flies. Aim a little ahead, and let one blast set off the next.',
-        ssTut3: 'Missiles and cities', ssTutText3: 'Each battery has ten missiles a wave. Cities and missiles left give a bonus; lose every city and the game is over.'
+        ssScene: 'Night sky with three observatories and six villages', ssTapGo: 'Tap to start the wave.', ssTapNext: 'Tap for the next wave.',
+        ssHowTo: 'Tap anywhere in the sky to flare a light burst there.', ssWaveN: 'Wave {n}', ssDailyWave: 'Wave {n} of {m}',
+        ssScoreN: 'Score: {n}', ssBestN: 'Best: {n}', ssDaily: 'Daily Meteor Shower',
+        ssNewRun: 'Start over', ssClearT: 'Wave over! {n} bonus points.', ssCityBack: 'A village was rebuilt.',
+        ssNoAmmo: 'Out of light bursts!', ssOver: 'Every village is gone!', ssWin: 'All five waves weathered!',
+        ssWaves: 'Waves survived', ssScore: 'Score', ssBest: 'Best',
+        ssTries: 'Tries', ssKAim: 'Move the crosshair', ssKFire: 'Flare from the nearest observatory',
+        ssKBat: 'Flare from observatory 1, 2 or 3', ssKAgain: 'Start over', ssPickT: 'Observatory that flares',
+        ssPickN: 'Nearest', ssPickF: 'Fullest', ssRules: 'Meteors fall towards your six villages and three observatories. Tap the sky: a light burst rises from the nearest observatory that has bursts left and blooms at that spot. The glow grows, holds and fades, shattering every meteor inside it into sparkles, and each shattered meteor flares too, so one burst can set off a chain. Aim a little ahead of a falling meteor. Every observatory has ten bursts a wave; observatories are refilled and rebuilt when the next wave starts. From wave 3 some meteors split in the air, and from wave 4 some fall fast. Bursts and villages left give a bonus at the end of a wave, and every 10,000 points rebuilds a lost village. The game ends when every village is gone. The daily game is five waves, the same for everyone.',
+        ssTut1: 'Tap to flare', ssTutText1: 'Tap the sky. A light burst rises from the nearest observatory and blooms right there.', ssTut2: 'Aim ahead',
+        ssTutText2: 'Meteors keep falling while your light rises. Aim a little ahead, and let one burst set off the next.', ssTut3: 'Bursts and villages', ssTutText3: 'Each observatory has ten bursts a wave. Villages and bursts left give a bonus; lose every village and the game is over.'
       },
       zh: {
-        ssScene: '城市上空，三座导弹发射台和六座城市', ssTapGo: '点击开始这一波。', ssTapNext: '点击进入下一波。',
-        ssHowTo: '点击天空任意处，拦截导弹就在那里爆炸。',
-        ssWaveN: '第 {n} 波', ssDailyWave: '第 {n} 波 / {m}', ssScoreN: '得分：{n}', ssBestN: '最佳：{n}', ssDaily: '每日天空之盾', ssNewRun: '重新开始',
-        ssClearT: '守住了这一波！奖励 {n} 分。', ssCityBack: '一座城市已重建。', ssNoAmmo: '导弹用完了！',
-        ssOver: '所有城市都被摧毁了！', ssWin: '五波全部守住！',
-        ssWaves: '守住的波数', ssScore: '得分', ssBest: '最佳', ssTries: '尝试次数',
-        ssKAim: '移动准星', ssKFire: '从最近的发射台发射', ssKBat: '从 1、2 或 3 号发射台发射', ssKAgain: '重新开始',
-        ssPickT: '发射的发射台', ssPickN: '最近的', ssPickF: '最满的',
-        ssRules: '弹头正落向你的六座城市和三座导弹发射台。点击天空：离得最近且还有导弹的发射台会射出一枚拦截导弹，在那一点爆炸。爆炸会扩大、停留片刻再消散，范围内的弹头都会被摧毁；被摧毁的弹头也会爆炸，所以一发就能引发连锁。瞄准下落弹头的前方一点。每座发射台每波有十枚导弹，下一波开始时会补满并修复。从第 3 波起有些弹头会在空中分裂，从第 4 波起有些下落更快。每波结束时剩余的导弹和城市会给奖励分，每 10,000 分重建一座被毁的城市。所有城市被毁时游戏结束。每日挑战是所有人相同的五波。',
-        ssTut1: '点击发射', ssTutText1: '点击天空。拦截导弹从最近的发射台飞出，就在那里爆炸。',
-        ssTut2: '提前瞄准', ssTutText2: '导弹飞行时弹头还在下落。瞄准前方一点，让一次爆炸引发下一次。',
-        ssTut3: '导弹与城市', ssTutText3: '每座发射台每波有十枚导弹。剩下的城市和导弹有奖励；城市全部被毁，游戏就结束。'
+        ssScene: '夜空下的三座天文台和六个村庄', ssTapGo: '点击开始这一波。', ssTapNext: '点击进入下一波。',
+        ssHowTo: '点击天空任意处，光芒就在那里绽放。', ssWaveN: '第 {n} 波', ssDailyWave: '第 {n} 波 / {m}',
+        ssScoreN: '得分：{n}', ssBestN: '最佳：{n}', ssDaily: '每日流星雨',
+        ssNewRun: '重新开始', ssClearT: '这一波过去了！奖励 {n} 分。', ssCityBack: '一个村庄已重建。',
+        ssNoAmmo: '光芒用完了！', ssOver: '所有村庄都被毁了！', ssWin: '五波全部度过！',
+        ssWaves: '度过的波数', ssScore: '得分', ssBest: '最佳',
+        ssTries: '尝试次数', ssKAim: '移动准星', ssKFire: '从最近的天文台释放',
+        ssKBat: '从 1、2 或 3 号天文台释放', ssKAgain: '重新开始', ssPickT: '释放的天文台',
+        ssPickN: '最近的', ssPickF: '最满的', ssRules: '流星正落向你的六个村庄和三座天文台。点击天空：离得最近且还有光芒的天文台会升起一束光，在那一点绽放。光芒会扩大、停留片刻再消散，范围内的流星都会被击碎成点点星光；被击碎的流星也会闪耀，所以一束光就能引发连锁。瞄准下落流星的前方一点。每座天文台每波有十束光，下一波开始时会补满并修复。从第 3 波起有些流星会在空中分裂，从第 4 波起有些下落更快。每波结束时剩余的光芒和村庄会给奖励分，每 10,000 分重建一个被毁的村庄。所有村庄被毁时游戏结束。每日挑战是所有人相同的五波。',
+        ssTut1: '点击释放', ssTutText1: '点击天空。一束光从最近的天文台升起，就在那里绽放。', ssTut2: '提前瞄准',
+        ssTutText2: '光升起时流星还在下落。瞄准前方一点，让一次绽放引发下一次。', ssTut3: '光芒与村庄', ssTutText3: '每座天文台每波有十束光。剩下的村庄和光芒有奖励；村庄全部被毁，游戏就结束。'
       },
       de: {
-        ssScene: 'Stadthimmel mit drei Raketenstellungen und sechs Städten', ssTapGo: 'Tippen, um die Welle zu starten.', ssTapNext: 'Für die nächste Welle tippen.',
-        ssHowTo: 'Tippe irgendwo in den Himmel, dort explodiert eine Abfangrakete.',
-        ssWaveN: 'Welle {n}', ssDailyWave: 'Welle {n} von {m}', ssScoreN: 'Punkte: {n}', ssBestN: 'Bestwert: {n}', ssDaily: 'Tägliches Himmelsschild', ssNewRun: 'Neu starten',
-        ssClearT: 'Welle abgewehrt! {n} Bonuspunkte.', ssCityBack: 'Eine Stadt wurde wieder aufgebaut.', ssNoAmmo: 'Keine Raketen mehr!',
-        ssOver: 'Alle Städte sind verloren!', ssWin: 'Alle fünf Wellen abgewehrt!',
-        ssWaves: 'Abgewehrte Wellen', ssScore: 'Punkte', ssBest: 'Bestwert', ssTries: 'Versuche',
-        ssKAim: 'Fadenkreuz bewegen', ssKFire: 'Von der nächsten Stellung feuern', ssKBat: 'Von Stellung 1, 2 oder 3 feuern', ssKAgain: 'Neu starten',
-        ssPickT: 'Feuernde Stellung', ssPickN: 'Nächste', ssPickF: 'Vollste',
-        ssRules: 'Sprengköpfe fallen auf deine sechs Städte und drei Raketenstellungen. Tippe in den Himmel: Eine Abfangrakete startet von der nächsten Stellung mit Raketen und explodiert an dieser Stelle. Die Explosion wächst, hält kurz und verblasst und zerstört jeden Sprengkopf darin; jeder zerstörte Sprengkopf explodiert ebenfalls, so kann ein Schuss eine Kettenreaktion auslösen. Ziele etwas vor einen fallenden Sprengkopf. Jede Stellung hat zehn Raketen pro Welle und wird zu Beginn der nächsten Welle aufgefüllt und wieder aufgebaut. Ab Welle 3 teilen sich manche Sprengköpfe in der Luft, ab Welle 4 fallen manche schneller. Übrige Raketen und Städte geben am Ende einer Welle einen Bonus, und alle 10.000 Punkte wird eine verlorene Stadt wieder aufgebaut. Das Spiel endet, wenn alle Städte verloren sind. Die Tagesaufgabe sind fünf Wellen, für alle gleich.',
-        ssTut1: 'Tippen und feuern', ssTutText1: 'Tippe in den Himmel. Eine Abfangrakete fliegt von der nächsten Stellung los und explodiert genau dort.',
-        ssTut2: 'Vorhalten', ssTutText2: 'Während deine Rakete fliegt, fallen die Sprengköpfe weiter. Ziele etwas voraus und lass eine Explosion die nächste auslösen.',
-        ssTut3: 'Raketen und Städte', ssTutText3: 'Jede Stellung hat zehn Raketen pro Welle. Übrige Städte und Raketen geben einen Bonus; sind alle Städte weg, ist das Spiel vorbei.'
+        ssScene: 'Nachthimmel mit drei Sternwarten und sechs Dörfern', ssTapGo: 'Tippen, um die Welle zu starten.', ssTapNext: 'Für die nächste Welle tippen.',
+        ssHowTo: 'Tippe irgendwo in den Himmel, dort leuchtet ein Lichtblitz auf.', ssWaveN: 'Welle {n}', ssDailyWave: 'Welle {n} von {m}',
+        ssScoreN: 'Punkte: {n}', ssBestN: 'Bestwert: {n}', ssDaily: 'Täglicher Meteorschauer',
+        ssNewRun: 'Neu starten', ssClearT: 'Welle überstanden! {n} Bonuspunkte.', ssCityBack: 'Ein Dorf wurde wieder aufgebaut.',
+        ssNoAmmo: 'Keine Lichtblitze mehr!', ssOver: 'Alle Dörfer sind verloren!', ssWin: 'Alle fünf Wellen überstanden!',
+        ssWaves: 'Überstandene Wellen', ssScore: 'Punkte', ssBest: 'Bestwert',
+        ssTries: 'Versuche', ssKAim: 'Fadenkreuz bewegen', ssKFire: 'Von der nächsten Sternwarte leuchten lassen',
+        ssKBat: 'Von Sternwarte 1, 2 oder 3 leuchten lassen', ssKAgain: 'Neu starten', ssPickT: 'Leuchtende Sternwarte',
+        ssPickN: 'Nächste', ssPickF: 'Vollste', ssRules: 'Meteore fallen auf deine sechs Dörfer und drei Sternwarten. Tippe in den Himmel: Von der nächsten Sternwarte mit Lichtblitzen steigt ein Lichtblitz auf und erblüht an dieser Stelle. Das Leuchten wächst, hält kurz und verblasst und lässt jeden Meteor darin zu Funken zerspringen; jeder zersprungene Meteor leuchtet ebenfalls auf, so kann ein Lichtblitz eine Kettenreaktion auslösen. Ziele etwas vor einen fallenden Meteor. Jede Sternwarte hat zehn Lichtblitze pro Welle und wird zu Beginn der nächsten Welle aufgefüllt und wieder aufgebaut. Ab Welle 3 teilen sich manche Meteore in der Luft, ab Welle 4 fallen manche schneller. Übrige Lichtblitze und Dörfer geben am Ende einer Welle einen Bonus, und alle 10.000 Punkte wird ein verlorenes Dorf wieder aufgebaut. Das Spiel endet, wenn alle Dörfer verloren sind. Die Tagesaufgabe sind fünf Wellen, für alle gleich.',
+        ssTut1: 'Tippen und leuchten', ssTutText1: 'Tippe in den Himmel. Ein Lichtblitz steigt von der nächsten Sternwarte auf und erblüht genau dort.', ssTut2: 'Vorhalten',
+        ssTutText2: 'Während dein Licht aufsteigt, fallen die Meteore weiter. Ziele etwas voraus und lass ein Leuchten das nächste auslösen.', ssTut3: 'Lichtblitze und Dörfer', ssTutText3: 'Jede Sternwarte hat zehn Lichtblitze pro Welle. Übrige Dörfer und Lichtblitze geben einen Bonus; sind alle Dörfer weg, ist das Spiel vorbei.'
       },
       es: {
-        ssScene: 'Cielo de la ciudad con tres baterías de misiles y seis ciudades', ssTapGo: 'Toca para empezar la oleada.', ssTapNext: 'Toca para la siguiente oleada.',
-        ssHowTo: 'Toca cualquier punto del cielo para que estalle allí un antimisil.',
-        ssWaveN: 'Oleada {n}', ssDailyWave: 'Oleada {n} de {m}', ssScoreN: 'Puntos: {n}', ssBestN: 'Récord: {n}', ssDaily: 'Escudo celeste diario', ssNewRun: 'Empezar de nuevo',
-        ssClearT: '¡Oleada resistida! {n} puntos de bono.', ssCityBack: 'Se reconstruyó una ciudad.', ssNoAmmo: '¡Sin misiles!',
-        ssOver: '¡No queda ninguna ciudad!', ssWin: '¡Resististe las cinco oleadas!',
-        ssWaves: 'Oleadas resistidas', ssScore: 'Puntos', ssBest: 'Récord', ssTries: 'Intentos',
-        ssKAim: 'Mover la mira', ssKFire: 'Disparar desde la batería más cercana', ssKBat: 'Disparar desde la batería 1, 2 o 3', ssKAgain: 'Empezar de nuevo',
-        ssPickT: 'Batería que dispara', ssPickN: 'La más cercana', ssPickF: 'La más llena',
-        ssRules: 'Las ojivas caen sobre tus seis ciudades y tus tres baterías de misiles. Toca el cielo: un antimisil sale de la batería más cercana que tenga misiles y estalla en ese punto. La explosión crece, se mantiene un momento y se apaga, y destruye toda ojiva que haya dentro; cada ojiva destruida también estalla, así que un disparo puede provocar una cadena. Apunta un poco por delante de la ojiva que cae. Cada batería tiene diez misiles por oleada y se recarga y reconstruye al empezar la siguiente. Desde la oleada 3 algunas ojivas se dividen en el aire, y desde la 4 algunas caen más rápido. Los misiles y las ciudades que quedan dan un bono al final de cada oleada, y cada 10.000 puntos se reconstruye una ciudad perdida. La partida termina cuando no queda ninguna ciudad. El reto diario son cinco oleadas, iguales para todos.',
-        ssTut1: 'Toca y dispara', ssTutText1: 'Toca el cielo. Un antimisil sale de la batería más cercana y estalla justo allí.',
-        ssTut2: 'Adelántate', ssTutText2: 'Las ojivas siguen cayendo mientras vuela tu misil. Apunta un poco por delante y deja que una explosión encienda la siguiente.',
-        ssTut3: 'Misiles y ciudades', ssTutText3: 'Cada batería tiene diez misiles por oleada. Las ciudades y los misiles que quedan dan un bono; si pierdes todas las ciudades, se acabó.'
+        ssScene: 'Cielo nocturno con tres observatorios y seis pueblos', ssTapGo: 'Toca para empezar la oleada.', ssTapNext: 'Toca para la siguiente oleada.',
+        ssHowTo: 'Toca cualquier punto del cielo para que allí brille un destello de luz.', ssWaveN: 'Oleada {n}', ssDailyWave: 'Oleada {n} de {m}',
+        ssScoreN: 'Puntos: {n}', ssBestN: 'Récord: {n}', ssDaily: 'Lluvia de meteoros diaria',
+        ssNewRun: 'Empezar de nuevo', ssClearT: '¡Oleada superada! {n} puntos de bono.', ssCityBack: 'Se reconstruyó un pueblo.',
+        ssNoAmmo: '¡Sin destellos!', ssOver: '¡No queda ningún pueblo!', ssWin: '¡Superaste las cinco oleadas!',
+        ssWaves: 'Oleadas superadas', ssScore: 'Puntos', ssBest: 'Récord',
+        ssTries: 'Intentos', ssKAim: 'Mover la mira', ssKFire: 'Lanzar desde el observatorio más cercano',
+        ssKBat: 'Lanzar desde el observatorio 1, 2 o 3', ssKAgain: 'Empezar de nuevo', ssPickT: 'Observatorio que lanza',
+        ssPickN: 'El más cercano', ssPickF: 'El más lleno', ssRules: 'Los meteoros caen sobre tus seis pueblos y tus tres observatorios. Toca el cielo: del observatorio más cercano que tenga destellos sube uno y florece en ese punto. El brillo crece, se mantiene un momento y se apaga, y rompe en chispas todo meteoro que haya dentro; cada meteoro roto también destella, así que un destello puede provocar una cadena. Apunta un poco por delante del meteoro que cae. Cada observatorio tiene diez destellos por oleada y se recarga y reconstruye al empezar la siguiente. Desde la oleada 3 algunos meteoros se dividen en el aire, y desde la 4 algunos caen más rápido. Los destellos y los pueblos que quedan dan un bono al final de cada oleada, y cada 10.000 puntos se reconstruye un pueblo perdido. La partida termina cuando no queda ningún pueblo. El reto diario son cinco oleadas, iguales para todos.',
+        ssTut1: 'Toca e ilumina', ssTutText1: 'Toca el cielo. Un destello sube desde el observatorio más cercano y florece justo allí.', ssTut2: 'Adelántate',
+        ssTutText2: 'Los meteoros siguen cayendo mientras sube tu luz. Apunta un poco por delante y deja que un destello encienda el siguiente.', ssTut3: 'Destellos y pueblos', ssTutText3: 'Cada observatorio tiene diez destellos por oleada. Los pueblos y destellos que quedan dan un bono; si pierdes todos los pueblos, se acabó.'
       },
       pl: {
-        ssScene: 'Niebo nad miastem, trzy wyrzutnie rakiet i sześć miast', ssTapGo: 'Dotknij, aby zacząć falę.', ssTapNext: 'Dotknij, aby przejść do następnej fali.',
-        ssHowTo: 'Dotknij dowolnego miejsca na niebie, a antyrakieta wybuchnie właśnie tam.',
-        ssWaveN: 'Fala {n}', ssDailyWave: 'Fala {n} z {m}', ssScoreN: 'Wynik: {n}', ssBestN: 'Rekord: {n}', ssDaily: 'Dzienna Tarcza Nieba', ssNewRun: 'Od nowa',
-        ssClearT: 'Fala odparta! {n} pkt premii.', ssCityBack: 'Jedno miasto zostało odbudowane.', ssNoAmmo: 'Brak rakiet!',
-        ssOver: 'Wszystkie miasta zniszczone!', ssWin: 'Odparto wszystkie pięć fal!',
-        ssWaves: 'Odparte fale', ssScore: 'Wynik', ssBest: 'Rekord', ssTries: 'Próby',
-        ssKAim: 'Przesuń celownik', ssKFire: 'Strzał z najbliższej wyrzutni', ssKBat: 'Strzał z wyrzutni 1, 2 lub 3', ssKAgain: 'Od nowa',
-        ssPickT: 'Która wyrzutnia strzela', ssPickN: 'Najbliższa', ssPickF: 'Najpełniejsza',
-        ssRules: 'Głowice spadają na twoje sześć miast i trzy wyrzutnie rakiet. Dotknij nieba: antyrakieta startuje z najbliższej wyrzutni, która ma rakiety, i wybucha w tym miejscu. Wybuch rośnie, trwa chwilę i gaśnie, niszcząc każdą głowicę w środku; każda zniszczona głowica też wybucha, więc jeden strzał może wywołać reakcję łańcuchową. Celuj trochę przed spadającą głowicę. Każda wyrzutnia ma dziesięć rakiet na falę i na początku następnej fali jest uzupełniana i odbudowywana. Od fali 3 niektóre głowice dzielą się w powietrzu, a od fali 4 niektóre spadają szybciej. Pozostałe rakiety i miasta dają premię na koniec fali, a co 10 000 punktów odbudowuje się jedno utracone miasto. Gra kończy się, gdy nie zostanie żadne miasto. Wyzwanie dnia to pięć fal, takich samych dla wszystkich.',
-        ssTut1: 'Dotknij i strzelaj', ssTutText1: 'Dotknij nieba. Antyrakieta startuje z najbliższej wyrzutni i wybucha właśnie tam.',
-        ssTut2: 'Celuj z wyprzedzeniem', ssTutText2: 'Głowice spadają dalej, gdy twoja rakieta leci. Celuj trochę przed nimi i pozwól, by jeden wybuch odpalił następny.',
-        ssTut3: 'Rakiety i miasta', ssTutText3: 'Każda wyrzutnia ma dziesięć rakiet na falę. Pozostałe miasta i rakiety dają premię; gdy stracisz wszystkie miasta, gra się kończy.'
+        ssScene: 'Nocne niebo, trzy obserwatoria i sześć wiosek', ssTapGo: 'Dotknij, aby zacząć falę.', ssTapNext: 'Dotknij, aby przejść do następnej fali.',
+        ssHowTo: 'Dotknij dowolnego miejsca na niebie, a rozbłyśnie tam światło.', ssWaveN: 'Fala {n}', ssDailyWave: 'Fala {n} z {m}',
+        ssScoreN: 'Wynik: {n}', ssBestN: 'Rekord: {n}', ssDaily: 'Dzienny Deszcz meteorów',
+        ssNewRun: 'Od nowa', ssClearT: 'Fala przetrwana! {n} pkt premii.', ssCityBack: 'Jedna wioska została odbudowana.',
+        ssNoAmmo: 'Brak rozbłysków!', ssOver: 'Wszystkie wioski stracone!', ssWin: 'Przetrwano wszystkie pięć fal!',
+        ssWaves: 'Przetrwane fale', ssScore: 'Wynik', ssBest: 'Rekord',
+        ssTries: 'Próby', ssKAim: 'Przesuń celownik', ssKFire: 'Rozbłysk z najbliższego obserwatorium',
+        ssKBat: 'Rozbłysk z obserwatorium 1, 2 lub 3', ssKAgain: 'Od nowa', ssPickT: 'Które obserwatorium świeci',
+        ssPickN: 'Najbliższe', ssPickF: 'Najpełniejsze', ssRules: 'Meteory spadają na twoje sześć wiosek i trzy obserwatoria. Dotknij nieba: z najbliższego obserwatorium, które ma jeszcze rozbłyski, wznosi się światło i rozkwita w tym miejscu. Blask rośnie, trwa chwilę i gaśnie, rozbijając w iskry każdy meteor w środku; każdy rozbity meteor też rozbłyska, więc jeden rozbłysk może wywołać reakcję łańcuchową. Celuj trochę przed spadający meteor. Każde obserwatorium ma dziesięć rozbłysków na falę i na początku następnej fali jest uzupełniane i odbudowywane. Od fali 3 niektóre meteory dzielą się w powietrzu, a od fali 4 niektóre spadają szybciej. Pozostałe rozbłyski i wioski dają premię na koniec fali, a co 10 000 punktów odbudowuje się jedna utracona wioska. Gra kończy się, gdy nie zostanie żadna wioska. Wyzwanie dnia to pięć fal, takich samych dla wszystkich.',
+        ssTut1: 'Dotknij i rozświetl', ssTutText1: 'Dotknij nieba. Z najbliższego obserwatorium wznosi się światło i rozkwita właśnie tam.', ssTut2: 'Celuj z wyprzedzeniem',
+        ssTutText2: 'Meteory spadają dalej, gdy twoje światło leci. Celuj trochę przed nie i pozwól, by jeden rozbłysk zapalił następny.', ssTut3: 'Rozbłyski i wioski', ssTutText3: 'Każde obserwatorium ma dziesięć rozbłysków na falę. Pozostałe wioski i rozbłyski dają premię; gdy stracisz wszystkie wioski, gra się kończy.'
       },
       fr: {
-        ssScene: 'Ciel de la ville avec trois batteries de missiles et six villes', ssTapGo: 'Touchez pour lancer la vague.', ssTapNext: 'Touchez pour la vague suivante.',
-        ssHowTo: 'Touchez n’importe où dans le ciel pour y faire exploser un antimissile.',
-        ssWaveN: 'Vague {n}', ssDailyWave: 'Vague {n} sur {m}', ssScoreN: 'Score : {n}', ssBestN: 'Record : {n}', ssDaily: 'Bouclier céleste du jour', ssNewRun: 'Recommencer',
-        ssClearT: 'Vague repoussée ! {n} points de bonus.', ssCityBack: 'Une ville a été reconstruite.', ssNoAmmo: 'Plus de missiles !',
-        ssOver: 'Toutes les villes sont détruites !', ssWin: 'Les cinq vagues sont repoussées !',
-        ssWaves: 'Vagues repoussées', ssScore: 'Score', ssBest: 'Record', ssTries: 'Essais',
-        ssKAim: 'Déplacer le viseur', ssKFire: 'Tirer depuis la batterie la plus proche', ssKBat: 'Tirer depuis la batterie 1, 2 ou 3', ssKAgain: 'Recommencer',
-        ssPickT: 'Batterie qui tire', ssPickN: 'La plus proche', ssPickF: 'La plus pleine',
-        ssRules: 'Des ogives tombent sur vos six villes et vos trois batteries de missiles. Touchez le ciel : un antimissile part de la batterie la plus proche qui a encore des missiles et explose à cet endroit. L’explosion grandit, tient un instant puis s’efface, et détruit toute ogive qui s’y trouve ; chaque ogive détruite explose à son tour, si bien qu’un tir peut déclencher une réaction en chaîne. Visez un peu devant une ogive qui tombe. Chaque batterie a dix missiles par vague et elle est rechargée et reconstruite au début de la vague suivante. Dès la vague 3, certaines ogives se divisent en vol, et dès la vague 4, certaines tombent plus vite. Les missiles et les villes restants donnent un bonus à la fin de chaque vague, et tous les 10 000 points une ville perdue est reconstruite. La partie s’arrête quand il ne reste plus aucune ville. Le défi du jour compte cinq vagues, les mêmes pour tous.',
-        ssTut1: 'Touchez pour tirer', ssTutText1: 'Touchez le ciel. Un antimissile part de la batterie la plus proche et explose juste là.',
-        ssTut2: 'Visez devant', ssTutText2: 'Les ogives continuent de tomber pendant que votre missile vole. Visez un peu devant et laissez une explosion déclencher la suivante.',
-        ssTut3: 'Missiles et villes', ssTutText3: 'Chaque batterie a dix missiles par vague. Les villes et les missiles restants donnent un bonus ; perdez toutes les villes et la partie est finie.'
+        ssScene: 'Ciel nocturne avec trois observatoires et six villages', ssTapGo: 'Touchez pour lancer la vague.', ssTapNext: 'Touchez pour la vague suivante.',
+        ssHowTo: 'Touchez n’importe où dans le ciel pour y faire jaillir un éclat de lumière.', ssWaveN: 'Vague {n}', ssDailyWave: 'Vague {n} sur {m}',
+        ssScoreN: 'Score : {n}', ssBestN: 'Record : {n}', ssDaily: 'Pluie de météores du jour',
+        ssNewRun: 'Recommencer', ssClearT: 'Vague passée ! {n} points de bonus.', ssCityBack: 'Un village a été reconstruit.',
+        ssNoAmmo: 'Plus d’éclats !', ssOver: 'Tous les villages sont détruits !', ssWin: 'Les cinq vagues sont passées !',
+        ssWaves: 'Vagues passées', ssScore: 'Score', ssBest: 'Record',
+        ssTries: 'Essais', ssKAim: 'Déplacer le viseur', ssKFire: 'Lancer depuis l’observatoire le plus proche',
+        ssKBat: 'Lancer depuis l’observatoire 1, 2 ou 3', ssKAgain: 'Recommencer', ssPickT: 'Observatoire qui lance',
+        ssPickN: 'Le plus proche', ssPickF: 'Le plus plein', ssRules: 'Des météores tombent sur vos six villages et vos trois observatoires. Touchez le ciel : un éclat de lumière part de l’observatoire le plus proche qui en a encore et s’épanouit à cet endroit. La lueur grandit, tient un instant puis s’efface, et brise en étincelles tout météore qui s’y trouve ; chaque météore brisé s’illumine à son tour, si bien qu’un éclat peut déclencher une réaction en chaîne. Visez un peu devant un météore qui tombe. Chaque observatoire a dix éclats par vague et il est rechargé et reconstruit au début de la vague suivante. Dès la vague 3, certains météores se divisent en vol, et dès la vague 4, certains tombent plus vite. Les éclats et les villages restants donnent un bonus à la fin de chaque vague, et tous les 10 000 points un village perdu est reconstruit. La partie s’arrête quand il ne reste plus aucun village. Le défi du jour compte cinq vagues, les mêmes pour tous.',
+        ssTut1: 'Touchez pour éclairer', ssTutText1: 'Touchez le ciel. Un éclat de lumière part de l’observatoire le plus proche et s’épanouit juste là.', ssTut2: 'Visez devant',
+        ssTutText2: 'Les météores continuent de tomber pendant que votre lumière monte. Visez un peu devant et laissez un éclat déclencher le suivant.', ssTut3: 'Éclats et villages', ssTutText3: 'Chaque observatoire a dix éclats par vague. Les villages et les éclats restants donnent un bonus ; perdez tous les villages et la partie est finie.'
       },
       ar: {
-        ssScene: 'سماء المدينة مع ثلاث بطاريات صواريخ وست مدن', ssTapGo: 'المس الشاشة لبدء الموجة.', ssTapNext: 'المس الشاشة للموجة التالية.',
-        ssHowTo: 'المس أي مكان في السماء لينفجر صاروخ اعتراضي هناك.',
-        ssWaveN: 'الموجة {n}', ssDailyWave: 'الموجة {n} من {m}', ssScoreN: 'النقاط: {n}', ssBestN: 'الأفضل: {n}', ssDaily: 'درع السماء اليومي', ssNewRun: 'من جديد',
-        ssClearT: 'صددت الموجة! {n} نقطة مكافأة.', ssCityBack: 'أُعيد بناء مدينة.', ssNoAmmo: 'نفدت الصواريخ!',
-        ssOver: 'دُمّرت كل المدن!', ssWin: 'صددت الموجات الخمس كلها!',
-        ssWaves: 'الموجات المصدودة', ssScore: 'النقاط', ssBest: 'الأفضل', ssTries: 'المحاولات',
-        ssKAim: 'تحريك المنظار', ssKFire: 'الإطلاق من أقرب بطارية', ssKBat: 'الإطلاق من البطارية 1 أو 2 أو 3', ssKAgain: 'من جديد',
-        ssPickT: 'البطارية التي تطلق', ssPickN: 'الأقرب', ssPickF: 'الأكثر امتلاءً',
-        ssRules: 'تسقط رؤوس حربية نحو مدنك الست وبطاريات صواريخك الثلاث. المس السماء: ينطلق صاروخ اعتراضي من أقرب بطارية لديها صواريخ وينفجر في تلك النقطة. يكبر الانفجار ويبقى لحظة ثم يتلاشى، ويدمّر كل رأس حربي داخله؛ وكل رأس يُدمَّر ينفجر بدوره، فقد تُشعل طلقة واحدة سلسلة انفجارات. صوّب أمام الرأس الساقط بقليل. لكل بطارية عشرة صواريخ في كل موجة، وتُملأ ويُعاد بناؤها عند بدء الموجة التالية. من الموجة الثالثة تنقسم بعض الرؤوس في الجو، ومن الرابعة يسقط بعضها أسرع. الصواريخ والمدن الباقية تمنح مكافأة في نهاية كل موجة، وكل 10,000 نقطة تعيد بناء مدينة مدمّرة. تنتهي اللعبة حين تُدمَّر كل المدن. التحدي اليومي خمس موجات متطابقة للجميع.',
-        ssTut1: 'المس لتطلق', ssTutText1: 'المس السماء. ينطلق صاروخ اعتراضي من أقرب بطارية وينفجر هناك تمامًا.',
-        ssTut2: 'صوّب أمامه', ssTutText2: 'تواصل الرؤوس سقوطها بينما يطير صاروخك. صوّب أمامها بقليل، ودع انفجارًا يُشعل التالي.',
-        ssTut3: 'الصواريخ والمدن', ssTutText3: 'لكل بطارية عشرة صواريخ في كل موجة. المدن والصواريخ الباقية تمنح مكافأة؛ وإن خسرت كل المدن انتهت اللعبة.'
+        ssScene: 'سماء الليل مع ثلاثة مراصد وست قرى', ssTapGo: 'المس الشاشة لبدء الموجة.', ssTapNext: 'المس الشاشة للموجة التالية.',
+        ssHowTo: 'المس أي مكان في السماء ليتألق وميض ضوء هناك.', ssWaveN: 'الموجة {n}', ssDailyWave: 'الموجة {n} من {m}',
+        ssScoreN: 'النقاط: {n}', ssBestN: 'الأفضل: {n}', ssDaily: 'زخّة الشهب اليومية',
+        ssNewRun: 'من جديد', ssClearT: 'عبرت الموجة! {n} نقطة مكافأة.', ssCityBack: 'أُعيد بناء قرية.',
+        ssNoAmmo: 'نفدت الومضات!', ssOver: 'دُمّرت كل القرى!', ssWin: 'عبرت الموجات الخمس كلها!',
+        ssWaves: 'الموجات المعبورة', ssScore: 'النقاط', ssBest: 'الأفضل',
+        ssTries: 'المحاولات', ssKAim: 'تحريك المنظار', ssKFire: 'الإضاءة من أقرب مرصد',
+        ssKBat: 'الإضاءة من المرصد 1 أو 2 أو 3', ssKAgain: 'من جديد', ssPickT: 'المرصد الذي يضيء',
+        ssPickN: 'الأقرب', ssPickF: 'الأكثر امتلاءً', ssRules: 'تسقط الشهب نحو قراك الست ومراصدك الثلاثة. المس السماء: يصعد وميض ضوء من أقرب مرصد لديه ومضات وينفتح في تلك النقطة. يكبر التوهج ويبقى لحظة ثم يتلاشى، ويحطّم كل شهاب داخله إلى شرارات؛ وكل شهاب يتحطم يتوهج بدوره، فقد يُشعل وميض واحد سلسلة من التوهجات. صوّب أمام الشهاب الساقط بقليل. لكل مرصد عشر ومضات في كل موجة، ويُملأ ويُعاد بناؤه عند بدء الموجة التالية. من الموجة الثالثة تنقسم بعض الشهب في الجو، ومن الرابعة يسقط بعضها أسرع. الومضات والقرى الباقية تمنح مكافأة في نهاية كل موجة، وكل 10,000 نقطة تعيد بناء قرية مدمّرة. تنتهي اللعبة حين تُدمَّر كل القرى. التحدي اليومي خمس موجات متطابقة للجميع.',
+        ssTut1: 'المس لتضيء', ssTutText1: 'المس السماء. يصعد وميض ضوء من أقرب مرصد وينفتح هناك تمامًا.', ssTut2: 'صوّب أمامه',
+        ssTutText2: 'تواصل الشهب سقوطها بينما يصعد ضوؤك. صوّب أمامها بقليل، ودع توهجًا يُشعل التالي.', ssTut3: 'الومضات والقرى', ssTutText3: 'لكل مرصد عشر ومضات في كل موجة. القرى والومضات الباقية تمنح مكافأة؛ وإن خسرت كل القرى انتهت اللعبة.'
       },
       hi: {
-        ssScene: 'शहर का आसमान, तीन मिसाइल ठिकाने और छह शहर', ssTapGo: 'लहर शुरू करने के लिए छुएँ।', ssTapNext: 'अगली लहर के लिए छुएँ।',
-        ssHowTo: 'आसमान में कहीं भी छुएँ, रोधी मिसाइल वहीं फटेगी।',
-        ssWaveN: 'लहर {n}', ssDailyWave: 'लहर {n} / {m}', ssScoreN: 'अंक: {n}', ssBestN: 'सर्वश्रेष्ठ: {n}', ssDaily: 'रोज़ की आसमानी ढाल', ssNewRun: 'फिर से शुरू',
-        ssClearT: 'लहर रोक ली! {n} बोनस अंक।', ssCityBack: 'एक शहर फिर से बन गया।', ssNoAmmo: 'मिसाइलें ख़त्म!',
-        ssOver: 'सारे शहर ख़त्म हो गए!', ssWin: 'पाँचों लहरें रोक लीं!',
-        ssWaves: 'रोकी गई लहरें', ssScore: 'अंक', ssBest: 'सर्वश्रेष्ठ', ssTries: 'कोशिशें',
-        ssKAim: 'निशाना हिलाएँ', ssKFire: 'सबसे पास के ठिकाने से दागें', ssKBat: 'ठिकाना 1, 2 या 3 से दागें', ssKAgain: 'फिर से शुरू',
-        ssPickT: 'कौन-सा ठिकाना दागे', ssPickN: 'सबसे पास वाला', ssPickF: 'सबसे भरा',
-        ssRules: 'हथियार आपके छह शहरों और तीन मिसाइल ठिकानों पर गिर रहे हैं। आसमान छुएँ: सबसे पास का वह ठिकाना जिसमें मिसाइल बची है, एक रोधी मिसाइल दागता है जो उसी जगह फटती है। धमाका बढ़ता है, पल भर टिकता है और फिर मिट जाता है, और उसके अंदर का हर हथियार नष्ट हो जाता है; नष्ट हुआ हथियार भी फटता है, इसलिए एक गोली से धमाकों की लड़ी बन सकती है। गिरते हथियार से थोड़ा आगे निशाना लगाएँ। हर ठिकाने में हर लहर दस मिसाइलें होती हैं, और अगली लहर शुरू होने पर उसे भर दिया और फिर से बना दिया जाता है। लहर 3 से कुछ हथियार हवा में टूट जाते हैं और लहर 4 से कुछ तेज़ गिरते हैं। लहर के अंत में बची मिसाइलें और शहर बोनस देते हैं, और हर 10,000 अंक पर एक उजड़ा शहर फिर बनता है। सारे शहर ख़त्म होने पर खेल ख़त्म। रोज़ की चुनौती सबके लिए एक जैसी पाँच लहरें हैं।',
-        ssTut1: 'छुएँ और दागें', ssTutText1: 'आसमान छुएँ। सबसे पास के ठिकाने से रोधी मिसाइल उड़ती है और ठीक वहीं फटती है।',
-        ssTut2: 'आगे निशाना', ssTutText2: 'आपकी मिसाइल उड़ते समय हथियार गिरते रहते हैं। थोड़ा आगे निशाना लगाएँ और एक धमाके से अगला जलने दें।',
-        ssTut3: 'मिसाइलें और शहर', ssTutText3: 'हर ठिकाने में हर लहर दस मिसाइलें होती हैं। बचे शहर और मिसाइलें बोनस देते हैं; सारे शहर गए तो खेल ख़त्म।'
+        ssScene: 'रात का आसमान, तीन वेधशालाएँ और छह गाँव', ssTapGo: 'लहर शुरू करने के लिए छुएँ।', ssTapNext: 'अगली लहर के लिए छुएँ।',
+        ssHowTo: 'आसमान में कहीं भी छुएँ, वहीं रोशनी की चमक उठेगी।', ssWaveN: 'लहर {n}', ssDailyWave: 'लहर {n} / {m}',
+        ssScoreN: 'अंक: {n}', ssBestN: 'सर्वश्रेष्ठ: {n}', ssDaily: 'रोज़ की उल्का वर्षा',
+        ssNewRun: 'फिर से शुरू', ssClearT: 'लहर पार हुई! {n} बोनस अंक।', ssCityBack: 'एक गाँव फिर से बस गया।',
+        ssNoAmmo: 'चमकें ख़त्म!', ssOver: 'सारे गाँव ख़त्म हो गए!', ssWin: 'पाँचों लहरें पार हुईं!',
+        ssWaves: 'पार की गई लहरें', ssScore: 'अंक', ssBest: 'सर्वश्रेष्ठ',
+        ssTries: 'कोशिशें', ssKAim: 'निशाना हिलाएँ', ssKFire: 'सबसे पास की वेधशाला से चमकाएँ',
+        ssKBat: 'वेधशाला 1, 2 या 3 से चमकाएँ', ssKAgain: 'फिर से शुरू', ssPickT: 'कौन-सी वेधशाला चमके',
+        ssPickN: 'सबसे पास वाली', ssPickF: 'सबसे भरी', ssRules: 'उल्काएँ आपके छह गाँवों और तीन वेधशालाओं पर गिर रही हैं। आसमान छुएँ: सबसे पास की वह वेधशाला जिसमें चमकें बची हैं, रोशनी की एक चमक उठाती है जो उसी जगह खिल उठती है। चमक बढ़ती है, पल भर टिकती है और फिर मिट जाती है, और उसके अंदर की हर उल्का चमकते कणों में बिखर जाती है; बिखरी हुई उल्का भी चमक उठती है, इसलिए एक चमक से चमकों की लड़ी बन सकती है। गिरती उल्का से थोड़ा आगे निशाना लगाएँ। हर वेधशाला में हर लहर दस चमकें होती हैं, और अगली लहर शुरू होने पर उसे भर दिया और फिर से बना दिया जाता है। लहर 3 से कुछ उल्काएँ हवा में टूट जाती हैं और लहर 4 से कुछ तेज़ गिरती हैं। लहर के अंत में बची चमकें और गाँव बोनस देते हैं, और हर 10,000 अंक पर एक उजड़ा गाँव फिर बसता है। सारे गाँव ख़त्म होने पर खेल ख़त्म। रोज़ की चुनौती सबके लिए एक जैसी पाँच लहरें हैं।',
+        ssTut1: 'छुएँ और चमकाएँ', ssTutText1: 'आसमान छुएँ। सबसे पास की वेधशाला से रोशनी उठती है और ठीक वहीं खिल उठती है।', ssTut2: 'आगे निशाना',
+        ssTutText2: 'आपकी रोशनी उठते समय उल्काएँ गिरती रहती हैं। थोड़ा आगे निशाना लगाएँ और एक चमक से अगली जलने दें।', ssTut3: 'चमकें और गाँव', ssTutText3: 'हर वेधशाला में हर लहर दस चमकें होती हैं। बचे गाँव और चमकें बोनस देते हैं; सारे गाँव गए तो खेल ख़त्म।'
       }
     }
   });
 
-  // which battery a tap fires from, behind the gear: the nearest for a new player
+  // which observatory a tap flares from, behind the gear: the nearest for a new player
   var prefs = ctx.store.get('prefs', null);
   if (!prefs || typeof prefs !== 'object') prefs = {};
   prefs.pick = prefs.pick === 'full' ? 'full' : 'near';
@@ -497,7 +488,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SkyShieldE
   // the run: wave n (1-based), the waves held, the endless run's own seed
   var S = null, n = 1, held = 0, tries = 0, runSeed = 0, startedAt = 0;
   var raf = 0, last = 0, acc = 0, paused = false, ended = false, waiting = false, clock = 0;
-  var clearAt = 0, nextReady = false, cityBack = false, noAmmo = false, lastFlak = 0, lastHit = 0;
+  var clearAt = 0, nextReady = false, cityBack = false, noAmmo = false, lastChime = 0, lastHit = 0;
   var aim = { x: 50, y: 55 }, keys = { l: false, r: false, u: false, d: false }, kbUsed = false;
   var bits = [], shake = 0;
 
@@ -567,7 +558,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SkyShieldE
       if (ev.length) events(ev, cb, bb, now);
       if (S.score !== sc) renderTop();
     }
-    // after the last city falls the blasts still burn out on screen
+    // after the last village falls the bursts still burn out on screen
     if (S.phase === 'over' && !blocked) {
       S.blasts = S.blasts.filter(function (b) { b.t += dt; return b.t < E.LIFE; });
     }
@@ -581,9 +572,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SkyShieldE
 
   function events(ev, cb, bb, now) {
     var still = C.ui.reduceMotion(), i;
-    if (ev.indexOf('blast') >= 0 && now - lastFlak > 70) { lastFlak = now; C.audio.sfx('flak'); }
+    if (ev.indexOf('blast') >= 0 && now - lastChime > 70) { lastChime = now; C.audio.sfx('chime'); }
     if (ev.indexOf('chain') >= 0 && now - lastHit > 90) { lastHit = now; C.audio.sfx('hit'); }
-    // a destroyed warhead's own burst is a fresh chain blast: sparks fly from it
+    // a shattered meteor's own flare is a fresh chain burst: sparkles fly from it
     S.blasts.forEach(function (b) { if (b.k === 'chain' && b.t === 0) sparks(b.x, b.y, still ? 3 : 10, 0); });
     for (i = 0; i < 6; i++) if (cb[i] && !S.cities[i]) hitGround(E.CITY_X[i], still);
     for (i = 0; i < 3; i++) if (bb[i] && !S.bats[i].alive) hitGround(E.BAT_X[i], still);
@@ -652,7 +643,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SkyShieldE
         { label: C.t('ssScore'), value: C.num(score) },
         dailyDate ? { label: C.t('ssTries'), value: C.num(tries) } : { label: C.t('ssBest'), value: C.num(bestEver || score) }
       ],
-      shareText: 'چوگان · سپر آسمان' + (dailyDate ? ('\nروزانه ' + dailyDate) : '') + '\n' + held + ' موج · ' + score + ' امتیاز',
+      shareText: 'چوگان · باران شهاب' + (dailyDate ? ('\nروزانه ' + dailyDate) : '') + '\n' + held + ' موج · ' + score + ' امتیاز',
       againLabel: C.t('ssNewRun'),
       onAgain: dailyDate && won ? null : function () { newRun(); }
     });
@@ -667,9 +658,14 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SkyShieldE
     return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
   }
   function palette() {
-    return dark()
-      ? { sky0: '#05081A', sky1: '#232246', star: 'rgba(255,255,255,', ground: '#252B2A', groundTop: '#3E4A3C', city: '#8EA3C8', cityDk: '#5A6B8E', win: '#FFD36B', rubble: '#4B4A52', mound: '#4E4840', dome: '#FF4D6A', domeDk: '#8A1430', trail: 'rgba(255,128,96,', head: '#FFC2B0', fast: '#FFE45C', shot: 'rgba(130,215,255,', shotHead: '#E6F7FF', core: '#FFFFFF', blast: '#FF6A3D', chain: '#FFC24D', ground0: '#FF7A3D', text: '#EEF1F6', dim: 'rgba(238,241,246,', bits: ['#FFD27A', '#FF8A4D', '#8B8A93'] }
-      : { sky0: '#8FB0DD', sky1: '#F7EFE4', star: 'rgba(255,255,255,', ground: '#8A7C63', groundTop: '#6E8C4E', city: '#4F6489', cityDk: '#34435F', win: '#FFE7A0', rubble: '#7E746A', mound: '#7A6B57', dome: ACCENT, domeDk: '#6E0018', trail: 'rgba(150,30,22,', head: '#6E0E0E', fast: '#B25200', shot: 'rgba(16,64,140,', shotHead: '#0B2E66', core: '#FFF7DC', blast: '#EA4E28', chain: '#F2A11C', ground0: '#C9461C', text: '#1F2430', dim: 'rgba(31,36,48,', bits: ['#F2A11C', '#C9461C', '#5E5650'] };
+    // a night sky in both themes: the light theme is only a lighter twilight, so the stars,
+    // the light bursts and the white text keep their contrast
+    var base = { star: 'rgba(255,255,255,', city: '#C9B896', cityDk: '#9C8A6C', roof: '#B5573F', win: '#FFD36B', rubble: '#56546B', dome: '#ECE6FA', domeDk: '#6C648A', trail: 'rgba(255,160,80,', head: '#FFD9A8', fast: '#FFF08A', shot: 'rgba(255,232,150,', shotHead: '#FFFFFF', core: '#FFFFFF', blast: '#FFD86B', chain: '#9FE8FF', ground0: '#FF9A5C', text: '#F2F2FA', dim: 'rgba(242,242,250,', bits: ['#FFD86B', '#9FE8FF', '#FFFFFF'] };
+    var sky = dark()
+      ? { sky0: '#05081A', sky1: '#2A2160', ground: '#1B1B33', groundTop: '#3A4A6B', mound: '#34325A' }
+      : { sky0: '#2C3C94', sky1: '#8E78C0', ground: '#2E2A52', groundTop: '#4C5C86', mound: '#463F78' };
+    for (var key in sky) base[key] = sky[key];
+    return base;
   }
 
   function size() {
@@ -691,9 +687,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SkyShieldE
   function sx(V, x) { return V.ox + x * V.k; }
   function sy(V, y) { return V.by - y * V.k; }
 
-  // fixed stars and skylines, placed once by seeded generators so nothing jumps between frames
+  // fixed stars and rooflines, placed once by seeded generators so nothing jumps between frames
   var STARS = (function () { var r = E.rng(906), s = []; for (var i = 0; i < 60; i++) s.push([r(), r(), 0.5 + r() * 1.2, r()]); return s; })();
-  var TOWERS = E.CITY_X.map(function (cx, ci) {
+  var HOUSES = E.CITY_X.map(function (cx, ci) {
     var r = E.rng(9060 + ci), t = [], x = cx - 3.6;
     while (x < cx + 3.2) {
       var w = 1.3 + r() * 1.3, h = 2.6 + r() * 4.2;
@@ -717,12 +713,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SkyShieldE
     var sky = g.createLinearGradient(0, 0, 0, Z.h);
     sky.addColorStop(0, P.sky0); sky.addColorStop(1, P.sky1);
     g.fillStyle = sky; g.fillRect(0, 0, Z.w, Z.h);
-    if (dark()) {
-      for (i = 0; i < STARS.length; i++) {
-        var st = STARS[i], tw = still ? 0.7 : 0.45 + 0.4 * Math.sin(clock * 1.2 + st[3] * 20);
-        g.fillStyle = P.star + tw.toFixed(2) + ')';
-        g.fillRect(st[0] * Z.w, st[1] * Z.h * 0.65, st[2], st[2]);
-      }
+    for (i = 0; i < STARS.length; i++) {
+      var st = STARS[i], tw = still ? 0.7 : 0.45 + 0.4 * Math.sin(clock * 1.2 + st[3] * 20);
+      g.fillStyle = P.star + tw.toFixed(2) + ')';
+      g.fillRect(st[0] * Z.w, st[1] * Z.h * 0.65, st[2], st[2]);
     }
     // a shaken screen moves the world, never the sky
     var shx = 0, shy = 0;
@@ -734,11 +728,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SkyShieldE
     g.fillStyle = P.ground; g.fillRect(-20, gy, Z.w + 40, Z.h - gy + 20);
     g.fillStyle = P.groundTop; g.fillRect(-20, gy, Z.w + 40, Math.max(2, k * 0.7));
 
-    // cities: a few towers with lit windows, or a low heap of rubble once hit
-    for (i = 0; i < 6; i++) drawCity(g, V, P, i);
-    for (i = 0; i < 3; i++) drawBattery(g, V, P, i, still);
+    // villages: a few small houses with lit windows, or a low heap of rubble once hit
+    for (i = 0; i < 6; i++) drawVillage(g, V, P, i);
+    for (i = 0; i < 3; i++) drawObservatory(g, V, P, i, still);
 
-    // warheads: a fading trail from where they entered, and a bright head
+    // meteors: a fading tail from where they entered, and a glowing head
     g.lineCap = 'round';
     S.war.forEach(function (w) {
       var hx = sx(V, w.x), hy = sy(V, w.y), x0 = sx(V, w.x0), y0 = sy(V, w.y0);
@@ -746,12 +740,15 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SkyShieldE
       grd.addColorStop(0, P.trail + '0)'); grd.addColorStop(1, P.trail + (w.fast ? '0.95)' : '0.8)'));
       g.strokeStyle = grd; g.lineWidth = Math.max(1.4, k * (w.fast ? 0.42 : 0.3));
       g.beginPath(); g.moveTo(x0, y0); g.lineTo(hx, hy); g.stroke();
+      var hr = Math.max(2.2, k * (w.fast ? 0.7 : 0.6)), glow = g.createRadialGradient(hx, hy, 0, hx, hy, hr * 2.6);
+      glow.addColorStop(0, P.trail + '0.55)'); glow.addColorStop(1, P.trail + '0)');
+      g.fillStyle = glow; g.beginPath(); g.arc(hx, hy, hr * 2.6, 0, Math.PI * 2); g.fill();
       g.fillStyle = w.fast ? P.fast : P.head;
-      g.beginPath(); g.arc(hx, hy, Math.max(2.2, k * (w.fast ? 0.7 : 0.6)), 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.arc(hx, hy, hr, 0, Math.PI * 2); g.fill();
       if (w.kids) { g.strokeStyle = P.head; g.lineWidth = Math.max(1, k * 0.18); g.beginPath(); g.arc(hx, hy, Math.max(4, k * 1.2), 0, Math.PI * 2); g.stroke(); }
     });
 
-    // counter-missiles: a thin trail from the battery and a cross where they will burst
+    // light bursts: a thin beam from the observatory and a cross where they will bloom
     S.shots.forEach(function (s) {
       g.strokeStyle = P.shot + '0.75)'; g.lineWidth = Math.max(1.2, k * 0.25);
       g.beginPath(); g.moveTo(sx(V, s.x0), sy(V, s.y0)); g.lineTo(sx(V, s.x), sy(V, s.y)); g.stroke();
@@ -761,7 +758,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SkyShieldE
       g.beginPath(); g.moveTo(tx - a, ty - a); g.lineTo(tx + a, ty + a); g.moveTo(tx + a, ty - a); g.lineTo(tx - a, ty + a); g.stroke();
     });
 
-    // blasts: a hot core in a coloured ball that flickers unless motion is reduced
+    // bursts: a bright core in a glowing ball that shimmers unless motion is reduced
     S.blasts.forEach(function (b) {
       var r = E.blastR(b) * k;
       if (r < 0.5) return;
@@ -804,7 +801,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SkyShieldE
     }
   }
 
-  function drawCity(g, V, P, i) {
+  function drawVillage(g, V, P, i) {
     var k = V.k, base = sy(V, E.GROUND);
     if (!S.cities[i]) {
       g.fillStyle = P.rubble;
@@ -813,10 +810,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SkyShieldE
       g.closePath(); g.fill();
       return;
     }
-    TOWERS[i].forEach(function (t, j) {
+    HOUSES[i].forEach(function (t, j) {
       var x = sx(V, t.x), w = t.w * k, h = t.h * k;
       g.fillStyle = j % 2 ? P.cityDk : P.city;
       g.fillRect(x, base - h, w, h);
+      g.fillStyle = P.roof;
+      g.beginPath(); g.moveTo(x - 0.15 * k, base - h); g.lineTo(x + w / 2, base - h - Math.min(w * 0.55, 1.6 * k)); g.lineTo(x + w + 0.15 * k, base - h); g.closePath(); g.fill();
       // windows only where there is room for them to read as windows
       if (k >= 2.5) {
         var cols = Math.max(1, Math.floor(t.w / 0.7)), rows = Math.max(1, Math.floor(t.h / 1.1)), ww = Math.max(1, k * 0.28);
@@ -828,21 +827,23 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SkyShieldE
       }
     });
   }
-  function drawBattery(g, V, P, i, still) {
+  function drawObservatory(g, V, P, i, still) {
     var k = V.k, b = S.bats[i], cx = sx(V, E.BAT_X[i]), base = sy(V, E.GROUND), topY = sy(V, E.BAT_Y - 1.2);
-    // a mound, with the launcher dome on top while it stands
+    // a mound, with the observatory dome on top while it stands
     g.fillStyle = P.mound;
     g.beginPath(); g.moveTo(cx - 5.5 * k, base); g.lineTo(cx - 2.6 * k, topY); g.lineTo(cx + 2.6 * k, topY); g.lineTo(cx + 5.5 * k, base); g.closePath(); g.fill();
     if (b.alive) {
       g.fillStyle = b.ammo ? P.dome : P.domeDk;
       g.beginPath(); g.arc(cx, topY, 1.8 * k, Math.PI, 0); g.closePath(); g.fill();
-      // a beacon that blinks while missiles are left
+      // the dome's slit
+      g.fillStyle = P.mound; g.fillRect(cx - 0.25 * k, topY - 1.7 * k, 0.5 * k, 1.7 * k);
+      // a star-bright beacon that blinks while light bursts are left
       if (b.ammo && (still || Math.sin(clock * 5 + i * 2) > 0)) { g.fillStyle = P.win; g.beginPath(); g.arc(cx, topY - 1.9 * k, Math.max(1.5, k * 0.35), 0, Math.PI * 2); g.fill(); }
     } else {
       g.strokeStyle = P.rubble; g.lineWidth = Math.max(2, k * 0.5); g.lineCap = 'round';
       g.beginPath(); g.moveTo(cx - 1.4 * k, topY - 1.2 * k); g.lineTo(cx + 1.4 * k, topY + 0.2 * k); g.moveTo(cx + 1.4 * k, topY - 1.2 * k); g.lineTo(cx - 1.4 * k, topY + 0.2 * k); g.stroke();
     }
-    // missiles left: a row of pips in the ground below, and the number beside them
+    // light bursts left: a row of pips in the ground below, and the number beside them
     var gy = base + Math.max(4, 1.6 * k), pw = Math.max(2, 0.55 * k), gap = Math.max(1, 0.25 * k), left = cx - (E.AMMO * (pw + gap) - gap) / 2;
     for (var m = 0; m < E.AMMO; m++) {
       g.fillStyle = m < b.ammo ? P.text : P.dim + '0.22)';
@@ -876,7 +877,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SkyShieldE
     status.textContent = t;
   }
 
-  // which battery fires lives behind the gear, never in the help
+  // which observatory flares lives behind the gear, never in the help
   function showSettings() {
     var seg = C.ui.segmented([{ value: 'near', label: C.t('ssPickN') }, { value: 'full', label: C.t('ssPickF') }], prefs.pick, function (v) {
       prefs.pick = v === 'full' ? 'full' : 'near';
@@ -911,7 +912,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SkyShieldE
   wrap.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
   // a digit on any keyboard layout: Latin, Persian or Arabic-Indic, top row or keypad
-  function batteryKey(e) {
+  function observatoryKey(e) {
     var m = /^(?:Digit|Numpad)([1-3])$/.exec(e.code || '');
     if (m) return +m[1] - 1;
     var i = ['1', '2', '3'].indexOf(e.key);
@@ -925,7 +926,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SkyShieldE
   }
   window.addEventListener('keydown', function (e) {
     if (document.querySelector('.ch-scrim') || !S) return;
-    var a = arrowOf(e), bi = batteryKey(e);
+    var a = arrowOf(e), bi = observatoryKey(e);
     if (a) { e.preventDefault(); keys[a] = true; if (!kbUsed) { kbUsed = true; draw(); } return; }
     if (e.key === ' ' || e.key === 'Enter') {
       e.preventDefault();
@@ -964,17 +965,18 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SkyShieldE
     });
   }
   function tArt(kind) {
-    var s = '<svg viewBox="0 0 200 110" width="100%" direction="ltr"><rect width="200" height="110" rx="10" fill="#1A1C3C"/>';
-    var ground = '<rect x="0" y="92" width="200" height="18" fill="#252B2A"/><rect x="0" y="92" width="200" height="2" fill="#3E4A3C"/>' +
-      '<path d="M4 92 L12 84 L24 84 L32 92Z M86 92 L94 84 L106 84 L114 92Z M168 92 L176 84 L188 84 L196 92Z" fill="#4E4840"/>' +
-      '<path d="M14 84 A4 4 0 0 1 22 84Z M96 84 A4 4 0 0 1 104 84Z M178 84 A4 4 0 0 1 186 84Z" fill="#FF4D6A"/>' +
-      '<path d="M38 92 V80 H43 V92 M45 92 V76 H49 V92 M56 92 V82 H61 V92 M63 92 V78 H67 V92 M74 92 V81 H79 V92 M126 92 V79 H131 V92 M133 92 V83 H137 V92 M144 92 V77 H149 V92 M151 92 V82 H155 V92 M160 92 V80 H165 V92" fill="#8EA3C8"/>';
-    var war = function (x0, x1, y1) { return '<path d="M' + x0 + ' 0 L' + x1 + ' ' + y1 + '" stroke="#FF8060" stroke-width="1.6" opacity=".8"/><circle cx="' + x1 + '" cy="' + y1 + '" r="2.4" fill="#FFC2B0"/>'; };
+    var s = '<svg viewBox="0 0 200 110" width="100%" direction="ltr"><rect width="200" height="110" rx="10" fill="#1A1C3C"/><g fill="#fff" opacity=".7"><circle cx="20" cy="14" r="1"/><circle cx="58" cy="30" r=".8"/><circle cx="92" cy="12" r="1.1"/><circle cx="150" cy="22" r=".9"/><circle cx="184" cy="10" r="1"/><circle cx="170" cy="50" r=".7"/></g>';
+    var ground = '<rect x="0" y="92" width="200" height="18" fill="#1B1B33"/><rect x="0" y="92" width="200" height="2" fill="#3A4A6B"/>' +
+      '<path d="M4 92 L12 84 L24 84 L32 92Z M86 92 L94 84 L106 84 L114 92Z M168 92 L176 84 L188 84 L196 92Z" fill="#34325A"/>' +
+      '<path d="M14 84 A4 4 0 0 1 22 84Z M96 84 A4 4 0 0 1 104 84Z M178 84 A4 4 0 0 1 186 84Z" fill="#ECE6FA"/>' +
+      '<path d="M38 92 V80 H43 V92 M45 92 V76 H49 V92 M56 92 V82 H61 V92 M63 92 V78 H67 V92 M74 92 V81 H79 V92 M126 92 V79 H131 V92 M133 92 V83 H137 V92 M144 92 V77 H149 V92 M151 92 V82 H155 V92 M160 92 V80 H165 V92" fill="#C9B896"/>' +
+      '<path d="M37 80 L40.5 76 L44 80Z M44 76 L47 72 L50 76Z M55 82 L58.5 78 L62 82Z M62 78 L65 74 L68 78Z M73 81 L76.5 77 L80 81Z M125 79 L128.5 75 L132 79Z M143 77 L146.5 73 L150 77Z M159 80 L162.5 76 L166 80Z" fill="#B5573F"/>';
+    var war = function (x0, x1, y1) { return '<path d="M' + x0 + ' 0 L' + x1 + ' ' + y1 + '" stroke="#FFA050" stroke-width="1.6" opacity=".8"/><circle cx="' + x1 + '" cy="' + y1 + '" r="2.4" fill="#FFD9A8"/>'; };
     var blast = function (x, y, r, c) { return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + c + '" opacity=".85"/><circle cx="' + x + '" cy="' + y + '" r="' + (r * 0.4) + '" fill="#fff"/>'; };
-    if (kind === 1) s += ground + war(60, 74, 40) + '<path d="M100 84 L120 34" stroke="#82D7FF" stroke-width="1.4"/><path d="M118 32 l6 6 m0 -6 l-6 6" stroke="#82D7FF" stroke-width="1.6"/>' +
+    if (kind === 1) s += ground + war(60, 74, 40) + '<path d="M100 84 L120 34" stroke="#FFE896" stroke-width="1.4"/><path d="M118 32 l6 6 m0 -6 l-6 6" stroke="#FFE896" stroke-width="1.6"/>' +
       '<circle cx="136" cy="44" r="9" fill="rgba(255,255,255,.25)"/><circle cx="136" cy="44" r="3.5" fill="#fff"/>';
-    if (kind === 2) s += ground + war(40, 70, 46) + war(130, 112, 40) + war(104, 96, 30) + blast(98, 38, 12, '#FF6A3D') + blast(112, 46, 7, '#FFC24D');
-    if (kind === 3) s += ground + '<path d="M54 92 L58 88 L62 90 L66 87 L70 92Z" fill="#4B4A52"/>' + blast(140, 50, 10, '#FF6A3D') +
+    if (kind === 2) s += ground + war(40, 70, 46) + war(130, 112, 40) + war(104, 96, 30) + blast(98, 38, 12, '#FFD86B') + blast(112, 46, 7, '#9FE8FF');
+    if (kind === 3) s += ground + '<path d="M54 92 L58 88 L62 90 L66 87 L70 92Z" fill="#56546B"/>' + blast(140, 50, 10, '#FFD86B') +
       '<g fill="#EEF1F6">' + [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(function (m) { return '<rect x="' + (90 + m * 2.2) + '" y="97" width="1.4" height="5"/>'; }).join('') + '</g>';
     return s + '</svg>';
   }
@@ -986,7 +988,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SkyShieldE
 
   /* -------------------------------------------------------------- start */
 
-  // A run is saved when the app goes away and comes back waiting for a tap, so no warhead
+  // A run is saved when the app goes away and comes back waiting for a tap, so no meteor
   // falls while nobody looks; a held wave comes back at the start of the next one
   ctx.autosave(function () {
     if (!S || S.phase === 'over' || ended || (n === 1 && waiting && S.t === 0)) return { inProgress: false };
