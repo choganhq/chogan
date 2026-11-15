@@ -1,0 +1,793 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>کوتوله‌ی زرد — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  :root { --ch-pface: var(--c-surface); --nj-gold: #C98A00; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --game-text: var(--game-text-dark, var(--game)); --ch-pface: var(--c-surface-3); --nj-gold: #F2B84B; } }
+  :root[data-theme="dark"] { --game-text: var(--game-text-dark, var(--game)); --ch-pface: var(--c-surface-3); --nj-gold: #F2B84B; }
+  /* cards grow with the game area (#359) */
+  .nj-wrap { --cw: clamp(40px, min(11cqw, (100cqh - 420px) / 1.6), 92px); margin-block: auto; width: 100%; max-width: max(560px, calc(var(--cw) * 8)); display: flex; flex-direction: column; align-items: center; gap: var(--s-2); }
+  .nj-top { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; align-items: center; }
+  .nj-bots { width: 100%; display: flex; gap: var(--s-2); justify-content: center; }
+  .nj-bot { flex: 1; max-width: 200px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 8px;
+    background: var(--c-surface); border-radius: var(--r-md); box-shadow: var(--sh-1); border: 2px solid transparent; font-size: var(--fs-sm); font-weight: 700; color: var(--c-text-dim); }
+  .nj-bot--on { border-color: var(--game); }
+  .nj-bot b { color: var(--c-text); font-variant-numeric: tabular-nums; }
+  .nj-fan { direction: ltr; display: flex; height: 26px; align-items: center; }
+  .nj-fan .ch-pback { width: 16px; border-width: 1px; border-radius: 3px; margin-inline-start: -10px; box-shadow: none; }
+  .nj-fan .ch-pback:first-child { margin-inline-start: 0; }
+  .nj-count { font-size: var(--fs-xs, 12px); }
+  /* the five honour boxes, each with the pot it holds */
+  .nj-hons { direction: ltr; width: 100%; display: grid; grid-template-columns: 1fr 1fr 1.3fr 1fr 1fr; gap: var(--s-2); }
+  .nj-hon { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 6px 2px; border-radius: var(--r-md);
+    background: var(--c-surface); border: 2px solid var(--c-line); font-weight: 800; line-height: 1.1; min-width: 0; }
+  .nj-hon b { font-size: var(--fs-md, 16px); }
+  .nj-hon--red b { color: var(--c-bad); }
+  .nj-hon small { font-size: 10px; font-weight: 700; color: var(--c-text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .nj-hon--dwarf { border-color: var(--nj-gold); box-shadow: 0 0 0 1px var(--nj-gold) inset; }
+  .nj-hon--gone { opacity: .5; }
+  .nj-pot { display: inline-flex; align-items: center; gap: 3px; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; color: var(--c-text); }
+  .nj-pot svg { color: var(--nj-gold); }
+  /* every card of the pack: who has played it, which ones are in my hand */
+  .nj-grid { direction: ltr; width: 100%; display: grid; grid-template-columns: 1.4em repeat(13, 1fr); gap: 2px; align-items: center; }
+  .nj-suit { text-align: center; font-weight: 800; font-size: 13px; color: var(--c-text); }
+  .nj-suit--red { color: var(--c-bad); }
+  .nj-cell { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; border-radius: 4px; border: 1px solid var(--c-line); color: var(--c-text-dim);
+    font-size: clamp(9px, 2.8cqw, 13px); font-weight: 800; line-height: 1; min-width: 0; }
+  .nj-cell--mine { border-color: var(--game-text, var(--game)); border-width: 2px; color: var(--c-text); }
+  .nj-cell--bot { background: var(--c-surface-3); color: var(--c-text); border-color: transparent; }
+  .nj-cell--you { background: var(--game); color: var(--c-accent-ink); border-color: var(--game); }
+  .nj-cell--hon { box-shadow: inset 0 0 0 2px var(--nj-gold); }
+  .nj-cell--last { outline: 2px solid var(--c-text); outline-offset: 1px; }
+  .nj-status { min-height: 1.5em; font-weight: 700; font-size: var(--fs-sm); color: var(--c-text-dim); text-align: center; }
+  .nj-hand { direction: ltr; width: 100%; display: flex; justify-content: center; min-height: calc(var(--cw) * 1.4 + 12px); padding-top: 12px; }
+  .nj-hand .ch-pcard { --pw: var(--cw); flex: 0 0 auto; transition: transform var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease); }
+  .nj-hand .nj-ok { transform: translateY(-10px); box-shadow: var(--sh-2), 0 0 0 2px var(--game); }
+  .nj-hand .nj-no { opacity: .55; cursor: default; }
+  .nj-hand .nj-dw { box-shadow: 0 0 0 2px var(--nj-gold); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function NainJauneEngineFactory() {
+  'use strict';
+
+  // A card is rank * 4 + suit, as in Chogan.cards: ranks A..K are 0..12 (ace low, king
+  // high), suits are 0 clubs, 1 diamonds, 2 hearts, 3 spades.
+  // The five honours, in the order of their boxes: 7 of diamonds, 10 of diamonds, the
+  // Yellow Dwarf (jack of diamonds), queen of spades, king of hearts.
+  var HONOURS = [25, 37, 41, 47, 50];
+  var ANTE = [1, 1, 2, 1, 1];          // what each player puts in each box before a deal
+  var DWARF = 41, DWARF_BOX = 2, DWARF_COST = 5;
+  var STAKE = 6, DEALS = 3, START = 50;
+  function rank(c) { return c >> 2; }
+  function suit(c) { return c & 3; }
+  function honourIdx(c) { return HONOURS.indexOf(c); }
+  // the card that follows c in its suit; nothing follows a king
+  function succ(c) { return rank(c) < 12 ? c + 4 : -1; }
+  function perHand(n) { return n === 3 ? 17 : 13; }
+
+  function shuffled(rnd) {
+    var d = [];
+    for (var i = 0; i < 52; i++) d.push(i);
+    for (var j = 51; j > 0; j--) { var k = Math.floor(rnd() * (j + 1)), t = d[j]; d[j] = d[k]; d[k] = t; }
+    return d;
+  }
+  function byCard(a, b) { return a - b; }
+
+  // Three or four players. With three, each gets 17 cards and the 52nd is set aside
+  // unseen (the dead card); with four, 13 each. `carry` is what the boxes still hold
+  // from earlier deals, and every player antes into every box.
+  function newDeal(rnd, n, first, carry) {
+    var d = shuffled(rnd), per = perHand(n);
+    var R = { n: n, hands: [], dead: -1, playedBy: [], pots: [], lead: first, turn: first, last: -1, lastBy: -1, winner: -1, take: [], won: [], seq: 0 };
+    for (var p = 0; p < n; p++) { R.hands.push(d.splice(0, per).sort(byCard)); R.take.push(0); R.won.push([]); }
+    if (n === 3) R.dead = d.pop();
+    for (var i = 0; i < 52; i++) R.playedBy.push(-1);
+    for (var b = 0; b < 5; b++) R.pots.push((carry && carry[b] > 0 ? carry[b] : 0) + ANTE[b] * n);
+    return R;
+  }
+
+  function holder(R, c) {
+    for (var p = 0; p < R.n; p++) if (R.hands[p].indexOf(c) >= 0) return p;
+    return -1;
+  }
+  // The leader may open with any card; everyone else may play only the card that
+  // follows the last one in its suit, and must play it if they hold it.
+  function legal(R, p) {
+    if (R.winner >= 0 || R.turn !== p) return [];
+    if (R.last < 0) return R.hands[p].slice();
+    var s = succ(R.last);
+    return s >= 0 && R.hands[p].indexOf(s) >= 0 ? [s] : [];
+  }
+
+  // Plays card c for the player to move. Returns false when it is not allowed, else
+  // { box, pot, ended, out }: the honour box it paid (or -1) and what it held, whether
+  // the sequence stopped, and whether the hand is now empty.
+  function play(R, c) {
+    var p = R.turn;
+    if (legal(R, p).indexOf(c) < 0) return false;
+    var following = R.last >= 0;
+    R.hands[p].splice(R.hands[p].indexOf(c), 1);
+    R.playedBy[c] = p;
+    R.seq++;
+    var res = { box: -1, pot: 0, ended: false, out: false };
+    var hi = honourIdx(c);
+    // an honour pays only when it comes up in a sequence, never as the opening card
+    if (following && hi >= 0 && R.pots[hi] > 0) {
+      res.box = hi; res.pot = R.pots[hi];
+      R.take[p] += R.pots[hi]; R.won[p].push(hi); R.pots[hi] = 0;
+    }
+    R.lastBy = p;
+    if (!R.hands[p].length) { R.winner = p; R.last = -1; res.out = true; res.ended = true; return res; }
+    var s = succ(c), h = s >= 0 && R.playedBy[s] < 0 ? holder(R, s) : -1;
+    if (h < 0) {
+      // the king, a card already played or the dead card: the sequence stops and the
+      // player who played last opens the next one
+      R.last = -1; R.turn = p; res.ended = true;
+    } else { R.last = c; R.turn = h; }
+    return res;
+  }
+
+  function penalty(R, p) {
+    var s = 0;
+    R.hands[p].forEach(function (c) { s += c === DWARF ? DWARF_COST : 1; });
+    return s;
+  }
+  // The winner collects one token per card the others still hold, five for a Yellow
+  // Dwarf; everyone paid the stake, and the pots they took are theirs. Boxes nobody won
+  // carry over to the next deal.
+  function settle(R) {
+    var delta = [], pen = [], tot = 0, p;
+    for (p = 0; p < R.n; p++) { pen.push(R.winner === p ? 0 : penalty(R, p)); tot += pen[p]; }
+    for (p = 0; p < R.n; p++) delta.push(R.take[p] - STAKE - pen[p] + (R.winner === p ? tot : 0));
+    return { delta: delta, pen: pen, carry: R.pots.slice() };
+  }
+
+  /* ------------------------------------------------------------ bots */
+
+  // The cards nobody has played and the bot does not hold: where the hidden hands (and
+  // the dead card, with three players) come from.
+  function unseen(R, p) {
+    var out = [], h = R.hands[p];
+    for (var c = 0; c < 52; c++) if (R.playedBy[c] < 0 && h.indexOf(c) < 0) out.push(c);
+    return out;
+  }
+  // One sequence played out on a guessed layout of the hidden hands. A sequence is
+  // forced after its first card, so it can be followed exactly.
+  function simSeq(R, hands, p, c) {
+    var hs = hands.map(function (h) { return h.slice(); }), pots = R.pots.slice(), seen = {}, by = p, cur = c, first = true;
+    var res = { rem: [], cash: [], dwarf: false, out: -1, end: p }, q;
+    for (q = 0; q < R.n; q++) { res.rem.push(0); res.cash.push(0); }
+    for (;;) {
+      var h = hs[by];
+      h.splice(h.indexOf(cur), 1);
+      res.rem[by]++; seen[cur] = 1;
+      if (cur === DWARF && by === p) res.dwarf = true;
+      if (!first) { var hi = honourIdx(cur); if (hi >= 0 && pots[hi]) { res.cash[by] += pots[hi]; pots[hi] = 0; } }
+      first = false;
+      res.end = by;
+      if (!h.length) { res.out = by; break; }
+      var s = succ(cur), nb = -1;
+      if (s < 0 || R.playedBy[s] >= 0 || seen[s]) break;
+      for (q = 0; q < R.n; q++) if (hs[q].indexOf(s) >= 0) { nb = q; break; }
+      if (nb < 0) break;
+      by = nb; cur = s;
+    }
+    return res;
+  }
+  function value(R, p, r) {
+    var v = 1.2 * r.rem[p] + 2 * r.cash[p] + (r.end === p ? 3 : -1.5) + (r.dwarf ? 4 : 0);
+    for (var q = 0; q < R.n; q++) if (q !== p) v -= 0.5 * r.rem[q] + 1.5 * r.cash[q];
+    if (r.out === p) v += 60; else if (r.out >= 0) v -= 40;
+    return v;
+  }
+  // Guesses the hidden hands, plays each possible lead out on each guess and takes the
+  // lead that does best on average.
+  function hardLead(R, p, rnd, samples) {
+    var L = R.hands[p], un = unseen(R, p), score = {}, i, j, q;
+    L.forEach(function (c) { score[c] = 0; });
+    for (i = 0; i < samples; i++) {
+      var d = un.slice();
+      for (j = d.length - 1; j > 0; j--) { var k = Math.floor(rnd() * (j + 1)), t = d[j]; d[j] = d[k]; d[k] = t; }
+      var hands = [];
+      for (q = 0; q < R.n; q++) hands.push(q === p ? L : d.splice(0, R.hands[q].length));
+      L.forEach(function (c) { score[c] += value(R, p, simSeq(R, hands, p, c)); });
+    }
+    var best = L[0];
+    L.forEach(function (c) { if (score[c] > score[best] + 1e-9) best = c; });
+    return best;
+  }
+
+  // The card the player to move plays. After the first card of a sequence the move is
+  // forced, so only a lead needs a decision.
+  function botMove(R, level, rnd) {
+    var p = R.turn, L = legal(R, p);
+    if (!L.length) return -1;
+    if (L.length === 1) return L[0];
+    if (level === 'easy') return L[Math.floor(rnd() * L.length)];
+    if (level === 'hard') return hardLead(R, p, rnd, 8);
+    // medium looks at one guessed layout of the hidden hands (hard at eight) and now and
+    // then, about a third of the time, plays a random lead, so medium
+    // slips where hard does not
+    if (rnd() < 0.35) return L[Math.floor(rnd() * L.length)];
+    return hardLead(R, p, rnd, 1);
+  }
+
+  // A saved deal is checked before it is restored: every card exactly once, in a hand,
+  // played or set aside, and the boxes and the turn make sense.
+  function validRound(v) {
+    if (!v || !(v.n === 3 || v.n === 4) || !Array.isArray(v.hands) || v.hands.length !== v.n || !Array.isArray(v.playedBy) || v.playedBy.length !== 52 ||
+      !Array.isArray(v.pots) || v.pots.length !== 5 || !Array.isArray(v.take) || v.take.length !== v.n || !Array.isArray(v.won) || v.won.length !== v.n) return false;
+    var seen = {}, count = 0, ok = true, c, p;
+    var add = function (x) { if (typeof x !== 'number' || x !== Math.floor(x) || x < 0 || x > 51 || seen[x]) ok = false; seen[x] = 1; count++; };
+    v.hands.forEach(function (h) { if (!Array.isArray(h)) ok = false; else h.forEach(add); });
+    for (c = 0; c < 52; c++) {
+      var by = v.playedBy[c];
+      if (by !== -1) { if (!(by >= 0 && by < v.n) || seen[c]) ok = false; seen[c] = 1; count++; }
+    }
+    if (v.n === 3) { if (v.dead >= 0 && v.dead < 52) add(v.dead); else ok = false; } else if (v.dead !== -1) ok = false;
+    v.pots.forEach(function (x) { if (typeof x !== 'number' || x < 0 || x !== Math.floor(x)) ok = false; });
+    v.take.forEach(function (x) { if (typeof x !== 'number' || x < 0 || x !== Math.floor(x)) ok = false; });
+    for (p = 0; p < v.n; p++) if (!Array.isArray(v.won[p])) ok = false;
+    if (!ok || count !== 52) return false;
+    if (!(v.turn >= 0 && v.turn < v.n) || !(v.winner >= -1 && v.winner < v.n) || !(v.lead >= 0 && v.lead < v.n)) return false;
+    if (v.last !== -1) {
+      if (!(v.last >= 0 && v.last < 52) || v.playedBy[v.last] < 0) return false;
+      // mid-sequence, the player to move holds the next card
+      var s = succ(v.last);
+      if (v.winner < 0 && (s < 0 || v.hands[v.turn].indexOf(s) < 0)) return false;
+    }
+    return true;
+  }
+
+  return {
+    HONOURS: HONOURS, ANTE: ANTE, DWARF: DWARF, DWARF_BOX: DWARF_BOX, DWARF_COST: DWARF_COST, STAKE: STAKE, DEALS: DEALS, START: START,
+    rank: rank, suit: suit, succ: succ, honourIdx: honourIdx, perHand: perHand, newDeal: newDeal, legal: legal, play: play,
+    penalty: penalty, settle: settle, botMove: botMove, simSeq: simSeq, unseen: unseen, validRound: validRound
+  };
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = NainJauneEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = NainJauneEngineFactory();
+  var LEVELS = ['easy', 'medium', 'hard'];
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'nainjaune',
+    name: { fa: 'کوتوله‌ی زرد', en: 'Yellow Dwarf', zh: '黄矮人', de: 'Gelber Zwerg', es: 'Enano Amarillo', pl: 'Żółty Karzeł', fr: 'Nain Jaune', ar: 'القزم الأصفر', hi: 'पीला बौना' },
+    accent: '#100480',
+    mood: 'menu',
+    cardSpeed: true,
+    scroll: true,
+    strings: {
+      fa: {
+        you: 'تو', rivalN: 'حریف {n}', cardsN: '{n} کارت', dealN: 'دست {n} از {m}', tokensN: '{n} ژتون', dailyNj: 'کوتوله‌ی زرد روزانه',
+        yourLead: 'نوبت توست: هر کارتی را شروع کن', yourFollow: 'کارت بعدی را بازی کن: {c}', thinking: '{n} فکر می‌کند…',
+        playedN: '{n} بازی کرد: {c}', potWonN: '{n} با {b} تعداد {k} ژتون برد', leadsN: '{n} دوباره شروع می‌کند',
+        wentOut: '{n} دستش را خالی کرد', youWentOut: 'دستت را خالی کردی!', dwarfName: 'کوتوله‌ی زرد', nextDeal: 'دست بعد',
+        matchWon: 'مسابقه را بردی!', matchLost: '{n} مسابقه را برد', newMatch: 'مسابقه‌ی تازه', rivals: 'حریف‌ها', level: 'سطح',
+        autoPlay: 'کارت اجباری خودکار بازی شود', autoOn: 'روشن', autoOff: 'خاموش', optNote: 'حریف‌ها و سطح از مسابقه‌ی بعد اعمال می‌شود.',
+        deals: 'دست‌ها', carryN: '{k} ژتون در جعبه‌ها به دست بعد می‌رود', tokens: 'ژتون',
+        kbCards: 'رفتن بین کارت‌ها', kbPlay: 'بازی کردن کارت',
+        rules: 'در هر دست هر بازیکن یک ژتون در جعبه‌های ۷♦، ۱۰♦، Q♠ و K♥ و دو ژتون در جعبه‌ی کوتوله‌ی زرد (J♦) می‌گذارد. همه‌ی کارت‌ها پخش می‌شود؛ با سه بازیکن هرکس ۱۷ کارت می‌گیرد و یک کارت پنهان کنار می‌ماند، با چهار بازیکن هرکس ۱۳. شروع‌کننده هر کارتی بازی می‌کند. هرکس کارت بعدیِ هم‌خال را دارد باید همان را بازی کند، و همین‌طور تا شاه. وقتی کارت بعدی قبلاً بازی شده یا کنار گذاشته شده یا شاه آمده، رشته تمام می‌شود و آخرین بازیکن دوباره شروع می‌کند. کارت افتخار اگر در ادامه‌ی رشته بیاید (نه به‌عنوان شروع) ژتون‌های جعبه‌اش را می‌برد: ۷♦ بعد از ۶♦، ۱۰♦ بعد از ۹♦، کوتوله‌ی زرد J♦ بعد از ۱۰♦، Q♠ بعد از J♠ و K♥ بعد از Q♥. اولین کسی که دستش خالی شود از هر حریف به ازای هر کارت باقی‌مانده یک ژتون می‌گیرد، و پنج ژتون اگر کوتوله‌ی زرد در دستش مانده باشد. جعبه‌ای که کسی نبرده به دست بعد می‌رود. مسابقه سه دست است و بیشترین ژتون برنده است. ژتون‌ها فقط امتیازند و چیزی با آن خریده نمی‌شود.',
+        tutTitle1: 'رشته', tutText1: 'کارت بعدیِ هم‌خال را داری؟ باید بازی‌اش کنی. رشته تا شاه یا تا کارتی که بیرون است می‌رود.',
+        tutTitle2: 'کارت‌های افتخار', tutText2: 'اگر کوتوله‌ی زرد (J♦) و چهار کارت افتخار دیگر در ادامه‌ی رشته بیایند، ژتون جعبه‌شان را می‌برند.',
+        tutTitle3: 'دست خالی', tutText3: 'هر که زودتر دستش خالی شود، برای کارت‌های باقی‌مانده‌ی بقیه ژتون می‌گیرد.'
+      },
+      en: {
+        you: 'You', rivalN: 'Rival {n}', cardsN: '{n} cards', dealN: 'Deal {n} of {m}', tokensN: '{n} tokens', dailyNj: 'Daily Yellow Dwarf',
+        yourLead: 'Your lead: play any card', yourFollow: 'Play the next card: {c}', thinking: '{n} is thinking…',
+        playedN: '{n} played {c}', potWonN: '{n} took {k} tokens with {b}', leadsN: '{n} leads again',
+        wentOut: '{n} went out', youWentOut: 'You went out!', dwarfName: 'Yellow Dwarf', nextDeal: 'Next deal',
+        matchWon: 'You won the match!', matchLost: '{n} won the match', newMatch: 'New match', rivals: 'Rivals', level: 'Level',
+        autoPlay: 'Play forced cards automatically', autoOn: 'On', autoOff: 'Off', optNote: 'Rivals and level apply from the next match.',
+        deals: 'Deals', carryN: '{k} tokens in the boxes carry over to the next deal', tokens: 'Tokens',
+        kbCards: 'Move between cards', kbPlay: 'Play the card',
+        rules: 'Each deal, every player puts 1 token in each of the 7♦, 10♦, Q♠ and K♥ boxes and 2 in the Yellow Dwarf (J♦) box. All the cards are dealt: with three players each gets 17 and one card is set aside unseen, with four players each gets 13. The leader plays any card. Whoever holds the next higher card of the same suit must play it, and so on up to the king. The sequence also stops when the next card has already been played or was set aside, and the last player to play leads again. An honour played in a sequence, not as the opening card, wins the tokens in its box: 7♦ after 6♦, 10♦ after 9♦, the Yellow Dwarf J♦ after 10♦, Q♠ after J♠ and K♥ after Q♥. The first player to empty their hand wins one token for every card the others still hold, and five for a Yellow Dwarf. A box nobody won carries over to the next deal. A match is three deals and the most tokens wins. Tokens are only points: there is nothing to buy.',
+        tutTitle1: 'Sequences', tutText1: 'Hold the next card of the suit? You must play it. A sequence runs up to the king or to a card that is out of play.',
+        tutTitle2: 'Honours', tutText2: 'The Yellow Dwarf (J♦) and the four other honours win the tokens in their box when they come up in a sequence.',
+        tutTitle3: 'Empty your hand', tutText3: 'The first to empty their hand scores a token for every card the others still hold.'
+      },
+      pl: {
+        you: 'Ty', rivalN: 'Rywal {n}', cardsN: '{n} kart', dealN: 'Rozdanie {n} z {m}', tokensN: '{n} żetonów', dailyNj: 'Żółty Karzeł dnia',
+        yourLead: 'Twój wyjazd: zagraj dowolną kartę', yourFollow: 'Zagraj następną kartę: {c}', thinking: '{n} myśli…',
+        playedN: '{n} zagrał: {c}', potWonN: '{n} zdobył {k} żetonów kartą {b}', leadsN: '{n} znowu wychodzi',
+        wentOut: '{n} pozbył się kart', youWentOut: 'Pozbyłeś się kart!', dwarfName: 'Żółty Karzeł', nextDeal: 'Następne rozdanie',
+        matchWon: 'Wygrałeś mecz!', matchLost: '{n} wygrał mecz', newMatch: 'Nowy mecz', rivals: 'Rywale', level: 'Poziom',
+        autoPlay: 'Wymuszone karty same się grają', autoOn: 'Wł.', autoOff: 'Wył.', optNote: 'Rywale i poziom zmienią się od następnego meczu.',
+        deals: 'Rozdania', carryN: '{k} żetonów w pulach przechodzi do następnego rozdania', tokens: 'Żetony',
+        kbCards: 'Przechodzenie między kartami', kbPlay: 'Zagraj kartę',
+        rules: 'W każdym rozdaniu każdy gracz wkłada po 1 żetonie do pól 7♦, 10♦, Q♠ i K♥ oraz 2 żetony do pola Żółtego Karła (J♦). Rozdaje się wszystkie karty: przy trzech graczach każdy dostaje 17, a jedna karta zostaje odłożona zakryta, przy czterech każdy dostaje 13. Wychodzący gra dowolną kartę. Kto ma następną wyższą kartę w tym samym kolorze, musi ją zagrać, i tak aż do króla. Seria kończy się też, gdy następna karta była już zagrana lub odłożona, a ostatni gracz wychodzi ponownie. Honor zagrany w serii, a nie jako pierwsza karta, wygrywa żetony ze swojego pola: 7♦ po 6♦, 10♦ po 9♦, Żółty Karzeł J♦ po 10♦, Q♠ po J♠ i K♥ po Q♥. Pierwszy, kto pozbędzie się kart, dostaje po żetonie za każdą kartę rywali, a pięć za Żółtego Karła. Pole, którego nikt nie wygrał, przechodzi do następnego rozdania. Mecz to trzy rozdania, wygrywa najwięcej żetonów. Żetony to tylko punkty: nic za nie nie kupisz.',
+        tutTitle1: 'Serie', tutText1: 'Masz następną kartę w kolorze? Musisz ją zagrać. Seria idzie do króla lub do karty poza grą.',
+        tutTitle2: 'Honory', tutText2: 'Żółty Karzeł (J♦) i cztery inne honory wygrywają żetony ze swojego pola, gdy pojawią się w serii.',
+        tutTitle3: 'Pozbądź się kart', tutText3: 'Kto pierwszy pozbędzie się kart, dostaje żeton za każdą kartę rywali.'
+      },
+      fr: {
+        you: 'Toi', rivalN: 'Adversaire {n}', cardsN: '{n} cartes', dealN: 'Donne {n} sur {m}', tokensN: '{n} jetons', dailyNj: 'Nain Jaune du jour',
+        yourLead: 'À toi d’ouvrir : joue une carte au choix', yourFollow: 'Joue la carte suivante : {c}', thinking: '{n} réfléchit…',
+        playedN: '{n} a joué {c}', potWonN: '{n} a pris {k} jetons avec {b}', leadsN: '{n} ouvre de nouveau',
+        wentOut: '{n} a fini sa main', youWentOut: 'Tu as fini ta main !', dwarfName: 'Nain Jaune', nextDeal: 'Donne suivante',
+        matchWon: 'Tu as gagné le match !', matchLost: '{n} a gagné le match', newMatch: 'Nouveau match', rivals: 'Adversaires', level: 'Niveau',
+        autoPlay: 'Jouer seul les cartes obligées', autoOn: 'Oui', autoOff: 'Non', optNote: 'Les adversaires et le niveau valent dès le prochain match.',
+        deals: 'Donnes', carryN: '{k} jetons restent dans les cases pour la donne suivante', tokens: 'Jetons',
+        kbCards: 'Passer d’une carte à l’autre', kbPlay: 'Jouer la carte',
+        rules: 'À chaque donne, chaque joueur met 1 jeton dans les cases 7♦, 10♦, Q♠ et K♥ et 2 dans la case du Nain Jaune (J♦). Toutes les cartes sont distribuées : à trois joueurs, 17 chacun et une carte écartée face cachée ; à quatre, 13 chacun. Celui qui ouvre joue une carte au choix. Celui qui a la carte suivante de la même couleur doit la jouer, et ainsi de suite jusqu’au roi. La suite s’arrête aussi quand la carte suivante a déjà été jouée ou écartée, et le dernier à jouer ouvre de nouveau. Une figure d’honneur jouée dans une suite, et non en ouverture, gagne les jetons de sa case : 7♦ après 6♦, 10♦ après 9♦, le Nain Jaune J♦ après 10♦, Q♠ après J♠ et K♥ après Q♥. Le premier à vider sa main gagne un jeton par carte restant chez les autres, et cinq pour un Nain Jaune. Une case que personne n’a gagnée passe à la donne suivante. Un match dure trois donnes ; le plus de jetons gagne. Les jetons ne sont que des points : rien à acheter.',
+        tutTitle1: 'Suites', tutText1: 'Tu as la carte suivante de la couleur ? Tu dois la jouer. La suite va jusqu’au roi ou jusqu’à une carte hors jeu.',
+        tutTitle2: 'Honneurs', tutText2: 'Le Nain Jaune (J♦) et les quatre autres honneurs gagnent les jetons de leur case quand ils tombent dans une suite.',
+        tutTitle3: 'Vider sa main', tutText3: 'Le premier à vider sa main gagne un jeton par carte restant chez les autres.'
+      },
+      ar: {
+        you: 'أنت', rivalN: 'الخصم {n}', cardsN: '{n} ورقة', dealN: 'الجولة {n} من {m}', tokensN: '{n} رقاقة', dailyNj: 'القزم الأصفر اليومي',
+        yourLead: 'دورك في البدء: العب أي ورقة', yourFollow: 'العب الورقة التالية: {c}', thinking: '{n} يفكر…',
+        playedN: 'لعب {n} الورقة {c}', potWonN: 'أخذ {n} {k} رقاقة بالورقة {b}', leadsN: 'يبدأ {n} من جديد',
+        wentOut: 'أنهى {n} أوراقه', youWentOut: 'أنهيت أوراقك!', dwarfName: 'القزم الأصفر', nextDeal: 'الجولة التالية',
+        matchWon: 'فزت بالمباراة!', matchLost: 'فاز {n} بالمباراة', newMatch: 'مباراة جديدة', rivals: 'الخصوم', level: 'المستوى',
+        autoPlay: 'لعب الورقة الإجبارية تلقائيًا', autoOn: 'تشغيل', autoOff: 'إيقاف', optNote: 'يسري تغيير الخصوم والمستوى من المباراة التالية.',
+        deals: 'الجولات', carryN: 'تنتقل {k} رقاقة من الصناديق إلى الجولة التالية', tokens: 'الرقائق',
+        kbCards: 'التنقل بين الأوراق', kbPlay: 'لعب الورقة',
+        rules: 'في كل جولة يضع كل لاعب رقاقة واحدة في كل من صناديق 7♦ و10♦ وQ♠ وK♥ ورقاقتين في صندوق القزم الأصفر (J♦). توزَّع كل الأوراق: مع ثلاثة لاعبين يحصل كل واحد على 17 وتُترك ورقة واحدة مقلوبة جانبًا، ومع أربعة يحصل كل واحد على 13. يلعب البادئ أي ورقة. ومن يملك الورقة التالية الأعلى من النوع نفسه يجب أن يلعبها، وهكذا حتى الشايب. وتتوقف السلسلة أيضًا إذا كانت الورقة التالية قد لُعبت أو وُضعت جانبًا، ويبدأ آخر لاعب لعب من جديد. الورقة الشرفية التي تُلعب ضمن سلسلة، لا في البدء، تربح رقائق صندوقها: 7♦ بعد 6♦ و10♦ بعد 9♦ والقزم الأصفر J♦ بعد 10♦ وQ♠ بعد J♠ وK♥ بعد Q♥. أول من يُنهي أوراقه يأخذ رقاقة عن كل ورقة بقيت مع الآخرين، وخمسًا عن القزم الأصفر. الصندوق الذي لم يربحه أحد ينتقل إلى الجولة التالية. المباراة ثلاث جولات ويفوز صاحب أكثر الرقائق. الرقائق مجرد نقاط ولا شيء يُشترى بها.',
+        tutTitle1: 'السلاسل', tutText1: 'هل معك الورقة التالية من النوع؟ يجب أن تلعبها. تمتد السلسلة حتى الشايب أو حتى ورقة خارج اللعب.',
+        tutTitle2: 'الأوراق الشرفية', tutText2: 'القزم الأصفر (J♦) والأوراق الشرفية الأربع الأخرى تربح رقائق صندوقها حين تأتي ضمن سلسلة.',
+        tutTitle3: 'أنهِ أوراقك', tutText3: 'أول من يُنهي أوراقه يأخذ رقاقة عن كل ورقة بقيت مع الآخرين.'
+      },
+      hi: {
+        you: 'आप', rivalN: 'विरोधी {n}', cardsN: '{n} पत्ते', dealN: 'दौर {n} / {m}', tokensN: '{n} टोकन', dailyNj: 'आज का पीला बौना',
+        yourLead: 'आपकी बारी: कोई भी पत्ता चलें', yourFollow: 'अगला पत्ता चलें: {c}', thinking: '{n} सोच रहा है…',
+        playedN: '{n} ने {c} चला', potWonN: '{n} ने {b} से {k} टोकन जीते', leadsN: '{n} फिर शुरू करता है',
+        wentOut: '{n} के पत्ते खत्म', youWentOut: 'आपके पत्ते खत्म!', dwarfName: 'पीला बौना', nextDeal: 'अगला दौर',
+        matchWon: 'आप मैच जीत गए!', matchLost: '{n} मैच जीता', newMatch: 'नया मैच', rivals: 'विरोधी', level: 'स्तर',
+        autoPlay: 'अनिवार्य पत्ता अपने आप चलें', autoOn: 'चालू', autoOff: 'बंद', optNote: 'विरोधी और स्तर अगले मैच से लागू होंगे।',
+        deals: 'दौर', carryN: 'डिब्बों के {k} टोकन अगले दौर में जाते हैं', tokens: 'टोकन',
+        kbCards: 'पत्तों के बीच जाएँ', kbPlay: 'पत्ता चलें',
+        rules: 'हर दौर में हर खिलाड़ी 7♦, 10♦, Q♠ और K♥ के डिब्बों में 1-1 टोकन और पीले बौने (J♦) के डिब्बे में 2 टोकन डालता है। सारे पत्ते बाँटे जाते हैं: तीन खिलाड़ियों में हर किसी को 17 पत्ते मिलते हैं और एक पत्ता उल्टा अलग रख दिया जाता है, चार में हर किसी को 13। शुरू करने वाला कोई भी पत्ता चलता है। जिसके पास उसी रंग का अगला बड़ा पत्ता हो उसे वही चलना होता है, और ऐसे ही बादशाह तक। अगला पत्ता पहले ही चला जा चुका हो या अलग रखा हो तो क्रम रुक जाता है और आखिरी चलने वाला फिर शुरू करता है। क्रम के भीतर चला गया ऑनर पत्ता (शुरुआती पत्ते के रूप में नहीं) अपने डिब्बे के टोकन जीतता है: 6♦ के बाद 7♦, 9♦ के बाद 10♦, 10♦ के बाद पीला बौना J♦, J♠ के बाद Q♠ और Q♥ के बाद K♥। जिसके पत्ते सबसे पहले खत्म हों उसे दूसरों के हर बचे पत्ते पर एक टोकन मिलता है, और पीले बौने पर पाँच। जो डिब्बा किसी ने नहीं जीता वह अगले दौर में जाता है। मैच तीन दौर का है और सबसे ज़्यादा टोकन वाला जीतता है। टोकन सिर्फ़ अंक हैं: इनसे कुछ खरीदा नहीं जाता।',
+        tutTitle1: 'क्रम', tutText1: 'रंग का अगला पत्ता आपके पास है? उसे चलना ही होगा। क्रम बादशाह तक या खेल से बाहर पत्ते तक चलता है।',
+        tutTitle2: 'ऑनर पत्ते', tutText2: 'पीला बौना (J♦) और बाकी चार ऑनर पत्ते क्रम में आने पर अपने डिब्बे के टोकन जीतते हैं।',
+        tutTitle3: 'पत्ते खत्म करें', tutText3: 'जिसके पत्ते सबसे पहले खत्म हों उसे दूसरों के हर बचे पत्ते पर एक टोकन मिलता है।'
+      },
+      zh: {
+        you: '你', rivalN: '对手{n}', cardsN: '{n}张', dealN: '第{n}/{m}局', tokensN: '{n}枚筹码', dailyNj: '每日黄矮人',
+        yourLead: '轮到你领牌：打出任意一张', yourFollow: '打出下一张：{c}', thinking: '{n}在思考……',
+        playedN: '{n}打出了{c}', potWonN: '{n}用{b}赢得{k}枚筹码', leadsN: '{n}再次领牌',
+        wentOut: '{n}出完了牌', youWentOut: '你出完了牌！', dwarfName: '黄矮人', nextDeal: '下一局',
+        matchWon: '你赢得了比赛！', matchLost: '{n}赢得了比赛', newMatch: '新比赛', rivals: '对手', level: '难度',
+        autoPlay: '必出的牌自动打出', autoOn: '开', autoOff: '关', optNote: '对手和难度从下一场比赛起生效。',
+        deals: '局数', carryN: '格子里的{k}枚筹码留到下一局', tokens: '筹码',
+        kbCards: '在牌之间移动', kbPlay: '打出这张牌',
+        rules: '每局开始，每位玩家向7♦、10♦、Q♠、K♥四个格子各放1枚筹码，向黄矮人（J♦）格放2枚。所有牌发完：三人时每人17张，另有一张牌扣在一旁；四人时每人13张。领牌者可打出任意一张。持有同花色下一张更大牌的人必须打出它，依次直到K。如果下一张牌已被打出或被扣在一旁，牌列也会中止，由最后出牌的人再次领牌。荣誉牌若在牌列中打出（而不是作为领牌），就赢得它格子里的筹码：6♦后的7♦、9♦后的10♦、10♦后的黄矮人J♦、J♠后的Q♠、Q♥后的K♥。最先出完牌的人，按其他人手中每剩一张牌得一枚筹码，剩黄矮人则按五枚。无人赢得的格子留到下一局。一场比赛三局，筹码最多者获胜。筹码只是分数，不能用来购买任何东西。',
+        tutTitle1: '牌列', tutText1: '手里有该花色的下一张？必须打出。牌列一直到K，或到一张不在局中的牌为止。',
+        tutTitle2: '荣誉牌', tutText2: '黄矮人（J♦）和另外四张荣誉牌在牌列中出现时，赢得各自格子里的筹码。',
+        tutTitle3: '出完手牌', tutText3: '最先出完牌的人，按其他人手中每剩一张牌得一枚筹码。'
+      },
+      de: {
+        you: 'Du', rivalN: 'Gegner {n}', cardsN: '{n} Karten', dealN: 'Runde {n} von {m}', tokensN: '{n} Chips', dailyNj: 'Gelber Zwerg des Tages',
+        yourLead: 'Du eröffnest: spiele eine beliebige Karte', yourFollow: 'Spiele die nächste Karte: {c}', thinking: '{n} überlegt…',
+        playedN: '{n} spielte {c}', potWonN: '{n} gewann {k} Chips mit {b}', leadsN: '{n} eröffnet wieder',
+        wentOut: 'Alle Karten los: {n}', youWentOut: 'Du bist die Karten los!', dwarfName: 'Gelber Zwerg', nextDeal: 'Nächste Runde',
+        matchWon: 'Du hast das Spiel gewonnen!', matchLost: 'Spiel gewonnen: {n}', newMatch: 'Neues Spiel', rivals: 'Gegner', level: 'Stufe',
+        autoPlay: 'Zwangskarten automatisch spielen', autoOn: 'An', autoOff: 'Aus', optNote: 'Gegner und Stufe gelten ab dem nächsten Spiel.',
+        deals: 'Runden', carryN: '{k} Chips in den Feldern gehen in die nächste Runde', tokens: 'Chips',
+        kbCards: 'Zwischen Karten wechseln', kbPlay: 'Karte spielen',
+        rules: 'In jeder Runde legt jeder Spieler 1 Chip in die Felder 7♦, 10♦, Q♠ und K♥ und 2 Chips in das Feld des Gelben Zwergs (J♦). Alle Karten werden ausgeteilt: zu dritt bekommt jeder 17 und eine Karte wird verdeckt beiseitegelegt, zu viert bekommt jeder 13. Wer eröffnet, spielt eine beliebige Karte. Wer die nächsthöhere Karte derselben Farbe hat, muss sie spielen, und so weiter bis zum König. Die Folge endet auch, wenn die nächste Karte schon gespielt oder beiseitegelegt wurde; der zuletzt Spielende eröffnet erneut. Eine Ehrenkarte, die in einer Folge gespielt wird (nicht als Eröffnung), gewinnt die Chips ihres Felds: 7♦ nach 6♦, 10♦ nach 9♦, der Gelbe Zwerg J♦ nach 10♦, Q♠ nach J♠ und K♥ nach Q♥. Wer zuerst keine Karten mehr hat, bekommt für jede Karte der anderen einen Chip, für einen Gelben Zwerg fünf. Ein Feld, das niemand gewonnen hat, bleibt für die nächste Runde. Ein Spiel hat drei Runden; die meisten Chips gewinnen. Chips sind nur Punkte: man kann nichts damit kaufen.',
+        tutTitle1: 'Folgen', tutText1: 'Du hast die nächste Karte der Farbe? Du musst sie spielen. Die Folge geht bis zum König oder bis zu einer Karte, die nicht im Spiel ist.',
+        tutTitle2: 'Ehrenkarten', tutText2: 'Der Gelbe Zwerg (J♦) und die vier anderen Ehrenkarten gewinnen die Chips ihres Felds, wenn sie in einer Folge kommen.',
+        tutTitle3: 'Karten loswerden', tutText3: 'Wer zuerst keine Karten mehr hat, bekommt für jede Karte der anderen einen Chip.'
+      },
+      es: {
+        you: 'Tú', rivalN: 'Rival {n}', cardsN: '{n} cartas', dealN: 'Mano {n} de {m}', tokensN: '{n} fichas', dailyNj: 'Enano Amarillo diario',
+        yourLead: 'Te toca abrir: juega cualquier carta', yourFollow: 'Juega la carta siguiente: {c}', thinking: '{n} está pensando…',
+        playedN: '{n} jugó {c}', potWonN: '{n} ganó {k} fichas con {b}', leadsN: '{n} vuelve a abrir',
+        wentOut: '{n} se quedó sin cartas', youWentOut: '¡Te quedaste sin cartas!', dwarfName: 'Enano Amarillo', nextDeal: 'Siguiente mano',
+        matchWon: '¡Ganaste la partida!', matchLost: '{n} ganó la partida', newMatch: 'Partida nueva', rivals: 'Rivales', level: 'Nivel',
+        autoPlay: 'Jugar solas las cartas obligadas', autoOn: 'Sí', autoOff: 'No', optNote: 'Los rivales y el nivel valen desde la próxima partida.',
+        deals: 'Manos', carryN: '{k} fichas de las casillas pasan a la mano siguiente', tokens: 'Fichas',
+        kbCards: 'Moverse entre cartas', kbPlay: 'Jugar la carta',
+        rules: 'En cada mano, cada jugador pone 1 ficha en cada casilla 7♦, 10♦, Q♠ y K♥ y 2 en la del Enano Amarillo (J♦). Se reparten todas las cartas: con tres jugadores, 17 cada uno y una carta apartada boca abajo; con cuatro, 13 cada uno. Quien abre juega la carta que quiera. Quien tenga la carta siguiente del mismo palo debe jugarla, y así hasta el rey. La secuencia también se corta si la carta siguiente ya se jugó o se apartó, y el último en jugar abre de nuevo. Una figura de honor jugada dentro de una secuencia, no al abrir, gana las fichas de su casilla: 7♦ tras el 6♦, 10♦ tras el 9♦, el Enano Amarillo J♦ tras el 10♦, Q♠ tras J♠ y K♥ tras Q♥. El primero en quedarse sin cartas gana una ficha por cada carta que les quede a los demás, y cinco por un Enano Amarillo. La casilla que nadie ganó pasa a la mano siguiente. Una partida son tres manos y gana quien tenga más fichas. Las fichas son solo puntos: no se compra nada con ellas.',
+        tutTitle1: 'Secuencias', tutText1: '¿Tienes la carta siguiente del palo? Debes jugarla. La secuencia llega hasta el rey o hasta una carta fuera de juego.',
+        tutTitle2: 'Honores', tutText2: 'El Enano Amarillo (J♦) y los otros cuatro honores ganan las fichas de su casilla cuando salen en una secuencia.',
+        tutTitle3: 'Quedarse sin cartas', tutText3: 'El primero en quedarse sin cartas gana una ficha por cada carta que les quede a los demás.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', { rivals: 2, level: 'medium', auto: true });
+  if (!(prefs.rivals === 2 || prefs.rivals === 3)) prefs.rivals = 2;
+  if (LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+  if (typeof prefs.auto !== 'boolean') prefs.auto = true;
+
+  var BOT_MS = 700, DEAL_MS = 40;
+  var M = null, botTimer = null, kf = -1, msg = '', pausedAt = 0, botRnd = Math.random, lastCard = -1;
+
+  var top = el('div', { class: 'nj-top' });
+  var bots = el('div', { class: 'nj-bots' });
+  var hons = el('div', { class: 'nj-hons' });
+  var grid = el('div', { class: 'nj-grid', 'aria-hidden': 'true' });
+  var status = el('div', { class: 'nj-status', role: 'status', 'aria-live': 'polite' });
+  var hand = el('div', { class: 'nj-hand' });
+  var wrap = el('div', { class: 'nj-wrap' }, [top, bots, hons, grid, status, hand]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  function pname(p) { return p === 0 ? C.t('you') : C.t('rivalN', { n: C.num(p) }); }
+  function human() { return M && M.R && M.R.turn === 0 && M.R.winner < 0; }
+  function cname(c) { return c === E.DWARF ? C.t('dwarfName') : C.cards.label(c); }
+  function red(c) { return E.suit(c) === 1 || E.suit(c) === 2; }
+
+  /* ------------------------------------------------------------ start */
+
+  function newMatch(daily) {
+    stopBot();
+    var n = daily ? 3 : prefs.rivals + 1;
+    M = { n: n, level: daily ? 'medium' : prefs.level, tokens: [], round: 0, deals: daily ? 1 : E.DEALS, carry: [0, 0, 0, 0, 0], daily: daily || null, startedAt: Date.now(), applied: false, dwarf: false };
+    for (var p = 0; p < n; p++) M.tokens.push(E.START);
+    newDeal();
+  }
+  function newDeal() {
+    stopBot();
+    M.round++; M.applied = false;
+    var rnd = M.daily ? C.daily('nainjaune', M.daily).rng : Math.random;
+    botRnd = M.daily ? C.daily('nainjaune', M.daily + '|bots').rng : Math.random;
+    // the opening player moves on deal by deal; the daily is one deal that you open
+    M.R = E.newDeal(rnd, M.n, M.daily ? 0 : (M.round - 1) % M.n, M.carry);
+    msg = ''; kf = -1; lastCard = -1;
+    render();
+    dealIn();
+    save();
+    step();
+  }
+  function resume(v) {
+    M = v;
+    // closed on a deal's result: settle it if that was not done, then go on
+    if (M.R.winner >= 0) { M.startedAt = Date.now() - (v.elapsed || 0); applyDeal(); newDeal(); return; }
+    msg = ''; lastCard = -1;
+    botRnd = M.daily ? C.daily('nainjaune', M.daily + '|bots|' + M.R.seq).rng : Math.random;
+    M.startedAt = Date.now() - (v.elapsed || 0);
+    render();
+    step();
+  }
+
+  /* ------------------------------------------------------------- draw */
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (M.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyNj') + ' — ' + C.num(M.daily) })]));
+    else top.appendChild(el('span', { class: 'ch-badge', text: C.t('dealN', { n: C.num(M.round), m: C.num(M.deals) }) }));
+    top.appendChild(el('span', { class: 'ch-badge', text: C.t('tokensN', { n: C.num(M.tokens[0]) }) }));
+    top.appendChild(C.cards.backPicker());
+    // options behind a gear in the top row, never in «?» (#409)
+    var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', showSettings);
+    top.appendChild(gear);
+  }
+
+  function renderBots() {
+    bots.innerHTML = '';
+    for (var p = 1; p < M.n; p++) {
+      var fan = el('div', { class: 'nj-fan', 'aria-hidden': 'true' });
+      var k = M.R.hands[p].length;
+      for (var i = 0; i < Math.min(k, 9); i++) fan.appendChild(C.cards.back());
+      bots.appendChild(el('div', { class: 'nj-bot' + (M.R.turn === p && M.R.winner < 0 ? ' nj-bot--on' : ''), 'data-p': p }, [
+        el('span', { text: pname(p) }), fan,
+        el('span', { class: 'nj-count', text: C.t('cardsN', { n: C.num(k) }) + ' · ' + C.num(M.tokens[p]) })
+      ]));
+    }
+  }
+
+  function renderHons() {
+    hons.innerHTML = '';
+    E.HONOURS.forEach(function (c, i) {
+      var gone = M.R.playedBy[c] >= 0;
+      var kids = [el('b', { text: C.cards.label(c) })];
+      if (i === E.DWARF_BOX) kids.push(el('small', { text: C.t('dwarfName') }));
+      kids.push(el('span', { class: 'nj-pot' }, [C.icon('coin', 12), el('span', { text: C.num(M.R.pots[i]) })]));
+      hons.appendChild(el('div', { class: 'nj-hon' + (red(c) ? ' nj-hon--red' : '') + (i === E.DWARF_BOX ? ' nj-hon--dwarf' : '') + (gone ? ' nj-hon--gone' : ''), 'data-b': i }, kids));
+    });
+  }
+
+  function renderGrid() {
+    var R = M.R, mine = R.hands[0];
+    grid.innerHTML = '';
+    for (var s = 0; s < 4; s++) {
+      grid.appendChild(el('span', { class: 'nj-suit' + (s === 1 || s === 2 ? ' nj-suit--red' : ''), text: C.cards.GLYPH[s] }));
+      for (var r = 0; r < 13; r++) {
+        var c = r * 4 + s, by = R.playedBy[c];
+        var cls = 'nj-cell' + (by === 0 ? ' nj-cell--you' : by > 0 ? ' nj-cell--bot' : mine.indexOf(c) >= 0 ? ' nj-cell--mine' : '') +
+          (E.honourIdx(c) >= 0 ? ' nj-cell--hon' : '') + (c === lastCard ? ' nj-cell--last' : '');
+        grid.appendChild(el('span', { class: cls, 'data-c': c, text: C.cards.rankText(r) }));
+      }
+    }
+  }
+
+  function render() {
+    var R = M.R;
+    renderTop(); renderBots(); renderHons(); renderGrid(); renderHand();
+    var st = msg;
+    if (!st && R.winner < 0) {
+      if (R.turn !== 0) st = C.t('thinking', { n: pname(R.turn) });
+      else if (R.last < 0) st = C.t('yourLead');
+      else st = C.t('yourFollow', { c: C.cards.label(E.succ(R.last)) });
+    }
+    status.textContent = st;
+  }
+
+  function renderHand() {
+    var R = M.R, h = R.hands[0].slice().sort(function (a, b) { return E.suit(a) - E.suit(b) || E.rank(a) - E.rank(b); });
+    var ok = human() ? E.legal(R, 0) : [], forced = human() && R.last >= 0;
+    hand.innerHTML = '';
+    // overlap the cards so the whole hand stays on one row. The width is measured from the
+    // laid-out page: reading --cw back gives the unresolved clamp() text, which sized the
+    // overlap from a wrong card width and pushed the hand off the screen.
+    var room = hand.clientWidth || wrap.clientWidth || 360;
+    var probe = C.cards.el(h[0] || 0, ''); probe.style.visibility = 'hidden'; hand.appendChild(probe);
+    var cw = probe.offsetWidth || 56; hand.innerHTML = '';
+    // keep at least 38% of every covered card visible: shrink the cards when the row is short
+    var n = h.length, fit = n > 1 ? room / (1 + (n - 1) * 0.38) : cw;
+    var cwUse = Math.min(cw, fit), over = n > 1 ? Math.min(-4, (room - cwUse * n) / (n - 1)) : 0;
+    over = Math.max(over, -cwUse * 0.8);
+    h.forEach(function (c, i) {
+      var b = C.cards.el(c, (forced ? (ok.indexOf(c) >= 0 ? 'nj-ok' : 'nj-no') : '') + (c === E.DWARF ? ' nj-dw' : ''));
+      b._c = c;
+      b.style.setProperty('--pw', cwUse + 'px');
+      if (i) b.style.marginInlineStart = over + 'px';
+      if (kf === i) b.style.outline = '3px solid var(--game)';
+      b.addEventListener('click', function () { humanPlay(c, b); });
+      hand.appendChild(b);
+    });
+  }
+  function handNode(c) { var k = hand.children; for (var i = 0; i < k.length; i++) if (k[i]._c === c) return k[i]; return null; }
+  function botBox(p) { return bots.querySelector('[data-p="' + p + '"]'); }
+  function cellOf(c) { return grid.querySelector('[data-c="' + c + '"]'); }
+
+  // a new deal: the hand flies in one card at a time, turning over (#398)
+  function dealIn() {
+    if (C.ui.reduceMotion()) return;
+    var from = bots.getBoundingClientRect();
+    for (var i = 0; i < hand.children.length; i++) C.ui.fly(hand.children[i], from, { ms: 220, delay: i * DEAL_MS, flip: true });
+  }
+
+  /* ------------------------------------------------------------ moves */
+
+  function humanPlay(c, node) {
+    if (!human() || document.querySelector('.ch-scrim')) return;
+    if (E.legal(M.R, 0).indexOf(c) < 0) { C.feedback('bad'); C.ui.shake(node); return; }
+    commit(0, c, node.getBoundingClientRect());
+  }
+
+  // one card played by anyone: the engine moves, then the table catches up
+  function commit(p, c, fromRect) {
+    var R = M.R, res = E.play(R, c);
+    if (!res) { C.feedback('bad'); return; }
+    lastCard = c; kf = -1;
+    C.audio.sfx('place'); if (p === 0) C.haptic('tap');
+    msg = C.t('playedN', { n: pname(p), c: C.cards.label(c) });
+    var boxTile = null;
+    if (res.box >= 0) {
+      msg = C.t('potWonN', { n: pname(p), k: C.num(res.pot), b: cname(c) });
+      C.audio.sfx('coin');
+      if (res.box === E.DWARF_BOX && p === 0) { M.dwarf = true; C.achievements.unlock('nj-dwarf'); }
+    }
+    if (res.out) msg = p === 0 ? C.t('youWentOut') : C.t('wentOut', { n: pname(p) });
+    else if (res.ended) msg += ' · ' + C.t('leadsN', { n: pname(p) });
+    render();
+    if (res.box >= 0) boxTile = hons.querySelector('[data-b="' + res.box + '"]');
+    var cell = cellOf(c);
+    if (cell && fromRect) C.ui.fly(cell, fromRect, { ms: 240 });
+    if (boxTile) C.ui.burst(boxTile, { count: 22, speed: 240, ring: 30, colors: ['#F2B84B', '#C98A00', '#FFF1C9'] });
+    save();
+    if (R.winner >= 0) { endDeal(); return; }
+    step();
+  }
+
+  // whoever is to move: a bot after a pause, the player when forced (if the gear says so)
+  function step() {
+    stopBot();
+    var R = M.R;
+    if (R.winner >= 0) return;
+    if (R.turn === 0) {
+      if (R.last >= 0 && prefs.auto) {
+        botTimer = setTimeout(function () {
+          botTimer = null;
+          if (!M || M.R !== R || !human() || R.last < 0 || document.querySelector('.ch-scrim')) return;
+          var f = E.legal(R, 0)[0], n = handNode(f);
+          if (f !== undefined && n) humanPlay(f, n);
+        }, C.cards.pace(C.ui.reduceMotion() ? 250 : 450));
+      }
+      return;
+    }
+    botTimer = setTimeout(function () {
+      botTimer = null;
+      if (!M || M.R !== R || R.winner >= 0 || R.turn === 0) return;
+      var p = R.turn, c = E.botMove(R, M.level, botRnd);
+      if (c < 0) return;
+      var b = botBox(p);
+      commit(p, c, b ? b.getBoundingClientRect() : null);
+    }, C.cards.pace(C.ui.reduceMotion() ? 300 : BOT_MS));
+  }
+  function stopBot() { if (botTimer) { clearTimeout(botTimer); botTimer = null; } }
+
+  /* ------------------------------------------------------------ deals */
+
+  // adds the deal's result to the tokens once, however often the page is reopened
+  function applyDeal() {
+    if (M.applied) return null;
+    var st = E.settle(M.R);
+    for (var p = 0; p < M.n; p++) M.tokens[p] += st.delta[p];
+    M.carry = st.carry;
+    M.applied = true;
+    return st;
+  }
+
+  function endDeal() {
+    stopBot();
+    var R = M.R, w = R.winner, st = applyDeal();
+    render();
+    var over = M.round >= M.deals;
+    save();
+    if (over) { setTimeout(finish, C.cards.pace(900)); return; }
+    var lines = [], carry = 0;
+    for (var p = 0; p < M.n; p++) lines.push(el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: pname(p) }), el('b', { class: 'ch-num', text: signed(st.delta[p]) + ' → ' + C.num(M.tokens[p]) })]));
+    M.carry.forEach(function (k, i) { carry += k - E.ANTE[i] * 0; });
+    setTimeout(function () {
+      C.ui.modal({
+        title: w === 0 ? C.t('youWentOut') : C.t('wentOut', { n: pname(w) }),
+        body: [el('div', { class: 'ch-list' }, lines)],
+        actions: [{ label: C.t('nextDeal'), kind: 'primary', onClick: function () { newDeal(); } }],
+        onClose: function () { if (M && M.R === R) newDeal(); }
+      });
+    }, C.cards.pace(700));
+  }
+  function signed(d) { return d > 0 ? '+' + C.num(d) : d < 0 ? '−' + C.num(-d) : C.num(0); }
+
+  function finish() {
+    var ms = Date.now() - M.startedAt, best = 0, p, won;
+    for (p = 1; p < M.n; p++) if (M.tokens[p] > M.tokens[best]) best = p;
+    won = best === 0 && M.tokens.every(function (t, q) { return q === 0 || t < M.tokens[0]; });
+    var base = { easy: 6, medium: 12, hard: 20 }[M.level] || 12;
+    var coins = won ? base + (M.daily ? 8 : 0) : Math.max(2, Math.round(base * 0.3));
+    var points = won ? base * 4 + (M.daily ? 25 : 0) : Math.round(base * 1.2);
+    if (won) {
+      C.achievements.unlock('nj-win');
+      if (M.level === 'hard' && !M.daily) C.achievements.unlock('nj-hard');
+    }
+    if (M.daily) {
+      var first = C.stats.daily('nainjaune', M.daily, { label: won ? C.t('matchWon') : C.t('matchLost', { n: pname(best) }), win: won });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    var lines = [];
+    for (var q = 0; q < M.n; q++) lines.push({ label: pname(q), value: C.num(M.tokens[q]) });
+    var toks = M.tokens.slice();
+    ctx.finish({
+      won: won,
+      title: won ? C.t('matchWon') : C.t('matchLost', { n: pname(best) }),
+      timeMs: ms, coins: coins, points: points,
+      lines: lines,
+      shareText: 'چوگان · کوتوله‌ی زرد' + (M.daily ? ('\nروزانه ' + M.daily) : '') + '\n' + toks.map(function (s) { return C.num(s); }).join(' - '),
+      onAgain: M.daily ? null : function () { newMatch(null); }
+    });
+  }
+
+  /* ----------------------------------------------------------- dialogs */
+
+  function showSettings() {
+    var seg1 = C.ui.segmented([2, 3].map(function (n) { return { value: n, label: C.num(n) }; }), prefs.rivals, function (v) { prefs.rivals = v; ctx.store.set('prefs', prefs); });
+    var seg2 = C.ui.segmented(LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), prefs.level, function (v) { prefs.level = v; ctx.store.set('prefs', prefs); });
+    var seg3 = C.ui.segmented([{ value: 1, label: C.t('autoOn') }, { value: 0, label: C.t('autoOff') }], prefs.auto ? 1 : 0, function (v) { prefs.auto = v === 1; ctx.store.set('prefs', prefs); if (M) step(); });
+    C.ui.modal({
+      title: C.t('settings'),
+      body: [el('div', { class: 'ch-list' }, [
+        el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('rivals') }), seg1]),
+        el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('level') }), seg2]),
+        el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('autoPlay') }), seg3]),
+        C.cards.speedRow()
+      ]), el('p', { class: 'ch-dim', text: C.t('optNote') })],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  function askNew() {
+    if (document.querySelector('.ch-scrim')) return;
+    var dd = M ? M.daily : null;
+    var started = M && (M.round > 1 || M.R.seq > 0);
+    if (!started) { newMatch(dd); return; }
+    C.ui.confirm({ title: C.t('newMatch'), body: C.t('resetWarn'), onOk: function () { newMatch(dd); } });
+  }
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← →', C.t('kbCards')), kb('Enter', C.t('kbPlay'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+
+  window.addEventListener('keydown', function (e) {
+    if (!human() || document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter'))) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var n = M.R.hands[0].length;
+    // the hand is drawn left to right in every language, so the arrows are not flipped
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      kf = kf < 0 ? 0 : (kf + (e.key === 'ArrowRight' ? 1 : n - 1)) % n;
+      renderHand(); e.preventDefault(); return;
+    }
+    if (e.key === 'Enter' && kf >= 0 && hand.children[kf]) { var b = hand.children[kf]; humanPlay(b._c, b); e.preventDefault(); }
+  });
+
+  function svgCard(x, y, label, red, gold) {
+    return '<rect x="' + x + '" y="' + y + '" width="34" height="48" rx="5" fill="var(--c-surface)" stroke="' + (gold ? '#C98A00' : 'var(--c-line)') + '" stroke-width="' + (gold ? 3 : 1) + '"/>' +
+      '<text x="' + (x + 4) + '" y="' + (y + 15) + '" font-size="13" font-weight="800" fill="' + (red ? 'var(--c-bad)' : 'var(--c-text)') + '">' + label + '</text>';
+  }
+  function arrow(x) { return '<path d="M' + x + ' 54 h14 m-6 -6 l6 6 -6 6" stroke="var(--game)" stroke-width="3" fill="none" stroke-linecap="round"/>'; }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr">' + svgCard(14, 30, '5♣︎', false) + arrow(52) + svgCard(70, 30, '6♣︎', false) + arrow(108) + svgCard(126, 30, '7♣︎', false) + '</svg>' },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr">' + svgCard(30, 30, '10♦︎', true) + arrow(68) + svgCard(86, 30, 'J♦︎', true, true) +
+      '<circle cx="150" cy="54" r="12" fill="#F2B84B"/><text x="150" y="59" font-size="14" font-weight="800" text-anchor="middle" fill="#201410">+8</text></svg>' },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr"><rect x="40" y="30" width="34" height="48" rx="5" fill="#100480" stroke="#FBF5E6" stroke-width="2"/>' +
+      '<path d="M84 54 H 120" stroke="var(--game)" stroke-width="4" stroke-linecap="round"/><path d="M112 46 l 9 8 -9 8" stroke="var(--game)" stroke-width="4" fill="none" stroke-linecap="round"/>' +
+      '<circle cx="152" cy="54" r="14" fill="#F2B84B"/><text x="152" y="59" font-size="14" font-weight="800" text-anchor="middle" fill="#201410">+1</text></svg>' }
+  ];
+
+  /* ------------------------------------------------------------ save */
+
+  ctx.autosave(function () {
+    if (!M || !M.R || (M.R.winner >= 0 && M.round >= M.deals)) return { inProgress: false };
+    var v = JSON.parse(JSON.stringify(M));
+    v.elapsed = (pausedAt || Date.now()) - M.startedAt;
+    return { m: v };
+  });
+  function save() { ctx.save(); }
+  C.onPause(function () { stopBot(); if (!pausedAt) pausedAt = Date.now(); });
+  C.onResume(function () { if (pausedAt && M) M.startedAt += Date.now() - pausedAt; pausedAt = 0; if (M) step(); });
+  window.addEventListener('resize', function () { if (M) renderHand(); });
+  // the web font arrives after the first paint and changes the sizes the hand is laid out with
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { if (M) render(); });
+
+  /* ------------------------------------------------------------ start */
+
+  function validMatch(v) {
+    return v && v.R && v.n === v.R.n && Array.isArray(v.tokens) && v.tokens.length === v.n && v.tokens.every(Number.isFinite) &&
+      Array.isArray(v.carry) && v.carry.length === 5 && v.round >= 1 && v.deals >= v.round && E.validRound(v.R);
+  }
+  var saved = ctx.loadSave();
+  var sv = saved && saved.m && validMatch(saved.m) ? saved.m : null;
+  if (dailyDate) {
+    if (sv && sv.daily === dailyDate) resume(sv);
+    else newMatch(dailyDate);
+    if (C.stats.dailyDone('nainjaune', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).nainjaune;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (sv && !sv.daily) resume(sv);
+  else newMatch(null);
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
