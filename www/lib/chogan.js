@@ -208,8 +208,11 @@
     haptics: true,
     cardBack: 'carpet',  // carpet | termeh, shared by every card game (#181)
     cardSpeed: 'normal', // slow | normal | fast: the pace of every card game (#425)
-    pinned: []           // game ids pinned to the top of the menu, in pin order (#193)
+    pinned: [],          // game ids pinned to the top of the menu, in pin order (#193)
+    colors: 'default'    // one of COLOR_THEMES, the app's colour theme (#875)
   };
+  // the ids of the [data-colors] palettes in chogan.css; the first is the default
+  var COLOR_THEMES = ['default', 'paper', 'slate', 'forest', 'rose', 'contrast'];
 
   function randomId() {
     var s = '';
@@ -328,6 +331,7 @@
       streak: 'پیوستگی', dayStreak: 'روز پیوسته', locked: 'قفل',
       unlockedAt: 'باز شد', totalPlays: 'بازی', playTime: 'زمان بازی', thisWeek: 'این هفته', lastWeek: 'هفته‌ی قبل', weekMinutes: 'زمان بازی (دقیقه)', weekWins: 'برد', weekDays: 'روز بازی', weekGames: 'بازی‌های مختلف',
       language: 'زبان', theme: 'تم', themeAuto: 'خودکار', themeLight: 'روشن', themeDark: 'تاریک', motion: 'انیمیشن', motionAuto: 'خودکار', motionOn: 'روشن', motionOff: 'خاموش',
+      colors: 'رنگ‌بندی', colorsDefault: 'پیش‌فرض', colorsPaper: 'کاغذ کاهی', colorsSlate: 'خاکستری سرد', colorsForest: 'جنگل', colorsRose: 'گلبهی', colorsContrast: 'کنتراست بالا',
       sfx: 'افکت صوتی', music: 'موسیقی', haptics: 'لرزش',
       resetGame: 'بازنشانی داده‌ی بازی', resetAsk: 'داده‌ی این بازی کامل پاک شود؟',
       resetWarn: 'این کار برگشت ندارد.', resetDone: 'پاک شد',
@@ -375,6 +379,7 @@
       streak: 'Streak', dayStreak: 'day streak', locked: 'Locked',
       unlockedAt: 'Unlocked', totalPlays: 'Games', playTime: 'Play time', thisWeek: 'This week', lastWeek: 'Last week', weekMinutes: 'Play time (min)', weekWins: 'Wins', weekDays: 'Days played', weekGames: 'Different games',
       language: 'Language', theme: 'Theme', themeAuto: 'Auto', themeLight: 'Light', themeDark: 'Dark', motion: 'Animations', motionAuto: 'Auto', motionOn: 'On', motionOff: 'Off',
+      colors: 'Colours', colorsDefault: 'Default', colorsPaper: 'Warm paper', colorsSlate: 'Cool slate', colorsForest: 'Forest', colorsRose: 'Rose', colorsContrast: 'High contrast',
       sfx: 'Sound effects', music: 'Music', haptics: 'Vibration',
       resetGame: 'Reset game data', resetAsk: 'Erase all data for this game?',
       resetWarn: 'This cannot be undone.', resetDone: 'Erased',
@@ -422,6 +427,7 @@
       streak: 'Seria', dayStreak: 'dni z rzędu', locked: 'Zablokowane',
       unlockedAt: 'Odblokowano', totalPlays: 'Rozegrane gry', playTime: 'Czas gry', thisWeek: 'Ten tydzień', lastWeek: 'Poprzedni tydzień', weekMinutes: 'Czas gry (min)', weekWins: 'Wygrane', weekDays: 'Dni gry', weekGames: 'Różne gry',
       language: 'Język', theme: 'Motyw', themeAuto: 'Automatyczny', themeLight: 'Jasny', themeDark: 'Ciemny', motion: 'Animacje', motionAuto: 'Auto', motionOn: 'Włączone', motionOff: 'Wyłączone',
+      colors: 'Kolorystyka', colorsDefault: 'Domyślny', colorsPaper: 'Ciepły papier', colorsSlate: 'Chłodny łupek', colorsForest: 'Las', colorsRose: 'Róż', colorsContrast: 'Wysoki kontrast',
       sfx: 'Efekty dźwiękowe', music: 'Muzyka', haptics: 'Wibracje',
       resetGame: 'Resetuj dane gry', resetAsk: 'Usunąć wszystkie dane tej gry?',
       resetWarn: 'Tej operacji nie można cofnąć.', resetDone: 'Usunięto',
@@ -469,6 +475,7 @@
       streak: 'Série', dayStreak: 'jours d’affilée', locked: 'Verrouillé',
       unlockedAt: 'Débloqué', totalPlays: 'Parties', playTime: 'Temps de jeu', thisWeek: 'Cette semaine', lastWeek: 'Semaine dernière', weekMinutes: 'Temps de jeu (min)', weekWins: 'Victoires', weekDays: 'Jours joués', weekGames: 'Jeux différents',
       language: 'Langue', theme: 'Thème', themeAuto: 'Auto', themeLight: 'Clair', themeDark: 'Sombre', motion: 'Animations', motionAuto: 'Auto', motionOn: 'Activées', motionOff: 'Désactivées',
+      colors: 'Couleurs', colorsDefault: 'Par défaut', colorsPaper: 'Papier chaud', colorsSlate: 'Ardoise', colorsForest: 'Forêt', colorsRose: 'Rose', colorsContrast: 'Contraste élevé',
       sfx: 'Effets sonores', music: 'Musique', haptics: 'Vibrations',
       resetGame: 'Effacer les données du jeu', resetAsk: 'Effacer toutes les données de ce jeu ?',
       resetWarn: 'Impossible de revenir en arrière.', resetDone: 'Effacé',
@@ -516,6 +523,7 @@
       streak: 'السلسلة', dayStreak: 'أيام متتالية', locked: 'مقفل',
       unlockedAt: 'فُتح', totalPlays: 'الألعاب', playTime: 'وقت اللعب', thisWeek: 'هذا الأسبوع', lastWeek: 'الأسبوع الماضي', weekMinutes: 'وقت اللعب (دقيقة)', weekWins: 'الانتصارات', weekDays: 'أيام اللعب', weekGames: 'ألعاب مختلفة',
       language: 'اللغة', theme: 'المظهر', themeAuto: 'تلقائي', themeLight: 'فاتح', themeDark: 'داكن', motion: 'الحركة', motionAuto: 'تلقائي', motionOn: 'تشغيل', motionOff: 'إيقاف',
+      colors: 'الألوان', colorsDefault: 'افتراضي', colorsPaper: 'ورق دافئ', colorsSlate: 'أردوازي بارد', colorsForest: 'غابة', colorsRose: 'وردي', colorsContrast: 'تباين عالٍ',
       sfx: 'المؤثرات الصوتية', music: 'الموسيقى', haptics: 'الاهتزاز',
       resetGame: 'مسح بيانات اللعبة', resetAsk: 'أتمسح كل بيانات هذه اللعبة؟',
       resetWarn: 'لا يمكن التراجع عن هذا.', resetDone: 'مُسحت',
@@ -563,6 +571,7 @@
       streak: 'लगातार', dayStreak: 'दिन लगातार', locked: 'बंद',
       unlockedAt: 'खुला', totalPlays: 'खेल', playTime: 'खेलने का समय', thisWeek: 'इस हफ़्ते', lastWeek: 'पिछले हफ़्ते', weekMinutes: 'खेलने का समय (मिनट)', weekWins: 'जीत', weekDays: 'खेले गए दिन', weekGames: 'अलग-अलग खेल',
       language: 'भाषा', theme: 'थीम', themeAuto: 'अपने-आप', themeLight: 'हल्की', themeDark: 'गहरी', motion: 'एनिमेशन', motionAuto: 'अपने-आप', motionOn: 'चालू', motionOff: 'बंद',
+      colors: 'रंग-योजना', colorsDefault: 'सामान्य', colorsPaper: 'गर्म काग़ज़', colorsSlate: 'ठंडा स्लेटी', colorsForest: 'जंगल', colorsRose: 'गुलाबी', colorsContrast: 'उच्च कंट्रास्ट',
       sfx: 'ध्वनि प्रभाव', music: 'संगीत', haptics: 'कंपन',
       resetGame: 'खेल का डेटा मिटाएँ', resetAsk: 'इस खेल का सारा डेटा मिटा दें?',
       resetWarn: 'यह वापस नहीं हो सकता।', resetDone: 'मिटा दिया',
@@ -610,6 +619,7 @@
       streak: '连续', dayStreak: '天连续', locked: '未解锁',
       unlockedAt: '解锁于', totalPlays: '局数', playTime: '游戏时长', thisWeek: '本周', lastWeek: '上周', weekMinutes: '游戏时长（分钟）', weekWins: '胜局', weekDays: '游戏天数', weekGames: '玩过的游戏',
       language: '语言', theme: '主题', themeAuto: '自动', themeLight: '浅色', themeDark: '深色', motion: '动画', motionAuto: '自动', motionOn: '开', motionOff: '关',
+      colors: '配色', colorsDefault: '默认', colorsPaper: '暖纸', colorsSlate: '冷石板', colorsForest: '森林', colorsRose: '玫瑰', colorsContrast: '高对比度',
       sfx: '音效', music: '音乐', haptics: '振动',
       resetGame: '重置游戏数据', resetAsk: '确定清除这个游戏的全部数据？',
       resetWarn: '此操作无法撤销。', resetDone: '已清除',
@@ -657,6 +667,7 @@
       streak: 'Serie', dayStreak: 'Tage in Folge', locked: 'Gesperrt',
       unlockedAt: 'Freigeschaltet', totalPlays: 'Spiele', playTime: 'Spielzeit', thisWeek: 'Diese Woche', lastWeek: 'Letzte Woche', weekMinutes: 'Spielzeit (Min.)', weekWins: 'Siege', weekDays: 'Spieltage', weekGames: 'Verschiedene Spiele',
       language: 'Sprache', theme: 'Design', themeAuto: 'Auto', themeLight: 'Hell', themeDark: 'Dunkel', motion: 'Animationen', motionAuto: 'Auto', motionOn: 'An', motionOff: 'Aus',
+      colors: 'Farbschema', colorsDefault: 'Standard', colorsPaper: 'Warmes Papier', colorsSlate: 'Kühler Schiefer', colorsForest: 'Wald', colorsRose: 'Rosé', colorsContrast: 'Hoher Kontrast',
       sfx: 'Soundeffekte', music: 'Musik', haptics: 'Vibration',
       resetGame: 'Spieldaten zurücksetzen', resetAsk: 'Alle Daten dieses Spiels löschen?',
       resetWarn: 'Das lässt sich nicht rückgängig machen.', resetDone: 'Gelöscht',
@@ -704,6 +715,7 @@
       streak: 'Racha', dayStreak: 'días seguidos', locked: 'Bloqueado',
       unlockedAt: 'Desbloqueado', totalPlays: 'Partidas', playTime: 'Tiempo de juego', thisWeek: 'Esta semana', lastWeek: 'Semana pasada', weekMinutes: 'Tiempo de juego (min)', weekWins: 'Victorias', weekDays: 'Días jugados', weekGames: 'Juegos distintos',
       language: 'Idioma', theme: 'Tema', themeAuto: 'Auto', themeLight: 'Claro', themeDark: 'Oscuro', motion: 'Animaciones', motionAuto: 'Auto', motionOn: 'Activadas', motionOff: 'Desactivadas',
+      colors: 'Colores', colorsDefault: 'Predeterminado', colorsPaper: 'Papel cálido', colorsSlate: 'Pizarra fría', colorsForest: 'Bosque', colorsRose: 'Rosa', colorsContrast: 'Alto contraste',
       sfx: 'Efectos de sonido', music: 'Música', haptics: 'Vibración',
       resetGame: 'Borrar datos del juego', resetAsk: '¿Borrar todos los datos de este juego?',
       resetWarn: 'No se puede deshacer.', resetDone: 'Borrado',
@@ -852,7 +864,11 @@
     else document.documentElement.removeAttribute('data-theme');
     var dark = t === 'dark' || (t === 'auto' && global.matchMedia && global.matchMedia('(prefers-color-scheme: dark)').matches);
     var meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', dark ? '#15120E' : '#FBF6EF');
+    // the bar takes the page's own background, so a colour theme (#875) does not sit
+    // under a cream or brown bar; the fixed values remain for a page without the stylesheet
+    var bg = '';
+    try { if (typeof getComputedStyle === 'function') bg = String(getComputedStyle(document.documentElement).getPropertyValue('--c-bg') || '').trim(); } catch (e) { bg = ''; }
+    if (meta) meta.setAttribute('content', /^#[0-9A-Fa-f]{6}$/.test(bg) ? bg : dark ? '#15120E' : '#FBF6EF');
     // The Android app has no theme-color; without this its navigation bar
     // followed the device and stayed cream under the dark theme (#402)
     if (global.ChoganBars && global.ChoganBars.setDark) { try { global.ChoganBars.setDark(!!dark); } catch (e) { /* bars keep the device's look */ } }
@@ -861,6 +877,23 @@
     state.settings.theme = t;
     saveSettings();
     Chogan.applyTheme();
+  };
+
+  // One colour theme for the whole app (#875). Only the neutral tokens change (see the
+  // [data-colors] blocks in chogan.css); lib/early.js applies the saved one before the
+  // first paint and must list the same ids. The default has no attribute, and a value
+  // this build does not know (an older or newer save) falls back to it.
+  Chogan.applyColors = function () {
+    var c = state.settings.colors;
+    var known = typeof c === 'string' && COLOR_THEMES.indexOf(c) > 0;
+    if (known) document.documentElement.setAttribute('data-colors', c);
+    else document.documentElement.removeAttribute('data-colors');
+  };
+  Chogan.setColors = function (c) {
+    state.settings.colors = c;
+    saveSettings();
+    Chogan.applyColors();
+    Chogan.applyTheme(); // the browser bar follows the new background
   };
 
   // Chrome on Android reports "reduce" when the system animation scale is 0, which some
@@ -3879,6 +3912,7 @@
     // صفحه‌ی منو. صفحه‌ی بازی خودش در Chogan.game عنوان دقیق‌ترش را می‌گذارد.
     if (!Chogan.pageTitle) Chogan.pageTitle = function () { return Chogan.t('appName'); };
     Chogan.applyLang();
+    Chogan.applyColors(); // before applyTheme, which reads the palette's background for the bar
     Chogan.applyTheme();
     Chogan.applyMotion();
     Chogan.cards.applyBack();
