@@ -1,0 +1,703 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>دهکده — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  /* the table is the dice, the two buttons and the four building rows in one slot; every size
+     is in --u (a hundredth of its width), measured in code rather than set in cq units, which
+     the Android WebViews before Chrome 105 drop (#611) */
+  .hm-wrap > .ch-fit { --fit-ar: 0.7; }
+  .ch-fit > .hm-table { --u: 3.6px; direction: ltr; aspect-ratio: 0.7; max-height: 100%; box-sizing: border-box;
+    display: flex; flex-direction: column; gap: calc(var(--u) * 2.4); padding-top: calc(var(--u) * 3); }
+  .hm-dice { display: grid; grid-template-columns: repeat(5, 1fr); gap: calc(var(--u) * 3); padding: 0 calc(var(--u) * 1.5); }
+  .hm-die { position: relative; aspect-ratio: 1; padding: 0; border: 0; background: none; cursor: pointer;
+    border-radius: 20%; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    transition: transform var(--t-fast, .15s) ease, opacity var(--t-fast, .15s) ease; }
+  .hm-die:disabled { cursor: default; }
+  .hm-die:focus-visible { outline: 3px solid var(--game, var(--c-accent)); outline-offset: 2px; }
+  .hm-die[aria-pressed="true"] { transform: translateY(calc(var(--u) * -2.6)); }
+  /* the picture never takes the tap: a repaint mid-press would otherwise eat the click (#750) */
+  .hm-die svg { display: block; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+  .hm-face { fill: var(--c-surface); stroke: var(--c-line); stroke-width: 3; }
+  .hm-die[aria-pressed="true"] .hm-face { stroke: var(--game, var(--c-accent)); stroke-width: 7; }
+  .hm-blank .hm-face { fill: var(--c-surface-2); stroke-dasharray: 8 6; }
+  .hm-die.hm-used { opacity: .3; }
+  .hm-btns { display: flex; gap: calc(var(--u) * 2.4); }
+  .hm-roll, .hm-end { min-height: 0; height: calc(var(--u) * 11); font-size: calc(var(--u) * 4.4); }
+  .hm-roll { flex: 1.5; }
+  .hm-end { flex: 1; white-space: nowrap; padding-inline: var(--s-2); }
+  .hm-roll small { font-weight: 600; opacity: .85; font-size: .85em; margin-inline-start: .6em; }
+  .hm-roll small:empty { display: none; }
+  .hm-plots { flex: 1; min-height: 0; display: grid; grid-template-rows: repeat(4, minmax(0, 1fr)); gap: calc(var(--u) * 1.8); }
+  .hm-row { font: inherit; display: flex; align-items: stretch; gap: calc(var(--u) * 1.6); min-width: 0; min-height: 0;
+    padding: calc(var(--u) * 1.4) calc(var(--u) * 2); border: 0; border-radius: calc(var(--u) * 2.4);
+    background: var(--c-surface); color: var(--c-text); box-shadow: var(--sh-1); text-align: start;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  button.hm-row { cursor: pointer; }
+  button.hm-row:disabled { cursor: default; }
+  .hm-row:focus-visible { outline: 3px solid var(--game, var(--c-accent)); outline-offset: 2px; }
+  .hm-row > * { pointer-events: none; }
+  .hm-row.hm-can { background: var(--game-soft, var(--c-accent-soft)); box-shadow: inset 0 0 0 2px var(--game, var(--c-accent)); }
+  .hm-row.hm-lock { background: var(--c-surface-2); box-shadow: none; }
+  .hm-row.hm-full { background: var(--c-surface-2); box-shadow: inset 0 0 0 2px var(--c-good); }
+  .hm-cost { flex: none; width: calc(var(--u) * 24); display: flex; flex-direction: column; justify-content: center; gap: calc(var(--u) * 1); }
+  .hm-faces { display: flex; gap: calc(var(--u) * .8); }
+  .hm-faces svg { width: calc(var(--u) * 7.2); height: calc(var(--u) * 7.2); display: block; }
+  .hm-bon { font-size: calc(var(--u) * 3.4); font-weight: 700; color: var(--c-text-dim); font-variant-numeric: tabular-nums; }
+  .hm-full .hm-bon { color: var(--c-good); }
+  .hm-slots { flex: 1; min-width: 0; display: flex; gap: calc(var(--u) * 1.2); }
+  .hm-slot { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    border-radius: calc(var(--u) * 1.6); background: var(--c-surface-2); position: relative; overflow: hidden; }
+  .hm-slot svg { width: 86%; flex: 1; min-height: 0; display: block; }
+  .hm-slot.hm-ghost svg { opacity: .22; filter: grayscale(1); }
+  .hm-slot.hm-next { box-shadow: inset 0 0 0 calc(var(--u) * .5) var(--game, var(--c-accent)); }
+  .hm-slot.hm-built { background: var(--c-surface); box-shadow: inset 0 0 0 1px var(--c-line); }
+  .hm-pts { font-size: calc(var(--u) * 3.2); font-weight: 800; line-height: 1; padding-bottom: calc(var(--u) * .6); color: var(--c-text-dim); font-variant-numeric: tabular-nums; }
+  .hm-built .hm-pts { color: var(--c-good); }
+  .hm-side { align-items: center; }
+  .hm-top { display: flex; justify-content: center; }
+  .hm-scores { display: flex; gap: var(--s-2); justify-content: center; }
+  .hm-score { flex: 1 1 0; min-width: 0; padding: var(--s-2) var(--s-2); border-radius: var(--r-md, 14px);
+    background: var(--c-surface); box-shadow: var(--sh-1); text-align: center; }
+  .hm-score__l { font-size: .8rem; color: var(--c-text-dim); font-weight: 700; }
+  .hm-score__v { font-size: 1.3rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--c-text); }
+  .hm-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function HamletEngineFactory() {
+  'use strict';
+
+  // The faces: 1 timber, 2 stone, 3 reed, 4 water, 5 seed, 6 sun. The sun stands in for any other face.
+  var SUN = 6, ROUNDS = 12, ROLLS = 3, DICE = 5;
+  var KINDS = ['path', 'hut', 'well', 'field'];
+  // cost: the faces to pay (one die each); pts: what each slot scores, built left to right;
+  // bonus: paid once the whole row is built
+  var PLAN = {
+    path:  { cost: [1, 1, 2],    pts: [1, 1, 1, 2, 2, 3], bonus: 4 },
+    hut:   { cost: [1, 3, 3, 5], pts: [2, 3, 4, 5],       bonus: 6 },
+    well:  { cost: [2, 2, 4, 4], pts: [3, 4, 5],          bonus: 5 },
+    field: { cost: [5, 5, 4, 3], pts: [2, 2, 3, 3],       bonus: 4 }
+  };
+  var BALANCE = 5, BALANCE_AT = 2;   // two of every kind builds a balanced hamlet
+
+  function sumOf(a) { var s = 0; for (var i = 0; i < a.length; i++) s += a[i]; return s; }
+  var MAX = (function () {
+    var m = BALANCE;
+    KINDS.forEach(function (k) { m += sumOf(PLAN[k].pts) + PLAN[k].bonus; });
+    return m;
+  })();
+
+  // Every die is a fixed function of the game's seed and where it is rolled (round, roll,
+  // position): reopening the game can never roll again for a better result, and the daily
+  // game gives everyone the same dice for the same choices
+  function mix(a, b) {
+    var h = (a ^ 0x9E3779B9) | 0;
+    h = Math.imul(h ^ (h >>> 15), 0x2C1B3C6D);
+    h = (h + Math.imul(b | 0, 0x297A2D39)) | 0;
+    h = Math.imul(h ^ (h >>> 12), 0x7FEB352D);
+    h = Math.imul(h ^ (h >>> 15), 0x846CA68B);
+    return (h ^ (h >>> 16)) >>> 0;
+  }
+  function die(seed, round, roll, i) {
+    var slot = (round * ROLLS + roll) * DICE + i;
+    return mix(mix(seed | 0, 0x68E31DA4), slot + 1) % 6 + 1;
+  }
+
+  function newGame(seed) {
+    return { dice: [1, 1, 1, 1, 1], held: [false, false, false, false, false], used: [false, false, false, false, false],
+      rolls: 0, round: 0, built: { path: 0, hut: 0, well: 0, field: 0 }, seed: seed | 0 };
+  }
+  function over(S) { return S.round >= ROUNDS; }
+
+  // Rolls every die that is neither kept nor spent (all five on a round's first roll); the
+  // indexes that rolled, or null when no roll is left
+  function roll(S) {
+    if (over(S) || S.rolls >= ROLLS) return null;
+    if (S.rolls === 0) { S.held = [false, false, false, false, false]; S.used = [false, false, false, false, false]; }
+    var rolled = [];
+    for (var i = 0; i < DICE; i++) {
+      if (S.held[i] || S.used[i]) continue;
+      S.dice[i] = die(S.seed, S.round, S.rolls, i);
+      rolled.push(i);
+    }
+    if (!rolled.length) return null;
+    S.rolls++;
+    return rolled;
+  }
+  // Keeping a die only means something between rolls, and a spent die has left the table
+  function toggle(S, i) {
+    if (over(S) || S.rolls === 0 || S.rolls >= ROLLS || i < 0 || i >= DICE || S.used[i]) return false;
+    S.held[i] = !S.held[i];
+    return true;
+  }
+
+  // The dice that would pay for the next building of a kind: each cost face from a die showing
+  // it first, then suns for what is left. Null when they cannot be found
+  function pay(S, kind) {
+    var cost = PLAN[kind].cost, take = [], taken = [false, false, false, false, false], i, j;
+    var missing = [];
+    for (i = 0; i < cost.length; i++) {
+      for (j = 0; j < DICE; j++) if (!S.used[j] && !taken[j] && S.dice[j] === cost[i]) break;
+      if (j < DICE) { taken[j] = true; take.push(j); } else missing.push(i);
+    }
+    for (i = 0; i < missing.length; i++) {
+      for (j = 0; j < DICE; j++) if (!S.used[j] && !taken[j] && S.dice[j] === SUN) break;
+      if (j >= DICE) return null;
+      taken[j] = true; take.push(j);
+    }
+    return take;
+  }
+  // A hut needs a path to stand on: the first hut one path, the second two, and so on
+  function unlocked(S, kind) { return kind !== 'hut' || S.built.hut < S.built.path; }
+  function room(S, kind) { return S.built[kind] < PLAN[kind].pts.length; }
+  function canBuild(S, kind) {
+    return !over(S) && S.rolls > 0 && !!PLAN[kind] && room(S, kind) && unlocked(S, kind) && pay(S, kind) !== null;
+  }
+  // Spends the dice and builds the next slot of the row
+  function build(S, kind) {
+    if (!canBuild(S, kind)) return null;
+    var dice = pay(S, kind), n = S.built[kind], pts = PLAN[kind].pts[n], had = rowDone(S, kind);
+    dice.forEach(function (j) { S.used[j] = true; S.held[j] = false; });
+    S.built[kind]++;
+    return { kind: kind, slot: n, points: pts, dice: dice, rowDone: !had && rowDone(S, kind), balanced: balanced(S) };
+  }
+  // Ends the round: whatever dice are left are lost
+  function endRound(S) {
+    if (over(S) || S.rolls === 0) return null;
+    S.round++; S.rolls = 0;
+    S.held = [false, false, false, false, false]; S.used = [false, false, false, false, false];
+    return { over: over(S) };
+  }
+
+  function rowDone(S, kind) { return S.built[kind] >= PLAN[kind].pts.length; }
+  function balanced(S) { return KINDS.every(function (k) { return S.built[k] >= BALANCE_AT; }); }
+  function rowPoints(S, kind) { var s = 0; for (var i = 0; i < S.built[kind]; i++) s += PLAN[kind].pts[i]; return s; }
+  function total(S) {
+    var s = balanced(S) ? BALANCE : 0;
+    KINDS.forEach(function (k) { s += rowPoints(S, k) + (rowDone(S, k) ? PLAN[k].bonus : 0); });
+    return s;
+  }
+  function count(S) { return sumOf(KINDS.map(function (k) { return S.built[k]; })); }
+
+  // A save that no game could have reached is not restored
+  function valid(s) {
+    if (!s || !Array.isArray(s.dice) || s.dice.length !== DICE || !Array.isArray(s.held) || s.held.length !== DICE ||
+      !Array.isArray(s.used) || s.used.length !== DICE || !s.built || !Number.isInteger(s.seed)) return false;
+    if (!s.dice.every(function (v) { return Number.isInteger(v) && v >= 1 && v <= 6; })) return false;
+    if (!s.held.every(function (v) { return typeof v === 'boolean'; }) || !s.used.every(function (v) { return typeof v === 'boolean'; })) return false;
+    if (!Number.isInteger(s.round) || s.round < 0 || s.round >= ROUNDS || !Number.isInteger(s.rolls) || s.rolls < 0 || s.rolls > ROLLS) return false;
+    if (s.rolls === 0 && (s.used.some(Boolean) || s.held.some(Boolean))) return false;
+    if (s.held.some(function (h, i) { return h && s.used[i]; })) return false;
+    for (var k = 0; k < KINDS.length; k++) {
+      var n = s.built[KINDS[k]];
+      if (!Number.isInteger(n) || n < 0 || n > PLAN[KINDS[k]].pts.length) return false;
+    }
+    if (Object.keys(s.built).length !== KINDS.length || s.built.hut > s.built.path) return false;
+    // a building costs at least three dice and a round has five: more buildings than that
+    // cannot have been paid for
+    return count(s) <= Math.floor(DICE * (s.round + (s.rolls ? 1 : 0)) / 3);
+  }
+
+  return { KINDS: KINDS, PLAN: PLAN, SUN: SUN, ROUNDS: ROUNDS, ROLLS: ROLLS, DICE: DICE, MAX: MAX, BALANCE: BALANCE, BALANCE_AT: BALANCE_AT,
+    die: die, newGame: newGame, over: over, roll: roll, toggle: toggle, pay: pay, canBuild: canBuild, build: build, endRound: endRound,
+    unlocked: unlocked, room: room, rowDone: rowDone, balanced: balanced, rowPoints: rowPoints, total: total, count: count, valid: valid };
+}
+if (typeof module !== 'undefined') module.exports = HamletEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = HamletEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'hamlet',
+    name: { fa: 'دهکده', en: 'Hamlet', zh: '小村庄', de: 'Dörfchen', es: 'Aldea', pl: 'Wioska', fr: 'Hameau', ar: 'القرية', hi: 'गाँव' },
+    accent: '#1B3729',
+    mood: 'menu',
+    strings: {
+      fa: {
+        hmTimber: 'چوب', hmStone: 'سنگ', hmReed: 'نی', hmWater: 'آب', hmSeed: 'دانه', hmSun: 'خورشید',
+        hmPath: 'راه', hmHut: 'کلبه', hmWell: 'چاه', hmField: 'مزرعه',
+        hmRoll: 'بریز', hmLeft: '{n} بار مانده', hmEnd: 'دور بعد',
+        hmHintRoll: 'تاس‌ها را بریز', hmHintHold: 'تاس نگه دار، بساز یا دور را تمام کن', hmHintLast: 'بساز یا دور را تمام کن',
+        hmDie: 'تاس {i}: {f}', hmDieBlank: 'تاس {i}، هنوز ریخته نشده', hmDieUsed: 'تاس {i}: {f}، خرج شد',
+        hmRowCan: '{b}: بساز، {p} امتیاز', hmRowNo: '{b}: {n} از {m} ساخته شده', hmRowLock: '{b}: اول راه لازم است', hmRowFull: '{b}: کامل شد',
+        hmRound: 'دور', hmBal: 'تعادل {n}/۴', hmBalDone: 'تعادل ✓',
+        hmDaily: 'دهکده‌ی روزانه', hmScoreN: 'امتیاز {s}', hmDoneT: 'دهکده ساخته شد', hmNewBest: 'رکورد تازه!', hmPrevBest: 'رکورد قبلی', hmBelow: '{d} امتیاز تا رکوردت',
+        hmBuilt: 'ساخته‌ها', hmRowsL: 'جایزه‌ی ردیف‌ها', hmBalL: 'جایزه‌ی تعادل',
+        hmKRoll: 'ریختن تاس‌ها', hmKHold: 'نگه داشتن تاس (از چپ)', hmKBuild: 'ساختن (راه، کلبه، چاه، مزرعه)', hmKEnd: 'پایان دور', hmKNew: 'بازی تازه',
+        hmRules: 'بازی ۱۲ دور دارد. در هر دور تا سه بار پنج تاس را می‌ریزی: بعد از هر ریختن، روی تاس‌هایی که می‌خواهی بزن تا بمانند و بقیه را دوباره بریز. تاس‌ها را خرج ساختن کن: ردیفی که روشن شده را بزن تا بهایش با رو‌های درست پرداخت شود؛ خورشید جای هر رو را می‌گیرد. تاسی که خرج شد دیگر ریخته نمی‌شود و تاس‌های خرج‌نشده با پایان دور از بین می‌روند. هر ردیف از چپ پر می‌شود و هر ساختمان امتیاز خودش را دارد. کلبه روی راه می‌نشیند: کلبه‌ی اول یک راه می‌خواهد، دوم دو راه و همین‌طور. پر کردن کل یک ردیف جایزه دارد (راه ۴، کلبه ۶، چاه ۵، مزرعه ۴) و از هر نوع دست‌کم دو تا ۵ امتیاز دیگر می‌دهد.',
+        hmTut1T: 'بریز و نگه دار', hmTut1: 'در هر دور تا سه بار بریز. روی تاس بزن تا بماند؛ بقیه دوباره ریخته می‌شوند.',
+        hmTut2T: 'خرج کن و بساز', hmTut2: 'هر ردیف بهایش را با رو‌های تاس نشان می‌دهد. وقتی تاس‌هایت می‌رسند ردیف روشن می‌شود؛ بزن تا ساخته شود.',
+        hmTut3T: 'خورشید و جایزه‌ها', hmTut3: 'خورشید جای هر رو را می‌گیرد. کلبه روی راه می‌نشیند. یک ردیف کامل یا دو ساختمان از هر نوع جایزه دارد.'
+      },
+      en: {
+        hmTimber: 'Timber', hmStone: 'Stone', hmReed: 'Reed', hmWater: 'Water', hmSeed: 'Seed', hmSun: 'Sun',
+        hmPath: 'Path', hmHut: 'Hut', hmWell: 'Well', hmField: 'Field',
+        hmRoll: 'Roll', hmLeft: '{n} left', hmEnd: 'Next round',
+        hmHintRoll: 'Roll the dice', hmHintHold: 'Keep dice, build, or end the round', hmHintLast: 'Build, or end the round',
+        hmDie: 'Die {i}: {f}', hmDieBlank: 'Die {i}, not rolled yet', hmDieUsed: 'Die {i}: {f}, spent',
+        hmRowCan: '{b}: build for {p} points', hmRowNo: '{b}: {n} of {m} built', hmRowLock: '{b}: needs a path first', hmRowFull: '{b}: complete',
+        hmRound: 'Round', hmBal: 'Balance {n}/4', hmBalDone: 'Balance ✓',
+        hmDaily: 'Daily Hamlet', hmScoreN: 'Score {s}', hmDoneT: 'Hamlet built', hmNewBest: 'New best!', hmPrevBest: 'Previous best', hmBelow: '{d} short of your best',
+        hmBuilt: 'Buildings', hmRowsL: 'Row bonuses', hmBalL: 'Balance bonus',
+        hmKRoll: 'Roll the dice', hmKHold: 'Keep a die (from the left)', hmKBuild: 'Build (path, hut, well, field)', hmKEnd: 'End the round', hmKNew: 'New game',
+        hmRules: 'A game has 12 rounds. Each round you roll the five dice up to three times: after a roll, tap the dice you want to keep and roll the rest again. Spend dice on buildings: tap a row that glows to pay its cost with the matching faces; the Sun stands in for any face. A spent die is not rolled again, and dice you do not spend are lost when the round ends. Each row fills from the left and every building scores its own points. A hut stands on a path: the first hut needs one path, the second two, and so on. Finishing a whole row pays a bonus (path 4, hut 6, well 5, field 4), and two buildings of every kind pay 5 more.',
+        hmTut1T: 'Roll and keep', hmTut1: 'Roll up to three times a round. Tap a die to keep it; the rest roll again.',
+        hmTut2T: 'Spend and build', hmTut2: 'Each row shows its cost in dice faces. When your dice match, the row glows; tap it to build.',
+        hmTut3T: 'Suns and bonuses', hmTut3: 'The Sun stands in for any face. A hut stands on a path. A full row, or two of every kind, earns a bonus.'
+      },
+      pl: {
+        hmTimber: 'Drewno', hmStone: 'Kamień', hmReed: 'Trzcina', hmWater: 'Woda', hmSeed: 'Ziarno', hmSun: 'Słońce',
+        hmPath: 'Ścieżka', hmHut: 'Chata', hmWell: 'Studnia', hmField: 'Pole',
+        hmRoll: 'Rzuć', hmLeft: 'zostało {n}', hmEnd: 'Następna runda',
+        hmHintRoll: 'Rzuć kośćmi', hmHintHold: 'Zatrzymaj kości, buduj albo zakończ rundę', hmHintLast: 'Buduj albo zakończ rundę',
+        hmDie: 'Kość {i}: {f}', hmDieBlank: 'Kość {i}, jeszcze nie rzucona', hmDieUsed: 'Kość {i}: {f}, zużyta',
+        hmRowCan: '{b}: buduj za {p} pkt', hmRowNo: '{b}: zbudowano {n} z {m}', hmRowLock: '{b}: najpierw potrzebna ścieżka', hmRowFull: '{b}: gotowe',
+        hmRound: 'Runda', hmBal: 'Równowaga {n}/4', hmBalDone: 'Równowaga ✓',
+        hmDaily: 'Codzienna Wioska', hmScoreN: 'Wynik {s}', hmDoneT: 'Wioska zbudowana', hmNewBest: 'Nowy rekord!', hmPrevBest: 'Poprzedni rekord', hmBelow: '{d} do rekordu',
+        hmBuilt: 'Budynki', hmRowsL: 'Premie za rzędy', hmBalL: 'Premia za równowagę',
+        hmKRoll: 'Rzuć kośćmi', hmKHold: 'Zatrzymaj kość (od lewej)', hmKBuild: 'Buduj (ścieżka, chata, studnia, pole)', hmKEnd: 'Zakończ rundę', hmKNew: 'Nowa gra',
+        hmRules: 'Gra ma 12 rund. W każdej rundzie rzucasz pięcioma kośćmi do trzech razy: po rzucie dotknij kości, które chcesz zatrzymać, i rzuć resztą ponownie. Wydawaj kości na budynki: dotknij podświetlonego rzędu, aby zapłacić jego koszt pasującymi ściankami; Słońce zastępuje każdą ściankę. Wydana kość nie jest już rzucana, a niewydane przepadają z końcem rundy. Każdy rząd wypełnia się od lewej i każdy budynek daje własne punkty. Chata stoi na ścieżce: pierwsza potrzebuje jednej ścieżki, druga dwóch i tak dalej. Cały rząd daje premię (ścieżka 4, chata 6, studnia 5, pole 4), a po dwa budynki każdego rodzaju dają jeszcze 5.',
+        hmTut1T: 'Rzucaj i zatrzymuj', hmTut1: 'Rzucaj do trzech razy w rundzie. Dotknij kości, aby ją zatrzymać; reszta leci ponownie.',
+        hmTut2T: 'Wydaj i buduj', hmTut2: 'Każdy rząd pokazuje koszt w ściankach kości. Gdy kości pasują, rząd się podświetla; dotknij go, aby zbudować.',
+        hmTut3T: 'Słońce i premie', hmTut3: 'Słońce zastępuje każdą ściankę. Chata stoi na ścieżce. Pełny rząd lub po dwa budynki każdego rodzaju dają premię.'
+      },
+      fr: {
+        hmTimber: 'Bois', hmStone: 'Pierre', hmReed: 'Roseau', hmWater: 'Eau', hmSeed: 'Graine', hmSun: 'Soleil',
+        hmPath: 'Chemin', hmHut: 'Cabane', hmWell: 'Puits', hmField: 'Champ',
+        hmRoll: 'Lancer', hmLeft: 'encore {n}', hmEnd: 'Tour suivant',
+        hmHintRoll: 'Lance les dés', hmHintHold: 'Garde des dés, construis ou finis le tour', hmHintLast: 'Construis ou finis le tour',
+        hmDie: 'Dé {i} : {f}', hmDieBlank: 'Dé {i}, pas encore lancé', hmDieUsed: 'Dé {i} : {f}, dépensé',
+        hmRowCan: '{b} : construire pour {p} points', hmRowNo: '{b} : {n} sur {m} construits', hmRowLock: '{b} : il faut d’abord un chemin', hmRowFull: '{b} : complet',
+        hmRound: 'Tour', hmBal: 'Équilibre {n}/4', hmBalDone: 'Équilibre ✓',
+        hmDaily: 'Hameau du jour', hmScoreN: 'Score {s}', hmDoneT: 'Hameau construit', hmNewBest: 'Nouveau record !', hmPrevBest: 'Record précédent', hmBelow: '{d} sous ton record',
+        hmBuilt: 'Bâtiments', hmRowsL: 'Bonus des lignes', hmBalL: 'Bonus d’équilibre',
+        hmKRoll: 'Lancer les dés', hmKHold: 'Garder un dé (depuis la gauche)', hmKBuild: 'Construire (chemin, cabane, puits, champ)', hmKEnd: 'Finir le tour', hmKNew: 'Nouvelle partie',
+        hmRules: 'Une partie compte 12 tours. À chaque tour tu lances les cinq dés jusqu’à trois fois : après un lancer, touche les dés à garder et relance les autres. Dépense les dés pour construire : touche une ligne qui s’allume pour payer son coût avec les bonnes faces ; le Soleil remplace n’importe quelle face. Un dé dépensé n’est plus relancé, et les dés non dépensés sont perdus à la fin du tour. Chaque ligne se remplit depuis la gauche et chaque bâtiment rapporte ses points. Une cabane s’appuie sur un chemin : la première en demande un, la deuxième deux, et ainsi de suite. Une ligne complète donne un bonus (chemin 4, cabane 6, puits 5, champ 4), et deux bâtiments de chaque sorte rapportent 5 de plus.',
+        hmTut1T: 'Lance et garde', hmTut1: 'Lance jusqu’à trois fois par tour. Touche un dé pour le garder ; les autres sont relancés.',
+        hmTut2T: 'Dépense et construis', hmTut2: 'Chaque ligne montre son coût en faces de dés. Quand tes dés correspondent, la ligne s’allume ; touche-la pour construire.',
+        hmTut3T: 'Soleils et bonus', hmTut3: 'Le Soleil remplace n’importe quelle face. Une cabane s’appuie sur un chemin. Une ligne complète, ou deux bâtiments de chaque sorte, donne un bonus.'
+      },
+      ar: {
+        hmTimber: 'خشب', hmStone: 'حجر', hmReed: 'قصب', hmWater: 'ماء', hmSeed: 'بذرة', hmSun: 'شمس',
+        hmPath: 'طريق', hmHut: 'كوخ', hmWell: 'بئر', hmField: 'حقل',
+        hmRoll: 'ارمِ', hmLeft: 'باقٍ {n}', hmEnd: 'الجولة التالية',
+        hmHintRoll: 'ارمِ النرد', hmHintHold: 'أبقِ نردًا أو ابنِ أو أنهِ الجولة', hmHintLast: 'ابنِ أو أنهِ الجولة',
+        hmDie: 'النرد {i}: {f}', hmDieBlank: 'النرد {i}، لم يُرمَ بعد', hmDieUsed: 'النرد {i}: {f}، صُرف',
+        hmRowCan: '{b}: ابنِ مقابل {p} نقطة', hmRowNo: '{b}: بُني {n} من {m}', hmRowLock: '{b}: يلزم طريق أولًا', hmRowFull: '{b}: مكتمل',
+        hmRound: 'الجولة', hmBal: 'التوازن {n}/4', hmBalDone: 'التوازن ✓',
+        hmDaily: 'قرية اليوم', hmScoreN: 'النتيجة {s}', hmDoneT: 'تم بناء القرية', hmNewBest: 'رقم قياسي جديد!', hmPrevBest: 'الرقم السابق', hmBelow: 'ينقصك {d} عن رقمك',
+        hmBuilt: 'المباني', hmRowsL: 'مكافآت الصفوف', hmBalL: 'مكافأة التوازن',
+        hmKRoll: 'ارمِ النرد', hmKHold: 'أبقِ نردًا (من اليسار)', hmKBuild: 'ابنِ (طريق، كوخ، بئر، حقل)', hmKEnd: 'أنهِ الجولة', hmKNew: 'لعبة جديدة',
+        hmRules: 'في اللعبة 12 جولة. في كل جولة ترمي النرد الخمسة حتى ثلاث مرات: بعد كل رمية المس النرد الذي تريد إبقاءه وارمِ الباقي من جديد. اصرف النرد على المباني: المس صفًّا مضيئًا لتدفع ثمنه بالأوجه المطابقة؛ والشمس تقوم مقام أي وجه. النرد المصروف لا يُرمى ثانية، وما لم تصرفه يضيع بانتهاء الجولة. يمتلئ كل صف من اليسار ولكل مبنى نقاطه. الكوخ يقوم على طريق: الأول يحتاج طريقًا واحدًا والثاني اثنين وهكذا. إكمال صف كامل يمنح مكافأة (طريق 4، كوخ 6، بئر 5، حقل 4)، ومبنيان من كل نوع يمنحان 5 أخرى.',
+        hmTut1T: 'ارمِ وأبقِ', hmTut1: 'ارمِ حتى ثلاث مرات في الجولة. المس نردًا لتُبقيه؛ والباقي يُرمى من جديد.',
+        hmTut2T: 'اصرف وابنِ', hmTut2: 'يعرض كل صف ثمنه بأوجه النرد. حين يطابقه نردك يضيء الصف؛ المسه لتبني.',
+        hmTut3T: 'الشمس والمكافآت', hmTut3: 'الشمس تقوم مقام أي وجه. الكوخ يقوم على طريق. الصف الكامل أو مبنيان من كل نوع يمنحان مكافأة.'
+      },
+      hi: {
+        hmTimber: 'लकड़ी', hmStone: 'पत्थर', hmReed: 'सरकंडा', hmWater: 'पानी', hmSeed: 'बीज', hmSun: 'सूरज',
+        hmPath: 'रास्ता', hmHut: 'झोपड़ी', hmWell: 'कुआँ', hmField: 'खेत',
+        hmRoll: 'फेंकें', hmLeft: '{n} बाकी', hmEnd: 'अगला दौर',
+        hmHintRoll: 'पासे फेंकें', hmHintHold: 'पासे रखें, बनाएँ या दौर ख़त्म करें', hmHintLast: 'बनाएँ या दौर ख़त्म करें',
+        hmDie: 'पासा {i}: {f}', hmDieBlank: 'पासा {i}, अभी फेंका नहीं गया', hmDieUsed: 'पासा {i}: {f}, ख़र्च हुआ',
+        hmRowCan: '{b}: {p} अंक में बनाएँ', hmRowNo: '{b}: {m} में से {n} बने', hmRowLock: '{b}: पहले रास्ता चाहिए', hmRowFull: '{b}: पूरा',
+        hmRound: 'दौर', hmBal: 'संतुलन {n}/4', hmBalDone: 'संतुलन ✓',
+        hmDaily: 'रोज़ का गाँव', hmScoreN: 'स्कोर {s}', hmDoneT: 'गाँव बन गया', hmNewBest: 'नया रिकॉर्ड!', hmPrevBest: 'पिछला रिकॉर्ड', hmBelow: 'रिकॉर्ड से {d} कम',
+        hmBuilt: 'इमारतें', hmRowsL: 'पंक्तियों का बोनस', hmBalL: 'संतुलन बोनस',
+        hmKRoll: 'पासे फेंकें', hmKHold: 'पासा रखें (बाएँ से)', hmKBuild: 'बनाएँ (रास्ता, झोपड़ी, कुआँ, खेत)', hmKEnd: 'दौर ख़त्म करें', hmKNew: 'नया खेल',
+        hmRules: 'एक खेल में 12 दौर होते हैं। हर दौर में आप पाँचों पासे तीन बार तक फेंकते हैं: हर बार के बाद जिन पासों को रखना है उन्हें छुएँ और बाक़ी फिर से फेंकें। पासों को इमारतों पर ख़र्च करें: चमकती पंक्ति को छुएँ ताकि उसकी क़ीमत मेल खाते चेहरों से चुकाई जाए; सूरज किसी भी चेहरे की जगह ले लेता है। ख़र्च हुआ पासा दोबारा नहीं फेंका जाता और न ख़र्च हुए पासे दौर ख़त्म होते ही चले जाते हैं। हर पंक्ति बाएँ से भरती है और हर इमारत के अपने अंक हैं। झोपड़ी रास्ते पर बनती है: पहली को एक रास्ता चाहिए, दूसरी को दो, और आगे भी ऐसे ही। पूरी पंक्ति पर बोनस मिलता है (रास्ता 4, झोपड़ी 6, कुआँ 5, खेत 4), और हर तरह की दो इमारतों पर 5 और।',
+        hmTut1T: 'फेंकें और रखें', hmTut1: 'हर दौर में तीन बार तक फेंकें। पासा रखने के लिए उसे छुएँ; बाक़ी फिर फेंके जाते हैं।',
+        hmTut2T: 'ख़र्च करें और बनाएँ', hmTut2: 'हर पंक्ति अपनी क़ीमत पासों के चेहरों में दिखाती है। पासे मेल खाएँ तो पंक्ति चमकती है; बनाने के लिए उसे छुएँ।',
+        hmTut3T: 'सूरज और बोनस', hmTut3: 'सूरज किसी भी चेहरे की जगह लेता है। झोपड़ी रास्ते पर बनती है। पूरी पंक्ति या हर तरह की दो इमारतों पर बोनस मिलता है।'
+      },
+      zh: {
+        hmTimber: '木头', hmStone: '石头', hmReed: '芦苇', hmWater: '水', hmSeed: '种子', hmSun: '太阳',
+        hmPath: '小路', hmHut: '木屋', hmWell: '水井', hmField: '农田',
+        hmRoll: '掷骰', hmLeft: '还剩 {n} 次', hmEnd: '下一回合',
+        hmHintRoll: '掷骰子', hmHintHold: '保留骰子、建造，或结束回合', hmHintLast: '建造，或结束回合',
+        hmDie: '骰子 {i}：{f}', hmDieBlank: '骰子 {i}，还没掷', hmDieUsed: '骰子 {i}：{f}，已用掉',
+        hmRowCan: '{b}：花费建造，得 {p} 分', hmRowNo: '{b}：已建 {n}/{m}', hmRowLock: '{b}：需要先有小路', hmRowFull: '{b}：已建满',
+        hmRound: '回合', hmBal: '均衡 {n}/4', hmBalDone: '均衡 ✓',
+        hmDaily: '每日小村庄', hmScoreN: '分数 {s}', hmDoneT: '村庄建好了', hmNewBest: '新纪录！', hmPrevBest: '之前的最高分', hmBelow: '离最高分还差 {d}',
+        hmBuilt: '建筑', hmRowsL: '整行奖励', hmBalL: '均衡奖励',
+        hmKRoll: '掷骰子', hmKHold: '保留骰子（从左数）', hmKBuild: '建造（小路、木屋、水井、农田）', hmKEnd: '结束回合', hmKNew: '新游戏',
+        hmRules: '一局共 12 回合。每回合最多掷五颗骰子三次：每次掷完后，点选想保留的骰子，再重掷其余的。用骰子来建造：点亮起的一行，用对应的点面支付费用；太阳可以当作任何一面。用掉的骰子不再重掷，没用掉的骰子在回合结束时作废。每一行从左往右建，每座建筑有各自的分数。木屋要建在小路上：第一间需要一条小路，第二间需要两条，依此类推。建满一整行有奖励（小路 4、木屋 6、水井 5、农田 4），每种建筑各建两座再加 5 分。',
+        hmTut1T: '掷骰与保留', hmTut1: '每回合最多掷三次。点骰子保留它，其余的重掷。',
+        hmTut2T: '花费并建造', hmTut2: '每一行用骰子点面显示费用。骰子凑够时这一行会亮起；点它就能建造。',
+        hmTut3T: '太阳与奖励', hmTut3: '太阳可以当作任何一面。木屋要建在小路上。建满一行，或每种建筑各两座，都有奖励。'
+      },
+      de: {
+        hmTimber: 'Holz', hmStone: 'Stein', hmReed: 'Schilf', hmWater: 'Wasser', hmSeed: 'Saat', hmSun: 'Sonne',
+        hmPath: 'Weg', hmHut: 'Hütte', hmWell: 'Brunnen', hmField: 'Feld',
+        hmRoll: 'Würfeln', hmLeft: 'noch {n}', hmEnd: 'Nächste Runde',
+        hmHintRoll: 'Würfle', hmHintHold: 'Würfel behalten, bauen oder die Runde beenden', hmHintLast: 'Baue oder beende die Runde',
+        hmDie: 'Würfel {i}: {f}', hmDieBlank: 'Würfel {i}, noch nicht gewürfelt', hmDieUsed: 'Würfel {i}: {f}, ausgegeben',
+        hmRowCan: '{b}: bauen für {p} Punkte', hmRowNo: '{b}: {n} von {m} gebaut', hmRowLock: '{b}: braucht zuerst einen Weg', hmRowFull: '{b}: voll',
+        hmRound: 'Runde', hmBal: 'Ausgleich {n}/4', hmBalDone: 'Ausgleich ✓',
+        hmDaily: 'Dörfchen des Tages', hmScoreN: 'Punkte {s}', hmDoneT: 'Dörfchen gebaut', hmNewBest: 'Neuer Rekord!', hmPrevBest: 'Bisheriger Rekord', hmBelow: '{d} unter deinem Rekord',
+        hmBuilt: 'Gebäude', hmRowsL: 'Zeilenboni', hmBalL: 'Ausgleichsbonus',
+        hmKRoll: 'Würfeln', hmKHold: 'Würfel behalten (von links)', hmKBuild: 'Bauen (Weg, Hütte, Brunnen, Feld)', hmKEnd: 'Runde beenden', hmKNew: 'Neues Spiel',
+        hmRules: 'Ein Spiel hat 12 Runden. In jeder Runde würfelst du bis zu dreimal mit fünf Würfeln: Tippe nach einem Wurf die Würfel an, die du behalten willst, und würfle den Rest neu. Gib Würfel für Gebäude aus: Tippe eine leuchtende Zeile an, um ihre Kosten mit den passenden Augen zu bezahlen; die Sonne ersetzt jedes Auge. Ein ausgegebener Würfel wird nicht mehr gewürfelt, und nicht ausgegebene verfallen am Rundenende. Jede Zeile füllt sich von links, und jedes Gebäude bringt eigene Punkte. Eine Hütte steht auf einem Weg: die erste braucht einen Weg, die zweite zwei und so weiter. Eine ganze Zeile bringt einen Bonus (Weg 4, Hütte 6, Brunnen 5, Feld 4), und zwei Gebäude jeder Art bringen 5 weitere.',
+        hmTut1T: 'Würfeln und behalten', hmTut1: 'Würfle bis zu dreimal pro Runde. Tippe einen Würfel an, um ihn zu behalten; der Rest wird neu gewürfelt.',
+        hmTut2T: 'Ausgeben und bauen', hmTut2: 'Jede Zeile zeigt ihre Kosten als Würfelaugen. Passen deine Würfel, leuchtet die Zeile; tippe sie an, um zu bauen.',
+        hmTut3T: 'Sonnen und Boni', hmTut3: 'Die Sonne ersetzt jedes Auge. Eine Hütte steht auf einem Weg. Eine volle Zeile oder zwei Gebäude jeder Art bringen einen Bonus.'
+      },
+      es: {
+        hmTimber: 'Madera', hmStone: 'Piedra', hmReed: 'Caña', hmWater: 'Agua', hmSeed: 'Semilla', hmSun: 'Sol',
+        hmPath: 'Camino', hmHut: 'Cabaña', hmWell: 'Pozo', hmField: 'Campo',
+        hmRoll: 'Tirar', hmLeft: 'quedan {n}', hmEnd: 'Siguiente ronda',
+        hmHintRoll: 'Tira los dados', hmHintHold: 'Guarda dados, construye o termina la ronda', hmHintLast: 'Construye o termina la ronda',
+        hmDie: 'Dado {i}: {f}', hmDieBlank: 'Dado {i}, aún sin tirar', hmDieUsed: 'Dado {i}: {f}, gastado',
+        hmRowCan: '{b}: construir por {p} puntos', hmRowNo: '{b}: {n} de {m} construidos', hmRowLock: '{b}: antes hace falta un camino', hmRowFull: '{b}: completo',
+        hmRound: 'Ronda', hmBal: 'Equilibrio {n}/4', hmBalDone: 'Equilibrio ✓',
+        hmDaily: 'Aldea del día', hmScoreN: 'Puntos {s}', hmDoneT: 'Aldea construida', hmNewBest: '¡Nuevo récord!', hmPrevBest: 'Récord anterior', hmBelow: '{d} por debajo de tu récord',
+        hmBuilt: 'Edificios', hmRowsL: 'Bonos de fila', hmBalL: 'Bono de equilibrio',
+        hmKRoll: 'Tirar los dados', hmKHold: 'Guardar un dado (desde la izquierda)', hmKBuild: 'Construir (camino, cabaña, pozo, campo)', hmKEnd: 'Terminar la ronda', hmKNew: 'Partida nueva',
+        hmRules: 'Una partida tiene 12 rondas. En cada ronda tiras los cinco dados hasta tres veces: tras una tirada, toca los dados que quieras guardar y vuelve a tirar el resto. Gasta dados en edificios: toca una fila que brille para pagar su coste con las caras que coinciden; el Sol vale por cualquier cara. Un dado gastado no se vuelve a tirar, y los que no gastes se pierden al acabar la ronda. Cada fila se llena desde la izquierda y cada edificio da sus propios puntos. Una cabaña se apoya en un camino: la primera necesita uno, la segunda dos, y así. Completar una fila entera da un bono (camino 4, cabaña 6, pozo 5, campo 4), y dos edificios de cada tipo dan 5 más.',
+        hmTut1T: 'Tira y guarda', hmTut1: 'Tira hasta tres veces por ronda. Toca un dado para guardarlo; los demás se vuelven a tirar.',
+        hmTut2T: 'Gasta y construye', hmTut2: 'Cada fila muestra su coste en caras de dado. Cuando tus dados coinciden, la fila brilla; tócala para construir.',
+        hmTut3T: 'Soles y bonos', hmTut3: 'El Sol vale por cualquier cara. Una cabaña se apoya en un camino. Una fila completa, o dos edificios de cada tipo, dan un bono.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var KINDS = E.KINDS;
+  // literal keys, so the string check in tools/test.js can see each one
+  var BNAME = { path: C.t('hmPath'), hut: C.t('hmHut'), well: C.t('hmWell'), field: C.t('hmField') };
+  var FNAME = [null, C.t('hmTimber'), C.t('hmStone'), C.t('hmReed'), C.t('hmWater'), C.t('hmSeed'), C.t('hmSun')];
+
+  var S = null, startedAt = 0, ended = false;
+
+  /* ------------------------------------------------------------- art */
+
+  // The six faces and four buildings are drawn in code on a 100-unit square. Their colours
+  // are fixed (they read on the light and the dark surface alike); the die's face is the theme's
+  var SYM = {
+    1: '<rect x="43" y="56" width="14" height="28" rx="2" fill="#7A4B2A"/><polygon points="50,12 76,48 24,48" fill="#2F7D3A"/><polygon points="50,28 82,66 18,66" fill="#3C9648"/>',
+    2: '<polygon points="20,72 32,40 58,30 82,50 76,76" fill="#9AA0A6" stroke="#6B7177" stroke-width="4" stroke-linejoin="round"/><polygon points="32,40 58,30 62,50 46,60" fill="#C3C8CD"/>',
+    3: '<g stroke="#9C8030" stroke-width="5" stroke-linecap="round"><line x1="30" y1="86" x2="34" y2="34"/><line x1="50" y1="86" x2="50" y2="22"/><line x1="70" y1="86" x2="66" y2="34"/></g><g fill="#6E4F22"><ellipse cx="34" cy="28" rx="6" ry="12"/><ellipse cx="50" cy="16" rx="6" ry="12"/><ellipse cx="66" cy="28" rx="6" ry="12"/></g>',
+    4: '<path d="M50 12 C50 12 24 44 24 63 a26 26 0 0 0 52 0 C76 44 50 12 50 12Z" fill="#3A8FD6"/><path d="M38 62 a12 12 0 0 0 10 14" fill="none" stroke="#BFE0F7" stroke-width="5" stroke-linecap="round"/>',
+    5: '<line x1="50" y1="84" x2="50" y2="46" stroke="#3C8A3A" stroke-width="5" stroke-linecap="round"/><ellipse cx="34" cy="40" rx="16" ry="8" transform="rotate(-28 34 40)" fill="#5DAE45"/><ellipse cx="66" cy="34" rx="16" ry="8" transform="rotate(28 66 34)" fill="#5DAE45"/><ellipse cx="50" cy="72" rx="12" ry="9" fill="#D9A621"/>',
+    6: '<circle cx="50" cy="50" r="17" fill="#F2B21A"/><g stroke="#F2B21A" stroke-width="6" stroke-linecap="round"><line x1="50" y1="14" x2="50" y2="24"/><line x1="50" y1="76" x2="50" y2="86"/><line x1="14" y1="50" x2="24" y2="50"/><line x1="76" y1="50" x2="86" y2="50"/><line x1="25" y1="25" x2="32" y2="32"/><line x1="68" y1="68" x2="75" y2="75"/><line x1="75" y1="25" x2="68" y2="32"/><line x1="25" y1="75" x2="32" y2="68"/></g>'
+  };
+  var BLD = {
+    path: '<g fill="#B59A6B" stroke="#8C7449" stroke-width="3"><rect x="10" y="58" width="30" height="20" rx="8"/><rect x="38" y="38" width="30" height="20" rx="8"/><rect x="62" y="20" width="28" height="20" rx="8"/></g>',
+    hut: '<rect x="20" y="46" width="60" height="38" fill="#C9A06A" stroke="#8C6B3D" stroke-width="3"/><polygon points="10,48 50,14 90,48" fill="#8B4A2B" stroke="#5E3019" stroke-width="3" stroke-linejoin="round"/><rect x="43" y="62" width="14" height="22" rx="2" fill="#5E3019"/>',
+    well: '<rect x="22" y="14" width="6" height="42" fill="#7A4B2A"/><rect x="72" y="14" width="6" height="42" fill="#7A4B2A"/><polygon points="14,18 50,4 86,18" fill="#8B4A2B"/><rect x="20" y="52" width="60" height="32" rx="6" fill="#9AA0A6" stroke="#6B7177" stroke-width="3"/><ellipse cx="50" cy="52" rx="30" ry="8" fill="#3A8FD6" stroke="#6B7177" stroke-width="3"/>',
+    field: '<rect x="10" y="22" width="80" height="62" rx="8" fill="#B58B4F"/><g fill="none" stroke="#6FA33A" stroke-width="7" stroke-linecap="round"><line x1="20" y1="36" x2="80" y2="36"/><line x1="20" y1="53" x2="80" y2="53"/><line x1="20" y1="70" x2="80" y2="70"/></g><g fill="#D9A621"><circle cx="30" cy="36" r="3.5"/><circle cx="52" cy="53" r="3.5"/><circle cx="70" cy="70" r="3.5"/></g>'
+  };
+  function sym(v, size) { return '<svg viewBox="0 0 100 100" aria-hidden="true">' + SYM[v] + '</svg>'; }
+  function faceSvg(v) {
+    return '<svg viewBox="0 0 100 100" aria-hidden="true"><rect class="hm-face" x="3" y="3" width="94" height="94" rx="20"/>' + (v ? SYM[v] : '') + '</svg>';
+  }
+  function bldSvg(k) { return '<svg viewBox="0 0 100 100" aria-hidden="true">' + BLD[k] + '</svg>'; }
+
+  /* --------------------------------------------------------------- view */
+
+  var dieBtns = [], diceShown = [];
+  for (var di = 0; di < 5; di++) {
+    (function (i) {
+      dieBtns.push(el('button', { class: 'hm-die', type: 'button', onclick: function () { hold(i); } }));
+    })(di);
+  }
+  var diceRow = el('div', { class: 'hm-dice' }, dieBtns);
+  var rollLabel = el('span'), rollSub = el('small');
+  var rollBtn = el('button', { class: 'ch-btn ch-btn--primary hm-roll', type: 'button', onclick: doRoll }, [rollLabel, rollSub]);
+  var endBtn = el('button', { class: 'ch-btn hm-end', type: 'button', onclick: doEnd, text: C.t('hmEnd') });
+  var btns = el('div', { class: 'hm-btns' }, [rollBtn, endBtn]);
+  var plots = el('div', { class: 'hm-plots' });
+  var rows = {};
+  KINDS.forEach(function (k) {
+    var cost = el('div', { class: 'hm-cost' }), faces = el('div', { class: 'hm-faces' }), bon = el('div', { class: 'hm-bon' });
+    faces.innerHTML = E.PLAN[k].cost.map(sym).join('');
+    cost.appendChild(faces); cost.appendChild(bon);
+    var slots = el('div', { class: 'hm-slots' }), cells = [];
+    E.PLAN[k].pts.forEach(function (p) {
+      var cell = el('div', { class: 'hm-slot' }), pt = el('span', { class: 'hm-pts', text: C.num(p) });
+      cell.innerHTML = bldSvg(k);
+      cell.appendChild(pt);
+      cells.push(cell); slots.appendChild(cell);
+    });
+    var b = el('button', { class: 'hm-row', type: 'button', onclick: function () { buildKind(k); } }, [cost, slots]);
+    rows[k] = { b: b, bon: bon, cells: cells, state: '' };
+    plots.appendChild(b);
+  });
+  var table = el('div', { class: 'hm-table' }, [diceRow, btns, plots]);
+
+  var top = el('div', { class: 'hm-top ch-above' });
+  function box(label, v) { return el('div', { class: 'hm-score' }, [el('div', { class: 'hm-score__l', text: label }), v]); }
+  var roundV = el('div', { class: 'hm-score__v', text: '1' }), scoreV = el('div', { class: 'hm-score__v', text: '0' }), bestV = el('div', { class: 'hm-score__v', text: '0' });
+  var scores = el('div', { class: 'hm-scores ch-above' }, [box(C.t('hmRound'), roundV), box(C.t('score'), scoreV), box(C.t('best'), bestV)]);
+  var balChip = el('span', { class: 'ch-badge' });
+  var status = el('div', { class: 'hm-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'hm-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [table]), el('div', { class: 'ch-side hm-side' }, [top, scores, el('div', { class: 'hm-top' }, [balChip]), status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  if (!dailyDate) ctx.button({ icon: 'refresh', label: C.t('newGame'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  function best() { return C.stats.getBest('hamlet', 'score') || 0; }
+
+  // Writes only what changed: rebuilding a die or a row under a finger eats the tap (#750)
+  function render() {
+    var blank = S.rolls === 0 || E.over(S);
+    for (var i = 0; i < 5; i++) {
+      var b = dieBtns[i], v = blank ? 0 : S.dice[i], key = v + (blank ? 'b' : '');
+      if (diceShown[i] !== key) { b.innerHTML = faceSvg(v); diceShown[i] = key; }
+      b.classList.toggle('hm-blank', blank);
+      b.classList.toggle('hm-used', !blank && S.used[i]);
+      b.setAttribute('aria-pressed', !blank && S.held[i] ? 'true' : 'false');
+      b.disabled = blank || S.rolls >= E.ROLLS || S.used[i] || ended;
+      b.setAttribute('aria-label', blank ? C.t('hmDieBlank', { i: i + 1 }) : S.used[i] ? C.t('hmDieUsed', { i: i + 1, f: FNAME[v] }) : C.t('hmDie', { i: i + 1, f: FNAME[v] }));
+    }
+    var left = E.ROLLS - S.rolls, free = 0;
+    for (i = 0; i < 5; i++) if (!S.used[i]) free++;
+    rollLabel.textContent = C.t('hmRoll');
+    // no "·" separator: beside a Persian digit it reads as the zero «۰» ("۱۰ بار مانده")
+    rollSub.textContent = left > 0 && free > 0 ? C.t('hmLeft', { n: C.num(left) }) : '';
+    rollBtn.disabled = left <= 0 || free === 0 || ended;
+    endBtn.disabled = S.rolls === 0 || ended;
+    KINDS.forEach(function (k) {
+      var r = rows[k], n = S.built[k], m = E.PLAN[k].pts.length, can = E.canBuild(S, k), done = E.rowDone(S, k), lock = !done && !E.unlocked(S, k);
+      var st = done ? 'full' : can ? 'can' : lock ? 'lock' : 'idle';
+      if (r.state !== st) {
+        r.state = st;
+        r.b.classList.toggle('hm-can', st === 'can');
+        r.b.classList.toggle('hm-full', st === 'full');
+        r.b.classList.toggle('hm-lock', st === 'lock');
+      }
+      r.b.disabled = !can || ended;
+      r.cells.forEach(function (cell, j) {
+        cell.classList.toggle('hm-built', j < n);
+        cell.classList.toggle('hm-ghost', j >= n);
+        cell.classList.toggle('hm-next', j === n && !done);
+      });
+      var bt = '★ +' + C.num(E.PLAN[k].bonus);
+      if (r.bon.textContent !== bt) r.bon.textContent = bt;
+      r.b.setAttribute('aria-label', done ? C.t('hmRowFull', { b: BNAME[k] }) : can ? C.t('hmRowCan', { b: BNAME[k], p: E.PLAN[k].pts[n] }) : lock ? C.t('hmRowLock', { b: BNAME[k] }) : C.t('hmRowNo', { b: BNAME[k], n: n, m: m }));
+    });
+    var tot = E.total(S);
+    roundV.textContent = C.num(Math.min(S.round + 1, E.ROUNDS)) + '/' + C.num(E.ROUNDS);
+    scoreV.textContent = C.num(tot);
+    bestV.textContent = C.num(best());
+    var bn = 0;
+    KINDS.forEach(function (k) { if (S.built[k] >= E.BALANCE_AT) bn++; });
+    balChip.textContent = E.balanced(S) ? C.t('hmBalDone') : C.t('hmBal', { n: C.num(bn) });
+    balChip.className = 'ch-badge' + (E.balanced(S) ? ' ch-badge--accent' : '');
+    top.innerHTML = '';
+    if (S.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('hmDaily') + ' — ' + C.num(S.daily) })]));
+    status.textContent = ended ? '' : S.rolls === 0 ? C.t('hmHintRoll') : S.rolls < E.ROLLS && free > 0 ? C.t('hmHintHold') : C.t('hmHintLast');
+  }
+
+  function fitSize() {
+    var w = table.getBoundingClientRect().width;
+    if (w) table.style.setProperty('--u', (w / 100).toFixed(2) + 'px');
+  }
+  if (window.ResizeObserver) new ResizeObserver(fitSize).observe(table); else window.addEventListener('resize', fitSize);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { fitSize(); });
+
+  /* ------------------------------------------------------------- game */
+
+  function seedFor() {
+    var r = dailyDate ? C.daily('hamlet', dailyDate).rng : Math.random;
+    return Math.floor(r() * 4294967296) | 0;
+  }
+  function newGame() {
+    S = E.newGame(seedFor());
+    S.daily = dailyDate || null;
+    startedAt = Date.now(); ended = false;
+    diceShown = [];
+    render();
+    save();
+  }
+  function askNew() {
+    if (S && !ended && (S.round > 0 || S.rolls > 0)) C.ui.confirm({ title: C.t('newGame'), body: C.t('resetWarn'), onOk: newGame });
+    else newGame();
+  }
+
+  function doRoll() {
+    if (!S || ended) return;
+    var rolled = E.roll(S);
+    if (!rolled) return;
+    C.feedback('clack');
+    render();
+    save();
+    if (!C.ui.reduceMotion()) {
+      // each die tumbles in from the button: the move on the button, the spin on its picture
+      rolled.forEach(function (i, n) {
+        C.ui.fly(dieBtns[i], rollBtn, { ms: 380, delay: n * 45 });
+        var svg = dieBtns[i].firstChild;
+        if (svg && svg.animate) svg.animate([{ transform: 'rotate(' + (n % 2 ? 260 : -260) + 'deg) scale(.7)' }, { transform: 'rotate(' + (n % 2 ? -12 : 12) + 'deg) scale(1.06)', offset: .75 }, { transform: 'none' }],
+          { duration: 480, delay: n * 45, easing: 'cubic-bezier(.2,.8,.3,1)', fill: 'backwards' });
+      });
+    }
+  }
+
+  function hold(i) {
+    if (!S || ended || !E.toggle(S, i)) return;
+    C.feedback('select');
+    render();
+    save();
+  }
+
+  function buildKind(k) {
+    if (!S || ended) return;
+    var t = E.build(S, k);
+    if (!t) return;
+    C.feedback('place');
+    render();
+    var cell = rows[k].cells[t.slot];
+    if (!C.ui.reduceMotion()) {
+      C.ui.fly(cell, dieBtns[t.dice[0]], { ms: 360 });
+      if (cell.firstChild && cell.firstChild.animate) cell.firstChild.animate([{ transform: 'scale(.4)' }, { transform: 'scale(1.15)', offset: .7 }, { transform: 'none' }], { duration: 420, easing: 'ease-out' });
+    }
+    if (t.rowDone) { C.achievements.unlock('hm-row'); C.ui.burst(rows[k].b, { colors: ['#1B3729', '#6FA33A', '#F2B21A'], count: 30 }); }
+    if (t.balanced && !S.balancedSeen) { S.balancedSeen = true; C.achievements.unlock('hm-bal'); C.ui.burst(balChip, { colors: ['#1B3729', '#F2B21A'], count: 22 }); }
+    save();
+  }
+
+  function doEnd() {
+    if (!S || ended) return;
+    var t = E.endRound(S);
+    if (!t) return;
+    C.feedback('tap');
+    diceShown = [];
+    render();
+    if (t.over) { finishGame(); return; }
+    save();
+    rollBtn.focus({ preventScroll: true });
+  }
+
+  function finishGame() {
+    ended = true;
+    var tot = E.total(S), prev = best(), isBest = tot > prev;
+    C.stats.best('hamlet', 'score', tot);
+    if (tot >= 45) C.achievements.unlock('hm-big');
+    var coins = Math.max(2, Math.round(tot / 8)), points = Math.max(1, Math.min(120, Math.round(tot * 2)));
+    if (S.daily) {
+      C.achievements.unlock('hm-daily');
+      if (!C.stats.daily('hamlet', S.daily, { label: C.t('hmScoreN', { s: C.num(tot) }), win: true })) {
+        coins = Math.round(coins * 0.2); points = Math.round(points * 0.2);
+      }
+    }
+    ctx.clearSave();
+    render();
+    var rowsBonus = 0;
+    KINDS.forEach(function (k) { if (E.rowDone(S, k)) rowsBonus += E.PLAN[k].bonus; });
+    var lines = [];
+    if (S.daily) lines.push({ label: C.t('daily'), value: C.num(S.daily) });
+    lines.push({ label: C.t('score'), value: C.num(tot) });
+    lines.push({ label: C.t('hmBuilt'), value: C.num(E.count(S)) });
+    lines.push({ label: C.t('hmRowsL'), value: rowsBonus ? '+' + C.num(rowsBonus) : C.num(0) });
+    lines.push({ label: C.t('hmBalL'), value: E.balanced(S) ? '+' + C.num(E.BALANCE) : C.num(0) });
+    lines.push({ label: C.t('hmPrevBest'), value: prev ? C.num(prev) : '–' });
+    var note = isBest ? C.t('hmNewBest') : tot < prev ? C.t('hmBelow', { d: C.num(prev - tot) }) : null;
+    setTimeout(function () {
+      ctx.finish({
+        won: true, title: C.t('hmDoneT'), note: note, timeMs: Date.now() - startedAt, coins: coins, points: points,
+        lines: lines,
+        shareText: 'چوگان · دهکده' + (S.daily ? '\nروزانه ' + S.daily : '') + '\n' + tot,
+        againLabel: S.daily ? null : C.t('newGame'), onAgain: S.daily ? null : newGame
+      });
+    }, C.ui.reduceMotion() ? 200 : 700);
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim') || e.ctrlKey || e.metaKey || e.altKey) return;
+    var t = e.target;
+    var onButton = t && t.tagName === 'BUTTON';
+    if ((e.key === ' ' && !onButton) || C.keyIs(e, 'r')) { e.preventDefault(); doRoll(); return; }
+    if (C.keyIs(e, 'e')) { e.preventDefault(); doEnd(); return; }
+    var n = '12345'.indexOf(e.key);
+    if (n < 0 && /^Digit[1-5]$/.test(e.code || '')) n = +e.code.slice(5) - 1;
+    if (n >= 0 && e.key.length === 1) { e.preventDefault(); hold(n); return; }
+    var b = '6789'.indexOf(e.key);
+    if (b < 0 && /^Digit[6-9]$/.test(e.code || '')) b = +e.code.slice(5) - 6;
+    if (b >= 0) { e.preventDefault(); buildKind(KINDS[b]); return; }
+    if (C.keyIs(e, 'n') && !dailyDate) { e.preventDefault(); askNew(); }
+  });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    var keys = [kb('Space · R', C.t('hmKRoll')), kb('1–5', C.t('hmKHold')), kb('6–9', C.t('hmKBuild')), kb('E', C.t('hmKEnd'))];
+    if (!dailyDate) keys.push(kb('N', C.t('hmKNew')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('hmRules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, keys)
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // The tutorial art: five faces (kept ones ringed in the game's colour), and optionally a
+  // building with the faces it costs. Colours are the theme's own variables, so it fits the dark dialog too
+  function mini(v, x, y, s) { return '<svg x="' + x + '" y="' + y + '" width="' + s + '" height="' + s + '" viewBox="0 0 100 100">' + SYM[v] + '</svg>'; }
+  function tArt(vals, kept, build) {
+    var s = '<svg viewBox="0 0 200 120" width="100%" direction="ltr">';
+    vals.forEach(function (v, i) {
+      var x = 12 + i * 37, y = kept && kept[i] ? 8 : 18, on = kept && kept[i];
+      s += '<rect x="' + x + '" y="' + y + '" width="30" height="30" rx="6" fill="var(--c-surface)" stroke="' + (on ? '#1B3729' : 'var(--c-line)') + '" stroke-width="' + (on ? 2.4 : 1.2) + '"/>' + mini(v, x + 3, y + 3, 24);
+    });
+    if (build) {
+      s += '<rect x="20" y="62" width="160" height="46" rx="8" fill="var(--game-soft, #E0ECE5)" stroke="#1B3729" stroke-width="1.6"/>';
+      build.cost.forEach(function (f, i) { s += mini(f, 30 + i * 24, 72, 22); });
+      s += '<svg x="128" y="68" width="38" height="34" viewBox="0 0 100 100">' + BLD[build.kind] + '</svg>';
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('hmTut1T'), text: C.t('hmTut1'), art: tArt([1, 3, 3, 2, 6], [true, false, true, false, false]) },
+    { title: C.t('hmTut2T'), text: C.t('hmTut2'), art: tArt([1, 3, 3, 5, 2], [false, false, false, false, false], { kind: 'hut', cost: [1, 3, 3] }) },
+    { title: C.t('hmTut3T'), text: C.t('hmTut3'), art: tArt([6, 3, 3, 4, 4], null, { kind: 'hut', cost: [1, 3, 3] }) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // saved after every roll, keep, building and round; the daily game has its own slot
+  ctx.autosave(function () {
+    if (!S || ended) return { inProgress: false };
+    return { dice: S.dice, held: S.held, used: S.used, rolls: S.rolls, round: S.round, built: S.built, seed: S.seed, daily: S.daily, elapsed: Date.now() - startedAt };
+  });
+  function save() { ctx.save(); }
+  var saved = ctx.loadSave();
+  if (saved && E.valid(saved) && (saved.daily || null) === (dailyDate || null)) {
+    S = { dice: saved.dice.slice(), held: saved.held.slice(), used: saved.used.slice(), rolls: saved.rolls, round: saved.round, seed: saved.seed, daily: saved.daily || null,
+      built: { path: saved.built.path, hut: saved.built.hut, well: saved.built.well, field: saved.built.field } };
+    S.balancedSeen = E.balanced(S);
+    startedAt = Date.now() - (saved.elapsed || 0);
+    render();
+  } else newGame();
+  if (dailyDate && C.stats.dailyDone('hamlet', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).hamlet;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  fitSize();
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
