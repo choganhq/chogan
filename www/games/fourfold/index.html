@@ -1,0 +1,939 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>چهارگانه — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* The board and pieces are the game's own: a pale wood board in the light theme and a dark
+     one in the dark theme, with both piece colours re-tuned for each so that a light piece's
+     outline and a dark piece's face still read on an empty cell */
+  :root { --ff-board: #D8CCD3; --ff-cell: #EFE8EC; --ff-lf: #F6E7C8; --ff-ls: #E0C690; --ff-le: #8A6A3A; --ff-lh: #B89660;
+    --ff-d: #5B3A55; --ff-ds: #3E2539; --ff-de: #2A1727; --ff-dh: #2E1B2A; --ff-ring: #584A5A; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --ff-board: #1E191C; --ff-cell: #2C262A; --ff-lf: #F2E2C0; --ff-ls: #CDB07A; --ff-le: #A88A55; --ff-lh: #8C7046;
+      --ff-d: #9C6A90; --ff-ds: #74486A; --ff-de: #1A1219; --ff-dh: #4A2C43; --ff-ring: #E3BFD8; }
+  }
+  :root[data-theme="dark"] { --ff-board: #1E191C; --ff-cell: #2C262A; --ff-lf: #F2E2C0; --ff-ls: #CDB07A; --ff-le: #A88A55; --ff-lh: #8C7046;
+    --ff-d: #9C6A90; --ff-ds: #74486A; --ff-de: #1A1219; --ff-dh: #4A2C43; --ff-ring: #E3BFD8; }
+  /* a square board in every window. Beside the board in a wide and tall window the pieces
+     get four larger columns; a phone turned on its side keeps eight, or the tray would run
+     off the bottom. The selector is more specific than .fo-tray below, which would win. */
+  .fo-wrap > .ch-fit { --fit-ar: 1; }
+  @container game (min-aspect-ratio: 5 / 4) and (min-height: 600px) { .fo-wrap .fo-tray { grid-template-columns: repeat(4, minmax(44px, 1fr)); } }
+  @media (min-height: 680px) { .ch-nocq .ch-gamemain.ch-wide .fo-wrap .fo-tray { grid-template-columns: repeat(4, minmax(44px, 1fr)); } }
+  .ch-fit > .fo-box { position: relative; aspect-ratio: var(--fit-ar); display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(4, 1fr);
+    gap: 3%; padding: 3.5%; box-sizing: border-box; background: var(--ff-board); border-radius: var(--r-lg); box-shadow: var(--sh-1); }
+  .fo-cell { border: 0; margin: 0; padding: 8%; min-width: 0; min-height: 0; border-radius: 50%; background: var(--ff-cell); cursor: pointer;
+    display: grid; place-items: center; touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: box-shadow var(--t-fast) var(--ease); }
+  .fo-cell:disabled { cursor: default; }
+  .fo-cell--last { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ff-ring) 45%, transparent); }
+  .fo-cell--win { box-shadow: inset 0 0 0 4px var(--ff-ring); }
+  .fo-cell--cur { outline: 3px solid var(--c-text); outline-offset: 2px; }
+  .fo-cell--ok:hover { box-shadow: inset 0 0 0 2px var(--ff-ring); }
+  /* the drawn pieces never take a tap: the cell or slot under them does (#750) */
+  .fo-pc { width: 100%; height: 100%; display: block; pointer-events: none; overflow: visible; }
+  .fo-pc path { stroke: var(--e); stroke-width: 2.5; stroke-linejoin: round; }
+  .fo-pc--l { --f: var(--ff-lf); --s: var(--ff-ls); --e: var(--ff-le); --h: var(--ff-lh); }
+  .fo-pc--d { --f: var(--ff-d); --s: var(--ff-ds); --e: var(--ff-de); --h: var(--ff-dh); }
+  .fo-pc .fo-t { fill: var(--f); }
+  .fo-pc .fo-s { fill: var(--s); }
+  .fo-pc .fo-h { fill: var(--h); }
+  .fo-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .fo-info { display: flex; align-items: center; gap: var(--s-2); }
+  .fo-chip { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; min-height: 44px; padding: 6px 10px; background: var(--c-surface);
+    border-radius: var(--r-md); box-shadow: var(--sh-1); border: 2px solid transparent; font-weight: 700; font-size: var(--fs-sm);
+    transition: border-color var(--t-mid) var(--ease), transform var(--t-mid) var(--ease); }
+  .fo-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fo-chip--on { border-color: var(--game); transform: translateY(-2px); box-shadow: var(--sh-2); }
+  .fo-thinking { animation: fo-blink 900ms infinite; }
+  @keyframes fo-blink { 50% { opacity: .55; } }
+  .fo-hand { flex: 0 0 60px; width: 60px; height: 60px; box-sizing: border-box; padding: 4px; border-radius: var(--r-md); background: var(--ff-cell);
+    border: 2px dashed color-mix(in srgb, var(--ff-ring) 55%, transparent); }
+  .fo-hand--preview .fo-pc { opacity: .5; }
+  /* the Give button appears in this row, so the row keeps its height and the board above it
+     never moves between two taps */
+  .fo-status { min-height: 48px; display: flex; align-items: center; justify-content: center; gap: var(--s-2); flex-wrap: wrap;
+    font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+  .fo-tray { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 3px; }
+  .fo-slot { min-height: 44px; min-width: 0; aspect-ratio: 1; border: 0; margin: 0; padding: 3px; border-radius: var(--r-sm); background: var(--c-surface);
+    box-shadow: var(--sh-1); cursor: pointer; display: grid; place-items: center; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    transition: transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease); }
+  .fo-slot--gone { background: transparent; box-shadow: inset 0 0 0 1.5px var(--c-line, rgba(127, 127, 127, .25)); cursor: default; }
+  .fo-slot--gone .fo-pc { visibility: hidden; }
+  .fo-slot--sel { box-shadow: inset 0 0 0 3px var(--game), var(--sh-2); transform: translateY(-3px); }
+  .fo-slot--cur { outline: 3px solid var(--c-text); outline-offset: 1px; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function FourfoldEngineFactory() {
+  'use strict';
+
+  // Sixteen pieces, each a 4-bit number: bit 1 tall, 2 dark, 4 round, 8 hollow. The board is
+  // 4×4, index r * 4 + c. One player hands a piece over, the other places it and then hands
+  // the next one. Completing a line of four that all have, or all lack, any one trait wins
+  // for whoever placed the fourth piece.
+  var PIECES = 16, TRAITS = [1, 2, 4, 8], LEVELS = ['easy', 'medium', 'hard'], WIN = 100;
+  var LINES = [];
+  for (var r0 = 0; r0 < 4; r0++) LINES.push([r0 * 4, r0 * 4 + 1, r0 * 4 + 2, r0 * 4 + 3]);
+  for (var c0 = 0; c0 < 4; c0++) LINES.push([c0, c0 + 4, c0 + 8, c0 + 12]);
+  LINES.push([0, 5, 10, 15], [3, 6, 9, 12]);
+  var CELL_LINES = [];
+  for (var i0 = 0; i0 < 16; i0++) CELL_LINES.push(LINES.filter(function (l) { return l.indexOf(i0) >= 0; }));
+
+  function shares(ps) {
+    if (!ps || ps.length !== 4) return false;
+    var and = 15, or = 0;
+    for (var k = 0; k < 4; k++) { var p = ps[k]; if (!(p >= 0 && p < 16)) return false; and &= p; or |= p; }
+    return (and | (~or & 15)) !== 0;
+  }
+  // who places the nth piece (0-based): the player who did not hand over first
+  function placer(S, n) { return n % 2 === 0 ? 1 - S.first : S.first; }
+  function count(board) { var n = 0; for (var i = 0; i < 16; i++) if (board[i] >= 0) n++; return n; }
+
+  function newGame(first) {
+    var f = first === 1 ? 1 : 0, b = [];
+    for (var i = 0; i < 16; i++) b.push(-1);
+    return { board: b, hand: -1, turn: f, phase: 'give', first: f, winner: -1, draw: false, plies: 0, last: -1 };
+  }
+  function clone(S) {
+    return { board: S.board.slice(), hand: S.hand, turn: S.turn, phase: S.phase, first: S.first, winner: S.winner, draw: S.draw, plies: S.plies, last: S.last };
+  }
+  function over(S) { return S.winner >= 0 || S.draw; }
+  function give(S, p) {
+    if (S.phase !== 'give' || over(S) || !(p === (p | 0) && p >= 0 && p < 16) || S.board.indexOf(p) >= 0) return false;
+    S.hand = p; S.phase = 'place'; S.turn = 1 - S.turn; S.plies++;
+    return true;
+  }
+  function lineWins(board, l) { return shares([board[l[0]], board[l[1]], board[l[2]], board[l[3]]]); }
+  function place(S, c) {
+    if (S.phase !== 'place' || over(S) || !(c === (c | 0) && c >= 0 && c < 16) || S.board[c] !== -1) return false;
+    S.board[c] = S.hand; S.last = c; S.hand = -1; S.plies++; S.phase = 'give';
+    if (CELL_LINES[c].some(function (l) { return lineWins(S.board, l); })) S.winner = S.turn;
+    else if (count(S.board) === 16) S.draw = true;
+    return true;
+  }
+  function winningLines(board) { return LINES.filter(function (l) { return lineWins(board, l); }); }
+  function winningLine(board) { var w = winningLines(board); return w.length ? w[0].slice() : null; }
+  function avail(S) { var out = []; for (var p = 0; p < 16; p++) if (S.board.indexOf(p) < 0 && p !== S.hand) out.push(p); return out; }
+
+  // A save is restored only if it is a position the rules can reach
+  function valid(S) {
+    if (!S || typeof S !== 'object' || !Array.isArray(S.board) || S.board.length !== 16) return false;
+    var seen = {}, n = 0;
+    for (var i = 0; i < 16; i++) {
+      var x = S.board[i];
+      if (x !== (x | 0) || x < -1 || x > 15) return false;
+      if (x >= 0) { if (seen[x]) return false; seen[x] = true; n++; }
+    }
+    if ((S.first !== 0 && S.first !== 1) || (S.turn !== 0 && S.turn !== 1) || typeof S.draw !== 'boolean' || S.plies !== (S.plies | 0)) return false;
+    if (S.last !== -1 && !(S.last === (S.last | 0) && S.last >= 0 && S.last < 16 && S.board[S.last] >= 0)) return false;
+    var wins = winningLines(S.board);
+    if (S.phase === 'place') {
+      if (!(S.hand === (S.hand | 0) && S.hand >= 0 && S.hand < 16) || seen[S.hand]) return false;
+      if (n >= 16 || S.plies !== 2 * n + 1 || S.turn !== placer(S, n) || S.winner !== -1 || S.draw || wins.length) return false;
+      return true;
+    }
+    if (S.phase !== 'give' || S.hand !== -1 || S.plies !== 2 * n) return false;
+    if (S.turn !== (n === 0 ? S.first : placer(S, n - 1))) return false;
+    if (wins.length) {
+      if (S.winner !== placer(S, n - 1) || S.draw) return false;
+      if (S.last >= 0 && !wins.every(function (l) { return l.indexOf(S.last) >= 0; })) return false;
+    } else if (S.winner !== -1) return false;
+    return S.draw === (n === 16 && !wins.length);
+  }
+
+  /* ------------------------------------------------------------ search */
+
+  // WINMASK[A * 16 + Z]: the pieces that complete a line whose three pieces all have the
+  // traits in A and all lack the traits in Z. danger(board) is the set of pieces that would
+  // win somewhere at once, so "is this piece safe to hand over" is one bit test.
+  var WINMASK = [];
+  for (var A = 0; A < 16; A++) for (var Z = 0; Z < 16; Z++) {
+    var m = 0;
+    for (var p0 = 0; p0 < 16; p0++) if (((A & p0) | (Z & ~p0 & 15)) !== 0) m |= 1 << p0;
+    WINMASK[A * 16 + Z] = m;
+  }
+  function danger(board) {
+    var d = 0;
+    for (var k = 0; k < 10; k++) {
+      var l = LINES[k], a = 15, z = 15, empty = 0;
+      for (var j = 0; j < 4; j++) { var x = board[l[j]]; if (x < 0) empty++; else { a &= x; z &= ~x & 15; } }
+      if (empty === 1) d |= WINMASK[a * 16 + z];
+    }
+    return d;
+  }
+  function winsAt(board, p) {
+    var out = [];
+    for (var c = 0; c < 16; c++) {
+      if (board[c] !== -1) continue;
+      board[c] = p;
+      if (CELL_LINES[c].some(function (l) { return lineWins(board, l); })) out.push(c);
+      board[c] = -1;
+    }
+    return out;
+  }
+  function bits(m) { var out = []; for (var p = 0; p < 16; p++) if ((m >> p) & 1) out.push(p); return out; }
+  function shuffle(a, rnd) { for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(rnd() * (i + 1)), t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
+  function availMask(S) { var m = 0; for (var p = 0; p < 16; p++) if (S.board.indexOf(p) < 0 && p !== S.hand) m |= 1 << p; return m; }
+  function emptyCells(board) { var out = []; for (var c = 0; c < 16; c++) if (board[c] === -1) out.push(c); return out; }
+
+  var nodes = 0, deadline = 0, ABORT = { abort: true };
+  // Negamax for the player who must place `hand`; dm is danger(board). A win is worth more
+  // the sooner it comes, so the bot takes a quick win and drags out a loss.
+  function search(board, hand, av, empties, depth, alpha, beta, dm) {
+    if ((++nodes & 1023) === 0 && deadline && Date.now() > deadline) throw ABORT;
+    if ((dm >> hand) & 1) return WIN + empties;
+    if (empties === 1 || depth === 0) return 0;
+    var best = -Infinity;
+    for (var c = 0; c < 16; c++) {
+      if (board[c] !== -1) continue;
+      board[c] = hand;
+      var d2 = danger(board), safe = av & ~d2, v;
+      if (!safe) v = -(WIN + empties - 1);
+      else {
+        v = -Infinity;
+        for (var g = 0; g < 16; g++) {
+          if (!((safe >> g) & 1)) continue;
+          var s = -search(board, g, av & ~(1 << g), empties - 1, depth - 1, -beta, -Math.max(alpha, v), d2);
+          if (s > v) v = s;
+          if (v >= beta) break;
+        }
+      }
+      board[c] = -1;
+      if (v > best) best = v;
+      if (best > alpha) alpha = best;
+      if (alpha >= beta) break;
+    }
+    return best;
+  }
+  function rootPlace(S, depth, rnd) {
+    var board = S.board.slice(), hand = S.hand, av = availMask(S), cells = shuffle(emptyCells(board), rnd), empties = cells.length;
+    var wins = winsAt(board, hand);
+    if (wins.length) return { cell: wins[Math.floor(rnd() * wins.length)], give: -1, v: WIN + empties };
+    if (empties === 1) return { cell: cells[0], give: -1, v: 0 };
+    var best = null;
+    cells.forEach(function (c) {
+      board[c] = hand;
+      var d2 = danger(board), safe = shuffle(bits(av & ~d2), rnd);
+      if (!safe.length) {
+        var all = bits(av), v0 = -(WIN + empties - 1);
+        if (!best || v0 > best.v) best = { cell: c, give: all[Math.floor(rnd() * all.length)], v: v0 };
+      }
+      safe.forEach(function (g) {
+        var alpha = best ? best.v : -Infinity;
+        var v = -search(board, g, av & ~(1 << g), empties - 1, depth - 1, -Infinity, -alpha, d2);
+        if (!best || v > best.v) best = { cell: c, give: g, v: v };
+      });
+      board[c] = -1;
+    });
+    return best;
+  }
+  function rootGive(S, depth, rnd) {
+    var board = S.board, av = availMask(S), list = shuffle(bits(av), rnd), empties = emptyCells(board).length, dm = danger(board), best = null;
+    list.forEach(function (g) {
+      var v;
+      if ((dm >> g) & 1) v = -(WIN + empties);
+      else {
+        var alpha = best ? best.v : -Infinity;
+        v = -search(board.slice(), g, av & ~(1 << g), empties, depth, -Infinity, -alpha, dm);
+      }
+      if (!best || v > best.v) best = { cell: -1, give: g, v: v };
+    });
+    return best;
+  }
+
+  // easy: often misses; medium: looks one placement ahead, so it takes any win and never hands
+  // over a winning piece when it has a choice; hard: deepens until its time budget runs out
+  // and keeps the answer of the last depth it finished.
+  function think(S, level, rnd, opts) {
+    rnd = rnd || Math.random;
+    opts = opts || {};
+    if (over(S)) return { cell: -1, give: -1 };
+    var giving = S.phase === 'give';
+    if (level === 'easy') {
+      if (giving) {
+        var safe = bits(availMask(S) & ~danger(S.board)), all = avail(S);
+        var pool = safe.length && rnd() < 0.5 ? safe : all;
+        return { cell: -1, give: pool[Math.floor(rnd() * pool.length)] };
+      }
+      var w = winsAt(S.board, S.hand), cells = emptyCells(S.board);
+      return { cell: w.length && rnd() < 0.6 ? w[0] : cells[Math.floor(rnd() * cells.length)], give: -1 };
+    }
+    deadline = 0;
+    var res = giving ? rootGive(S, 1, rnd) : rootPlace(S, 1, rnd);
+    if (level === 'hard' && Math.abs(res.v) < WIN) {
+      var empties = emptyCells(S.board).length;
+      nodes = 0;
+      deadline = Date.now() + (opts.budget || 150);
+      try {
+        for (var d = 2; d <= empties; d++) {
+          var r = giving ? rootGive(S, d, rnd) : rootPlace(S, d, rnd);
+          res = r;
+          if (Math.abs(r.v) >= WIN) break;
+        }
+      } catch (e) { if (e !== ABORT) throw e; }
+      deadline = 0;
+    }
+    return { cell: res.cell, give: res.give };
+  }
+
+  // The day's game: four pieces already down with no line, and a piece in your hand that has
+  // no winning cell yet and leaves you at least one safe answer
+  function dailyPosition(rnd) {
+    for (var tries = 0; tries < 500; tries++) {
+      var pcs = shuffle(Array.from({ length: 16 }, function (x, i) { return i; }), rnd);
+      var cells = shuffle(Array.from({ length: 16 }, function (x, i) { return i; }), rnd);
+      var board = [];
+      for (var i = 0; i < 16; i++) board.push(-1);
+      for (var k = 0; k < 4; k++) board[cells[k]] = pcs[k];
+      if (winningLines(board).length) continue;
+      var dm = danger(board), rest = pcs.slice(4), hand = -1;
+      for (var h = 0; h < rest.length && hand < 0; h++) {
+        var p = rest[h];
+        if ((dm >> p) & 1) continue;
+        var others = 0;
+        rest.forEach(function (q) { if (q !== p) others |= 1 << q; });
+        var ok = emptyCells(board).some(function (c) { board[c] = p; var fine = (others & ~danger(board)) !== 0; board[c] = -1; return fine; });
+        if (ok) hand = p;
+      }
+      if (hand < 0) continue;
+      return { board: board, hand: hand, turn: 0, phase: 'place', first: 1, winner: -1, draw: false, plies: 9, last: -1 };
+    }
+    return null;
+  }
+
+  return { PIECES: PIECES, TRAITS: TRAITS, LINES: LINES, CELL_LINES: CELL_LINES, LEVELS: LEVELS, shares: shares, newGame: newGame, clone: clone,
+    give: give, place: place, avail: avail, winningLine: winningLine, winningLines: winningLines, winsAt: winsAt, danger: danger, valid: valid,
+    think: think, dailyPosition: dailyPosition };
+}
+if (typeof module !== 'undefined') module.exports = FourfoldEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = FourfoldEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'fourfold',
+    name: { fa: 'چهارگانه', en: 'Fourfold', zh: '四同棋', de: 'Vierfalt', es: 'Cuádruple', pl: 'Czworaki', fr: 'Quadruple', ar: 'الرباعية', hi: 'चौगुना' },
+    accent: '#584A5A',
+    mood: 'sudoku',
+    strings: {
+      fa: {
+        board: 'صفحه‌ی چهارگانه', vsBot: 'مقابل ربات', two: 'دو نفره', bot: 'ربات', playerN: 'بازیکن {n}', modeT: 'بازیکن‌ها', levelT: 'سطح ربات',
+        newMatch: 'بازی تازه', begin: 'شروع', undoMove: 'برگرداندن حرکت', endWarn: 'بازی فعلی تمام می‌شود. ادامه؟', settingsT: 'بازی تازه',
+        yourPlace: 'مهره‌ای را که گرفتی در یک خانه‌ی خالی بگذار', yourGive: 'مهره‌ای برای {n} انتخاب کن و «بده» را بزن',
+        placeOf: 'نوبت {n}: مهره را بگذار', giveOf: 'نوبت {n}: مهره‌ای برای {m} انتخاب کن', thinking: 'ربات فکر می‌کند…', giveBtn: 'بده',
+        handL: 'مهره‌ی در دست', trayL: 'مهره‌های باقی‌مانده', dailyFf: 'چهارگانه‌ی روزانه', vsMedium: 'مقابل ربات متوسط', playerWon: '{n} برد', drawn: 'مساوی', piecesL: 'مهره‌های روی صفحه',
+        rules: 'شانزده مهره داری که هیچ دو تایی شبیه هم نیستند: بلند یا کوتاه، روشن یا تیره، گرد یا چهارگوش، توخالی یا توپر. مهره‌ای را که می‌گذاری خودت انتخاب نمی‌کنی؛ حریف آن را به تو می‌دهد. آن را در هر خانه‌ی خالی بگذار، بعد یکی از مهره‌های باقی‌مانده را برای حریف انتخاب کن. هر کس ردیف، ستون یا قطری از چهار مهره کامل کند که دست‌کم در یک ویژگی مشترک باشند می‌برد، مهم نیست سه مهره‌ی دیگر را چه کسی گذاشته. اگر صفحه پر شود و چنین خطی نباشد، بازی مساوی است.',
+        kCursor: 'جابه‌جایی بین خانه‌ها یا مهره‌ها', kGo: 'گذاشتن یا انتخاب مهره', kGive: 'دادن مهره‌ی انتخاب‌شده',
+        tutTitle1: 'چهار در یک خط، یک ویژگی مشترک', tutText1: 'ردیف، ستون یا قطری از چهار مهره که همه بلند، یا همه تیره، یا همه گرد، یا همه توخالی باشند (یا همه برعکس) برنده است.',
+        tutTitle2: 'حریف مهره‌ات را انتخاب می‌کند', tutText2: 'مهره‌ای را که حریف داده در هر خانه‌ی خالی بگذار. اگر خطی را کامل کند، برده‌ای.',
+        tutTitle3: 'بعد تو مهره‌ی او را انتخاب کن', tutText3: 'یکی از مهره‌های باقی‌مانده را بده. مراقب باش مهره‌ای ندهی که یک خط را کامل کند.',
+        tTall: 'بلند', tShort: 'کوتاه', tDark: 'تیره', tLight: 'روشن', tRound: 'گرد', tSquare: 'چهارگوش', tHollow: 'توخالی', tSolid: 'توپر', emptyCell: 'خانه‌ی خالی'
+      },
+      en: {
+        board: 'Fourfold board', vsBot: 'Against the bot', two: 'Two players', bot: 'Bot', playerN: 'Player {n}', modeT: 'Players', levelT: 'Bot level',
+        newMatch: 'New game', begin: 'Start', undoMove: 'Undo move', endWarn: 'This ends the current game. Continue?', settingsT: 'New game',
+        yourPlace: 'Place the piece you were handed on an empty cell', yourGive: 'Pick a piece for {n}, then tap Give',
+        placeOf: '{n}: place the piece', giveOf: '{n}: pick a piece for {m}', thinking: 'The bot is thinking…', giveBtn: 'Give',
+        handL: 'Piece in hand', trayL: 'Pieces left', dailyFf: 'Daily Fourfold', vsMedium: 'against the medium bot', playerWon: '{n} wins', drawn: 'Draw', piecesL: 'Pieces on the board',
+        rules: 'Sixteen pieces, each different: tall or short, light or dark, round or square, hollow or solid. You never choose the piece you play: your opponent hands it to you. Place it on any empty cell, then choose one of the remaining pieces for your opponent. Whoever completes a row, column or diagonal of four pieces that share at least one trait wins, no matter who placed the other three. If the board fills with no such line, the game is a draw.',
+        kCursor: 'Move between cells or pieces', kGo: 'Place or pick a piece', kGive: 'Give the picked piece',
+        tutTitle1: 'Four in a line, one trait in common', tutText1: 'A row, column or diagonal of four pieces that are all tall, all dark, all round or all hollow (or all the opposite) wins.',
+        tutTitle2: 'Your opponent picks your piece', tutText2: 'Place the piece you were handed on any empty cell. If it completes a line, you win.',
+        tutTitle3: 'Then you pick theirs', tutText3: 'Hand over one of the remaining pieces. Never give one that completes a line.',
+        tTall: 'tall', tShort: 'short', tDark: 'dark', tLight: 'light', tRound: 'round', tSquare: 'square', tHollow: 'hollow', tSolid: 'solid', emptyCell: 'Empty cell'
+      },
+      pl: {
+        board: 'Plansza Czworaków', vsBot: 'Przeciwko botowi', two: 'Dwóch graczy', bot: 'Bot', playerN: 'Gracz {n}', modeT: 'Gracze', levelT: 'Poziom bota',
+        newMatch: 'Nowa gra', begin: 'Start', undoMove: 'Cofnij ruch', endWarn: 'To zakończy bieżącą grę. Kontynuować?', settingsT: 'Nowa gra',
+        yourPlace: 'Postaw otrzymany pionek na pustym polu', yourGive: 'Wybierz pionek dla gracza {n}, potem dotknij Daj',
+        placeOf: '{n}: postaw pionek', giveOf: '{n}: wybierz pionek dla gracza {m}', thinking: 'Bot myśli…', giveBtn: 'Daj',
+        handL: 'Pionek w ręce', trayL: 'Pozostałe pionki', dailyFf: 'Codzienne Czworaki', vsMedium: 'przeciwko botowi na średnim poziomie', playerWon: '{n} wygrywa', drawn: 'Remis', piecesL: 'Pionki na planszy',
+        rules: 'Szesnaście pionków, każdy inny: wysoki lub niski, jasny lub ciemny, okrągły lub kwadratowy, pusty lub pełny. Nigdy nie wybierasz pionka, którym grasz: daje ci go rywal. Postaw go na dowolnym pustym polu, a potem wybierz dla rywala jeden z pozostałych. Wygrywa ten, kto zamknie rząd, kolumnę lub przekątną z czterech pionków o co najmniej jednej wspólnej cesze, bez względu na to, kto postawił pozostałe trzy. Jeśli plansza się zapełni bez takiej linii, jest remis.',
+        kCursor: 'Ruch między polami lub pionkami', kGo: 'Postaw lub wybierz pionek', kGive: 'Daj wybrany pionek',
+        tutTitle1: 'Cztery w linii, jedna wspólna cecha', tutText1: 'Wygrywa rząd, kolumna lub przekątna czterech pionków, które są wszystkie wysokie, ciemne, okrągłe albo puste (lub wszystkie przeciwnie).',
+        tutTitle2: 'Rywal wybiera twój pionek', tutText2: 'Postaw otrzymany pionek na dowolnym pustym polu. Jeśli zamknie linię, wygrywasz.',
+        tutTitle3: 'Potem ty wybierasz jego', tutText3: 'Oddaj jeden z pozostałych pionków. Nigdy nie dawaj takiego, który zamyka linię.',
+        tTall: 'wysoki', tShort: 'niski', tDark: 'ciemny', tLight: 'jasny', tRound: 'okrągły', tSquare: 'kwadratowy', tHollow: 'pusty', tSolid: 'pełny', emptyCell: 'Puste pole'
+      },
+      fr: {
+        board: 'Plateau de Quadruple', vsBot: 'Contre le robot', two: 'Deux joueurs', bot: 'Robot', playerN: 'Joueur {n}', modeT: 'Joueurs', levelT: 'Niveau du robot',
+        newMatch: 'Nouvelle partie', begin: 'Commencer', undoMove: 'Annuler le coup', endWarn: 'Cela met fin à la partie en cours. Continuer ?', settingsT: 'Nouvelle partie',
+        yourPlace: 'Pose la pièce reçue sur une case vide', yourGive: 'Choisis une pièce pour {n}, puis touche Donner',
+        placeOf: '{n} : pose la pièce', giveOf: '{n} : choisis une pièce pour {m}', thinking: 'Le robot réfléchit…', giveBtn: 'Donner',
+        handL: 'Pièce en main', trayL: 'Pièces restantes', dailyFf: 'Quadruple du jour', vsMedium: 'contre le robot moyen', playerWon: '{n} gagne', drawn: 'Égalité', piecesL: 'Pièces sur le plateau',
+        rules: 'Seize pièces, toutes différentes : haute ou basse, claire ou foncée, ronde ou carrée, creuse ou pleine. Tu ne choisis jamais la pièce que tu joues : ton adversaire te la donne. Pose-la sur une case vide, puis choisis l’une des pièces restantes pour ton adversaire. Celui qui complète une ligne, une colonne ou une diagonale de quatre pièces ayant au moins un caractère commun gagne, peu importe qui a posé les trois autres. Si le plateau se remplit sans une telle ligne, c’est une égalité.',
+        kCursor: 'Passer d’une case ou d’une pièce à l’autre', kGo: 'Poser ou choisir une pièce', kGive: 'Donner la pièce choisie',
+        tutTitle1: 'Quatre en ligne, un caractère commun', tutText1: 'Une ligne, une colonne ou une diagonale de quatre pièces toutes hautes, toutes foncées, toutes rondes ou toutes creuses (ou toutes l’inverse) gagne.',
+        tutTitle2: 'L’adversaire choisit ta pièce', tutText2: 'Pose la pièce reçue sur n’importe quelle case vide. Si elle complète une ligne, tu gagnes.',
+        tutTitle3: 'Puis tu choisis la sienne', tutText3: 'Donne l’une des pièces restantes. Ne donne jamais une pièce qui complète une ligne.',
+        tTall: 'haute', tShort: 'basse', tDark: 'foncée', tLight: 'claire', tRound: 'ronde', tSquare: 'carrée', tHollow: 'creuse', tSolid: 'pleine', emptyCell: 'Case vide'
+      },
+      ar: {
+        board: 'لوح الرباعية', vsBot: 'ضد الروبوت', two: 'لاعبان', bot: 'الروبوت', playerN: 'اللاعب {n}', modeT: 'اللاعبون', levelT: 'مستوى الروبوت',
+        newMatch: 'لعبة جديدة', begin: 'ابدأ', undoMove: 'تراجع', endWarn: 'سينهي هذا اللعبة الحالية. هل تتابع؟', settingsT: 'لعبة جديدة',
+        yourPlace: 'ضع القطعة التي أُعطيت لك في خانة فارغة', yourGive: 'اختر قطعة لـ{n} ثم انقر «أعطِ»',
+        placeOf: '{n}: ضع القطعة', giveOf: '{n}: اختر قطعة لـ{m}', thinking: 'الروبوت يفكر…', giveBtn: 'أعطِ',
+        handL: 'القطعة في اليد', trayL: 'القطع المتبقية', dailyFf: 'الرباعية اليومية', vsMedium: 'ضد الروبوت المتوسط', playerWon: 'فاز {n}', drawn: 'تعادل', piecesL: 'القطع على اللوح',
+        rules: 'ست عشرة قطعة، كل واحدة مختلفة: طويلة أو قصيرة، فاتحة أو داكنة، مستديرة أو مربعة، مجوفة أو مصمتة. لا تختار أبدًا القطعة التي تلعبها: خصمك يعطيك إياها. ضعها في أي خانة فارغة، ثم اختر لخصمك قطعة من القطع المتبقية. يفوز من يكمل صفًا أو عمودًا أو قطرًا من أربع قطع تشترك في صفة واحدة على الأقل، أيًّا كان من وضع القطع الثلاث الأخرى. إن امتلأ اللوح دون خط كهذا فهو تعادل.',
+        kCursor: 'تنقل بين الخانات أو القطع', kGo: 'ضع قطعة أو اخترها', kGive: 'أعطِ القطعة المختارة',
+        tutTitle1: 'أربع في خط، صفة مشتركة', tutText1: 'يفوز صف أو عمود أو قطر من أربع قطع كلها طويلة أو كلها داكنة أو كلها مستديرة أو كلها مجوفة، أو كلها عكس ذلك.',
+        tutTitle2: 'خصمك يختار قطعتك', tutText2: 'ضع القطعة التي أُعطيت لك في أي خانة فارغة. إن أكملت خطًا فقد فزت.',
+        tutTitle3: 'ثم تختار أنت قطعته', tutText3: 'أعطِ قطعة من القطع المتبقية. لا تعطِ أبدًا قطعة تكمل خطًا.',
+        tTall: 'طويلة', tShort: 'قصيرة', tDark: 'داكنة', tLight: 'فاتحة', tRound: 'مستديرة', tSquare: 'مربعة', tHollow: 'مجوفة', tSolid: 'مصمتة', emptyCell: 'خانة فارغة'
+      },
+      hi: {
+        board: 'चौगुना का बोर्ड', vsBot: 'बॉट से', two: 'दो खिलाड़ी', bot: 'बॉट', playerN: 'खिलाड़ी {n}', modeT: 'खिलाड़ी', levelT: 'बॉट का स्तर',
+        newMatch: 'नया खेल', begin: 'शुरू करें', undoMove: 'चाल वापस', endWarn: 'इससे मौजूदा खेल ख़त्म हो जाएगा। जारी रखें?', settingsT: 'नया खेल',
+        yourPlace: 'मिला हुआ मोहरा किसी ख़ाली ख़ाने में रखें', yourGive: '{n} के लिए मोहरा चुनें, फिर «दें» छुएँ',
+        placeOf: '{n}: मोहरा रखें', giveOf: '{n}: {m} के लिए मोहरा चुनें', thinking: 'बॉट सोच रहा है…', giveBtn: 'दें',
+        handL: 'हाथ में मोहरा', trayL: 'बचे मोहरे', dailyFf: 'रोज़ का चौगुना', vsMedium: 'मध्यम बॉट के ख़िलाफ़', playerWon: '{n} की जीत', drawn: 'बराबरी', piecesL: 'बोर्ड पर मोहरे',
+        rules: 'सोलह मोहरे, हर एक अलग: लंबा या छोटा, हल्का या गहरा, गोल या चौकोर, खोखला या ठोस। जिस मोहरे से आप खेलते हैं उसे आप कभी नहीं चुनते: विरोधी उसे आपको देता है। उसे किसी भी ख़ाली ख़ाने में रखें, फिर बचे मोहरों में से एक विरोधी के लिए चुनें। जो चार ऐसे मोहरों की पंक्ति, स्तंभ या विकर्ण पूरा करे जिनमें कम से कम एक गुण साझा हो, वह जीतता है, चाहे बाकी तीन किसी ने भी रखे हों। अगर बोर्ड ऐसी किसी रेखा के बिना भर जाए, तो खेल बराबरी पर ख़त्म होता है।',
+        kCursor: 'ख़ानों या मोहरों के बीच जाएँ', kGo: 'मोहरा रखें या चुनें', kGive: 'चुना हुआ मोहरा दें',
+        tutTitle1: 'एक रेखा में चार, एक साझा गुण', tutText1: 'चार मोहरों की पंक्ति, स्तंभ या विकर्ण जो सब लंबे, सब गहरे, सब गोल या सब खोखले हों (या सब उलटे) जीतती है।',
+        tutTitle2: 'विरोधी आपका मोहरा चुनता है', tutText2: 'मिला हुआ मोहरा किसी भी ख़ाली ख़ाने में रखें। अगर वह रेखा पूरी करे तो आप जीते।',
+        tutTitle3: 'फिर आप उसका चुनें', tutText3: 'बचे मोहरों में से एक दें। ऐसा मोहरा कभी न दें जो रेखा पूरी कर दे।',
+        tTall: 'लंबा', tShort: 'छोटा', tDark: 'गहरा', tLight: 'हल्का', tRound: 'गोल', tSquare: 'चौकोर', tHollow: 'खोखला', tSolid: 'ठोस', emptyCell: 'ख़ाली ख़ाना'
+      },
+      zh: {
+        board: '四同棋棋盘', vsBot: '对战电脑', two: '双人', bot: '电脑', playerN: '玩家 {n}', modeT: '玩家', levelT: '电脑难度',
+        newMatch: '新一局', begin: '开始', undoMove: '悔棋', endWarn: '将结束当前对局，是否继续？', settingsT: '新一局',
+        yourPlace: '把拿到的棋子放到一个空格上', yourGive: '为{n}选一枚棋子，然后点“给出”',
+        placeOf: '{n}：放下棋子', giveOf: '{n}：为{m}选一枚棋子', thinking: '电脑思考中……', giveBtn: '给出',
+        handL: '手中的棋子', trayL: '剩余棋子', dailyFf: '每日四同棋', vsMedium: '对战中等电脑', playerWon: '{n}获胜', drawn: '平局', piecesL: '盘上棋子',
+        rules: '十六枚棋子各不相同：高或矮、浅或深、圆或方、空心或实心。你从不自己挑要下的棋子，而是由对手交给你。把它放在任意空格上，然后从剩下的棋子中为对手选一枚。谁连成一行、一列或一条对角线上四枚至少有一个共同特征的棋子，谁就获胜，不管另外三枚是谁放的。棋盘下满仍没有这样的线，则为平局。',
+        kCursor: '在格子或棋子之间移动', kGo: '放下或选择棋子', kGive: '给出选中的棋子',
+        tutTitle1: '四子一线，一个共同点', tutText1: '一行、一列或一条对角线上的四枚棋子全高、全深、全圆或全空心（或全部相反）即获胜。',
+        tutTitle2: '对手为你挑棋子', tutText2: '把拿到的棋子放到任意空格。如果它连成一线，你就赢了。',
+        tutTitle3: '然后你为对手挑', tutText3: '从剩下的棋子中交出一枚。千万别交出能连成一线的棋子。',
+        tTall: '高', tShort: '矮', tDark: '深色', tLight: '浅色', tRound: '圆', tSquare: '方', tHollow: '空心', tSolid: '实心', emptyCell: '空格'
+      },
+      de: {
+        board: 'Vierfalt-Brett', vsBot: 'Gegen den Bot', two: 'Zu zweit', bot: 'Bot', playerN: 'Spieler {n}', modeT: 'Spieler', levelT: 'Bot-Stufe',
+        newMatch: 'Neue Partie', begin: 'Start', undoMove: 'Zug zurück', endWarn: 'Die aktuelle Partie endet. Weiter?', settingsT: 'Neue Partie',
+        yourPlace: 'Setze die erhaltene Figur auf ein freies Feld', yourGive: 'Wähle eine Figur für {n} und tippe auf Geben',
+        placeOf: '{n}: Figur setzen', giveOf: '{n}: Figur für {m} wählen', thinking: 'Der Bot überlegt …', giveBtn: 'Geben',
+        handL: 'Figur in der Hand', trayL: 'Übrige Figuren', dailyFf: 'Vierfalt des Tages', vsMedium: 'gegen den mittleren Bot', playerWon: 'Sieg: {n}', drawn: 'Unentschieden', piecesL: 'Figuren auf dem Brett',
+        rules: 'Sechzehn Figuren, jede anders: hoch oder niedrig, hell oder dunkel, rund oder eckig, hohl oder massiv. Die Figur, die du setzt, wählst du nie selbst: Dein Gegner gibt sie dir. Setze sie auf ein beliebiges freies Feld und wähle dann eine der übrigen Figuren für deinen Gegner. Wer eine Reihe, Spalte oder Diagonale aus vier Figuren vollendet, die mindestens ein Merkmal teilen, gewinnt, egal wer die anderen drei gesetzt hat. Ist das Brett voll ohne eine solche Linie, endet die Partie unentschieden.',
+        kCursor: 'Zwischen Feldern oder Figuren wechseln', kGo: 'Figur setzen oder wählen', kGive: 'Gewählte Figur geben',
+        tutTitle1: 'Vier in einer Linie, ein gemeinsames Merkmal', tutText1: 'Eine Reihe, Spalte oder Diagonale aus vier Figuren, die alle hoch, alle dunkel, alle rund oder alle hohl sind (oder alle das Gegenteil), gewinnt.',
+        tutTitle2: 'Dein Gegner wählt deine Figur', tutText2: 'Setze die erhaltene Figur auf ein beliebiges freies Feld. Vollendet sie eine Linie, hast du gewonnen.',
+        tutTitle3: 'Dann wählst du seine', tutText3: 'Gib eine der übrigen Figuren ab. Gib nie eine, die eine Linie vollendet.',
+        tTall: 'hoch', tShort: 'niedrig', tDark: 'dunkel', tLight: 'hell', tRound: 'rund', tSquare: 'eckig', tHollow: 'hohl', tSolid: 'massiv', emptyCell: 'Freies Feld'
+      },
+      es: {
+        board: 'Tablero de Cuádruple', vsBot: 'Contra el bot', two: 'Dos jugadores', bot: 'Bot', playerN: 'Jugador {n}', modeT: 'Jugadores', levelT: 'Nivel del bot',
+        newMatch: 'Nueva partida', begin: 'Empezar', undoMove: 'Deshacer jugada', endWarn: 'Esto termina la partida actual. ¿Seguir?', settingsT: 'Nueva partida',
+        yourPlace: 'Pon la pieza que te dieron en una casilla vacía', yourGive: 'Elige una pieza para {n} y toca Dar',
+        placeOf: '{n}: pon la pieza', giveOf: '{n}: elige una pieza para {m}', thinking: 'El bot está pensando…', giveBtn: 'Dar',
+        handL: 'Pieza en mano', trayL: 'Piezas restantes', dailyFf: 'Cuádruple diario', vsMedium: 'contra el bot medio', playerWon: 'Gana: {n}', drawn: 'Empate', piecesL: 'Piezas en el tablero',
+        rules: 'Dieciséis piezas, todas distintas: alta o baja, clara u oscura, redonda o cuadrada, hueca o maciza. Nunca eliges la pieza que juegas: te la da tu rival. Ponla en cualquier casilla vacía y luego elige una de las piezas restantes para tu rival. Gana quien completa una fila, columna o diagonal de cuatro piezas que comparten al menos un rasgo, sin importar quién puso las otras tres. Si el tablero se llena sin una línea así, es empate.',
+        kCursor: 'Moverse entre casillas o piezas', kGo: 'Poner o elegir una pieza', kGive: 'Dar la pieza elegida',
+        tutTitle1: 'Cuatro en línea, un rasgo en común', tutText1: 'Gana una fila, columna o diagonal de cuatro piezas todas altas, todas oscuras, todas redondas o todas huecas (o todas lo contrario).',
+        tutTitle2: 'Tu rival elige tu pieza', tutText2: 'Pon la pieza que te dieron en cualquier casilla vacía. Si completa una línea, ganas.',
+        tutTitle3: 'Luego eliges tú la suya', tutText3: 'Entrega una de las piezas restantes. Nunca des una que complete una línea.',
+        tTall: 'alta', tShort: 'baja', tDark: 'oscura', tLight: 'clara', tRound: 'redonda', tSquare: 'cuadrada', tHollow: 'hueca', tSolid: 'maciza', emptyCell: 'Casilla vacía'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var MODES = ['bot', 'two'];
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs) prefs = { mode: 'bot', level: 'medium' };
+  if (MODES.indexOf(prefs.mode) < 0) prefs.mode = 'bot';
+  if (E.LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+
+  // G: the game around the engine's state S; sel is the piece picked to hand over,
+  // curCell and curSlot are the keyboard's places on the board and in the tray
+  var G = null, timer = null, kbOn = false, curCell = 5, curSlot = 0, sel = -1;
+
+  /* ------------------------------------------------------------ pieces */
+
+  // A piece drawn as a small block seen from above at an angle: a cylinder or a box, tall or
+  // short, with a hole in its top when hollow. Each part is a path, so the share card can draw
+  // the same shapes on a canvas with Path2D.
+  function ell(cx, cy, rx, ry) {
+    return 'M' + (cx - rx) + ',' + cy + ' A' + rx + ',' + ry + ' 0 1 0 ' + (cx + rx) + ',' + cy + ' A' + rx + ',' + ry + ' 0 1 0 ' + (cx - rx) + ',' + cy + ' Z';
+  }
+  function shapes(p) {
+    var B = 76, H = p & 1 ? 38 : 12, T = B - H, out = [];
+    if (p & 4) {
+      out.push(['s', 'M23,' + T + ' L23,' + B + ' A27,11 0 0 0 77,' + B + ' L77,' + T + ' Z']);
+      out.push(['t', ell(50, T, 27, 11)]);
+      if (p & 8) out.push(['h', ell(50, T, 11, 4.5)]);
+    } else {
+      out.push(['s', 'M23,' + T + ' L50,' + (T + 12) + ' L50,' + (B + 12) + ' L23,' + B + ' Z']);
+      out.push(['h', 'M50,' + (T + 12) + ' L77,' + T + ' L77,' + B + ' L50,' + (B + 12) + ' Z']);
+      out.push(['t', 'M23,' + T + ' L50,' + (T - 12) + ' L77,' + T + ' L50,' + (T + 12) + ' Z']);
+      if (p & 8) out.push(['h', 'M39,' + T + ' L50,' + (T - 5) + ' L61,' + T + ' L50,' + (T + 5) + ' Z']);
+    }
+    return out;
+  }
+  function pieceInner(p) { return shapes(p).map(function (s) { return '<path class="fo-' + s[0] + '" d="' + s[1] + '"/>'; }).join(''); }
+  function pieceSvg(p) {
+    return '<svg class="fo-pc fo-pc--' + (p & 2 ? 'd' : 'l') + '" viewBox="0 0 100 100" aria-hidden="true">' + pieceInner(p) + '</svg>';
+  }
+  function traits(p) {
+    return [p & 1 ? 'tTall' : 'tShort', p & 2 ? 'tDark' : 'tLight', p & 4 ? 'tRound' : 'tSquare', p & 8 ? 'tHollow' : 'tSolid'].map(function (k) { return C.t(k); }).join(' · ');
+  }
+
+  /* ------------------------------------------------------------- layout */
+
+  // both grids run left to right in every language, so the arrow keys and the board's
+  // geometry agree in Persian too
+  var box = el('div', { class: 'fo-box', role: 'grid', 'aria-label': C.t('board') });
+  box.dir = 'ltr';
+  var cells = [], cellKey = [];
+  for (var i = 0; i < 16; i++) {
+    (function (c) {
+      var b = el('button', { class: 'fo-cell', type: 'button' });
+      b.addEventListener('click', function () { tapCell(c); });
+      cells.push(b); cellKey.push(null); box.appendChild(b);
+    })(i);
+  }
+  var tray = el('div', { class: 'fo-tray', role: 'group', 'aria-label': C.t('trayL') });
+  tray.dir = 'ltr';
+  var slots = [], slotKey = [];
+  for (var p0 = 0; p0 < 16; p0++) {
+    (function (p) {
+      var b = el('button', { class: 'fo-slot', type: 'button' });
+      b.innerHTML = pieceSvg(p);
+      b.addEventListener('click', function () { tapSlot(p); });
+      slots.push(b); slotKey.push(null); tray.appendChild(b);
+    })(p0);
+  }
+  var top = el('div', { class: 'fo-top ch-above' });
+  var chips = [el('div', { class: 'fo-chip' }), el('div', { class: 'fo-chip' })];
+  var hand = el('div', { class: 'fo-hand', role: 'img', 'aria-label': C.t('handL') });
+  var info = el('div', { class: 'fo-info ch-above' }, [chips[0], hand, chips[1]]);
+  var status = el('div', { class: 'fo-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'fo-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, info, status, tray])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ setup */
+
+  function newGame(o) {
+    stop();
+    var daily = o.daily || null;
+    G = { mode: daily ? 'bot' : o.mode, level: daily ? 'medium' : o.level, daily: daily, S: null, hist: [], startedAt: Date.now(), done: false };
+    // against the bot it hands you the first piece; two players take turns from player 1
+    if (daily) G.S = E.dailyPosition(C.daily('fourfold', daily).rng);
+    else {
+      G.S = E.newGame(G.mode === 'bot' ? 1 : 0);
+      prefs.mode = o.mode; prefs.level = o.level; ctx.store.set('prefs', prefs);
+    }
+    sel = -1; curCell = 5; curSlot = 0;
+    render(); save();
+    maybeBot();
+  }
+  function current() { return { mode: G.mode, level: G.level }; }
+
+  function isBot(side) { return G.mode === 'bot' && side === 1; }
+  function busy() { return !G || G.done || isBot(G.S.turn); }
+  function stop() { if (timer) { clearTimeout(timer); timer = null; } }
+
+  function maybeBot() {
+    if (!G || G.done || !isBot(G.S.turn)) return;
+    renderSide();
+    var slow = !C.ui.reduceMotion();
+    timer = setTimeout(function () {
+      timer = null;
+      if (!G || G.done || !isBot(G.S.turn)) return;
+      // the daily bot plays from the day's seed, so everyone meets the same opponent
+      var rnd = G.daily ? C.daily('fourfold', G.daily + '|' + G.S.plies).rng : Math.random;
+      // a phone gets half a second of thought at most, so the hard bot never feels stuck
+      var m = E.think(G.S, G.level, rnd, { budget: 500 });
+      if (G.S.phase === 'place') doPlace(m.cell); else doGive(m.give);
+    }, G.S.phase === 'place' ? (slow ? 450 : 150) : (slow ? 550 : 150));
+  }
+
+  /* ------------------------------------------------------------- moves */
+
+  function push(before) { G.hist.push(before); if (G.hist.length > 80) G.hist.shift(); }
+
+  function doGive(p) {
+    var before = E.clone(G.S), who = G.S.turn, from = slots[p];
+    var rect = from.getBoundingClientRect();
+    if (!E.give(G.S, p)) { C.feedback('bad'); return false; }
+    push(before);
+    sel = -1;
+    C.feedback(isBot(who) ? 'soft' : 'place');
+    render();
+    var svg = hand.querySelector('svg');
+    if (svg) C.ui.fly(svg, rect, { ms: 380 });
+    save();
+    maybeBot();
+    return true;
+  }
+  function doPlace(c) {
+    var before = E.clone(G.S), who = G.S.turn, rect = hand.getBoundingClientRect();
+    if (!E.place(G.S, c)) { C.feedback('bad'); return false; }
+    push(before);
+    C.feedback(isBot(who) ? 'soft' : 'place');
+    if (G.S.winner >= 0 || G.S.draw) G.done = true;
+    render();
+    var svg = cells[c].querySelector('svg');
+    if (svg) C.ui.fly(svg, rect, { ms: 340 });
+    if (G.done) { finish(); return true; }
+    save();
+    maybeBot();
+    return true;
+  }
+
+  function tapCell(c) {
+    if (busy() || G.S.phase !== 'place') return;
+    kbOn = false;
+    if (G.S.board[c] !== -1) { C.feedback('bad'); return; }
+    doPlace(c);
+  }
+  function tapSlot(p) {
+    if (busy() || G.S.phase !== 'give') return;
+    kbOn = false;
+    if (G.S.board.indexOf(p) >= 0) { C.feedback('bad'); return; }
+    // a second tap on the picked piece hands it over, so the Give button is only a shortcut
+    if (sel === p) { doGive(p); return; }
+    sel = p; curSlot = p;
+    C.feedback('soft');
+    render();
+  }
+
+  // Against the bot one undo goes back to your last decision, past the bot's moves after it
+  function undo() {
+    if (!G || G.done || !G.hist.length) return;
+    var k = G.hist.length - 1;
+    if (G.mode === 'bot') { while (k >= 0 && G.hist[k].turn !== 0) k--; if (k < 0) return; }
+    stop();
+    G.S = G.hist[k];
+    G.hist.length = k;
+    sel = -1;
+    C.feedback('soft');
+    render(); save();
+    maybeBot();
+  }
+
+  /* ------------------------------------------------------------ result */
+
+  function pname(side) {
+    if (G.mode === 'bot') return side === 0 ? (C.state.profile.name || C.t('you')) : C.t('bot') + ' · ' + C.t(G.level);
+    return C.t('playerN', { n: C.num(side + 1) });
+  }
+
+  function finish() {
+    stop();
+    var S = G.S, vsBot = G.mode === 'bot', draw = S.draw, won = vsBot && !draw && S.winner === 0;
+    var placed = S.board.filter(function (x) { return x >= 0; }).length;
+    var base = vsBot ? ({ easy: 6, medium: 12, hard: 20 }[G.level] || 12) : 8;
+    var share = won || !vsBot ? 1 : draw ? 0.6 : 0.3;
+    var coins = Math.max(2, Math.round(base * share)) + (G.daily ? 8 : 0);
+    var points = Math.max(3, Math.round(base * 4 * share)) + (G.daily ? 25 : 0);
+    if (won) {
+      C.achievements.unlock('fo-win');
+      if (G.level === 'hard') C.achievements.unlock('fo-hard');
+      if (placed <= 10) C.achievements.unlock('fo-quick');
+    }
+    var title = draw ? C.t('drawn') : vsBot ? (won ? C.t('won') : C.t('lost')) : C.t('playerWon', { n: pname(S.winner) });
+    if (G.daily) {
+      var first = C.stats.daily('fourfold', G.daily, { label: title, win: won });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    if (!draw && !C.ui.reduceMotion()) {
+      (E.winningLines(S.board)).forEach(function (l) {
+        l.forEach(function (c, k) { setTimeout(function () { C.ui.burst(cells[c], { count: 10, colors: ['#E3BFD8', '#584A5A', '#F6E7C8'] }); }, 80 * k); });
+      });
+    }
+    setTimeout(function () {
+      ctx.finish({
+        won: vsBot && !draw ? won : null,
+        title: title,
+        timeMs: Date.now() - G.startedAt, coins: coins, points: points,
+        lines: [{ label: C.t('piecesL'), value: C.num(placed) + ' / ' + C.num(16) }],
+        shareText: 'چوگان · چهارگانه' + (G.daily ? ('\nروزانه ' + G.daily) : '') + '\n' + title,
+        paint: cardPaint(),
+        onAgain: G.daily ? null : function () { newGame(current()); }
+      });
+    }, C.ui.reduceMotion() ? 150 : 900);
+  }
+
+  /* ------------------------------------------------------------- saves */
+
+  ctx.autosave(function () {
+    if (!G || G.done || !G.hist.length) return { inProgress: false };
+    return { g: { mode: G.mode, level: G.level, daily: G.daily, S: G.S, elapsed: Date.now() - G.startedAt } };
+  });
+  function save() { ctx.save(); }
+  function validSave(sv) {
+    var g = sv && sv.g;
+    return !!(g && MODES.indexOf(g.mode) >= 0 && E.LEVELS.indexOf(g.level) >= 0 && E.valid(g.S) && g.S.winner < 0 && !g.S.draw);
+  }
+  function restore(g) {
+    G = { mode: g.mode, level: g.level, daily: g.daily || null, S: g.S, hist: [], startedAt: Date.now() - (g.elapsed || 0), done: false };
+    sel = -1;
+    render();
+    maybeBot();
+  }
+
+  function askNew() {
+    if (G && G.daily) {
+      var o = { daily: G.daily };
+      if (G.done || !G.hist.length) newGame(o); else C.ui.confirm({ title: C.t('newMatch'), body: C.t('endWarn'), onOk: function () { newGame(o); } });
+      return;
+    }
+    settings();
+  }
+  function settings() {
+    var o = G && !G.daily ? current() : { mode: prefs.mode, level: prefs.level };
+    var body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
+    function rows() {
+      body.innerHTML = '';
+      body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('modeT') }));
+      body.appendChild(C.ui.segmented([{ value: 'bot', label: C.t('vsBot') }, { value: 'two', label: C.t('two') }], o.mode, function (v) { o.mode = v; rows(); }));
+      if (o.mode === 'bot') {
+        body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('levelT') }));
+        body.appendChild(C.ui.segmented(E.LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), o.level, function (v) { o.level = v; }));
+      }
+      if (G && !G.done && G.hist.length) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('endWarn') }));
+    }
+    rows();
+    C.ui.modal({
+      title: C.t('settingsT'), closeButton: true, body: [body],
+      actions: [{ label: C.t('cancel') }, { label: C.t('begin'), kind: 'primary', onClick: function () { newGame(o); } }]
+    });
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function colors() {
+    var cs = getComputedStyle(document.documentElement);
+    var v = function (k, f) { return cs.getPropertyValue(k).trim() || f; };
+    return {
+      board: v('--ff-board', '#D8CCD3'), cell: v('--ff-cell', '#EFE8EC'), ring: v('--ff-ring', '#584A5A'),
+      l: { t: v('--ff-lf', '#F6E7C8'), s: v('--ff-ls', '#E0C690'), e: v('--ff-le', '#8A6A3A'), h: v('--ff-lh', '#B89660') },
+      d: { t: v('--ff-d', '#5B3A55'), s: v('--ff-ds', '#3E2539'), e: v('--ff-de', '#2A1727'), h: v('--ff-dh', '#2E1B2A') }
+    };
+  }
+  // the finished board for the share card, drawn from the same shapes as the page
+  function cardPaint() {
+    var board = G.S.board.slice(), win = [];
+    E.winningLines(board).forEach(function (l) { win = win.concat(l); });
+    return function (g, W, H) {
+      var col = colors(), s = Math.min(W, H), ox = (W - s) / 2, oy = (H - s) / 2, pad = s * 0.035, gap = s * 0.03, cs = (s - 2 * pad - 3 * gap) / 4;
+      g.fillStyle = col.board;
+      g.beginPath();
+      if (g.roundRect) g.roundRect(ox, oy, s, s, s * 0.05); else g.rect(ox, oy, s, s);
+      g.fill();
+      for (var c = 0; c < 16; c++) {
+        var x = ox + pad + (c % 4) * (cs + gap), y = oy + pad + Math.floor(c / 4) * (cs + gap);
+        g.fillStyle = col.cell;
+        g.beginPath(); g.arc(x + cs / 2, y + cs / 2, cs / 2, 0, Math.PI * 2); g.fill();
+        if (win.indexOf(c) >= 0) { g.strokeStyle = col.ring; g.lineWidth = Math.max(2, cs * 0.06); g.beginPath(); g.arc(x + cs / 2, y + cs / 2, cs / 2 - g.lineWidth / 2, 0, Math.PI * 2); g.stroke(); }
+        var p = board[c];
+        if (p < 0 || typeof Path2D === 'undefined') continue;
+        var tone = p & 2 ? col.d : col.l, k = cs * 0.84 / 100;
+        g.save();
+        g.translate(x + cs * 0.08, y + cs * 0.08); g.scale(k, k);
+        g.lineWidth = 2.5; g.lineJoin = 'round'; g.strokeStyle = tone.e;
+        shapes(p).forEach(function (sh) { var path = new Path2D(sh[1]); g.fillStyle = tone[sh[0]]; g.fill(path); g.stroke(path); });
+        g.restore();
+      }
+    };
+  }
+
+  function renderBoard() {
+    var S = G.S, win = [], placing = !busy() && S.phase === 'place';
+    if (G.done && !S.draw) E.winningLines(S.board).forEach(function (l) { win = win.concat(l); });
+    for (var c = 0; c < 16; c++) {
+      var p = S.board[c], cls = 'fo-cell' + (win.indexOf(c) >= 0 ? ' fo-cell--win' : c === S.last && !G.done ? ' fo-cell--last' : '') +
+        (placing && p < 0 ? ' fo-cell--ok' : '') + (kbOn && placing && c === curCell ? ' fo-cell--cur' : '');
+      var key = p + '|' + cls;
+      // only a changed cell is rewritten, so a cell under a finger is never replaced mid-tap (#750)
+      if (cellKey[c] === key) continue;
+      var piece = cellKey[c] === null || cellKey[c].split('|')[0] !== String(p);
+      cellKey[c] = key;
+      cells[c].className = cls;
+      if (piece) {
+        cells[c].innerHTML = p >= 0 ? pieceSvg(p) : '';
+        cells[c].setAttribute('aria-label', p >= 0 ? traits(p) : C.t('emptyCell'));
+      }
+    }
+  }
+  function renderTray() {
+    var S = G.S, giving = !busy() && S.phase === 'give';
+    for (var p = 0; p < 16; p++) {
+      var gone = S.board.indexOf(p) >= 0 || p === S.hand;
+      var cls = 'fo-slot' + (gone ? ' fo-slot--gone' : '') + (giving && p === sel ? ' fo-slot--sel' : '') + (kbOn && giving && p === curSlot ? ' fo-slot--cur' : '');
+      if (slotKey[p] === cls) continue;
+      slotKey[p] = cls;
+      slots[p].className = cls;
+      slots[p].disabled = gone;
+      slots[p].setAttribute('aria-label', traits(p));
+      slots[p].setAttribute('aria-pressed', p === sel ? 'true' : 'false');
+    }
+  }
+  function renderTop() {
+    top.innerHTML = '';
+    if (G.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyFf') + ' — ' + C.num(G.daily) })]));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('vsMedium') }));
+      return;
+    }
+    top.appendChild(el('button', { class: 'ch-badge ch-tap', type: 'button', onclick: settings,
+      text: G.mode === 'bot' ? C.t('vsBot') + ' · ' + C.t(G.level) : C.t('two') }));
+    var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', settings);
+    top.appendChild(gear);
+  }
+  function renderSide() {
+    var S = G.S, t = S.turn;
+    [0, 1].forEach(function (k) {
+      chips[k].className = 'fo-chip' + (t === k && !G.done ? ' fo-chip--on' : '') + (isBot(k) && t === 1 && !G.done ? ' fo-thinking' : '');
+      chips[k].innerHTML = '';
+      chips[k].appendChild(el('span', { text: pname(k) }));
+    });
+    // the hand shows the piece to place, or while picking, a faint preview of the picked one
+    var show = S.phase === 'place' ? S.hand : sel;
+    hand.className = 'fo-hand' + (S.phase === 'give' && sel >= 0 ? ' fo-hand--preview' : '');
+    var hk = String(show) + hand.className;
+    if (hand.getAttribute('data-k') !== hk) {
+      hand.setAttribute('data-k', hk);
+      hand.innerHTML = show >= 0 ? pieceSvg(show) : '';
+      hand.setAttribute('aria-label', C.t('handL') + (show >= 0 ? ': ' + traits(show) : ''));
+    }
+    status.innerHTML = '';
+    if (G.done) return;
+    var line;
+    if (isBot(t)) line = C.t('thinking');
+    else if (S.phase === 'place') line = G.mode === 'bot' ? C.t('yourPlace') : C.t('placeOf', { n: pname(t) });
+    else line = G.mode === 'bot' ? C.t('yourGive', { n: C.t('bot') }) : C.t('giveOf', { n: pname(t), m: pname(1 - t) });
+    status.appendChild(el('span', { text: line }));
+    if (!isBot(t) && S.phase === 'give' && sel >= 0) {
+      status.appendChild(el('button', { class: 'ch-btn ch-btn--sm ch-btn--primary', type: 'button', onclick: function () { if (sel >= 0) doGive(sel); } },
+        [el('span', { text: C.t('giveBtn') })]));
+    }
+  }
+  function render() { renderTop(); renderSide(); renderBoard(); renderTray(); }
+
+  /* -------------------------------------------------------------- input */
+
+  function trayCols() {
+    var n = getComputedStyle(tray).gridTemplateColumns.split(' ').filter(Boolean).length;
+    return n > 0 ? n : 8;
+  }
+  window.addEventListener('keydown', function (e) {
+    if (!G || document.querySelector('.ch-scrim')) return;
+    if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
+    if (busy() || e.ctrlKey || e.metaKey || e.altKey) return;
+    var tg = e.target && e.target.tagName;
+    if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT') return;
+    var S = G.S;
+    if (C.keyIs(e, 'g') && S.phase === 'give' && sel >= 0) { e.preventDefault(); doGive(sel); return; }
+    // the board and the tray are laid out left to right in every language, so the arrows are
+    // geometric and never flip in RTL (#338)
+    var d = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.key];
+    if (d) {
+      e.preventDefault();
+      if (!kbOn) { kbOn = true; render(); return; }
+      if (S.phase === 'place') {
+        var r = Math.floor(curCell / 4) + d[1], c = curCell % 4 + d[0];
+        if (r >= 0 && r < 4 && c >= 0 && c < 4) curCell = r * 4 + c;
+      } else {
+        var n = trayCols(), next = curSlot + d[0] + d[1] * n;
+        if (next >= 0 && next < 16 && (d[1] !== 0 || Math.floor(next / n) === Math.floor(curSlot / n))) curSlot = next;
+      }
+      render(); return;
+    }
+    if ((e.key === 'Enter' || e.key === ' ') && kbOn && tg !== 'BUTTON') {
+      e.preventDefault();
+      if (S.phase === 'place') { if (S.board[curCell] === -1) doPlace(curCell); else C.feedback('bad'); }
+      else if (S.board.indexOf(curSlot) >= 0) C.feedback('bad');
+      else if (sel === curSlot) doGive(curSlot);
+      else { sel = curSlot; render(); }
+    }
+  });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← ↑ → ↓', C.t('kCursor')), kb('Space / Enter', C.t('kGo')), kb('G', C.t('kGive')), kb('U / Ctrl+Z', C.t('undoMove'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // small scenes for the tutorial, drawn with the same pieces
+  function tPiece(p, x, y, s, extra) {
+    return '<g class="fo-pc fo-pc--' + (p & 2 ? 'd' : 'l') + '" transform="translate(' + x + ',' + y + ') scale(' + s + ')"' + (extra || '') + '>' + pieceInner(p) + '</g>';
+  }
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 110" width="100%">', k;
+    if (kind === 1) {
+      // four tall pieces in a row, otherwise all different
+      var row = [1, 7, 11, 13];
+      s += '<rect x="6" y="18" width="188" height="64" rx="12" fill="#D8CCD3"/>';
+      for (k = 0; k < 4; k++) s += '<circle cx="' + (31 + k * 46) + '" cy="50" r="21" fill="#EFE8EC" stroke="#584A5A" stroke-width="3"/>' + tPiece(row[k], 11 + k * 46, 28, 0.4);
+      s += '<text x="100" y="102" text-anchor="middle" font-size="13" font-weight="700" fill="#584A5A">↑ ↑ ↑ ↑</text>';
+    } else if (kind === 2) {
+      // a piece arrives from the opponent's side and goes into the empty cell
+      s += '<rect x="96" y="14" width="98" height="82" rx="12" fill="#D8CCD3"/>';
+      for (k = 0; k < 4; k++) s += '<circle cx="' + (121 + (k % 2) * 48) + '" cy="' + (35 + Math.floor(k / 2) * 40) + '" r="16" fill="#EFE8EC"/>';
+      s += tPiece(4, 105, 59, 0.32) + tPiece(10, 153, 19, 0.32) + tPiece(15, 105, 19, 0.32);
+      s += '<rect x="12" y="34" width="46" height="46" rx="10" fill="#EFE8EC" stroke="#584A5A" stroke-width="2" stroke-dasharray="4 3"/>' + tPiece(3, 14, 36, 0.42);
+      s += '<path d="M62,57 C90,57 120,72 150,72" fill="none" stroke="#584A5A" stroke-width="3" stroke-linecap="round" stroke-dasharray="5 5"/>';
+      s += '<circle cx="169" cy="75" r="16" fill="none" stroke="#584A5A" stroke-width="3"/>';
+    } else {
+      // the tray: hand over a safe piece, never the one that completes a line
+      var tr = [0, 6, 9, 12, 5, 14];
+      for (k = 0; k < 6; k++) {
+        var x = 10 + k * 31;
+        s += '<rect x="' + x + '" y="30" width="28" height="28" rx="6" fill="#FFFFFF" stroke="' + (k === 1 ? '#584A5A' : '#D8CCD3') + '" stroke-width="' + (k === 1 ? 3 : 1.5) + '"/>' + tPiece(tr[k], x + 1, 31, 0.26);
+      }
+      s += '<path d="M138,26 L162,62 M162,26 L138,62" stroke="#C0262D" stroke-width="3" stroke-linecap="round"/>';
+      s += '<path d="M54,64 L54,86 L100,86" fill="none" stroke="#584A5A" stroke-width="3" stroke-linecap="round"/><path d="M94,80 L100,86 L94,92" fill="none" stroke="#584A5A" stroke-width="3" stroke-linecap="round"/>';
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  var saved = ctx.loadSave();
+  if (validSave(saved) && (saved.g.daily || null) === (dailyDate || null)) restore(saved.g);
+  else newGame(dailyDate ? { daily: dailyDate } : { mode: prefs.mode, level: prefs.level });
+  if (dailyDate && C.stats.dailyDone('fourfold', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).fourfold;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
