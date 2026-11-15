@@ -1,0 +1,1097 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>گوشه‌به‌گوشه — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* Paper cells in the light theme, dark cells in the dark one; each side's colour and the
+     colour of its mark are tuned per theme so a square reads on its cell and the mark on
+     the square, and the two sides never differ by colour alone */
+  :root { --cn-cell: #F3EDE3; --cn-line: #D9CDBB; --cn-a: #B85A00; --cn-b: #1F65A8; --cn-a-mark: #FFD9A8; --cn-b-mark: #BFE0FA; --cn-ink: #5A4E40; --cn-ok: #1E8E3E; --cn-bad: #C62828; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --cn-cell: #2B2723; --cn-line: #423B33; --cn-a: #F0963C; --cn-b: #62AEEA; --cn-a-mark: #7A3A00; --cn-b-mark: #1C4E78; --cn-ink: #D3C6B2; --cn-ok: #5BD07A; --cn-bad: #FF6B6B; }
+  }
+  :root[data-theme="dark"] { --cn-cell: #2B2723; --cn-line: #423B33; --cn-a: #F0963C; --cn-b: #62AEEA; --cn-a-mark: #7A3A00; --cn-b-mark: #1C4E78; --cn-ink: #D3C6B2; --cn-ok: #5BD07A; --cn-bad: #FF6B6B; }
+  .cn-wrap > .ch-fit { --fit-ar: 1; }
+  .ch-fit > .cn-box { position: relative; aspect-ratio: var(--fit-ar); }
+  .cn-canvas { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: block; touch-action: none; cursor: pointer; }
+  .cn-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .cn-sides { display: flex; gap: var(--s-2); }
+  .cn-side { flex: 1; display: flex; align-items: center; gap: var(--s-2); min-width: 0; background: var(--c-surface);
+    border-radius: var(--r-md); padding: 6px 10px; box-shadow: var(--sh-1); border: 2px solid transparent; min-height: 44px;
+    transition: border-color var(--t-mid) var(--ease), transform var(--t-mid) var(--ease); }
+  .cn-side--on { border-color: var(--game); transform: translateY(-2px); box-shadow: var(--sh-2); }
+  .cn-side svg { flex: 0 0 20px; }
+  .cn-side__text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .cn-side__name { min-width: 0; font-weight: 700; font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cn-side__left { font-size: var(--fs-xs); color: var(--c-text-dim); font-weight: 700; }
+  .cn-thinking { animation: cn-blink 900ms infinite; }
+  @keyframes cn-blink { 50% { opacity: .55; } }
+  /* the hints change between two taps, so the row keeps its height and the board never moves */
+  .cn-status { min-height: 48px; display: flex; align-items: center; justify-content: center; text-align: center;
+    font-weight: 700; color: var(--c-text-dim); font-size: var(--fs-sm); }
+  .cn-tools { display: flex; justify-content: center; gap: var(--s-2); }
+  .cn-tools .ch-btn { min-height: 44px; min-width: 44px; }
+  /* 21 pieces fill three rows on a phone; a shorter window scrolls the tray, never the board */
+  .cn-tray { display: grid; grid-template-columns: repeat(auto-fill, minmax(48px, 1fr)); gap: 4px; max-height: 168px;
+    overflow-y: auto; overscroll-behavior: contain; padding: 2px; }
+  @container game (min-aspect-ratio: 5 / 4) { .cn-tray { max-height: none; overflow-y: auto; } }
+  .cn-piece { min-height: 44px; min-width: 44px; height: 52px; display: grid; place-items: center; padding: 4px;
+    background: var(--c-surface); border: 2px solid transparent; border-radius: var(--r-sm); cursor: pointer;
+    touch-action: pan-y; -webkit-user-select: none; user-select: none; color: inherit; }
+  .cn-piece svg { width: 100%; height: 100%; pointer-events: none; }
+  .cn-piece--on { border-color: var(--game); box-shadow: var(--sh-2); }
+  .cn-piece:disabled { opacity: .22; cursor: default; }
+  /* a piece dragged from the tray floats above the finger on its own layer, so moving it
+     never repaints the page under it */
+  .cn-drag { position: fixed; left: 0; top: 0; width: 64px; height: 64px; pointer-events: none; z-index: 50;
+    will-change: transform; opacity: .9; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function CornersEngineFactory() {
+  'use strict';
+
+  // A 14×14 board, index r * N + c; -1 is empty, 0 and 1 the two sides. Side 0 starts at
+  // the bottom left corner, side 1 at the top right. Each side owns the 21 free polyominoes
+  // of one to five squares, and every one can be turned and flipped.
+  var N = 14, CELLS = N * N, LEVELS = ['easy', 'medium', 'hard'];
+  var START = [(N - 1) * N, N - 1];
+  var PIECES = [
+    [[0, 0]],
+    [[0, 0], [0, 1]],
+    [[0, 0], [0, 1], [0, 2]],
+    [[0, 0], [1, 0], [1, 1]],
+    [[0, 0], [0, 1], [0, 2], [0, 3]],
+    [[0, 0], [1, 0], [2, 0], [2, 1]],
+    [[0, 0], [0, 1], [0, 2], [1, 1]],
+    [[0, 1], [0, 2], [1, 0], [1, 1]],
+    [[0, 0], [0, 1], [1, 0], [1, 1]],
+    [[0, 1], [0, 2], [1, 0], [1, 1], [2, 1]],
+    [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4]],
+    [[0, 0], [1, 0], [2, 0], [3, 0], [3, 1]],
+    [[0, 1], [1, 1], [2, 0], [2, 1], [3, 0]],
+    [[0, 0], [0, 1], [1, 0], [1, 1], [2, 0]],
+    [[0, 0], [0, 1], [0, 2], [1, 1], [2, 1]],
+    [[0, 0], [0, 2], [1, 0], [1, 1], [1, 2]],
+    [[0, 0], [1, 0], [2, 0], [2, 1], [2, 2]],
+    [[0, 0], [1, 0], [1, 1], [2, 1], [2, 2]],
+    [[0, 1], [1, 0], [1, 1], [1, 2], [2, 1]],
+    [[0, 1], [1, 0], [1, 1], [2, 1], [3, 1]],
+    [[0, 0], [0, 1], [1, 1], [2, 1], [2, 2]]
+  ];
+  var TOTAL = 0;
+  PIECES.forEach(function (p) { TOTAL += p.length; });
+
+  function norm(cells) {
+    var mr = Infinity, mc = Infinity;
+    cells.forEach(function (c) { if (c[0] < mr) mr = c[0]; if (c[1] < mc) mc = c[1]; });
+    return cells.map(function (c) { return [c[0] - mr, c[1] - mc]; }).sort(function (a, b) { return a[0] - b[0] || a[1] - b[1]; });
+  }
+  function keyOf(cells) { return cells.map(function (c) { return c[0] + ':' + c[1]; }).join('|'); }
+  function turn(cells) { return cells.map(function (c) { return [c[1], -c[0]]; }); }
+  function mirror(cells) { return cells.map(function (c) { return [c[0], -c[1]]; }); }
+
+  // Every distinct orientation of each piece, the unturned one first; ROT and FLIP map an
+  // orientation to the one a quarter turn or a mirror gives, so the page can turn a piece
+  // by index without knowing its shape
+  var ORIENT = [], ROT = [], FLIP = [];
+  PIECES.forEach(function (base) {
+    var list = [], keys = [];
+    for (var f = 0; f < 2; f++) for (var k = 0; k < 4; k++) {
+      var cells = f ? mirror(base) : base.slice();
+      for (var j = 0; j < k; j++) cells = turn(cells);
+      cells = norm(cells);
+      var kk = keyOf(cells);
+      if (keys.indexOf(kk) >= 0) continue;
+      keys.push(kk);
+      var h = 0, w = 0;
+      cells.forEach(function (c) { if (c[0] + 1 > h) h = c[0] + 1; if (c[1] + 1 > w) w = c[1] + 1; });
+      list.push({ cells: cells, h: h, w: w });
+    }
+    ORIENT.push(list);
+    ROT.push(list.map(function (o) { return keys.indexOf(keyOf(norm(turn(o.cells)))); }));
+    FLIP.push(list.map(function (o) { return keys.indexOf(keyOf(norm(mirror(o.cells)))); }));
+  });
+  function rot(p, o) { return ROT[p][o]; }
+  function flip(p, o) { return FLIP[p][o]; }
+
+  function newGame() {
+    var cells = [], u0 = [], u1 = [];
+    for (var i = 0; i < CELLS; i++) cells.push(-1);
+    for (var p = 0; p < PIECES.length; p++) { u0.push(0); u1.push(0); }
+    return { cells: cells, turn: 0, used: [u0, u1], passed: [false, false], plies: 0, over: false, log: [], last: [] };
+  }
+  function clone(S) {
+    return { cells: S.cells.slice(), turn: S.turn, used: [S.used[0].slice(), S.used[1].slice()], passed: S.passed.slice(),
+      plies: S.plies, over: S.over, log: S.log.map(function (e) { return e.slice(); }), last: (S.last || []).slice() };
+  }
+  function isInt(x) { return typeof x === 'number' && Math.floor(x) === x; }
+  function firstMove(S, side) { return S.used[side].indexOf(1) < 0; }
+  // An empty square sharing an edge with the side's own squares can never take its piece
+  function sideBlocked(cells, i, side) {
+    var r = (i / N) | 0, c = i % N;
+    return (r > 0 && cells[i - N] === side) || (r < N - 1 && cells[i + N] === side) ||
+      (c > 0 && cells[i - 1] === side) || (c < N - 1 && cells[i + 1] === side);
+  }
+  function cornerTouch(cells, i, side) {
+    var r = (i / N) | 0, c = i % N;
+    return (r > 0 && c > 0 && cells[i - N - 1] === side) || (r > 0 && c < N - 1 && cells[i - N + 1] === side) ||
+      (r < N - 1 && c > 0 && cells[i + N - 1] === side) || (r < N - 1 && c < N - 1 && cells[i + N + 1] === side);
+  }
+
+  // p, o: piece and orientation; r, c: the square under the orientation's top left corner
+  function legal(S, side, p, o, r, c) {
+    if (S.over || !isInt(p) || p < 0 || p >= PIECES.length || !isInt(o) || o < 0 || o >= ORIENT[p].length) return false;
+    var O = ORIENT[p][o];
+    if (!isInt(r) || !isInt(c) || r < 0 || c < 0 || r + O.h > N || c + O.w > N) return false;
+    if (S.used[side][p]) return false;
+    var first = firstMove(S, side), touch = false;
+    for (var k = 0; k < O.cells.length; k++) {
+      var i = (r + O.cells[k][0]) * N + c + O.cells[k][1];
+      if (S.cells[i] !== -1 || sideBlocked(S.cells, i, side)) return false;
+      if (!touch) touch = first ? i === START[side] : cornerTouch(S.cells, i, side);
+    }
+    return touch;
+  }
+
+  // The empty squares a new piece of the side could cover first: the corner at the start,
+  // later any square touching its own pieces at a corner and none of them along a side
+  function anchors(S, side) {
+    var out = [];
+    if (firstMove(S, side)) { if (S.cells[START[side]] === -1) out.push(START[side]); return out; }
+    for (var i = 0; i < CELLS; i++) if (S.cells[i] === -1 && !sideBlocked(S.cells, i, side) && cornerTouch(S.cells, i, side)) out.push(i);
+    return out;
+  }
+  function anchorCount(S, side) {
+    if (firstMove(S, side)) return S.cells[START[side]] === -1 ? 1 : 0;
+    var n = 0;
+    for (var i = 0; i < CELLS; i++) if (S.cells[i] === -1 && cornerTouch(S.cells, i, side) && !sideBlocked(S.cells, i, side)) n++;
+    return n;
+  }
+
+  // Every legal placement: each piece cell laid on each anchor, so no square of the board
+  // is tried that could not take a piece
+  function scan(S, side, stopAtOne) {
+    var out = [], A = anchors(S, side);
+    if (!A.length) return out;
+    var seen = new Uint8Array(PIECES.length * 8 * CELLS);
+    for (var p = 0; p < PIECES.length; p++) {
+      if (S.used[side][p]) continue;
+      for (var o = 0; o < ORIENT[p].length; o++) {
+        var O = ORIENT[p][o];
+        for (var a = 0; a < A.length; a++) {
+          var ar = (A[a] / N) | 0, ac = A[a] % N;
+          for (var k = 0; k < O.cells.length; k++) {
+            var r = ar - O.cells[k][0], c = ac - O.cells[k][1];
+            if (r < 0 || c < 0 || r + O.h > N || c + O.w > N) continue;
+            var key = ((p * 8 + o) * N + r) * N + c;
+            if (seen[key]) continue;
+            seen[key] = 1;
+            if (legal(S, side, p, o, r, c)) { out.push({ p: p, o: o, r: r, c: c }); if (stopAtOne) return out; }
+          }
+        }
+      }
+    }
+    return out;
+  }
+  function moves(S, side) { return S.over ? [] : scan(S, side, false); }
+  function hasMove(S, side) { return !S.over && scan(S, side, true).length > 0; }
+  function cellsOf(m) {
+    var O = ORIENT[m.p][m.o];
+    return O.cells.map(function (q) { return (m.r + q[0]) * N + m.c + q[1]; });
+  }
+
+  // A side that cannot place passes for good (its corners only shrink while it waits), and
+  // the game ends once both have passed
+  function play(S, m) {
+    if (!m || S.over) return false;
+    var side = S.turn;
+    if (!legal(S, side, m.p, m.o, m.r, m.c)) return false;
+    var list = cellsOf(m);
+    list.forEach(function (i) { S.cells[i] = side; });
+    S.used[side][m.p] = 1;
+    S.log.push([side, m.p, m.o, m.r, m.c]);
+    S.plies++;
+    S.last = list;
+    var other = 1 - side;
+    if (!S.passed[other] && hasMove(S, other)) S.turn = other;
+    else {
+      S.passed[other] = true;
+      if (hasMove(S, side)) S.turn = side;
+      else { S.passed[side] = true; S.over = true; S.turn = other; }
+    }
+    return true;
+  }
+
+  function score(S) {
+    var n = [0, 0];
+    for (var i = 0; i < CELLS; i++) if (S.cells[i] >= 0) n[S.cells[i]]++;
+    return n;
+  }
+  // -1 while the game runs, then the side with more squares, or 2 for a draw
+  function winner(S) {
+    if (!S.over) return -1;
+    var n = score(S);
+    return n[0] > n[1] ? 0 : n[1] > n[0] ? 1 : 2;
+  }
+
+  /* --------------------------------------------------------------- bot */
+
+  // A placement is worth its squares, the corners it opens for its own side and the
+  // corners it takes away from the other; early on, reaching for the middle counts too,
+  // because the side that gets there first has room to spread
+  function value(S, side, m) {
+    var list = cellsOf(m), placed = 0;
+    for (var p = 0; p < PIECES.length; p++) placed += S.used[side][p];
+    list.forEach(function (i) { S.cells[i] = side; });
+    S.used[side][m.p] = 1;
+    var v = 4 * list.length + anchorCount(S, side) - 1.2 * anchorCount(S, 1 - side);
+    if (placed < 5) {
+      var d = 0;
+      list.forEach(function (i) { var r = (i / N) | 0, c = i % N; d += Math.max(Math.abs(r - 6.5), Math.abs(c - 6.5)); });
+      v += (6.5 - d / list.length) * 1.5;
+    }
+    S.used[side][m.p] = 0;
+    list.forEach(function (i) { S.cells[i] = -1; });
+    return v;
+  }
+
+  function think(S, level, rnd, budgetMs) {
+    if (S.over) return null;
+    var t = S.turn, ms = moves(S, t);
+    if (!ms.length) return null;
+    if (ms.length === 1) return ms[0];
+    if (level === 'easy') return ms[Math.floor(rnd() * ms.length)];
+    var k, v;
+    if (level === 'medium') {
+      // a little uneven, so it can be beaten
+      var best = ms[0], bv = -Infinity;
+      for (k = 0; k < ms.length; k++) { v = value(S, t, ms[k]) + rnd() * 1.5; if (v > bv) { bv = v; best = ms[k]; } }
+      return best;
+    }
+    // hard: the best few placements, each against the other side's best answer, inside a
+    // time budget so a phone never waits long
+    var deadline = Date.now() + (budgetMs || 700);
+    var rated = ms.map(function (m) { return { m: m, v: value(S, t, m) }; });
+    rated.sort(function (a, b) { return b.v - a.v; });
+    var top = rated.slice(0, 10), out = top[0].m, outV = -Infinity;
+    for (k = 0; k < top.length; k++) {
+      if (Date.now() > deadline) break;
+      var x = top[k], list = cellsOf(x.m), aborted = false, oppBest = 0;
+      list.forEach(function (i) { S.cells[i] = t; });
+      S.used[t][x.m.p] = 1;
+      var opp = scan(S, 1 - t, false);
+      for (var j = 0; j < opp.length; j++) {
+        if ((j & 63) === 0 && Date.now() > deadline) { aborted = true; break; }
+        v = value(S, 1 - t, opp[j]);
+        if (v > oppBest) oppBest = v;
+      }
+      S.used[t][x.m.p] = 0;
+      list.forEach(function (i) { S.cells[i] = -1; });
+      if (aborted) break;
+      var sv = x.v - 0.8 * oppBest;
+      if (sv > outV) { outV = sv; out = x.m; }
+    }
+    return out;
+  }
+
+  // A save is trusted only if replaying its log from a new game gives exactly its state
+  function valid(S) {
+    try {
+      if (!S || typeof S !== 'object' || !Array.isArray(S.cells) || S.cells.length !== CELLS || !Array.isArray(S.log) ||
+        !Array.isArray(S.used) || S.used.length !== 2 || !Array.isArray(S.passed) || S.passed.length !== 2) return false;
+      var R = newGame();
+      for (var k = 0; k < S.log.length; k++) {
+        var e = S.log[k];
+        if (!Array.isArray(e) || e.length !== 5 || R.over || e[0] !== R.turn) return false;
+        if (!play(R, { p: e[1], o: e[2], r: e[3], c: e[4] })) return false;
+      }
+      for (var i = 0; i < CELLS; i++) if (S.cells[i] !== R.cells[i]) return false;
+      if (S.turn !== R.turn || S.plies !== R.plies || S.over !== R.over || S.passed[0] !== R.passed[0] || S.passed[1] !== R.passed[1]) return false;
+      for (var s = 0; s < 2; s++) {
+        if (!Array.isArray(S.used[s]) || S.used[s].length !== PIECES.length) return false;
+        for (var p = 0; p < PIECES.length; p++) if (S.used[s][p] !== R.used[s][p]) return false;
+      }
+      return true;
+    } catch (err) { return false; }
+  }
+
+  return { N: N, CELLS: CELLS, LEVELS: LEVELS, START: START, PIECES: PIECES, TOTAL: TOTAL, ORIENT: ORIENT, rot: rot, flip: flip,
+    newGame: newGame, clone: clone, legal: legal, anchors: anchors, moves: moves, hasMove: hasMove, cellsOf: cellsOf, play: play,
+    score: score, winner: winner, value: value, think: think, valid: valid };
+}
+if (typeof module !== 'undefined') module.exports = CornersEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = CornersEngineFactory(), N = E.N;
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'corners',
+    name: { fa: 'گوشه‌به‌گوشه', en: 'Corner to Corner', zh: '角对角', de: 'Ecke an Ecke', es: 'Esquina a esquina', pl: 'Róg w róg', fr: 'Coin à coin', ar: 'زاوية بزاوية', hi: 'कोने से कोना' },
+    accent: '#88008C',
+    mood: 'sudoku',
+    strings: {
+      fa: {
+        board: 'صفحه‌ی گوشه‌به‌گوشه', vsBot: 'مقابل ربات', two: 'دو نفره', bot: 'ربات', playerN: 'بازیکن {n}', modeT: 'بازیکن‌ها', levelT: 'سطح ربات',
+        newMatch: 'بازی تازه', begin: 'شروع', undoMove: 'برگرداندن حرکت', endWarn: 'بازی فعلی تمام می‌شود. ادامه؟', settingsT: 'بازی تازه',
+        orange: 'نارنجی', blue: 'آبی', leftN: '{n} خانه مانده', passedT: 'دیگر جا ندارد', passToast: '{n} جایی برای قطعه ندارد و رد می‌کند',
+        pickPiece: 'یک قطعه از پایین بردار و روی صفحه بزن', tapAgain: 'دوباره روی قطعه بزن یا «بگذار» را بزن',
+        noFit: 'جا نمی‌شود: قطعه‌هایت فقط از گوشه به هم برسند، نه از ضلع', firstHint: 'قطعه‌ی اولت باید خانه‌ی گوشه‌ات را بپوشاند',
+        turnOf: 'نوبت {n} ({c})', thinking: 'ربات فکر می‌کند…', rotateL: 'چرخاندن', flipL: 'آینه', placeL: 'بگذار', piecesL: 'قطعه',
+        dailyCn: 'گوشه‌به‌گوشه‌ی روزانه', vsMedium: 'مقابل ربات متوسط', playerWon: '{n} برد', drawT: 'مساوی', leftL: 'خانه‌های مانده',
+        rules: 'هر طرف ۲۱ قطعه دارد، از یک تا پنج خانه. نارنجی از گوشه‌ی پایین چپ شروع می‌کند و آبی از گوشه‌ی بالا راست. قطعه‌ی اول باید خانه‌ی گوشه‌ی خودت را بپوشاند. هر قطعه‌ی بعدی باید دست‌کم از یک گوشه به قطعه‌ای از خودت برسد و هیچ ضلعی با قطعه‌های خودت مشترک نداشته باشد؛ چسبیدن به قطعه‌های حریف آزاد است. قطعه را می‌شود چرخاند و آینه کرد. هر کس جایی برای هیچ قطعه‌ای نداشته باشد رد می‌کند و وقتی هر دو رد کنند بازی تمام است. هر کس خانه‌ی بیشتری پوشانده باشد، یعنی خانه‌ی کمتری برایش مانده باشد، می‌برد.',
+        kMove: 'جابه‌جا کردن قطعه', kRotate: 'چرخاندن قطعه', kFlip: 'آینه کردن قطعه', kPlace: 'گذاشتن قطعه', kNext: 'قطعه‌ی بعدی',
+        tutTitle1: 'از گوشه‌ات شروع کن', tutText1: 'قطعه‌ی اول باید خانه‌ی گوشه‌ی تو را بپوشاند. نارنجی پایین چپ، آبی بالا راست.',
+        tutTitle2: 'گوشه آری، ضلع نه', tutText2: 'هر قطعه‌ی تازه از گوشه به قطعه‌ای از خودت می‌رسد و ضلع مشترکی با قطعه‌های خودت ندارد. به قطعه‌های حریف هر طور بخواهی بچسب.',
+        tutTitle3: 'بیشترین خانه را بپوشان', tutText3: 'هر کس جا نداشته باشد رد می‌کند. وقتی هر دو رد کنند، هر کس خانه‌ی بیشتری پوشانده باشد می‌برد.'
+      },
+      en: {
+        board: 'Corner to Corner board', vsBot: 'Against the bot', two: 'Two players', bot: 'Bot', playerN: 'Player {n}', modeT: 'Players', levelT: 'Bot level',
+        newMatch: 'New game', begin: 'Start', undoMove: 'Undo move', endWarn: 'This ends the current game. Continue?', settingsT: 'New game',
+        orange: 'orange', blue: 'blue', leftN: '{n} squares left', passedT: 'out of moves', passToast: '{n} cannot place a piece and passes',
+        pickPiece: 'Pick a piece below, then tap the board', tapAgain: 'Tap the piece again or press Place to put it down',
+        noFit: 'It does not fit: touch your own pieces only at a corner, never along a side', firstHint: 'Your first piece must cover your corner square',
+        turnOf: '{n}’s turn ({c})', thinking: 'The bot is thinking…', rotateL: 'Rotate', flipL: 'Flip', placeL: 'Place', piecesL: 'Piece',
+        dailyCn: 'Daily Corner to Corner', vsMedium: 'against the medium bot', playerWon: '{n} wins', drawT: 'Draw', leftL: 'Squares left',
+        rules: 'Each side has 21 pieces of one to five squares. Orange starts in the bottom left corner, blue in the top right. Your first piece must cover your own corner square. Every later piece must touch one of your own pieces at a corner at least, and never share a side with your own pieces; touching the other side’s pieces is fine. Pieces can be rotated and flipped. A side that cannot place any piece passes, and when both have passed the game ends. Whoever covered more squares, that is, has fewer squares left, wins.',
+        kMove: 'Move the piece', kRotate: 'Rotate the piece', kFlip: 'Flip the piece', kPlace: 'Place the piece', kNext: 'Next piece',
+        tutTitle1: 'Start in your corner', tutText1: 'Your first piece must cover your corner square. Orange starts bottom left, blue top right.',
+        tutTitle2: 'Corners, never sides', tutText2: 'Each new piece touches one of your own at a corner and shares no side with your own pieces. Touch the other side’s pieces any way you like.',
+        tutTitle3: 'Cover the most', tutText3: 'A side with no room passes. When both have passed, whoever covered more squares wins.'
+      },
+      pl: {
+        board: 'Plansza Róg w róg', vsBot: 'Przeciwko botowi', two: 'Dwóch graczy', bot: 'Bot', playerN: 'Gracz {n}', modeT: 'Gracze', levelT: 'Poziom bota',
+        newMatch: 'Nowa gra', begin: 'Start', undoMove: 'Cofnij ruch', endWarn: 'To zakończy bieżącą grę. Kontynuować?', settingsT: 'Nowa gra',
+        orange: 'pomarańczowi', blue: 'niebiescy', leftN: 'Zostało pól: {n}', passedT: 'brak ruchów', passToast: '{n} nie może położyć klocka i pasuje',
+        pickPiece: 'Wybierz klocek poniżej i dotknij planszy', tapAgain: 'Dotknij klocka jeszcze raz albo naciśnij Połóż',
+        noFit: 'Nie pasuje: swoich klocków dotykaj tylko rogiem, nigdy bokiem', firstHint: 'Pierwszy klocek musi zakryć twoje pole narożne',
+        turnOf: 'Ruch gracza {n} ({c})', thinking: 'Bot myśli…', rotateL: 'Obróć', flipL: 'Odbij', placeL: 'Połóż', piecesL: 'Klocek',
+        dailyCn: 'Codzienny Róg w róg', vsMedium: 'przeciwko botowi na średnim poziomie', playerWon: '{n} wygrywa', drawT: 'Remis', leftL: 'Pozostałe pola',
+        rules: 'Każda strona ma 21 klocków z jednego do pięciu pól. Pomarańczowi zaczynają w lewym dolnym rogu, niebiescy w prawym górnym. Pierwszy klocek musi zakryć twoje pole narożne. Każdy kolejny musi dotykać co najmniej rogiem jednego z twoich klocków i nigdy nie stykać się bokiem z twoimi klockami; dotykanie klocków rywala jest dozwolone. Klocki można obracać i odbijać. Strona, która nie może położyć żadnego klocka, pasuje, a gdy spasują obie, gra się kończy. Wygrywa ten, kto zakrył więcej pól, czyli ma mniej pól w zapasie.',
+        kMove: 'Przesuń klocek', kRotate: 'Obróć klocek', kFlip: 'Odbij klocek', kPlace: 'Połóż klocek', kNext: 'Następny klocek',
+        tutTitle1: 'Zacznij w swoim rogu', tutText1: 'Pierwszy klocek musi zakryć twoje pole narożne. Pomarańczowi zaczynają na dole po lewej, niebiescy na górze po prawej.',
+        tutTitle2: 'Rogiem, nigdy bokiem', tutText2: 'Każdy nowy klocek dotyka twojego rogiem i nie styka się bokiem z twoimi klockami. Klocków rywala możesz dotykać dowolnie.',
+        tutTitle3: 'Zakryj najwięcej', tutText3: 'Strona bez miejsca pasuje. Gdy spasują obie, wygrywa ten, kto zakrył więcej pól.'
+      },
+      fr: {
+        board: 'Plateau de Coin à coin', vsBot: 'Contre le robot', two: 'Deux joueurs', bot: 'Robot', playerN: 'Joueur {n}', modeT: 'Joueurs', levelT: 'Niveau du robot',
+        newMatch: 'Nouvelle partie', begin: 'Commencer', undoMove: 'Annuler le coup', endWarn: 'Cela met fin à la partie en cours. Continuer ?', settingsT: 'Nouvelle partie',
+        orange: 'orange', blue: 'bleu', leftN: '{n} cases restantes', passedT: 'plus de coups', passToast: '{n} ne peut plus poser de pièce et passe',
+        pickPiece: 'Choisis une pièce en bas, puis touche le plateau', tapAgain: 'Touche la pièce encore une fois ou appuie sur Poser',
+        noFit: 'Ça ne va pas : tes pièces ne se touchent que par un coin, jamais par un côté', firstHint: 'Ta première pièce doit couvrir ta case de coin',
+        turnOf: 'Au tour de {n} ({c})', thinking: 'Le robot réfléchit…', rotateL: 'Tourner', flipL: 'Retourner', placeL: 'Poser', piecesL: 'Pièce',
+        dailyCn: 'Coin à coin du jour', vsMedium: 'contre le robot moyen', playerWon: '{n} gagne', drawT: 'Égalité', leftL: 'Cases restantes',
+        rules: 'Chaque camp a 21 pièces d’une à cinq cases. Orange commence dans le coin en bas à gauche, bleu en haut à droite. Ta première pièce doit couvrir ta propre case de coin. Chaque pièce suivante doit toucher au moins par un coin une de tes pièces, et ne jamais partager un côté avec tes pièces ; toucher les pièces adverses est permis. Les pièces se tournent et se retournent. Un camp qui ne peut poser aucune pièce passe, et quand les deux ont passé, la partie se termine. Celui qui a couvert le plus de cases, donc qui en a le moins en réserve, gagne.',
+        kMove: 'Déplacer la pièce', kRotate: 'Tourner la pièce', kFlip: 'Retourner la pièce', kPlace: 'Poser la pièce', kNext: 'Pièce suivante',
+        tutTitle1: 'Commence dans ton coin', tutText1: 'Ta première pièce doit couvrir ta case de coin. Orange en bas à gauche, bleu en haut à droite.',
+        tutTitle2: 'Par les coins, jamais les côtés', tutText2: 'Chaque nouvelle pièce touche une des tiennes par un coin et ne partage aucun côté avec tes pièces. Les pièces adverses, touche-les comme tu veux.',
+        tutTitle3: 'Couvre le plus', tutText3: 'Un camp sans place passe. Quand les deux ont passé, celui qui a couvert le plus de cases gagne.'
+      },
+      ar: {
+        board: 'لوح زاوية بزاوية', vsBot: 'ضد الروبوت', two: 'لاعبان', bot: 'الروبوت', playerN: 'اللاعب {n}', modeT: 'اللاعبون', levelT: 'مستوى الروبوت',
+        newMatch: 'لعبة جديدة', begin: 'ابدأ', undoMove: 'تراجع', endWarn: 'سينهي هذا اللعبة الحالية. هل تتابع؟', settingsT: 'لعبة جديدة',
+        orange: 'البرتقالي', blue: 'الأزرق', leftN: 'بقي {n} مربعًا', passedT: 'لا حركات', passToast: '{n} لا يستطيع وضع قطعة فيتخطى دوره',
+        pickPiece: 'اختر قطعة من الأسفل ثم انقر اللوح', tapAgain: 'انقر القطعة مرة أخرى أو اضغط ضع',
+        noFit: 'لا تناسب: قطعك تتلامس من الزوايا فقط، لا من الأضلاع', firstHint: 'قطعتك الأولى يجب أن تغطي مربع زاويتك',
+        turnOf: 'دور {n} ({c})', thinking: 'الروبوت يفكر…', rotateL: 'تدوير', flipL: 'قلب', placeL: 'ضع', piecesL: 'قطعة',
+        dailyCn: 'زاوية بزاوية اليومية', vsMedium: 'ضد الروبوت المتوسط', playerWon: 'فاز {n}', drawT: 'تعادل', leftL: 'المربعات الباقية',
+        rules: 'لكل جانب 21 قطعة من مربع واحد إلى خمسة. يبدأ البرتقالي من الزاوية السفلية اليسرى والأزرق من العلوية اليمنى. يجب أن تغطي قطعتك الأولى مربع زاويتك. وكل قطعة بعدها يجب أن تلمس إحدى قطعك من زاوية على الأقل، وألا تشارك أي ضلع مع قطعك؛ ملامسة قطع الخصم مسموحة. يمكن تدوير القطع وقلبها. الجانب الذي لا يستطيع وضع أي قطعة يتخطى دوره، وحين يتخطى الاثنان تنتهي اللعبة. يفوز من غطى مربعات أكثر، أي من بقيت له مربعات أقل.',
+        kMove: 'حرّك القطعة', kRotate: 'دوّر القطعة', kFlip: 'اقلب القطعة', kPlace: 'ضع القطعة', kNext: 'القطعة التالية',
+        tutTitle1: 'ابدأ من زاويتك', tutText1: 'يجب أن تغطي قطعتك الأولى مربع زاويتك. البرتقالي أسفل اليسار والأزرق أعلى اليمين.',
+        tutTitle2: 'زوايا لا أضلاع', tutText2: 'كل قطعة جديدة تلمس إحدى قطعك من زاوية ولا تشارك أي ضلع مع قطعك. المس قطع الخصم كما تشاء.',
+        tutTitle3: 'غطِّ الأكثر', tutText3: 'الجانب الذي لا مكان له يتخطى دوره. حين يتخطى الاثنان يفوز من غطى مربعات أكثر.'
+      },
+      hi: {
+        board: 'कोने से कोना का बोर्ड', vsBot: 'बॉट से', two: 'दो खिलाड़ी', bot: 'बॉट', playerN: 'खिलाड़ी {n}', modeT: 'खिलाड़ी', levelT: 'बॉट का स्तर',
+        newMatch: 'नया खेल', begin: 'शुरू करें', undoMove: 'चाल वापस', endWarn: 'इससे मौजूदा खेल ख़त्म हो जाएगा। जारी रखें?', settingsT: 'नया खेल',
+        orange: 'नारंगी', blue: 'नीला', leftN: '{n} ख़ाने बाक़ी', passedT: 'चाल नहीं बची', passToast: '{n} कोई टुकड़ा नहीं रख सकता और बारी छोड़ता है',
+        pickPiece: 'नीचे से एक टुकड़ा चुनें, फिर बोर्ड छुएँ', tapAgain: 'टुकड़े को फिर छुएँ या रखें दबाएँ',
+        noFit: 'यह नहीं बैठता: अपने टुकड़ों को सिर्फ़ कोने से छुएँ, किनारे से कभी नहीं', firstHint: 'पहला टुकड़ा आपके कोने के ख़ाने को ढके',
+        turnOf: '{n} की बारी ({c})', thinking: 'बॉट सोच रहा है…', rotateL: 'घुमाएँ', flipL: 'पलटें', placeL: 'रखें', piecesL: 'टुकड़ा',
+        dailyCn: 'रोज़ का कोने से कोना', vsMedium: 'मध्यम बॉट के ख़िलाफ़', playerWon: '{n} की जीत', drawT: 'बराबरी', leftL: 'बाक़ी ख़ाने',
+        rules: 'हर पक्ष के पास एक से पाँच ख़ानों के 21 टुकड़े हैं। नारंगी नीचे बाएँ कोने से शुरू करता है, नीला ऊपर दाएँ से। पहला टुकड़ा आपके अपने कोने के ख़ाने को ढके। हर अगला टुकड़ा आपके किसी टुकड़े को कम से कम एक कोने से छुए और आपके टुकड़ों से कोई किनारा साझा न करे; विरोधी के टुकड़ों को छूना ठीक है। टुकड़े घुमाए और पलटे जा सकते हैं। जो पक्ष कोई टुकड़ा नहीं रख सकता वह बारी छोड़ता है, और जब दोनों छोड़ दें तो खेल ख़त्म। जिसने ज़्यादा ख़ाने ढके, यानी जिसके कम ख़ाने बचे, वह जीतता है।',
+        kMove: 'टुकड़ा खिसकाएँ', kRotate: 'टुकड़ा घुमाएँ', kFlip: 'टुकड़ा पलटें', kPlace: 'टुकड़ा रखें', kNext: 'अगला टुकड़ा',
+        tutTitle1: 'अपने कोने से शुरू करें', tutText1: 'पहला टुकड़ा आपके कोने के ख़ाने को ढके। नारंगी नीचे बाएँ, नीला ऊपर दाएँ।',
+        tutTitle2: 'कोने हाँ, किनारे नहीं', tutText2: 'हर नया टुकड़ा आपके किसी टुकड़े को कोने से छूता है और आपके टुकड़ों से कोई किनारा साझा नहीं करता। विरोधी के टुकड़ों को जैसे चाहें छुएँ।',
+        tutTitle3: 'सबसे ज़्यादा ढकें', tutText3: 'जिसके पास जगह न हो वह बारी छोड़ता है। दोनों के छोड़ने पर ज़्यादा ख़ाने ढकने वाला जीतता है।'
+      },
+      zh: {
+        board: '角对角棋盘', vsBot: '对战电脑', two: '双人', bot: '电脑', playerN: '玩家 {n}', modeT: '玩家', levelT: '电脑难度',
+        newMatch: '新一局', begin: '开始', undoMove: '悔棋', endWarn: '将结束当前对局，是否继续？', settingsT: '新一局',
+        orange: '橙方', blue: '蓝方', leftN: '剩 {n} 格', passedT: '无处可放', passToast: '{n}无处可放，跳过',
+        pickPiece: '从下方选一块，再点棋盘', tapAgain: '再点一次这块，或按放下',
+        noFit: '放不下：自己的块只能以角相接，不能共边', firstHint: '第一块必须盖住你的角格',
+        turnOf: '轮到{n}（{c}）', thinking: '电脑思考中……', rotateL: '旋转', flipL: '翻转', placeL: '放下', piecesL: '方块',
+        dailyCn: '每日角对角', vsMedium: '对战中等电脑', playerWon: '{n}获胜', drawT: '平局', leftL: '剩余格数',
+        rules: '每方有21块，由一到五格组成。橙方从左下角开始，蓝方从右上角开始。第一块必须盖住你自己的角格。之后每一块必须至少以一个角接触你自己的块，且不能与你自己的块共边；接触对方的块没有限制。块可以旋转和翻转。无处可放的一方跳过，双方都跳过时对局结束。盖住格子多的一方，也就是剩余格数少的一方获胜。',
+        kMove: '移动方块', kRotate: '旋转方块', kFlip: '翻转方块', kPlace: '放下方块', kNext: '下一块',
+        tutTitle1: '从你的角开始', tutText1: '第一块必须盖住你的角格。橙方在左下，蓝方在右上。',
+        tutTitle2: '角相接，不共边', tutText2: '每块新块以角接触你自己的块，且不与你自己的块共边。对方的块可以随便接触。',
+        tutTitle3: '盖住最多', tutText3: '无处可放的一方跳过。双方都跳过时，盖住格子多的一方获胜。'
+      },
+      de: {
+        board: 'Ecke-an-Ecke-Brett', vsBot: 'Gegen den Bot', two: 'Zu zweit', bot: 'Bot', playerN: 'Spieler {n}', modeT: 'Spieler', levelT: 'Bot-Stufe',
+        newMatch: 'Neue Partie', begin: 'Start', undoMove: 'Zug zurück', endWarn: 'Die aktuelle Partie endet. Weiter?', settingsT: 'Neue Partie',
+        orange: 'Orange', blue: 'Blau', leftN: 'Noch {n} Felder', passedT: 'keine Züge mehr', passToast: '{n}: kein Teil passt mehr, Zug ausgesetzt',
+        pickPiece: 'Wähle unten ein Teil und tippe dann aufs Brett', tapAgain: 'Tippe das Teil noch einmal oder drücke Legen',
+        noFit: 'Passt nicht: Deine Teile berühren sich nur an Ecken, nie an Seiten', firstHint: 'Dein erstes Teil muss dein Eckfeld bedecken',
+        turnOf: 'Am Zug: {n} ({c})', thinking: 'Der Bot überlegt …', rotateL: 'Drehen', flipL: 'Spiegeln', placeL: 'Legen', piecesL: 'Teil',
+        dailyCn: 'Ecke an Ecke des Tages', vsMedium: 'gegen den mittleren Bot', playerWon: 'Sieg: {n}', drawT: 'Unentschieden', leftL: 'Felder übrig',
+        rules: 'Jede Seite hat 21 Teile aus einem bis fünf Feldern. Orange beginnt in der Ecke unten links, Blau oben rechts. Dein erstes Teil muss dein eigenes Eckfeld bedecken. Jedes weitere Teil muss mindestens an einer Ecke eines deiner Teile anliegen und darf nie eine Seite mit deinen Teilen teilen; die Teile der anderen Seite darfst du berühren. Teile lassen sich drehen und spiegeln. Wer kein Teil mehr legen kann, passt, und wenn beide gepasst haben, endet die Partie. Wer mehr Felder bedeckt hat, also weniger übrig hat, gewinnt.',
+        kMove: 'Teil verschieben', kRotate: 'Teil drehen', kFlip: 'Teil spiegeln', kPlace: 'Teil legen', kNext: 'Nächstes Teil',
+        tutTitle1: 'Beginne in deiner Ecke', tutText1: 'Dein erstes Teil muss dein Eckfeld bedecken. Orange unten links, Blau oben rechts.',
+        tutTitle2: 'Ecken, nie Seiten', tutText2: 'Jedes neue Teil berührt eines deiner Teile an einer Ecke und teilt keine Seite mit deinen Teilen. Die Teile der anderen Seite darfst du beliebig berühren.',
+        tutTitle3: 'Bedecke am meisten', tutText3: 'Wer keinen Platz hat, passt. Haben beide gepasst, gewinnt, wer mehr Felder bedeckt hat.'
+      },
+      es: {
+        board: 'Tablero de Esquina a esquina', vsBot: 'Contra el bot', two: 'Dos jugadores', bot: 'Bot', playerN: 'Jugador {n}', modeT: 'Jugadores', levelT: 'Nivel del bot',
+        newMatch: 'Nueva partida', begin: 'Empezar', undoMove: 'Deshacer jugada', endWarn: 'Esto termina la partida actual. ¿Seguir?', settingsT: 'Nueva partida',
+        orange: 'naranja', blue: 'azul', leftN: 'Quedan {n} casillas', passedT: 'sin jugadas', passToast: '{n} no puede poner pieza y pasa',
+        pickPiece: 'Elige una pieza abajo y toca el tablero', tapAgain: 'Toca la pieza otra vez o pulsa Poner',
+        noFit: 'No encaja: tus piezas solo se tocan por una esquina, nunca por un lado', firstHint: 'Tu primera pieza debe cubrir tu casilla de esquina',
+        turnOf: 'Turno de {n} ({c})', thinking: 'El bot está pensando…', rotateL: 'Girar', flipL: 'Voltear', placeL: 'Poner', piecesL: 'Pieza',
+        dailyCn: 'Esquina a esquina diario', vsMedium: 'contra el bot medio', playerWon: 'Gana: {n}', drawT: 'Empate', leftL: 'Casillas restantes',
+        rules: 'Cada lado tiene 21 piezas de una a cinco casillas. Naranja empieza en la esquina inferior izquierda, azul en la superior derecha. Tu primera pieza debe cubrir tu propia casilla de esquina. Cada pieza siguiente debe tocar al menos por una esquina una de tus piezas y nunca compartir un lado con tus piezas; tocar las piezas del rival está permitido. Las piezas se pueden girar y voltear. Quien no puede poner ninguna pieza pasa, y cuando los dos han pasado la partida termina. Gana quien cubrió más casillas, es decir, a quien le quedan menos.',
+        kMove: 'Mover la pieza', kRotate: 'Girar la pieza', kFlip: 'Voltear la pieza', kPlace: 'Poner la pieza', kNext: 'Pieza siguiente',
+        tutTitle1: 'Empieza en tu esquina', tutText1: 'Tu primera pieza debe cubrir tu casilla de esquina. Naranja abajo a la izquierda, azul arriba a la derecha.',
+        tutTitle2: 'Esquinas, nunca lados', tutText2: 'Cada pieza nueva toca una tuya por una esquina y no comparte ningún lado con tus piezas. Las del rival puedes tocarlas como quieras.',
+        tutTitle3: 'Cubre más', tutText3: 'Quien no tiene sitio pasa. Cuando los dos han pasado, gana quien cubrió más casillas.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var MODES = ['bot', 'two'];
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs) prefs = { mode: 'bot', level: 'medium' };
+  if (MODES.indexOf(prefs.mode) < 0) prefs.mode = 'bot';
+  if (E.LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+
+  // G: the game around the engine's state S. sel and ori: the piece in hand and its turn;
+  // gh: the ghost's top left square on the board, or null
+  var G = null, timer = null, sel = -1, ori = 0, gh = null, kbOn = false;
+
+  var cv = el('canvas', { class: 'cn-canvas', role: 'img', 'aria-label': C.t('board') });
+  var box = el('div', { class: 'cn-box' }, [cv]);
+  var top = el('div', { class: 'cn-top ch-above' });
+  var sides = el('div', { class: 'cn-sides ch-above' });
+  var status = el('div', { class: 'cn-status', role: 'status', 'aria-live': 'polite' });
+  var rotBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button', 'aria-label': C.t('rotateL'), title: C.t('rotateL') }, [C.icon('rotate', 20), el('span', { text: C.t('rotateL') })]);
+  var flipBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button', 'aria-label': C.t('flipL'), title: C.t('flipL') });
+  flipBtn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18"/><path d="M9 7L4 17h5z"/><path d="M15 7l5 10h-5z"/></svg>';
+  flipBtn.appendChild(el('span', { text: C.t('flipL') }));
+  var placeBtn = el('button', { class: 'ch-btn ch-btn--primary', type: 'button' }, [C.icon('check', 20), el('span', { text: C.t('placeL') })]);
+  var tools = el('div', { class: 'cn-tools' }, [rotBtn, flipBtn, placeBtn]);
+  var tray = el('div', { class: 'cn-tray', role: 'listbox', 'aria-label': C.t('piecesL') });
+  var wrap = el('div', { class: 'cn-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, sides, status, tools, tray])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ setup */
+
+  function newGame(o) {
+    stop();
+    var daily = o.daily || null;
+    G = { mode: daily ? 'bot' : o.mode, level: daily ? 'medium' : o.level, daily: daily, S: E.newGame(), hist: [], startedAt: Date.now(), done: false };
+    if (!daily) { prefs.mode = o.mode; prefs.level = o.level; ctx.store.set('prefs', prefs); }
+    sel = -1; ori = 0; gh = null;
+    render(); save();
+    maybeBot();
+  }
+  function current() { return { mode: G.mode, level: G.level }; }
+
+  function isBot(side) { return G.mode === 'bot' && side === 1; }
+  function busy() { return !G || G.done || isBot(G.S.turn); }
+  function stop() { if (timer) { clearTimeout(timer); timer = null; } }
+  // the tray always shows the pieces of the side whose hand it is: yours against the bot
+  function handSide() { return G.mode === 'bot' ? 0 : G.S.turn; }
+
+  function maybeBot() {
+    if (!G || G.done || !isBot(G.S.turn)) return;
+    renderSide();
+    timer = setTimeout(function () {
+      timer = null;
+      if (!G || G.done || !isBot(G.S.turn)) return;
+      // the daily bot plays from the day's seed, so everyone meets the same opponent
+      var rnd = G.daily ? C.daily('corners', G.daily + '|' + G.S.plies).rng : Math.random;
+      var m = E.think(G.S, G.level, rnd, 700);
+      if (m) act(m);
+    }, C.ui.reduceMotion() ? 200 : 420);
+  }
+
+  /* ------------------------------------------------------------- moves */
+
+  function act(m) {
+    var before = E.clone(G.S), who = G.S.turn, was = G.S.passed.slice();
+    if (!E.play(G.S, m)) { C.feedback('bad'); return false; }
+    G.hist.push(before);
+    if (G.hist.length > 60) G.hist.shift();
+    sel = -1; ori = 0; gh = null;
+    C.feedback(isBot(who) ? 'soft' : 'place');
+    if (G.S.over) { G.done = true; render(); finish(); return true; }
+    [0, 1].forEach(function (s) { if (!was[s] && G.S.passed[s]) C.ui.toast({ icon: 'info', title: C.t('passToast', { n: pname(s) }) }); });
+    render(); save();
+    maybeBot();
+    return true;
+  }
+
+  // Against the bot one undo takes back its replies and your piece together
+  function undo() {
+    if (!G || G.done || !G.hist.length) return;
+    stop();
+    var h = G.hist.pop();
+    while (G.mode === 'bot' && isBot(h.turn) && G.hist.length) h = G.hist.pop();
+    if (isBot(h.turn)) { G.hist.push(h); render(); maybeBot(); return; }
+    G.S = h;
+    sel = -1; ori = 0; gh = null;
+    C.feedback('soft');
+    render(); save();
+    maybeBot();
+  }
+
+  /* ------------------------------------------------------------ result */
+
+  function pname(side) {
+    if (G.mode === 'bot') return side === 0 ? (C.state.profile.name || C.t('you')) : C.t('bot') + ' · ' + C.t(G.level);
+    return C.t('playerN', { n: C.num(side + 1) });
+  }
+  function colourName(t) { return C.t(t === 0 ? 'orange' : 'blue'); }
+
+  function finish() {
+    stop();
+    var S = G.S, vsBot = G.mode === 'bot', w = E.winner(S), sc = E.score(S), won = vsBot ? w === 0 : true;
+    var base = vsBot ? ({ easy: 6, medium: 12, hard: 20 }[G.level] || 12) : 8;
+    var coins = Math.max(2, Math.round(won ? base : base * 0.3)) + (G.daily ? 8 : 0);
+    var points = Math.max(3, Math.round(won ? base * 4 : base * 1.2)) + (G.daily ? 25 : 0);
+    if (vsBot) {
+      if (won) C.achievements.unlock('cn-win');
+      if (won && G.level === 'hard') C.achievements.unlock('cn-hard');
+      if (S.used[0].indexOf(0) < 0) C.achievements.unlock('cn-all');
+    }
+    if (G.daily) {
+      var first = C.stats.daily('corners', G.daily, { label: won ? C.t('won') : C.t('lost'), win: won });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    var title = w === 2 ? C.t('drawT') : vsBot ? (won ? C.t('won') : C.t('lost')) : C.t('playerWon', { n: pname(w) });
+    setTimeout(function () {
+      ctx.finish({
+        won: w === 2 ? null : vsBot ? won : null,
+        title: title,
+        timeMs: Date.now() - G.startedAt, coins: coins, points: points,
+        // one line a side, named: a bare "40 / 24" reads in either order under RTL
+        lines: [0, 1].map(function (k) { return { label: pname(k) + ' (' + colourName(k) + ')', value: C.t('leftN', { n: C.num(E.TOTAL - sc[k]) }) }; }),
+        shareText: 'چوگان · گوشه‌به‌گوشه' + (G.daily ? ('\nروزانه ' + G.daily) : '') + '\n' + title,
+        paint: cardPaint(),
+        onAgain: G.daily ? null : function () { newGame(current()); }
+      });
+    }, C.ui.reduceMotion() ? 150 : 700);
+  }
+
+  /* ------------------------------------------------------------- saves */
+
+  ctx.autosave(function () {
+    if (!G || G.done || !G.hist.length) return { inProgress: false };
+    return { g: { mode: G.mode, level: G.level, daily: G.daily, S: G.S, elapsed: Date.now() - G.startedAt } };
+  });
+  function save() { ctx.save(); }
+  function validSave(sv) {
+    var g = sv && sv.g;
+    return !!(g && MODES.indexOf(g.mode) >= 0 && E.LEVELS.indexOf(g.level) >= 0 && E.valid(g.S) && !g.S.over);
+  }
+  function restore(g) {
+    G = { mode: g.mode, level: g.level, daily: g.daily || null, S: g.S, hist: [], startedAt: Date.now() - (g.elapsed || 0), done: false };
+    render();
+    maybeBot();
+  }
+
+  function askNew() {
+    if (G && G.daily) { go({ daily: G.daily }); return; }
+    settings();
+    function go(o) { if (!G || G.done || !G.hist.length) newGame(o); else C.ui.confirm({ title: C.t('newMatch'), body: C.t('endWarn'), onOk: function () { newGame(o); } }); }
+  }
+  function settings() {
+    var o = G && !G.daily ? current() : { mode: prefs.mode, level: prefs.level };
+    var body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
+    function rows() {
+      body.innerHTML = '';
+      body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('modeT') }));
+      body.appendChild(C.ui.segmented([{ value: 'bot', label: C.t('vsBot') }, { value: 'two', label: C.t('two') }], o.mode, function (v) { o.mode = v; rows(); }));
+      if (o.mode === 'bot') {
+        body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('levelT') }));
+        body.appendChild(C.ui.segmented(E.LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), o.level, function (v) { o.level = v; }));
+      }
+      if (G && !G.done && G.hist.length) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('endWarn') }));
+    }
+    rows();
+    C.ui.modal({
+      title: C.t('settingsT'), closeButton: true, body: [body],
+      actions: [{ label: C.t('cancel') }, { label: C.t('begin'), kind: 'primary', onClick: function () { newGame(o); } }]
+    });
+  }
+
+  /* ------------------------------------------------------------- ghost */
+
+  // The square of the orientation nearest its middle: a tap puts the piece there, so the
+  // piece lands around the finger and not hanging off it
+  function centreOf(O) {
+    var mr = 0, mc = 0, best = O.cells[0], bd = Infinity;
+    O.cells.forEach(function (q) { mr += q[0] / O.cells.length; mc += q[1] / O.cells.length; });
+    O.cells.forEach(function (q) { var d = Math.abs(q[0] - mr) + Math.abs(q[1] - mc); if (d < bd - 1e-9) { bd = d; best = q; } });
+    return best;
+  }
+  function clampGhost(r, c) {
+    var O = E.ORIENT[sel][ori];
+    return { r: Math.max(0, Math.min(N - O.h, r)), c: Math.max(0, Math.min(N - O.w, c)) };
+  }
+  function ghostOk() { return !!gh && sel >= 0 && !busy() && E.legal(G.S, G.S.turn, sel, ori, gh.r, gh.c); }
+  function ghostCells() {
+    if (!gh || sel < 0) return [];
+    return E.cellsOf({ p: sel, o: ori, r: gh.r, c: gh.c });
+  }
+  // Puts the piece around a square; if that does not fit, tries each of its squares on the
+  // one tapped, so a tap on a free corner finds the placement meant
+  function ghostAt(r, c, adjust) {
+    var O = E.ORIENT[sel][ori], cc = centreOf(O);
+    gh = clampGhost(r - cc[0], c - cc[1]);
+    if (!adjust || ghostOk()) return;
+    for (var k = 0; k < O.cells.length; k++) {
+      var rr = r - O.cells[k][0], c2 = c - O.cells[k][1];
+      if (rr >= 0 && c2 >= 0 && rr + O.h <= N && c2 + O.w <= N && E.legal(G.S, G.S.turn, sel, ori, rr, c2)) { gh = { r: rr, c: c2 }; return; }
+    }
+  }
+  // A turn or a flip keeps the piece where it was, around the same middle
+  function reorient(no) {
+    if (sel < 0 || busy()) return;
+    var mid = null;
+    if (gh) { var cc = centreOf(E.ORIENT[sel][ori]); mid = [gh.r + cc[0], gh.c + cc[1]]; }
+    ori = no;
+    if (mid) ghostAt(mid[0], mid[1], false);
+    C.feedback('tap');
+    render();
+  }
+  function rotate() { if (sel >= 0) reorient(E.rot(sel, ori)); }
+  function flipIt() { if (sel >= 0) reorient(E.flip(sel, ori)); }
+  function choose(p) {
+    if (busy() || G.S.used[handSide()][p]) return;
+    if (sel === p) { rotate(); return; }
+    var mid = null;
+    if (gh && sel >= 0) { var cc = centreOf(E.ORIENT[sel][ori]); mid = [gh.r + cc[0], gh.c + cc[1]]; }
+    sel = p; ori = 0;
+    gh = null;
+    if (mid) ghostAt(mid[0], mid[1], true);
+    C.feedback('tap');
+    render();
+  }
+  function placeGhost() {
+    if (ghostOk()) act({ p: sel, o: ori, r: gh.r, c: gh.c });
+    else C.feedback('bad');
+  }
+  rotBtn.addEventListener('click', rotate);
+  flipBtn.addEventListener('click', flipIt);
+  placeBtn.addEventListener('click', placeGhost);
+
+  /* --------------------------------------------------------------- draw */
+
+  function colors() {
+    var cs = getComputedStyle(document.documentElement);
+    var v = function (k, f) { return cs.getPropertyValue(k).trim() || f; };
+    return { cell: v('--cn-cell', '#F3EDE3'), line: v('--cn-line', '#D9CDBB'), a: v('--cn-a', '#B85A00'), b: v('--cn-b', '#1F65A8'),
+      aMark: v('--cn-a-mark', '#FFD9A8'), bMark: v('--cn-b-mark', '#BFE0FA'), ink: v('--cn-ink', '#5A4E40'),
+      ok: v('--cn-ok', '#1E8E3E'), bad: v('--cn-bad', '#C62828') };
+  }
+
+  // Shared by drawing and by reading a tap, so a tap lands on what is drawn under it
+  function geo(W, H) {
+    var pad = Math.max(3, Math.min(W, H) * 0.015), d = (Math.min(W, H) - 2 * pad) / N;
+    return { d: d, ox: (W - d * N) / 2, oy: (H - d * N) / 2 };
+  }
+  function rr(g, x, y, w, h, rad) {
+    g.beginPath(); g.moveTo(x + rad, y); g.arcTo(x + w, y, x + w, y + h, rad); g.arcTo(x + w, y + h, x, y + h, rad);
+    g.arcTo(x, y + h, x, y, rad); g.arcTo(x, y, x + w, y, rad); g.closePath();
+  }
+  // Orange squares carry a dot, blue squares diagonal stripes
+  function markA(g, x, y, d, col) {
+    g.fillStyle = col.aMark;
+    g.beginPath(); g.arc(x + d / 2, y + d / 2, d * 0.17, 0, Math.PI * 2); g.fill();
+  }
+  function markB(g, x, y, d, col) {
+    g.save();
+    g.beginPath(); g.rect(x, y, d, d); g.clip();
+    g.strokeStyle = col.bMark; g.lineWidth = Math.max(1, d * 0.12);
+    g.beginPath();
+    g.moveTo(x + d * 0.05, y + d * 0.55); g.lineTo(x + d * 0.55, y + d * 0.05);
+    g.moveTo(x + d * 0.45, y + d * 0.95); g.lineTo(x + d * 0.95, y + d * 0.45);
+    g.stroke();
+    g.restore();
+  }
+  function square(g, x, y, d, side, col) {
+    var in1 = Math.max(0.5, d * 0.05);
+    g.fillStyle = side === 0 ? col.a : col.b;
+    rr(g, x + in1, y + in1, d - 2 * in1, d - 2 * in1, d * 0.14); g.fill();
+    if (side === 0) markA(g, x, y, d, col); else markB(g, x, y, d, col);
+  }
+
+  function paintBoard(g, W, H, o, col) {
+    var S = o.S, Q = geo(W, H), d = Q.d, i, x, y;
+    g.fillStyle = col.line;
+    rr(g, Q.ox - 2, Q.oy - 2, d * N + 4, d * N + 4, Math.max(4, d * 0.3)); g.fill();
+    for (i = 0; i < E.CELLS; i++) {
+      x = Q.ox + (i % N) * d; y = Q.oy + Math.floor(i / N) * d;
+      if (S.cells[i] >= 0) { square(g, x, y, d, S.cells[i], col); continue; }
+      g.fillStyle = col.cell;
+      rr(g, x + d * 0.05, y + d * 0.05, d * 0.9, d * 0.9, d * 0.14); g.fill();
+    }
+    // the two start corners, a ring in each side's colour while still empty
+    [0, 1].forEach(function (s) {
+      var k = E.START[s];
+      if (S.cells[k] !== -1) return;
+      x = Q.ox + (k % N) * d; y = Q.oy + Math.floor(k / N) * d;
+      g.strokeStyle = s === 0 ? col.a : col.b; g.lineWidth = Math.max(1.5, d * 0.1);
+      g.beginPath(); g.arc(x + d / 2, y + d / 2, d * 0.28, 0, Math.PI * 2); g.stroke();
+    });
+    // where the hand's side may start a piece, while it is that side's turn
+    (o.anchors || []).forEach(function (k) {
+      x = Q.ox + (k % N) * d; y = Q.oy + Math.floor(k / N) * d;
+      g.fillStyle = o.handSide === 0 ? col.a : col.b; g.globalAlpha = 0.45;
+      g.beginPath(); g.arc(x + d / 2, y + d / 2, Math.max(1.5, d * 0.1), 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
+    });
+    (o.last || []).forEach(function (k) {
+      if (S.cells[k] < 0) return;
+      x = Q.ox + (k % N) * d; y = Q.oy + Math.floor(k / N) * d;
+      g.strokeStyle = col.ink; g.lineWidth = Math.max(1.5, d * 0.08);
+      rr(g, x + d * 0.1, y + d * 0.1, d * 0.8, d * 0.8, d * 0.12); g.stroke();
+    });
+    if (o.ghost && o.ghost.cells.length) {
+      var gc = o.ghost.cells, ok = o.ghost.ok;
+      g.globalAlpha = 0.55;
+      gc.forEach(function (k) { square(g, Q.ox + (k % N) * d, Q.oy + Math.floor(k / N) * d, d, o.ghost.side, col); });
+      g.globalAlpha = 1;
+      g.strokeStyle = ok ? col.ok : col.bad; g.lineWidth = Math.max(2, d * 0.12);
+      g.setLineDash(ok ? [] : [Math.max(3, d * 0.22), Math.max(2, d * 0.14)]);
+      gc.forEach(function (k) { x = Q.ox + (k % N) * d; y = Q.oy + Math.floor(k / N) * d; rr(g, x + d * 0.08, y + d * 0.08, d * 0.84, d * 0.84, d * 0.14); g.stroke(); });
+      g.setLineDash([]);
+      if (!ok) {
+        // a cross on the middle square, so a refused place reads without colour
+        var mk = gc[Math.floor(gc.length / 2)];
+        x = Q.ox + (mk % N) * d; y = Q.oy + Math.floor(mk / N) * d;
+        g.strokeStyle = col.bad; g.lineWidth = Math.max(2, d * 0.14);
+        g.beginPath(); g.moveTo(x + d * 0.28, y + d * 0.28); g.lineTo(x + d * 0.72, y + d * 0.72);
+        g.moveTo(x + d * 0.72, y + d * 0.28); g.lineTo(x + d * 0.28, y + d * 0.72); g.stroke();
+      }
+    }
+  }
+
+  function boxSize() {
+    var r = box.getBoundingClientRect();
+    return { w: Math.max(1, Math.floor(r.width)), h: Math.max(1, Math.floor(r.height || r.width)) };
+  }
+  function draw() {
+    if (!G) return;
+    var sz = boxSize(), W = sz.w, H = sz.h, dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    cv.style.width = W + 'px'; cv.style.height = H + 'px';
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    var mine = !busy();
+    paintBoard(g, W, H, {
+      S: G.S, last: G.S.last, handSide: G.S.turn,
+      anchors: mine && sel >= 0 ? E.anchors(G.S, G.S.turn) : [],
+      ghost: mine && gh && sel >= 0 ? { cells: ghostCells(), ok: ghostOk(), side: G.S.turn } : null
+    }, colors());
+  }
+  function cardPaint() {
+    var o = { S: E.clone(G.S), last: [], anchors: [], ghost: null };
+    return function (g, W, H) { paintBoard(g, W, H, o, colors()); };
+  }
+
+  // A small picture of a piece for the tray, the drag and the side pills, with the side's
+  // mark on every square
+  function pieceSvg(p, o, side, minN) {
+    var O = E.ORIENT[p][o], s = 10, n = Math.max(O.h, O.w, minN || 3), off = [(n - O.h) * s / 2, (n - O.w) * s / 2];
+    var out = '<svg viewBox="0 0 ' + (n * s) + ' ' + (n * s) + '" aria-hidden="true">';
+    O.cells.forEach(function (q) {
+      var x = off[1] + q[1] * s, y = off[0] + q[0] * s;
+      out += '<rect x="' + (x + 0.5) + '" y="' + (y + 0.5) + '" width="' + (s - 1) + '" height="' + (s - 1) + '" rx="1.6" style="fill:var(' + (side === 0 ? '--cn-a' : '--cn-b') + ')"/>';
+      out += side === 0 ? '<circle cx="' + (x + s / 2) + '" cy="' + (y + s / 2) + '" r="1.7" style="fill:var(--cn-a-mark)"/>'
+        : '<path d="M' + (x + 1) + ' ' + (y + 5.5) + 'L' + (x + 5.5) + ' ' + (y + 1) + 'M' + (x + 4.5) + ' ' + (y + 9) + 'L' + (x + 9) + ' ' + (y + 4.5) + '" style="stroke:var(--cn-b-mark)" stroke-width="1.2"/>';
+    });
+    return out + '</svg>';
+  }
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (G.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyCn') + ' — ' + C.num(G.daily) })]));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('vsMedium') }));
+      return;
+    }
+    top.appendChild(el('button', { class: 'ch-badge ch-tap', type: 'button', onclick: settings,
+      text: G.mode === 'bot' ? C.t('vsBot') + ' · ' + C.t(G.level) : C.t('two') }));
+    var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', settings);
+    top.appendChild(gear);
+  }
+  function renderSide() {
+    sides.innerHTML = '';
+    var t = G.S.turn, sc = E.score(G.S);
+    [0, 1].forEach(function (k) {
+      var sw = el('span', {});
+      sw.innerHTML = pieceSvg(0, 0, k, 1).replace('<svg ', '<svg width="20" height="20" ');
+      sides.appendChild(el('div', { class: 'cn-side' + (t === k && !G.done ? ' cn-side--on' : '') + (isBot(k) && t === k && !G.done ? ' cn-thinking' : '') }, [
+        sw.firstChild,
+        el('div', { class: 'cn-side__text' }, [
+          el('div', { class: 'cn-side__name', text: pname(k) }),
+          el('div', { class: 'cn-side__left', text: C.t('leftN', { n: C.num(E.TOTAL - sc[k]) }) + (G.S.passed[k] && !G.done ? ' · ' + C.t('passedT') : '') })
+        ])
+      ]));
+    });
+    status.textContent = '';
+    if (G.done) return;
+    var line;
+    if (isBot(t)) line = C.t('thinking');
+    else if (sel < 0) line = G.S.used[t].indexOf(1) < 0 ? C.t('firstHint') : G.mode === 'two' ? C.t('turnOf', { n: pname(t), c: colourName(t) }) : C.t('pickPiece');
+    else if (!gh) line = C.t('pickPiece');
+    else line = ghostOk() ? C.t('tapAgain') : C.t('noFit');
+    status.textContent = line;
+    var can = !busy() && sel >= 0;
+    rotBtn.disabled = !can; flipBtn.disabled = !can; placeBtn.disabled = !ghostOk();
+  }
+  function renderTray() {
+    tray.innerHTML = '';
+    var side = handSide(), off = busy();
+    E.PIECES.forEach(function (cells, p) {
+      var used = !!G.S.used[side][p];
+      var b = el('button', { class: 'cn-piece' + (sel === p ? ' cn-piece--on' : ''), type: 'button', role: 'option',
+        'aria-selected': sel === p ? 'true' : 'false', 'aria-label': C.t('piecesL') + ' ' + C.num(p + 1) + ' · ' + C.num(cells.length) });
+      b.innerHTML = pieceSvg(p, sel === p ? ori : 0, side);
+      b.disabled = used || (off && !G.done && G.mode === 'two');
+      b.dataset.p = p;
+      tray.appendChild(b);
+    });
+  }
+  function render() {
+    renderTop(); renderSide(); renderTray(); draw();
+    if (G.done) { rotBtn.disabled = flipBtn.disabled = placeBtn.disabled = true; }
+  }
+  function refresh() { renderSide(); draw(); }
+
+  /* -------------------------------------------------------------- input */
+
+  function cellUnder(x, y) {
+    var r = cv.getBoundingClientRect(), Q = geo(r.width, r.height);
+    return { r: Math.floor((y - r.top - Q.oy) / Q.d), c: Math.floor((x - r.left - Q.ox) / Q.d), d: Q.d };
+  }
+  function onBoard(q) { return q.r >= 0 && q.r < N && q.c >= 0 && q.c < N; }
+
+  // The board: a tap puts the piece in hand there, a second tap on a piece that fits puts
+  // it down; a drag moves it, lifted above a finger so the finger never hides it
+  var down = null;
+  cv.addEventListener('pointerdown', function (e) {
+    if (busy()) return;
+    e.preventDefault();
+    kbOn = false;
+    down = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false, lift: e.pointerType === 'touch' };
+    try { cv.setPointerCapture(e.pointerId); } catch (err) { /* an old WebView without capture still gets the moves */ }
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (!down || e.pointerId !== down.id || sel < 0 || busy()) return;
+    if (!down.moved && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 8) return;
+    down.moved = true;
+    var q = cellUnder(e.clientX, e.clientY - (down.lift ? q0().d * 1.6 : 0));
+    ghostAt(q.r, q.c, false);
+    refresh();
+  });
+  function q0() { return cellUnder(0, 0); }
+  cv.addEventListener('pointerup', function (e) {
+    if (!down || e.pointerId !== down.id) return;
+    var was = down; down = null;
+    if (busy() || was.moved) { if (was.moved) placeBtn.disabled = !ghostOk(); return; }
+    var q = cellUnder(e.clientX, e.clientY);
+    if (!onBoard(q)) return;
+    if (sel < 0) { C.feedback('bad'); return; }
+    var k = q.r * N + q.c;
+    if (gh && ghostCells().indexOf(k) >= 0 && ghostOk()) { placeGhost(); return; }
+    ghostAt(q.r, q.c, true);
+    C.feedback(ghostOk() ? 'tap' : 'bad');
+    refresh();
+  });
+  cv.addEventListener('pointercancel', function () { down = null; });
+
+  // The tray: a tap picks a piece (a tap on the piece in hand turns it); a drag carries it
+  // to the board, at once with a mouse, after a short hold with a finger so a swipe still
+  // scrolls the tray
+  var drag = null, floatEl = null;
+  function startDrag() {
+    if (!drag || drag.on) return;
+    drag.on = true;
+    if (sel !== drag.p) { sel = drag.p; ori = 0; gh = null; }
+    floatEl = el('div', { class: 'cn-drag' });
+    floatEl.innerHTML = pieceSvg(sel, ori, handSide());
+    document.body.appendChild(floatEl);
+    moveDrag(drag.x, drag.y);
+    renderTray(); refresh();
+  }
+  function moveDrag(x, y) {
+    drag.x = x; drag.y = y;
+    var lift = drag.touch ? 70 : 0, q = cellUnder(x, y - lift), over = onBoard(q);
+    if (floatEl) {
+      floatEl.style.transform = 'translate(' + Math.round(x - 32) + 'px,' + Math.round(y - lift - 32) + 'px)';
+      floatEl.style.opacity = over ? '0' : '.9';
+    }
+    if (over) { ghostAt(q.r, q.c, false); refresh(); }
+    else if (gh) { gh = null; refresh(); }
+  }
+  function endDrag(place) {
+    if (floatEl) { floatEl.remove(); floatEl = null; }
+    var d = drag; drag = null;
+    if (d && d.timer) clearTimeout(d.timer);
+    if (!d || !d.on) return;
+    if (place && ghostOk()) placeGhost(); else { C.feedback(gh ? 'bad' : 'soft'); render(); }
+  }
+  tray.addEventListener('pointerdown', function (e) {
+    var b = e.target.closest && e.target.closest('.cn-piece');
+    if (!b || b.disabled || busy()) return;
+    drag = { p: +b.dataset.p, id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, on: false, touch: e.pointerType === 'touch', timer: null };
+    if (drag.touch) drag.timer = setTimeout(function () { if (drag) { drag.timer = null; startDrag(); } }, 260);
+  });
+  // once a held finger is carrying a piece, the tray must not scroll under it
+  tray.addEventListener('touchmove', function (e) { if (drag && drag.on) e.preventDefault(); }, { passive: false });
+  window.addEventListener('pointermove', function (e) {
+    if (!drag || e.pointerId !== drag.id) return;
+    var far = Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 8;
+    if (!drag.on) {
+      if (!far) return;
+      if (drag.touch) { endDrag(false); return; }
+      startDrag();
+    }
+    moveDrag(e.clientX, e.clientY);
+  });
+  window.addEventListener('pointerup', function (e) {
+    if (!drag || e.pointerId !== drag.id) return;
+    if (drag.on) { endDrag(true); return; }
+    var p = drag.p; endDrag(false);
+    choose(p);
+  });
+  window.addEventListener('pointercancel', function (e) { if (drag && e.pointerId === drag.id) endDrag(false); });
+  tray.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  window.addEventListener('keydown', function (e) {
+    if (!G || document.querySelector('.ch-scrim')) return;
+    if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
+    if (busy() || e.ctrlKey || e.metaKey || e.altKey) return;
+    var tg = e.target && e.target.tagName;
+    if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT') return;
+    var side = G.S.turn;
+    function firstFree(from, step) {
+      for (var k = 1; k <= E.PIECES.length; k++) { var p = ((from + step * k) % 21 + 21) % 21; if (!G.S.used[side][p]) return p; }
+      return -1;
+    }
+    function ensure() {
+      if (sel < 0) { sel = firstFree(-1, 1); ori = 0; }
+      if (sel >= 0 && !gh) { var A = E.anchors(G.S, side), a = A.length ? A[0] : E.START[side]; ghostAt(Math.floor(a / N), a % N, true); }
+    }
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      var nx = firstFree(sel < 0 ? -1 : sel, e.shiftKey ? -1 : 1);
+      if (nx < 0) return;
+      var mid = null;
+      if (gh && sel >= 0) { var cc = centreOf(E.ORIENT[sel][ori]); mid = [gh.r + cc[0], gh.c + cc[1]]; }
+      sel = nx; ori = 0; gh = null;
+      if (mid) ghostAt(mid[0], mid[1], false); else ensure();
+      kbOn = true; render(); return;
+    }
+    // the board is drawn the same way in every language, so the arrows are geometric (#338)
+    var want = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[e.key];
+    if (want) {
+      e.preventDefault();
+      kbOn = true;
+      if (sel < 0 || !gh) { ensure(); render(); return; }
+      gh = clampGhost(gh.r + want[0], gh.c + want[1]);
+      refresh(); return;
+    }
+    if (C.keyIs(e, 'r')) { e.preventDefault(); kbOn = true; if (sel < 0) { ensure(); render(); } else rotate(); return; }
+    if (C.keyIs(e, 'f')) { e.preventDefault(); kbOn = true; if (sel < 0) { ensure(); render(); } else flipIt(); return; }
+    if (e.key === 'Escape' && sel >= 0) { e.preventDefault(); sel = -1; ori = 0; gh = null; render(); return; }
+    if ((e.key === 'Enter' || e.key === ' ') && tg !== 'BUTTON' && sel >= 0 && gh) { e.preventDefault(); placeGhost(); }
+  });
+
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  else window.addEventListener('resize', draw);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← ↑ → ↓', C.t('kMove')), kb('R', C.t('kRotate')), kb('F', C.t('kFlip')), kb('Enter / Space', C.t('kPlace')),
+          kb('Tab', C.t('kNext')), kb('U / Ctrl+Z', C.t('undoMove'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // a 7×7 corner of the board for the tutorial: orange squares carry a dot, as on the board
+  function tArt(kind) {
+    var n = 7, s = 14, ox = (200 - n * s) / 2, oy = 6, out = '<svg viewBox="0 0 200 110" width="100%">';
+    var A = { 1: ['6,0', '5,0', '6,1', '5,1'], 2: ['6,0', '5,0', '6,1', '5,1', '4,2', '3,2', '3,3'], 3: ['6,0', '5,0', '6,1', '5,1', '4,2', '3,2', '3,3', '2,4', '1,4', '1,5'] }[kind];
+    var B = { 1: [], 2: ['2,2', '2,3', '1,3'], 3: ['2,2', '2,3', '1,3', '4,3', '4,4', '5,4', '0,2'] }[kind];
+    out += '<rect x="' + (ox - 2) + '" y="' + (oy - 2) + '" width="' + (n * s + 4) + '" height="' + (n * s + 4) + '" rx="4" fill="#D9CDBB"/>';
+    for (var r = 0; r < n; r++) for (var c = 0; c < n; c++) {
+      var key = r + ',' + c, x = ox + c * s, y = oy + r * s, a = A.indexOf(key) >= 0, b = B.indexOf(key) >= 0;
+      out += '<rect x="' + (x + 0.8) + '" y="' + (y + 0.8) + '" width="' + (s - 1.6) + '" height="' + (s - 1.6) + '" rx="2.5" fill="' + (a ? '#B85A00' : b ? '#1F65A8' : '#F3EDE3') + '"/>';
+      if (a) out += '<circle cx="' + (x + s / 2) + '" cy="' + (y + s / 2) + '" r="2.4" fill="#FFD9A8"/>';
+      if (b) out += '<path d="M' + (x + 1) + ' ' + (y + 7.7) + 'L' + (x + 7.7) + ' ' + (y + 1) + 'M' + (x + 6.3) + ' ' + (y + 13) + 'L' + (x + 13) + ' ' + (y + 6.3) + '" stroke="#BFE0FA" stroke-width="1.6"/>';
+    }
+    if (kind === 1) out += '<circle cx="' + (ox + s / 2) + '" cy="' + (oy + 6 * s + s / 2) + '" r="5" fill="none" stroke="#5A4E40" stroke-width="2"/>';
+    if (kind === 2) {
+      // the corner where the new piece meets the old one
+      out += '<circle cx="' + (ox + 2 * s) + '" cy="' + (oy + 5 * s) + '" r="4.5" fill="none" stroke="#1E8E3E" stroke-width="2.2"/>';
+    }
+    return out + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  var saved = ctx.loadSave();
+  if (validSave(saved) && (saved.g.daily || null) === (dailyDate || null)) restore(saved.g);
+  else newGame(dailyDate ? { daily: dailyDate } : { mode: prefs.mode, level: prefs.level });
+  if (dailyDate && C.stats.dailyDone('corners', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).corners;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
