@@ -1,0 +1,887 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>سنت — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* Sandstone squares in the light theme, dark stone in the dark one. Each side's piece has
+     an edge that reaches 3:1 on a square in both, since an ivory spool on a pale square or
+     a dark cone on a dark square cannot rely on its fill */
+  :root { --sn-sq: #EADFC6; --sn-sq-sp: #DDCBA6; --sn-frame: #B08D58; --sn-glyph: #7A5C2E; --sn-p0: #FBF6EA; --sn-p0-edge: #6B5532; --sn-p1: #3D2B1F; --sn-p1-edge: #24170E; --sn-ring: var(--game); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --sn-sq: #3A3127; --sn-sq-sp: #4A3D2E; --sn-frame: #241D16; --sn-glyph: #C9A774; --sn-p0: #EDE3CC; --sn-p0-edge: #F7EFDC; --sn-p1: #1E150D; --sn-p1-edge: #C9A26A; --sn-ring: var(--game-text-dark, #C8CC9C); }
+  }
+  :root[data-theme="dark"] { --sn-sq: #3A3127; --sn-sq-sp: #4A3D2E; --sn-frame: #241D16; --sn-glyph: #C9A774; --sn-p0: #EDE3CC; --sn-p0-edge: #F7EFDC; --sn-p1: #1E150D; --sn-p1-edge: #C9A26A; --sn-ring: var(--game-text-dark, #C8CC9C); }
+  /* three columns of ten with the two trays beside them in a tall window, three rows of ten
+     with the trays above and below in a wide one; the script lays the squares out for
+     whichever shape the slot gives it */
+  .sn-wrap > .ch-fit { --fit-ar: .46; }
+  @container game (min-aspect-ratio: 5 / 4) { .sn-wrap > .ch-fit { --fit-ar: 2.17; } }
+  .ch-nocq .ch-gamemain.ch-wide .sn-wrap > .ch-fit { --fit-ar: 2.17; }
+  .ch-fit > .sn-box { position: relative; aspect-ratio: var(--fit-ar); }
+  /* the path is the same picture in every language, so the board never mirrors in RTL */
+  .sn-board { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: grid; direction: ltr; gap: 3px; padding: 4px;
+    background: var(--sn-frame); border-radius: var(--r-md); box-shadow: var(--sh-1);
+    grid-template-columns: .8fr repeat(3, 1fr) .8fr; grid-template-rows: repeat(10, 1fr); }
+  .sn-board.sn-wide { grid-template-columns: repeat(10, 1fr); grid-template-rows: .8fr repeat(3, 1fr) .8fr; }
+  .sn-cell { position: relative; border: 0; margin: 0; padding: 0; min-width: 0; min-height: 0; border-radius: 6px; background: var(--sn-sq);
+    display: flex; align-items: center; justify-content: center; color: var(--sn-glyph); font: inherit; touch-action: manipulation; cursor: default;
+    -webkit-tap-highlight-color: transparent; }
+  .sn-cell--sp { background: var(--sn-sq-sp); }
+  .sn-num { position: absolute; top: 1px; left: 4px; font-size: 10px; font-weight: 700; opacity: .6; pointer-events: none; }
+  .sn-glyph { position: absolute; top: 18%; right: 18%; bottom: 18%; left: 18%; opacity: .55; pointer-events: none; }
+  .sn-glyph svg { width: 100%; height: 100%; display: block; }
+  .sn-piece { width: 74%; height: 74%; position: relative; z-index: 1; pointer-events: none; display: block; }
+  .sn-p0 path { fill: var(--sn-p0); stroke: var(--sn-p0-edge); }
+  .sn-p1 path { fill: var(--sn-p1); stroke: var(--sn-p1-edge); }
+  .sn-cell.sn-can { outline: 3px solid var(--sn-ring); outline-offset: -3px; cursor: pointer; }
+  .sn-cell.sn-sel { box-shadow: inset 0 0 0 4px var(--c-text); }
+  .sn-cell.sn-to::after { content: ''; position: absolute; top: 4px; right: 4px; bottom: 4px; left: 4px; border: 3px dashed var(--sn-ring); border-radius: 6px; pointer-events: none; }
+  .sn-tray { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 2px; padding: 4px 0; min-width: 0; min-height: 0;
+    border-radius: 6px; background: rgba(0, 0, 0, .12); }
+  .sn-wide .sn-tray { flex-direction: row; padding: 0 6px; }
+  .sn-tray .sn-piece { width: auto; height: auto; flex: 0 0 auto; }
+  .sn-board:not(.sn-wide) .sn-tray .sn-piece { width: 80%; aspect-ratio: 1; }
+  .sn-wide .sn-tray .sn-piece { height: 80%; aspect-ratio: 1; }
+  .sn-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .sn-sides { width: 100%; max-width: 520px; display: flex; gap: var(--s-2); }
+  .sn-side { flex: 1; display: flex; align-items: center; gap: var(--s-2); min-width: 0; background: var(--c-surface);
+    border-radius: var(--r-md); padding: 6px 10px; box-shadow: var(--sh-1); border: 2px solid transparent; min-height: 44px;
+    transition: border-color var(--t-mid) var(--ease), transform var(--t-mid) var(--ease); }
+  .sn-side--on { border-color: var(--game); transform: translateY(-2px); box-shadow: var(--sh-2); }
+  .sn-side .sn-piece { width: 24px; height: 24px; flex: 0 0 24px; }
+  .sn-side__text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  /* wraps rather than truncates: in a landscape phone the card is too narrow for «ربات · متوسط» */
+  .sn-side__name { min-width: 0; font-weight: 700; font-size: var(--fs-sm); overflow-wrap: anywhere; line-height: 1.25; }
+  .sn-side__off { font-size: var(--fs-xs); color: var(--c-text-dim); font-weight: 700; }
+  .sn-thinking { animation: sn-blink 900ms infinite; }
+  @keyframes sn-blink { 50% { opacity: .55; } }
+  .sn-dock { display: flex; align-items: center; justify-content: center; gap: var(--s-3); flex-wrap: wrap; direction: ltr; }
+  .sn-sticks { display: flex; gap: 6px; align-items: center; height: 48px; }
+  .sn-stick { width: 12px; height: 44px; border-radius: 6px; background: #E6D3AE; border: 2px solid #7A5C2E; box-sizing: border-box; }
+  .sn-stick--up { background: repeating-linear-gradient(180deg, #4B3420 0 5px, #8A643A 5px 9px); }
+  .sn-roll { min-width: 36px; font-size: var(--fs-xl, 1.6rem); font-weight: 800; text-align: center; font-variant-numeric: tabular-nums; }
+  .sn-throw { min-height: 48px; min-width: 112px; }
+  /* the throw prompt and the notes appear in this row, so it keeps its height and the board
+     above it never moves between two taps */
+  .sn-status { min-height: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+  .sn-note { font-size: var(--fs-xs); font-weight: 700; color: var(--c-text-dim); opacity: .85; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function SenetEngineFactory() {
+  'use strict';
+
+  // Thirty squares on one path, index 0 (square 1) to 29 (square 30), laid out in an S on
+  // a 3×10 board. b[i] is the side on square i (0 light, 1 dark) or -1. The rules are the
+  // simplified modern ones after Timothy Kendall's reconstruction: nobody knows the
+  // Egyptians' own, so the game says so in its help.
+  var N = 30, OFF = 30, PIECES = 5, REBIRTH = 14, HAPPY = 25, WATER = 26;
+  var LEVELS = ['easy', 'medium', 'hard'];
+  // four two-sided sticks: k marked sides up has C(4,k)/16 odds, and none up counts as 5
+  var PROB = [0, 4 / 16, 6 / 16, 4 / 16, 1 / 16, 1 / 16];
+
+  function newGame() {
+    var b = [];
+    for (var i = 0; i < N; i++) b.push(i < 10 ? i % 2 : -1);
+    return { b: b, off: [0, 0], turn: 0, roll: 0, throws: 0, plies: 0, winner: -1, wet: [0, 0], last: null };
+  }
+  function clone(S) {
+    return { b: S.b.slice(), off: S.off.slice(), turn: S.turn, roll: S.roll, throws: S.throws, plies: S.plies, winner: S.winner,
+      wet: S.wet.slice(), last: S.last ? JSON.parse(JSON.stringify(S.last)) : null };
+  }
+  function sticks(rnd) { return [0, 1, 2, 3].map(function () { return rnd() < 0.5 ? 1 : 0; }); }
+  function count(st) { var k = 0; for (var i = 0; i < st.length; i++) if (st[i]) k++; return k || 5; }
+
+  // from square 26 on, a piece can never be swapped
+  function safe(i) { return i >= HAPPY; }
+  function isProtected(b, i) { var o = b[i]; return o >= 0 && ((i > 0 && b[i - 1] === o) || (i < N - 1 && b[i + 1] === o)); }
+  function runAt(b, i) {
+    var o = b[i], n = 1, k;
+    if (o < 0) return 0;
+    for (k = i - 1; k >= 0 && b[k] === o; k--) n++;
+    for (k = i + 1; k < N && b[k] === o; k++) n++;
+    return n;
+  }
+  // a piece out of the water goes to 15, or the nearest free square before it, or after it
+  function rebirth(b) {
+    if (b[REBIRTH] < 0) return REBIRTH;
+    for (var i = REBIRTH - 1; i >= 0; i--) if (b[i] < 0) return i;
+    for (var j = REBIRTH + 1; j < HAPPY; j++) if (b[j] < 0) return j;
+    return -1;
+  }
+
+  // Where the piece on f goes with a throw of r, or null: {kind, to[, back]}
+  function dest(S, f, r) {
+    var b = S.b, me = b[f], foe = 1 - me;
+    if (me < 0 || r < 1 || r > 5) return null;
+    if (f > HAPPY) return f + r === N ? { kind: 'off', to: OFF } : null;
+    if (f === HAPPY) {
+      if (r === 5) return { kind: 'off', to: OFF };
+      if (r === 1) {
+        var nb = b.slice(); nb[f] = -1;
+        var back = rebirth(nb);
+        return back < 0 ? null : { kind: 'water', to: WATER, back: back };
+      }
+      return b[f + r] < 0 ? { kind: 'step', to: f + r } : null;
+    }
+    var t = f + r;
+    // every piece must stop on 26 before going on
+    if (t > HAPPY) return null;
+    for (var j = f + 1; j < t; j++) if (b[j] === foe && runAt(b, j) >= 3) return null;
+    if (b[t] === me) return null;
+    if (b[t] === foe) return safe(t) || isProtected(b, t) ? null : { kind: 'swap', to: t };
+    return { kind: 'step', to: t };
+  }
+  function moves(S, r) {
+    if (r === undefined) r = S.roll;
+    var out = [];
+    if (S.winner >= 0 || !r) return out;
+    for (var i = 0; i < N; i++) if (S.b[i] === S.turn && dest(S, i, r)) out.push(i);
+    return out;
+  }
+  // A throw: with no legal move the turn passes at once
+  function setRoll(S, r) {
+    if (S.winner >= 0 || S.roll || r < 1 || r > 5) return null;
+    S.roll = r; S.throws++;
+    if (!moves(S).length) { S.roll = 0; S.turn = 1 - S.turn; return { passed: true, roll: r }; }
+    return { passed: false, roll: r };
+  }
+  function play(S, f) {
+    if (S.winner >= 0 || !S.roll || S.b[f] !== S.turn) return null;
+    var r = S.roll, d = dest(S, f, r), me = S.turn;
+    if (!d) return null;
+    var info = { side: me, from: f, to: d.to, kind: d.kind, roll: r, back: -1, extra: false };
+    S.b[f] = -1;
+    if (d.kind === 'off') S.off[me]++;
+    else if (d.kind === 'water') { S.b[d.back] = me; info.back = d.back; S.wet[me]++; }
+    else if (d.kind === 'swap') { S.b[f] = 1 - me; S.b[d.to] = me; }
+    else S.b[d.to] = me;
+    S.plies++;
+    S.roll = 0;
+    if (S.off[me] >= PIECES) S.winner = me;
+    else if (r === 1 || r === 4 || r === 5) info.extra = true;
+    else S.turn = 1 - me;
+    S.last = info;
+    return info;
+  }
+
+  // Squares gained, plus bonuses: a piece borne off is worth more than square 30, a pair is
+  // safe, and a lone piece loses about twice its distance when an enemy behind it can swap
+  function sideValue(S, p) {
+    var b = S.b, q = 1 - p, v = S.off[p] * 40;
+    for (var i = 0; i < N; i++) {
+      if (b[i] !== p) continue;
+      v += i + 1;
+      if (i === HAPPY) v += 2;
+      if (i < HAPPY) {
+        if (isProtected(b, i)) v += 1.5;
+        else for (var d = 1; d <= 5 && i - d >= 0; d++) if (b[i - d] === q) v -= 2 * d * PROB[d];
+      }
+    }
+    return v;
+  }
+  function evaluate(S, p) {
+    if (S.winner >= 0) return S.winner === p ? 1e4 : -1e4;
+    return sideValue(S, p) - sideValue(S, 1 - p);
+  }
+
+  // easy: any legal move. medium: the best position after this move, with a little noise.
+  // hard: expectimax over the five throws and their odds, deepened while time allows.
+  function think(S, level, rnd, ms) {
+    var mv = moves(S);
+    if (!mv.length) return -1;
+    if (mv.length === 1) return mv[0];
+    rnd = rnd || Math.random;
+    if (level === 'easy') return mv[Math.floor(rnd() * mv.length)];
+    var me = S.turn, i, U;
+    if (level !== 'hard') {
+      var best = mv[0], bv = -Infinity;
+      for (i = 0; i < mv.length; i++) {
+        U = clone(S); play(U, mv[i]);
+        var v = evaluate(U, me) + rnd();
+        if (v > bv) { bv = v; best = mv[i]; }
+      }
+      return best;
+    }
+    var deadline = Date.now() + (ms || 450), nodes = 0, STOP = {};
+    function tick() { if ((++nodes & 255) === 0 && Date.now() > deadline) throw STOP; }
+    // T is waiting for a throw
+    function chance(T, depth) {
+      if (T.winner >= 0 || depth <= 0) return evaluate(T, me);
+      var v = 0;
+      for (var r = 1; r <= 5; r++) {
+        var X = clone(T), res = setRoll(X, r);
+        tick();
+        v += PROB[r] * (res.passed ? chance(X, depth - 1) : choose(X, depth));
+      }
+      return v;
+    }
+    function choose(T, depth) {
+      var ms2 = moves(T), maxi = T.turn === me, bestV = maxi ? -Infinity : Infinity;
+      for (var k = 0; k < ms2.length; k++) {
+        var X = clone(T); play(X, ms2[k]);
+        var v = chance(X, depth - 1);
+        if (maxi ? v > bestV : v < bestV) bestV = v;
+      }
+      return bestV;
+    }
+    var pick = mv[0];
+    try {
+      for (var depth = 1; depth <= 8; depth++) {
+        var bd = mv[0], bvd = -Infinity;
+        for (i = 0; i < mv.length; i++) {
+          U = clone(S); play(U, mv[i]);
+          var val = chance(U, depth - 1);
+          if (val > bvd) { bvd = val; bd = mv[i]; }
+        }
+        pick = bd;
+        // try the last depth's choice first, so an interrupted depth still has it
+        mv.splice(mv.indexOf(bd), 1); mv.unshift(bd);
+      }
+    } catch (e) { if (e !== STOP) throw e; }
+    return pick;
+  }
+
+  // A save is checked before it is restored
+  function valid(S) {
+    if (!S || typeof S !== 'object' || !Array.isArray(S.b) || S.b.length !== N || !Array.isArray(S.off) || S.off.length !== 2 ||
+      !Array.isArray(S.wet) || S.wet.length !== 2) return false;
+    var n = [0, 0];
+    for (var i = 0; i < N; i++) { var o = S.b[i]; if (o !== -1 && o !== 0 && o !== 1) return false; if (o >= 0) n[o]++; }
+    if (S.b[WATER] !== -1) return false;
+    for (var p = 0; p < 2; p++) {
+      if (!Number.isInteger(S.off[p]) || S.off[p] < 0 || n[p] + S.off[p] !== PIECES) return false;
+      if (!Number.isInteger(S.wet[p]) || S.wet[p] < 0) return false;
+    }
+    if (!Number.isInteger(S.throws) || S.throws < 0 || !Number.isInteger(S.plies) || S.plies < 0) return false;
+    if (S.turn !== 0 && S.turn !== 1) return false;
+    if (!Number.isInteger(S.roll) || S.roll < 0 || S.roll > 5) return false;
+    if (S.winner !== -1 && S.winner !== 0 && S.winner !== 1) return false;
+    if (S.winner >= 0 ? S.off[S.winner] !== PIECES || S.roll : S.off[0] >= PIECES || S.off[1] >= PIECES) return false;
+    if (S.roll && !moves(S).length) return false;
+    if (S.last !== null && (typeof S.last !== 'object' || Array.isArray(S.last))) return false;
+    return true;
+  }
+
+  return { N: N, OFF: OFF, PIECES: PIECES, REBIRTH: REBIRTH, HAPPY: HAPPY, WATER: WATER, LEVELS: LEVELS, PROB: PROB,
+    newGame: newGame, clone: clone, sticks: sticks, count: count, dest: dest, moves: moves, setRoll: setRoll, play: play,
+    isProtected: isProtected, evaluate: evaluate, think: think, valid: valid };
+}
+if (typeof module !== 'undefined') module.exports = SenetEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = SenetEngineFactory(), N = E.N;
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'senet',
+    name: { fa: 'سنت', en: 'Senet', zh: '塞尼特', de: 'Senet', es: 'Senet', pl: 'Senet', fr: 'Senet', ar: 'سينيت', hi: 'सेनेट' },
+    accent: '#4A5030',
+    mood: 'dots',
+    strings: {
+      fa: {
+        board: 'صفحه‌ی سنت', vsBot: 'مقابل ربات', two: 'دو نفره', bot: 'ربات', playerN: 'بازیکن {n}', modeT: 'بازیکن‌ها', levelT: 'سطح ربات',
+        newMatch: 'بازی تازه', begin: 'شروع', endWarn: 'بازی فعلی تمام می‌شود. ادامه؟', settingsT: 'بازی تازه',
+        sideL: 'روشن', sideD: 'تیره', throwBtn: 'بینداز', yourThrow: 'چوب‌ها را بینداز', pickMove: '{r} آوردی؛ روی یک مهره‌ی حلقه‌دار بزن',
+        turnThrow: '{n} ({c}): چوب‌ها را بینداز', turnPick: '{n} ({c}): {r}؛ روی یک مهره‌ی حلقه‌دار بزن', noMove: '{n}: {r}، حرکتی نیست',
+        extraThrow: '{n}: یک پرتاب دیگر', thinking: 'ربات فکر می‌کند…',
+        dailySn: 'سنت روزانه', vsMedium: 'مقابل ربات متوسط', playerWon: '{n} برد', offL: 'بیرون‌رفته', wetMsg: '{n}: یک مهره در آب افتاد',
+        rules: 'سنت بازی مسابقه‌ای مصر باستان است. هر طرف پنج مهره دارد و آن‌ها را در مسیری مارپیچ از خانه‌ی ۱ تا ۳۰ می‌برد و از صفحه بیرون می‌کند. چهار چوب می‌اندازی: تعداد چوب‌هایی که طرف علامت‌دارشان رو می‌افتد اندازه‌ی حرکت است و اگر هیچ‌کدام رو نباشد ۵ حساب می‌شود. با ۱، ۴ یا ۵ یک بار دیگر هم می‌اندازی. اگر روی تک‌مهره‌ی حریف بنشینی، جای دو مهره عوض می‌شود. دو مهره‌ی کنار هم از هم محافظت می‌کنند و نمی‌شود رویشان نشست؛ از سه مهره‌ی پشت سر هم هم نمی‌شود رد شد. روی مهره‌ی خودت نمی‌نشینی. اگر حرکتی نداشته باشی، نوبت به حریف می‌رسد. اولین کسی که هر پنج مهره را بیرون ببرد برنده است.',
+        rulesSq: 'خانه‌ی ۱۵ (عنخ) خانه‌ی تولد دوباره است. هر مهره باید دقیقاً روی خانه‌ی ۲۶، خانه‌ی خوشی، بایستد و نمی‌تواند از رویش بپرد. از ۲۶ با ۱ در آب خانه‌ی ۲۷ می‌افتی و به ۱۵ برمی‌گردی (یا اگر پر بود، به نزدیک‌ترین خانه‌ی خالی پیش از آن)، با ۲ تا ۴ به خانه‌های ۲۸ تا ۳۰ می‌روی و با ۵ همان‌جا بیرون می‌روی. از ۲۸، ۲۹ و ۳۰ فقط با دقیقاً ۳، ۲ و ۱ بیرون می‌روی. مهره‌ی روی خانه‌های ۲۶ تا ۳۰ جابه‌جا نمی‌شود.',
+        rulesSrc: 'این قوانین ساده‌شده‌ی امروزی است، بر پایه‌ی بازسازی تیموتی کندال. هیچ‌کس دقیقاً نمی‌داند مصری‌ها چطور بازی می‌کردند.',
+        kThrow: 'انداختن چوب‌ها', kCursor: 'رفتن بین مهره‌هایی که حرکت دارند', kGo: 'حرکت مهره', sqN: 'خانه‌ی {n}',
+        tutTitle1: 'مسابقه تا بیرون', tutText1: 'پنج مهره‌ات را در مسیر مارپیچ از خانه‌ی ۳۰ بیرون ببر. اولین نفر برنده است.',
+        tutTitle2: 'چوب‌ها', tutText2: 'چوب‌های علامت‌دارِ رو را بشمار؛ هیچ‌کدام یعنی ۵. با ۱، ۴ و ۵ دوباره می‌اندازی.',
+        tutTitle3: 'جابه‌جایی و آب', tutText3: 'روی تک‌مهره‌ی حریف بنشین تا جایتان عوض شود. روی ۲۶ بایست و مراقب آب ۲۷ باش.'
+      },
+      en: {
+        board: 'Senet board', vsBot: 'Against the bot', two: 'Two players', bot: 'Bot', playerN: 'Player {n}', modeT: 'Players', levelT: 'Bot level',
+        newMatch: 'New game', begin: 'Start', endWarn: 'This ends the current game. Continue?', settingsT: 'New game',
+        sideL: 'light', sideD: 'dark', throwBtn: 'Throw', yourThrow: 'Throw the sticks', pickMove: 'You threw {r}: tap a ringed piece',
+        turnThrow: '{n} ({c}): throw the sticks', turnPick: '{n} ({c}): {r}, tap a ringed piece', noMove: '{n}: {r}, no move',
+        extraThrow: '{n}: another throw', thinking: 'The bot is thinking…',
+        dailySn: 'Daily Senet', vsMedium: 'against the medium bot', playerWon: '{n} wins', offL: 'Borne off', wetMsg: '{n}: a piece fell into the water',
+        rules: 'Senet is an ancient Egyptian race game. Each side has five pieces and moves them along an S-shaped path from square 1 to square 30 and off the board. You throw four sticks: the number of marked sides that land up is your move, and if none does, it counts as 5. A 1, 4 or 5 gives you another throw. Landing on a lone enemy piece swaps the two. Two pieces side by side protect each other and cannot be landed on; three in a row cannot be passed either. You cannot land on your own piece. If you have no move, your turn passes. The first to bear off all five pieces wins.',
+        rulesSq: 'Square 15 (the ankh) is the house of rebirth. Every piece must stop exactly on square 26, the house of happiness, and cannot jump past it. From 26, a 1 falls into the water on 27 and the piece goes back to 15 (or the nearest free square before it), 2 to 4 reach squares 28 to 30, and a 5 bears the piece off at once. From 28, 29 and 30 a piece bears off only with exactly 3, 2 and 1. A piece on squares 26 to 30 cannot be swapped.',
+        rulesSrc: 'These are simplified modern rules after Timothy Kendall’s reconstruction. Nobody knows exactly how the Egyptians played.',
+        kThrow: 'Throw the sticks', kCursor: 'Move between pieces that can move', kGo: 'Move the piece', sqN: 'Square {n}',
+        tutTitle1: 'Race to the end', tutText1: 'Take your five pieces along the S-shaped path and off past square 30. The first to bear them all off wins.',
+        tutTitle2: 'The sticks', tutText2: 'Count the marked sides up; none means 5. A 1, 4 or 5 throws again.',
+        tutTitle3: 'Swaps and water', tutText3: 'Land on a lone enemy piece to swap places. Stop on 26, and beware the water on 27.'
+      },
+      pl: {
+        board: 'Plansza senet', vsBot: 'Przeciwko botowi', two: 'Dwóch graczy', bot: 'Bot', playerN: 'Gracz {n}', modeT: 'Gracze', levelT: 'Poziom bota',
+        newMatch: 'Nowa gra', begin: 'Start', endWarn: 'To zakończy bieżącą grę. Kontynuować?', settingsT: 'Nowa gra',
+        sideL: 'jasne', sideD: 'ciemne', throwBtn: 'Rzuć', yourThrow: 'Rzuć patyczkami', pickMove: 'Wyrzucono {r}: dotknij zaznaczonego pionka',
+        turnThrow: '{n} ({c}): rzuć patyczkami', turnPick: '{n} ({c}): {r}, dotknij zaznaczonego pionka', noMove: '{n}: {r}, brak ruchu',
+        extraThrow: '{n}: jeszcze jeden rzut', thinking: 'Bot myśli…',
+        dailySn: 'Codzienny senet', vsMedium: 'przeciwko botowi na średnim poziomie', playerWon: '{n} wygrywa', offL: 'Zdjęte', wetMsg: '{n}: pionek wpadł do wody',
+        rules: 'Senet to starożytna egipska gra wyścigowa. Każda strona ma pięć pionków i prowadzi je ścieżką w kształcie litery S od pola 1 do pola 30, a potem zdejmuje z planszy. Rzucasz czterema patyczkami: liczba oznaczonych stron na wierzchu to długość ruchu, a jeśli nie ma żadnej, liczy się 5. Za 1, 4 lub 5 rzucasz jeszcze raz. Stając na samotnym pionku rywala, zamieniasz się z nim miejscami. Dwa pionki obok siebie chronią się nawzajem i nie można na nich stanąć; trzech w rzędzie nie można też przeskoczyć. Nie możesz stanąć na własnym pionku. Gdy nie masz ruchu, tura przechodzi dalej. Wygrywa ten, kto pierwszy zdejmie wszystkie pięć pionków.',
+        rulesSq: 'Pole 15 (anch) to dom odrodzenia. Każdy pionek musi zatrzymać się dokładnie na polu 26, domu szczęścia, i nie może go przeskoczyć. Z pola 26 przy 1 pionek wpada do wody na polu 27 i wraca na 15 (albo na najbliższe wolne pole przed nim), przy 2–4 idzie na pola 28–30, a przy 5 od razu schodzi z planszy. Z pól 28, 29 i 30 pionek schodzi tylko przy dokładnie 3, 2 i 1. Pionka na polach 26–30 nie można zamienić.',
+        rulesSrc: 'To uproszczone współczesne zasady według rekonstrukcji Timothy’ego Kendalla. Nikt nie wie dokładnie, jak grali Egipcjanie.',
+        kThrow: 'Rzuć patyczkami', kCursor: 'Przechodź między pionkami, które mogą się ruszyć', kGo: 'Przesuń pionek', sqN: 'Pole {n}',
+        tutTitle1: 'Wyścig do końca', tutText1: 'Przeprowadź pięć pionków ścieżką w kształcie S poza pole 30. Kto pierwszy zdejmie wszystkie, wygrywa.',
+        tutTitle2: 'Patyczki', tutText2: 'Policz oznaczone strony na wierzchu; żadna to 5. Za 1, 4 lub 5 rzucasz znowu.',
+        tutTitle3: 'Zamiany i woda', tutText3: 'Stań na samotnym pionku rywala, by zamienić się miejscami. Zatrzymaj się na 26 i uważaj na wodę na 27.'
+      },
+      fr: {
+        board: 'Plateau de senet', vsBot: 'Contre le robot', two: 'Deux joueurs', bot: 'Robot', playerN: 'Joueur {n}', modeT: 'Joueurs', levelT: 'Niveau du robot',
+        newMatch: 'Nouvelle partie', begin: 'Commencer', endWarn: 'Cela met fin à la partie en cours. Continuer ?', settingsT: 'Nouvelle partie',
+        sideL: 'clair', sideD: 'foncé', throwBtn: 'Lancer', yourThrow: 'Lance les bâtonnets', pickMove: 'Tu as fait {r} : touche un pion entouré',
+        turnThrow: '{n} ({c}) : lance les bâtonnets', turnPick: '{n} ({c}) : {r}, touche un pion entouré', noMove: '{n} : {r}, aucun coup',
+        extraThrow: '{n} : encore un lancer', thinking: 'Le robot réfléchit…',
+        dailySn: 'Senet du jour', vsMedium: 'contre le robot moyen', playerWon: '{n} gagne', offL: 'Sortis', wetMsg: '{n} : un pion tombe à l’eau',
+        rules: 'Le senet est un jeu de course de l’Égypte ancienne. Chaque camp a cinq pions et les mène sur un chemin en S de la case 1 à la case 30, puis hors du plateau. Tu lances quatre bâtonnets : le nombre de faces marquées tournées vers le haut donne ton déplacement, et si aucune ne l’est, cela compte 5. Un 1, un 4 ou un 5 te donne un nouveau lancer. Arriver sur un pion adverse isolé échange les deux pions. Deux pions côte à côte se protègent et on ne peut pas s’y poser ; trois à la suite ne peuvent pas non plus être franchis. Tu ne peux pas te poser sur ton propre pion. Sans coup possible, ton tour passe. Le premier à sortir ses cinq pions gagne.',
+        rulesSq: 'La case 15 (l’ânkh) est la maison de la renaissance. Chaque pion doit s’arrêter exactement sur la case 26, la maison du bonheur, sans la sauter. Depuis la 26, un 1 fait tomber le pion dans l’eau de la case 27 et il revient en 15 (ou sur la case libre la plus proche avant elle), un 2 à 4 mène aux cases 28 à 30, et un 5 le sort aussitôt. Depuis les cases 28, 29 et 30, un pion ne sort qu’avec exactement 3, 2 et 1. Un pion sur les cases 26 à 30 ne peut pas être échangé.',
+        rulesSrc: 'Ce sont des règles modernes simplifiées d’après la reconstitution de Timothy Kendall. Personne ne sait exactement comment jouaient les Égyptiens.',
+        kThrow: 'Lancer les bâtonnets', kCursor: 'Passer d’un pion jouable à l’autre', kGo: 'Déplacer le pion', sqN: 'Case {n}',
+        tutTitle1: 'Course jusqu’au bout', tutText1: 'Mène tes cinq pions sur le chemin en S et fais-les sortir après la case 30. Le premier à tous les sortir gagne.',
+        tutTitle2: 'Les bâtonnets', tutText2: 'Compte les faces marquées vers le haut ; aucune vaut 5. Un 1, un 4 ou un 5 relance.',
+        tutTitle3: 'Échanges et eau', tutText3: 'Pose-toi sur un pion adverse isolé pour échanger vos places. Arrête-toi sur la 26 et gare à l’eau de la 27.'
+      },
+      ar: {
+        board: 'لوح سينيت', vsBot: 'ضد الروبوت', two: 'لاعبان', bot: 'الروبوت', playerN: 'اللاعب {n}', modeT: 'اللاعبون', levelT: 'مستوى الروبوت',
+        newMatch: 'لعبة جديدة', begin: 'ابدأ', endWarn: 'سينهي هذا اللعبة الحالية. هل تتابع؟', settingsT: 'لعبة جديدة',
+        sideL: 'الفاتح', sideD: 'الداكن', throwBtn: 'ارمِ', yourThrow: 'ارمِ العصي', pickMove: 'رميت {r}: انقر قطعة محاطة بحلقة',
+        turnThrow: '{n} ({c}): ارمِ العصي', turnPick: '{n} ({c}): {r}، انقر قطعة محاطة بحلقة', noMove: '{n}: {r}، لا حركة',
+        extraThrow: '{n}: رمية أخرى', thinking: 'الروبوت يفكر…',
+        dailySn: 'سينيت اليومي', vsMedium: 'ضد الروبوت المتوسط', playerWon: 'فاز {n}', offL: 'الخارجة', wetMsg: '{n}: سقطت قطعة في الماء',
+        rules: 'سينيت لعبة سباق من مصر القديمة. لكل طرف خمس قطع يسير بها في مسار على شكل حرف S من الخانة 1 إلى الخانة 30 ثم يخرجها من اللوح. ترمي أربع عصي: عدد الوجوه المعلَّمة التي تقع إلى أعلى هو حركتك، وإن لم يقع أي منها يُحسب 5. الرمية 1 أو 4 أو 5 تمنحك رمية أخرى. إذا نزلت على قطعة منفردة للخصم تتبادل القطعتان مكانيهما. قطعتان متجاورتان تحميان بعضهما فلا يُنزل عليهما، وثلاث متتالية لا يمكن تجاوزها أيضًا. لا تنزل على قطعتك. إن لم تكن لديك حركة ينتقل الدور. أول من يُخرج قطعه الخمس يفوز.',
+        rulesSq: 'الخانة 15 (عنخ) بيت البعث. على كل قطعة أن تتوقف تمامًا على الخانة 26، بيت السعادة، ولا يمكنها القفز فوقها. من 26 يسقط الرقم 1 القطعة في ماء الخانة 27 فتعود إلى 15 (أو إلى أقرب خانة فارغة قبلها)، و2 إلى 4 تنقلها إلى الخانات 28 إلى 30، و5 تُخرجها فورًا. من الخانات 28 و29 و30 لا تخرج القطعة إلا بـ3 و2 و1 تمامًا. القطعة على الخانات 26 إلى 30 لا يمكن تبديلها.',
+        rulesSrc: 'هذه قواعد حديثة مبسطة وفق إعادة بناء تيموثي كندال. لا أحد يعرف بالضبط كيف كان المصريون يلعبون.',
+        kThrow: 'ارمِ العصي', kCursor: 'تنقل بين القطع التي يمكنها الحركة', kGo: 'حرّك القطعة', sqN: 'الخانة {n}',
+        tutTitle1: 'سباق حتى النهاية', tutText1: 'سِر بقطعك الخمس في المسار على شكل S وأخرجها بعد الخانة 30. أول من يُخرجها كلها يفوز.',
+        tutTitle2: 'العصي', tutText2: 'عُدّ الوجوه المعلَّمة إلى أعلى؛ لا شيء يعني 5. الرمية 1 أو 4 أو 5 تُعاد.',
+        tutTitle3: 'التبديل والماء', tutText3: 'انزل على قطعة منفردة للخصم لتتبادلا المكان. توقف على 26 واحذر ماء الخانة 27.'
+      },
+      hi: {
+        board: 'सेनेट का बोर्ड', vsBot: 'बॉट से', two: 'दो खिलाड़ी', bot: 'बॉट', playerN: 'खिलाड़ी {n}', modeT: 'खिलाड़ी', levelT: 'बॉट का स्तर',
+        newMatch: 'नया खेल', begin: 'शुरू करें', endWarn: 'इससे मौजूदा खेल ख़त्म हो जाएगा। जारी रखें?', settingsT: 'नया खेल',
+        sideL: 'हल्का', sideD: 'गहरा', throwBtn: 'फेंकें', yourThrow: 'डंडियाँ फेंकें', pickMove: 'आपका {r} आया: घेरे वाली गोटी छुएँ',
+        turnThrow: '{n} ({c}): डंडियाँ फेंकें', turnPick: '{n} ({c}): {r}, घेरे वाली गोटी छुएँ', noMove: '{n}: {r}, कोई चाल नहीं',
+        extraThrow: '{n}: एक और फेंक', thinking: 'बॉट सोच रहा है…',
+        dailySn: 'रोज़ का सेनेट', vsMedium: 'मध्यम बॉट के ख़िलाफ़', playerWon: '{n} की जीत', offL: 'बाहर निकलीं', wetMsg: '{n}: एक गोटी पानी में गिरी',
+        rules: 'सेनेट प्राचीन मिस्र का दौड़ वाला खेल है। हर पक्ष के पास पाँच गोटियाँ हैं, जिन्हें वह S आकार के रास्ते पर ख़ाना 1 से ख़ाना 30 तक ले जाकर बोर्ड से बाहर निकालता है। आप चार डंडियाँ फेंकते हैं: जितनी निशान वाली सतहें ऊपर आएँ, उतनी चाल; अगर एक भी नहीं, तो 5 गिना जाता है। 1, 4 या 5 पर एक और बार फेंकने को मिलता है। विरोधी की अकेली गोटी पर उतरने से दोनों की जगह बदल जाती है। साथ-साथ रखी दो गोटियाँ एक-दूसरे को बचाती हैं, उन पर उतरा नहीं जा सकता; लगातार तीन को पार भी नहीं किया जा सकता। अपनी गोटी पर नहीं उतर सकते। कोई चाल न हो तो बारी आगे चली जाती है। जो पहले पाँचों गोटियाँ बाहर निकाले, वही जीतता है।',
+        rulesSq: 'ख़ाना 15 (आँख) पुनर्जन्म का घर है। हर गोटी को ठीक ख़ाना 26, ख़ुशी के घर, पर रुकना होता है; वह उसे लाँघ नहीं सकती। 26 से 1 आने पर गोटी ख़ाना 27 के पानी में गिरकर 15 पर लौट जाती है (या उससे पहले के सबसे पास वाले ख़ाली ख़ाने पर), 2 से 4 पर ख़ाने 28 से 30 तक जाती है, और 5 पर तुरंत बाहर निकल जाती है। ख़ाने 28, 29 और 30 से गोटी ठीक 3, 2 और 1 आने पर ही बाहर निकलती है। ख़ाने 26 से 30 पर रखी गोटी की जगह नहीं बदली जा सकती।',
+        rulesSrc: 'ये टिमोथी केंडल के पुनर्निर्माण पर आधारित सरल आधुनिक नियम हैं। कोई ठीक-ठीक नहीं जानता कि मिस्रवासी कैसे खेलते थे।',
+        kThrow: 'डंडियाँ फेंकें', kCursor: 'चल सकने वाली गोटियों के बीच जाएँ', kGo: 'गोटी चलें', sqN: 'ख़ाना {n}',
+        tutTitle1: 'आख़िर तक दौड़', tutText1: 'अपनी पाँचों गोटियों को S आकार के रास्ते पर ख़ाना 30 के पार बाहर ले जाएँ। जो पहले सब निकाले, वह जीते।',
+        tutTitle2: 'डंडियाँ', tutText2: 'ऊपर आई निशान वाली सतहें गिनें; एक भी नहीं तो 5। 1, 4 या 5 पर फिर फेंकें।',
+        tutTitle3: 'अदला-बदली और पानी', tutText3: 'विरोधी की अकेली गोटी पर उतरकर जगह बदलें। 26 पर रुकें और 27 के पानी से बचें।'
+      },
+      zh: {
+        board: '塞尼特棋盘', vsBot: '对战电脑', two: '双人', bot: '电脑', playerN: '玩家 {n}', modeT: '玩家', levelT: '电脑难度',
+        newMatch: '新一局', begin: '开始', endWarn: '将结束当前对局，是否继续？', settingsT: '新一局',
+        sideL: '浅色', sideD: '深色', throwBtn: '投掷', yourThrow: '投掷木棒', pickMove: '你投出 {r}：点一个带圈的棋子',
+        turnThrow: '{n}（{c}）：投掷木棒', turnPick: '{n}（{c}）：{r}，点一个带圈的棋子', noMove: '{n}：{r}，无路可走',
+        extraThrow: '{n}：再投一次', thinking: '电脑思考中……',
+        dailySn: '每日塞尼特', vsMedium: '对战中等电脑', playerWon: '{n}获胜', offL: '已走出', wetMsg: '{n}：一枚棋子掉进了水里',
+        rules: '塞尼特是古埃及的竞速棋。每方五枚棋子，沿 S 形路线从第 1 格走到第 30 格，再走出棋盘。每次投掷四根木棒：有标记的一面朝上的根数就是步数，一根都没有则算 5。投出 1、4 或 5 可以再投一次。落在对方单独的棋子上，两枚棋子交换位置。相邻的两枚棋子互相保护，不能落在上面；连成三枚的棋子也不能越过。不能落在自己的棋子上。无棋可走时轮到对方。先把五枚棋子全部走出的一方获胜。',
+        rulesSq: '第 15 格（安卡）是重生之屋。每枚棋子都必须恰好停在第 26 格（幸福之屋），不能越过。从第 26 格投出 1 会掉进第 27 格的水里，退回第 15 格（若已被占，则退到它之前最近的空格）；投出 2 到 4 走到第 28 到 30 格；投出 5 直接走出。从第 28、29、30 格只有恰好投出 3、2、1 才能走出。第 26 到 30 格上的棋子不能被交换。',
+        rulesSrc: '这里是根据蒂莫西·肯德尔的复原整理的简化现代规则。没有人确切知道古埃及人是怎么玩的。',
+        kThrow: '投掷木棒', kCursor: '在可走的棋子之间切换', kGo: '走这枚棋子', sqN: '第 {n} 格',
+        tutTitle1: '跑到终点', tutText1: '把五枚棋子沿 S 形路线走过第 30 格并走出。先全部走出的一方获胜。',
+        tutTitle2: '木棒', tutText2: '数一数有标记的一面朝上的根数；一根都没有算 5。投出 1、4、5 再投一次。',
+        tutTitle3: '交换与水', tutText3: '落在对方单独的棋子上就交换位置。要停在第 26 格，小心第 27 格的水。'
+      },
+      de: {
+        board: 'Senet-Brett', vsBot: 'Gegen den Bot', two: 'Zu zweit', bot: 'Bot', playerN: 'Spieler {n}', modeT: 'Spieler', levelT: 'Bot-Stufe',
+        newMatch: 'Neue Partie', begin: 'Start', endWarn: 'Die aktuelle Partie endet. Weiter?', settingsT: 'Neue Partie',
+        sideL: 'hell', sideD: 'dunkel', throwBtn: 'Werfen', yourThrow: 'Wirf die Stäbchen', pickMove: 'Du hast {r} geworfen: tippe eine umrandete Figur',
+        turnThrow: '{n} ({c}): wirf die Stäbchen', turnPick: '{n} ({c}): {r}, tippe eine umrandete Figur', noMove: '{n}: {r}, kein Zug',
+        extraThrow: '{n}: noch ein Wurf', thinking: 'Der Bot überlegt …',
+        dailySn: 'Senet des Tages', vsMedium: 'gegen den mittleren Bot', playerWon: 'Sieg: {n}', offL: 'Hinaus', wetMsg: '{n}: eine Figur fällt ins Wasser',
+        rules: 'Senet ist ein Wettlaufspiel aus dem alten Ägypten. Jede Seite hat fünf Figuren und zieht sie auf einem S-förmigen Weg von Feld 1 bis Feld 30 und vom Brett. Du wirfst vier Stäbchen: Die Zahl der markierten Seiten, die oben liegen, ist dein Zug; liegt keine oben, zählt das 5. Bei 1, 4 oder 5 wirfst du noch einmal. Ziehst du auf eine einzelne gegnerische Figur, tauschen beide die Plätze. Zwei Figuren nebeneinander schützen sich und dürfen nicht betreten werden; drei in einer Reihe dürfen auch nicht übersprungen werden. Auf eine eigene Figur darfst du nicht ziehen. Hast du keinen Zug, ist der andere dran. Wer zuerst alle fünf Figuren hinausbringt, gewinnt.',
+        rulesSq: 'Feld 15 (das Anch) ist das Haus der Wiedergeburt. Jede Figur muss genau auf Feld 26, dem Haus des Glücks, halten und darf es nicht überspringen. Von 26 fällt sie bei einer 1 ins Wasser auf Feld 27 und kehrt auf 15 zurück (oder auf das nächste freie Feld davor), bei 2 bis 4 erreicht sie die Felder 28 bis 30, und bei einer 5 geht sie sofort hinaus. Von 28, 29 und 30 geht eine Figur nur mit genau 3, 2 und 1 hinaus. Eine Figur auf den Feldern 26 bis 30 kann nicht getauscht werden.',
+        rulesSrc: 'Das sind vereinfachte moderne Regeln nach der Rekonstruktion von Timothy Kendall. Niemand weiß genau, wie die Ägypter gespielt haben.',
+        kThrow: 'Stäbchen werfen', kCursor: 'Zwischen ziehbaren Figuren wechseln', kGo: 'Figur ziehen', sqN: 'Feld {n}',
+        tutTitle1: 'Wettlauf ins Ziel', tutText1: 'Bring deine fünf Figuren auf dem S-förmigen Weg über Feld 30 hinaus. Wer zuerst alle draußen hat, gewinnt.',
+        tutTitle2: 'Die Stäbchen', tutText2: 'Zähl die markierten Seiten oben; keine heißt 5. Bei 1, 4 oder 5 wirfst du noch einmal.',
+        tutTitle3: 'Tausch und Wasser', tutText3: 'Zieh auf eine einzelne gegnerische Figur, um die Plätze zu tauschen. Halte auf 26 und hüte dich vor dem Wasser auf 27.'
+      },
+      es: {
+        board: 'Tablero de senet', vsBot: 'Contra el bot', two: 'Dos jugadores', bot: 'Bot', playerN: 'Jugador {n}', modeT: 'Jugadores', levelT: 'Nivel del bot',
+        newMatch: 'Nueva partida', begin: 'Empezar', endWarn: 'Esto termina la partida actual. ¿Seguir?', settingsT: 'Nueva partida',
+        sideL: 'claro', sideD: 'oscuro', throwBtn: 'Lanzar', yourThrow: 'Lanza los palos', pickMove: 'Sacaste {r}: toca una ficha marcada',
+        turnThrow: '{n} ({c}): lanza los palos', turnPick: '{n} ({c}): {r}, toca una ficha marcada', noMove: '{n}: {r}, sin movimiento',
+        extraThrow: '{n}: otro lanzamiento', thinking: 'El bot está pensando…',
+        dailySn: 'Senet diario', vsMedium: 'contra el bot medio', playerWon: 'Gana: {n}', offL: 'Fuera', wetMsg: '{n}: una ficha cae al agua',
+        rules: 'El senet es un juego de carreras del antiguo Egipto. Cada bando tiene cinco fichas y las lleva por un camino en forma de S de la casilla 1 a la 30 y fuera del tablero. Lanzas cuatro palos: el número de caras marcadas que quedan arriba es tu movimiento, y si no queda ninguna, cuenta 5. Un 1, un 4 o un 5 te da otro lanzamiento. Caer en una ficha rival sola intercambia las dos. Dos fichas juntas se protegen y no se puede caer en ellas; tres seguidas tampoco se pueden saltar. No puedes caer en una ficha tuya. Si no tienes movimiento, pasa el turno. Gana quien saque primero sus cinco fichas.',
+        rulesSq: 'La casilla 15 (el anj) es la casa del renacimiento. Toda ficha debe detenerse justo en la casilla 26, la casa de la felicidad, y no puede saltarla. Desde la 26, un 1 la hace caer al agua de la 27 y vuelve a la 15 (o a la casilla libre más cercana antes de ella), de 2 a 4 llega a las casillas 28 a 30, y un 5 la saca enseguida. Desde la 28, la 29 y la 30 una ficha sale solo con 3, 2 y 1 exactos. Una ficha en las casillas 26 a 30 no se puede intercambiar.',
+        rulesSrc: 'Son reglas modernas simplificadas según la reconstrucción de Timothy Kendall. Nadie sabe con exactitud cómo jugaban los egipcios.',
+        kThrow: 'Lanzar los palos', kCursor: 'Moverse entre las fichas que pueden mover', kGo: 'Mover la ficha', sqN: 'Casilla {n}',
+        tutTitle1: 'Carrera hasta el final', tutText1: 'Lleva tus cinco fichas por el camino en S y sácalas tras la casilla 30. Gana quien las saque todas primero.',
+        tutTitle2: 'Los palos', tutText2: 'Cuenta las caras marcadas hacia arriba; ninguna vale 5. Con 1, 4 o 5 vuelves a lanzar.',
+        tutTitle3: 'Cambios y agua', tutText3: 'Cae en una ficha rival sola para cambiar de sitio. Detente en la 26 y cuidado con el agua de la 27.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var MODES = ['bot', 'two'];
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs) prefs = { mode: 'bot', level: 'medium' };
+  if (MODES.indexOf(prefs.mode) < 0) prefs.mode = 'bot';
+  if (E.LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+
+  // G: the game around the engine's state S. sel is the keyboard's chosen piece.
+  var G = null, timer = null, sel = -1;
+
+  /* -------------------------------------------------------------- pieces */
+
+  // a light spool and a dark cone, after the two kinds of Egyptian pieces
+  var SPOOL = '<path d="M9 7h22l-5 7v12l5 7H9l5-7V14z" stroke-width="2.6" stroke-linejoin="round"/>';
+  var CONE = '<path d="M20 5c2.2 0 3.3 2 3.8 4.2L31 33H9l7.2-23.8C16.7 7 17.8 5 20 5z" stroke-width="2.6" stroke-linejoin="round"/>';
+  function pieceSvg(side) {
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 40 40');
+    s.setAttribute('class', 'sn-piece sn-p' + side);
+    s.setAttribute('aria-hidden', 'true');
+    s.innerHTML = side === 0 ? SPOOL : CONE;
+    return s;
+  }
+  var G_ANKH = '<path d="M12 10.5C9.6 9 8.6 7 8.6 5.4a3.4 3.4 0 0 1 6.8 0c0 1.6-1 3.6-3.4 5.1zM6 12h12M12 10.5V22"/>';
+  var G_NEFER = '<path d="M12 9.5c-3 0-4.5-2-4.5-4.2a4.5 4.5 0 0 1 9 0c0 2.2-1.5 4.2-4.5 4.2zM12 9.5V22M8.5 15.5h7"/>';
+  var G_WATER = '<path d="M2.5 8c3-2.2 6.3 2.2 9.5 0s6.5-2.2 9.5 0M2.5 13c3-2.2 6.3 2.2 9.5 0s6.5-2.2 9.5 0M2.5 18c3-2.2 6.3 2.2 9.5 0s6.5-2.2 9.5 0"/>';
+  var G_SUN = '<circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>';
+  var strokes = function (n) { var s = ''; for (var k = 0; k < n; k++) { var x = 12 + (k - (n - 1) / 2) * 5; s += '<path d="M' + x + ' 5v14"/>'; } return s; };
+  var GLYPH = {};
+  GLYPH[E.REBIRTH] = G_ANKH; GLYPH[E.HAPPY] = G_NEFER; GLYPH[E.WATER] = G_WATER; GLYPH[27] = strokes(3); GLYPH[28] = strokes(2); GLYPH[29] = G_SUN;
+
+  /* -------------------------------------------------------------- layout */
+
+  var board = el('div', { class: 'sn-board', role: 'group', 'aria-label': C.t('board') });
+  var cells = [], shown = [];
+  for (var i0 = 0; i0 < N; i0++) {
+    var c = el('button', { class: 'sn-cell' + (GLYPH[i0] ? ' sn-cell--sp' : ''), type: 'button', tabindex: '-1' }, [el('span', { class: 'sn-num', text: C.num(i0 + 1) })]);
+    if (GLYPH[i0]) c.appendChild(el('span', { class: 'sn-glyph', html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + GLYPH[i0] + '</svg>' }));
+    c.addEventListener('click', onCell.bind(null, i0));
+    cells.push(c); shown.push(-1);
+    board.appendChild(c);
+  }
+  var trays = [el('div', { class: 'sn-tray', 'aria-hidden': 'true' }), el('div', { class: 'sn-tray', 'aria-hidden': 'true' })];
+  board.appendChild(trays[0]); board.appendChild(trays[1]);
+  var box = el('div', { class: 'sn-box' }, [board]);
+
+  var stickEls = [0, 1, 2, 3].map(function () { return el('span', { class: 'sn-stick' }); });
+  var rollEl = el('span', { class: 'sn-roll', 'aria-live': 'polite' });
+  var throwBtn = el('button', { class: 'ch-btn ch-btn--primary sn-throw', type: 'button', onclick: function () { if (canThrow()) doThrow(); } }, [el('span', { text: C.t('throwBtn') })]);
+  var dock = el('div', { class: 'sn-dock' }, [el('div', { class: 'sn-sticks', 'aria-hidden': 'true' }, stickEls), rollEl, throwBtn]);
+  var top = el('div', { class: 'sn-top ch-above' });
+  var sides = el('div', { class: 'sn-sides ch-above' });
+  var status = el('div', { class: 'sn-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'sn-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, sides, dock, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  // The S runs along three rows of ten in a wide slot and down three columns of ten in a
+  // tall one, the second line always running back the other way
+  var wideNow = null;
+  function layout() {
+    var r = box.getBoundingClientRect();
+    var wide = r.width > r.height;
+    if (wide === wideNow) return;
+    wideNow = wide;
+    board.classList.toggle('sn-wide', wide);
+    for (var i = 0; i < N; i++) {
+      var line = Math.floor(i / 10), k = line % 2 ? 9 - i % 10 : i % 10;
+      cells[i].style.gridColumn = wide ? String(1 + k) : String(2 + line);
+      cells[i].style.gridRow = wide ? String(2 + line) : String(1 + k);
+    }
+    trays[0].style.gridColumn = wide ? '1 / span 10' : '1'; trays[0].style.gridRow = wide ? '1' : '1 / span 10';
+    trays[1].style.gridColumn = wide ? '1 / span 10' : '5'; trays[1].style.gridRow = wide ? '5' : '1 / span 10';
+  }
+
+  /* -------------------------------------------------------------- setup */
+
+  function newGame(o) {
+    stop();
+    var daily = o.daily || null;
+    G = { mode: daily ? 'bot' : o.mode, level: daily ? 'medium' : o.level, daily: daily, S: E.newGame(), sticks: null, note: '', startedAt: Date.now(), done: false };
+    if (!daily) { prefs.mode = o.mode; prefs.level = o.level; ctx.store.set('prefs', prefs); }
+    sel = -1;
+    render(); save();
+    maybeBot();
+  }
+  function current() { return { mode: G.mode, level: G.level }; }
+
+  function isBot(side) { return G.mode === 'bot' && side === 1; }
+  function busy() { return !G || G.done || isBot(G.S.turn); }
+  function canThrow() { return !busy() && !G.S.roll; }
+  function stop() { if (timer) { clearTimeout(timer); timer = null; } }
+
+  // The bot throws, waits a moment so the throw can be read, then moves
+  function maybeBot() {
+    if (!G || G.done || !isBot(G.S.turn)) return;
+    timer = setTimeout(function () {
+      timer = null;
+      if (!G || G.done || !isBot(G.S.turn)) return;
+      if (!G.S.roll) { doThrow(); return; }
+      // the daily bot's noise comes from the day's seed, so everyone meets the same opponent
+      var rnd = G.daily ? C.daily('senet', G.daily + '|b' + G.S.throws).rng : Math.random;
+      var f = E.think(G.S, G.level, rnd, 450);
+      if (f >= 0) act(f);
+    }, C.ui.reduceMotion() ? 220 : 560);
+  }
+
+  /* -------------------------------------------------------------- moves */
+
+  function doThrow() {
+    if (!G || G.done || G.S.roll) return;
+    // the daily game's sticks are the day's, the same for everyone, throw by throw
+    var rnd = G.daily ? C.daily('senet', G.daily + '|' + G.S.throws).rng : Math.random;
+    var st = E.sticks(rnd), r = E.count(st), who = G.S.turn;
+    var res = E.setRoll(G.S, r);
+    if (!res) return;
+    G.sticks = st;
+    G.note = res.passed ? C.t('noMove', { n: pname(who), r: C.num(r) }) : '';
+    sel = -1;
+    C.feedback('roll');
+    render();
+    tossSticks();
+    save();
+    maybeBot();
+  }
+
+  function act(f) {
+    var S = G.S, who = S.turn;
+    var info = E.play(S, f);
+    if (!info) { C.feedback('bad'); return false; }
+    G.note = info.kind === 'water' ? C.t('wetMsg', { n: pname(who) }) : info.extra ? C.t('extraThrow', { n: pname(who) }) : '';
+    C.feedback(info.kind === 'swap' ? 'thud' : info.kind === 'off' ? 'coin' : info.kind === 'water' ? 'bad' : 'place');
+    sel = -1;
+    if (S.winner >= 0) G.done = true;
+    render();
+    animate(info);
+    if (G.done) { finish(); return true; }
+    save();
+    maybeBot();
+    return true;
+  }
+
+  function onCell(i) {
+    if (busy() || !G.S.roll) { if (!busy() && !G.S.roll && G.S.b[i] === G.S.turn) C.ui.shake(throwBtn); return; }
+    if (G.S.b[i] !== G.S.turn || !E.dest(G.S, i, G.S.roll)) { C.feedback('bad'); return; }
+    act(i);
+  }
+
+  /* ------------------------------------------------------------- result */
+
+  function pname(side) {
+    if (G.mode === 'bot') return side === 0 ? (C.state.profile.name || C.t('you')) : C.t('bot') + ' · ' + C.t(G.level);
+    return C.t('playerN', { n: C.num(side + 1) });
+  }
+  function colourName(t) { return C.t(t === 0 ? 'sideL' : 'sideD'); }
+
+  function finish() {
+    stop();
+    var S = G.S, vsBot = G.mode === 'bot', won = vsBot ? S.winner === 0 : true;
+    var base = vsBot ? ({ easy: 6, medium: 12, hard: 20 }[G.level] || 12) : 8;
+    var coins = Math.max(2, Math.round(won ? base : base * 0.3)) + (G.daily ? 8 : 0);
+    var points = Math.max(3, Math.round(won ? base * 4 : base * 1.2)) + (G.daily ? 25 : 0);
+    if (vsBot && won) {
+      C.achievements.unlock('snt-win');
+      if (G.level === 'hard') C.achievements.unlock('snt-hard');
+      if (G.level !== 'easy' && S.wet[0] === 0) C.achievements.unlock('snt-dry');
+    }
+    if (G.daily) {
+      var first = C.stats.daily('senet', G.daily, { label: won ? C.t('won') : C.t('lost'), win: won });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    var title = vsBot ? (won ? C.t('won') : C.t('lost')) : C.t('playerWon', { n: pname(S.winner) });
+    setTimeout(function () {
+      ctx.finish({
+        won: vsBot ? won : null,
+        title: title,
+        timeMs: Date.now() - G.startedAt, coins: coins, points: points,
+        lines: [{ label: C.t('offL'), value: C.num(S.off[0]) + ' / ' + C.num(S.off[1]) }],
+        shareText: 'چوگان · سنت' + (G.daily ? ('\nروزانه ' + G.daily) : '') + '\n' + title,
+        paint: cardPaint(),
+        onAgain: G.daily ? null : function () { newGame(current()); }
+      });
+    }, C.ui.reduceMotion() ? 150 : 900);
+  }
+
+  /* -------------------------------------------------------------- saves */
+
+  ctx.autosave(function () {
+    if (!G || G.done || !G.S.throws) return { inProgress: false };
+    return { g: { mode: G.mode, level: G.level, daily: G.daily, S: G.S, sticks: G.sticks, elapsed: Date.now() - G.startedAt } };
+  });
+  function save() { ctx.save(); }
+  function validSave(sv) {
+    var g = sv && sv.g;
+    return !!(g && MODES.indexOf(g.mode) >= 0 && E.LEVELS.indexOf(g.level) >= 0 && E.valid(g.S) && g.S.winner < 0);
+  }
+  function restore(g) {
+    var st = Array.isArray(g.sticks) && g.sticks.length === 4 ? g.sticks.map(function (v) { return v ? 1 : 0; }) : null;
+    G = { mode: g.mode, level: g.level, daily: g.daily || null, S: g.S, sticks: st, note: '', startedAt: Date.now() - (g.elapsed || 0), done: false };
+    sel = -1;
+    render();
+    maybeBot();
+  }
+
+  function askNew() {
+    if (G && G.daily) {
+      if (!G.S.throws || G.done) newGame({ daily: G.daily });
+      else C.ui.confirm({ title: C.t('newMatch'), body: C.t('endWarn'), onOk: function () { newGame({ daily: G.daily }); } });
+      return;
+    }
+    settings();
+  }
+  function settings() {
+    var o = G && !G.daily ? current() : { mode: prefs.mode, level: prefs.level };
+    var body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
+    function rows() {
+      body.innerHTML = '';
+      body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('modeT') }));
+      body.appendChild(C.ui.segmented([{ value: 'bot', label: C.t('vsBot') }, { value: 'two', label: C.t('two') }], o.mode, function (v) { o.mode = v; rows(); }));
+      if (o.mode === 'bot') {
+        body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('levelT') }));
+        body.appendChild(C.ui.segmented(E.LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), o.level, function (v) { o.level = v; }));
+      }
+      if (G && !G.done && G.S.throws) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('endWarn') }));
+    }
+    rows();
+    C.ui.modal({
+      title: C.t('settingsT'), closeButton: true, body: [body],
+      actions: [{ label: C.t('cancel') }, { label: C.t('begin'), kind: 'primary', onClick: function () { newGame(o); } }]
+    });
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  // Only what changed is rewritten: a piece removed under a finger eats the click (#750)
+  function renderBoard() {
+    layout();
+    var S = G.S, mine = !busy() && S.roll, can = mine ? E.moves(S) : [];
+    var target = mine && sel >= 0 ? E.dest(S, sel, S.roll) : null;
+    for (var i = 0; i < N; i++) {
+      var cell = cells[i], o = S.b[i];
+      if (shown[i] !== o) {
+        var old = cell.querySelector('.sn-piece');
+        if (old) cell.removeChild(old);
+        if (o >= 0) cell.appendChild(pieceSvg(o));
+        shown[i] = o;
+      }
+      cell.classList.toggle('sn-can', can.indexOf(i) >= 0);
+      cell.classList.toggle('sn-sel', i === sel);
+      cell.classList.toggle('sn-to', !!target && (target.kind === 'water' ? i === target.back : i === target.to));
+      cell.setAttribute('aria-label', C.t('sqN', { n: C.num(i + 1) }) + (o >= 0 ? ' · ' + colourName(o) : ''));
+    }
+    [0, 1].forEach(function (p) {
+      var t = trays[p], have = t.querySelectorAll('.sn-piece').length;
+      while (have > S.off[p]) { t.removeChild(t.lastChild); have--; }
+      while (have < S.off[p]) { t.appendChild(pieceSvg(p)); have++; }
+    });
+  }
+  function renderDock() {
+    var st = G.sticks;
+    stickEls.forEach(function (s, k) { s.classList.toggle('sn-stick--up', !!(st && st[k])); s.style.opacity = st ? '' : '.45'; });
+    rollEl.textContent = G.S.roll ? C.num(G.S.roll) : '';
+    throwBtn.disabled = !canThrow();
+  }
+  function renderTop() {
+    top.innerHTML = '';
+    if (G.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailySn') + ' — ' + C.num(G.daily) })]));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('vsMedium') }));
+      return;
+    }
+    top.appendChild(el('button', { class: 'ch-badge ch-tap', type: 'button', onclick: settings,
+      text: G.mode === 'bot' ? C.t('vsBot') + ' · ' + C.t(G.level) : C.t('two') }));
+    var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', settings);
+    top.appendChild(gear);
+  }
+  function renderSide() {
+    sides.innerHTML = '';
+    var t = G.S.turn;
+    [0, 1].forEach(function (k) {
+      sides.appendChild(el('div', { class: 'sn-side' + (t === k && !G.done ? ' sn-side--on' : '') + (isBot(k) && t === 1 && !G.done ? ' sn-thinking' : '') }, [
+        pieceSvg(k),
+        el('div', { class: 'sn-side__text' }, [
+          el('div', { class: 'sn-side__name', text: pname(k) }),
+          el('div', { class: 'sn-side__off', text: C.t('offL') + ' ' + C.num(G.S.off[k]) + '/' + C.num(E.PIECES) })
+        ])
+      ]));
+    });
+    status.innerHTML = '';
+    if (G.note) status.appendChild(el('span', { class: 'sn-note', text: G.note }));
+    if (G.done) return;
+    var S = G.S, line;
+    if (isBot(t)) line = C.t('thinking');
+    else if (G.mode === 'bot') line = S.roll ? C.t('pickMove', { r: C.num(S.roll) }) : C.t('yourThrow');
+    else line = S.roll ? C.t('turnPick', { n: pname(t), c: colourName(t), r: C.num(S.roll) }) : C.t('turnThrow', { n: pname(t), c: colourName(t) });
+    status.appendChild(el('span', { text: line }));
+  }
+  function render() { if (!G) return; renderTop(); renderSide(); renderDock(); renderBoard(); }
+
+  // The state changes at once; only the picture catches up, so input is never held
+  function animate(info) {
+    if (C.ui.reduceMotion() || !info) return;
+    var piece = function (i) { return cells[i].querySelector('.sn-piece'); };
+    if (info.kind === 'step' || info.kind === 'swap') {
+      C.ui.fly(piece(info.to), cells[info.from], { ms: 320 });
+      if (info.kind === 'swap') C.ui.fly(piece(info.from), cells[info.to], { ms: 320 });
+    } else if (info.kind === 'water') {
+      C.ui.fly(piece(info.back), cells[E.WATER], { ms: 420 });
+    } else if (info.kind === 'off') {
+      C.ui.fly(trays[info.side].lastChild, cells[info.from], { ms: 360 });
+    }
+  }
+  function tossSticks() {
+    if (C.ui.reduceMotion()) return;
+    stickEls.forEach(function (s, k) {
+      if (s.animate) s.animate([{ transform: 'translateY(-14px) rotate(' + (k % 2 ? 160 : -160) + 'deg)' }, { transform: 'none' }], { duration: 360 + k * 50, easing: 'cubic-bezier(.2,.7,.3,1)' });
+    });
+  }
+
+  function colors() {
+    var cs = getComputedStyle(document.documentElement);
+    var v = function (k, f) { return cs.getPropertyValue(k).trim() || f; };
+    return { sq: v('--sn-sq', '#EADFC6'), sp: v('--sn-sq-sp', '#DDCBA6'), frame: v('--sn-frame', '#B08D58'), p0: v('--sn-p0', '#FBF6EA'),
+      e0: v('--sn-p0-edge', '#6B5532'), p1: v('--sn-p1', '#3D2B1F'), e1: v('--sn-p1-edge', '#24170E') };
+  }
+  // the result card: the final board as three rows of ten
+  function cardPaint() {
+    var b = G.S.b.slice();
+    return function (g, W, H) {
+      var col = colors(), d = Math.min(W / 10.4, H / 3.4), ox = (W - d * 10) / 2, oy = (H - d * 3) / 2;
+      g.fillStyle = col.frame; g.fillRect(ox - d * 0.15, oy - d * 0.15, d * 10.3, d * 3.3);
+      for (var i = 0; i < N; i++) {
+        var line = Math.floor(i / 10), k = line % 2 ? 9 - i % 10 : i % 10, x = ox + k * d, y = oy + line * d;
+        g.fillStyle = GLYPH[i] ? col.sp : col.sq; g.fillRect(x + d * 0.05, y + d * 0.05, d * 0.9, d * 0.9);
+        if (b[i] >= 0) {
+          g.fillStyle = b[i] ? col.p1 : col.p0; g.strokeStyle = b[i] ? col.e1 : col.e0; g.lineWidth = Math.max(1, d * 0.06);
+          g.beginPath(); g.arc(x + d / 2, y + d / 2, d * 0.3, 0, Math.PI * 2); g.fill(); g.stroke();
+        }
+      }
+    };
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  window.addEventListener('keydown', function (e) {
+    if (!G || document.querySelector('.ch-scrim')) return;
+    if (busy() || e.ctrlKey || e.metaKey || e.altKey) return;
+    var tg = e.target && e.target.tagName;
+    if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT') return;
+    if (C.keyIs(e, 't')) { e.preventDefault(); if (canThrow()) doThrow(); return; }
+    var S = G.S;
+    // the board is the same picture in every language, so the arrows step along the path
+    var step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (step && S.roll) {
+      e.preventDefault();
+      var can = E.moves(S);
+      if (!can.length) return;
+      var at = can.indexOf(sel);
+      sel = at < 0 ? can[step > 0 ? 0 : can.length - 1] : can[(at + step + can.length) % can.length];
+      renderBoard();
+      return;
+    }
+    if ((e.key === 'Enter' || e.key === ' ') && tg !== 'BUTTON') {
+      e.preventDefault();
+      if (!S.roll) doThrow();
+      else if (sel >= 0) act(sel);
+    }
+  });
+
+  if (window.ResizeObserver) new ResizeObserver(function () { if (G) renderBoard(); }).observe(box);
+  else window.addEventListener('resize', function () { if (G) renderBoard(); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { if (G) renderBoard(); });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('p', { class: 'ch-dim', text: C.t('rulesSq') }),
+        el('p', { class: 'ch-xs ch-dim', text: C.t('rulesSrc') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('T / Space', C.t('kThrow')), kb('← ↑ → ↓', C.t('kCursor')), kb('Space / Enter', C.t('kGo'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // small pictures in fixed colours for the three tutorial slides
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 90" width="100%">', d = 17, ox = 15, oy = 19;
+    var sq = function (i, fill) {
+      var line = Math.floor(i / 10), k = line % 2 ? 9 - i % 10 : i % 10;
+      return '<rect x="' + (ox + k * d + 1) + '" y="' + (oy + line * d + 1) + '" width="' + (d - 2) + '" height="' + (d - 2) + '" rx="3" fill="' + fill + '"/>';
+    };
+    var at = function (i) { var line = Math.floor(i / 10), k = line % 2 ? 9 - i % 10 : i % 10; return [ox + k * d + d / 2, oy + line * d + d / 2]; };
+    var dot = function (i, side) { var p = at(i); return '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="5.5" fill="' + (side ? '#3D2B1F' : '#FBF6EA') + '" stroke="' + (side ? '#24170E' : '#6B5532') + '" stroke-width="1.8"/>'; };
+    if (kind === 2) {
+      // four sticks, two marked sides up: a throw of 2
+      [1, 0, 1, 0].forEach(function (up, k) {
+        s += '<rect x="' + (52 + k * 22) + '" y="14" width="12" height="62" rx="6" fill="' + (up ? '#4B3420' : '#E6D3AE') + '" stroke="#7A5C2E" stroke-width="2"/>';
+        if (up) for (var j = 0; j < 5; j++) s += '<rect x="' + (52 + k * 22) + '" y="' + (22 + j * 11) + '" width="12" height="4" fill="#8A643A"/>';
+      });
+      s += '<text x="160" y="56" font-size="26" font-weight="800" fill="#4A5030" text-anchor="middle">= 2</text>';
+      return s + '</svg>';
+    }
+    s += '<rect x="' + (ox - 3) + '" y="' + (oy - 3) + '" width="' + (d * 10 + 6) + '" height="' + (d * 3 + 6) + '" rx="5" fill="#B08D58"/>';
+    for (var i = 0; i < N; i++) s += sq(i, GLYPH[i] ? '#DDCBA6' : '#EADFC6');
+    if (kind === 1) {
+      // the path as one line through the S
+      var pts = [];
+      for (var k2 = 0; k2 < N; k2++) pts.push(at(k2).join(','));
+      s += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="#4A5030" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity=".75"/>';
+      [0, 2, 4, 6, 8].forEach(function (k3) { s += dot(k3, 0); });
+      [1, 3, 5, 7, 9].forEach(function (k3) { s += dot(k3, 1); });
+    } else {
+      // a swap on the second row, and the water square
+      s += dot(12, 0) + dot(15, 1);
+      var a = at(12), b = at(15);
+      s += '<path d="M' + a[0] + ' ' + (a[1] - 8) + 'Q' + ((a[0] + b[0]) / 2) + ' ' + (a[1] - 24) + ' ' + b[0] + ' ' + (b[1] - 8) + '" fill="none" stroke="#4A5030" stroke-width="2.2" marker-end="url(#ah)"/>';
+      s += '<defs><marker id="ah" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L10 5L0 10z" fill="#4A5030"/></marker></defs>';
+      var w = at(E.WATER);
+      s += '<rect x="' + (w[0] - d / 2 + 1) + '" y="' + (w[1] - d / 2 + 1) + '" width="' + (d - 2) + '" height="' + (d - 2) + '" rx="3" fill="#7FB2D6"/>';
+      s += dot(E.HAPPY, 0);
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  var saved = ctx.loadSave();
+  if (validSave(saved) && (saved.g.daily || null) === (dailyDate || null)) restore(saved.g);
+  else newGame(dailyDate ? { daily: dailyDate } : { mode: prefs.mode, level: prefs.level });
+  if (dailyDate && C.stats.dailyDone('senet', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).senet;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
