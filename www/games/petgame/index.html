@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>بازی حیوانات خانگی — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  /* The field is the whole game area: there is no board with a shape to protect, so it
+     is a plain flex slot rather than a .ch-fit (whose children are sized by an aspect). */
+  .pg-stage { flex: 1 1 0; min-height: 0; width: 100%; position: relative; }
+  /* A canvas given only offsets keeps its backing-store size and is drawn at that many
+     CSS pixels, so on a phone with a pixel ratio above 1 it would run off the screen
+     (Goose Race, 2026-11-15). Both sizes come from CSS. */
+  .pg-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; touch-action: none;
+    border-radius: var(--r-lg); direction: ltr; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function PetEngineFactory() {
+  'use strict';
+
+  var KINDS = ['mouse', 'butterfly', 'bug', 'light'];
+  var MODES = ['mixed', 'mouse', 'bug', 'butterfly', 'light'];
+  var SPEEDS = { slow: 0.6, normal: 1, fast: 1.6 };
+  var HOLD_S = 1.5;        // how long the four corners are held to leave
+  var RESPAWN_S = 0.45;    // a popped critter is replaced this long after
+  var HIT_K = 1.35;        // a poke counts this many radii from a critter's centre: small paws and fingers miss a lot
+
+  function unit(W, H) { return Math.min(W, H); }
+  function radius(W, H) { return Math.max(26, Math.min(64, unit(W, H) * 0.085)); }
+  // more critters on a bigger field, never fewer than three or more than seven
+  function wanted(W, H) { return Math.max(3, Math.min(7, Math.round(W * H / 60000))); }
+
+  function newField(W, H, mode, speed) {
+    return {
+      W: W, H: H, mode: MODES.indexOf(mode) < 0 ? 'mixed' : mode, speed: SPEEDS[speed] || 1,
+      critters: [], bits: [], rings: [], queue: [], popped: 0, time: 0, nextId: 1, hold: 0
+    };
+  }
+
+  function wrap(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
+  function turnToward(a, want, maxStep) {
+    var d = wrap(want - a);
+    if (Math.abs(d) <= maxStep) return want;
+    return a + (d > 0 ? maxStep : -maxStep);
+  }
+
+  function retarget(S, c, rnd) {
+    var m = c.r;
+    c.tx = m + rnd() * Math.max(1, S.W - 2 * m);
+    c.ty = m + rnd() * Math.max(1, S.H - 2 * m);
+  }
+  function pickKind(S, rnd) { return S.mode === 'mixed' ? KINDS[Math.floor(rnd() * KINDS.length) % KINDS.length] : S.mode; }
+
+  function spawn(S, rnd, kind) {
+    var r = radius(S.W, S.H);
+    var c = {
+      id: S.nextId++, kind: kind || pickKind(S, rnd), r: r,
+      x: r + rnd() * Math.max(1, S.W - 2 * r), y: r + rnd() * Math.max(1, S.H - 2 * r),
+      a: rnd() * 2 * Math.PI, v: 0, tx: 0, ty: 0, wait: 0, phase: rnd() * 6.28, wob: rnd() * 6.28, age: 0,
+      variant: Math.floor(rnd() * 3), turn: 0, turnT: 0
+    };
+    retarget(S, c, rnd);
+    S.critters.push(c);
+    return c;
+  }
+  function fill(S, rnd) {
+    var n = wanted(S.W, S.H);
+    while (S.critters.length + S.queue.length < n) spawn(S, rnd);
+  }
+  function resize(S, W, H) {
+    S.W = W; S.H = H;
+    var r = radius(W, H);
+    S.critters.forEach(function (c) {
+      c.r = r;
+      c.x = Math.max(r * 0.6, Math.min(W - r * 0.6, c.x));
+      c.y = Math.max(r * 0.6, Math.min(H - r * 0.6, c.y));
+      c.tx = Math.max(r, Math.min(W - r, c.tx)); c.ty = Math.max(r, Math.min(H - r, c.ty));
+    });
+  }
+  // a new kind starts a fresh set, with the new ones fading in where they appear
+  function setMode(S, mode, rnd) {
+    S.mode = MODES.indexOf(mode) < 0 ? 'mixed' : mode;
+    S.critters = []; S.queue = [];
+    fill(S, rnd);
+  }
+  function setSpeed(S, name) { S.speed = SPEEDS[name] || 1; }
+
+  function step(S, dt, rnd) {
+    S.time += dt;
+    var U = unit(S.W, S.H), k = S.speed;
+    S.critters.forEach(function (c) {
+      c.age += dt; c.wob += dt;
+      if (c.kind === 'mouse') {
+        // scurries to a spot, stops and twitches, then picks another
+        if (c.wait > 0) { c.wait -= dt; c.v = 0; c.phase += dt * 3; }
+        else {
+          var dx = c.tx - c.x, dy = c.ty - c.y;
+          if (Math.sqrt(dx * dx + dy * dy) < 0.04 * U) { c.wait = rnd() < 0.3 ? 0 : 0.25 + rnd() * 0.9; retarget(S, c, rnd); c.v = 0; }
+          else { c.a = turnToward(c.a, Math.atan2(dy, dx), 9 * dt); c.v = 0.5 * U * k; c.phase += dt * 16 * k; }
+        }
+      } else if (c.kind === 'bug') {
+        // crawls on a steady wobbly line, now and then stopping
+        c.turnT -= dt;
+        if (c.turnT <= 0) { c.turn = (rnd() - 0.5) * 3; c.turnT = 0.4 + rnd() * 0.9; if (rnd() < 0.15) c.wait = 0.3 + rnd() * 0.6; }
+        if (c.wait > 0) { c.wait -= dt; c.v = 0; c.phase += dt * 4; }
+        else { c.a += c.turn * dt; c.v = 0.2 * U * k; c.phase += dt * 18 * k; }
+      } else if (c.kind === 'butterfly') {
+        // flutters along a swaying path, never in a straight line
+        c.turnT -= dt;
+        if (c.turnT <= 0) { c.turn = (rnd() - 0.5) * 1.2; c.turnT = 0.6 + rnd() * 1.2; }
+        c.a += (Math.sin(c.wob * 0.9) * 1.6 + c.turn) * dt;
+        c.v = 0.17 * U * k * (0.8 + 0.4 * Math.sin(c.wob * 1.3));
+        c.phase += dt * 15;
+      } else {
+        // a light darts to a spot, rests a moment and darts again, like a pointer on the floor
+        c.turnT -= dt;
+        if (c.turnT <= 0) { retarget(S, c, rnd); c.turnT = 0.45 + rnd() * 1.1 + (rnd() < 0.25 ? 0.6 : 0); }
+        var lx = c.tx - c.x, ly = c.ty - c.y, d = Math.sqrt(lx * lx + ly * ly);
+        c.a = Math.atan2(ly, lx);
+        c.v = Math.min(d * 5, 1.7 * U * k);
+        c.phase += dt * 6;
+      }
+      c.x += Math.cos(c.a) * c.v * dt;
+      c.y += Math.sin(c.a) * c.v * dt;
+      var m = c.r * 0.6;
+      if (c.x < m) { c.x = m; c.a = Math.PI - c.a; }
+      if (c.x > S.W - m) { c.x = S.W - m; c.a = Math.PI - c.a; }
+      if (c.y < m) { c.y = m; c.a = -c.a; }
+      if (c.y > S.H - m) { c.y = S.H - m; c.a = -c.a; }
+    });
+    // replacements arrive on their own, and a field that is short of critters is topped up
+    for (var i = S.queue.length - 1; i >= 0; i--) {
+      S.queue[i] -= dt;
+      if (S.queue[i] <= 0) { S.queue.splice(i, 1); spawn(S, rnd); }
+    }
+    fill(S, rnd);
+    for (var j = S.bits.length - 1; j >= 0; j--) {
+      var b = S.bits[j];
+      b.life -= dt; b.x += b.vx * dt; b.y += b.vy * dt; b.vy += 420 * dt; b.vx *= Math.max(0, 1 - 2.5 * dt);
+      if (b.life <= 0) S.bits.splice(j, 1);
+    }
+    for (var q = S.rings.length - 1; q >= 0; q--) {
+      S.rings[q].t += dt;
+      if (S.rings[q].t >= S.rings[q].life) S.rings.splice(q, 1);
+    }
+  }
+
+  // The nearest critter within reach of a poke, or null. Reach is generous on purpose.
+  function hit(S, x, y, slop) {
+    var best = null, bd = Infinity;
+    S.critters.forEach(function (c) {
+      var reach = c.r * HIT_K + (slop || 0), dx = c.x - x, dy = c.y - y, d2 = dx * dx + dy * dy;
+      if (d2 <= reach * reach && d2 < bd) { best = c; bd = d2; }
+    });
+    return best;
+  }
+  function pop(S, c, rnd) {
+    var i = S.critters.indexOf(c);
+    if (i < 0) return false;
+    S.critters.splice(i, 1);
+    S.popped++;
+    S.queue.push(RESPAWN_S);
+    for (var n = 0; n < 14; n++) {
+      var a = (n / 14) * 2 * Math.PI + rnd() * 0.4, sp = 120 + rnd() * 220;
+      S.bits.push({ x: c.x, y: c.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 60, life: 0.45 + rnd() * 0.4, max: 0.85, size: 3 + rnd() * 4, kind: c.kind, variant: c.variant, tone: n % 3 });
+    }
+    if (S.bits.length > 240) S.bits.splice(0, S.bits.length - 240);
+    S.rings.push({ x: c.x, y: c.y, r: c.r, t: 0, life: 0.35, kind: c.kind, variant: c.variant });
+    return true;
+  }
+  // a key press pops one critter, so a paw on the keyboard plays too
+  function popAny(S, rnd) {
+    if (!S.critters.length) return null;
+    var c = S.critters[Math.floor(rnd() * S.critters.length) % S.critters.length];
+    pop(S, c, rnd);
+    return c;
+  }
+
+  // The four square zones in the corners of the field that are held to leave
+  function zoneSize(W, H) { return Math.max(56, Math.min(110, unit(W, H) * 0.2)); }
+  function zones(W, H) {
+    var z = zoneSize(W, H);
+    return [{ x: 0, y: 0, w: z, h: z }, { x: W - z, y: 0, w: z, h: z }, { x: 0, y: H - z, w: z, h: z }, { x: W - z, y: H - z, w: z, h: z }];
+  }
+  // true when every corner has a finger (or paw) in it; zones never overlap, so they
+  // are four different pointers
+  function cornersHeld(points, W, H) {
+    if (W < 4 * zoneSize(W, H) / 2 || H < 2 * zoneSize(W, H)) return false;
+    return zones(W, H).every(function (z) {
+      return points.some(function (p) { return p.x >= z.x && p.x <= z.x + z.w && p.y >= z.y && p.y <= z.y + z.h; });
+    });
+  }
+  // Counts the hold while all four are down; letting go of any resets it. True once it is long enough.
+  function holdStep(S, held, dt) {
+    S.hold = held ? S.hold + dt : 0;
+    return S.hold >= HOLD_S;
+  }
+
+  return {
+    KINDS: KINDS, MODES: MODES, SPEEDS: SPEEDS, HOLD_S: HOLD_S, RESPAWN_S: RESPAWN_S, HIT_K: HIT_K,
+    radius: radius, wanted: wanted, newField: newField, spawn: spawn, fill: fill, resize: resize, setMode: setMode, setSpeed: setSpeed,
+    step: step, hit: hit, pop: pop, popAny: popAny, zoneSize: zoneSize, zones: zones, cornersHeld: cornersHeld, holdStep: holdStep
+  };
+}
+if (typeof module !== 'undefined') module.exports = PetEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = PetEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'petgame',
+    name: { fa: 'بازی حیوانات خانگی', en: 'Pet Game', zh: '宠物游戏', de: 'Tierspiel', es: 'Juego para mascotas', pl: 'Gra dla zwierząt', fr: 'Jeu pour animaux', ar: 'لعبة الحيوانات الأليفة', hi: 'पालतू खेल' },
+    accent: '#005050',
+    strings: {
+      fa: {
+        pgScene: 'صفحه‌ی بازی: موش و حشره و پروانه و نقطه‌ی نور که می‌دوند', pgKind: 'نوع جانور', pgMixed: 'ترکیبی', pgMice: 'موش', pgBugs: 'حشره', pgButterflies: 'پروانه', pgLights: 'نور',
+        pgSpeed: 'سرعت', pgSlow: 'آرام', pgNormal: 'معمولی', pgFast: 'تند', pgSound: 'صدا', pgOn: 'روشن', pgOff: 'خاموش',
+        pgRules: 'این بازی برای گربه، سگ و بچه‌های کوچک است. موش و حشره و پروانه و نقطه‌ی نور روی صفحه می‌دوند؛ هر لمس یکی را می‌ترکاند و یکی تازه پیدا می‌شود. امتیاز و باخت ندارد و برای بازی کردن لازم نیست چیزی بخوانی. برای بیرون آمدن هر چهار گوشه‌ی صفحه را با هم نگه دار، حدود یک ثانیه و نیم؛ دکمه‌ی برگشت بالای صفحه هم برای بزرگ‌ترهاست. از چرخ‌دنده نوع جانور، سرعت و صدا را عوض کن. هر کلید کیبورد هم یکی را می‌ترکاند.',
+        pgKeys: 'هر کلید', pgKeyWhat: 'یک جانور را می‌ترکاند', pgCorners: 'چهار گوشه، با هم', pgCornersWhat: 'بیرون آمدن (حدود ۱٫۵ ثانیه نگه دار)',
+        pgTutTitle: 'چطور بیرون بیایم؟', pgTutText: 'هر چهار گوشه‌ی صفحه را با هم نگه دار، حدود یک ثانیه و نیم. در هر گوشه یک نشانه‌ی کم‌رنگ هست. دکمه‌ی برگشت بالا هم کار می‌کند.'
+      },
+      en: {
+        pgScene: 'The play field: mice, bugs, butterflies and lights running around', pgKind: 'Critters', pgMixed: 'Mixed', pgMice: 'Mice', pgBugs: 'Bugs', pgButterflies: 'Butterflies', pgLights: 'Lights',
+        pgSpeed: 'Speed', pgSlow: 'Slow', pgNormal: 'Normal', pgFast: 'Fast', pgSound: 'Sound', pgOn: 'On', pgOff: 'Off',
+        pgRules: 'This one is for cats, dogs and little ones. Mice, bugs, butterflies and lights scurry about the screen; a touch pops one and a new one appears. There is no score and no losing, and nothing needs reading to play. To leave, hold all four corners of the screen at once for about a second and a half; the back button at the top is for the grown-ups. The gear changes the kind of critter, the speed and the sound. Any key on a keyboard pops one too.',
+        pgKeys: 'Any key', pgKeyWhat: 'Pops a critter', pgCorners: 'All four corners at once', pgCornersWhat: 'Leave (hold for about 1.5 seconds)',
+        pgTutTitle: 'How do I leave?', pgTutText: 'Hold all four corners of the screen at once for about a second and a half. Each corner has a faint marker. The back button at the top works too.'
+      },
+      pl: {
+        pgScene: 'Pole gry: myszy, robaki, motyle i światełka biegające po ekranie', pgKind: 'Stworki', pgMixed: 'Mieszane', pgMice: 'Myszy', pgBugs: 'Robaki', pgButterflies: 'Motyle', pgLights: 'Światełka',
+        pgSpeed: 'Prędkość', pgSlow: 'Wolno', pgNormal: 'Normalnie', pgFast: 'Szybko', pgSound: 'Dźwięk', pgOn: 'Włączony', pgOff: 'Wyłączony',
+        pgRules: 'Ta gra jest dla kotów, psów i maluchów. Myszy, robaki, motyle i światełka biegają po ekranie; dotknięcie łapie jedno z nich i pojawia się nowe. Nie ma punktów ani przegranej, a do zabawy nie trzeba nic czytać. Aby wyjść, przytrzymaj jednocześnie wszystkie cztery rogi ekranu przez około półtorej sekundy; przycisk wstecz u góry jest dla dorosłych. Zębatka zmienia rodzaj stworków, prędkość i dźwięk. Każdy klawisz na klawiaturze też łapie jednego.',
+        pgKeys: 'Dowolny klawisz', pgKeyWhat: 'Łapie stworka', pgCorners: 'Wszystkie cztery rogi naraz', pgCornersWhat: 'Wyjście (przytrzymaj około 1,5 s)',
+        pgTutTitle: 'Jak wyjść?', pgTutText: 'Przytrzymaj jednocześnie wszystkie cztery rogi ekranu przez około półtorej sekundy. W każdym rogu jest delikatny znacznik. Przycisk wstecz u góry też działa.'
+      },
+      fr: {
+        pgScene: 'Le terrain de jeu : souris, insectes, papillons et lumières qui courent', pgKind: 'Petites bêtes', pgMixed: 'Mélange', pgMice: 'Souris', pgBugs: 'Insectes', pgButterflies: 'Papillons', pgLights: 'Lumières',
+        pgSpeed: 'Vitesse', pgSlow: 'Lente', pgNormal: 'Normale', pgFast: 'Rapide', pgSound: 'Son', pgOn: 'Activé', pgOff: 'Coupé',
+        pgRules: 'Celui-ci est pour les chats, les chiens et les tout-petits. Des souris, des insectes, des papillons et des lumières filent sur l’écran ; un toucher en éclate une et une nouvelle apparaît. Pas de score, pas de défaite, et rien à lire pour jouer. Pour quitter, maintiens les quatre coins de l’écran en même temps pendant environ une seconde et demie ; le bouton retour en haut est pour les grands. L’engrenage change le genre de bêtes, la vitesse et le son. N’importe quelle touche du clavier en éclate une aussi.',
+        pgKeys: 'N’importe quelle touche', pgKeyWhat: 'Éclate une bête', pgCorners: 'Les quatre coins à la fois', pgCornersWhat: 'Quitter (maintenir environ 1,5 s)',
+        pgTutTitle: 'Comment quitter ?', pgTutText: 'Maintiens les quatre coins de l’écran en même temps pendant environ une seconde et demie. Chaque coin a un repère discret. Le bouton retour en haut marche aussi.'
+      },
+      ar: {
+        pgScene: 'ساحة اللعب: فئران وحشرات وفراشات وأضواء تركض', pgKind: 'المخلوقات', pgMixed: 'مزيج', pgMice: 'فئران', pgBugs: 'حشرات', pgButterflies: 'فراشات', pgLights: 'أضواء',
+        pgSpeed: 'السرعة', pgSlow: 'بطيئة', pgNormal: 'عادية', pgFast: 'سريعة', pgSound: 'الصوت', pgOn: 'يعمل', pgOff: 'متوقف',
+        pgRules: 'هذه اللعبة للقطط والكلاب والصغار. تركض الفئران والحشرات والفراشات والأضواء على الشاشة؛ لمسة واحدة تفرقع أحدها فيظهر غيره. لا نقاط ولا خسارة، ولا شيء يُقرأ لتلعب. للخروج اضغط الزوايا الأربع للشاشة معًا نحو ثانية ونصف؛ زر الرجوع في الأعلى للكبار. التروس تغيّر نوع المخلوقات والسرعة والصوت. وأي مفتاح في لوحة المفاتيح يفرقع واحدًا أيضًا.',
+        pgKeys: 'أي مفتاح', pgKeyWhat: 'يفرقع مخلوقًا', pgCorners: 'الزوايا الأربع معًا', pgCornersWhat: 'خروج (اضغط نحو 1.5 ثانية)',
+        pgTutTitle: 'كيف أخرج؟', pgTutText: 'اضغط الزوايا الأربع للشاشة معًا نحو ثانية ونصف. في كل زاوية علامة خافتة. وزر الرجوع في الأعلى يعمل أيضًا.'
+      },
+      hi: {
+        pgScene: 'खेल का मैदान: दौड़ते चूहे, कीड़े, तितलियाँ और रोशनी', pgKind: 'जीव', pgMixed: 'मिले-जुले', pgMice: 'चूहे', pgBugs: 'कीड़े', pgButterflies: 'तितलियाँ', pgLights: 'रोशनी',
+        pgSpeed: 'गति', pgSlow: 'धीमी', pgNormal: 'सामान्य', pgFast: 'तेज़', pgSound: 'आवाज़', pgOn: 'चालू', pgOff: 'बंद',
+        pgRules: 'यह खेल बिल्लियों, कुत्तों और छोटे बच्चों के लिए है। चूहे, कीड़े, तितलियाँ और रोशनी स्क्रीन पर दौड़ते हैं; एक छुअन से एक फूटता है और नया आ जाता है। न स्कोर है, न हार, और खेलने के लिए कुछ पढ़ना नहीं पड़ता। बाहर निकलने के लिए स्क्रीन के चारों कोने एक साथ करीब डेढ़ सेकंड दबाए रखें; ऊपर का वापस बटन बड़ों के लिए है। गियर से जीवों का प्रकार, गति और आवाज़ बदलें। कीबोर्ड की कोई भी कुंजी भी एक को फोड़ती है।',
+        pgKeys: 'कोई भी कुंजी', pgKeyWhat: 'एक जीव फोड़ती है', pgCorners: 'चारों कोने एक साथ', pgCornersWhat: 'बाहर निकलें (करीब 1.5 सेकंड दबाएँ)',
+        pgTutTitle: 'बाहर कैसे निकलूँ?', pgTutText: 'स्क्रीन के चारों कोने एक साथ करीब डेढ़ सेकंड दबाए रखें। हर कोने में हल्का निशान है। ऊपर का वापस बटन भी काम करता है।'
+      },
+      zh: {
+        pgScene: '游戏区域：奔跑的老鼠、小虫、蝴蝶和光点', pgKind: '小动物', pgMixed: '混合', pgMice: '老鼠', pgBugs: '小虫', pgButterflies: '蝴蝶', pgLights: '光点',
+        pgSpeed: '速度', pgSlow: '慢', pgNormal: '正常', pgFast: '快', pgSound: '声音', pgOn: '开', pgOff: '关',
+        pgRules: '这个游戏是给猫、狗和小宝宝玩的。老鼠、小虫、蝴蝶和光点在屏幕上跑来跑去；碰一下就会戳破一个，随后又出现新的。没有分数，也不会输，玩的时候什么都不用读。要退出，请同时按住屏幕四个角约一秒半；顶部的返回按钮是给大人用的。齿轮可以改小动物的种类、速度和声音。键盘上任意一个键也会戳破一个。',
+        pgKeys: '任意键', pgKeyWhat: '戳破一个小动物', pgCorners: '四个角同时按住', pgCornersWhat: '退出（按住约 1.5 秒）',
+        pgTutTitle: '怎么退出？', pgTutText: '同时按住屏幕四个角约一秒半。每个角都有一个淡淡的标记。顶部的返回按钮也可以用。'
+      },
+      de: {
+        pgScene: 'Das Spielfeld: Mäuse, Käfer, Schmetterlinge und Lichter laufen umher', pgKind: 'Krabbeltiere', pgMixed: 'Gemischt', pgMice: 'Mäuse', pgBugs: 'Käfer', pgButterflies: 'Schmetterlinge', pgLights: 'Lichter',
+        pgSpeed: 'Tempo', pgSlow: 'Langsam', pgNormal: 'Normal', pgFast: 'Schnell', pgSound: 'Ton', pgOn: 'An', pgOff: 'Aus',
+        pgRules: 'Dieses Spiel ist für Katzen, Hunde und die ganz Kleinen. Mäuse, Käfer, Schmetterlinge und Lichter huschen über den Bildschirm; eine Berührung lässt eines platzen, und ein neues erscheint. Es gibt keine Punkte und kein Verlieren, und zum Spielen muss man nichts lesen. Zum Verlassen halte alle vier Ecken des Bildschirms gleichzeitig etwa anderthalb Sekunden gedrückt; die Zurück-Taste oben ist für die Großen. Das Zahnrad ändert die Art der Tierchen, das Tempo und den Ton. Auch jede Taste der Tastatur lässt eines platzen.',
+        pgKeys: 'Jede Taste', pgKeyWhat: 'Lässt ein Tierchen platzen', pgCorners: 'Alle vier Ecken gleichzeitig', pgCornersWhat: 'Verlassen (etwa 1,5 Sekunden halten)',
+        pgTutTitle: 'Wie komme ich raus?', pgTutText: 'Halte alle vier Ecken des Bildschirms gleichzeitig etwa anderthalb Sekunden gedrückt. In jeder Ecke ist eine schwache Markierung. Die Zurück-Taste oben geht auch.'
+      },
+      es: {
+        pgScene: 'El campo de juego: ratones, bichos, mariposas y luces que corretean', pgKind: 'Bichitos', pgMixed: 'Mezcla', pgMice: 'Ratones', pgBugs: 'Bichos', pgButterflies: 'Mariposas', pgLights: 'Luces',
+        pgSpeed: 'Velocidad', pgSlow: 'Lenta', pgNormal: 'Normal', pgFast: 'Rápida', pgSound: 'Sonido', pgOn: 'Sí', pgOff: 'No',
+        pgRules: 'Este es para gatos, perros y peques. Ratones, bichos, mariposas y luces corretean por la pantalla; un toque revienta uno y aparece otro nuevo. No hay puntos ni se pierde, y no hace falta leer nada para jugar. Para salir, mantén pulsadas las cuatro esquinas de la pantalla a la vez durante segundo y medio; el botón de volver de arriba es para los mayores. El engranaje cambia el tipo de bichitos, la velocidad y el sonido. Cualquier tecla del teclado también revienta uno.',
+        pgKeys: 'Cualquier tecla', pgKeyWhat: 'Revienta un bichito', pgCorners: 'Las cuatro esquinas a la vez', pgCornersWhat: 'Salir (mantén 1,5 segundos)',
+        pgTutTitle: '¿Cómo salgo?', pgTutText: 'Mantén pulsadas las cuatro esquinas de la pantalla a la vez durante segundo y medio. Cada esquina tiene una marca tenue. El botón de volver de arriba también sirve.'
+      }
+    }
+  });
+
+  var KIND_KEYS = { mixed: 'pgMixed', mouse: 'pgMice', bug: 'pgBugs', butterfly: 'pgButterflies', light: 'pgLights' };
+  var prefs = ctx.store.get('prefs', null) || {};
+  if (E.MODES.indexOf(prefs.mode) < 0) prefs.mode = 'mixed';
+  if (!E.SPEEDS[prefs.speed]) prefs.speed = 'normal';
+  prefs.sound = prefs.sound !== false;
+  // No daily and no saved scene: a pet game has nothing to resume. The call keeps the
+  // daily-resume guard satisfied and ignores any save an older build might have left.
+  ctx.loadSave();
+  var pops = parseInt(ctx.store.get('pops', 0), 10) || 0;
+
+  var cv = el('canvas', { class: 'pg-canvas', role: 'img', 'aria-label': C.t('pgScene') });
+  var stage = el('div', { class: 'pg-stage' }, [cv]);
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'gear', label: C.t('settings'), onClick: showSettings });
+  ctx.main.appendChild(stage);
+  ctx.mount();
+
+  var S = null, drawn = { w: 0, h: 0 }, raf = 0, last = 0, paused = false, left = false;
+  var touches = {};
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return !!(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+  }
+  function still() { return C.ui.reduceMotion(); }
+
+  /* ----------------------------------------------------------- field */
+
+  function size() { return { w: Math.max(40, cv.clientWidth), h: Math.max(40, cv.clientHeight) }; }
+  function fit() {
+    var Z = size(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
+    if (!S) { S = E.newField(Z.w, Z.h, prefs.mode, prefs.speed); E.fill(S, Math.random); }
+    else if (Math.abs(S.W - Z.w) > 0.5 || Math.abs(S.H - Z.h) > 0.5) E.resize(S, Z.w, Z.h);
+    drawn = { w: Z.w, h: Z.h, dpr: dpr };
+  }
+
+  /* ------------------------------------------------------------ draw */
+
+  var PAL_L = { bgA: '#F6F0E4', bgB: '#EBE2D0', dot: 'rgba(60,50,30,0.06)', mark: 'rgba(0,80,80,', mouse: '#9AA1AB', mouseIn: '#F0A8B8', outline: 'rgba(40,36,30,0.55)', eye: '#22201C' };
+  var PAL_D = { bgA: '#1B2230', bgB: '#232C3D', dot: 'rgba(255,255,255,0.05)', mark: 'rgba(130,220,220,', mouse: '#C2C8D2', mouseIn: '#E896AA', outline: 'rgba(0,0,0,0.55)', eye: '#14161C' };
+  var WINGS = [['#EE6C8E', '#F7B3C6'], ['#F29B35', '#FBD08B'], ['#4FA3E8', '#A9D4F6']];
+  var SHELLS = ['#D9452E', '#E8892B', '#4FA44A'];
+  var GLOWS = ['255,64,56', '70,225,120', '70,200,255'];
+
+  function bitColor(b) {
+    if (b.kind === 'butterfly') return WINGS[b.variant][b.tone % 2];
+    if (b.kind === 'bug') return b.tone === 2 ? '#2A2622' : SHELLS[b.variant];
+    if (b.kind === 'light') return 'rgb(' + GLOWS[b.variant] + ')';
+    return b.tone === 1 ? '#F0A8B8' : '#B0B6C0';
+  }
+
+  function drawCritter(g, c, P, dk) {
+    var appear = still() ? 1 : Math.min(1, c.age / 0.3);
+    var k = c.r / 30 * (1 - Math.pow(1 - appear, 3));
+    g.save();
+    g.translate(c.x, c.y);
+    if (c.kind === 'light') {
+      var gl = GLOWS[c.variant], R = c.r * 1.25 * (appear < 1 ? appear : 1);
+      var gr = g.createRadialGradient(0, 0, 0, 0, 0, R);
+      gr.addColorStop(0, 'rgba(' + gl + ',0.95)'); gr.addColorStop(0.28, 'rgba(' + gl + ',0.55)'); gr.addColorStop(1, 'rgba(' + gl + ',0)');
+      g.fillStyle = gr; g.beginPath(); g.arc(0, 0, R, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#FFFFFF'; g.beginPath(); g.arc(0, 0, R * 0.17, 0, Math.PI * 2); g.fill();
+      g.restore();
+      return;
+    }
+    g.rotate(c.a);
+    g.scale(k, k);
+    g.lineWidth = 1.6; g.strokeStyle = P.outline; g.lineJoin = 'round'; g.lineCap = 'round';
+    if (c.kind === 'mouse') {
+      var sw = Math.sin(c.phase * 1.2) * 0.5;
+      // tail
+      g.beginPath(); g.moveTo(-26, 0); g.quadraticCurveTo(-40, 14 * sw, -52, -10 * sw + 4 * Math.sin(c.phase)); g.lineWidth = 3; g.strokeStyle = P.mouseIn; g.stroke();
+      g.lineWidth = 1.6; g.strokeStyle = P.outline;
+      // body, head, ears
+      g.fillStyle = P.mouse;
+      g.beginPath(); g.ellipse(-4, 0, 30, 17, 0, 0, Math.PI * 2); g.fill(); g.stroke();
+      g.beginPath(); g.arc(19, 0, 12, 0, Math.PI * 2); g.fill(); g.stroke();
+      [-1, 1].forEach(function (s) {
+        g.fillStyle = P.mouse; g.beginPath(); g.arc(14, s * 12, 7.5, 0, Math.PI * 2); g.fill(); g.stroke();
+        g.fillStyle = P.mouseIn; g.beginPath(); g.arc(14, s * 12, 4.2, 0, Math.PI * 2); g.fill();
+      });
+      // feet that scurry
+      g.fillStyle = P.mouseIn;
+      for (var f = 0; f < 2; f++) { var fo = Math.sin(c.phase + f * Math.PI) * 4; g.beginPath(); g.arc(8 + fo, f ? 14 : -14, 3.2, 0, Math.PI * 2); g.fill(); }
+      g.fillStyle = P.mouseIn; g.beginPath(); g.arc(30.5, 0, 3.2, 0, Math.PI * 2); g.fill();
+      g.fillStyle = P.eye; g.beginPath(); g.arc(22, -4.5, 1.8, 0, Math.PI * 2); g.arc(22, 4.5, 1.8, 0, Math.PI * 2); g.fill();
+    } else if (c.kind === 'bug') {
+      g.strokeStyle = P.outline; g.lineWidth = 2;
+      for (var l = 0; l < 3; l++) {
+        var lx = -10 + l * 11, sw2 = Math.sin(c.phase + l * 2.1) * 5;
+        [-1, 1].forEach(function (s) { g.beginPath(); g.moveTo(lx, s * 8); g.lineTo(lx + sw2, s * 21); g.stroke(); });
+      }
+      g.lineWidth = 1.6;
+      g.fillStyle = '#2A2622'; g.beginPath(); g.arc(19, 0, 8, 0, Math.PI * 2); g.fill();
+      g.fillStyle = SHELLS[c.variant]; g.beginPath(); g.ellipse(0, 0, 22, 18, 0, 0, Math.PI * 2); g.fill(); g.stroke();
+      g.beginPath(); g.moveTo(-22, 0); g.lineTo(22, 0); g.lineWidth = 2; g.strokeStyle = '#2A2622'; g.stroke();
+      g.fillStyle = '#2A2622';
+      [[-9, -8], [-9, 8], [5, -9], [5, 9], [-1, 0]].forEach(function (d) { g.beginPath(); g.arc(d[0], d[1], 2.8, 0, Math.PI * 2); g.fill(); });
+      g.fillStyle = '#FFFFFF'; g.beginPath(); g.arc(23, -3.5, 1.7, 0, Math.PI * 2); g.arc(23, 3.5, 1.7, 0, Math.PI * 2); g.fill();
+    } else {
+      var flap = still() ? 0.8 : 0.35 + 0.65 * Math.abs(Math.cos(c.phase * 0.55)), W2 = WINGS[c.variant];
+      [-1, 1].forEach(function (s) {
+        g.save(); g.scale(1, s * flap);
+        g.fillStyle = W2[0]; g.beginPath(); g.ellipse(-2, 15, 15, 20, -0.35, 0, Math.PI * 2); g.fill(); g.stroke();
+        g.fillStyle = W2[1]; g.beginPath(); g.ellipse(-10, 18, 7, 9, -0.35, 0, Math.PI * 2); g.fill();
+        g.fillStyle = W2[0]; g.beginPath(); g.ellipse(7, 8, 11, 13, 0.5, 0, Math.PI * 2); g.fill(); g.stroke();
+        g.restore();
+      });
+      g.fillStyle = '#3A322C'; g.beginPath(); g.ellipse(0, 0, 15, 4.2, 0, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.arc(15, 0, 4, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = '#3A322C'; g.lineWidth = 1.5;
+      g.beginPath(); g.moveTo(17, -1.5); g.quadraticCurveTo(25, -7, 28, -11); g.moveTo(17, 1.5); g.quadraticCurveTo(25, 7, 28, 11); g.stroke();
+    }
+    g.restore();
+  }
+
+  function drawMarkers(g, Z, P) {
+    var zs = E.zoneSize(Z.w, Z.h), r = zs * 0.62, prog = Math.min(1, S.hold / E.HOLD_S);
+    var spots = [[0, 0, 0], [Z.w, 0, Math.PI / 2], [Z.w, Z.h, Math.PI], [0, Z.h, Math.PI * 1.5]];
+    spots.forEach(function (s) {
+      g.save(); g.translate(s[0], s[1]); g.rotate(s[2]);
+      g.fillStyle = P.mark + (0.07 + 0.1 * prog).toFixed(3) + ')';
+      g.beginPath(); g.moveTo(0, 0); g.arc(0, 0, r, 0, Math.PI / 2); g.closePath(); g.fill();
+      g.strokeStyle = P.mark + '0.28)'; g.lineWidth = 2; g.beginPath(); g.arc(0, 0, r, 0, Math.PI / 2); g.stroke();
+      if (prog > 0) { g.strokeStyle = P.mark + '0.8)'; g.lineWidth = 5; g.lineCap = 'round'; g.beginPath(); g.arc(0, 0, r, 0, prog * Math.PI / 2); g.stroke(); }
+      g.restore();
+    });
+  }
+
+  function draw() {
+    if (!S) return;
+    fit();
+    var Z = drawn, g = cv.getContext('2d'), dk = dark(), P = dk ? PAL_D : PAL_L;
+    g.setTransform(Z.dpr, 0, 0, Z.dpr, 0, 0);
+    var bg = g.createLinearGradient(0, 0, 0, Z.h);
+    bg.addColorStop(0, P.bgA); bg.addColorStop(1, P.bgB);
+    g.fillStyle = bg; g.fillRect(0, 0, Z.w, Z.h);
+    // a few soft dots on the floor so the field is not a flat colour
+    g.fillStyle = P.dot;
+    for (var i = 0; i < 28; i++) { var px = ((i * 137.5) % 100) / 100 * Z.w, py = ((i * 61.8 + 13) % 100) / 100 * Z.h; g.beginPath(); g.arc(px, py, 5 + (i % 4) * 3, 0, Math.PI * 2); g.fill(); }
+    drawMarkers(g, Z, P);
+    S.critters.forEach(function (c) { drawCritter(g, c, P, dk); });
+    S.rings.forEach(function (rg) {
+      var t = rg.t / rg.life;
+      g.strokeStyle = rg.kind === 'light' ? 'rgba(' + GLOWS[rg.variant] + ',' + (0.8 * (1 - t)).toFixed(2) + ')' : (dk ? 'rgba(255,255,255,' : 'rgba(60,50,30,') + (0.5 * (1 - t)).toFixed(2) + ')';
+      g.lineWidth = 4 * (1 - t) + 1; g.beginPath(); g.arc(rg.x, rg.y, rg.r * (0.6 + t * 1.2), 0, Math.PI * 2); g.stroke();
+    });
+    S.bits.forEach(function (b) {
+      var a = Math.max(0, Math.min(1, b.life / b.max * 1.4));
+      g.globalAlpha = a; g.fillStyle = bitColor(b);
+      g.beginPath(); g.arc(b.x, b.y, b.size * (0.5 + 0.5 * a), 0, Math.PI * 2); g.fill();
+    });
+    g.globalAlpha = 1;
+  }
+
+  /* ------------------------------------------------------------ loop */
+
+  function frame(ts) {
+    raf = 0;
+    if (paused || left) return;
+    var dt = last ? Math.min(0.05, (ts - last) / 1000) : 0.016;
+    last = ts;
+    if (S) {
+      E.step(S, dt, Math.random);
+      var pts = [];
+      for (var id in touches) pts.push(touches[id]);
+      if (E.holdStep(S, E.cornersHeld(pts, S.W, S.H), dt)) { left = true; C.haptic('success'); C.back(); return; }
+    }
+    draw();
+    raf = requestAnimationFrame(frame);
+  }
+  function kick() { if (!raf && !paused && !left) { last = 0; raf = requestAnimationFrame(frame); } }
+
+  /* ----------------------------------------------------------- input */
+
+  function local(e) { var r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+  function popAt(p) {
+    if (!S) return;
+    var c = E.hit(S, p.x, p.y, 0);
+    if (!c) return;
+    E.pop(S, c, Math.random);
+    if (prefs.sound) C.audio.sfx('pgPop' + Math.floor(Math.random() * 3));
+    if (!still()) C.haptic('tap');
+    pops++; ctx.store.set('pops', pops);
+    if (pops >= 100) C.achievements.unlock('pet-hundred');
+  }
+  cv.addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    try { cv.setPointerCapture(e.pointerId); } catch (x) { /* a synthetic pointer has nothing to capture */ }
+    var p = local(e); touches[e.pointerId] = p;
+    popAt(p);
+  });
+  // a finger dragged across the field pops what it passes over
+  cv.addEventListener('pointermove', function (e) {
+    if (!touches[e.pointerId]) return;
+    var p = local(e); touches[e.pointerId] = p;
+    popAt(p);
+  });
+  function lift(e) { delete touches[e.pointerId]; }
+  cv.addEventListener('pointerup', lift);
+  cv.addEventListener('pointercancel', lift);
+  cv.addEventListener('lostpointercapture', lift);
+  cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  // A paw on the keyboard pops one critter. Escape and Backspace would take the player out of the
+  // game through the core's back shortcut, so while the field is showing they go no further; the
+  // grown-up leaves with the corners or the back button.
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    e.stopImmediatePropagation(); e.preventDefault();
+    if (e.repeat || !S) return;
+    var c = E.popAny(S, Math.random);
+    if (c && prefs.sound) C.audio.sfx('pgPop' + Math.floor(Math.random() * 3));
+    if (c) { pops++; ctx.store.set('pops', pops); if (pops >= 100) C.achievements.unlock('pet-hundred'); }
+  }, true);
+
+  C.onPause(function () { paused = true; touches = {}; if (S) S.hold = 0; });
+  C.onResume(function () { paused = false; kick(); });
+  window.addEventListener('pageshow', function (e) { if (e.persisted) { left = false; if (S) S.hold = 0; touches = {}; kick(); } });
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(stage);
+  else window.addEventListener('resize', function () { draw(); });
+  // turning the phone: the observer covers it, and the font arriving can move the bar above
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+
+  /* -------------------------------------------------------- settings */
+
+  function row(label, node) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: label }), node]); }
+  function showSettings() {
+    var kind = C.ui.segmented(E.MODES.map(function (m) { return { value: m, label: C.t(KIND_KEYS[m]) }; }), prefs.mode, function (v) {
+      prefs.mode = v; ctx.store.set('prefs', prefs);
+      if (S) E.setMode(S, v, Math.random);
+    });
+    // five choices do not fit one row at 390px in German or Spanish, so they wrap
+    kind.classList.add('ch-seg--wrap');
+    var speed = C.ui.segmented([{ value: 'slow', label: C.t('pgSlow') }, { value: 'normal', label: C.t('pgNormal') }, { value: 'fast', label: C.t('pgFast') }], prefs.speed, function (v) {
+      prefs.speed = v; ctx.store.set('prefs', prefs);
+      if (S) E.setSpeed(S, v);
+    });
+    var snd = C.ui.segmented([{ value: 'on', label: C.t('pgOn') }, { value: 'off', label: C.t('pgOff') }], prefs.sound ? 'on' : 'off', function (v) {
+      prefs.sound = v === 'on'; ctx.store.set('prefs', prefs);
+    });
+    C.ui.modal({
+      title: C.t('settings'), closeButton: true,
+      body: [el('div', { class: 'ch-list' }, [row(C.t('pgKind'), kind), row(C.t('pgSpeed'), speed), row(C.t('pgSound'), snd)])],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  /* ------------------------------------------------------------ help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('pgRules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb(C.t('pgKeys'), C.t('pgKeyWhat')), kb(C.t('pgCorners'), C.t('pgCornersWhat'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  var TUT = [{
+    title: C.t('pgTutTitle'), text: C.t('pgTutText'),
+    art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr"><rect width="200" height="110" rx="10" fill="#F3EDE4"/>' +
+      '<g fill="#005050" fill-opacity=".22" stroke="#005050" stroke-opacity=".7" stroke-width="2"><path d="M0 0H34A34 34 0 0 1 0 34Z"/><path d="M200 0V34A34 34 0 0 1 166 0Z"/><path d="M0 110V76A34 34 0 0 1 34 110Z"/><path d="M200 110H166A34 34 0 0 1 200 76Z"/></g>' +
+      '<circle cx="100" cy="55" r="16" fill="#9AA1AB"/><circle cx="116" cy="55" r="8" fill="#9AA1AB"/></svg>'
+  }];
+
+  /* ----------------------------------------------------------- start */
+
+  fit();
+  draw();
+  kick();
+  // the first visit explains how to leave: a grown-up reads it, a pet never gets this far
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>

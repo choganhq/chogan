@@ -1042,6 +1042,11 @@
     simon2: function () { tone({ freq: 659.25, dur: 0.32, gain: 0.2, type: 'triangle', attack: 0.01 }); },
     simon3: function () { tone({ freq: 783.99, dur: 0.32, gain: 0.18, type: 'triangle', attack: 0.01 }); },
     simonWrong: function () { tone({ freq: 196, to: 98, dur: 0.6, gain: 0.26, type: 'sawtooth' }); },
+    // Pet Game (#903): three small squeaky pops of different pitch, so a run of them does
+    // not sound like one repeated beep; high enough for a phone speaker
+    pgPop0: function () { tone({ freq: 620, to: 1250, dur: 0.1, gain: 0.2, type: 'sine' }); },
+    pgPop1: function () { tone({ freq: 800, to: 1500, dur: 0.09, gain: 0.18, type: 'triangle' }); },
+    pgPop2: function () { tone({ freq: 480, to: 980, dur: 0.12, gain: 0.2, type: 'sine' }); noise({ freq: 2600, to: 1200, dur: 0.04, gain: 0.06 }); },
     tap: function () { tone({ freq: 620, to: 520, dur: 0.07, gain: 0.16, type: 'sine' }); },
     select: function () { tone({ freq: 880, dur: 0.06, gain: 0.13, type: 'triangle' }); },
     place: function () { tone({ freq: 300, to: 460, dur: 0.11, gain: 0.22, type: 'triangle' }); },
@@ -1624,7 +1629,8 @@
     { id: 'cs-bot',      icon: 'trophy',  fa: 'از ربات بردی',      en: 'Beat the machine',  dfa: 'ربات شطرنج را در سطح سخت بردی',        den: 'Beat the chess AI on hard', zh: '战胜电脑', dzh: '在困难难度下战胜国际象棋电脑', de: 'Maschine besiegt', dde: 'Besiege die Schach-KI auf Schwer', es: 'Vence a la máquina', des: 'Vence a la IA de Ajedrez en difícil', ar: 'هزمت الآلة', dar: 'اهزم روبوت الشطرنج على المستوى الصعب', hi: 'मशीन को हराया', dhi: 'शतरंज में कठिन कंप्यूटर को हराएँ' },
     { id: 'xq-win',      icon: 'crown',   fa: 'برد شطرنج چینی',    en: 'Xiangqi victory',   dfa: 'یک بازی شطرنج چینی را بردی',           den: 'Win a game of Chinese chess', zh: '象棋首胜', dzh: '赢下一局中国象棋', de: 'Xiangqi-Sieg', dde: 'Gewinne eine Partie Chinesisches Schach', es: 'Victoria de xiangqi', des: 'Gana una partida de ajedrez chino', ar: 'نصر صيني', dar: 'فُز بلعبة الشطرنج الصيني', hi: 'चीनी शतरंज विजय', dhi: 'चीनी शतरंज का एक खेल जीतें' },
     { id: 'xq-fast',     icon: 'bolt',    fa: 'دست سبک',           en: 'Quick general',     dfa: 'شطرنج چینی را زیر پنج دقیقه بردی',      den: 'Win Chinese chess in under five minutes', zh: '快棋', dzh: '五分钟内赢下一局中国象棋', de: 'Schneller Feldherr', dde: 'Gewinne Chinesisches Schach in unter fünf Minuten', es: 'General rápido', des: 'Gana al ajedrez chino en menos de cinco minutos', ar: 'جنرال سريع', dar: 'فُز بالشطرنج الصيني في أقل من خمس دقائق', hi: 'फुर्तीला सेनापति', dhi: 'चीनी शतरंज पाँच मिनट से कम में जीतें' },
-    { id: 'xq-clean',    icon: 'sparkle', fa: 'بی برگشت',          en: 'No second thoughts', dfa: 'شطرنج چینی را بدون برگرداندن حرکت بردی', den: 'Win Chinese chess without undoing a move', zh: '不悔棋', dzh: '不撤销任何一步赢下中国象棋', de: 'Ohne Rückzieher', dde: 'Gewinne Chinesisches Schach ohne einen Zug zurückzunehmen', es: 'Sin marcha atrás', des: 'Gana al ajedrez chino sin deshacer ninguna jugada', ar: 'بلا تردد', dar: 'فُز بالشطرنج الصيني دون التراجع عن أي حركة', hi: 'कोई पछतावा नहीं', dhi: 'एक भी चाल वापस लिए बिना चीनी शतरंज जीतें' }
+    { id: 'xq-clean',    icon: 'sparkle', fa: 'بی برگشت',          en: 'No second thoughts', dfa: 'شطرنج چینی را بدون برگرداندن حرکت بردی', den: 'Win Chinese chess without undoing a move', zh: '不悔棋', dzh: '不撤销任何一步赢下中国象棋', de: 'Ohne Rückzieher', dde: 'Gewinne Chinesisches Schach ohne einen Zug zurückzunehmen', es: 'Sin marcha atrás', des: 'Gana al ajedrez chino sin deshacer ninguna jugada', ar: 'بلا تردد', dar: 'فُز بالشطرنج الصيني دون التراجع عن أي حركة', hi: 'कोई पछतावा नहीं', dhi: 'एक भी चाल वापस लिए बिना चीनी शतरंज जीतें' },
+    { id: 'pet-hundred',  icon: 'star',    fa: 'شکارچی کوچولو',     en: 'Little hunter',     dfa: 'در بازی حیوانات خانگی صد جانور کوچک را ترکاندی', den: 'Pop 100 critters in Pet Game', zh: '小猎手', dzh: '在宠物游戏中戳破 100 只小动物', de: 'Kleiner Jäger', dde: 'Fang im Tierspiel 100 Krabbeltiere', es: 'Pequeño cazador', des: 'Atrapa 100 bichitos en el Juego para mascotas', pl: 'Mały łowca', dpl: 'Złap 100 stworków w Grze dla zwierząt', fr: 'Petit chasseur', dfr: 'Attrape 100 petites bêtes dans le Jeu pour animaux', ar: 'صيّاد صغير', dar: 'اصطد 100 مخلوق صغير في لعبة الحيوانات الأليفة', hi: 'नन्हा शिकारी', dhi: 'पालतू खेल में 100 छोटे जीव पकड़ें' }
   ];
 
   // The game an award belongs to, by its id's prefix; null is an award for the whole
@@ -1643,7 +1649,7 @@
     tw: 'towerup', dom: 'dominoes', ws: 'watersort', fb: 'football', wg: 'wrigglers', tri: 'trio',
     fr: 'fourrow', pk: 'peak', tr: 'territories', pw: 'pipes', db: 'doubles', sk: 'storekeeper',
     sr: 'starraid', cx: 'crossing', cm: 'carrom', nd: 'numberdrop', ci: 'circuit',
-    hr: 'hillrider', fl: 'flood', mo: 'motorush', mu: 'muncher', ft: 'fitten', fd: 'fivedice', hx: 'hex', ln: 'lander', gs: 'goose', dl: 'dicelands', cn: 'corners', fo: 'fourfold', snt: 'senet', hc: 'honeycomb'
+    hr: 'hillrider', fl: 'flood', mo: 'motorush', mu: 'muncher', ft: 'fitten', fd: 'fivedice', hx: 'hex', ln: 'lander', gs: 'goose', dl: 'dicelands', cn: 'corners', fo: 'fourfold', snt: 'senet', pet: 'petgame', hc: 'honeycomb'
   };
   // Darts kept Dots' prefix for this one award when #464 renamed the others
   var ACH_GAME_ID = { 'dt-180': 'darts' };
