@@ -17,6 +17,10 @@ module.exports = function (T) {
     const cells = [];
     for (let n = 0; n <= 63; n++) cells.push(E.cell(n));
     const keys = new Set(cells.map((q) => q.join()));
+    // A canvas given only top/right/bottom/left keeps its backing-store size, so on a phone with a
+    // pixel ratio above 1 the board showed at double size and ran off the screen (staging, 2026-11-15).
+    const cvRule = (html.match(/\.gs-canvas\s*\{[^}]*\}/) || [''])[0];
+    ok(/width:\s*100%/.test(cvRule) && /height:\s*100%/.test(cvRule), 'the board canvas is sized by CSS, not by its backing store');
     ok(E.END === 63 && keys.size === 64 && cells.every((q) => q[0] >= 0 && q[0] < 8 && q[1] >= 0 && q[1] < 8), 'the 64 squares fill an 8×8 grid, each once');
     ok(cells.every((q, n) => n === 0 || Math.abs(q[0] - cells[n - 1][0]) + Math.abs(q[1] - cells[n - 1][1]) === 1), 'each square sits beside the one before it, so the path never jumps');
     ok(cells[0].join() === '0,7' && cells[63][0] >= 3 && cells[63][0] <= 4 && cells[63][1] >= 3 && cells[63][1] <= 4, 'the start is the bottom left corner and 63 is in the middle');
