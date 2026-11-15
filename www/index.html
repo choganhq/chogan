@@ -10,6 +10,7 @@
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="lib/chogan.css">
+<script src="lib/early.js"></script>
 </head>
 <body class="ch-menu">
 <div id="app"></div>
@@ -1581,6 +1582,41 @@
     });
   }
 
+  // The app's colour theme (#875). Each button carries data-colors, so chogan.css draws
+  // it in that palette's own light or dark colours whatever the current one is. Keys are
+  // literal so the string check in tools/test.js can see them.
+  var COLOR_CHOICES = [
+    { id: 'default', key: 'colorsDefault' },
+    { id: 'paper', key: 'colorsPaper' },
+    { id: 'slate', key: 'colorsSlate' },
+    { id: 'forest', key: 'colorsForest' },
+    { id: 'rose', key: 'colorsRose' },
+    { id: 'contrast', key: 'colorsContrast' }
+  ];
+  function colorSwatches(value) {
+    var cur = COLOR_CHOICES.some(function (o) { return o.id === value; }) ? value : 'default';
+    var row = el('div', { class: 'ch-swatches', role: 'group', 'aria-labelledby': 'colorsLabel' });
+    COLOR_CHOICES.forEach(function (o) {
+      row.appendChild(el('button', {
+        type: 'button', class: 'ch-swatch', 'data-colors': o.id,
+        'aria-pressed': o.id === cur ? 'true' : 'false',
+        onclick: function () {
+          if (o.id === cur) return;
+          C.setColors(o.id);
+          C.feedback('tap');
+          render();
+        }
+      }, [
+        el('span', { class: 'ch-swatch__chip', 'aria-hidden': 'true' }, [
+          el('span', { class: 'ch-swatch__aa', text: 'Aa' }),
+          el('span', { class: 'ch-swatch__dots' }, [el('i'), el('i')])
+        ]),
+        el('span', { class: 'ch-swatch__name', text: C.t(o.key) })
+      ]));
+    });
+    return row;
+  }
+
   function settingsCard() {
     var card = el('div', { class: 'ch-card' });
     var s = C.state.settings;
@@ -1599,6 +1635,12 @@
         { value: 'light', label: C.t('themeLight') },
         { value: 'dark', label: C.t('themeDark') }
       ], s.theme, function (v) { C.setTheme(v); render(); })
+    ]));
+
+    card.appendChild(el('div', { class: 'ch-item' }, [
+      C.icon('palette', 20),
+      el('div', { class: 'ch-item__label', id: 'colorsLabel', text: C.t('colors') }),
+      colorSwatches(s.colors)
     ]));
 
     card.appendChild(el('div', { class: 'ch-item' }, [

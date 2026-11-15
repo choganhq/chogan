@@ -208,8 +208,11 @@
     haptics: true,
     cardBack: 'carpet',  // carpet | termeh, shared by every card game (#181)
     cardSpeed: 'normal', // slow | normal | fast: the pace of every card game (#425)
-    pinned: []           // game ids pinned to the top of the menu, in pin order (#193)
+    pinned: [],          // game ids pinned to the top of the menu, in pin order (#193)
+    colors: 'default'    // one of COLOR_THEMES, the app's colour theme (#875)
   };
+  // the ids of the [data-colors] palettes in chogan.css; the first is the default
+  var COLOR_THEMES = ['default', 'paper', 'slate', 'forest', 'rose', 'contrast'];
 
   function randomId() {
     var s = '';
@@ -328,6 +331,7 @@
       streak: 'پیوستگی', dayStreak: 'روز پیوسته', locked: 'قفل',
       unlockedAt: 'باز شد', totalPlays: 'بازی', playTime: 'زمان بازی', thisWeek: 'این هفته', lastWeek: 'هفته‌ی قبل', weekMinutes: 'زمان بازی (دقیقه)', weekWins: 'برد', weekDays: 'روز بازی', weekGames: 'بازی‌های مختلف',
       language: 'زبان', theme: 'تم', themeAuto: 'خودکار', themeLight: 'روشن', themeDark: 'تاریک', motion: 'انیمیشن', motionAuto: 'خودکار', motionOn: 'روشن', motionOff: 'خاموش',
+      colors: 'رنگ‌بندی', colorsDefault: 'پیش‌فرض', colorsPaper: 'کاغذ کاهی', colorsSlate: 'خاکستری سرد', colorsForest: 'جنگل', colorsRose: 'گلبهی', colorsContrast: 'کنتراست بالا',
       sfx: 'افکت صوتی', music: 'موسیقی', haptics: 'لرزش',
       resetGame: 'بازنشانی داده‌ی بازی', resetAsk: 'داده‌ی این بازی کامل پاک شود؟',
       resetWarn: 'این کار برگشت ندارد.', resetDone: 'پاک شد',
@@ -375,6 +379,7 @@
       streak: 'Streak', dayStreak: 'day streak', locked: 'Locked',
       unlockedAt: 'Unlocked', totalPlays: 'Games', playTime: 'Play time', thisWeek: 'This week', lastWeek: 'Last week', weekMinutes: 'Play time (min)', weekWins: 'Wins', weekDays: 'Days played', weekGames: 'Different games',
       language: 'Language', theme: 'Theme', themeAuto: 'Auto', themeLight: 'Light', themeDark: 'Dark', motion: 'Animations', motionAuto: 'Auto', motionOn: 'On', motionOff: 'Off',
+      colors: 'Colours', colorsDefault: 'Default', colorsPaper: 'Warm paper', colorsSlate: 'Cool slate', colorsForest: 'Forest', colorsRose: 'Rose', colorsContrast: 'High contrast',
       sfx: 'Sound effects', music: 'Music', haptics: 'Vibration',
       resetGame: 'Reset game data', resetAsk: 'Erase all data for this game?',
       resetWarn: 'This cannot be undone.', resetDone: 'Erased',
@@ -422,6 +427,7 @@
       streak: 'Seria', dayStreak: 'dni z rzędu', locked: 'Zablokowane',
       unlockedAt: 'Odblokowano', totalPlays: 'Rozegrane gry', playTime: 'Czas gry', thisWeek: 'Ten tydzień', lastWeek: 'Poprzedni tydzień', weekMinutes: 'Czas gry (min)', weekWins: 'Wygrane', weekDays: 'Dni gry', weekGames: 'Różne gry',
       language: 'Język', theme: 'Motyw', themeAuto: 'Automatyczny', themeLight: 'Jasny', themeDark: 'Ciemny', motion: 'Animacje', motionAuto: 'Auto', motionOn: 'Włączone', motionOff: 'Wyłączone',
+      colors: 'Kolorystyka', colorsDefault: 'Domyślny', colorsPaper: 'Ciepły papier', colorsSlate: 'Chłodny łupek', colorsForest: 'Las', colorsRose: 'Róż', colorsContrast: 'Wysoki kontrast',
       sfx: 'Efekty dźwiękowe', music: 'Muzyka', haptics: 'Wibracje',
       resetGame: 'Resetuj dane gry', resetAsk: 'Usunąć wszystkie dane tej gry?',
       resetWarn: 'Tej operacji nie można cofnąć.', resetDone: 'Usunięto',
@@ -469,6 +475,7 @@
       streak: 'Série', dayStreak: 'jours d’affilée', locked: 'Verrouillé',
       unlockedAt: 'Débloqué', totalPlays: 'Parties', playTime: 'Temps de jeu', thisWeek: 'Cette semaine', lastWeek: 'Semaine dernière', weekMinutes: 'Temps de jeu (min)', weekWins: 'Victoires', weekDays: 'Jours joués', weekGames: 'Jeux différents',
       language: 'Langue', theme: 'Thème', themeAuto: 'Auto', themeLight: 'Clair', themeDark: 'Sombre', motion: 'Animations', motionAuto: 'Auto', motionOn: 'Activées', motionOff: 'Désactivées',
+      colors: 'Couleurs', colorsDefault: 'Par défaut', colorsPaper: 'Papier chaud', colorsSlate: 'Ardoise', colorsForest: 'Forêt', colorsRose: 'Rose', colorsContrast: 'Contraste élevé',
       sfx: 'Effets sonores', music: 'Musique', haptics: 'Vibrations',
       resetGame: 'Effacer les données du jeu', resetAsk: 'Effacer toutes les données de ce jeu ?',
       resetWarn: 'Impossible de revenir en arrière.', resetDone: 'Effacé',
@@ -516,6 +523,7 @@
       streak: 'السلسلة', dayStreak: 'أيام متتالية', locked: 'مقفل',
       unlockedAt: 'فُتح', totalPlays: 'الألعاب', playTime: 'وقت اللعب', thisWeek: 'هذا الأسبوع', lastWeek: 'الأسبوع الماضي', weekMinutes: 'وقت اللعب (دقيقة)', weekWins: 'الانتصارات', weekDays: 'أيام اللعب', weekGames: 'ألعاب مختلفة',
       language: 'اللغة', theme: 'المظهر', themeAuto: 'تلقائي', themeLight: 'فاتح', themeDark: 'داكن', motion: 'الحركة', motionAuto: 'تلقائي', motionOn: 'تشغيل', motionOff: 'إيقاف',
+      colors: 'الألوان', colorsDefault: 'افتراضي', colorsPaper: 'ورق دافئ', colorsSlate: 'أردوازي بارد', colorsForest: 'غابة', colorsRose: 'وردي', colorsContrast: 'تباين عالٍ',
       sfx: 'المؤثرات الصوتية', music: 'الموسيقى', haptics: 'الاهتزاز',
       resetGame: 'مسح بيانات اللعبة', resetAsk: 'أتمسح كل بيانات هذه اللعبة؟',
       resetWarn: 'لا يمكن التراجع عن هذا.', resetDone: 'مُسحت',
@@ -563,6 +571,7 @@
       streak: 'लगातार', dayStreak: 'दिन लगातार', locked: 'बंद',
       unlockedAt: 'खुला', totalPlays: 'खेल', playTime: 'खेलने का समय', thisWeek: 'इस हफ़्ते', lastWeek: 'पिछले हफ़्ते', weekMinutes: 'खेलने का समय (मिनट)', weekWins: 'जीत', weekDays: 'खेले गए दिन', weekGames: 'अलग-अलग खेल',
       language: 'भाषा', theme: 'थीम', themeAuto: 'अपने-आप', themeLight: 'हल्की', themeDark: 'गहरी', motion: 'एनिमेशन', motionAuto: 'अपने-आप', motionOn: 'चालू', motionOff: 'बंद',
+      colors: 'रंग-योजना', colorsDefault: 'सामान्य', colorsPaper: 'गर्म काग़ज़', colorsSlate: 'ठंडा स्लेटी', colorsForest: 'जंगल', colorsRose: 'गुलाबी', colorsContrast: 'उच्च कंट्रास्ट',
       sfx: 'ध्वनि प्रभाव', music: 'संगीत', haptics: 'कंपन',
       resetGame: 'खेल का डेटा मिटाएँ', resetAsk: 'इस खेल का सारा डेटा मिटा दें?',
       resetWarn: 'यह वापस नहीं हो सकता।', resetDone: 'मिटा दिया',
@@ -610,6 +619,7 @@
       streak: '连续', dayStreak: '天连续', locked: '未解锁',
       unlockedAt: '解锁于', totalPlays: '局数', playTime: '游戏时长', thisWeek: '本周', lastWeek: '上周', weekMinutes: '游戏时长（分钟）', weekWins: '胜局', weekDays: '游戏天数', weekGames: '玩过的游戏',
       language: '语言', theme: '主题', themeAuto: '自动', themeLight: '浅色', themeDark: '深色', motion: '动画', motionAuto: '自动', motionOn: '开', motionOff: '关',
+      colors: '配色', colorsDefault: '默认', colorsPaper: '暖纸', colorsSlate: '冷石板', colorsForest: '森林', colorsRose: '玫瑰', colorsContrast: '高对比度',
       sfx: '音效', music: '音乐', haptics: '振动',
       resetGame: '重置游戏数据', resetAsk: '确定清除这个游戏的全部数据？',
       resetWarn: '此操作无法撤销。', resetDone: '已清除',
@@ -657,6 +667,7 @@
       streak: 'Serie', dayStreak: 'Tage in Folge', locked: 'Gesperrt',
       unlockedAt: 'Freigeschaltet', totalPlays: 'Spiele', playTime: 'Spielzeit', thisWeek: 'Diese Woche', lastWeek: 'Letzte Woche', weekMinutes: 'Spielzeit (Min.)', weekWins: 'Siege', weekDays: 'Spieltage', weekGames: 'Verschiedene Spiele',
       language: 'Sprache', theme: 'Design', themeAuto: 'Auto', themeLight: 'Hell', themeDark: 'Dunkel', motion: 'Animationen', motionAuto: 'Auto', motionOn: 'An', motionOff: 'Aus',
+      colors: 'Farbschema', colorsDefault: 'Standard', colorsPaper: 'Warmes Papier', colorsSlate: 'Kühler Schiefer', colorsForest: 'Wald', colorsRose: 'Rosé', colorsContrast: 'Hoher Kontrast',
       sfx: 'Soundeffekte', music: 'Musik', haptics: 'Vibration',
       resetGame: 'Spieldaten zurücksetzen', resetAsk: 'Alle Daten dieses Spiels löschen?',
       resetWarn: 'Das lässt sich nicht rückgängig machen.', resetDone: 'Gelöscht',
@@ -704,6 +715,7 @@
       streak: 'Racha', dayStreak: 'días seguidos', locked: 'Bloqueado',
       unlockedAt: 'Desbloqueado', totalPlays: 'Partidas', playTime: 'Tiempo de juego', thisWeek: 'Esta semana', lastWeek: 'Semana pasada', weekMinutes: 'Tiempo de juego (min)', weekWins: 'Victorias', weekDays: 'Días jugados', weekGames: 'Juegos distintos',
       language: 'Idioma', theme: 'Tema', themeAuto: 'Auto', themeLight: 'Claro', themeDark: 'Oscuro', motion: 'Animaciones', motionAuto: 'Auto', motionOn: 'Activadas', motionOff: 'Desactivadas',
+      colors: 'Colores', colorsDefault: 'Predeterminado', colorsPaper: 'Papel cálido', colorsSlate: 'Pizarra fría', colorsForest: 'Bosque', colorsRose: 'Rosa', colorsContrast: 'Alto contraste',
       sfx: 'Efectos de sonido', music: 'Música', haptics: 'Vibración',
       resetGame: 'Borrar datos del juego', resetAsk: '¿Borrar todos los datos de este juego?',
       resetWarn: 'No se puede deshacer.', resetDone: 'Borrado',
@@ -852,7 +864,11 @@
     else document.documentElement.removeAttribute('data-theme');
     var dark = t === 'dark' || (t === 'auto' && global.matchMedia && global.matchMedia('(prefers-color-scheme: dark)').matches);
     var meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', dark ? '#15120E' : '#FBF6EF');
+    // the bar takes the page's own background, so a colour theme (#875) does not sit
+    // under a cream or brown bar; the fixed values remain for a page without the stylesheet
+    var bg = '';
+    try { if (typeof getComputedStyle === 'function') bg = String(getComputedStyle(document.documentElement).getPropertyValue('--c-bg') || '').trim(); } catch (e) { bg = ''; }
+    if (meta) meta.setAttribute('content', /^#[0-9A-Fa-f]{6}$/.test(bg) ? bg : dark ? '#15120E' : '#FBF6EF');
     // The Android app has no theme-color; without this its navigation bar
     // followed the device and stayed cream under the dark theme (#402)
     if (global.ChoganBars && global.ChoganBars.setDark) { try { global.ChoganBars.setDark(!!dark); } catch (e) { /* bars keep the device's look */ } }
@@ -861,6 +877,23 @@
     state.settings.theme = t;
     saveSettings();
     Chogan.applyTheme();
+  };
+
+  // One colour theme for the whole app (#875). Only the neutral tokens change (see the
+  // [data-colors] blocks in chogan.css); lib/early.js applies the saved one before the
+  // first paint and must list the same ids. The default has no attribute, and a value
+  // this build does not know (an older or newer save) falls back to it.
+  Chogan.applyColors = function () {
+    var c = state.settings.colors;
+    var known = typeof c === 'string' && COLOR_THEMES.indexOf(c) > 0;
+    if (known) document.documentElement.setAttribute('data-colors', c);
+    else document.documentElement.removeAttribute('data-colors');
+  };
+  Chogan.setColors = function (c) {
+    state.settings.colors = c;
+    saveSettings();
+    Chogan.applyColors();
+    Chogan.applyTheme(); // the browser bar follows the new background
   };
 
   // Chrome on Android reports "reduce" when the system animation scale is 0, which some
@@ -1520,10 +1553,23 @@
     { id: 'hx-win',      icon: 'medal',    fa: 'لبه تا لبه',          en: 'Edge to edge',      dfa: 'یک دست هگز را مقابل ربات بردی', den: 'Win a game of Hex against the bot', zh: '边到边', dzh: '对战电脑赢下一局六贯棋', de: 'Rand zu Rand', dde: 'Gewinne eine Partie Hex gegen den Bot', es: 'De lado a lado', des: 'Gana una partida de Hex contra el bot', pl: 'Od brzegu do brzegu', dpl: 'Wygraj partię Hex z botem', fr: 'Bord à bord', dfr: 'Gagne une partie de Hex contre le robot', ar: 'من حافة إلى حافة', dar: 'فُز بلعبة هِكس ضد الروبوت', hi: 'किनारे से किनारे', dhi: 'बॉट के ख़िलाफ़ हेक्स का एक खेल जीतें' },
     { id: 'hx-hard',     icon: 'crown',    fa: 'استاد کندو',          en: 'Honeycomb master',  dfa: 'در هگز ربات سخت را شکست دادی', den: 'Beat the hard bot at Hex', zh: '蜂巢大师', dzh: '在六贯棋中击败困难电脑', de: 'Wabenmeister', dde: 'Schlag den schweren Bot in Hex', es: 'Maestro del panal', des: 'Vence al bot difícil en Hex', pl: 'Mistrz plastra', dpl: 'Pokonaj trudnego bota w Hex', fr: 'Maître de la ruche', dfr: 'Bats le robot difficile au Hex', ar: 'سيد خلية النحل', dar: 'اهزم الروبوت الصعب في هِكس', hi: 'छत्ते का उस्ताद', dhi: 'हेक्स में कठिन बॉट को हराएँ' },
     { id: 'hx-lean',     icon: 'bolt',     fa: 'راه کوتاه',           en: 'Short path',        dfa: 'در هگز با هجده مهره یا کمتر ربات را بردی', den: 'Beat the bot at Hex with 18 stones or fewer', zh: '捷径', dzh: '在六贯棋中用不超过 18 颗子战胜电脑', de: 'Kurzer Weg', dde: 'Besiege den Bot in Hex mit höchstens 18 Steinen', es: 'Camino corto', des: 'Vence al bot en Hex con 18 piedras o menos', pl: 'Krótka droga', dpl: 'Pokonaj bota w Hex, używając najwyżej 18 kamieni', fr: 'Chemin court', dfr: 'Bats le robot au Hex avec 18 pierres ou moins', ar: 'طريق قصير', dar: 'اهزم الروبوت في هِكس بـ18 حجرًا أو أقل', hi: 'छोटा रास्ता', dhi: 'हेक्स में 18 या कम पत्थरों से बॉट को हराएँ' },
+    { id: 'gs-finish',   icon: 'medal',    fa: 'دور مارپیچ',          en: 'Round the spiral',  dfa: 'یک دست بازی غاز را تا آخر بازی کردی', den: 'Finish a game of Goose Race', zh: '绕完螺旋', dzh: '下完一局鹅棋', de: 'Einmal um die Spirale', dde: 'Spiele eine Partie Gänsespiel zu Ende', es: 'Vuelta a la espiral', des: 'Termina una partida del juego de la oca', pl: 'Dookoła spirali', dpl: 'Dokończ partię Wyścigu gęsi', fr: 'Le tour de la spirale', dfr: 'Termine une partie de jeu de l’oie', ar: 'دورة الحلزون', dar: 'أكمل جولة من لعبة الإوزة', hi: 'घुमाव पूरा', dhi: 'हंस दौड़ का एक खेल पूरा करें' },
+    { id: 'dl-win',      icon: 'trophy',   fa: 'زمین‌دار',            en: 'Landholder',        dfa: 'در تاس‌زمین همه‌ی ربات‌ها را از نقشه بیرون کردی', den: 'Drive every bot off the map in Dicelands', zh: '大地主', dzh: '在骰子大陆中把所有电脑赶出地图', de: 'Landbesitzer', dde: 'Vertreibe in Würfelland alle Bots von der Karte', es: 'Terrateniente', des: 'Echa a todos los bots del mapa en Tierra de dados', pl: 'Władca ziemi', dpl: 'Wypchnij wszystkie boty z mapy w Krainach kości', fr: 'Propriétaire terrien', dfr: 'Chasse tous les robots de la carte dans Terres de dés', ar: 'صاحب الأرض', dar: 'أخرج كل الروبوتات من الخريطة في «أرض النرد»', hi: 'ज़मींदार', dhi: 'पासों के देश में सारे बॉट नक्शे से बाहर करें' },
+    { id: 'dl-hard',     icon: 'bolt',     fa: 'تاس آهنین',           en: 'Iron dice',         dfa: 'در تاس‌زمین ربات‌های سخت را بردی', den: 'Beat the hard bots in Dicelands', zh: '铁骰子', dzh: '在骰子大陆中战胜困难电脑', de: 'Eiserne Würfel', dde: 'Besiege in Würfelland die schweren Bots', es: 'Dados de hierro', des: 'Vence a los bots difíciles en Tierra de dados', pl: 'Żelazne kości', dpl: 'Pokonaj trudne boty w Krainach kości', fr: 'Dés de fer', dfr: 'Bats les robots difficiles dans Terres de dés', ar: 'نرد من حديد', dar: 'اهزم الروبوتات الصعبة في «أرض النرد»', hi: 'लोहे के पासे', dhi: 'पासों के देश में कठिन बॉटों को हराएँ' },
+    { id: 'dl-crowd',    icon: 'star',     fa: 'یکی در برابر سه',     en: 'One against three', dfa: 'در تاس‌زمین مقابل سه ربات بردی', den: 'Win against three bots in Dicelands', zh: '以一敌三', dzh: '在骰子大陆中战胜三个电脑', de: 'Einer gegen drei', dde: 'Gewinne in Würfelland gegen drei Bots', es: 'Uno contra tres', des: 'Gana contra tres bots en Tierra de dados', pl: 'Jeden na trzech', dpl: 'Wygraj z trzema botami w Krainach kości', fr: 'Un contre trois', dfr: 'Gagne contre trois robots dans Terres de dés', ar: 'واحد ضد ثلاثة', dar: 'افز على ثلاثة روبوتات في «أرض النرد»', hi: 'तीन के ख़िलाफ़ एक', dhi: 'पासों के देश में तीन बॉटों के ख़िलाफ़ जीतें' },
     { id: 'ln-first',    icon: 'moon',     fa: 'نخستین فرود',         en: 'First touchdown',   dfa: 'در فرودگر برای اولین بار سالم روی سکو نشستی', den: 'Land safely on a pad for the first time in Lander', zh: '首次着陆', dzh: '在登月舱中第一次安全降落在着陆台上', de: 'Erstes Aufsetzen', dde: 'Lande im Mondlander zum ersten Mal sicher auf einer Plattform', es: 'Primer contacto', des: 'Aterriza a salvo en una plataforma por primera vez en Alunizador', pl: 'Pierwsze przyziemienie', dpl: 'Wyląduj bezpiecznie na lądowisku po raz pierwszy w Lądowniku', fr: 'Premier contact', dfr: 'Pose-toi sans casse sur une plateforme pour la première fois dans Alunisseur', ar: 'أول هبوط', dar: 'اهبط بسلام على منصة لأول مرة في «مركبة الهبوط»', hi: 'पहली लैंडिंग', dhi: 'लैंडर में पहली बार पैड पर सुरक्षित उतरें' },
     { id: 'ln-ace',      icon: 'sparkle',  fa: 'فرود پَری',           en: 'Feather landing',   dfa: 'در فرودگر وسط سکو، صاف و بسیار نرم نشستی', den: 'Land upright, very softly, in the middle of a pad in Lander', zh: '羽毛着陆', dzh: '在登月舱中竖直、极轻地降落在着陆台中央', de: 'Federleicht', dde: 'Lande im Mondlander aufrecht und ganz sanft in der Mitte einer Plattform', es: 'Aterrizaje de pluma', des: 'Aterriza recto y muy suave en el centro de una plataforma en Alunizador', pl: 'Lądowanie jak piórko', dpl: 'Wyląduj prosto i bardzo miękko na środku lądowiska w Lądowniku', fr: 'Comme une plume', dfr: 'Pose-toi droit, tout en douceur, au milieu d’une plateforme dans Alunisseur', ar: 'هبوط كالريشة', dar: 'اهبط مستقيمًا وبلطف شديد في وسط منصة في «مركبة الهبوط»', hi: 'पंख जैसी लैंडिंग', dhi: 'लैंडर में पैड के बीच सीधे और बहुत धीरे उतरें' },
     { id: 'ln-ten',      icon: 'trophy',   fa: 'ده سکو',              en: 'Ten pads',          dfa: 'در فرودگر در یک دور پشت سر هم روی ده سکو نشستی', den: 'Land on ten pads in one run of Lander', zh: '十台连降', dzh: '在登月舱的一局中降落在十个着陆台上', de: 'Zehn Plattformen', dde: 'Lande in einem Lauf des Mondlanders auf zehn Plattformen', es: 'Diez plataformas', des: 'Aterriza en diez plataformas en una partida de Alunizador', pl: 'Dziesięć lądowisk', dpl: 'Wyląduj na dziesięciu lądowiskach w jednej grze Lądownika', fr: 'Dix plateformes', dfr: 'Pose-toi sur dix plateformes en une partie d’Alunisseur', ar: 'عشر منصات', dar: 'اهبط على عشر منصات في جولة واحدة من «مركبة الهبوط»', hi: 'दस पैड', dhi: 'लैंडर के एक खेल में दस पैड पर उतरें' },
     { id: 'ln-daily',    icon: 'calendar', fa: 'فرود روز',            en: 'Landing of the day', dfa: 'در فرودگر روزانه روی هر سه سکو نشستی', den: 'Land on all three pads of the daily Lander', zh: '今日着陆', dzh: '在每日登月舱中降落在全部三个着陆台上', de: 'Landung des Tages', dde: 'Lande im täglichen Mondlander auf allen drei Plattformen', es: 'Aterrizaje del día', des: 'Aterriza en las tres plataformas del Alunizador diario', pl: 'Lądowanie dnia', dpl: 'Wyląduj na wszystkich trzech lądowiskach dziennego Lądownika', fr: 'Atterrissage du jour', dfr: 'Pose-toi sur les trois plateformes de l’Alunisseur du jour', ar: 'هبوط اليوم', dar: 'اهبط على المنصات الثلاث في «مركبة الهبوط» اليومية', hi: 'आज की लैंडिंग', dhi: 'रोज़ के लैंडर के तीनों पैड पर उतरें' },
+    { id: 'cn-win',      icon: 'medal',    fa: 'گوشه‌گیر', en: 'Corner Claimer', dfa: 'یک بازی گوشه‌به‌گوشه را از ربات ببر', den: 'Win a game of Corner to Corner against the bot', zh: '占角能手', dzh: '在角对角中战胜电脑', de: 'Eckenjäger', dde: 'Gewinne Ecke an Ecke gegen den Bot', es: 'Cazaesquinas', des: 'Gana una partida de Esquina a esquina contra el bot', pl: 'Łowca rogów', dpl: 'Wygraj partię Róg w róg z botem', fr: 'Preneur de coins', dfr: 'Gagne une partie de Coin à coin contre le robot', ar: 'صائد الزوايا', dar: 'افز في زاوية بزاوية على الروبوت', hi: 'कोनों का शिकारी', dhi: 'कोने से कोना में बॉट को हराएँ' },
+    { id: 'cn-hard',     icon: 'crown',    fa: 'استاد گوشه‌ها', en: 'Master of Corners', dfa: 'ربات سخت را در گوشه‌به‌گوشه ببر', den: 'Beat the hard bot at Corner to Corner', zh: '角对角大师', dzh: '在角对角中战胜困难电脑', de: 'Meister der Ecken', dde: 'Besiege den schweren Bot bei Ecke an Ecke', es: 'Maestro de las esquinas', des: 'Vence al bot difícil en Esquina a esquina', pl: 'Mistrz rogów', dpl: 'Pokonaj trudnego bota w Róg w róg', fr: 'Maître des coins', dfr: 'Bats le robot difficile à Coin à coin', ar: 'سيد الزوايا', dar: 'اهزم الروبوت الصعب في زاوية بزاوية', hi: 'कोनों का उस्ताद', dhi: 'कोने से कोना में कठिन बॉट को हराएँ' },
+    { id: 'cn-all',      icon: 'star',     fa: 'همه‌ی بیست‌ویک', en: 'All Twenty-One', dfa: 'در بازی با ربات هر ۲۱ قطعه را بگذار', den: 'Place all 21 pieces in a game against the bot', zh: '二十一块全上', dzh: '对战电脑时放下全部21块', de: 'Alle einundzwanzig', dde: 'Lege alle 21 Teile in einer Partie gegen den Bot', es: 'Las veintiuna', des: 'Coloca las 21 piezas en una partida contra el bot', pl: 'Wszystkie dwadzieścia jeden', dpl: 'Połóż wszystkie 21 klocków w grze z botem', fr: 'Les vingt et une', dfr: 'Pose les 21 pièces dans une partie contre le robot', ar: 'الإحدى والعشرون كلها', dar: 'ضع القطع الـ21 كلها في لعبة ضد الروبوت', hi: 'सभी इक्कीस', dhi: 'बॉट के ख़िलाफ़ एक खेल में सभी 21 टुकड़े रखें' },
+    { id: 'fo-win',      icon: 'medal',    fa: 'وجه مشترک',           en: 'Shared trait', dfa: 'در چهارگانه ربات را شکست بده', den: 'Beat the bot in Fourfold', zh: '共同特征', dzh: '在四同棋中战胜电脑', de: 'Gemeinsames Merkmal', dde: 'Besiege den Bot in Vierfalt', es: 'Rasgo compartido', des: 'Vence al bot en Cuádruple', pl: 'Wspólna cecha', dpl: 'Pokonaj bota w Czworakach', fr: 'Caractère commun', dfr: 'Bats le robot à Quadruple', ar: 'صفة مشتركة', dar: 'اهزم الروبوت في «الرباعية»', hi: 'साझा गुण', dhi: 'चौगुना में बॉट को हराएँ' },
+    { id: 'fo-hard',     icon: 'crown',    fa: 'استاد چهارگانه',      en: 'Fourfold master', dfa: 'در چهارگانه ربات سخت را شکست بده', den: 'Beat the hard bot in Fourfold', zh: '四同棋大师', dzh: '在四同棋中战胜困难电脑', de: 'Vierfalt-Meister', dde: 'Besiege den schweren Bot in Vierfalt', es: 'Maestro de Cuádruple', des: 'Vence al bot difícil en Cuádruple', pl: 'Mistrz Czworaków', dpl: 'Pokonaj trudnego bota w Czworakach', fr: 'Maître de Quadruple', dfr: 'Bats le robot difficile à Quadruple', ar: 'سيد الرباعية', dar: 'اهزم الروبوت الصعب في «الرباعية»', hi: 'चौगुना उस्ताद', dhi: 'चौगुना में कठिन बॉट को हराएँ' },
+    { id: 'fo-quick',    icon: 'bolt',     fa: 'خط زودرس',            en: 'Early line', dfa: 'در چهارگانه با ده مهره یا کمتر روی صفحه ربات را ببر', den: 'Beat the bot in Fourfold with ten pieces or fewer on the board', zh: '早成一线', dzh: '在四同棋中盘上不超过十枚棋子时战胜电脑', de: 'Frühe Linie', dde: 'Besiege den Bot in Vierfalt mit höchstens zehn Figuren auf dem Brett', es: 'Línea temprana', des: 'Vence al bot en Cuádruple con diez piezas o menos en el tablero', pl: 'Wczesna linia', dpl: 'Pokonaj bota w Czworakach, mając najwyżej dziesięć pionków na planszy', fr: 'Ligne précoce', dfr: 'Bats le robot à Quadruple avec dix pièces ou moins sur le plateau', ar: 'خط مبكر', dar: 'اهزم الروبوت في «الرباعية» وعلى اللوح عشر قطع أو أقل', hi: 'जल्दी की रेखा', dhi: 'बोर्ड पर दस या कम मोहरों के साथ चौगुना में बॉट को हराएँ' },
+    { id: 'snt-win',     icon: 'trophy',   fa: 'گذر از سی خانه',      en: 'Through the thirty', dfa: 'یک دست سنت را مقابل ربات بردی', den: 'Win a game of Senet against the bot', zh: '走完三十格', dzh: '对战电脑赢下一局塞尼特', de: 'Durch die dreißig', dde: 'Gewinne eine Partie Senet gegen den Bot', es: 'A través de las treinta', des: 'Gana una partida de Senet contra el bot', pl: 'Przez trzydzieści pól', dpl: 'Wygraj partię Senet z botem', fr: 'À travers les trente', dfr: 'Gagne une partie de Senet contre le robot', ar: 'عبر الثلاثين', dar: 'فُز بلعبة سينيت ضد الروبوت', hi: 'तीसों पार', dhi: 'बॉट के ख़िलाफ़ सेनेट का एक खेल जीतें' },
+    { id: 'snt-hard',    icon: 'crown',    fa: 'هم‌تراز فرعون',       en: 'Pharaoh’s equal',   dfa: 'در سنت ربات سخت را شکست دادی', den: 'Beat the hard bot at Senet', zh: '法老之敌', dzh: '在塞尼特中击败困难电脑', de: 'Dem Pharao ebenbürtig', dde: 'Schlag den schweren Bot in Senet', es: 'A la altura del faraón', des: 'Vence al bot difícil en Senet', pl: 'Równy faraonowi', dpl: 'Pokonaj trudnego bota w Senet', fr: 'L’égal du pharaon', dfr: 'Bats le robot difficile au Senet', ar: 'ندّ الفرعون', dar: 'اهزم الروبوت الصعب في سينيت', hi: 'फ़िरौन के बराबर', dhi: 'सेनेट में कठिन बॉट को हराएँ' },
+    { id: 'snt-dry',     icon: 'shield',   fa: 'پای خشک',             en: 'Dry feet',          dfa: 'در سنت ربات متوسط یا سخت را بردی، بی‌آنکه مهره‌ای در آب بیفتد', den: 'Beat the medium or hard bot at Senet without a piece falling into the water', zh: '滴水不沾', dzh: '在塞尼特中战胜中等或困难电脑，且没有棋子落水', de: 'Trockene Füße', dde: 'Besiege den mittleren oder schweren Bot in Senet, ohne dass ein Stein ins Wasser fällt', es: 'Pies secos', des: 'Vence al bot medio o difícil en Senet sin que ninguna pieza caiga al agua', pl: 'Suche stopy', dpl: 'Pokonaj bota średniego lub trudnego w Senet, nie wpadając ani razu do wody', fr: 'Pieds au sec', dfr: 'Bats le robot moyen ou difficile au Senet sans qu’aucun pion tombe à l’eau', ar: 'أقدام جافة', dar: 'اهزم الروبوت المتوسط أو الصعب في سينيت دون أن يسقط حجر في الماء', hi: 'सूखे पाँव', dhi: 'सेनेट में मध्यम या कठिन बॉट को हराएँ, बिना कोई गोटी पानी में गिरे' },
     { id: 'go-win',      icon: 'medal',   fa: 'زمین‌گیر',          en: 'Territory',         dfa: 'یک دست گو را مقابل ربات بردی',        den: 'Win a game of go against the AI', zh: '围地', dzh: '对战电脑赢下一局围棋', de: 'Gebietsherr', dde: 'Gewinne eine Partie Go gegen den Computer', es: 'Territorio', des: 'Gana una partida de Go contra la IA', ar: 'الأرض', dar: 'فُز بلعبة غو ضد الروبوت', hi: 'इलाक़ा', dhi: 'गो में कंप्यूटर को हराएँ' },
     { id: 'go-hard',     icon: 'brain',   fa: 'دو چشم',            en: 'Two eyes',          dfa: 'در گو ربات سخت را شکست دادی',         den: 'Beat the hard AI at go', zh: '两只眼', dzh: '在围棋中击败困难电脑', de: 'Zwei Augen', dde: 'Schlag die schwere Go-KI', es: 'Dos ojos', des: 'Vence a la IA difícil en Go', ar: 'عينان', dar: 'اهزم الروبوت الصعب في غو', hi: 'दो आँखें', dhi: 'गो में कठिन कंप्यूटर को हराएँ' },
     { id: 'bj-win',      icon: 'trophy',  fa: 'دیلر را بردی',      en: 'Beat the dealer',   dfa: 'یک مسابقه‌ی ده‌دستی بیست‌ویک را بردی', den: 'Win a ten-hand blackjack match', zh: '赢过庄家', dzh: '赢下一场十手的二十一点比赛', de: 'Croupier geschlagen', dde: 'Gewinne eine Blackjack-Partie aus zehn Händen', es: 'Vence a la banca', des: 'Gana una partida de Blackjack de diez manos', ar: 'هزمت الموزّع', dar: 'فُز بمباراة واحد وعشرون من عشر أيادٍ', hi: 'डीलर को हराया', dhi: 'ब्लैकजैक का दस बाज़ियों वाला मुक़ाबला जीतें' },
@@ -1593,7 +1639,7 @@
     tw: 'towerup', dom: 'dominoes', ws: 'watersort', fb: 'football', wg: 'wrigglers', tri: 'trio',
     fr: 'fourrow', pk: 'peak', tr: 'territories', pw: 'pipes', db: 'doubles', sk: 'storekeeper',
     sr: 'starraid', cx: 'crossing', cm: 'carrom', nd: 'numberdrop', ci: 'circuit',
-    hr: 'hillrider', fl: 'flood', mo: 'motorush', mu: 'muncher', ft: 'fitten', fd: 'fivedice', hx: 'hex', ln: 'lander'
+    hr: 'hillrider', fl: 'flood', mo: 'motorush', mu: 'muncher', ft: 'fitten', fd: 'fivedice', hx: 'hex', ln: 'lander', gs: 'goose', dl: 'dicelands', cn: 'corners', fo: 'fourfold', snt: 'senet'
   };
   // Darts kept Dots' prefix for this one award when #464 renamed the others
   var ACH_GAME_ID = { 'dt-180': 'darts' };
@@ -3856,6 +3902,7 @@
     // صفحه‌ی منو. صفحه‌ی بازی خودش در Chogan.game عنوان دقیق‌ترش را می‌گذارد.
     if (!Chogan.pageTitle) Chogan.pageTitle = function () { return Chogan.t('appName'); };
     Chogan.applyLang();
+    Chogan.applyColors(); // before applyTheme, which reads the palette's background for the bar
     Chogan.applyTheme();
     Chogan.applyMotion();
     Chogan.cards.applyBack();

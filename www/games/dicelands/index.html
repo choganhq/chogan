@@ -1,0 +1,1131 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>تاس‌زمین — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  /* Four sides, each a pale fill the region numbers read on and a strong colour for its dice;
+     both re-tuned for the dark theme. Sides also differ by pattern, never by colour alone. */
+  :root { --dl-f0: #BFD5F5; --dl-f1: #F6D2AE; --dl-f2: #BFE5CC; --dl-f3: #EBC6E9; --dl-s0: #2563C9; --dl-s1: #C8610F; --dl-s2: #23824A; --dl-s3: #9B3A97;
+    --dl-ink: #1E2430; --dl-line: #FFFFFF; --dl-pill: #FFFFFF; --dl-die: #FFFFFF; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --dl-f0: #23395E; --dl-f1: #5A3A1E; --dl-f2: #1F4A31; --dl-f3: #4F2A4D; --dl-s0: #6FA3F2; --dl-s1: #F29A4A; --dl-s2: #5CC487; --dl-s3: #D77BD3;
+      --dl-ink: #F2F0EA; --dl-line: #14161C; --dl-pill: #14161C; --dl-die: #ECE8E0; }
+  }
+  :root[data-theme="dark"] { --dl-f0: #23395E; --dl-f1: #5A3A1E; --dl-f2: #1F4A31; --dl-f3: #4F2A4D; --dl-s0: #6FA3F2; --dl-s1: #F29A4A; --dl-s2: #5CC487; --dl-s3: #D77BD3;
+    --dl-ink: #F2F0EA; --dl-line: #14161C; --dl-pill: #14161C; --dl-die: #ECE8E0; }
+  /* the map is about as wide as it is tall; in a wide window it moves beside the panel */
+  .dl-wrap > .ch-fit { --fit-ar: 1; }
+  @container game (min-aspect-ratio: 5 / 4) { .dl-wrap > .ch-fit { --fit-ar: 1.08; } }
+  .ch-nocq .ch-gamemain.ch-wide .dl-wrap > .ch-fit { --fit-ar: 1.08; }
+  .ch-fit > .dl-box { position: relative; aspect-ratio: var(--fit-ar); }
+  .dl-canvas { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: block; touch-action: manipulation; cursor: pointer; }
+  .dl-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .dl-sides { width: 100%; max-width: 520px; display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2); }
+  .dl-side { display: flex; align-items: center; gap: var(--s-2); min-width: 0; background: var(--c-surface);
+    border-radius: var(--r-md); padding: 6px 10px; box-shadow: var(--sh-1); border: 2px solid transparent; min-height: 44px;
+    transition: border-color var(--t-mid) var(--ease), opacity var(--t-mid) var(--ease); }
+  .dl-side--on { border-color: var(--game); }
+  .dl-side--out { opacity: .45; }
+  .dl-side--out .dl-side__name { text-decoration: line-through; }
+  .dl-sw { width: 26px; height: 26px; flex: 0 0 26px; border-radius: 7px; display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 13px; color: var(--dl-ink); border: 2px solid var(--dl-ink); }
+  .dl-sw--1 { background-image: repeating-linear-gradient(45deg, rgba(0, 0, 0, .22) 0 2px, transparent 2px 6px); }
+  .dl-sw--2 { background-image: radial-gradient(rgba(0, 0, 0, .28) 1.4px, transparent 1.8px); background-size: 6px 6px; }
+  .dl-sw--3 { background-image: repeating-linear-gradient(45deg, rgba(0, 0, 0, .2) 0 1.5px, transparent 1.5px 6px), repeating-linear-gradient(-45deg, rgba(0, 0, 0, .2) 0 1.5px, transparent 1.5px 6px); }
+  .dl-side__text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .dl-side__name { min-width: 0; font-weight: 700; font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dl-side__info { font-size: var(--fs-xs); color: var(--c-text-dim); font-weight: 700; }
+  .dl-side__info span { white-space: nowrap; }
+  /* a landscape phone has ~330px under the header for the badge, chips, status and button */
+  @media (max-height: 480px) {
+    .dl-side { padding: 2px 8px; }
+    .dl-side__name, .dl-side__info { line-height: 1.25; }
+    .dl-status { min-height: 36px; }
+  }
+  .dl-thinking { animation: dl-blink 900ms infinite; }
+  @keyframes dl-blink { 50% { opacity: .55; } }
+  /* rolls appear in this row, so it keeps its height and nothing above or below it moves */
+  .dl-status { min-height: 48px; display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: nowrap;
+    font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); width: 100%; }
+  .dl-roll { display: flex; align-items: center; gap: 2px; direction: ltr; }
+  .dl-die { width: 13px; height: 13px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 800; line-height: 1; }
+  .dl-sum { min-width: 28px; font-size: var(--fs-md); font-weight: 800; color: var(--c-text); }
+  .dl-sum--win { color: var(--game-text, var(--game)); }
+  .dl-actions { display: flex; justify-content: center; width: 100%; min-height: 48px; align-items: center; }
+  .dl-actions .ch-btn { min-height: 44px; min-width: 160px; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function DicelandsEngineFactory() {
+  'use strict';
+
+  // A grid of pointy-top hexagons, odd rows shifted half a cell right, index r * COLS + c.
+  // Regions are grown on it from seeds; the game itself only looks at regions, their owner,
+  // their dice and which regions touch.
+  var COLS = 20, ROWS = 23, CELLS = COLS * ROWS, MAXD = 8, RESERVE_MAX = 64, ROUND_CAP = 60;
+  var LEVELS = ['easy', 'medium', 'hard'];
+  // Neighbour slots in edge order NE, E, SE, SW, W, NW, so slot k is the edge between the
+  // hexagon's corners k and k+1 (corner 0 at the top): drawing a border reads the same table
+  var NB = [];
+  for (var i0 = 0; i0 < CELLS; i0++) {
+    var r0 = Math.floor(i0 / COLS), c0 = i0 % COLS, odd = r0 & 1;
+    var d = odd ? [[-1, 1], [0, 1], [1, 1], [1, 0], [0, -1], [-1, 0]] : [[-1, 0], [0, 1], [1, 0], [1, -1], [0, -1], [-1, -1]];
+    NB.push(d.map(function (q) { var r = r0 + q[0], c = c0 + q[1]; return r >= 0 && r < ROWS && c >= 0 && c < COLS ? r * COLS + c : -1; }));
+  }
+  function px(i) { var r = Math.floor(i / COLS), c = i % COLS; return [Math.sqrt(3) * (c + 0.5 * (r & 1)), 1.5 * r]; }
+  function edge(i) { var r = Math.floor(i / COLS), c = i % COLS; return r === 0 || c === 0 || r === ROWS - 1 || c === COLS - 1; }
+
+  // P(sum of a dice > sum of b dice); a tie is the defender's, and a single die cannot attack
+  var SUMS = [[1]];
+  for (var k0 = 1; k0 <= MAXD; k0++) {
+    var prev = SUMS[k0 - 1], next = new Array(prev.length + 6).fill(0);
+    for (var s0 = 0; s0 < prev.length; s0++) for (var f0 = 1; f0 <= 6; f0++) next[s0 + f0] += prev[s0] / 6;
+    SUMS.push(next);
+  }
+  var PW = [];
+  for (var a0 = 0; a0 <= MAXD; a0++) {
+    PW.push([]);
+    for (var b0 = 0; b0 <= MAXD; b0++) {
+      var p = 0, A = SUMS[a0], B = SUMS[b0], cum = 0, cumB = [];
+      for (var x = 0; x < A.length; x++) { cumB.push(cum); cum += B[x] || 0; }
+      for (x = 0; x < A.length; x++) p += A[x] * cumB[x];
+      PW[a0].push(a0 < 2 ? 0 : b0 === 0 ? 1 : p);
+    }
+  }
+  function pwin(a, b) { return PW[Math.max(0, Math.min(MAXD, a))][Math.max(0, Math.min(MAXD, b))]; }
+
+  /* --------------------------------------------------------------- map */
+
+  // Regions grow one at a time from a seed that touches the land already made, so the map
+  // is connected by construction; a seed is taken near the middle, so the land stays a
+  // compact island. A map with a sliver of a region is thrown away and grown again.
+  function generate(sides, rnd) {
+    var opts = [];
+    for (var n0 = 24; n0 <= 32; n0++) if (n0 % sides === 0) opts.push(n0);
+    var n = opts[Math.floor(rnd() * opts.length)], target = Math.round(CELLS * 0.55 / n);
+    var centre = Math.floor(ROWS / 2) * COLS + Math.floor(COLS / 2), cp = px(centre);
+    var dist = function (i) { var q = px(i); return Math.hypot(q[0] - cp[0], q[1] - cp[1]); };
+    for (var tries = 0; tries < 60; tries++) {
+      var cells = new Array(CELLS).fill(-1), sizes = [], okMap = true;
+      for (var a = 0; a < n && okMap; a++) {
+        var cand = [], small = Math.max(4, Math.round(target * 0.6)), want = target - 1 + Math.floor(rnd() * 3), mem = null;
+        if (a > 0) {
+          for (var i = 0; i < CELLS; i++) {
+            if (cells[i] !== -1 || edge(i)) continue;
+            if (NB[i].some(function (j) { return j >= 0 && cells[j] >= 0; })) cand.push(i);
+          }
+          if (!cand.length) { okMap = false; break; }
+        }
+        // A seed boxed in by other regions cannot grow to size: such a region is cleared and
+        // grown again from another seed, so one bad pick does not throw the whole map away
+        for (var att = 0; att < 8 && !(mem && mem.length >= small); att++) {
+          if (mem) mem.forEach(function (x) { cells[x] = -1; });
+          var seed = centre;
+          if (a > 0) {
+            // near the middle, but with room around it
+            seed = -1;
+            for (var t = 0, bd = Infinity; t < 5; t++) {
+              var c = cand[Math.floor(rnd() * cand.length)], free = 0;
+              NB[c].forEach(function (j) { if (j >= 0 && cells[j] === -1 && !edge(j)) { free++; NB[j].forEach(function (q) { if (q >= 0 && cells[q] === -1 && !edge(q)) free += 0.25; }); } });
+              var dc = dist(c) - free * (0.8 + att * 0.5);
+              if (dc < bd) { bd = dc; seed = c; }
+            }
+          }
+          mem = grow(cells, a, seed, want, rnd);
+        }
+        sizes.push(mem.length);
+        if (mem.length < small) okMap = false;
+      }
+      if (!okMap) continue;
+      // a one-cell lake inside a single region is filled, it only looks like a hole
+      for (var h = 0; h < CELLS; h++) {
+        if (cells[h] !== -1) continue;
+        var around = NB[h].map(function (j) { return j < 0 ? -2 : cells[j]; });
+        if (around[0] >= 0 && around.every(function (o) { return o === around[0]; })) cells[h] = around[0];
+      }
+      return { n: n, cells: cells, adj: adjacency(cells, n) };
+    }
+    throw new Error('dicelands: no map grown');
+  }
+  function grow(cells, a, seed, want, rnd) {
+        var mem = [seed];
+        cells[seed] = a;
+        while (mem.length < want) {
+          var fr = [];
+          for (var m = 0; m < mem.length; m++) NB[mem[m]].forEach(function (j) { if (j >= 0 && cells[j] === -1 && !edge(j) && fr.indexOf(j) < 0) fr.push(j); });
+          // a region boxed in against the frame may use the outer ring rather than end up a sliver
+          if (!fr.length) for (m = 0; m < mem.length; m++) NB[mem[m]].forEach(function (j) { if (j >= 0 && cells[j] === -1 && fr.indexOf(j) < 0) fr.push(j); });
+          if (!fr.length) break;
+          // of three frontier cells, the one most surrounded by the region: round shapes
+          var best = -1, bs = -1;
+          for (var s = 0; s < 3; s++) {
+            var f = fr[Math.floor(rnd() * fr.length)], own = 0;
+            NB[f].forEach(function (j) { if (j >= 0 && cells[j] === a) own++; });
+            if (own > bs) { bs = own; best = f; }
+          }
+          cells[best] = a; mem.push(best);
+        }
+        return mem;
+  }
+  function adjacency(cells, n) {
+    var adj = [];
+    for (var a = 0; a < n; a++) adj.push([]);
+    for (var i = 0; i < CELLS; i++) {
+      var a2 = cells[i];
+      if (a2 < 0) continue;
+      NB[i].forEach(function (j) { if (j >= 0 && cells[j] >= 0 && cells[j] !== a2 && adj[a2].indexOf(cells[j]) < 0) adj[a2].push(cells[j]); });
+    }
+    adj.forEach(function (l) { l.sort(function (x, y) { return x - y; }); });
+    return adj;
+  }
+
+  // Regions are dealt round-robin from a shuffle, every region starts with one die, and
+  // every side gets the same number of extra dice spread at random: an even start
+  function newGame(sides, rnd) {
+    var M = generate(sides, rnd), n = M.n, order = [], owner = new Array(n), dice = new Array(n).fill(1);
+    for (var k = 0; k < n; k++) order.push(k);
+    for (k = n - 1; k > 0; k--) { var j = Math.floor(rnd() * (k + 1)), t = order[k]; order[k] = order[j]; order[j] = t; }
+    for (k = 0; k < n; k++) owner[order[k]] = k % sides;
+    var per = n / sides, reserve = [];
+    for (var sd = 0; sd < sides; sd++) {
+      var mine = [];
+      for (k = 0; k < n; k++) if (owner[k] === sd) mine.push(k);
+      for (var e = 0; e < per; e++) {
+        var room = mine.filter(function (r) { return dice[r] < MAXD; });
+        dice[room[Math.floor(rnd() * room.length)]]++;
+      }
+      reserve.push(0);
+    }
+    return { cols: COLS, rows: ROWS, cells: M.cells, n: n, adj: M.adj, owner: owner, dice: dice, sides: sides,
+      turn: 0, reserve: reserve, round: 1, moves: 0, winner: -1, capped: false };
+  }
+  function clone(S) {
+    return { cols: S.cols, rows: S.rows, cells: S.cells.slice(), n: S.n, adj: S.adj.map(function (l) { return l.slice(); }), owner: S.owner.slice(),
+      dice: S.dice.slice(), sides: S.sides, turn: S.turn, reserve: S.reserve.slice(), round: S.round, moves: S.moves, winner: S.winner, capped: S.capped };
+  }
+  function connected(S) {
+    var seen = [0], q = [0];
+    for (var h = 0; h < q.length; h++) S.adj[q[h]].forEach(function (b) { if (seen.indexOf(b) < 0) { seen.push(b); q.push(b); } });
+    return seen.length === S.n;
+  }
+  // The region's most inland cell, where its dice are drawn and a tap reads best
+  function centers(S) {
+    var out = [];
+    for (var a = 0; a < S.n; a++) {
+      var mem = [], sx = 0, sy = 0;
+      for (var i = 0; i < CELLS; i++) if (S.cells[i] === a) { mem.push(i); var q = px(i); sx += q[0]; sy += q[1]; }
+      sx /= mem.length; sy /= mem.length;
+      var best = mem[0], bv = -Infinity;
+      mem.forEach(function (c) {
+        var own = NB[c].filter(function (j) { return j >= 0 && S.cells[j] === a; }).length, q = px(c);
+        var v = own * 2 - Math.hypot(q[0] - sx, q[1] - sy);
+        if (v > bv) { bv = v; best = c; }
+      });
+      out.push(best);
+    }
+    return out;
+  }
+
+  /* ------------------------------------------------------------- rules */
+
+  function alive(S, side) { return S.owner.indexOf(side) >= 0; }
+  function legalAttack(S, f, t) {
+    return S.winner < 0 && f >= 0 && f < S.n && t >= 0 && t < S.n && S.owner[f] === S.turn && S.owner[t] !== S.turn &&
+      S.dice[f] >= 2 && S.adj[f].indexOf(t) >= 0;
+  }
+  function attacks(S) {
+    var out = [];
+    if (S.winner >= 0) return out;
+    for (var f = 0; f < S.n; f++) {
+      if (S.owner[f] !== S.turn || S.dice[f] < 2) continue;
+      S.adj[f].forEach(function (t) { if (S.owner[t] !== S.turn) out.push([f, t]); });
+    }
+    return out;
+  }
+  function roll(S, f, t, rnd) {
+    var r = { a: [], d: [] };
+    for (var k = 0; k < S.dice[f]; k++) r.a.push(1 + Math.floor(rnd() * 6));
+    for (k = 0; k < S.dice[t]; k++) r.d.push(1 + Math.floor(rnd() * 6));
+    return r;
+  }
+  function sum(l) { return l.reduce(function (x, y) { return x + y; }, 0); }
+  function resolve(S, f, t, rl) {
+    var sa = sum(rl.a), sd = sum(rl.d), win = sa > sd, side = S.owner[f], was = S.owner[t];
+    if (win) { S.owner[t] = side; S.dice[t] = S.dice[f] - 1; }
+    S.dice[f] = 1;
+    S.moves++;
+    var left = [];
+    for (var k = 0; k < S.sides; k++) if (alive(S, k)) left.push(k);
+    if (left.length === 1) S.winner = left[0];
+    return { win: win, a: rl.a, d: rl.d, sa: sa, sd: sd, from: f, to: t, side: side, was: was };
+  }
+  function attack(S, f, t, rnd) { return legalAttack(S, f, t) ? resolve(S, f, t, roll(S, f, t, rnd)) : null; }
+
+  function groups(S, side, extra) {
+    var seen = new Array(S.n).fill(false), best = 0;
+    var mine = function (r) { return S.owner[r] === side || r === extra; };
+    for (var a = 0; a < S.n; a++) {
+      if (seen[a] || !mine(a)) continue;
+      var q = [a], size = 0;
+      seen[a] = true;
+      while (q.length) { var x = q.pop(); size++; S.adj[x].forEach(function (b) { if (!seen[b] && mine(b)) { seen[b] = true; q.push(b); } }); }
+      if (size > best) best = size;
+    }
+    return best;
+  }
+  function largestGroup(S, side) { return groups(S, side, -1); }
+
+  // The side gets as many dice as its largest group of joined regions, plus what it kept,
+  // dropped one at a time on its regions that are not full; what does not fit is kept
+  function endTurn(S, rnd) {
+    if (S.winner >= 0) return null;
+    var side = S.turn, gain = largestGroup(S, side), pool = gain + S.reserve[side], placed = [], own = [];
+    for (var a = 0; a < S.n; a++) if (S.owner[a] === side) own.push(a);
+    while (pool > 0) {
+      var room = own.filter(function (r) { return S.dice[r] < MAXD; });
+      if (!room.length) break;
+      var r = room[Math.floor(rnd() * room.length)];
+      S.dice[r]++; placed.push(r); pool--;
+    }
+    S.reserve[side] = Math.min(RESERVE_MAX, pool);
+    var k = side;
+    do {
+      k = (k + 1) % S.sides;
+      if (k === 0) S.round++;
+    } while (!alive(S, k) && k !== side);
+    S.turn = k;
+    // A game that drags on (two careful bots can shuffle dice for ever) ends at the round
+    // cap: most regions, then most dice, then the earlier side
+    if (S.round > ROUND_CAP) {
+      var best = -1, bv = null;
+      for (var sd = 0; sd < S.sides; sd++) {
+        var cnt = 0, dc = 0;
+        for (a = 0; a < S.n; a++) if (S.owner[a] === sd) { cnt++; dc += S.dice[a]; }
+        if (!cnt) continue;
+        if (!bv || cnt > bv[0] || (cnt === bv[0] && dc > bv[1])) { bv = [cnt, dc]; best = sd; }
+      }
+      S.winner = best; S.capped = true;
+    }
+    return { side: side, gain: gain, placed: placed, kept: S.reserve[side] };
+  }
+
+  /* --------------------------------------------------------------- bot */
+
+  // How much an enemy region next to r could hurt r if r held n dice
+  function threat(S, r, n, side, skip) {
+    var worst = 0;
+    S.adj[r].forEach(function (e) {
+      if (e === skip || S.owner[e] === side || S.dice[e] < 2) return;
+      var p = pwin(S.dice[e], n);
+      if (p > worst) worst = p;
+    });
+    return worst;
+  }
+  // The next attack for the side to move, or null to end the turn
+  function think(S, level, rnd) {
+    if (S.winner >= 0) return null;
+    var side = S.turn, list = attacks(S);
+    if (!list.length) return null;
+    var rated = list.map(function (m) { return { m: m, p: pwin(S.dice[m[0]], S.dice[m[1]]) }; });
+    if (level === 'easy') {
+      // picks any attack with fair odds, and now and then simply stops
+      var fair = rated.filter(function (x) { return x.p >= 0.45; });
+      if (!fair.length || rnd() < 0.25) return null;
+      return fair[Math.floor(rnd() * fair.length)].m;
+    }
+    var now = largestGroup(S, side), best = null, bv = -Infinity;
+    rated.forEach(function (x) {
+      var f = x.m[0], t = x.m[1], full = S.dice[f] === MAXD;
+      // a stack of 8 gains nothing by waiting, so it may take an even fight
+      if (x.p < (full ? 0.4 : 0.5)) return;
+      var gain = groups(S, side, t) - now;
+      var v = x.p * (1 + 0.35 * gain);
+      if (level === 'hard') {
+        // what the captured region (left with n-1 dice) and the emptied source (one die)
+        // would face from the other sides afterwards
+        v -= 0.45 * x.p * threat(S, t, S.dice[f] - 1, side, -1) + 0.2 * threat(S, f, 1, side, t);
+        if (S.owner[t] !== side && alive(S, S.owner[t]) && S.owner.filter(function (o) { return o === S.owner[t]; }).length === 1) v += 0.6;
+      }
+      v += rnd() * 0.05;
+      if (v > bv) { bv = v; best = x.m; }
+    });
+    if (!best || (level === 'hard' && bv < 0.3)) return null;
+    return best;
+  }
+
+  function valid(S) {
+    if (!S || S.cols !== COLS || S.rows !== ROWS || !Array.isArray(S.cells) || S.cells.length !== CELLS) return false;
+    var n = S.n;
+    if (!(n >= 2 && n <= 64) || !(S.sides >= 2 && S.sides <= 4)) return false;
+    if (!Array.isArray(S.owner) || S.owner.length !== n || !Array.isArray(S.dice) || S.dice.length !== n || !Array.isArray(S.adj) || S.adj.length !== n) return false;
+    if (!Array.isArray(S.reserve) || S.reserve.length !== S.sides || S.reserve.some(function (x) { return !(x >= 0 && x <= RESERVE_MAX && x === Math.floor(x)); })) return false;
+    var count = new Array(n).fill(0);
+    for (var i = 0; i < CELLS; i++) {
+      var c = S.cells[i];
+      if (c === -1) continue;
+      if (!(c >= 0 && c < n && c === Math.floor(c))) return false;
+      count[c]++;
+    }
+    if (count.some(function (x) { return x === 0; })) return false;
+    if (JSON.stringify(adjacency(S.cells, n)) !== JSON.stringify(S.adj)) return false;
+    if (S.owner.some(function (o) { return !(o >= 0 && o < S.sides && o === Math.floor(o)); })) return false;
+    if (S.dice.some(function (x) { return !(x >= 1 && x <= MAXD && x === Math.floor(x)); })) return false;
+    if (!(S.turn >= 0 && S.turn < S.sides) || !(S.round >= 1 && S.round <= ROUND_CAP + 1) || !(S.moves >= 0)) return false;
+    if (!connected(S)) return false;
+    var left = 0;
+    for (var k = 0; k < S.sides; k++) if (alive(S, k)) left++;
+    if (S.winner === -1) return !S.capped && left >= 2 && alive(S, S.turn) && S.round <= ROUND_CAP;
+    if (!(S.winner >= 0 && S.winner < S.sides) || !alive(S, S.winner)) return false;
+    return S.capped ? S.round === ROUND_CAP + 1 : left === 1;
+  }
+
+  return { COLS: COLS, ROWS: ROWS, CELLS: CELLS, MAXD: MAXD, ROUND_CAP: ROUND_CAP, RESERVE_MAX: RESERVE_MAX, LEVELS: LEVELS, NB: NB, px: px,
+    pwin: pwin, generate: generate, newGame: newGame, clone: clone, connected: connected, centers: centers, alive: alive,
+    legalAttack: legalAttack, attacks: attacks, roll: roll, resolve: resolve, attack: attack, largestGroup: largestGroup, groups: groups,
+    endTurn: endTurn, think: think, valid: valid };
+}
+if (typeof module !== 'undefined') module.exports = DicelandsEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = DicelandsEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'dicelands',
+    name: { fa: 'تاس‌زمین', en: 'Dicelands', zh: '骰子大陆', de: 'Würfelland', es: 'Tierra de dados', pl: 'Krainy kości', fr: 'Terres de dés', ar: 'أرض النرد', hi: 'पासों का देश' },
+    accent: '#0030FC',
+    mood: 'sudoku',
+    strings: {
+      fa: {
+        map: 'نقشه‌ی تاس‌زمین', vsBot: 'مقابل ربات‌ها', two: 'دو نفره', botN: 'ربات {n}', playerN: 'بازیکن {n}', modeT: 'بازیکن‌ها', botsT: 'تعداد ربات‌ها', levelT: 'سطح ربات‌ها',
+        newMatch: 'بازی تازه', begin: 'شروع', endWarn: 'بازی فعلی تمام می‌شود. ادامه؟', settingsT: 'بازی تازه', endTurn: 'پایان نوبت',
+        yourTurn: 'سرزمینی از خودت را با دست‌کم دو تاس بزن', pickTarget: 'حالا یک سرزمین همسایه‌ی حریف را بزن', turnOf: 'نوبت {n}', thinking: '{n} فکر می‌کند…',
+        dailyDl: 'تاس‌زمین روزانه', vsMedium: 'چهار طرف، ربات‌های متوسط', playerWon: '{n} برد', regionsL: 'سرزمین‌ها', roundsL: 'دورها', out: 'بیرون',
+        reinforce: '{n} {k} تاس تازه گرفت', took: 'گرفت!', held: 'دفاع شد', capNote: 'به سقف دورها رسیدیم؛ سرزمین بیشتر برنده است',
+        sideInfo: '{r} سرزمین · {d} تاس', noMove: 'حمله‌ای نمانده؛ نوبت را تمام کن',
+        rules: 'هر طرف رنگ و طرح خودش را دارد و عدد هر سرزمین تعداد تاس‌های آن است. در نوبتت از سرزمینی با دست‌کم دو تاس به سرزمین همسایه‌ی حریف حمله کن. هر دو طرف همه‌ی تاس‌هایشان را می‌ریزند؛ جمع بیشتر می‌برد و مساوی به نفع مدافع است. اگر ببری، همه‌ی تاس‌ها جز یکی به سرزمین تازه می‌روند و یکی می‌ماند. اگر ببازی، فقط یک تاس برایت می‌ماند. هر چند بار بخواهی حمله کن، بعد نوبت را تمام کن: به اندازه‌ی بزرگ‌ترین گروه سرزمین‌های به‌هم‌چسبیده‌ات تاس تازه می‌گیری که تصادفی پخش می‌شوند. هر سرزمین حداکثر هشت تاس دارد و اضافه‌اش ذخیره می‌شود. آخرین طرفی که بماند می‌برد. روی هدف‌ها شانس بردن نوشته شده است.',
+        kCursor: 'جابه‌جایی بین سرزمین‌ها', kGo: 'انتخاب یا حمله', kEnd: 'پایان نوبت', kCancel: 'لغو انتخاب',
+        tutTitle1: 'سرزمین‌ها و تاس‌ها', tutText1: 'هر رنگ و طرح یک طرف است. عدد هر سرزمین تعداد تاس‌های آن است.',
+        tutTitle2: 'حمله', tutText2: 'سرزمینی با دست‌کم دو تاس را بزن، بعد همسایه‌ی حریف را. جمع بیشتر می‌برد و مساوی به نفع مدافع است.',
+        tutTitle3: 'به هم چسبیده بمان', tutText3: 'آخر نوبت به اندازه‌ی بزرگ‌ترین گروه سرزمین‌های به‌هم‌چسبیده‌ات تاس تازه می‌گیری.'
+      },
+      en: {
+        map: 'Dicelands map', vsBot: 'Against bots', two: 'Two players', botN: 'Bot {n}', playerN: 'Player {n}', modeT: 'Players', botsT: 'Number of bots', levelT: 'Bot level',
+        newMatch: 'New game', begin: 'Start', endWarn: 'This ends the current game. Continue?', settingsT: 'New game', endTurn: 'End turn',
+        yourTurn: 'Tap one of your regions with two or more dice', pickTarget: 'Now tap a neighbouring enemy region', turnOf: '{n}’s turn', thinking: '{n} is thinking…',
+        dailyDl: 'Daily Dicelands', vsMedium: 'four sides, medium bots', playerWon: '{n} wins', regionsL: 'Regions', roundsL: 'Rounds', out: 'out',
+        reinforce: '{n} gets {k} new dice', took: 'Taken!', held: 'Held', capNote: 'Round limit reached; most regions wins',
+        sideInfo: '{r} regions · {d} dice', noMove: 'No attacks left; end your turn',
+        rules: 'Each side has its own colour and pattern, and the number on a region is how many dice it holds. On your turn, attack a neighbouring enemy region from one of yours with at least two dice. Both sides roll all their dice; the higher sum wins and a tie goes to the defender. If you win, all but one of your dice move in and one stays behind. If you lose, you keep only one die. Attack as often as you like, then end your turn: you get as many new dice as your largest group of joined regions, spread at random. A region holds at most eight dice; the rest is kept for later. The last side standing wins. Targets show your odds of winning.',
+        kCursor: 'Move between regions', kGo: 'Select or attack', kEnd: 'End turn', kCancel: 'Cancel the selection',
+        tutTitle1: 'Regions and dice', tutText1: 'Each colour and pattern is a side. The number on a region is how many dice it holds.',
+        tutTitle2: 'Attack', tutText2: 'Tap a region with two or more dice, then an enemy neighbour. The higher sum wins; a tie goes to the defender.',
+        tutTitle3: 'Stay joined', tutText3: 'At the end of your turn you get as many new dice as your largest group of joined regions.'
+      },
+      pl: {
+        map: 'Mapa Krain kości', vsBot: 'Przeciwko botom', two: 'Dwóch graczy', botN: 'Bot {n}', playerN: 'Gracz {n}', modeT: 'Gracze', botsT: 'Liczba botów', levelT: 'Poziom botów',
+        newMatch: 'Nowa gra', begin: 'Start', endWarn: 'To zakończy bieżącą grę. Kontynuować?', settingsT: 'Nowa gra', endTurn: 'Koniec tury',
+        yourTurn: 'Dotknij swojego regionu z co najmniej dwiema kośćmi', pickTarget: 'Teraz dotknij sąsiedniego regionu wroga', turnOf: 'Tura: {n}', thinking: '{n} myśli…',
+        dailyDl: 'Codzienne Krainy kości', vsMedium: 'cztery strony, średnie boty', playerWon: '{n} wygrywa', regionsL: 'Regiony', roundsL: 'Rundy', out: 'odpada',
+        reinforce: '{n} dostaje nowe kości: {k}', took: 'Zdobyty!', held: 'Obroniony', capNote: 'Limit rund; wygrywa ten, kto ma najwięcej regionów',
+        sideInfo: 'regiony {r} · kości {d}', noMove: 'Brak ataków; zakończ turę',
+        rules: 'Każda strona ma swój kolor i wzór, a liczba na regionie to liczba jego kości. W swojej turze atakuj sąsiedni region wroga ze swojego regionu, który ma co najmniej dwie kości. Obie strony rzucają wszystkimi kośćmi; wyższa suma wygrywa, a remis wygrywa obrońca. Po wygranej wszystkie kości poza jedną wchodzą na nowy region, a jedna zostaje. Po przegranej zostaje ci tylko jedna kość. Atakuj, ile chcesz, potem zakończ turę: dostajesz tyle nowych kości, ile regionów liczy twoja największa połączona grupa, rozdzielonych losowo. Region mieści najwyżej osiem kości; nadmiar czeka na później. Wygrywa ostatnia strona na planszy. Na celach widać szanse na wygraną.',
+        kCursor: 'Ruch między regionami', kGo: 'Wybierz lub atakuj', kEnd: 'Koniec tury', kCancel: 'Anuluj wybór',
+        tutTitle1: 'Regiony i kości', tutText1: 'Każdy kolor i wzór to jedna strona. Liczba na regionie to liczba jego kości.',
+        tutTitle2: 'Atak', tutText2: 'Dotknij regionu z co najmniej dwiema kośćmi, potem sąsiada wroga. Wyższa suma wygrywa; remis wygrywa obrońca.',
+        tutTitle3: 'Trzymaj się razem', tutText3: 'Na koniec tury dostajesz tyle nowych kości, ile regionów liczy twoja największa połączona grupa.'
+      },
+      fr: {
+        map: 'Carte des Terres de dés', vsBot: 'Contre les robots', two: 'Deux joueurs', botN: 'Robot {n}', playerN: 'Joueur {n}', modeT: 'Joueurs', botsT: 'Nombre de robots', levelT: 'Niveau des robots',
+        newMatch: 'Nouvelle partie', begin: 'Commencer', endWarn: 'Cela met fin à la partie en cours. Continuer ?', settingsT: 'Nouvelle partie', endTurn: 'Fin du tour',
+        yourTurn: 'Touche une de tes régions avec au moins deux dés', pickTarget: 'Touche maintenant une région ennemie voisine', turnOf: 'Au tour de {n}', thinking: '{n} réfléchit…',
+        dailyDl: 'Terres de dés du jour', vsMedium: 'quatre camps, robots moyens', playerWon: '{n} gagne', regionsL: 'Régions', roundsL: 'Manches', out: 'éliminé',
+        reinforce: '{n} reçoit {k} nouveaux dés', took: 'Prise !', held: 'Tenue', capNote: 'Limite de manches atteinte ; le plus de régions gagne',
+        sideInfo: '{r} régions · {d} dés', noMove: 'Plus d’attaque possible ; finis ton tour',
+        rules: 'Chaque camp a sa couleur et son motif, et le nombre sur une région indique ses dés. À ton tour, attaque une région ennemie voisine depuis une des tiennes qui a au moins deux dés. Les deux camps lancent tous leurs dés ; la somme la plus haute gagne et l’égalité revient au défenseur. Si tu gagnes, tous tes dés sauf un entrent dans la région et un reste derrière. Si tu perds, il ne te reste qu’un dé. Attaque autant que tu veux, puis finis ton tour : tu reçois autant de nouveaux dés que ton plus grand groupe de régions reliées, répartis au hasard. Une région porte au plus huit dés ; le surplus est gardé pour plus tard. Le dernier camp en jeu gagne. Les cibles affichent tes chances.',
+        kCursor: 'Passer d’une région à l’autre', kGo: 'Choisir ou attaquer', kEnd: 'Fin du tour', kCancel: 'Annuler le choix',
+        tutTitle1: 'Régions et dés', tutText1: 'Chaque couleur et motif est un camp. Le nombre sur une région indique ses dés.',
+        tutTitle2: 'Attaquer', tutText2: 'Touche une région avec au moins deux dés, puis une voisine ennemie. La somme la plus haute gagne ; l’égalité revient au défenseur.',
+        tutTitle3: 'Reste groupé', tutText3: 'À la fin du tour, tu reçois autant de nouveaux dés que ton plus grand groupe de régions reliées.'
+      },
+      ar: {
+        map: 'خريطة أرض النرد', vsBot: 'ضد الروبوتات', two: 'لاعبان', botN: 'الروبوت {n}', playerN: 'اللاعب {n}', modeT: 'اللاعبون', botsT: 'عدد الروبوتات', levelT: 'مستوى الروبوتات',
+        newMatch: 'لعبة جديدة', begin: 'ابدأ', endWarn: 'سينهي هذا اللعبة الحالية. هل تتابع؟', settingsT: 'لعبة جديدة', endTurn: 'إنهاء الدور',
+        yourTurn: 'انقر إحدى مناطقك التي فيها نردان على الأقل', pickTarget: 'الآن انقر منطقة مجاورة للخصم', turnOf: 'دور {n}', thinking: '{n} يفكر…',
+        dailyDl: 'أرض النرد اليومية', vsMedium: 'أربعة أطراف، روبوتات متوسطة', playerWon: 'فاز {n}', regionsL: 'المناطق', roundsL: 'الجولات', out: 'خرج',
+        reinforce: '{n} حصل على {k} نرد جديد', took: 'استولى!', held: 'صمدت', capNote: 'بلغنا حد الجولات؛ الفائز صاحب أكثر المناطق',
+        sideInfo: '{r} منطقة · {d} نرد', noMove: 'لا هجمات متبقية؛ أنهِ دورك',
+        rules: 'لكل طرف لونه ونقشه، والرقم على المنطقة هو عدد أحجار النرد فيها. في دورك هاجم منطقة مجاورة للخصم من منطقة لك فيها نردان على الأقل. يرمي الطرفان كل نردهما؛ المجموع الأعلى يفوز والتعادل للمدافع. إن فزت انتقل كل نردك إلا واحدًا إلى المنطقة الجديدة وبقي واحد. وإن خسرت بقي لك نرد واحد فقط. هاجم كما تشاء ثم أنهِ دورك؛ تحصل على نرد جديد بعدد مناطق أكبر مجموعة متصلة لديك، يُوزَّع عشوائيًا. تحمل المنطقة ثمانية أحجار نرد على الأكثر، والباقي يُحفظ لاحقًا. آخر طرف يبقى هو الفائز. تظهر على الأهداف فرص فوزك.',
+        kCursor: 'تنقل بين المناطق', kGo: 'اختر أو هاجم', kEnd: 'إنهاء الدور', kCancel: 'إلغاء الاختيار',
+        tutTitle1: 'المناطق والنرد', tutText1: 'كل لون ونقش طرف. الرقم على المنطقة هو عدد أحجار النرد فيها.',
+        tutTitle2: 'الهجوم', tutText2: 'انقر منطقة فيها نردان على الأقل، ثم منطقة مجاورة للخصم. المجموع الأعلى يفوز والتعادل للمدافع.',
+        tutTitle3: 'ابقَ متصلًا', tutText3: 'في نهاية دورك تحصل على نرد جديد بعدد مناطق أكبر مجموعة متصلة لديك.'
+      },
+      hi: {
+        map: 'पासों के देश का नक्शा', vsBot: 'बॉटों से', two: 'दो खिलाड़ी', botN: 'बॉट {n}', playerN: 'खिलाड़ी {n}', modeT: 'खिलाड़ी', botsT: 'बॉटों की संख्या', levelT: 'बॉटों का स्तर',
+        newMatch: 'नया खेल', begin: 'शुरू करें', endWarn: 'इससे मौजूदा खेल ख़त्म हो जाएगा। जारी रखें?', settingsT: 'नया खेल', endTurn: 'बारी ख़त्म',
+        yourTurn: 'अपना कोई इलाक़ा छुएँ जिसमें कम से कम दो पासे हों', pickTarget: 'अब विरोधी का कोई पड़ोसी इलाक़ा छुएँ', turnOf: '{n} की बारी', thinking: '{n} सोच रहा है…',
+        dailyDl: 'रोज़ का पासों का देश', vsMedium: 'चार पक्ष, मध्यम बॉट', playerWon: '{n} की जीत', regionsL: 'इलाक़े', roundsL: 'दौर', out: 'बाहर',
+        reinforce: '{n} को {k} नए पासे मिले', took: 'जीत लिया!', held: 'बचा लिया', capNote: 'दौर की सीमा पूरी; सबसे ज़्यादा इलाक़ों वाला जीता',
+        sideInfo: '{r} इलाक़े · {d} पासे', noMove: 'कोई हमला नहीं बचा; बारी ख़त्म करें',
+        rules: 'हर पक्ष का अपना रंग और नमूना है, और इलाक़े पर लिखी संख्या उसके पासों की गिनती है। अपनी बारी में अपने किसी ऐसे इलाक़े से, जिसमें कम से कम दो पासे हों, विरोधी के पड़ोसी इलाक़े पर हमला करें। दोनों पक्ष अपने सारे पासे फेंकते हैं; बड़ा जोड़ जीतता है और बराबरी बचाव करने वाले की होती है। जीतने पर एक को छोड़ सारे पासे नए इलाक़े में चले जाते हैं। हारने पर आपके पास सिर्फ़ एक पासा बचता है। जितनी बार चाहें हमला करें, फिर बारी ख़त्म करें; आपको अपने सबसे बड़े जुड़े समूह के इलाक़ों जितने नए पासे मिलते हैं, जो बेतरतीब बँटते हैं। एक इलाक़े में अधिकतम आठ पासे रहते हैं; बाक़ी बाद के लिए रखे जाते हैं। आख़िर में बचा पक्ष जीतता है। निशानों पर जीत की संभावना दिखती है।',
+        kCursor: 'इलाक़ों के बीच जाएँ', kGo: 'चुनें या हमला करें', kEnd: 'बारी ख़त्म', kCancel: 'चुनाव रद्द करें',
+        tutTitle1: 'इलाक़े और पासे', tutText1: 'हर रंग और नमूना एक पक्ष है। इलाक़े पर लिखी संख्या उसके पासों की गिनती है।',
+        tutTitle2: 'हमला', tutText2: 'कम से कम दो पासों वाला इलाक़ा छुएँ, फिर विरोधी का पड़ोसी। बड़ा जोड़ जीतता है; बराबरी बचाव करने वाले की।',
+        tutTitle3: 'जुड़े रहें', tutText3: 'बारी के अंत में आपको अपने सबसे बड़े जुड़े समूह के इलाक़ों जितने नए पासे मिलते हैं।'
+      },
+      zh: {
+        map: '骰子大陆地图', vsBot: '对战电脑', two: '双人', botN: '电脑 {n}', playerN: '玩家 {n}', modeT: '玩家', botsT: '电脑数量', levelT: '电脑难度',
+        newMatch: '新一局', begin: '开始', endWarn: '将结束当前对局，是否继续？', settingsT: '新一局', endTurn: '结束回合',
+        yourTurn: '点你的一块至少有两颗骰子的领地', pickTarget: '再点一块相邻的敌方领地', turnOf: '轮到{n}', thinking: '{n}思考中……',
+        dailyDl: '每日骰子大陆', vsMedium: '四方，中等电脑', playerWon: '{n}获胜', regionsL: '领地', roundsL: '轮数', out: '出局',
+        reinforce: '{n}获得 {k} 颗新骰子', took: '攻下！', held: '守住', capNote: '已到轮数上限；领地最多者获胜',
+        sideInfo: '{r} 块领地 · {d} 颗骰子', noMove: '无法再进攻；请结束回合',
+        rules: '每一方有自己的颜色和花纹，领地上的数字是它的骰子数。轮到你时，从你一块至少有两颗骰子的领地进攻相邻的敌方领地。双方掷出全部骰子；点数和大的一方获胜，平局算防守方赢。进攻成功时，除一颗外的骰子全部进入新领地，留下一颗。进攻失败时，你只剩一颗骰子。想攻几次都行，然后结束回合：你会获得与最大相连领地群块数相同的新骰子，随机分配。每块领地最多八颗骰子，多出的留到以后。最后留下的一方获胜。目标上会显示获胜几率。',
+        kCursor: '在领地之间移动', kGo: '选择或进攻', kEnd: '结束回合', kCancel: '取消选择',
+        tutTitle1: '领地与骰子', tutText1: '每种颜色和花纹代表一方。领地上的数字是它的骰子数。',
+        tutTitle2: '进攻', tutText2: '先点一块至少有两颗骰子的领地，再点相邻的敌方领地。点数和大者胜，平局算防守方赢。',
+        tutTitle3: '保持相连', tutText3: '回合结束时，你会获得与最大相连领地群块数相同的新骰子。'
+      },
+      de: {
+        map: 'Karte von Würfelland', vsBot: 'Gegen Bots', two: 'Zu zweit', botN: 'Bot {n}', playerN: 'Spieler {n}', modeT: 'Spieler', botsT: 'Anzahl der Bots', levelT: 'Bot-Stufe',
+        newMatch: 'Neue Partie', begin: 'Start', endWarn: 'Die aktuelle Partie endet. Weiter?', settingsT: 'Neue Partie', endTurn: 'Zug beenden',
+        yourTurn: 'Tippe ein eigenes Gebiet mit mindestens zwei Würfeln', pickTarget: 'Tippe jetzt ein benachbartes feindliches Gebiet', turnOf: 'Am Zug: {n}', thinking: '{n} überlegt …',
+        dailyDl: 'Würfelland des Tages', vsMedium: 'vier Seiten, mittlere Bots', playerWon: 'Sieg: {n}', regionsL: 'Gebiete', roundsL: 'Runden', out: 'raus',
+        reinforce: '{n} erhält {k} neue Würfel', took: 'Erobert!', held: 'Gehalten', capNote: 'Rundenlimit erreicht; die meisten Gebiete gewinnen',
+        sideInfo: '{r} Gebiete · {d} Würfel', noMove: 'Kein Angriff mehr möglich; beende deinen Zug',
+        rules: 'Jede Seite hat ihre eigene Farbe und ihr Muster, und die Zahl auf einem Gebiet ist die Zahl seiner Würfel. In deinem Zug greifst du von einem eigenen Gebiet mit mindestens zwei Würfeln ein benachbartes feindliches Gebiet an. Beide Seiten werfen alle ihre Würfel; die höhere Summe gewinnt, ein Gleichstand geht an den Verteidiger. Gewinnst du, ziehen alle Würfel bis auf einen ein, einer bleibt zurück. Verlierst du, bleibt dir nur ein Würfel. Greife so oft an, wie du willst, dann beende den Zug: Du erhältst so viele neue Würfel, wie deine größte zusammenhängende Gruppe Gebiete hat, zufällig verteilt. Ein Gebiet trägt höchstens acht Würfel; der Rest wird aufbewahrt. Die letzte Seite im Spiel gewinnt. Ziele zeigen deine Gewinnchance.',
+        kCursor: 'Zwischen Gebieten wechseln', kGo: 'Wählen oder angreifen', kEnd: 'Zug beenden', kCancel: 'Auswahl aufheben',
+        tutTitle1: 'Gebiete und Würfel', tutText1: 'Jede Farbe mit ihrem Muster ist eine Seite. Die Zahl auf einem Gebiet ist die Zahl seiner Würfel.',
+        tutTitle2: 'Angreifen', tutText2: 'Tippe ein Gebiet mit mindestens zwei Würfeln, dann einen feindlichen Nachbarn. Die höhere Summe gewinnt; Gleichstand geht an den Verteidiger.',
+        tutTitle3: 'Bleib verbunden', tutText3: 'Am Ende des Zugs erhältst du so viele neue Würfel, wie deine größte zusammenhängende Gruppe Gebiete hat.'
+      },
+      es: {
+        map: 'Mapa de Tierra de dados', vsBot: 'Contra bots', two: 'Dos jugadores', botN: 'Bot {n}', playerN: 'Jugador {n}', modeT: 'Jugadores', botsT: 'Número de bots', levelT: 'Nivel de los bots',
+        newMatch: 'Nueva partida', begin: 'Empezar', endWarn: 'Esto termina la partida actual. ¿Seguir?', settingsT: 'Nueva partida', endTurn: 'Terminar turno',
+        yourTurn: 'Toca una de tus regiones con dos o más dados', pickTarget: 'Ahora toca una región enemiga vecina', turnOf: 'Turno de {n}', thinking: '{n} está pensando…',
+        dailyDl: 'Tierra de dados diaria', vsMedium: 'cuatro bandos, bots medios', playerWon: 'Gana: {n}', regionsL: 'Regiones', roundsL: 'Rondas', out: 'fuera',
+        reinforce: '{n} recibe {k} dados nuevos', took: '¡Tomada!', held: 'Resiste', capNote: 'Límite de rondas; gana quien tenga más regiones',
+        sideInfo: '{r} regiones · {d} dados', noMove: 'No quedan ataques; termina tu turno',
+        rules: 'Cada bando tiene su color y su dibujo, y el número de una región es la cantidad de dados que tiene. En tu turno, ataca una región enemiga vecina desde una tuya con al menos dos dados. Los dos bandos tiran todos sus dados; gana la suma más alta y el empate es para el defensor. Si ganas, todos tus dados menos uno entran en la región y uno se queda atrás. Si pierdes, solo te queda un dado. Ataca cuanto quieras y luego termina el turno: recibes tantos dados nuevos como regiones tenga tu mayor grupo unido, repartidos al azar. Una región lleva como mucho ocho dados; lo que sobra se guarda para después. Gana el último bando en pie. Los objetivos muestran tus probabilidades.',
+        kCursor: 'Moverse entre regiones', kGo: 'Elegir o atacar', kEnd: 'Terminar turno', kCancel: 'Cancelar la elección',
+        tutTitle1: 'Regiones y dados', tutText1: 'Cada color y dibujo es un bando. El número de una región es la cantidad de dados que tiene.',
+        tutTitle2: 'Atacar', tutText2: 'Toca una región con dos o más dados y luego una vecina enemiga. Gana la suma más alta; el empate es para el defensor.',
+        tutTitle3: 'Mantente unido', tutText3: 'Al final del turno recibes tantos dados nuevos como regiones tenga tu mayor grupo unido.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var MODES = ['bot', 'two'];
+  var PATTERNS = ['solid', 'stripes', 'dots', 'cross'];
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs) prefs = { mode: 'bot', level: 'medium', bots: 2 };
+  if (MODES.indexOf(prefs.mode) < 0) prefs.mode = 'bot';
+  if (E.LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+  if (!(prefs.bots >= 1 && prefs.bots <= 3)) prefs.bots = 2;
+
+  // G: the game around the engine's state S. sel is the chosen region, cur the keyboard's
+  // region, fx what is being animated (an attack arrow, fresh dice)
+  var G = null, timer = null, kbOn = false, cur = 0, sel = -1, busy = false, fx = null, raf = 0, CEN = null;
+
+  var cv = el('canvas', { class: 'dl-canvas', role: 'img', 'aria-label': C.t('map') });
+  var box = el('div', { class: 'dl-box' }, [cv]);
+  var top = el('div', { class: 'dl-top ch-above' });
+  var sides = el('div', { class: 'dl-sides ch-above' });
+  var status = el('div', { class: 'dl-status', role: 'status', 'aria-live': 'polite' });
+  var endBtn = el('button', { class: 'ch-btn ch-btn--primary', type: 'button', onclick: humanEnd, text: C.t('endTurn') });
+  var actions = el('div', { class: 'dl-actions' }, [endBtn]);
+  var wrap = el('div', { class: 'dl-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, sides, status, actions])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ setup */
+
+  function newGame(o) {
+    stop();
+    var daily = o.daily || null;
+    G = { mode: daily ? 'bot' : o.mode, level: daily ? 'medium' : o.level, sides: daily ? 4 : (o.mode === 'two' ? 2 : o.bots + 1), daily: daily,
+      S: null, startedAt: Date.now(), done: false, last: null };
+    // the day's map is the same for everyone
+    G.S = E.newGame(G.sides, daily ? C.daily('dicelands', daily).rng : Math.random);
+    if (!daily) { prefs.mode = o.mode; prefs.level = o.level; prefs.bots = o.bots; ctx.store.set('prefs', prefs); }
+    setup();
+    save();
+    loop();
+  }
+  function current() { return { mode: G.mode, level: G.level, bots: G.mode === 'two' ? prefs.bots : G.sides - 1 }; }
+  function setup() {
+    CEN = E.centers(G.S);
+    sel = -1; fx = null; busy = false;
+    cur = firstOwn(G.S.turn);
+    render();
+  }
+  function firstOwn(side) { var k = G.S.owner.indexOf(side); return k < 0 ? 0 : k; }
+
+  function isBot(side) { return G.mode === 'bot' && side !== 0; }
+  function locked() { return !G || G.done || busy || isBot(G.S.turn); }
+  function stop() { if (timer) { clearTimeout(timer); timer = null; } busy = false; fx = null; }
+  function later(fn, ms) { timer = setTimeout(function () { timer = null; fn(); }, ms); }
+  // bot pauses follow the shared card speed; reduced motion keeps them short and still
+  function pace(ms) { return C.cards.pace(C.ui.reduceMotion() ? Math.round(ms * 0.4) : ms); }
+  // The daily rolls come from the day's seed as well, so everyone plays the same game
+  function rnd(tag) { return G.daily ? C.daily('dicelands', G.daily + '|' + tag + '|' + G.S.round + '|' + G.S.turn + '|' + G.S.moves).rng : Math.random; }
+
+  /* ------------------------------------------------------------- turns */
+
+  // Runs whoever is to move: a bot plays one attack at a time with a pause around each
+  function loop() {
+    if (!G || G.done) return;
+    render();
+    if (!isBot(G.S.turn)) return;
+    busy = true;
+    later(function () {
+      var m = E.think(G.S, G.level, rnd('t'));
+      if (m) doAttack(m[0], m[1], loop);
+      else doEnd(loop);
+    }, pace(260));
+  }
+
+  function doAttack(f, t, then) {
+    busy = true;
+    sel = f;
+    fx = { kind: 'arrow', f: f, t: t, t0: performance.now() };
+    animate();
+    render();
+    C.feedback('roll');
+    later(function () {
+      var r = E.attack(G.S, f, t, rnd('a'));
+      if (!r) { busy = false; fx = null; sel = -1; render(); return; }
+      G.last = r;
+      fx = { kind: 'hit', f: f, t: t, win: r.win, t0: performance.now() };
+      sel = -1;
+      C.feedback(r.win ? (isBot(r.side) ? 'thud' : 'good') : (isBot(r.side) ? 'soft' : 'bad'));
+      render(); save();
+      later(function () {
+        fx = null;
+        if (checkEnd()) return;
+        busy = false;
+        render();
+        if (then) then();
+      }, pace(420));
+    }, pace(380));
+  }
+
+  function doEnd(then) {
+    busy = true;
+    var side = G.S.turn, r = E.endTurn(G.S, rnd('e'));
+    G.last = { reinforce: true, side: side, gain: r ? r.placed.length : 0 };
+    sel = -1;
+    fx = { kind: 'gain', placed: r ? r.placed : [], t0: performance.now() };
+    animate();
+    C.feedback('place');
+    render(); save();
+    later(function () {
+      fx = null;
+      if (checkEnd()) return;
+      busy = false;
+      if (!isBot(G.S.turn)) cur = firstOwn(G.S.turn);
+      render();
+      if (then) then();
+    }, pace(520));
+  }
+
+  function humanEnd() {
+    if (locked()) return;
+    doEnd(loop);
+  }
+
+  // The game ends when one side is left, at the round cap, or when you are out against bots
+  function checkEnd() {
+    if (G.S.winner >= 0 || (G.mode === 'bot' && !E.alive(G.S, 0))) { G.done = true; busy = false; render(); finish(); return true; }
+    return false;
+  }
+
+  /* ------------------------------------------------------------ result */
+
+  function pname(side) {
+    if (G.mode === 'bot') return side === 0 ? (C.state.profile.name || C.t('you')) : C.t('botN', { n: C.num(side) });
+    return C.t('playerN', { n: C.num(side + 1) });
+  }
+  function count(side) {
+    var r = 0, d = 0;
+    for (var a = 0; a < G.S.n; a++) if (G.S.owner[a] === side) { r++; d += G.S.dice[a]; }
+    return { r: r, d: d };
+  }
+
+  function finish() {
+    stop();
+    var S = G.S, vsBot = G.mode === 'bot', won = vsBot ? S.winner === 0 : true, bots = G.sides - 1;
+    var base = vsBot ? ({ easy: 6, medium: 12, hard: 20 }[G.level] || 12) + 3 * (bots - 1) : 8;
+    var coins = Math.max(2, Math.round(won ? base : base * 0.3)) + (G.daily ? 8 : 0);
+    var points = Math.max(3, Math.round(won ? base * 4 : base * 1.2)) + (G.daily ? 25 : 0);
+    if (vsBot && won) {
+      C.achievements.unlock('dl-win');
+      if (G.level === 'hard') C.achievements.unlock('dl-hard');
+      if (bots === 3) C.achievements.unlock('dl-crowd');
+    }
+    if (G.daily) {
+      var first = C.stats.daily('dicelands', G.daily, { label: won ? C.t('won') : C.t('lost'), win: won });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    var winSide = S.winner >= 0 ? S.winner : -1;
+    var title = vsBot ? (won ? C.t('won') : C.t('lost')) : C.t('playerWon', { n: pname(winSide) });
+    var mine = count(vsBot ? 0 : winSide), lines = [{ label: C.t('regionsL'), value: C.num(mine.r) + ' / ' + C.num(S.n) }, { label: C.t('roundsL'), value: C.num(Math.min(S.round, E.ROUND_CAP)) }];
+    if (S.capped) lines.push({ label: C.t('capNote'), value: '' });
+    var paint = cardPaint();
+    later(function () {
+      ctx.finish({
+        won: vsBot ? won : null,
+        title: title,
+        timeMs: Date.now() - G.startedAt, coins: coins, points: points,
+        lines: lines,
+        shareText: 'چوگان · تاس‌زمین' + (G.daily ? ('\nروزانه ' + G.daily) : '') + '\n' + title,
+        paint: paint,
+        onAgain: G.daily ? null : function () { newGame(current()); }
+      });
+    }, C.ui.reduceMotion() ? 150 : 700);
+  }
+
+  /* ------------------------------------------------------------- saves */
+
+  ctx.autosave(function () {
+    if (!G || G.done || !G.S.moves) return { inProgress: false };
+    return { g: { mode: G.mode, level: G.level, daily: G.daily, S: G.S, elapsed: Date.now() - G.startedAt } };
+  });
+  function save() { ctx.save(); }
+  function validSave(sv) {
+    var g = sv && sv.g;
+    if (!(g && MODES.indexOf(g.mode) >= 0 && E.LEVELS.indexOf(g.level) >= 0 && E.valid(g.S) && g.S.winner < 0)) return false;
+    return g.mode === 'two' ? g.S.sides === 2 : E.alive(g.S, 0);
+  }
+  function restore(g) {
+    G = { mode: g.mode, level: g.level, sides: g.S.sides, daily: g.daily || null, S: g.S, startedAt: Date.now() - (g.elapsed || 0), done: false, last: null };
+    setup();
+    loop();
+  }
+
+  function askNew() {
+    if (G && G.daily) { go({ daily: G.daily }); return; }
+    settings();
+    function go(o) { if (!G || G.done || !G.S.moves) newGame(o); else C.ui.confirm({ title: C.t('newMatch'), body: C.t('endWarn'), onOk: function () { newGame(o); } }); }
+  }
+  function settings() {
+    var o = G && !G.daily ? current() : { mode: prefs.mode, level: prefs.level, bots: prefs.bots };
+    var body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
+    function rows() {
+      body.innerHTML = '';
+      body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('modeT') }));
+      body.appendChild(C.ui.segmented([{ value: 'bot', label: C.t('vsBot') }, { value: 'two', label: C.t('two') }], o.mode, function (v) { o.mode = v; rows(); }));
+      if (o.mode === 'bot') {
+        body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('botsT') }));
+        body.appendChild(C.ui.segmented([1, 2, 3].map(function (n) { return { value: String(n), label: C.num(n) }; }), String(o.bots), function (v) { o.bots = +v; }));
+        body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('levelT') }));
+        body.appendChild(C.ui.segmented(E.LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), o.level, function (v) { o.level = v; }));
+      }
+      body.appendChild(el('div', { class: 'ch-list', style: { width: '100%' } }, [C.cards.speedRow()]));
+      if (G && !G.done && G.S.moves) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('endWarn') }));
+    }
+    rows();
+    C.ui.modal({
+      title: C.t('settingsT'), closeButton: true, body: [body],
+      actions: [{ label: C.t('cancel') }, { label: C.t('begin'), kind: 'primary', onClick: function () { newGame(o); } }]
+    });
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function colors() {
+    var cs = getComputedStyle(document.documentElement);
+    var v = function (k, f) { return cs.getPropertyValue(k).trim() || f; };
+    return { f: [0, 1, 2, 3].map(function (k) { return v('--dl-f' + k, '#CCCCCC'); }), s: [0, 1, 2, 3].map(function (k) { return v('--dl-s' + k, '#444444'); }),
+      ink: v('--dl-ink', '#1E2430'), line: v('--dl-line', '#FFFFFF'), pill: v('--dl-pill', '#FFFFFF'), die: v('--dl-die', '#FFFFFF') };
+  }
+  // One small tile per pattern, drawn in the ink colour at low strength over each side's fill
+  var patCache = {};
+  function pattern(g, kind, ink) {
+    var key = kind + ink;
+    if (patCache[key]) return patCache[key];
+    var t = document.createElement('canvas'), n = 16;
+    t.width = n; t.height = n;
+    var q = t.getContext('2d');
+    q.strokeStyle = ink; q.fillStyle = ink; q.globalAlpha = 0.2; q.lineWidth = 2.2;
+    if (kind === 'stripes' || kind === 'cross') { q.beginPath(); q.moveTo(-4, n + 4); q.lineTo(n + 4, -4); q.moveTo(-4, 4); q.lineTo(4, -4); q.moveTo(n - 4, n + 4); q.lineTo(n + 4, n - 4); q.stroke(); }
+    if (kind === 'cross') { q.beginPath(); q.moveTo(-4, -4); q.lineTo(n + 4, n + 4); q.moveTo(n - 4, -4); q.lineTo(n + 4, 4); q.moveTo(-4, n - 4); q.lineTo(4, n + 4); q.stroke(); }
+    if (kind === 'dots') { q.globalAlpha = 0.28; [[4, 4], [12, 12]].forEach(function (p) { q.beginPath(); q.arc(p[0], p[1], 2.2, 0, Math.PI * 2); q.fill(); }); }
+    patCache[key] = g.createPattern(t, 'repeat');
+    return patCache[key];
+  }
+
+  // Shared by drawing and by reading a tap, so a tap lands on what is drawn under it
+  function geo(S, W, H) {
+    var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, hw = Math.sqrt(3) / 2;
+    for (var i = 0; i < E.CELLS; i++) {
+      if (S.cells[i] < 0) continue;
+      var p = E.px(i);
+      if (p[0] - hw < minX) minX = p[0] - hw; if (p[0] + hw > maxX) maxX = p[0] + hw;
+      if (p[1] - 1 < minY) minY = p[1] - 1; if (p[1] + 1 > maxY) maxY = p[1] + 1;
+    }
+    var pad = Math.min(W, H) * 0.02, d = Math.min((W - 2 * pad) / (maxX - minX), (H - 2 * pad) / (maxY - minY));
+    var ox = W / 2 - d * (minX + maxX) / 2, oy = H / 2 - d * (minY + maxY) / 2;
+    return { d: d, at: function (i) { var p = E.px(i); return [ox + d * p[0], oy + d * p[1]]; },
+      inv: function (x, y) { return [(x - ox) / d, (y - oy) / d]; } };
+  }
+  function corner(Q, x, y, k, rad) { var an = (60 * k - 90) * Math.PI / 180; return [x + rad * Math.cos(an), y + rad * Math.sin(an)]; }
+  function hexPath(g, Q, x, y, rad) {
+    g.beginPath();
+    for (var k = 0; k < 6; k++) { var p = corner(Q, x, y, k, rad); if (k) g.lineTo(p[0], p[1]); else g.moveTo(p[0], p[1]); }
+    g.closePath();
+  }
+  function regionPath(g, S, Q, a, rad) {
+    g.beginPath();
+    for (var i = 0; i < E.CELLS; i++) {
+      if (S.cells[i] !== a) continue;
+      var c = Q.at(i);
+      for (var k = 0; k < 6; k++) { var p = corner(Q, c[0], c[1], k, rad); if (k) g.lineTo(p[0], p[1]); else g.moveTo(p[0], p[1]); }
+      g.closePath();
+    }
+  }
+  // Only a region's outer edges: stroking every cell's hexagon drew a honeycomb inside it
+  function outline(g, S, Q, a, rad) {
+    g.beginPath();
+    for (var i = 0; i < E.CELLS; i++) {
+      if (S.cells[i] !== a) continue;
+      var c = Q.at(i);
+      for (var k = 0; k < 6; k++) {
+        var j = E.NB[i][k];
+        if (j >= 0 && S.cells[j] === a) continue;
+        var p1 = corner(Q, c[0], c[1], k, rad), p2 = corner(Q, c[0], c[1], k + 1, rad);
+        g.moveTo(p1[0], p1[1]); g.lineTo(p2[0], p2[1]);
+      }
+    }
+  }
+  function roundRect(g, x, y, w, h, r) {
+    g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+  }
+  // A small die seen from above and the front: a light top, the side's colour in front, one pip
+  function die(g, x, y, s, col, side) {
+    var t = s * 0.38;
+    g.fillStyle = col.s[side];
+    roundRect(g, x - s / 2, y - s / 2, s, s, s * 0.22); g.fill();
+    g.fillStyle = col.die;
+    g.beginPath(); g.moveTo(x - s / 2 + 1, y - s / 2 + s * 0.08); g.lineTo(x - s / 2 + t * 0.6, y - s / 2 - t * 0.55); g.lineTo(x + s / 2 + t * 0.6 - 1, y - s / 2 - t * 0.55); g.lineTo(x + s / 2 - 1, y - s / 2 + s * 0.08); g.closePath(); g.fill();
+    g.strokeStyle = col.ink; g.globalAlpha = 0.5; g.lineWidth = 1; roundRect(g, x - s / 2, y - s / 2, s, s, s * 0.22); g.stroke(); g.globalAlpha = 1;
+    g.fillStyle = col.die; g.beginPath(); g.arc(x, y + s * 0.05, Math.max(1, s * 0.13), 0, Math.PI * 2); g.fill();
+  }
+  function pill(g, x, y, text, col, fs, edge) {
+    g.font = '800 ' + fs + 'px ' + getComputedStyle(document.body).fontFamily;
+    var w = Math.max(fs * 1.5, g.measureText(text).width + fs * 0.8), h = fs * 1.45;
+    g.fillStyle = col.pill; roundRect(g, x - w / 2, y - h / 2, w, h, h / 2); g.fill();
+    g.strokeStyle = edge; g.lineWidth = Math.max(1.5, fs * 0.14); g.stroke();
+    g.fillStyle = col.ink; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(text, x, y + fs * 0.05);
+  }
+
+  function paintMap(g, W, H, o, col) {
+    var S = o.S, Q = geo(S, W, H), d = Q.d, cen = o.cen, now = o.now || 0;
+    // fills and each side's pattern
+    for (var a = 0; a < S.n; a++) {
+      regionPath(g, S, Q, a, d * 1.03);
+      g.fillStyle = col.f[S.owner[a]]; g.fill();
+      if (PATTERNS[S.owner[a]] !== 'solid') { g.fillStyle = pattern(g, PATTERNS[S.owner[a]], col.ink); g.fill(); }
+    }
+    // borders: between regions in the line colour, the coast a little heavier
+    g.lineCap = 'round';
+    for (var i = 0; i < E.CELLS; i++) {
+      var me = S.cells[i];
+      if (me < 0) continue;
+      var c = Q.at(i);
+      for (var k = 0; k < 6; k++) {
+        var j = E.NB[i][k], other = j < 0 ? -1 : S.cells[j];
+        if (other === me || (other >= 0 && j < i)) continue;
+        var p1 = corner(Q, c[0], c[1], k, d), p2 = corner(Q, c[0], c[1], k + 1, d);
+        g.strokeStyle = other < 0 ? col.ink : col.line; g.globalAlpha = other < 0 ? 0.55 : 1;
+        g.lineWidth = Math.max(1.5, d * (other < 0 ? 0.22 : 0.26));
+        g.beginPath(); g.moveTo(p1[0], p1[1]); g.lineTo(p2[0], p2[1]); g.stroke();
+      }
+    }
+    g.globalAlpha = 1;
+    // the chosen region and its targets
+    var targets = [];
+    if (o.sel >= 0) {
+      regionPath(g, S, Q, o.sel, d * 1.03);
+      g.fillStyle = col.line; g.globalAlpha = 0.3; g.fill(); g.globalAlpha = 1;
+      outline(g, S, Q, o.sel, d);
+      g.strokeStyle = col.ink; g.lineWidth = Math.max(2.5, d * 0.34); g.stroke();
+      if (o.showTargets) targets = S.adj[o.sel].filter(function (t) { return S.owner[t] !== S.owner[o.sel]; });
+      targets.forEach(function (t) {
+        outline(g, S, Q, t, d);
+        g.setLineDash([d * 0.55, d * 0.4]); g.strokeStyle = col.ink; g.lineWidth = Math.max(2, d * 0.26); g.stroke(); g.setLineDash([]);
+      });
+    }
+    if (o.cursor >= 0) {
+      outline(g, S, Q, o.cursor, d);
+      g.strokeStyle = col.s[S.owner[o.cursor]]; g.lineWidth = Math.max(2, d * 0.28); g.stroke();
+    }
+    // dice: up to four in a column, a second column behind for five to eight, and the count
+    var s = Math.max(7, d * 0.95), fs = Math.max(10, Math.round(d * 0.95));
+    var flash = o.fx && o.fx.kind === 'gain' ? o.fx.placed : [];
+    for (a = 0; a < S.n; a++) {
+      var cc = Q.at(cen[a]), n = S.dice[a], cols = n > 4 ? 2 : 1;
+      for (var col2 = cols - 1; col2 >= 0; col2--) {
+        var inCol = col2 === 0 ? Math.min(4, n) : n - 4;
+        var x = cc[0] + (cols === 2 ? (col2 === 0 ? -s * 0.55 : s * 0.55) : 0) + (col2 === 1 ? 0 : 0), y0 = cc[1] - s * 0.15 - (col2 === 1 ? s * 0.25 : 0);
+        for (var q = 0; q < inCol; q++) die(g, x, y0 - q * s * 0.62, s, col, S.owner[a]);
+      }
+      pill(g, cc[0], cc[1] + s * 0.95, C.num(n), col, fs, col.s[S.owner[a]]);
+      var got = flash.filter(function (r) { return r === a; }).length;
+      if (got && o.fx) {
+        var age = Math.min(1, (now - o.fx.t0) / 500);
+        g.globalAlpha = 1 - age * 0.6;
+        g.fillStyle = col.ink; g.font = '800 ' + fs + 'px ' + getComputedStyle(document.body).fontFamily;
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        // the canvas inherits the page's rtl, which drew the sign after the digit in Persian
+        g.direction = 'ltr';
+        g.fillText('+' + C.num(got), cc[0] + s * 1.3, cc[1] - s * (1.2 + age * 0.8));
+        g.direction = 'inherit'; g.globalAlpha = 1;
+      }
+    }
+    // odds on each target, over its dice
+    targets.forEach(function (t) {
+      var tc = Q.at(cen[t]), pr = Math.round(E.pwin(S.dice[o.sel], S.dice[t]) * 100);
+      pill(g, tc[0], tc[1] - s * 2.6, C.num(pr) + '%', col, Math.max(10, Math.round(fs * 0.9)), col.s[S.owner[o.sel]]);
+    });
+    // the attack: an arrow whose dashes run from the attacker to the target
+    if (o.fx && (o.fx.kind === 'arrow' || o.fx.kind === 'hit')) {
+      var A = Q.at(cen[o.fx.f]), B = Q.at(cen[o.fx.t]), ang = Math.atan2(B[1] - A[1], B[0] - A[0]), hl = Math.max(8, d * 0.9);
+      var bx = B[0] - Math.cos(ang) * d * 0.6, by = B[1] - Math.sin(ang) * d * 0.6;
+      g.strokeStyle = col.ink; g.lineWidth = Math.max(3, d * 0.36); g.lineCap = 'round';
+      g.setLineDash([d * 0.7, d * 0.5]); g.lineDashOffset = -((now - o.fx.t0) / 14) % (d * 1.2);
+      g.beginPath(); g.moveTo(A[0], A[1]); g.lineTo(bx, by); g.stroke(); g.setLineDash([]); g.lineDashOffset = 0;
+      g.fillStyle = col.ink;
+      g.beginPath(); g.moveTo(bx + Math.cos(ang) * hl * 0.6, by + Math.sin(ang) * hl * 0.6);
+      g.lineTo(bx + Math.cos(ang + 2.4) * hl, by + Math.sin(ang + 2.4) * hl); g.lineTo(bx + Math.cos(ang - 2.4) * hl, by + Math.sin(ang - 2.4) * hl); g.closePath(); g.fill();
+    }
+  }
+
+  function boxSize() {
+    var r = box.getBoundingClientRect();
+    return { w: Math.max(1, Math.floor(r.width)), h: Math.max(1, Math.floor(r.height || r.width)) };
+  }
+  function draw() {
+    if (!G) return;
+    var sz = boxSize(), W = sz.w, H = sz.h, dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    cv.style.width = W + 'px'; cv.style.height = H + 'px';
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    var mine = !locked();
+    paintMap(g, W, H, { S: G.S, cen: CEN, sel: sel, showTargets: mine && sel >= 0, cursor: kbOn && mine ? cur : -1, fx: fx, now: performance.now() }, colors());
+  }
+  // Moving parts (the attack arrow, fresh dice) redraw every frame while they last
+  function animate() {
+    if (raf || C.ui.reduceMotion()) return;
+    var step = function () { raf = 0; draw(); if (fx && (fx.kind === 'arrow' || fx.kind === 'hit' || fx.kind === 'gain')) raf = requestAnimationFrame(step); };
+    raf = requestAnimationFrame(step);
+  }
+  function cardPaint() {
+    var o = { S: E.clone(G.S), cen: CEN.slice(), sel: -1, cursor: -1, fx: null };
+    return function (g, W, H) { paintMap(g, W, H, o, colors()); };
+  }
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (G.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyDl') + ' — ' + C.num(G.daily) })]));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('vsMedium') }));
+      top.appendChild(C.cards.speedGear());
+      return;
+    }
+    top.appendChild(el('button', { class: 'ch-badge ch-tap', type: 'button', onclick: settings,
+      text: G.mode === 'bot' ? C.t('vsBot') + ' · ' + C.num(G.sides - 1) + ' · ' + C.t(G.level) : C.t('two') }));
+    var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', settings);
+    top.appendChild(gear);
+  }
+  function sum(l) { return l.reduce(function (x, y) { return x + y; }, 0); }
+  function rollRow(list, side, won) {
+    var row = el('span', { class: 'dl-roll' });
+    list.forEach(function (v) { row.appendChild(el('span', { class: 'dl-die', style: { background: 'var(--dl-s' + side + ')', color: '#FFFFFF' }, text: C.num(v) })); });
+    return [row, el('span', { class: 'dl-sum' + (won ? ' dl-sum--win' : ''), text: C.num(sum(list)) })];
+  }
+  function renderSide() {
+    sides.innerHTML = '';
+    var t = G.S.turn;
+    for (var k = 0; k < G.sides; k++) {
+      var cnt = count(k), out = cnt.r === 0;
+      var on = t === k && !G.done && !out;
+      sides.appendChild(el('div', { class: 'dl-side' + (on ? ' dl-side--on' : '') + (out ? ' dl-side--out' : '') + (on && isBot(k) ? ' dl-thinking' : '') }, [
+        el('div', { class: 'dl-sw dl-sw--' + k, style: { 'background-color': 'var(--dl-f' + k + ')', 'border-color': 'var(--dl-s' + k + ')' }, text: C.num(k + 1) }),
+        el('div', { class: 'dl-side__text' }, [
+          el('div', { class: 'dl-side__name', text: pname(k) }),
+          // Each part stays whole and only the gaps between them break: in a narrow chip
+          // (landscape phone) the line was cut mid-number
+          el('div', { class: 'dl-side__info' }, (out ? [C.t('out')] : C.t('sideInfo', { r: C.num(cnt.r), d: C.num(cnt.d) }).split(' · ')
+            .concat(G.S.reserve[k] ? ['+' + C.num(G.S.reserve[k])] : [])).reduce(function (a, s, i) {
+              if (i) a.push(document.createTextNode(' · '));
+              a.push(el('span', { text: s })); return a; }, []))
+        ])
+      ]));
+    }
+    status.innerHTML = '';
+    var L = G.last;
+    // The last roll stays until the next selection: shown only during the hit it was gone in
+    // ~0.4 s, before anyone could read the dice (seen in the first touch proof)
+    var gaining = fx && fx.kind === 'gain' && L && L.reinforce;
+    var stuck = !G.done && !isBot(t) && !busy && sel < 0 && !E.attacks(G.S).length;
+    if (L && L.a && !gaining && !stuck && (sel < 0 || (fx && fx.kind === 'hit'))) {
+      var A = rollRow(L.a, L.side, L.win), D = rollRow(L.d, L.was, !L.win);
+      status.appendChild(A[0]); status.appendChild(A[1]);
+      status.appendChild(el('span', { text: L.win ? C.t('took') : C.t('held') }));
+      status.appendChild(D[1]); status.appendChild(D[0]);
+    } else if (gaining) {
+      status.appendChild(el('span', { text: C.t('reinforce', { n: pname(L.side), k: C.num(L.gain) }) }));
+    } else if (!G.done) {
+      var line;
+      if (isBot(t)) line = C.t('thinking', { n: pname(t) });
+      else if (busy) line = C.t('turnOf', { n: pname(t) });
+      else if (sel >= 0) line = C.t('pickTarget');
+      else if (!E.attacks(G.S).length) line = C.t('noMove');
+      else line = G.mode === 'bot' ? C.t('yourTurn') : C.t('turnOf', { n: pname(t) }) + ' · ' + C.t('yourTurn');
+      status.appendChild(el('span', { text: line }));
+    }
+    endBtn.disabled = locked();
+  }
+  function render() { renderTop(); renderSide(); draw(); }
+
+  /* -------------------------------------------------------------- input */
+
+  // The region under the tap: the nearest land cell centre, if the tap is on the land
+  function readTap(x, y) {
+    var r = cv.getBoundingClientRect(), Q = geo(G.S, r.width, r.height), u = Q.inv(x - r.left, y - r.top), best = -1, bd = 1.05;
+    for (var i = 0; i < E.CELLS; i++) {
+      if (G.S.cells[i] < 0) continue;
+      var p = E.px(i), dd = Math.hypot(p[0] - u[0], p[1] - u[1]);
+      if (dd < bd) { bd = dd; best = i; }
+    }
+    return best < 0 ? -1 : G.S.cells[best];
+  }
+  // One tap rule for touch, mouse and keyboard: your region with dice selects, an enemy
+  // neighbour of the selection is attacked, anything else clears the selection
+  function tapRegion(a) {
+    if (locked() || a < 0) return;
+    var S = G.S;
+    if (sel >= 0 && E.legalAttack(S, sel, a)) { doAttack(sel, a, function () { if (!isBot(G.S.turn)) { cur = a; render(); } }); return; }
+    if (S.owner[a] === S.turn && S.dice[a] >= 2 && a !== sel && S.adj[a].some(function (t) { return S.owner[t] !== S.turn; })) { sel = a; C.feedback('select'); render(); return; }
+    if (sel >= 0) { sel = -1; C.feedback('tap'); render(); return; }
+    C.feedback('bad');
+  }
+  cv.addEventListener('pointerdown', function (e) {
+    if (locked()) return;
+    e.preventDefault();
+    kbOn = false;
+    tapRegion(readTap(e.clientX, e.clientY));
+  });
+
+  window.addEventListener('keydown', function (e) {
+    if (!G || document.querySelector('.ch-scrim')) return;
+    if (locked() || e.ctrlKey || e.metaKey || e.altKey) return;
+    var tg = e.target && e.target.tagName;
+    if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT') return;
+    if (C.keyIs(e, 'e')) { e.preventDefault(); humanEnd(); return; }
+    if (e.key === 'Escape' && sel >= 0) { e.preventDefault(); sel = -1; render(); return; }
+    // the map is drawn the same way in every language, so the arrows are geometric (#338):
+    // each goes to the nearest region centre lying in its direction on the screen
+    var want = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.key];
+    if (want) {
+      e.preventDefault();
+      if (!kbOn) { kbOn = true; draw(); return; }
+      var from = E.px(CEN[cur]), best = -1, bd = Infinity;
+      for (var a = 0; a < G.S.n; a++) {
+        if (a === cur) continue;
+        var p = E.px(CEN[a]), dx = p[0] - from[0], dy = p[1] - from[1], len = Math.hypot(dx, dy), dot = (dx * want[0] + dy * want[1]) / len;
+        if (dot < 0.5) continue;
+        var score = len * (2 - dot);
+        if (score < bd) { bd = score; best = a; }
+      }
+      if (best >= 0) cur = best;
+      draw(); return;
+    }
+    if ((e.key === 'Enter' || e.key === ' ') && kbOn && tg !== 'BUTTON') { e.preventDefault(); tapRegion(cur); }
+  });
+
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  else window.addEventListener('resize', draw);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← ↑ → ↓', C.t('kCursor')), kb('Space / Enter', C.t('kGo')), kb('E', C.t('kEnd')), kb('Esc', C.t('kCancel'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // three hexagonal regions for the tutorial: blue with stripes-free fill, orange striped
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 110" width="100%">';
+    var hexPts = function (x, y, r) { var p = []; for (var k = 0; k < 6; k++) { var an = (60 * k - 90) * Math.PI / 180; p.push((x + r * Math.cos(an)).toFixed(1) + ',' + (y + r * Math.sin(an)).toFixed(1)); } return p.join(' '); };
+    var reg = function (x, y, fill, n, edge, extra) {
+      return '<polygon points="' + hexPts(x, y, 30) + '" fill="' + fill + '" stroke="#FFFFFF" stroke-width="3"' + (extra || '') + '/>' +
+        '<rect x="' + (x - 11) + '" y="' + (y - 9) + '" width="22" height="18" rx="9" fill="#FFFFFF" stroke="' + edge + '" stroke-width="2"/>' +
+        '<text x="' + x + '" y="' + (y + 5) + '" text-anchor="middle" font-size="13" font-weight="800" fill="#1E2430">' + n + '</text>';
+    };
+    s += '<defs><pattern id="tst" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)"><rect width="8" height="8" fill="#F6D2AE"/><rect width="2.5" height="8" fill="#1E2430" opacity=".2"/></pattern></defs>';
+    var a = kind === 3 ? '#BFD5F5' : '#BFD5F5';
+    s += reg(48, 55, a, kind === 3 ? 5 : 4, '#2563C9', kind === 2 ? ' stroke-dasharray="0"' : '');
+    s += reg(100, 55, kind === 3 ? '#BFD5F5' : 'url(#tst)', kind === 3 ? 3 : 2, kind === 3 ? '#2563C9' : '#C8610F', kind === 2 ? ' style="stroke:#1E2430;stroke-dasharray:6 4"' : '');
+    s += reg(152, 55, kind === 1 ? 'url(#tst)' : kind === 3 ? '#BFD5F5' : 'url(#tst)', kind === 1 ? 3 : 2, kind === 3 ? '#2563C9' : '#C8610F');
+    if (kind === 2) s += '<path d="M 62 40 L 88 40" stroke="#1E2430" stroke-width="5" stroke-linecap="round" stroke-dasharray="7 5"/><path d="M 92 40 l -9 -6 v 12 z" fill="#1E2430"/>' +
+      '<rect x="84" y="13" width="32" height="16" rx="8" fill="#FFFFFF" stroke="#2563C9" stroke-width="2"/><text x="100" y="25" text-anchor="middle" font-size="11" font-weight="800" fill="#1E2430">' + C.num(Math.round(E.pwin(4, 2) * 100)) + '%</text>';
+    if (kind === 3) s += '<text x="100" y="104" text-anchor="middle" font-size="13" font-weight="800" fill="#2563C9">+3</text>';
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  var saved = ctx.loadSave();
+  if (validSave(saved) && (saved.g.daily || null) === (dailyDate || null)) restore(saved.g);
+  else newGame(dailyDate ? { daily: dailyDate } : { mode: prefs.mode, level: prefs.level, bots: prefs.bots });
+  if (dailyDate && C.stats.dailyDone('dicelands', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).dicelands;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
