@@ -1,0 +1,944 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>بازی غاز — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<style>
+  /* Pawn colours tell the players apart and stay the same in both themes */
+  :root { --gs-c0: #E5484D; --gs-c1: #2F6FDE; --gs-c2: #E8A317; --gs-c3: #2E9E5B; }
+  .gs-top { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; align-items: center; }
+  .gs-top .ch-tap { border: 0; font: inherit; font-size: var(--fs-sm); font-weight: 700; min-height: 44px; padding-inline: var(--s-4); cursor: pointer; }
+  .gs-players { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--s-2); }
+  .gs-player {
+    display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 6px; align-items: center; min-width: 0;
+    background: var(--c-surface); border-radius: var(--r-md); padding: 5px 8px;
+    box-shadow: var(--sh-1); border: 2px solid transparent; min-height: 44px;
+    transition: border-color var(--t-mid) var(--ease), transform var(--t-mid) var(--ease);
+  }
+  .gs-player--on { border-color: var(--pc); transform: translateY(-2px); box-shadow: var(--sh-2); }
+  .gs-player__dot { width: 14px; height: 14px; border-radius: 50%; background: var(--pc); }
+  .gs-player__name { min-width: 0; font-weight: 700; font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gs-player__n { grid-column: 2; font-size: var(--fs-xs); color: var(--c-text-dim); font-variant-numeric: tabular-nums; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gs-thinking { animation: gs-blink 900ms infinite; }
+  @keyframes gs-blink { 50% { opacity: .55; } }
+  .gs-wrap > .ch-fit { --fit-ar: 1; }
+  .ch-fit > .gs-box { position: relative; aspect-ratio: var(--fit-ar); }
+  .gs-canvas { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: block; }
+  .gs-bar { display: flex; align-items: center; justify-content: center; gap: var(--s-3); }
+  /* Two lines kept whatever they say, so a long event (a goose chain, a bounce onto
+     death) never pushes the board up or down */
+  .gs-status { flex: 1; min-width: 0; min-height: calc(2 * 1.45 * var(--fs-sm)); display: flex; flex-direction: column; justify-content: center; text-align: center; line-height: 1.45; font-size: var(--fs-sm); }
+  .gs-log { font-weight: 700; color: var(--c-text); }
+  .gs-turn { font-weight: 700; color: var(--c-text-dim); }
+  /* The margin holds the nudge (turn 8°, grow 5%) inside the side column (#513) */
+  .gs-dice {
+    flex: 0 0 auto; min-height: 64px; margin: 6px; border: 0; padding: 8px 10px; border-radius: 16px; cursor: pointer;
+    background: var(--c-surface); box-shadow: var(--sh-2); outline: 3px solid var(--pc, var(--c-line)); outline-offset: -3px;
+    display: flex; gap: 6px; align-items: center; touch-action: manipulation;
+    transition: transform var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
+  }
+  .gs-dice:disabled { cursor: default; opacity: .75; }
+  .gs-dice--ready { animation: gs-nudge 1.4s var(--ease) infinite; }
+  .gs-dice--roll svg { animation: gs-spin 120ms linear infinite; }
+  .gs-dice--roll svg + svg { animation-direction: reverse; }
+  @keyframes gs-nudge { 0%, 70%, 100% { transform: none; } 80% { transform: rotate(-8deg) scale(1.05); } 90% { transform: rotate(8deg) scale(1.05); } }
+  @keyframes gs-spin { to { transform: rotate(90deg); } }
+  @media (prefers-reduced-motion: reduce) { :root:not([data-motion="on"]) .gs-dice--ready, :root:not([data-motion="on"]) .gs-dice--roll svg { animation: none; } }
+  .gs-seats { width: 100%; }
+  .gs-seat[hidden] { display: none; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function GooseEngineFactory() {
+  'use strict';
+
+  // The classic Game of the Goose: 63 squares and a start, wound into an 8×8 spiral.
+  var END = 63;
+  var GEESE = [5, 9, 14, 18, 23, 27, 32, 36, 41, 45, 50, 54, 59];
+  // bridge, maze and death move the pawn at once; the inn, the well and the prison hold it
+  var JUMPS = { 6: 12, 42: 39, 58: 1 };
+  var NAMES = { 0: 'start', 6: 'bridge', 19: 'inn', 31: 'well', 42: 'maze', 52: 'prison', 58: 'death', 63: 'goal' };
+  var IS_GOOSE = {};
+  GEESE.forEach(function (n) { IS_GOOSE[n] = true; });
+
+  function kind(n) { return IS_GOOSE[n] ? 'goose' : (NAMES[n] || ''); }
+
+  // Square n as [column, row], row 0 at the top: the start in the bottom left corner,
+  // then round the edge and inwards, so 63 ends in the middle as on the printed boards.
+  var CELLS = (function () {
+    var out = [], t = 0, b = 7, l = 0, r = 7, x, y;
+    while (out.length < 64) {
+      for (x = l; x <= r && out.length < 64; x++) out.push([x, b]);
+      b--;
+      for (y = b; y >= t && out.length < 64; y--) out.push([r, y]);
+      r--;
+      for (x = r; x >= l && out.length < 64; x--) out.push([x, t]);
+      t++;
+      for (y = t; y <= b && out.length < 64; y++) out.push([l, y]);
+      l++;
+    }
+    return out;
+  })();
+  function cell(n) { return CELLS[n].slice(); }
+
+  // pos: 0 is the start. wait: turns still to miss. trap: 31 or 52 while held in the
+  // well or the prison, which another player landing there ends. moved: the first
+  // throw is made (only the first throw of 9 takes the shortcut to 26 or 53).
+  function newGame(n) {
+    var S = { pos: [], wait: [], trap: [], moved: [], turn: 0, winner: -1, rolls: 0 };
+    for (var i = 0; i < n; i++) { S.pos.push(0); S.wait.push(0); S.trap.push(0); S.moved.push(false); }
+    return S;
+  }
+  function copy(S) {
+    return { pos: S.pos.slice(), wait: S.wait.slice(), trap: S.trap.slice(), moved: S.moved.slice(), turn: S.turn, winner: S.winner, rolls: S.rolls };
+  }
+
+  function isInt(v) { return typeof v === 'number' && Math.floor(v) === v; }
+
+  // A saved game is checked before it is restored, so a hand-edited or stale save
+  // cannot leave a pawn off the board or held for ever
+  function valid(S) {
+    if (!S || typeof S !== 'object' || !Array.isArray(S.pos)) return false;
+    var n = S.pos.length;
+    if (n < 2 || n > 4) return false;
+    if (!Array.isArray(S.wait) || !Array.isArray(S.trap) || !Array.isArray(S.moved)) return false;
+    if (S.wait.length !== n || S.trap.length !== n || S.moved.length !== n) return false;
+    if (!isInt(S.turn) || S.turn < 0 || S.turn >= n) return false;
+    if (!isInt(S.winner) || S.winner < -1 || S.winner >= n) return false;
+    if (!isInt(S.rolls) || S.rolls < 0) return false;
+    for (var i = 0; i < n; i++) {
+      var p = S.pos[i], w = S.wait[i], tr = S.trap[i];
+      if (!isInt(p) || p < 0 || p > END) return false;
+      if ((p === END) !== (S.winner === i)) return false;
+      if (!isInt(w) || w < 0 || w > 2) return false;
+      if (tr !== 0 && tr !== 31 && tr !== 52) return false;
+      if (tr && (p !== tr || w < 1)) return false;
+      if (w && !tr && !(p === 19 && w === 1)) return false;
+      if (typeof S.moved[i] !== 'boolean') return false;
+    }
+    return true;
+  }
+
+  function roll(rnd) { return [1 + Math.floor(rnd() * 6), 1 + Math.floor(rnd() * 6)]; }
+
+  // Walks t squares one by one. Past 63 the rest of the throw walks back (once the
+  // direction has turned it stays turned, so a goose met on the way back keeps going back).
+  function walk(p, t, dir, steps, ev) {
+    for (var k = 0; k < t; k++) {
+      if (p === END && dir > 0) { dir = -1; ev.push({ type: 'bounce' }); }
+      p += dir;
+      if (p < 0) p = 0;
+      steps.push({ n: p });
+    }
+    return { p: p, dir: dir };
+  }
+
+  // Plays the throw a + b for the player to move. Returns the new state, every
+  // square passed (for the animation; jump: a bridge, maze, death or the first 9)
+  // and the events in the order they happened.
+  function play(S, a, b) {
+    if (!S || S.winner >= 0) return null;
+    if (!isInt(a) || !isInt(b) || a < 1 || a > 6 || b < 1 || b > 6) return null;
+    if (S.wait[S.turn] > 0) return null;
+    var N = copy(S), me = N.turn, t = a + b, steps = [], ev = [], p = N.pos[me];
+    if (!N.moved[me] && t === 9) {
+      // without this a first 9 rides the geese straight home: 9, 18, … 63
+      p = (a === 6 || b === 6) ? 26 : 53;
+      steps.push({ n: p, jump: true });
+      ev.push({ type: 'nine', to: p });
+    } else {
+      var w = walk(p, t, 1, steps, ev);
+      p = w.p;
+      for (var guard = 0; guard < 40; guard++) {
+        if (IS_GOOSE[p]) {
+          var e = { type: 'goose', at: p, to: p };
+          ev.push(e);
+          w = walk(p, t, w.dir, steps, ev);
+          p = e.to = w.p;
+        } else if (JUMPS[p] !== undefined) {
+          ev.push({ type: kind(p), at: p, to: JUMPS[p] });
+          p = JUMPS[p];
+          steps.push({ n: p, jump: true });
+        } else break;
+      }
+    }
+    N.pos[me] = p;
+    N.moved[me] = true;
+    if (p === 19) {
+      N.wait[me] = 1;
+      ev.push({ type: 'inn' });
+    } else if (p === 31 || p === 52) {
+      ev.push({ type: p === 31 ? 'well' : 'prison' });
+      for (var j = 0; j < N.pos.length; j++) {
+        if (j !== me && N.trap[j] === p) { N.wait[j] = 0; N.trap[j] = 0; ev.push({ type: 'free', seat: j }); }
+      }
+      // two turns at most, for everyone: with only bots left in the well a game
+      // could otherwise wait for a rescuer who never comes
+      N.wait[me] = 2;
+      N.trap[me] = p;
+    } else if (p === END) {
+      N.winner = me;
+      ev.push({ type: 'win' });
+    }
+    N.rolls++;
+    if (N.winner < 0) N.turn = (me + 1) % N.pos.length;
+    return { state: N, steps: steps, events: ev };
+  }
+
+  // A held player's turn goes by without a throw
+  function pass(S) {
+    if (!S || S.winner >= 0 || !(S.wait[S.turn] > 0)) return null;
+    var N = copy(S), me = N.turn;
+    N.wait[me]--;
+    if (!N.wait[me]) N.trap[me] = 0;
+    N.turn = (me + 1) % N.pos.length;
+    return { state: N, steps: [], events: [{ type: 'skip', seat: me }] };
+  }
+
+  function waiting(S) { return S.wait[S.turn] > 0; }
+
+  var api = {
+    END: END, GEESE: GEESE, JUMPS: JUMPS, kind: kind, cell: cell, newGame: newGame, copy: copy,
+    valid: valid, roll: roll, play: play, pass: pass, waiting: waiting
+  };
+  if (typeof self !== 'undefined') self.GooseEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = GooseEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = GooseEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'goose',
+    name: { fa: 'بازی غاز', en: 'Goose Race', zh: '鹅棋', de: 'Gänsespiel', es: 'Juego de la oca', pl: 'Wyścig gęsi', fr: 'Jeu de l’oie', ar: 'لعبة الإوزة', hi: 'हंस दौड़' },
+    accent: '#6E3C70',
+    mood: 'menu',
+    cardSpeed: true,
+    strings: {
+      fa: {
+        players: 'بازیکن', person: 'آدم', bot: 'ربات', botN: 'ربات {n}', playerN: 'بازیکن {n}', you: 'تو', newMatch: 'دست تازه',
+        boardLabel: 'صفحه‌ی مارپیچ بازی غاز', roll: 'تاس بریز', turnOf: 'نوبت {n}', yourTurn: 'نوبت توست', threw: '{n}: {a} + {b}',
+        throwsLabel: 'تاس‌های تو', geeseLabel: 'غازهایی که سوار شدی', playerWon: 'برنده: {n}', waits: 'منتظر', square: 'خانه‌ی {n}',
+        evGoose: 'غاز! همان‌قدر دوباره', evBridge: 'پل: تا خانه‌ی ۱۲', evInn: 'مهمان‌خانه: یک نوبت می‌ماند', evWell: 'افتاد توی چاه',
+        evPrison: 'افتاد توی زندان', evMaze: 'هزارتو: برگشت به ۳۹', evDeath: 'مرگ: برگشت به خانه‌ی ۱', evBounce: 'از ۶۳ گذشت و برگشت',
+        evNine: 'اولین ۹: یک‌راست به {n}', evFree: 'آزاد: {n}', evSkip: 'نوبت از دست رفته: {n}',
+        rules: 'به نوبت دو تاس بریزید و غازتان را به اندازه‌ی جمع‌شان روی مارپیچ جلو ببرید، از شروع تا خانه‌ی ۶۳. روی غاز (۵، ۹، ۱۴، ۱۸، ۲۳، ۲۷، ۳۲، ۳۶، ۴۱، ۴۵، ۵۰، ۵۴، ۵۹) که بنشینی همان‌قدر دوباره جلو می‌روی. اولین تاس اگر ۹ باشد سوار غازها نمی‌شود: ۶ و ۳ می‌رود به ۲۶ و ۵ و ۴ به ۵۳. پل (۶): تا ۱۲ می‌روی. مهمان‌خانه (۱۹): یک نوبت می‌مانی. چاه (۳۱) و زندان (۵۲): می‌مانی تا بازیکن دیگری همان‌جا بیفتد و جایت را بگیرد، یا حداکثر دو نوبت. هزارتو (۴۲): برمی‌گردی به ۳۹. مرگ (۵۸): برمی‌گردی به ۱. باید دقیقاً روی ۶۳ بنشینی؛ اضافه‌ی تاس تو را برمی‌گرداند. چند مهره می‌توانند در یک خانه باشند. اولین کسی که به ۶۳ برسد می‌برد.',
+        rollKey: 'ریختن تاس',
+        tutTitle1: 'دو تاس بریز', tutText1: 'غازت به اندازه‌ی جمع دو تاس روی مارپیچ جلو می‌رود.',
+        tutTitle2: 'خانه‌های رنگی', tutText2: 'غازها دوباره جلو می‌برندت و پل هم. مهمان‌خانه، چاه و زندان نگهت می‌دارند و هزارتو و مرگ عقب می‌فرستند.',
+        tutTitle3: 'درست روی ۶۳', tutText3: 'اولین کسی که دقیقاً به ۶۳ برسد می‌برد. بازی کاملاً شانسی است؛ فقط لذتش را ببر.'
+      },
+      en: {
+        players: 'players', person: 'Person', bot: 'Bot', botN: 'Bot {n}', playerN: 'Player {n}', you: 'You', newMatch: 'New game',
+        boardLabel: 'Goose Race spiral board', roll: 'Throw the dice', turnOf: 'Turn: {n}', yourTurn: 'Your turn', threw: '{n}: {a} + {b}',
+        throwsLabel: 'Your throws', geeseLabel: 'Geese ridden', playerWon: 'Winner: {n}', waits: 'waiting', square: 'Square {n}',
+        evGoose: 'A goose! On again', evBridge: 'Bridge: over to 12', evInn: 'Inn: misses a turn', evWell: 'Down the well',
+        evPrison: 'Into the prison', evMaze: 'Maze: back to 39', evDeath: 'Death: back to 1', evBounce: 'Past 63 and back',
+        evNine: 'A first 9: straight to {n}', evFree: 'Free: {n}', evSkip: 'Turn missed: {n}',
+        rules: 'Take turns throwing two dice and move your goose that many squares along the spiral, from the start to 63. Land on a goose (5, 9, 14, 18, 23, 27, 32, 36, 41, 45, 50, 54, 59) and you move on again by the same throw. A first throw of 9 does not ride the geese: 6 + 3 goes to 26, 5 + 4 to 53. Bridge (6): cross to 12. Inn (19): miss one turn. Well (31) and prison (52): wait until another player lands there and takes your place, or two turns at most. Maze (42): back to 39. Death (58): back to 1. You must reach 63 exactly; the rest of a throw that goes past bounces you back. Pawns can share a square. The first to reach 63 wins.',
+        rollKey: 'Throw the dice',
+        tutTitle1: 'Throw two dice', tutText1: 'Your goose moves along the spiral by the sum of both dice.',
+        tutTitle2: 'The coloured squares', tutText2: 'Geese and the bridge carry you on. The inn, the well and the prison hold you, and the maze and death send you back.',
+        tutTitle3: 'Exactly 63', tutText3: 'The first to land exactly on 63 wins. It is all luck, so just enjoy the ride.'
+      },
+      pl: {
+        players: 'graczy', person: 'Człowiek', bot: 'Bot', botN: 'Bot {n}', playerN: 'Gracz {n}', you: 'Ty', newMatch: 'Nowa gra',
+        boardLabel: 'Spiralna plansza Wyścigu gęsi', roll: 'Rzuć kośćmi', turnOf: 'Kolej: {n}', yourTurn: 'Twoja kolej', threw: '{n}: {a} + {b}',
+        throwsLabel: 'Twoje rzuty', geeseLabel: 'Przejażdżki na gęsiach', playerWon: 'Wygrana: {n}', waits: 'czeka', square: 'Pole {n}',
+        evGoose: 'Gęś! Jeszcze raz tyle samo', evBridge: 'Most: na pole 12', evInn: 'Gospoda: traci kolejkę', evWell: 'Wpada do studni',
+        evPrison: 'Trafia do więzienia', evMaze: 'Labirynt: z powrotem na 39', evDeath: 'Śmierć: z powrotem na 1', evBounce: 'Za 63 i z powrotem',
+        evNine: 'Pierwsze 9: prosto na {n}', evFree: 'Wolność: {n}', evSkip: 'Stracona kolejka: {n}',
+        rules: 'Gracze na zmianę rzucają dwiema kośćmi i przesuwają gęś o sumę oczek po spirali, od startu do pola 63. Kto stanie na gęsi (5, 9, 14, 18, 23, 27, 32, 36, 41, 45, 50, 54, 59), idzie dalej o ten sam rzut. Pierwszy rzut 9 nie jedzie na gęsiach: 6 + 3 prowadzi na 26, a 5 + 4 na 53. Most (6): przejście na 12. Gospoda (19): jedna stracona kolejka. Studnia (31) i więzienie (52): czekasz, aż inny gracz tam stanie i zajmie twoje miejsce, najwyżej dwie kolejki. Labirynt (42): powrót na 39. Śmierć (58): powrót na 1. Na pole 63 trzeba trafić dokładnie; nadmiar rzutu cofa pionek. Pionki mogą stać na jednym polu. Wygrywa ten, kto pierwszy dotrze do 63.',
+        rollKey: 'Rzuć kośćmi',
+        tutTitle1: 'Rzuć dwiema kośćmi', tutText1: 'Twoja gęś idzie po spirali o sumę oczek na obu kościach.',
+        tutTitle2: 'Kolorowe pola', tutText2: 'Gęsi i most niosą cię dalej. Gospoda, studnia i więzienie zatrzymują, a labirynt i śmierć cofają.',
+        tutTitle3: 'Dokładnie 63', tutText3: 'Wygrywa ten, kto pierwszy stanie dokładnie na 63. To czyste szczęście, więc po prostu baw się dobrze.'
+      },
+      fr: {
+        players: 'joueurs', person: 'Humain', bot: 'Robot', botN: 'Robot {n}', playerN: 'Joueur {n}', you: 'Toi', newMatch: 'Nouvelle partie',
+        boardLabel: 'Plateau en spirale du jeu de l’oie', roll: 'Lance les dés', turnOf: 'Au tour de {n}', yourTurn: 'À toi de jouer', threw: '{n} : {a} + {b}',
+        throwsLabel: 'Tes lancers', geeseLabel: 'Oies empruntées', playerWon: 'Victoire : {n}', waits: 'attend', square: 'Case {n}',
+        evGoose: 'Une oie ! On repart', evBridge: 'Pont : jusqu’à 12', evInn: 'Auberge : passe un tour', evWell: 'Tombe dans le puits',
+        evPrison: 'Va en prison', evMaze: 'Labyrinthe : retour à 39', evDeath: 'Mort : retour à 1', evBounce: 'Au-delà de 63, retour',
+        evNine: 'Un premier 9 : droit sur {n}', evFree: 'Libéré : {n}', evSkip: 'Tour passé : {n}',
+        rules: 'Lancez deux dés à tour de rôle et avancez votre oie d’autant de cases sur la spirale, du départ à la case 63. Qui tombe sur une oie (5, 9, 14, 18, 23, 27, 32, 36, 41, 45, 50, 54, 59) avance encore du même nombre. Un premier lancer de 9 ne suit pas les oies : 6 + 3 mène à 26, 5 + 4 à 53. Pont (6) : passe à 12. Auberge (19) : passe un tour. Puits (31) et prison (52) : attends qu’un autre joueur y tombe et prenne ta place, deux tours au plus. Labyrinthe (42) : retour à 39. Mort (58) : retour à 1. Il faut arriver pile sur 63 ; le reste d’un lancer trop fort fait reculer. Plusieurs pions peuvent partager une case. Le premier sur 63 gagne.',
+        rollKey: 'Lancer les dés',
+        tutTitle1: 'Lance deux dés', tutText1: 'Ton oie avance sur la spirale de la somme des deux dés.',
+        tutTitle2: 'Les cases colorées', tutText2: 'Les oies et le pont te font avancer. L’auberge, le puits et la prison te retiennent ; le labyrinthe et la mort te renvoient en arrière.',
+        tutTitle3: 'Pile sur 63', tutText3: 'Le premier à tomber pile sur 63 gagne. Tout est question de chance, alors profite du voyage.'
+      },
+      ar: {
+        players: 'لاعبين', person: 'شخص', bot: 'روبوت', botN: 'روبوت {n}', playerN: 'اللاعب {n}', you: 'أنت', newMatch: 'لعبة جديدة',
+        boardLabel: 'لوحة لعبة الإوزة الحلزونية', roll: 'ارمِ النردين', turnOf: 'دور {n}', yourTurn: 'دورك', threw: '{n}: {a} + {b}',
+        throwsLabel: 'رمياتك', geeseLabel: 'إوزات ركبتها', playerWon: 'الفائز: {n}', waits: 'ينتظر', square: 'الخانة {n}',
+        evGoose: 'إوزة! تقدّم مرة أخرى', evBridge: 'الجسر: إلى 12', evInn: 'النُّزُل: يفوته دور', evWell: 'سقط في البئر',
+        evPrison: 'دخل السجن', evMaze: 'المتاهة: عودة إلى 39', evDeath: 'الموت: عودة إلى 1', evBounce: 'تجاوز 63 فعاد',
+        evNine: 'أول 9: مباشرة إلى {n}', evFree: 'حرية: {n}', evSkip: 'دور ضائع: {n}',
+        rules: 'ارموا نردين بالتناوب وحرّكوا إوزتكم بمجموعهما على الحلزون، من البداية حتى الخانة 63. من يقف على إوزة (5، 9، 14، 18، 23، 27، 32، 36، 41، 45، 50، 54، 59) يتقدم مرة أخرى بالرمية نفسها. الرمية الأولى إذا كانت 9 لا تركب الإوز: 6 + 3 تذهب إلى 26، و5 + 4 إلى 53. الجسر (6): إلى 12. النُّزُل (19): يفوتك دور. البئر (31) والسجن (52): تنتظر حتى يقع لاعب آخر هناك ويأخذ مكانك، أو دورين على الأكثر. المتاهة (42): عودة إلى 39. الموت (58): عودة إلى 1. يجب الوصول إلى 63 تمامًا؛ وما زاد من الرمية يعيدك إلى الخلف. يمكن لأكثر من قطعة أن تكون في خانة واحدة. أول من يصل إلى 63 يفوز.',
+        rollKey: 'ارمِ النردين',
+        tutTitle1: 'ارمِ نردين', tutText1: 'تتقدم إوزتك على الحلزون بمجموع النردين.',
+        tutTitle2: 'الخانات الملونة', tutText2: 'الإوز والجسر يدفعانك إلى الأمام. النُّزُل والبئر والسجن تحبسك، والمتاهة والموت يعيدانك إلى الخلف.',
+        tutTitle3: '63 تمامًا', tutText3: 'أول من يقف على 63 تمامًا يفوز. كل شيء حظ، فاستمتع بالرحلة.'
+      },
+      hi: {
+        players: 'खिलाड़ी', person: 'व्यक्ति', bot: 'बॉट', botN: 'बॉट {n}', playerN: 'खिलाड़ी {n}', you: 'आप', newMatch: 'नया खेल',
+        boardLabel: 'हंस दौड़ का घुमावदार बोर्ड', roll: 'पासे फेंकें', turnOf: '{n} की बारी', yourTurn: 'आपकी बारी', threw: '{n}: {a} + {b}',
+        throwsLabel: 'आपके पासे', geeseLabel: 'हंसों की सवारी', playerWon: 'विजेता: {n}', waits: 'रुका', square: 'खाना {n}',
+        evGoose: 'हंस! फिर उतना ही आगे', evBridge: 'पुल: 12 तक', evInn: 'सराय: एक बारी रुका', evWell: 'कुएँ में गिरा',
+        evPrison: 'जेल में गया', evMaze: 'भूलभुलैया: वापस 39', evDeath: 'मौत: वापस 1', evBounce: '63 से आगे, और वापस',
+        evNine: 'पहला 9: सीधे {n}', evFree: 'आज़ाद: {n}', evSkip: 'बारी छूटी: {n}',
+        rules: 'बारी-बारी से दो पासे फेंकें और अपने हंस को उनके जोड़ जितने खाने घुमावदार रास्ते पर आगे बढ़ाएँ, शुरुआत से खाना 63 तक। हंस वाले खाने (5, 9, 14, 18, 23, 27, 32, 36, 41, 45, 50, 54, 59) पर पहुँचें तो उतना ही फिर आगे बढ़ें। पहला पासा 9 हो तो हंसों की सवारी नहीं होती: 6 + 3 से 26 और 5 + 4 से 53। पुल (6): 12 तक। सराय (19): एक बारी रुकें। कुआँ (31) और जेल (52): तब तक रुकें जब तक कोई और खिलाड़ी वहाँ आकर आपकी जगह न ले, या ज़्यादा से ज़्यादा दो बारी। भूलभुलैया (42): वापस 39। मौत (58): वापस 1। खाना 63 पर ठीक पहुँचना ज़रूरी है; बाक़ी अंक पीछे लौटा देते हैं। एक खाने में कई गोटियाँ रह सकती हैं। जो पहले 63 पर पहुँचे, वह जीतता है।',
+        rollKey: 'पासे फेंकें',
+        tutTitle1: 'दो पासे फेंकें', tutText1: 'आपका हंस दोनों पासों के जोड़ जितना घुमावदार रास्ते पर आगे बढ़ता है।',
+        tutTitle2: 'रंगीन खाने', tutText2: 'हंस और पुल आगे ले जाते हैं। सराय, कुआँ और जेल रोकते हैं, और भूलभुलैया व मौत पीछे भेजते हैं।',
+        tutTitle3: 'ठीक 63', tutText3: 'जो पहले ठीक 63 पर पहुँचे, वह जीतता है। सब क़िस्मत का खेल है, बस मज़े लें।'
+      },
+      zh: {
+        players: '名玩家', person: '真人', bot: '电脑', botN: '电脑{n}', playerN: '玩家{n}', you: '你', newMatch: '新一局',
+        boardLabel: '鹅棋螺旋棋盘', roll: '掷骰子', turnOf: '轮到{n}', yourTurn: '轮到你', threw: '{n}：{a} + {b}',
+        throwsLabel: '你的掷骰次数', geeseLabel: '乘过的鹅', playerWon: '{n}获胜', waits: '等待', square: '第{n}格',
+        evGoose: '鹅！再走一次', evBridge: '桥：到第12格', evInn: '客栈：停一轮', evWell: '掉进井里',
+        evPrison: '进了监狱', evMaze: '迷宫：退回第39格', evDeath: '死亡：退回第1格', evBounce: '超过63又退回',
+        evNine: '首掷9点：直达{n}', evFree: '{n}获救', evSkip: '{n}本轮停走',
+        rules: '轮流掷两枚骰子，按点数之和沿螺旋移动你的鹅，从起点走到第63格。停在鹅格（5、9、14、18、23、27、32、36、41、45、50、54、59）上，就按同样的点数再走一次。首掷9点不乘鹅：6 + 3 去第26格，5 + 4 去第53格。桥（6）：过到12。客栈（19）：停一轮。井（31）和监狱（52）：等到另一名玩家落到这里替换你，最多等两轮。迷宫（42）：退回39。死亡（58）：退回1。必须正好走到63，多出的步数要往回走。多枚棋子可以停在同一格。先到63的人获胜。',
+        rollKey: '掷骰子',
+        tutTitle1: '掷两枚骰子', tutText1: '你的鹅按两枚骰子的点数之和沿螺旋前进。',
+        tutTitle2: '彩色格子', tutText2: '鹅和桥让你继续前进。客栈、井和监狱会让你停下，迷宫和死亡让你后退。',
+        tutTitle3: '正好63', tutText3: '先正好停在63的人获胜。全凭运气，尽情享受吧。'
+      },
+      de: {
+        players: 'Spieler', person: 'Mensch', bot: 'Bot', botN: 'Bot {n}', playerN: 'Spieler {n}', you: 'Du', newMatch: 'Neue Partie',
+        boardLabel: 'Spiralbrett des Gänsespiels', roll: 'Würfeln', turnOf: 'Am Zug: {n}', yourTurn: 'Du bist dran', threw: '{n}: {a} + {b}',
+        throwsLabel: 'Deine Würfe', geeseLabel: 'Gänse geritten', playerWon: 'Sieg: {n}', waits: 'wartet', square: 'Feld {n}',
+        evGoose: 'Eine Gans! Noch einmal so weit', evBridge: 'Brücke: hinüber auf 12', evInn: 'Wirtshaus: setzt einmal aus', evWell: 'In den Brunnen gefallen',
+        evPrison: 'Ins Gefängnis', evMaze: 'Labyrinth: zurück auf 39', evDeath: 'Tod: zurück auf 1', evBounce: 'Über 63 und zurück',
+        evNine: 'Eine erste 9: direkt auf {n}', evFree: 'Frei: {n}', evSkip: 'Aussetzen: {n}',
+        rules: 'Würfelt abwechselnd mit zwei Würfeln und zieht eure Gans um die Augensumme auf der Spirale weiter, vom Start bis Feld 63. Wer auf einer Gans landet (5, 9, 14, 18, 23, 27, 32, 36, 41, 45, 50, 54, 59), zieht noch einmal um denselben Wurf. Eine erste 9 reitet nicht auf den Gänsen: 6 + 3 führt auf 26, 5 + 4 auf 53. Brücke (6): hinüber auf 12. Wirtshaus (19): einmal aussetzen. Brunnen (31) und Gefängnis (52): warten, bis ein anderer Spieler dort landet und deinen Platz einnimmt, höchstens zwei Runden. Labyrinth (42): zurück auf 39. Tod (58): zurück auf 1. Feld 63 muss genau erreicht werden; der Rest eines zu hohen Wurfs geht zurück. Mehrere Figuren dürfen auf einem Feld stehen. Wer zuerst 63 erreicht, gewinnt.',
+        rollKey: 'Würfeln',
+        tutTitle1: 'Mit zwei Würfeln', tutText1: 'Deine Gans zieht um die Summe beider Würfel auf der Spirale weiter.',
+        tutTitle2: 'Die bunten Felder', tutText2: 'Gänse und die Brücke tragen dich weiter. Wirtshaus, Brunnen und Gefängnis halten dich fest, Labyrinth und Tod schicken dich zurück.',
+        tutTitle3: 'Genau 63', tutText3: 'Wer zuerst genau auf 63 landet, gewinnt. Es ist reines Glück, also genieß die Fahrt.'
+      },
+      es: {
+        players: 'jugadores', person: 'Persona', bot: 'Bot', botN: 'Bot {n}', playerN: 'Jugador {n}', you: 'Tú', newMatch: 'Nueva partida',
+        boardLabel: 'Tablero en espiral del juego de la oca', roll: 'Tirar los dados', turnOf: 'Turno: {n}', yourTurn: 'Tu turno', threw: '{n}: {a} + {b}',
+        throwsLabel: 'Tus tiradas', geeseLabel: 'Ocas aprovechadas', playerWon: 'Gana: {n}', waits: 'espera', square: 'Casilla {n}',
+        evGoose: '¡De oca a oca! Otra vez', evBridge: 'Puente: hasta la 12', evInn: 'Posada: pierde un turno', evWell: 'Cae en el pozo',
+        evPrison: 'A la cárcel', evMaze: 'Laberinto: vuelve a la 39', evDeath: 'Muerte: vuelve a la 1', evBounce: 'Pasó de 63 y volvió',
+        evNine: 'Un primer 9: directo a la {n}', evFree: 'Libre: {n}', evSkip: 'Turno perdido: {n}',
+        rules: 'Tirad dos dados por turnos y avanzad vuestra oca esa suma de casillas por la espiral, desde la salida hasta la 63. Si caes en una oca (5, 9, 14, 18, 23, 27, 32, 36, 41, 45, 50, 54, 59), vuelves a avanzar lo mismo. Una primera tirada de 9 no salta de oca en oca: 6 + 3 va a la 26 y 5 + 4 a la 53. Puente (6): pasa a la 12. Posada (19): pierdes un turno. Pozo (31) y cárcel (52): esperas hasta que otro jugador caiga allí y ocupe tu lugar, dos turnos como mucho. Laberinto (42): vuelves a la 39. Muerte (58): vuelves a la 1. Hay que llegar justo a la 63; lo que sobra de la tirada te hace retroceder. Varias fichas pueden compartir casilla. Gana quien llegue primero a la 63.',
+        rollKey: 'Tirar los dados',
+        tutTitle1: 'Tira dos dados', tutText1: 'Tu oca avanza por la espiral la suma de los dos dados.',
+        tutTitle2: 'Las casillas de color', tutText2: 'Las ocas y el puente te llevan más lejos. La posada, el pozo y la cárcel te retienen; el laberinto y la muerte te hacen volver.',
+        tutTitle3: 'Justo a la 63', tutText3: 'Gana quien caiga primero justo en la 63. Es pura suerte: disfruta del viaje.'
+      }
+    }
+  });
+
+  // seats[0] is always the person holding the phone; the others are people or bots
+  var prefs = ctx.store.get('prefs', { players: 2, seats: ['person', 'bot', 'bot', 'bot'] });
+  function cleanPrefs(p) {
+    var out = { players: [2, 3, 4].indexOf(p && p.players) >= 0 ? p.players : 2, seats: ['person', 'bot', 'bot', 'bot'] };
+    for (var i = 1; i < 4; i++) if (p && Array.isArray(p.seats) && p.seats[i] === 'person') out.seats[i] = 'person';
+    return out;
+  }
+  prefs = cleanPrefs(prefs);
+
+  // G: the game. phase: 'roll' (waiting for a throw) or 'busy' (dice or a pawn moving).
+  var G = null, timer = null, raf = 0, anim = null;
+
+  var cv = document.createElement('canvas');
+  cv.className = 'gs-canvas';
+  cv.setAttribute('role', 'img');
+  cv.setAttribute('aria-label', C.t('boardLabel'));
+  var box = el('div', { class: 'gs-box' }, [cv]);
+  var top = el('div', { class: 'gs-top ch-above' });
+  var playersRow = el('div', { class: 'gs-players ch-above' });
+  var logLine = el('div', { class: 'gs-log' });
+  var turnLine = el('div', { class: 'gs-turn' });
+  var status = el('div', { class: 'gs-status', role: 'status', 'aria-live': 'polite' }, [logLine, turnLine]);
+  var dice = el('button', { class: 'gs-dice', type: 'button', 'aria-label': C.t('roll') });
+  var bar = el('div', { class: 'gs-bar' }, [status, dice]);
+  var wrap = el('div', { class: 'gs-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, playersRow, bar])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: settings });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ setup */
+
+  function newGame(o) {
+    stop();
+    anim = null;
+    G = {
+      players: o.players, seats: o.seats.slice(0, o.players), phase: 'roll', roll: null, log: '',
+      myThrows: 0, geese: 0, startedAt: Date.now(), done: false
+    };
+    G.s = E.newGame(G.players);
+    prefs.players = o.players;
+    for (var i = 1; i < o.players; i++) prefs.seats[i] = o.seats[i];
+    ctx.store.set('prefs', prefs);
+    render();
+    save();
+    startTurn();
+  }
+  function current() {
+    var seats = prefs.seats.slice();
+    for (var i = 0; i < G.players; i++) seats[i] = G.seats[i];
+    return { players: G.players, seats: seats };
+  }
+  function fromPrefs() { return { players: prefs.players, seats: prefs.seats.slice() }; }
+
+  function isBot(seat) { return G.seats[seat] === 'bot'; }
+  function humans() { return G.seats.filter(function (s) { return s !== 'bot'; }).length; }
+  function stop() {
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (raf) { cancelAnimationFrame(raf); raf = 0; }
+  }
+  function later(fn, ms) { stop(); timer = setTimeout(function () { timer = null; fn(); }, ms); }
+  // card games' Slow / Normal / Fast setting paces the bots, the dice and the pawn
+  function pace(ms) { return C.cards.pace(ms); }
+
+  /* ------------------------------------------------------------- turns */
+
+  function startTurn() {
+    if (!G || G.done) return;
+    G.phase = 'roll';
+    G.roll = null;
+    render();
+    // a held player's turn goes by on its own, slow enough to read why
+    if (E.waiting(G.s)) { G.phase = 'busy'; render(); later(doPass, pace(900)); return; }
+    if (isBot(G.s.turn)) later(doRoll, pace(700));
+  }
+
+  function doPass() {
+    if (!G || G.done) return;
+    var r = E.pass(G.s);
+    if (!r) { startTurn(); return; }
+    G.s = r.state;
+    G.log = C.t('evSkip', { n: pname(r.events[0].seat) });
+    save();
+    startTurn();
+  }
+
+  function doRoll() {
+    if (!G || G.done || G.phase !== 'roll' || E.waiting(G.s)) return;
+    G.phase = 'busy';
+    var who = G.s.turn, v = E.roll(Math.random);
+    if (who === 0) G.myThrows++;
+    dice.classList.add('gs-dice--roll');
+    drawDice([1 + Math.floor(Math.random() * 6), 1 + Math.floor(Math.random() * 6)]);
+    C.feedback('clack');
+    render();
+    later(function () {
+      dice.classList.remove('gs-dice--roll');
+      G.roll = v;
+      // saved the moment it is known, so a reload plays this throw, not a new one
+      save();
+      drawDice(v);
+      later(move, pace(260));
+    }, C.ui.reduceMotion() ? 120 : pace(520));
+  }
+
+  function evText(r) {
+    var parts = [], geese = 0;
+    r.events.forEach(function (e) { if (e.type === 'goose') geese++; });
+    var saidGoose = false;
+    r.events.forEach(function (e) {
+      var t = e.type;
+      if (t === 'goose') {
+        // a chain of six geese reads as one line, not six
+        if (!saidGoose) parts.push(C.t('evGoose') + (geese > 1 ? ' ×' + C.num(geese) : ''));
+        saidGoose = true;
+      } else if (t === 'nine') parts.push(C.t('evNine', { n: C.num(e.to) }));
+      else if (t === 'free') parts.push(C.t('evFree', { n: pname(e.seat) }));
+      else if (t !== 'win') parts.push(C.t('ev' + t.charAt(0).toUpperCase() + t.slice(1)));
+    });
+    return parts;
+  }
+
+  function move() {
+    if (!G || G.done || !G.roll) return;
+    var who = G.s.turn, a = G.roll[0], b = G.roll[1], r = E.play(G.s, a, b);
+    if (!r) { G.roll = null; startTurn(); return; }
+    G.phase = 'busy';
+    var pts = [{ n: G.s.pos[who] }].concat(r.steps);
+    anim = { seat: who, pts: pts, k: 0, f: 0, t0: 0, from: G.s };
+    G.log = C.t('threw', { n: pname(who), a: C.num(a), b: C.num(b) });
+    render();
+    C.feedback('place');
+    var reduce = C.ui.reduceMotion();
+    function dur(st) { return reduce ? pace(st.jump ? 160 : 70) : pace(st.jump ? 420 : 170); }
+    function frame(now) {
+      raf = 0;
+      if (!anim) return;
+      if (!anim.t0) anim.t0 = now;
+      var d = dur(anim.pts[anim.k + 1]), f = (now - anim.t0) / d;
+      if (f >= 1) {
+        anim.k++;
+        anim.t0 = now;
+        f = 0;
+        if (anim.k >= anim.pts.length - 1) { arrive(who, r); return; }
+        C.feedback(anim.pts[anim.k + 1].jump ? 'whoosh' : 'place');
+      }
+      // reduced motion: the pawn steps square to square without the hop in between
+      anim.f = reduce ? 0 : f;
+      draw();
+      raf = requestAnimationFrame(frame);
+    }
+    raf = requestAnimationFrame(frame);
+  }
+
+  function arrive(who, r) {
+    anim = null;
+    G.s = r.state;
+    var a = G.roll[0], b = G.roll[1], parts = evText(r);
+    G.log = C.t('threw', { n: pname(who), a: C.num(a), b: C.num(b) }) + (parts.length ? ' · ' + parts.join(' · ') : '');
+    if (who === 0) r.events.forEach(function (e) { if (e.type === 'goose') G.geese++; });
+    var bad = r.events.some(function (e) { return /inn|well|prison|maze|death/.test(e.type); });
+    var good = r.events.some(function (e) { return /goose|bridge|nine/.test(e.type); });
+    if (bad) C.feedback('bad'); else if (good) C.feedback('good');
+    G.roll = null;
+    if (G.s.winner >= 0) {
+      G.done = true;
+      render();
+      later(finish, pace(700));
+      return;
+    }
+    save();
+    render();
+    later(startTurn, pace(parts.length ? 750 : 300));
+  }
+
+  /* ------------------------------------------------------------ result */
+
+  // A game of pure luck: small rewards, and the one award is for finishing a race
+  function finish() {
+    stop();
+    var w = G.s.winner, solo = humans() === 1, won = solo ? w === 0 : null;
+    var coins = solo ? (won ? 4 : 2) : 3, points = solo ? (won ? 12 + (G.players - 2) * 3 : 5) : 8;
+    C.achievements.unlock('gs-finish');
+    ctx.clearSave();
+    ctx.finish({
+      won: won,
+      title: solo ? (won ? C.t('won') : C.t('lost')) : C.t('playerWon', { n: pname(w) }),
+      timeMs: Date.now() - G.startedAt, coins: coins, points: points,
+      lines: [
+        { label: C.t('throwsLabel'), value: C.num(G.myThrows) },
+        { label: C.t('geeseLabel'), value: C.num(G.geese) }
+      ],
+      shareText: 'چوگان · بازی غاز\n' + pname(w),
+      paint: cardPaint(),
+      onAgain: function () { newGame(current()); }
+    });
+  }
+
+  /* ------------------------------------------------------------- saves */
+
+  // Saved between turns and as soon as the dice land, with the throw. A pawn caught
+  // mid-move is saved as the turn before it, so a reload plays the same throw again.
+  ctx.autosave(function () {
+    if (!G || G.done || (!G.s.rolls && !G.roll)) return { inProgress: false };
+    return {
+      g: { players: G.players, seats: G.seats, s: G.s, roll: G.roll, myThrows: G.myThrows, geese: G.geese, elapsed: Date.now() - G.startedAt },
+      prefs: prefs
+    };
+  });
+  function save() { ctx.save(); }
+
+  function validSave(sv) {
+    var g = sv && sv.g;
+    return !!(g && E.valid(g.s) && g.s.winner < 0 && g.players === g.s.pos.length && Array.isArray(g.seats) &&
+      g.seats.length === g.players && g.seats[0] === 'person' && g.seats.every(function (s) { return s === 'person' || s === 'bot'; }));
+  }
+  function restore(g) {
+    G = {
+      players: g.players, seats: g.seats.slice(), s: g.s, phase: 'roll', roll: null, log: '',
+      myThrows: g.myThrows || 0, geese: g.geese || 0, startedAt: Date.now() - (g.elapsed || 0), done: false
+    };
+    render();
+    var rl = g.roll;
+    if (Array.isArray(rl) && rl.length === 2 && rl.every(function (v) { return v >= 1 && v <= 6 && Math.floor(v) === v; }) && !E.waiting(G.s)) {
+      G.phase = 'busy'; G.roll = rl; drawDice(rl); later(move, 300);
+    } else startTurn();
+  }
+
+  // New game settings in one window. Nothing changes until Start, so it doubles as
+  // the "end this game?" question.
+  function settings() {
+    var o = G ? current() : fromPrefs(), body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
+    var seatRows = [];
+    body.appendChild(C.ui.segmented([2, 3, 4].map(function (n) { return { value: n, label: C.num(n) + ' ' + C.t('players') }; }),
+      o.players, function (v) { o.players = v; seatRows.forEach(function (row, i) { row.hidden = i + 1 >= v; }); }));
+    var list = el('div', { class: 'ch-list gs-seats' });
+    for (var i = 1; i < 4; i++) {
+      (function (i) {
+        var row = el('div', { class: 'ch-item gs-seat' }, [
+          el('div', { class: 'ch-item__label', text: C.t('playerN', { n: C.num(i + 1) }) }),
+          C.ui.segmented([{ value: 'person', label: C.t('person') }, { value: 'bot', label: C.t('bot') }], o.seats[i], function (v) { o.seats[i] = v; })
+        ]);
+        row.hidden = i >= o.players;
+        seatRows.push(row);
+        list.appendChild(row);
+      })(i);
+    }
+    list.appendChild(C.cards.speedRow());
+    body.appendChild(list);
+    if (G && G.s.rolls && !G.done) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('resetWarn') }));
+    C.ui.modal({
+      title: C.t('newMatch'), closeButton: true, body: [body],
+      actions: [{ label: C.t('cancel') }, { label: C.t('start'), kind: 'primary', onClick: function () { o.seats[0] = 'person'; newGame(o); } }]
+    });
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  var TILE = { goose: '#3C8CC0', bridge: '#A26A37', inn: '#D2742A', well: '#3F63B0', maze: '#3F8B4B', prison: '#5E6673', death: '#2B2B2B', goal: '#C9961A' };
+
+  function colors() {
+    var cs = getComputedStyle(document.documentElement);
+    var v = function (k, f) { return cs.getPropertyValue(k).trim() || f; };
+    return {
+      c: [v('--gs-c0', '#E5484D'), v('--gs-c1', '#2F6FDE'), v('--gs-c2', '#E8A317'), v('--gs-c3', '#2E9E5B')],
+      cell: v('--c-surface', '#FFFFFF'), bg: v('--c-surface-2', '#F7F1E8'), line: v('--c-line', '#E6DDD0'),
+      text: v('--c-text', '#2B2118'), dim: v('--c-text-dim', '#7A6C5C'), accent: '#6E3C70'
+    };
+  }
+
+  function centre(n) { var q = E.cell(n); return [q[0] + 0.5, q[1] + 0.5]; }
+
+  function tint(hex, a) {
+    var n = parseInt(hex.slice(1), 16);
+    return 'rgba(' + (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+  }
+
+  // The glyph of a special square, drawn in white inside a box of side s centred on (x, y)
+  function glyph(g, k, x, y, s, bgc) {
+    g.save();
+    g.translate(x, y);
+    g.scale(s / 24, s / 24);
+    g.fillStyle = '#FFFFFF'; g.strokeStyle = '#FFFFFF';
+    g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = 2.2;
+    g.beginPath();
+    if (k === 'goose') {
+      // body, neck and head looking right, with an orange beak
+      g.ellipse(-2, 5, 8, 5, 0, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.moveTo(-9, 3); g.lineTo(-12, 0); g.lineTo(-8, 6); g.fill();
+      g.beginPath(); g.lineWidth = 3.4; g.moveTo(4, 3); g.quadraticCurveTo(6, -2, 3, -6); g.stroke();
+      g.beginPath(); g.arc(4, -7, 3, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.fillStyle = '#F2A33A'; g.moveTo(6.5, -8); g.lineTo(11, -6.5); g.lineTo(6.5, -5.5); g.fill();
+      g.beginPath(); g.fillStyle = bgc; g.arc(4.6, -7.6, 0.9, 0, Math.PI * 2); g.fill();
+    } else if (k === 'bridge') {
+      g.moveTo(-11, 4); g.lineTo(11, 4); g.stroke();
+      g.beginPath(); g.moveTo(-9, 4); g.quadraticCurveTo(0, -12, 9, 4); g.stroke();
+      g.beginPath(); for (var i = -1; i <= 1; i++) { g.moveTo(i * 4.5, 4); g.lineTo(i * 4.5, i ? -1.5 : -4); } g.stroke();
+      g.beginPath(); g.lineWidth = 1.6; g.moveTo(-11, 9); g.quadraticCurveTo(-5.5, 7, 0, 9); g.quadraticCurveTo(5.5, 11, 11, 9); g.stroke();
+    } else if (k === 'inn') {
+      g.moveTo(-10, -1); g.lineTo(0, -10); g.lineTo(10, -1); g.closePath(); g.fill();
+      g.fillRect(-7.5, -1, 15, 11);
+      g.fillStyle = bgc; g.fillRect(-2, 3, 4, 7);
+      g.fillRect(-6, 1, 3, 3); g.fillRect(3, 1, 3, 3);
+    } else if (k === 'well') {
+      g.moveTo(-8, 1); g.lineTo(-8, 10); g.lineTo(8, 10); g.lineTo(8, 1); g.closePath(); g.fill();
+      g.beginPath(); g.moveTo(-7, 1); g.lineTo(-7, -7); g.moveTo(7, 1); g.lineTo(7, -7); g.stroke();
+      g.beginPath(); g.moveTo(-10, -6); g.lineTo(0, -11); g.lineTo(10, -6); g.closePath(); g.fill();
+      g.beginPath(); g.lineWidth = 1.4; g.moveTo(0, -6); g.lineTo(0, -2); g.stroke();
+      g.fillRect(-1.6, -2, 3.2, 3);
+      g.fillStyle = bgc; g.fillRect(-8, 4, 16, 1.4);
+    } else if (k === 'maze') {
+      g.lineWidth = 2;
+      g.moveTo(-10, -10); g.lineTo(10, -10); g.lineTo(10, 10); g.lineTo(-10, 10); g.lineTo(-10, -5);
+      g.moveTo(-5, -5); g.lineTo(5, -5); g.lineTo(5, 5); g.lineTo(-5, 5); g.lineTo(-5, 0); g.lineTo(0, 0);
+      g.stroke();
+    } else if (k === 'prison') {
+      g.lineWidth = 2;
+      g.rect(-9, -10, 18, 20); g.stroke();
+      g.beginPath(); for (var b = -4.5; b <= 4.5; b += 4.5) { g.moveTo(b, -10); g.lineTo(b, 10); } g.stroke();
+      g.beginPath(); g.moveTo(-9, -1); g.lineTo(9, -1); g.stroke();
+    } else if (k === 'death') {
+      g.arc(0, -2, 9, 0, Math.PI * 2); g.fill();
+      g.fillRect(-5, 5, 10, 6);
+      g.fillStyle = bgc;
+      g.beginPath(); g.arc(-3.6, -2, 2.6, 0, Math.PI * 2); g.arc(3.6, -2, 2.6, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.moveTo(0, 2); g.lineTo(-1.5, 4.5); g.lineTo(1.5, 4.5); g.fill();
+      g.fillRect(-2.6, 7.5, 1.2, 3.5); g.fillRect(1.4, 7.5, 1.2, 3.5);
+    } else if (k === 'goal') {
+      for (var p = 0; p < 10; p++) {
+        var rr = p % 2 ? 4.8 : 11, an = -Math.PI / 2 + p * Math.PI / 5;
+        if (p) g.lineTo(Math.cos(an) * rr, Math.sin(an) * rr); else g.moveTo(Math.cos(an) * rr, Math.sin(an) * rr);
+      }
+      g.closePath(); g.fill();
+    } else if (k === 'start') {
+      g.strokeStyle = bgc; g.fillStyle = bgc;
+      g.moveTo(-6, 11); g.lineTo(-6, -10); g.stroke();
+      g.beginPath(); g.moveTo(-5, -10); g.lineTo(9, -6); g.lineTo(-5, -1); g.closePath(); g.fill();
+    }
+    g.restore();
+  }
+
+  function paintBoard(g, W, o, col) {
+    var u = W / 8, s = o.s, gap = Math.max(1.5, u * 0.07), rad = u * 0.18;
+    g.fillStyle = col.bg;
+    C.rrect(g, 0, 0, W, W, Math.round(u * 0.3));
+    g.fill();
+    // the path: a band joining each square to the next, so the spiral reads at a glance
+    // while squares on neighbouring rings stay apart
+    g.strokeStyle = tint(col.accent, 0.35); g.lineWidth = u * 0.5; g.lineCap = 'round'; g.lineJoin = 'round';
+    g.beginPath();
+    for (var n = 0; n <= E.END; n++) { var c0 = centre(n); if (n) g.lineTo(c0[0] * u, c0[1] * u); else g.moveTo(c0[0] * u, c0[1] * u); }
+    g.stroke();
+    for (n = 0; n <= E.END; n++) {
+      var q = E.cell(n), x = q[0] * u + gap, y = q[1] * u + gap, w = u - gap * 2, k = E.kind(n), fill = TILE[k];
+      g.fillStyle = fill || (n === 0 ? tint(col.accent, 0.22) : col.cell);
+      C.rrect(g, x, y, w, w, rad);
+      g.fill();
+      if (!fill) { g.strokeStyle = col.line; g.lineWidth = Math.max(1, u / 40); g.stroke(); }
+      g.direction = 'ltr';
+      if (fill || n === 0) {
+        // the start flag is drawn in the text colour: white on the pale start tile vanished
+        glyph(g, k, x + w / 2, y + w * 0.56, w * 0.62, fill || col.text);
+        if (n) {
+          g.fillStyle = 'rgba(255,255,255,.92)';
+          g.font = '700 ' + Math.max(7, Math.round(u * 0.2)) + 'px Vazirmatn, system-ui, sans-serif';
+          g.textAlign = 'left'; g.textBaseline = 'top';
+          g.fillText(C.num(n), x + w * 0.08, y + w * 0.04);
+        }
+      } else {
+        g.fillStyle = col.dim;
+        g.font = '700 ' + Math.max(8, Math.round(u * 0.3)) + 'px Vazirmatn, system-ui, sans-serif';
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(C.num(n), x + w / 2, y + w / 2 + u * 0.02);
+      }
+    }
+    // pawns; several on one square sit side by side and a little smaller
+    var list = [];
+    for (var seat = 0; seat < s.pos.length; seat++) {
+      var at = centre(s.pos[seat]), key = 'n' + s.pos[seat], lift = 0;
+      if (o.anim && o.anim.seat === seat) {
+        var A = o.anim, p0 = centre(A.pts[A.k].n), p1 = centre(A.pts[Math.min(A.k + 1, A.pts.length - 1)].n), f = A.f;
+        at = [p0[0] + (p1[0] - p0[0]) * f, p0[1] + (p1[1] - p0[1]) * f];
+        lift = Math.sin(Math.PI * f) * (A.pts[A.k + 1] && A.pts[A.k + 1].jump ? 0.8 : 0.3);
+        key = '';
+      }
+      list.push({ seat: seat, x: at[0], y: at[1], lift: lift, key: key });
+    }
+    var groups = {};
+    list.forEach(function (t) { if (t.key) (groups[t.key] = groups[t.key] || []).push(t); });
+    Object.keys(groups).forEach(function (key) {
+      var gr = groups[key];
+      if (gr.length < 2) return;
+      gr.forEach(function (t, i) {
+        var a = i * Math.PI * 2 / gr.length - Math.PI * 3 / 4;
+        t.x += Math.cos(a) * 0.2; t.y += Math.sin(a) * 0.2; t.small = true;
+      });
+    });
+    // the moving pawn is drawn last, on top of the others
+    list.sort(function (a, b) { return (a.key ? 0 : 1) - (b.key ? 0 : 1); });
+    list.forEach(function (t) {
+      var R = u * (t.small ? 0.19 : 0.26), x = t.x * u, y = (t.y - t.lift) * u;
+      g.beginPath(); g.ellipse(t.x * u + R * 0.1, t.y * u + R * 0.35, R * (1 - t.lift * 0.3), R * 0.55 * (1 - t.lift * 0.3), 0, 0, Math.PI * 2);
+      g.fillStyle = 'rgba(0,0,0,.25)'; g.fill();
+      g.beginPath(); g.arc(x, y, R, 0, Math.PI * 2);
+      g.fillStyle = col.c[t.seat]; g.fill();
+      g.lineWidth = Math.max(1.5, R * 0.22);
+      g.strokeStyle = '#FFFFFF'; g.stroke();
+      g.beginPath(); g.arc(x - R * 0.3, y - R * 0.32, R * 0.28, 0, Math.PI * 2);
+      g.fillStyle = 'rgba(255,255,255,.45)'; g.fill();
+    });
+  }
+
+  function boxSize() {
+    var r = box.getBoundingClientRect(), side = Math.max(1, Math.floor(Math.min(r.width, r.height || r.width)));
+    return { w: side, h: side };
+  }
+
+  function draw() {
+    if (!G) return;
+    var sz = boxSize(), W = sz.w, H = sz.h, dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    paintBoard(g, W, { s: anim ? anim.from : G.s, anim: anim }, colors());
+  }
+
+  var PIPS = { 1: [[1, 1]], 2: [[0, 0], [2, 2]], 3: [[0, 0], [1, 1], [2, 2]], 4: [[0, 0], [2, 0], [0, 2], [2, 2]],
+    5: [[0, 0], [2, 0], [1, 1], [0, 2], [2, 2]], 6: [[0, 0], [2, 0], [0, 1], [2, 1], [0, 2], [2, 2]] };
+  function face(v, c) {
+    var s = '<svg viewBox="0 0 44 44" width="44" height="44" aria-hidden="true"><rect x="2" y="2" width="40" height="40" rx="9" fill="var(--c-surface-2)" stroke="var(--c-line)" stroke-width="2"/>';
+    if (v) PIPS[v].forEach(function (q) { s += '<circle cx="' + (10 + q[0] * 12) + '" cy="' + (10 + q[1] * 12) + '" r="4.4" fill="' + c + '"/>'; });
+    // before a throw: a faint five, so the button reads as dice, not as "add"
+    else PIPS[5].forEach(function (q) { s += '<circle cx="' + (10 + q[0] * 12) + '" cy="' + (10 + q[1] * 12) + '" r="4.4" fill="' + c + '" opacity=".25"/>'; });
+    return s + '</svg>';
+  }
+  function drawDice(v) {
+    var c = G ? 'var(--gs-c' + G.s.turn + ')' : 'var(--c-text)';
+    dice.innerHTML = face(v && v[0], c) + face(v && v[1], c);
+  }
+
+  function cardPaint() {
+    var s = E.copy(G.s);
+    return function (g, W, H) {
+      var side = Math.min(W, H);
+      g.translate((W - side) / 2, (H - side) / 2);
+      paintBoard(g, side, { s: s }, colors());
+    };
+  }
+
+  function pname(seat) {
+    if (seat === 0) return C.state.profile.name || C.t('you');
+    if (isBot(seat)) return C.t('botN', { n: C.num(seat + 1) });
+    return C.t('playerN', { n: C.num(seat + 1) });
+  }
+
+  function drawPlayers() {
+    playersRow.innerHTML = '';
+    for (var seat = 0; seat < G.players; seat++) {
+      var p = G.s.pos[seat], w = G.s.wait[seat];
+      var box = el('div', {
+        class: 'gs-player' + (G.s.turn === seat && !G.done ? ' gs-player--on' : ''),
+        style: { '--pc': 'var(--gs-c' + seat + ')' }
+      }, [
+        el('div', { class: 'gs-player__dot' }),
+        el('div', { class: 'gs-player__name', text: pname(seat) }),
+        el('span', { class: 'gs-player__n', text: (p ? C.num(p) : '–') + (w ? ' · ' + C.t('waits') : '') })
+      ]);
+      if (isBot(seat) && G.s.turn === seat && !G.done) box.classList.add('gs-thinking');
+      playersRow.appendChild(box);
+    }
+  }
+
+  function drawTop() {
+    top.innerHTML = '';
+    var bots = G.seats.filter(function (s) { return s === 'bot'; }).length;
+    var text = C.num(G.players) + ' ' + C.t('players') + (bots ? ' · ' + C.num(bots) + ' ' + C.t('bot') : '');
+    top.appendChild(el('button', { class: 'ch-badge ch-tap', type: 'button', onclick: settings, text: text }));
+    var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', settings);
+    top.appendChild(gear);
+  }
+
+  function drawBar() {
+    var mine = !isBot(G.s.turn) && !G.done && !E.waiting(G.s);
+    dice.style.setProperty('--pc', 'var(--gs-c' + G.s.turn + ')');
+    dice.disabled = !(mine && G.phase === 'roll');
+    dice.classList.toggle('gs-dice--ready', mine && G.phase === 'roll');
+    if (G.phase === 'roll' && !G.roll) drawDice(null);
+    var who = G.done ? C.t('playerWon', { n: pname(G.s.winner) }) : (G.s.turn === 0 ? C.t('yourTurn') : C.t('turnOf', { n: pname(G.s.turn) }));
+    if (!G.done && E.waiting(G.s)) who = C.t('evSkip', { n: pname(G.s.turn) });
+    else if (!G.done && G.phase === 'roll' && mine) who += ' · ' + C.t('roll');
+    logLine.textContent = G.log || ' ';
+    turnLine.textContent = who;
+  }
+
+  function render() {
+    if (!G) return;
+    drawTop();
+    drawPlayers();
+    drawBar();
+    draw();
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  dice.addEventListener('click', function () { if (G && !G.done && !isBot(G.s.turn) && G.phase === 'roll') doRoll(); });
+
+  window.addEventListener('keydown', function (e) {
+    if (!G || G.done || document.querySelector('.ch-scrim') || isBot(G.s.turn)) return;
+    var k = e.key;
+    if (G.phase === 'roll' && (k === ' ' || k === 'Enter' || C.keyIs(e, 'r'))) { e.preventDefault(); doRoll(); }
+  });
+
+  // the board follows its slot, which changes with the window and the side column (#359)
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  else window.addEventListener('resize', function () { draw(); });
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    if (mq.addEventListener) mq.addEventListener('change', function () { draw(); });
+  }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+  // A pause mid-move plays the same throw again from the turn's start (the move is
+  // applied only when it ends); dice still in the air are thrown again.
+  C.onPause(function () { stop(); });
+  C.onResume(function () {
+    if (!G || G.done) return;
+    anim = null;
+    dice.classList.remove('gs-dice--roll');
+    if (G.roll) { G.phase = 'busy'; drawDice(G.roll); later(move, 300); }
+    else startTurn();
+  });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) {
+    return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]);
+  }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('Space / Enter', C.t('rollKey'))])
+      ],
+      actions: [
+        { label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('done'), kind: 'primary' }
+      ]
+    });
+  }
+
+  function art(kind) {
+    var s = '<svg viewBox="0 0 220 120" width="100%">';
+    if (kind === 1) {
+      s += face(4, 'var(--gs-c0)').replace('<svg', '<svg x="50" y="38"') + face(5, 'var(--gs-c0)').replace('<svg', '<svg x="126" y="38"');
+    } else if (kind === 2) {
+      var ks = [['goose', 20], ['bridge', 70], ['well', 120], ['death', 170]];
+      ks.forEach(function (q) { s += '<rect x="' + q[1] + '" y="35" width="40" height="40" rx="8" fill="' + TILE[q[0]] + '"/>'; });
+      s += '<path d="M33 60c4-10 10-12 12-6 2-8-2-12-4-14" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>' +
+        '<path d="M76 62h28M78 62q12-18 24 0" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>' +
+        '<path d="M128 56v12h24V56M126 50l14-7 14 7" stroke="#fff" stroke-width="3" fill="#fff" stroke-linejoin="round"/>' +
+        '<circle cx="190" cy="52" r="10" fill="#fff"/><rect x="184" y="58" width="12" height="8" fill="#fff"/><circle cx="186" cy="52" r="3" fill="#2B2B2B"/><circle cx="194" cy="52" r="3" fill="#2B2B2B"/>';
+    } else {
+      s += '<rect x="80" y="20" width="60" height="60" rx="10" fill="' + TILE.goal + '"/><text x="110" y="58" text-anchor="middle" font-size="24" font-weight="700" fill="#fff">63</text>' +
+        '<circle cx="110" cy="100" r="10" fill="var(--gs-c0)" stroke="#fff" stroke-width="3"/>';
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: art(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: art(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: art(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  var saved = ctx.loadSave();
+  if (validSave(saved)) {
+    if (saved.prefs) prefs = cleanPrefs(saved.prefs);
+    restore(saved.g);
+  } else {
+    newGame(fromPrefs());
+    ctx.tutorialIfNew(TUT);
+  }
+})();
+</script>
+</body>
+</html>
