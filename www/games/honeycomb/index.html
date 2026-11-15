@@ -1,0 +1,941 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>کندو — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  /* One colour per piece family. The game's own tokens, because eight families need
+     eight colours the core does not have; each is drawn on the empty cell of every theme,
+     so tools/tests/honeycomb.js asks for 2:1 against the surfaces. */
+  :root {
+    --hc-1: #E99A22; --hc-2: #3FB39B; --hc-3: #5B8DEF; --hc-4: #E0637A;
+    --hc-5: #9A6FD6; --hc-6: #7DB548; --hc-7: #EE7A45; --hc-8: #C04E9A;
+  }
+  /* the hexagon board of nine rows, then the tray of three pieces under it:
+     100 units across, 120 down */
+  .hc-wrap > .ch-fit { --fit-ar: calc(100 / 120); }
+  .ch-fit > .hc-box { position: relative; aspect-ratio: var(--fit-ar); }
+  /* a canvas is a replaced element: it keeps its backing-store size unless both sides are set */
+  .hc-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block;
+    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .hc-canvas:focus-visible { outline: 3px solid var(--c-accent); outline-offset: 3px; border-radius: 4%; }
+  .hc-side { align-items: center; }
+  .hc-scores { display: flex; gap: var(--s-2); justify-content: center; flex-wrap: wrap; }
+  .hc-score { position: relative; min-width: 84px; padding: var(--s-2) var(--s-3); border-radius: var(--r-md, 14px);
+    background: var(--c-surface); box-shadow: var(--sh-1); text-align: center; }
+  .hc-score__l { font-size: .8rem; color: var(--c-text-dim); font-weight: 700; }
+  .hc-score__v { font-size: 1.35rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--c-text); }
+  .hc-gain { position: absolute; left: 0; right: 0; top: 0; font-weight: 800; color: var(--game-text, var(--c-accent)); pointer-events: none; }
+  .hc-top { display: flex; justify-content: center; }
+  .hc-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function HoneycombEngineFactory() {
+  'use strict';
+
+  // A hexagon of hexagons, R cells from the middle to a side: 61 cells for R = 4.
+  // Cells are axial (q, r); a row is a fixed r, and the board has two more directions of
+  // line, a fixed q and a fixed q + r. Rows run left to right, the first row on top.
+  var R = 4, W = 2 * R + 1;
+  var CELLS = [], IDX = {};
+  function key(q, r) { return (q + R) * W + (r + R); }
+  for (var r0 = -R; r0 <= R; r0++) for (var q0 = -R; q0 <= R; q0++) {
+    if (Math.abs(q0 + r0) <= R) { IDX[key(q0, r0)] = CELLS.length; CELLS.push([q0, r0]); }
+  }
+  var N = CELLS.length;
+  function cellAt(q, r) {
+    if (q < -R || q > R || r < -R || r > R) return -1;
+    var v = IDX[key(q, r)];
+    return v === undefined ? -1 : v;
+  }
+
+  // Every straight run of cells: nine rows, nine columns of the second direction, nine of
+  // the third. A line clears when all its cells are filled.
+  var LINES = [], LINES_OF = [];
+  (function () {
+    var i, a, groups = [{}, {}, {}];
+    for (i = 0; i < N; i++) {
+      var q = CELLS[i][0], r = CELLS[i][1];
+      [r, q, q + r].forEach(function (v, ax) { (groups[ax][v] = groups[ax][v] || []).push(i); });
+      LINES_OF.push([]);
+    }
+    for (a = 0; a < 3; a++) Object.keys(groups[a]).map(Number).sort(function (x, y) { return x - y; }).forEach(function (v) {
+      var id = LINES.length;
+      LINES.push(groups[a][v]);
+      groups[a][v].forEach(function (c) { LINES_OF[c].push(id); });
+    });
+  })();
+
+  // Pieces never turn in play, so each turn is its own piece: every fixed polyhex of one to
+  // four cells (1, 3, 11 and 44 of them), the three straight fives and the seven-cell
+  // flower. A piece is a list of (dq, dr) from its first cell (top row, then leftmost).
+  var DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]];
+  function norm(cs) {
+    var m = cs.slice().sort(function (a, b) { return a[1] - b[1] || a[0] - b[0]; });
+    return m.map(function (p) { return [p[0] - m[0][0], p[1] - m[0][1]]; });
+  }
+  function keyOf(cs) { return cs.map(function (p) { return p[0] + ',' + p[1]; }).join(' '); }
+  function straight(cs) {
+    if (cs.length < 3) return true;
+    var dq = cs[1][0] - cs[0][0], dr = cs[1][1] - cs[0][1];
+    for (var i = 2; i < cs.length; i++) if (cs[i][0] - cs[i - 1][0] !== dq || cs[i][1] - cs[i - 1][1] !== dr) return false;
+    return true;
+  }
+  var SHAPES = [];
+  (function () {
+    var bySize = [null, [[[0, 0]]]], n;
+    for (n = 2; n <= 4; n++) {
+      var seen = {}, next = [];
+      bySize[n - 1].forEach(function (cs) {
+        cs.forEach(function (p) {
+          DIRS.forEach(function (d) {
+            var np = [p[0] + d[0], p[1] + d[1]];
+            if (cs.some(function (x) { return x[0] === np[0] && x[1] === np[1]; })) return;
+            var nc = norm(cs.concat([np])), k = keyOf(nc);
+            if (!seen[k]) { seen[k] = 1; next.push(nc); }
+          });
+        });
+      });
+      bySize[n] = next;
+    }
+    var classes = [];
+    for (n = 1; n <= 4; n++) classes.push({ list: bySize[n], total: [0, 10, 20, 30, 30][n] });
+    classes.push({ list: [norm([[0, 0], [1, 0], [2, 0], [3, 0], [4, 0]]), norm([[0, 0], [0, 1], [0, 2], [0, 3], [0, 4]]), norm([[0, 0], [1, -1], [2, -2], [3, -3], [4, -4]])], total: 6 });
+    classes.push({ list: [norm([[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]])], total: 4 });
+    classes.forEach(function (cl) {
+      cl.list.forEach(function (cs) {
+        var n2 = cs.length, st = straight(cs), k;
+        if (n2 === 7) k = 8; else if (n2 === 5) k = 7; else if (n2 <= 2) k = n2; else k = (n2 === 3 ? 3 : 5) + (st ? 0 : 1);
+        SHAPES.push({ c: cs, n: n2, w: cl.total / cl.list.length, k: k });
+      });
+    });
+  })();
+  var S3 = Math.sqrt(3);
+  // Pixel offsets from a cell's centre in hexagons of size 1 (centre to corner), pointy side
+  // up: the box a piece fills, and its handle, the cell nearest the middle of that box, which
+  // is the one the finger and the keys carry
+  function px(q, r) { return [S3 * (q + r / 2), 1.5 * r]; }
+  SHAPES.forEach(function (s) {
+    var xs = s.c.map(function (p) { return px(p[0], p[1])[0]; }), ys = s.c.map(function (p) { return px(p[0], p[1])[1]; });
+    var x0 = Math.min.apply(null, xs) - S3 / 2, x1 = Math.max.apply(null, xs) + S3 / 2, y0 = Math.min.apply(null, ys) - 1, y1 = Math.max.apply(null, ys) + 1;
+    s.bx = (x0 + x1) / 2; s.by = (y0 + y1) / 2; s.bw = x1 - x0; s.bh = y1 - y0;
+    var bi = 0, bd = 1e9;
+    s.c.forEach(function (p, i) { var d = Math.hypot(xs[i] - s.bx, ys[i] - s.by); if (d < bd - 1e-9) { bd = d; bi = i; } });
+    s.hd = s.c[bi];
+  });
+  var WSUM = SHAPES.reduce(function (a, s) { return a + s.w; }, 0);
+
+  // A small seeded generator whose whole state is one integer, so a saved game and the
+  // daily game go on drawing exactly the pieces they would have drawn
+  function rand(S) {
+    var t = (S.seed = (S.seed + 0x6D2B79F5) | 0);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  function pickFrom(S, list) {
+    var total = 0, i;
+    for (i = 0; i < list.length; i++) total += SHAPES[list[i]].w;
+    var x = rand(S) * total;
+    for (i = 0; i < list.length; i++) { x -= SHAPES[list[i]].w; if (x < 0) return list[i]; }
+    return list[list.length - 1];
+  }
+  var ALL = SHAPES.map(function (s, i) { return i; });
+
+  function canPlace(g, si, q, r) {
+    var s = SHAPES[si];
+    if (!s) return false;
+    for (var k = 0; k < s.c.length; k++) {
+      var i = cellAt(q + s.c[k][0], r + s.c[k][1]);
+      if (i < 0 || g[i]) return false;
+    }
+    return true;
+  }
+  function fits(g, si) {
+    if (!SHAPES[si]) return false;
+    for (var i = 0; i < N; i++) if (canPlace(g, si, CELLS[i][0], CELLS[i][1])) return true;
+    return false;
+  }
+  function anyFits(g, tray) { for (var i = 0; i < tray.length; i++) if (tray[i] >= 0 && fits(g, tray[i])) return true; return false; }
+  // the cell indexes a piece at anchor (q, r) covers; -1 where it hangs off the board
+  function coverage(si, q, r) { return SHAPES[si].c.map(function (p) { return cellAt(q + p[0], r + p[1]); }); }
+  // the anchor that puts the piece's handle on cell (hq, hr)
+  function anchorFor(si, hq, hr) { var h = SHAPES[si].hd; return [hq - h[0], hr - h[1]]; }
+
+  // A new set of three. Fairness: when the board has room for any piece at all, the set
+  // holds at least one that fits; a set that does not is drawn again, and after a few
+  // tries one of its pieces is swapped for a piece that fits.
+  function deal(S) {
+    for (var tries = 0; tries < 12; tries++) {
+      S.tray = [pickFrom(S, ALL), pickFrom(S, ALL), pickFrom(S, ALL)];
+      if (anyFits(S.g, S.tray)) return S.tray;
+    }
+    var ok = ALL.filter(function (i) { return fits(S.g, i); });
+    if (ok.length) S.tray[Math.floor(rand(S) * 3)] = pickFrom(S, ok);
+    return S.tray;
+  }
+
+  function newGame(seed) {
+    var S = { g: new Array(N).fill(0), tray: [-1, -1, -1], score: 0, placed: 0, lines: 0, streak: 0, seed: seed | 0 };
+    deal(S);
+    return S;
+  }
+
+  // The lines a piece at (q, r) would fill, without changing the board
+  function preview(g, si, q, r) {
+    if (!canPlace(g, si, q, r)) return null;
+    var t = g.slice(), s = SHAPES[si], seen = {}, lines = [];
+    var cov = coverage(si, q, r);
+    cov.forEach(function (i) { t[i] = s.k; });
+    cov.forEach(function (i) {
+      LINES_OF[i].forEach(function (id) {
+        if (seen[id]) return;
+        seen[id] = 1;
+        if (LINES[id].every(function (c) { return t[c]; })) lines.push(id);
+      });
+    });
+    lines.sort(function (a, b) { return a - b; });
+    return { lines: lines, g: t, cells: cov };
+  }
+
+  // n lines with one piece score 10, 30, 60, 100…; every clearing piece right before this
+  // one adds 10 a line, so a streak pays
+  function bonus(n, streak) { return n ? 10 * n * (n + 1) / 2 + 10 * n * streak : 0; }
+
+  // One move: null when the slot is empty or the piece does not fit there (nothing changes)
+  function place(S, slot, q, r) {
+    var si = S.tray[slot];
+    if (!(slot >= 0 && slot < 3) || si < 0) return null;
+    var p = preview(S.g, si, q, r);
+    if (!p) return null;
+    var s = SHAPES[si], g = p.g, cleared = [], seen = {};
+    p.lines.forEach(function (id) { LINES[id].forEach(function (c) { seen[c] = 1; }); });
+    Object.keys(seen).map(Number).sort(function (a, b) { return a - b; }).forEach(function (i) { cleared.push({ i: i, k: g[i] }); g[i] = 0; });
+    var n = p.lines.length, b = bonus(n, S.streak), gain = s.c.length + b;
+    S.g = g;
+    S.streak = n ? S.streak + 1 : 0;
+    S.score += gain; S.placed++; S.lines += n;
+    S.tray[slot] = -1;
+    var refilled = false;
+    if (S.tray[0] < 0 && S.tray[1] < 0 && S.tray[2] < 0) { deal(S); refilled = true; }
+    return { slot: slot, shape: si, k: s.k, q: q, r: r, cells: p.cells, lines: p.lines, cleared: cleared,
+      gain: gain, bonus: b, streak: S.streak, refilled: refilled, over: isOver(S) };
+  }
+
+  function isOver(S) { return !anyFits(S.g, S.tray); }
+  function full(g) {
+    for (var i = 0; i < LINES.length; i++) if (LINES[i].every(function (c) { return g[c]; })) return true;
+    return false;
+  }
+  function count(v, lo) { return Number.isInteger(v) && v >= lo; }
+  function valid(s) {
+    if (!s || !Array.isArray(s.g) || s.g.length !== N || !Array.isArray(s.tray) || s.tray.length !== 3) return false;
+    for (var i = 0; i < N; i++) if (!(Number.isInteger(s.g[i]) && s.g[i] >= 0 && s.g[i] <= 8)) return false;
+    for (var t = 0; t < 3; t++) if (!(Number.isInteger(s.tray[t]) && s.tray[t] >= -1 && s.tray[t] < SHAPES.length)) return false;
+    return !full(s.g) && count(s.score, 0) && count(s.placed, 0) && count(s.lines, 0) && count(s.streak, 0) &&
+      Number.isInteger(s.seed) && !isOver(s);
+  }
+
+  return { R: R, N: N, CELLS: CELLS, LINES: LINES, LINES_OF: LINES_OF, SHAPES: SHAPES, cellAt: cellAt, rand: rand, deal: deal,
+    newGame: newGame, canPlace: canPlace, fits: fits, anyFits: anyFits, coverage: coverage, anchorFor: anchorFor,
+    preview: preview, bonus: bonus, place: place, isOver: isOver, full: full, valid: valid };
+}
+if (typeof module !== 'undefined') module.exports = HoneycombEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = HoneycombEngineFactory();
+  var CELLS = E.CELLS, N = E.N, SH = E.SHAPES;
+  // The picture is laid out in units of a hundredth of its width. SB is a board hexagon's
+  // size (centre to corner), (BX, BY) the middle cell, ST the size of a piece in the tray.
+  var HH = 120, SB = 6.15, BX = 50, BY = 45.3, ST = 3.4, TRAY_TOP = 91, TRAY_H = 28, TRAY_Y = 105;
+  var S3 = Math.sqrt(3), DAILY_GOAL = 600;
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'honeycomb',
+    name: { fa: 'کندو', en: 'Honeycomb', zh: '蜂巢', de: 'Honigwabe', es: 'Panal', pl: 'Plaster', fr: 'Alvéole', ar: 'قرص العسل', hi: 'छत्ता' },
+    accent: '#723E00',
+    mood: 'menu',
+    strings: {
+      fa: {
+        board: 'صفحه‌ی شش‌ضلعی', boardN: 'امتیاز {s}، {n} قطعه در سینی', pieceN: 'قطعه‌ی {n}',
+        dailyHc: 'کندوی روزانه', scoreN: 'امتیاز {s}', overT: 'دیگر جا نیست', newBest: 'رکورد تازه!',
+        linesL: 'خط پاک‌شده', placedL: 'قطعه', clearN: '{n} خط!', streakN: 'پشت سر هم ×{n}', noFit: 'این قطعه آنجا جا نمی‌شود',
+        goalN: 'هدف امروز: {g} امتیاز', hintIdle: 'یک قطعه را روی کندو بکش',
+        kPick: 'انتخاب قطعه', kMove: 'جابه‌جا کردن قطعه', kPlace: 'گذاشتن قطعه', kBack: 'برگرداندن قطعه', kNew: 'بازی تازه',
+        rules: 'همیشه سه قطعه در سینی زیر کندو منتظرند. یکی را بکش و روی کندوی شش‌ضلعی رها کن؛ قطعه بالاتر از انگشتت می‌ماند تا دیده شود، و سایه‌اش نشان می‌دهد کجا می‌نشیند و کدام خط‌ها پاک می‌شوند. قطعه‌ها نمی‌چرخند. هر خط راستی که پر شود پاک می‌شود، در هر سه جهت: افقی و دو جهت مورب. هر خانه‌ای که می‌گذاری یک امتیاز دارد؛ پاک کردن چند خط با یک قطعه امتیاز بیشتری دارد (۱۰، ۳۰، ۶۰ و …) و اگر با قطعه پشت قطعه خط پاک کنی، جایزه‌ی پشت سر هم هم می‌گیری. وقتی هر سه قطعه گذاشته شدند، سه قطعه‌ی تازه می‌آید. وقتی هیچ‌کدام از قطعه‌های باقی‌مانده جا نشود، بازی تمام است. زمان ندارد و برگشت به عقب ندارد. می‌توانی قطعه‌ای را بزنی تا انتخاب شود، بعد کندو را بزنی تا سایه‌اش جابه‌جا شود و روی سایه بزنی تا بنشیند.',
+        tutTitle1: 'بکش و رها کن', tutText1: 'یک قطعه را از سینی روی کندو بکش؛ سایه نشان می‌دهد کجا می‌نشیند.',
+        tutTitle2: 'خط پر، پاک', tutText2: 'هر خط راست پر پاک می‌شود، در هر سه جهت. چند خط با هم امتیاز بیشتری دارد.',
+        tutTitle3: 'تا جا هست', tutText3: 'بعد از هر سه قطعه، سه قطعه‌ی تازه می‌آید. وقتی هیچ‌کدام جا نشود، بازی تمام است.'
+      },
+      en: {
+        board: 'Hexagonal board', boardN: 'Score {s}, {n} pieces in the tray', pieceN: 'Piece {n}',
+        dailyHc: 'Daily Honeycomb', scoreN: 'Score {s}', overT: 'No room left', newBest: 'New best!',
+        linesL: 'Lines cleared', placedL: 'Pieces', clearN: '{n} lines!', streakN: 'Streak ×{n}', noFit: 'That piece does not fit there',
+        goalN: 'Today’s goal: {g} points', hintIdle: 'Drag a piece onto the honeycomb',
+        kPick: 'Pick a piece', kMove: 'Move the piece', kPlace: 'Place the piece', kBack: 'Put the piece back', kNew: 'New game',
+        rules: 'Three pieces always wait in the tray under the honeycomb. Drag one and let go over the hexagonal board; the piece stays above your finger so you can see it, and its shadow shows where it lands and which lines it clears. Pieces do not turn. Every straight line that gets full is cleared, in all three directions: across and the two slants. Each cell you place scores a point; clearing several lines with one piece scores more (10, 30, 60, …), and clearing lines with piece after piece adds a streak bonus. When all three are placed, three new pieces come. When none of the pieces left fits, the game is over. There is no timer and no undo. You can also tap a piece to pick it, tap the board to move its shadow, and tap the shadow to place it.',
+        tutTitle1: 'Drag and drop', tutText1: 'Drag a piece from the tray onto the honeycomb; its shadow shows where it lands.',
+        tutTitle2: 'Full lines clear', tutText2: 'Every full straight line is cleared, in all three directions. Several lines at once score more.',
+        tutTitle3: 'While there is room', tutText3: 'After all three pieces, three new ones come. When none fits, the game is over.'
+      },
+      zh: {
+        board: '六边形棋盘', boardN: '分数 {s}，托盘里还有 {n} 块', pieceN: '第 {n} 块',
+        dailyHc: '每日蜂巢', scoreN: '分数 {s}', overT: '放不下了', newBest: '新纪录！',
+        linesL: '消除线数', placedL: '方块数', clearN: '{n} 条线！', streakN: '连消 ×{n}', noFit: '这块放不进那里',
+        goalN: '今日目标：{g} 分', hintIdle: '把一块拖到蜂巢上',
+        kPick: '选一块', kMove: '移动方块', kPlace: '放下方块', kBack: '放回方块', kNew: '新游戏',
+        rules: '蜂巢下方的托盘里总有三块。把一块拖到六边形棋盘上松开；方块会停在手指上方方便看清，影子会显示它落在哪里以及会消除哪些线。方块不能旋转。填满的直线会被消除，三个方向都算：横向和两条斜向。每放一格得 1 分；一块同时消除多条线得分更多（10、30、60……），一块接一块地消除还有连消奖励。三块都放完后会来三块新的。剩下的方块都放不进去时，游戏结束。没有计时，也不能悔棋。也可以点一块选中它，点棋盘移动影子，再点影子放下。',
+        tutTitle1: '拖动放下', tutText1: '把托盘里的一块拖到蜂巢上；影子显示它落在哪里。',
+        tutTitle2: '满线消除', tutText2: '填满的直线会被消除，三个方向都算。一次消除多条得分更多。',
+        tutTitle3: '还有空位就继续', tutText3: '三块放完会来三块新的。都放不进去时，游戏结束。'
+      },
+      de: {
+        board: 'Sechseckiges Brett', boardN: 'Punkte {s}, {n} Teile in der Ablage', pieceN: 'Teil {n}',
+        dailyHc: 'Honigwabe des Tages', scoreN: 'Punkte {s}', overT: 'Kein Platz mehr', newBest: 'Neuer Rekord!',
+        linesL: 'Linien geräumt', placedL: 'Teile', clearN: '{n} Linien!', streakN: 'Serie ×{n}', noFit: 'Dieses Teil passt dort nicht',
+        goalN: 'Ziel heute: {g} Punkte', hintIdle: 'Zieh ein Teil auf die Wabe',
+        kPick: 'Teil wählen', kMove: 'Teil verschieben', kPlace: 'Teil setzen', kBack: 'Teil zurücklegen', kNew: 'Neues Spiel',
+        rules: 'Unter der Wabe liegen immer drei Teile in der Ablage. Zieh eines aufs sechseckige Brett und lass los; das Teil bleibt über deinem Finger, damit du es siehst, und sein Schatten zeigt, wo es landet und welche Linien es räumt. Teile drehen sich nicht. Jede volle gerade Linie wird geräumt, in allen drei Richtungen: quer und die beiden schrägen. Jedes gesetzte Feld bringt einen Punkt; mehrere Linien mit einem Teil bringen mehr (10, 30, 60, …), und Räumen mit Teil um Teil gibt einen Serienbonus. Sind alle drei gesetzt, kommen drei neue. Passt keines der übrigen Teile mehr, ist das Spiel vorbei. Es gibt keine Zeit und kein Rückgängig. Du kannst auch ein Teil antippen, aufs Brett tippen, um seinen Schatten zu verschieben, und auf den Schatten tippen, um es zu setzen.',
+        tutTitle1: 'Ziehen und loslassen', tutText1: 'Zieh ein Teil aus der Ablage auf die Wabe; der Schatten zeigt, wo es landet.',
+        tutTitle2: 'Volle Linien verschwinden', tutText2: 'Jede volle gerade Linie wird geräumt, in allen drei Richtungen. Mehrere auf einmal bringen mehr.',
+        tutTitle3: 'Solange Platz ist', tutText3: 'Nach drei Teilen kommen drei neue. Passt keines mehr, ist das Spiel vorbei.'
+      },
+      es: {
+        board: 'Tablero hexagonal', boardN: 'Puntos {s}, {n} piezas en la bandeja', pieceN: 'Pieza {n}',
+        dailyHc: 'Panal diario', scoreN: 'Puntos {s}', overT: 'No queda sitio', newBest: '¡Nuevo récord!',
+        linesL: 'Líneas borradas', placedL: 'Piezas', clearN: '¡{n} líneas!', streakN: 'Racha ×{n}', noFit: 'Esa pieza no cabe ahí',
+        goalN: 'Meta de hoy: {g} puntos', hintIdle: 'Arrastra una pieza al panal',
+        kPick: 'Elegir pieza', kMove: 'Mover la pieza', kPlace: 'Colocar la pieza', kBack: 'Devolver la pieza', kNew: 'Partida nueva',
+        rules: 'Bajo el panal siempre esperan tres piezas en la bandeja. Arrastra una y suéltala sobre el tablero hexagonal; la pieza queda por encima de tu dedo para que la veas, y su sombra muestra dónde cae y qué líneas borra. Las piezas no giran. Cada línea recta que se llena se borra, en las tres direcciones: a lo ancho y las dos diagonales. Cada celda colocada da un punto; borrar varias líneas con una pieza da más (10, 30, 60, …), y borrar pieza tras pieza suma una bonificación de racha. Cuando colocas las tres, llegan tres nuevas. Cuando ninguna de las que quedan cabe, la partida termina. No hay reloj ni deshacer. También puedes tocar una pieza para elegirla, tocar el tablero para mover su sombra y tocar la sombra para colocarla.',
+        tutTitle1: 'Arrastra y suelta', tutText1: 'Arrastra una pieza de la bandeja al panal; su sombra muestra dónde cae.',
+        tutTitle2: 'Línea llena, fuera', tutText2: 'Cada línea recta llena se borra, en las tres direcciones. Varias a la vez dan más puntos.',
+        tutTitle3: 'Mientras quepa', tutText3: 'Tras las tres piezas llegan tres nuevas. Si ninguna cabe, la partida termina.'
+      },
+      pl: {
+        board: 'Sześciokątna plansza', boardN: 'Wynik {s}, {n} klocki na tacy', pieceN: 'Klocek {n}',
+        dailyHc: 'Codzienny Plaster', scoreN: 'Wynik {s}', overT: 'Brak miejsca', newBest: 'Nowy rekord!',
+        linesL: 'Usunięte linie', placedL: 'Klocki', clearN: 'Linie: {n}!', streakN: 'Seria ×{n}', noFit: 'Ten klocek tam nie pasuje',
+        goalN: 'Cel na dziś: {g} pkt', hintIdle: 'Przeciągnij klocek na plaster',
+        kPick: 'Wybierz klocek', kMove: 'Przesuń klocek', kPlace: 'Połóż klocek', kBack: 'Odłóż klocek', kNew: 'Nowa gra',
+        rules: 'Pod plastrem zawsze czekają trzy klocki na tacy. Przeciągnij jeden i puść nad sześciokątną planszą; klocek zostaje nad palcem, żeby był widoczny, a jego cień pokazuje, gdzie wyląduje i które linie usunie. Klocki się nie obracają. Każda pełna prosta linia znika, we wszystkich trzech kierunkach: w poziomie i w dwóch ukośnych. Każde położone pole daje punkt; kilka linii jednym klockiem daje więcej (10, 30, 60, …), a usuwanie linii klockiem za klockiem dodaje premię za serię. Gdy położysz wszystkie trzy, przychodzą trzy nowe. Gdy żaden z pozostałych klocków się nie mieści, gra się kończy. Nie ma czasu ani cofania. Możesz też stuknąć klocek, by go wybrać, stuknąć planszę, by przesunąć jego cień, i stuknąć cień, by go położyć.',
+        tutTitle1: 'Przeciągnij i puść', tutText1: 'Przeciągnij klocek z tacy na plaster; cień pokazuje, gdzie wyląduje.',
+        tutTitle2: 'Pełne linie znikają', tutText2: 'Każda pełna prosta linia znika, w trzech kierunkach. Kilka naraz daje więcej.',
+        tutTitle3: 'Póki jest miejsce', tutText3: 'Po trzech klockach przychodzą trzy nowe. Gdy żaden się nie mieści, gra się kończy.'
+      },
+      fr: {
+        board: 'Plateau hexagonal', boardN: 'Score {s}, {n} pièces en réserve', pieceN: 'Pièce {n}',
+        dailyHc: 'Alvéole du jour', scoreN: 'Score {s}', overT: 'Plus de place', newBest: 'Nouveau record !',
+        linesL: 'Lignes effacées', placedL: 'Pièces', clearN: '{n} lignes !', streakN: 'Série ×{n}', noFit: 'Cette pièce ne rentre pas là',
+        goalN: 'Objectif du jour : {g} points', hintIdle: 'Glisse une pièce sur le rayon',
+        kPick: 'Choisir une pièce', kMove: 'Déplacer la pièce', kPlace: 'Poser la pièce', kBack: 'Reposer la pièce', kNew: 'Nouvelle partie',
+        rules: 'Trois pièces attendent toujours dans la réserve sous le rayon. Glisses-en une et relâche-la sur le plateau hexagonal ; la pièce reste au-dessus de ton doigt pour que tu la voies, et son ombre montre où elle se pose et quelles lignes elle efface. Les pièces ne tournent pas. Chaque ligne droite pleine est effacée, dans les trois directions : à l’horizontale et les deux obliques. Chaque case posée rapporte un point ; effacer plusieurs lignes d’un coup rapporte plus (10, 30, 60, …), et effacer des lignes pièce après pièce ajoute un bonus de série. Quand les trois sont posées, trois nouvelles arrivent. Quand aucune pièce restante ne rentre, la partie est finie. Pas de chrono ni d’annulation. Tu peux aussi toucher une pièce pour la choisir, toucher le plateau pour déplacer son ombre, puis toucher l’ombre pour la poser.',
+        tutTitle1: 'Glisse et relâche', tutText1: 'Glisse une pièce de la réserve sur le rayon ; son ombre montre où elle se pose.',
+        tutTitle2: 'Lignes pleines effacées', tutText2: 'Chaque ligne droite pleine est effacée, dans les trois directions. Plusieurs d’un coup rapportent plus.',
+        tutTitle3: 'Tant qu’il y a de la place', tutText3: 'Après les trois pièces, trois nouvelles arrivent. Si aucune ne rentre, la partie est finie.'
+      },
+      ar: {
+        board: 'لوحة سداسية', boardN: 'النتيجة {s}، {n} قطع في الصينية', pieceN: 'القطعة {n}',
+        dailyHc: 'قرص العسل اليومي', scoreN: 'النتيجة {s}', overT: 'لا مكان متبقٍّ', newBest: 'رقم قياسي جديد!',
+        linesL: 'الخطوط الممسوحة', placedL: 'القطع', clearN: '{n} خطوط!', streakN: 'سلسلة ×{n}', noFit: 'هذه القطعة لا تتسع هنا',
+        goalN: 'هدف اليوم: {g} نقطة', hintIdle: 'اسحب قطعة إلى قرص العسل',
+        kPick: 'اختيار قطعة', kMove: 'تحريك القطعة', kPlace: 'وضع القطعة', kBack: 'إعادة القطعة', kNew: 'لعبة جديدة',
+        rules: 'تنتظر ثلاث قطع دائمًا في الصينية تحت قرص العسل. اسحب واحدة وأفلتها فوق اللوحة السداسية؛ تبقى القطعة فوق إصبعك لتراها، ويُظهر ظلّها أين ستقع وأي خطوط ستمسح. القطع لا تدور. يُمسح كل خط مستقيم يمتلئ، في الاتجاهات الثلاثة: أفقيًا وفي المائلين. تمنحك كل خلية تضعها نقطة؛ ومسح عدة خطوط بقطعة واحدة يمنح أكثر (10، 30، 60، …)، ومسح الخطوط قطعةً بعد قطعة يضيف مكافأة سلسلة. عند وضع الثلاث تأتي ثلاث قطع جديدة. وحين لا تتسع أي قطعة متبقية تنتهي اللعبة. لا مؤقّت ولا تراجع. يمكنك أيضًا لمس قطعة لاختيارها، ولمس اللوحة لتحريك ظلّها، ولمس الظل لوضعها.',
+        tutTitle1: 'اسحب وأفلت', tutText1: 'اسحب قطعة من الصينية إلى قرص العسل؛ يُظهر ظلّها أين ستقع.',
+        tutTitle2: 'تُمسح الخطوط الممتلئة', tutText2: 'يُمسح كل خط مستقيم ممتلئ في الاتجاهات الثلاثة. ومسح عدة خطوط دفعة واحدة يمنح نقاطًا أكثر.',
+        tutTitle3: 'ما دام هناك مكان', tutText3: 'بعد القطع الثلاث تأتي ثلاث جديدة. وإذا لم تتسع أي قطعة تنتهي اللعبة.'
+      },
+      hi: {
+        board: 'षट्कोणीय बोर्ड', boardN: 'स्कोर {s}, ट्रे में {n} टुकड़े', pieceN: 'टुकड़ा {n}',
+        dailyHc: 'आज का छत्ता', scoreN: 'स्कोर {s}', overT: 'अब जगह नहीं बची', newBest: 'नया रिकॉर्ड!',
+        linesL: 'साफ़ हुई रेखाएँ', placedL: 'टुकड़े', clearN: '{n} रेखाएँ!', streakN: 'लगातार ×{n}', noFit: 'यह टुकड़ा यहाँ नहीं बैठता',
+        goalN: 'आज का लक्ष्य: {g} अंक', hintIdle: 'किसी टुकड़े को छत्ते पर खींचो',
+        kPick: 'टुकड़ा चुनें', kMove: 'टुकड़ा खिसकाएँ', kPlace: 'टुकड़ा रखें', kBack: 'टुकड़ा वापस रखें', kNew: 'नया खेल',
+        rules: 'छत्ते के नीचे ट्रे में हमेशा तीन टुकड़े रहते हैं। एक को खींचकर षट्कोणीय बोर्ड पर छोड़ो; टुकड़ा तुम्हारी उँगली के ऊपर दिखता रहता है, और उसकी छाया बताती है कि वह कहाँ बैठेगा और कौन-सी रेखाएँ साफ़ होंगी। टुकड़े घूमते नहीं। हर भरी सीधी रेखा साफ़ हो जाती है, तीनों दिशाओं में: आड़ी और दोनों तिरछी। रखा गया हर खाना एक अंक देता है; एक साथ कई रेखाएँ साफ़ करने पर ज़्यादा अंक मिलते हैं (10, 30, 60, …), और टुकड़े-दर-टुकड़े रेखाएँ साफ़ करने पर लगातार का बोनस जुड़ता है। तीनों रखते ही तीन नए आ जाते हैं। जब बचा कोई टुकड़ा नहीं बैठता, खेल ख़त्म हो जाता है। न टाइमर, न पूर्ववत। चाहो तो टुकड़े को छूकर चुनो, बोर्ड छूकर उसकी छाया खिसकाओ, फिर छाया को छूकर रख दो।',
+        tutTitle1: 'खींचो और छोड़ो', tutText1: 'ट्रे से टुकड़ा छत्ते पर खींचो; उसकी छाया दिखाती है कि वह कहाँ बैठेगा।',
+        tutTitle2: 'भरी रेखाएँ साफ़', tutText2: 'हर भरी सीधी रेखा साफ़ हो जाती है, तीनों दिशाओं में। एक साथ कई साफ़ करने पर ज़्यादा अंक मिलते हैं।',
+        tutTitle3: 'जब तक जगह है', tutText3: 'तीनों टुकड़ों के बाद तीन नए आते हैं। कोई न बैठे तो खेल ख़त्म।'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+
+  var G = null, startedAt = 0, ended = false, endFade = false;
+  // the picked slot (tap or keys), its handle cell (q, r) and the x the keys try to keep;
+  // shown is where its shadow lies now: { si, q, r, ok }
+  var sel = -1, cur = { q: 0, r: 0 }, prefX = 0, shown = null;
+
+  var cv = document.createElement('canvas');
+  cv.className = 'hc-canvas';
+  cv.setAttribute('role', 'application');
+  cv.setAttribute('tabindex', '0');
+  cv.setAttribute('aria-label', C.t('board'));
+  var box = el('div', { class: 'hc-box' }, [cv]);
+  var top = el('div', { class: 'hc-top ch-above' });
+  var scoreV = el('div', { class: 'hc-score__v', text: '0' }), bestV = el('div', { class: 'hc-score__v', text: '0' });
+  var scoreBox = el('div', { class: 'hc-score' }, [el('div', { class: 'hc-score__l', text: C.t('score') }), scoreV]);
+  var bestBox = el('div', { class: 'hc-score' }, [el('div', { class: 'hc-score__l', text: C.t('best') }), bestV]);
+  var status = el('div', { class: 'hc-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'hc-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]),
+    el('div', { class: 'ch-side hc-side' }, [top, el('div', { class: 'hc-scores' }, [scoreBox, bestBox]), status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  if (!dailyDate) ctx.button({ icon: 'refresh', label: C.t('newGame'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- game */
+
+  function seedFor() {
+    var r = dailyDate ? C.daily('honeycomb', dailyDate).rng : Math.random;
+    return Math.floor(r() * 4294967296) | 0;
+  }
+  function newGame() {
+    cancelDrag();
+    G = E.newGame(seedFor());
+    G.daily = dailyDate || null;
+    startedAt = Date.now(); ended = false; endFade = false; sel = -1; shown = null;
+    anims.length = 0; pops = {}; hiddenSlot = [false, false, false]; traySpawn = performance.now();
+    render();
+    status.textContent = G.daily ? C.t('goalN', { g: C.num(DAILY_GOAL) }) : C.t('hintIdle');
+    save();
+  }
+  function askNew() {
+    if (G && !ended && G.placed > 0) C.ui.confirm({ title: C.t('newGame'), body: C.t('resetWarn'), onOk: newGame });
+    else newGame();
+  }
+  function best() { return C.stats.getBest('honeycomb', 'score') || 0; }
+
+  function placeAt(slot, q, r, fromCentre) {
+    if (!G || ended) return false;
+    var t = E.place(G, slot, q, r);
+    if (!t) { C.feedback('bad'); C.ui.shake(box); status.textContent = C.t('noFit'); return false; }
+    sel = -1; shown = null;
+    var n = t.lines.length;
+    C.feedback(n ? 'good' : 'place');
+    C.stats.best('honeycomb', 'score', G.score);
+    if (n >= 3) C.achievements.unlock('hc-triple');
+    if (t.streak >= 5) C.achievements.unlock('hc-streak');
+    if (G.score >= 500) C.achievements.unlock('hc-500');
+    if (G.daily && G.score >= DAILY_GOAL) C.achievements.unlock('hc-daily');
+    play(t, fromCentre);
+    floatGain(t.gain);
+    if (n) status.textContent = (n > 1 ? C.t('clearN', { n: C.num(n) }) : '') + (t.streak > 1 ? (n > 1 ? ' · ' : '') + C.t('streakN', { n: C.num(t.streak) }) : '');
+    else status.textContent = G.daily ? C.t('goalN', { g: C.num(DAILY_GOAL) }) : '';
+    render();
+    if (t.over) { over(); return true; }
+    save();
+    return true;
+  }
+
+  function rewards() {
+    return { coins: Math.max(1, Math.round(G.score / 120)), points: Math.max(1, Math.min(160, Math.round(G.score / 16))) };
+  }
+  function over() {
+    ended = true;
+    var rw = rewards(), won = G.daily ? G.score >= DAILY_GOAL : null;
+    if (G.daily && !C.stats.daily('honeycomb', G.daily, { label: C.t('scoreN', { s: C.num(G.score) }), win: !!won })) {
+      rw.coins = Math.max(1, Math.round(rw.coins * 0.2)); rw.points = Math.max(1, Math.round(rw.points * 0.2));
+    }
+    var isBest = G.score > 0 && G.score >= best();
+    ctx.clearSave();
+    // the cells dim to show the comb is spent, then the result
+    setTimeout(function () { endFade = true; invalidate(); }, C.ui.reduceMotion() ? 0 : 520);
+    setTimeout(function () {
+      C.feedback('bad');
+      ctx.finish({
+        won: won, title: C.t('overT'), note: isBest ? C.t('newBest') : null,
+        timeMs: Date.now() - startedAt, coins: rw.coins, points: rw.points,
+        lines: lines(), shareText: share(),
+        againLabel: G.daily ? null : C.t('newGame'), onAgain: G.daily ? null : newGame
+      });
+    }, C.ui.reduceMotion() ? 300 : 1300);
+  }
+  function lines() {
+    var out = [];
+    if (G.daily) out.push({ label: C.t('daily'), value: C.num(G.daily) });
+    out.push({ label: C.t('score'), value: C.num(G.score) });
+    out.push({ label: C.t('best'), value: C.num(Math.max(best(), G.score)) });
+    out.push({ label: C.t('linesL'), value: C.num(G.lines) });
+    out.push({ label: C.t('placedL'), value: C.num(G.placed) });
+    return out;
+  }
+  function share() {
+    return 'چوگان · کندو' + (G.daily ? '\nروزانه ' + G.daily : '') + '\n' + G.score + ' · ' + G.lines;
+  }
+
+  /* --------------------------------------------------------------- view */
+
+  var drag = null;                          // { id, slot, si, touch, x0, y0, moved, cx, cy }: the piece a finger carries, cx/cy its box's middle
+  var anims = [];                           // flights, clearing bits and bursts: { t0, dur, draw(g, t) }
+  var pops = {};                            // cell -> { t0, hide }: a cell that just got filled
+  var hiddenSlot = [false, false, false];   // a tray piece that is in the air
+  var traySpawn = 0;                        // when the last set of three appeared
+  var raf = 0, view = { u: 1, ox: 0, oy: 0, W: 0, H: 0 };
+
+  function cellXY(q, r) { return [BX + SB * S3 * (q + r / 2), BY + 1.5 * SB * r]; }
+  // the middle of a piece's box when its first cell sits at p, at hexagon size s
+  function boxMid(si, p, s) { var h = SH[si]; return [p[0] + h.bx * s, p[1] + h.by * s]; }
+  function firstAt(si, mid, s) { var h = SH[si]; return [mid[0] - h.bx * s, mid[1] - h.by * s]; }
+  function slotMid(k) { return [33.333 * k + 16.667, TRAY_Y]; }
+  // which board cell a point is on (cube rounding), or null
+  function cellNear(x, y) {
+    var xx = (x - BX) / SB, yy = (y - BY) / SB;
+    var fq = (S3 / 3) * xx - yy / 3, fr = (2 / 3) * yy, fs = -fq - fr;
+    var q = Math.round(fq), r = Math.round(fr), s = Math.round(fs);
+    var dq = Math.abs(q - fq), dr = Math.abs(r - fr), ds = Math.abs(s - fs);
+    if (dq > dr && dq > ds) q = -r - s; else if (dr > ds) r = -q - s;
+    var i = E.cellAt(q, r);
+    return i < 0 ? null : { q: q, r: r, i: i };
+  }
+
+  function palette() {
+    var cs = getComputedStyle(cv);
+    var v = function (k, f) { return cs.getPropertyValue(k).trim() || f; };
+    var k = [null], fb = ['', '#E99A22', '#3FB39B', '#5B8DEF', '#E0637A', '#9A6FD6', '#7DB548', '#EE7A45', '#C04E9A'];
+    for (var i = 1; i <= 8; i++) k.push(v('--hc-' + i, fb[i]));
+    return { k: k, cell: v('--c-surface', '#FFFFFF'), plate: v('--c-surface-2', '#F7F1E8'), line: v('--c-line', '#E6DDD0'),
+      text: v('--c-text', '#2B2118'), dim: v('--c-text-dim', '#7A6C5C'), accent: v('--game', '#723E00') };
+  }
+  function hexPath(g, x, y, rad) {
+    g.beginPath();
+    for (var i = 0; i < 6; i++) {
+      var a = Math.PI / 180 * (60 * i - 30), px = x + rad * Math.cos(a), py = y + rad * Math.sin(a);
+      if (i) g.lineTo(px, py); else g.moveTo(px, py);
+    }
+    g.closePath();
+  }
+  // a filled cell: the colour, a darker lower half and a soft highlight, like wax
+  function block(g, x, y, rad, col, alpha) {
+    g.save();
+    if (alpha != null) g.globalAlpha = alpha;
+    g.lineJoin = 'round'; g.lineWidth = rad * 0.16; g.strokeStyle = col; g.fillStyle = col;
+    hexPath(g, x, y, rad * 0.92); g.fill(); g.stroke();
+    g.save();
+    hexPath(g, x, y, rad * 0.98); g.clip();
+    g.fillStyle = 'rgba(0,0,0,.17)'; g.fillRect(x - rad, y + rad * 0.3, rad * 2, rad);
+    g.fillStyle = 'rgba(255,255,255,.24)'; hexPath(g, x, y - rad * 0.14, rad * 0.55); g.fill();
+    g.restore();
+    g.restore();
+  }
+  function emptyCell(g, x, y, rad, P) {
+    g.save();
+    g.lineJoin = 'round'; g.lineWidth = rad * 0.1; g.strokeStyle = P.line; g.fillStyle = P.cell;
+    hexPath(g, x, y, rad * 0.9); g.fill(); g.stroke();
+    g.restore();
+  }
+  function drawPiece(g, si, p, s, P, alpha) {
+    var sh = SH[si];
+    sh.c.forEach(function (d) {
+      var x = p[0] + s * S3 * (d[0] + d[1] / 2), y = p[1] + 1.5 * s * d[1];
+      block(g, x, y, s, P.k[sh.k], alpha);
+    });
+  }
+  function ease(t) { return t < 0 ? 0 : t > 1 ? 1 : t * t * (3 - 2 * t); }
+
+  function draw() {
+    if (!G) return;
+    var r = box.getBoundingClientRect(), W = Math.max(1, Math.floor(r.width)), H = Math.max(1, Math.floor(r.height || r.width * 1.2));
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    var u = Math.min(W / 100, H / HH);
+    view = { u: u, ox: (W - 100 * u) / 2, oy: (H - HH * u) / 2, W: W, H: H };
+    var g = cv.getContext('2d'), P = palette(), now = performance.now(), i, k;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    g.save();
+    g.translate(view.ox, view.oy); g.scale(u, u);
+
+    // the plate under the comb: every cell a little bigger, in one colour, so the gaps close
+    g.fillStyle = P.plate; g.strokeStyle = P.plate; g.lineJoin = 'round'; g.lineWidth = 1.6;
+    for (i = 0; i < N; i++) { var c0 = cellXY(CELLS[i][0], CELLS[i][1]); hexPath(g, c0[0], c0[1], SB * 1.02); g.fill(); g.stroke(); }
+
+    var hit = {}, gh = null;
+    if (shown) {
+      var sh = SH[shown.si], cov = E.coverage(shown.si, shown.q, shown.r);
+      gh = { cov: cov, k: sh.k };
+      if (shown.ok) {
+        var p = E.preview(G.g, shown.si, shown.q, shown.r);
+        if (p) p.lines.forEach(function (id) { E.LINES[id].forEach(function (c) { hit[c] = 1; }); });
+      }
+    }
+    for (i = 0; i < N; i++) {
+      var c = cellXY(CELLS[i][0], CELLS[i][1]), v = G.g[i];
+      if (!v) { emptyCell(g, c[0], c[1], SB, P); continue; }
+      var sc = 1, pop = pops[i];
+      if (pop) {
+        var t = (now - pop.t0) / 230;
+        if (t < 0) sc = pop.hide ? 0 : 1;
+        else if (t < 1) sc = t < 0.6 ? 0.72 + 0.36 * (t / 0.6) : 1.08 - 0.08 * ((t - 0.6) / 0.4);
+        else delete pops[i];
+      }
+      if (sc <= 0) { emptyCell(g, c[0], c[1], SB, P); continue; }
+      block(g, c[0], c[1], SB * sc, P.k[v], endFade ? 0.45 : 1);
+    }
+    // the shadow: the cells it would fill, and a ring on the lines it would clear
+    if (gh) {
+      gh.cov.forEach(function (ci) {
+        if (ci < 0) return;
+        var cc = cellXY(CELLS[ci][0], CELLS[ci][1]);
+        if (shown.ok) block(g, cc[0], cc[1], SB, P.k[gh.k], 0.5);
+        else { g.save(); g.lineJoin = 'round'; g.lineWidth = 0.7; g.strokeStyle = P.dim; hexPath(g, cc[0], cc[1], SB * 0.86); g.stroke(); g.restore(); }
+      });
+      Object.keys(hit).forEach(function (key) {
+        var cc = cellXY(CELLS[key][0], CELLS[key][1]);
+        g.save(); g.lineJoin = 'round'; g.lineWidth = 0.95; g.strokeStyle = P.k[gh.k]; hexPath(g, cc[0], cc[1], SB * 0.99); g.stroke(); g.restore();
+      });
+    }
+
+    // the tray
+    for (k = 0; k < 3; k++) {
+      var sm = slotMid(k);
+      g.save();
+      g.fillStyle = k === sel ? 'rgba(0,0,0,.05)' : P.plate;
+      if (k === sel) { g.fillStyle = P.plate; }
+      g.beginPath();
+      if (g.roundRect) g.roundRect(sm[0] - 15.5, TRAY_TOP + 1, 31, TRAY_H - 2, 3); else g.rect(sm[0] - 15.5, TRAY_TOP + 1, 31, TRAY_H - 2);
+      g.fill();
+      if (k === sel) { g.lineWidth = 0.8; g.strokeStyle = P.accent; g.stroke(); }
+      g.restore();
+      var si = G.tray[k];
+      if (si < 0 || hiddenSlot[k] || (drag && drag.slot === k)) continue;
+      var spawn = C.ui.reduceMotion() ? 1 : ease((now - traySpawn - 70 * k) / 320);
+      if (spawn <= 0) continue;
+      var s2 = ST * (0.6 + 0.4 * spawn), fp = firstAt(si, [sm[0], sm[1] + (1 - spawn) * 8], s2);
+      drawPiece(g, si, fp, s2, P, (E.fits(G.g, si) ? 1 : 0.32) * spawn);
+    }
+
+    // clearing bits and flights
+    for (i = anims.length - 1; i >= 0; i--) {
+      var a = anims[i], ta = (now - a.t0) / a.dur;
+      if (ta >= 1) { if (a.end) a.end(); anims.splice(i, 1); continue; }
+      if (ta >= 0) a.draw(g, ta, P);
+    }
+    // the piece in a finger
+    if (drag) {
+      var dp = firstAt(drag.si, [drag.cx, drag.cy], SB);
+      g.save(); g.shadowColor = 'rgba(0,0,0,.3)'; g.shadowBlur = 3 * u; g.shadowOffsetY = 1.2 * u;
+      drawPiece(g, drag.si, dp, SB, P, 1);
+      g.restore();
+    }
+    g.restore();
+  }
+  function animating() {
+    return !!(drag || anims.length || Object.keys(pops).length || (G && performance.now() - traySpawn < 600));
+  }
+  function tick() { raf = 0; draw(); if (animating()) raf = requestAnimationFrame(tick); }
+  function invalidate() { if (!raf) raf = requestAnimationFrame(tick); }
+
+  function show(si, q, r, ok) {
+    var next = si >= 0 ? { si: si, q: q, r: r, ok: ok } : null;
+    if ((next && shown && next.si === shown.si && next.q === shown.q && next.r === shown.r && next.ok === shown.ok) || (!next && !shown)) return;
+    shown = next;
+    invalidate();
+  }
+
+  // The move as a short film: the piece lands (from where the finger let go), its cells pop,
+  // then every cleared cell breaks up from where the piece sat outward, with a burst on each line
+  function play(t, fromMid) {
+    var rm = C.ui.reduceMotion(), now = performance.now(), sh = SH[t.shape];
+    var land = 0;
+    if (!rm && fromMid) {
+      land = 130;
+      var q0 = t.q, r0 = t.r;
+      var to = boxMid(t.shape, cellXY(q0, r0), SB);
+      anims.push({ t0: now, dur: land, draw: function (g, tt, P) {
+        var m = [fromMid[0] + (to[0] - fromMid[0]) * ease(tt), fromMid[1] + (to[1] - fromMid[1]) * ease(tt)];
+        drawPiece(g, t.shape, firstAt(t.shape, m, SB), SB, P, 1);
+      } });
+    }
+    if (!rm) t.cells.forEach(function (i) { if (G.g[i]) pops[i] = { t0: now + land, hide: land > 0 }; });
+    var mid = cellXY(t.q, t.r), cm = boxMid(t.shape, mid, SB);
+    if (!rm) {
+      t.cleared.forEach(function (q) {
+        var xy = cellXY(CELLS[q.i][0], CELLS[q.i][1]);
+        var d = Math.hypot(xy[0] - cm[0], xy[1] - cm[1]) / (SB * S3), sign = q.i % 2 ? 50 : -50;
+        anims.push({ t0: now + land + 40 + d * 34, dur: 420, draw: function (g, tt, P) {
+          var sc = tt < 0.25 ? 1 + 0.12 * (tt / 0.25) : 1.12 * (1 - (tt - 0.25) / 0.75);
+          g.save(); g.translate(xy[0], xy[1]); g.rotate(sign * Math.PI / 180 * ease((tt - 0.25) / 0.75) * (tt > 0.25 ? 1 : 0));
+          block(g, 0, 0, SB * Math.max(0.01, sc), P.k[q.k], tt < 0.25 ? 1 : 1 - (tt - 0.25) / 0.75);
+          g.restore();
+        } });
+      });
+      var col = palette().k[t.k] || '#FFFFFF';
+      setTimeout(function () {
+        var rect = cv.getBoundingClientRect(), u = view.u, kx = rect.width / view.W;
+        t.lines.forEach(function (id, j) {
+          var ln = E.LINES[id], c1 = CELLS[ln[Math.floor(ln.length / 2)]], xy = cellXY(c1[0], c1[1]);
+          setTimeout(function () { C.ui.burst({ x: rect.left + (view.ox + xy[0] * u) * kx, y: rect.top + (view.oy + xy[1] * u) * kx },
+            { colors: [col, '#FFFFFF'], count: 22, speed: 260, life: 560, ring: 40 }); }, 60 * j);
+        });
+      }, land);
+    }
+    if (t.refilled) { traySpawn = now + (rm ? 0 : 260) + 70; }
+    invalidate();
+  }
+  function floatGain(g) {
+    if (C.ui.reduceMotion()) return;
+    var f = el('div', { class: 'hc-gain', text: '+' + C.num(g) });
+    scoreBox.appendChild(f);
+    f.animate([{ transform: 'translateY(0)', opacity: 1 }, { transform: 'translateY(-28px)', opacity: 0 }], { duration: 650, easing: 'ease-out' })
+      .onfinish = function () { if (f.parentNode) f.parentNode.removeChild(f); };
+  }
+  function render() {
+    scoreV.textContent = C.num(G.score);
+    bestV.textContent = C.num(Math.max(best(), G.score));
+    var left = G.tray.filter(function (x) { return x >= 0; }).length;
+    cv.setAttribute('aria-label', C.t('board') + ' — ' + C.t('boardN', { s: C.num(G.score), n: C.num(left) }));
+    top.innerHTML = '';
+    if (G.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyHc') + ' — ' + C.num(G.daily) })]));
+    invalidate();
+  }
+  if (window.ResizeObserver) new ResizeObserver(function () { invalidate(); }).observe(box); else window.addEventListener('resize', invalidate);
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    if (mq.addEventListener) mq.addEventListener('change', invalidate);
+  }
+  new MutationObserver(invalidate).observe(document.documentElement, { attributes: true });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(invalidate);
+
+  /* -------------------------------------------------------------- input */
+
+  // A finger on a tray piece lifts it at board size above the finger, so the finger never
+  // hides it; its shadow follows on the board. Let go over a place it fits and it lands;
+  // anywhere else it flies back. Everything is read against the picture as drawn last.
+  function units(e) {
+    var r = cv.getBoundingClientRect(), k = view.W / (r.width || 1);
+    return { x: ((e.clientX - r.left) * k - view.ox) / view.u, y: ((e.clientY - r.top) * k - view.oy) / view.u };
+  }
+  function slotAt(p) { return p.y >= TRAY_TOP - 2 && p.y <= TRAY_TOP + TRAY_H + 2 ? Math.max(0, Math.min(2, Math.floor(p.x / 33.333))) : -1; }
+  function moveDrag(p) {
+    var h = SH[drag.si];
+    drag.cx = p.x;
+    drag.cy = drag.touch ? p.y - h.bh * SB / 2 - 8 : p.y;
+    // the handle cell of the lifted piece decides where it would land
+    var first = firstAt(drag.si, [drag.cx, drag.cy], SB), hp = [first[0] + SB * S3 * (h.hd[0] + h.hd[1] / 2), first[1] + 1.5 * SB * h.hd[1]];
+    var cn = cellNear(hp[0], hp[1]);
+    if (cn) {
+      var an = E.anchorFor(drag.si, cn.q, cn.r);
+      show(drag.si, an[0], an[1], E.canPlace(G.g, drag.si, an[0], an[1]));
+    } else show(-1);
+    invalidate();
+  }
+  function cancelDrag() {
+    if (!drag) return;
+    drag = null; shown = null;
+    invalidate();
+  }
+  cv.addEventListener('pointerdown', function (e) {
+    if (drag || !G || ended || document.querySelector('.ch-scrim')) return;
+    var p = units(e), k = slotAt(p);
+    if (k >= 0 && G.tray[k] >= 0) {
+      e.preventDefault();
+      try { cv.setPointerCapture(e.pointerId); } catch (err) { /* already released */ }
+      drag = { id: e.pointerId, slot: k, si: G.tray[k], touch: e.pointerType !== 'mouse', x0: p.x, y0: p.y, moved: false, cx: p.x, cy: p.y };
+      moveDrag(p);
+      C.feedback('select');
+      return;
+    }
+    // with a piece picked, a tap on the board moves its shadow; a tap on the shadow places it
+    var cn = cellNear(p.x, p.y);
+    if (sel >= 0 && cn) {
+      if (shown && shown.ok && E.coverage(shown.si, shown.q, shown.r).indexOf(cn.i) >= 0) { placeAt(sel, shown.q, shown.r); return; }
+      cur = { q: cn.q, r: cn.r }; prefX = cn.q + cn.r / 2;
+      showSel();
+    }
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (!drag || e.pointerId !== drag.id) return;
+    var p = units(e);
+    if (Math.abs(p.x - drag.x0) + Math.abs(p.y - drag.y0) > 3) drag.moved = true;
+    moveDrag(p);
+  });
+  cv.addEventListener('pointerup', function (e) {
+    if (!drag || e.pointerId !== drag.id) return;
+    var d = drag, p = units(e);
+    moveDrag(p);
+    var target = shown, mid = [d.cx, d.cy];
+    if (!d.moved) { cancelDrag(); pick(d.slot); return; }   // a tap on a piece picks it for tapping or the keys
+    drag = null;
+    if (target && target.ok && target.si === d.si) { shown = null; placeAt(d.slot, target.q, target.r, mid); return; }
+    // dropped where it does not fit: it flies home
+    shown = null;
+    hiddenSlot[d.slot] = true;
+    var sm = slotMid(d.slot), to = sm, now = performance.now();
+    anims.push({ t0: now, dur: C.ui.reduceMotion() ? 1 : 220, draw: function (g, tt, P) {
+      var f = ease(tt), m = [mid[0] + (to[0] - mid[0]) * f, mid[1] + (to[1] - mid[1]) * f], s = SB + (ST - SB) * f;
+      drawPiece(g, d.si, firstAt(d.si, m, s), s, P, 1);
+    }, end: function () { hiddenSlot[d.slot] = false; invalidate(); } });
+    if (cellNear(p.x, p.y) && p.y < TRAY_TOP - 2) { C.feedback('bad'); status.textContent = C.t('noFit'); }
+    invalidate();
+  });
+  cv.addEventListener('pointercancel', function (e) { if (drag && e.pointerId === drag.id) cancelDrag(); });
+
+  function pick(k) {
+    if (!G || ended || k < 0 || k > 2 || G.tray[k] < 0) return;
+    if (sel === k) { sel = -1; shown = null; invalidate(); return; }
+    sel = k;
+    var si = G.tray[k];
+    // start the shadow on the first place the piece fits nearest the last one, so it is never hidden at once
+    var anc = E.anchorFor(si, cur.q, cur.r);
+    if (!E.canPlace(G.g, si, anc[0], anc[1])) {
+      var from = cellXY(cur.q, cur.r), bestD = 1e9;
+      for (var i = 0; i < N; i++) {
+        var a = E.anchorFor(si, CELLS[i][0], CELLS[i][1]);
+        if (!E.canPlace(G.g, si, a[0], a[1])) continue;
+        var xy = cellXY(CELLS[i][0], CELLS[i][1]), d = Math.hypot(xy[0] - from[0], xy[1] - from[1]);
+        if (d < bestD) { bestD = d; cur = { q: CELLS[i][0], r: CELLS[i][1] }; }
+      }
+    }
+    prefX = cur.q + cur.r / 2;
+    C.feedback('select');
+    showSel();
+  }
+  function showSel() {
+    if (sel < 0) return;
+    var si = G.tray[sel], an = E.anchorFor(si, cur.q, cur.r);
+    shown = null;
+    show(si, an[0], an[1], E.canPlace(G.g, si, an[0], an[1]));
+  }
+  // left and right step along a row; up and down take the neighbour nearest the column the
+  // cursor was last moved along, so a run of ups and downs does not drift sideways
+  function moveSel(dir) {
+    if (sel < 0) { pick(G.tray.findIndex(function (x) { return x >= 0; })); return; }
+    var cands = dir === 'l' ? [[-1, 0]] : dir === 'r' ? [[1, 0]] : dir === 'u' ? [[0, -1], [1, -1]] : [[-1, 1], [0, 1]];
+    var okc = cands.filter(function (d) { return E.cellAt(cur.q + d[0], cur.r + d[1]) >= 0; });
+    if (!okc.length) return;
+    var pickD = okc.reduce(function (a, d) {
+      var da = Math.abs(cur.q + a[0] + (cur.r + a[1]) / 2 - prefX), dd = Math.abs(cur.q + d[0] + (cur.r + d[1]) / 2 - prefX);
+      return dd < da - 1e-9 || (Math.abs(dd - da) < 1e-9 && d[0] > a[0]) ? d : a;
+    });
+    cur = { q: cur.q + pickD[0], r: cur.r + pickD[1] };
+    if (dir === 'l' || dir === 'r') prefX = cur.q + cur.r / 2;
+    showSel();
+  }
+
+  // The comb is drawn the same way in every language, so the arrows are never flipped
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim') || e.ctrlKey || e.metaKey || e.altKey || !G || ended) return;
+    if (e.key === 'ArrowLeft') { e.preventDefault(); moveSel('l'); return; }
+    if (e.key === 'ArrowRight') { e.preventDefault(); moveSel('r'); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); moveSel('u'); return; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); moveSel('d'); return; }
+    if (/^[1-3]$/.test(e.key)) { e.preventDefault(); pick(+e.key - 1); return; }
+    // Tab walks the pieces in the tray; past the last one it lets go, so the keys never trap the focus
+    if (e.key === 'Tab' && document.activeElement === cv) {
+      var step = e.shiftKey ? -1 : 1;
+      for (var n = (sel < 0 ? (e.shiftKey ? 3 : -1) : sel) + step; n >= 0 && n <= 2; n += step) {
+        if (G.tray[n] >= 0) { e.preventDefault(); pick(n); return; }
+      }
+      if (sel >= 0) { sel = -1; shown = null; invalidate(); }
+      return;
+    }
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      if (e.repeat) return;
+      if (sel < 0) { moveSel('x'); return; }
+      var an = E.anchorFor(G.tray[sel], cur.q, cur.r);
+      placeAt(sel, an[0], an[1]);
+      return;
+    }
+    if (e.key === 'Escape') { if (sel >= 0) { e.preventDefault(); sel = -1; shown = null; invalidate(); } return; }
+    if (C.keyIs(e, 'n') && !dailyDate) { e.preventDefault(); askNew(); }
+  });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    var keys = [kb(C.num(1) + '–' + C.num(3) + ' · Tab', C.t('kPick')), kb('← → ↑ ↓', C.t('kMove')), kb('Space · Enter', C.t('kPlace')), kb('Esc', C.t('kBack'))];
+    if (!dailyDate) keys.push(kb('N', C.t('kNew')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, keys)
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // A small honeycomb of 19 cells for the tutorial: filled cells as [q, r, colour family],
+  // ghost cells, a ring on the cells of a line, and a piece beside it. The colours are the
+  // game's own variables, so the picture follows the theme of the dialog.
+  function tArt(filled, ghost, gk, piece, ring) {
+    var s = 12, cx = 66, cy = 66, svg = '<svg viewBox="0 0 200 132" width="100%" aria-hidden="true">';
+    var pts = function (x, y, rad) {
+      var o = [];
+      for (var i = 0; i < 6; i++) { var a = Math.PI / 180 * (60 * i - 30); o.push((x + rad * Math.cos(a)).toFixed(1) + ',' + (y + rad * Math.sin(a)).toFixed(1)); }
+      return o.join(' ');
+    };
+    var on = {};
+    filled.forEach(function (f) { on[f[0] + ',' + f[1]] = f[2]; });
+    ghost.forEach(function (f) { on[f[0] + ',' + f[1]] = -1; });
+    var rg = {};
+    ring.forEach(function (f) { rg[f[0] + ',' + f[1]] = 1; });
+    for (var r = -2; r <= 2; r++) for (var q = -2; q <= 2; q++) {
+      if (Math.abs(q + r) > 2) continue;
+      var x = cx + s * Math.sqrt(3) * (q + r / 2), y = cy + 1.5 * s * r, v = on[q + ',' + r];
+      if (v === -1) svg += '<polygon points="' + pts(x, y, s * 0.9) + '" fill="var(--hc-' + gk + ')" opacity=".5"/>';
+      else if (v) svg += '<polygon points="' + pts(x, y, s * 0.9) + '" fill="var(--hc-' + v + ')"/>';
+      else svg += '<polygon points="' + pts(x, y, s * 0.9) + '" fill="var(--c-surface)" stroke="var(--c-line)" stroke-width="1"/>';
+      if (rg[q + ',' + r]) svg += '<polygon points="' + pts(x, y, s * 0.98) + '" fill="none" stroke="var(--hc-' + gk + ')" stroke-width="2.2"/>';
+    }
+    if (piece) {
+      piece.forEach(function (d) {
+        svg += '<polygon points="' + pts(160 + s * Math.sqrt(3) * (d[0] + d[1] / 2), 24 + 1.5 * s * d[1], s * 0.9) + '" fill="var(--hc-' + gk + ')"/>';
+      });
+      svg += '<path d="M146 40 C 138 56, 128 62, 116 62" stroke="#723E00" stroke-width="2.5" fill="none" stroke-linecap="round"/><path d="M121 56 l-6 6 8 3" stroke="#723E00" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>';
+    }
+    return svg + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt([[-2, 2, 3], [-1, 2, 3], [0, 2, 3], [-2, 1, 6], [-1, 1, 6]], [[0, -1], [1, -1], [0, 0]], 4, [[0, 0], [1, 0], [0, 1]], []) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt([[-2, 0, 2], [-1, 0, 2], [1, 0, 2], [-1, -1, 6], [1, -2, 1], [-2, 2, 3]], [[0, 0], [2, 0]], 7, null, [[-2, 0], [-1, 0], [0, 0], [1, 0], [2, 0]]) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt([[-2, 0, 2], [-1, -1, 3], [0, -2, 5], [1, -2, 6], [-2, 1, 3], [-1, 1, 6], [0, 1, 1], [1, 0, 2], [2, -1, 4], [2, -2, 7], [-1, 0, 5], [0, 0, 8], [-2, 2, 4], [0, 2, 3], [1, 1, 5], [-1, 2, 1], [1, -1, 7]], [], 2, [[0, 0], [1, 0], [2, 0]], []) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // saved after every piece; the daily game has its own slot
+  ctx.autosave(function () {
+    if (!G || ended) return { inProgress: false };
+    return { g: G.g, tray: G.tray, score: G.score, placed: G.placed, lines: G.lines, streak: G.streak, seed: G.seed, daily: G.daily,
+      elapsed: Date.now() - startedAt };
+  });
+  function save() { ctx.save(); }
+  var saved = ctx.loadSave();
+  if (saved && E.valid(saved) && (saved.daily || null) === (dailyDate || null)) {
+    G = { g: saved.g.slice(), tray: saved.tray.slice(), score: saved.score, placed: saved.placed, lines: saved.lines, streak: saved.streak,
+      seed: saved.seed, daily: saved.daily || null };
+    startedAt = Date.now() - (saved.elapsed || 0);
+    traySpawn = performance.now();
+    render();
+    status.textContent = G.daily ? C.t('goalN', { g: C.num(DAILY_GOAL) }) : C.t('hintIdle');
+  } else newGame();
+  if (dailyDate && C.stats.dailyDone('honeycomb', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).honeycomb;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
