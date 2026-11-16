@@ -1,0 +1,1028 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>تیله‌ران — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  /* A wooden board with round pits. The marbles stay onyx and pearl in both themes, so the
+     two sides differ by lightness, not by hue, and read the same for colour-blind players;
+     only the wood darkens in the dark theme, and the onyx marbles gain a light rim there. */
+  :root { --po-wood: #C8955A; --po-wood2: #A87440; --po-edge: #6E4520; --po-pit: #6E4522; --po-pit2: #A87A4C;
+    --po-sel: #1565C0; --po-ink: #2B1D10; --po-rim: rgba(255, 255, 255, 0); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --po-wood: #6A4A2E; --po-wood2: #4E3620; --po-edge: #24180D; --po-pit: #24180D; --po-pit2: #4A3522;
+      --po-sel: #64B5F6; --po-ink: #F3E3CC; --po-rim: rgba(255, 255, 255, .38); }
+  }
+  :root[data-theme="dark"] { --po-wood: #6A4A2E; --po-wood2: #4E3620; --po-edge: #24180D; --po-pit: #24180D; --po-pit2: #4A3522;
+    --po-sel: #64B5F6; --po-ink: #F3E3CC; --po-rim: rgba(255, 255, 255, .38); }
+  /* the hexagon is a little wider than tall, with flat top and bottom rows */
+  .po-wrap > .ch-fit { --fit-ar: 1.15; }
+  .ch-fit > .po-box { position: relative; aspect-ratio: var(--fit-ar); }
+  /* a canvas does not stretch between four offsets: without width and height its CSS size
+     became its backing size, double on a phone (#919) */
+  .po-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: pointer; }
+  .po-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .po-sides { width: 100%; max-width: 520px; display: flex; gap: var(--s-2); }
+  .po-side { flex: 1; display: flex; align-items: center; gap: var(--s-2); min-width: 0; background: var(--c-surface);
+    border-radius: var(--r-md); padding: 8px 10px; box-shadow: var(--sh-1); border: 2px solid transparent; min-height: 44px;
+    transition: border-color var(--t-mid) var(--ease), transform var(--t-mid) var(--ease); }
+  .po-side--on { border-color: var(--game); transform: translateY(-2px); box-shadow: var(--sh-2); }
+  /* the tray: six slots, one for each marble this side has pushed off. An empty slot is only
+     a small dot: a hollow pit looked like a pearl on a light card, so five pearls read as none.
+     Written before the marble rules, so a filled slot takes the marble's look. */
+  .po-slot { width: 11px; height: auto; aspect-ratio: 1; flex: 0 1 11px; min-width: 6px; border-radius: 50%;
+    background: radial-gradient(circle, var(--c-text-dim) 0 1.6px, transparent 2.2px); opacity: .7; }
+  .po-m { width: 18px; height: 18px; flex: 0 0 18px; border-radius: 50%; box-shadow: 0 1px 2px rgba(0, 0, 0, .35); }
+  .po-m0 { background: radial-gradient(circle at 35% 30%, #8A8A94, #2E2E35 45%, #09090C); box-shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 0 0 1px var(--po-rim); }
+  .po-m1 { background: radial-gradient(circle at 35% 30%, #FFFFFF, #EEE8DD 50%, #B8AE9C); }
+  .po-side__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .po-side__name { min-width: 0; font-weight: 700; font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .po-tray { display: flex; gap: 3px; min-width: 0; }
+  .po-slot.po-m0, .po-slot.po-m1 { width: 11px; height: auto; flex: 0 1 11px; opacity: 1; }
+  .po-slot.po-m1 { box-shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 0 0 1px rgba(0, 0, 0, .28); }
+  .po-thinking { animation: po-blink 900ms infinite; }
+  @keyframes po-blink { 50% { opacity: .55; } }
+  /* the row keeps its height whatever it says, so the board never moves between two taps */
+  .po-status { min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+  .po-left { font-size: var(--fs-xs); font-weight: 600; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function PushOutEngineFactory() {
+  'use strict';
+
+  // A hexagon of 61 pits, five on a side, in axial coordinates (q, r) with |q|, |r| and
+  // |q + r| at most 4. Index i walks the nine rows top to bottom (r = -4 … 4), each row
+  // left to right, so the rows hold 5, 6, 7, 8, 9, 8, 7, 6 and 5 pits. Side 0 starts on
+  // the bottom three rows, side 1 on the top three.
+  var R = 4, LEVELS = ['easy', 'medium', 'hard'], START = 14, WIN = 6;
+  // A game that pushes nobody off for a long time is not finished, it is stuck: two sides
+  // that only guard the middle can shuffle forever. 200 moves (100 each) is about ten
+  // minutes for a person at a few seconds a move; then whoever pushed off more wins.
+  var MAX_PLIES = 200;
+  // east, north-east, north-west, west, south-west, south-east; d + 3 is the opposite way
+  var DIRS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+  var Q = [], RR = [], IDX = {};
+  for (var r0 = -R; r0 <= R; r0++) {
+    for (var q0 = Math.max(-R, -R - r0); q0 <= Math.min(R, R - r0); q0++) { IDX[q0 + ',' + r0] = Q.length; Q.push(q0); RR.push(r0); }
+  }
+  var CELLS = Q.length;
+  var NB = [];
+  for (var i0 = 0; i0 < CELLS; i0++) {
+    NB.push(DIRS.map(function (d) { var k = (Q[i0] + d[0]) + ',' + (RR[i0] + d[1]); return k in IDX ? IDX[k] : -1; }));
+  }
+  // steps from the middle pit: 0 in the centre, 4 on the rim
+  var RING = [];
+  for (var i1 = 0; i1 < CELLS; i1++) RING.push(Math.max(Math.abs(Q[i1]), Math.abs(RR[i1]), Math.abs(Q[i1] + RR[i1])));
+  function at(q, r) { var k = q + ',' + r; return k in IDX ? IDX[k] : -1; }
+
+  // The classic start: the near row of five, the row of six behind it, and three in the
+  // middle of the third row
+  function startCells() {
+    var cells = [];
+    for (var i = 0; i < CELLS; i++) {
+      var q = Q[i], r = RR[i], o = -1;
+      if (r === 4 || r === 3 || (r === 2 && q >= -2 && q <= 0)) o = 0;
+      if (r === -4 || r === -3 || (r === -2 && q >= 0 && q <= 2)) o = 1;
+      cells.push(o);
+    }
+    return cells;
+  }
+  function newGame(first) {
+    var f = first === 1 ? 1 : 0;
+    return { cells: startCells(), turn: f, first: f, plies: 0, lost: [0, 0], winner: -1, last: null };
+  }
+  function clone(S) {
+    return { cells: S.cells.slice(), turn: S.turn, first: S.first, plies: S.plies, lost: S.lost.slice(), winner: S.winner,
+      last: S.last ? { c: S.last.c.slice(), d: S.last.d, push: S.last.push, off: S.last.off } : null };
+  }
+
+  /* ------------------------------------------------------------- moves */
+
+  // A move: c, the 1 to 3 own marbles (in-line moves list them tail to head), d, the way
+  // they go, push, how many of the other side's marbles are shoved along, and off, whether
+  // the last of those leaves the board. A broadside move (side) never pushes.
+  function genMoves(cells, t) {
+    var out = [], o = 1 - t, i, d, a, k;
+    for (i = 0; i < CELLS; i++) {
+      if (cells[i] !== t) continue;
+      for (d = 0; d < 6; d++) {
+        var g = [i], h = i;
+        for (k = 1; k <= 3; k++) {
+          var tg = NB[h][d];
+          if (tg < 0) break;                                  // never off the board yourself
+          if (cells[tg] === -1) { out.push({ c: g.slice(), d: d, push: 0, off: false, side: false }); break; }
+          if (cells[tg] === o) {
+            // a sumito: strictly more of ours than of theirs in the line, and behind their
+            // last one an empty pit or the edge, never one of ours
+            var m = 0, x = tg;
+            while (x >= 0 && cells[x] === o && m < k) { m++; x = NB[x][d]; }
+            if (m < k && (x < 0 || cells[x] === -1)) out.push({ c: g.slice(), d: d, push: m, off: x < 0, side: false });
+            break;
+          }
+          if (k === 3) break;                                  // a fourth marble cannot move
+          g.push(tg); h = tg;
+        }
+      }
+      // broadside: two or three in a line step sideways together into empty pits
+      for (a = 0; a < 3; a++) {
+        var line = [i], n = i;
+        for (k = 2; k <= 3; k++) {
+          n = NB[n][a];
+          if (n < 0 || cells[n] !== t) break;
+          line.push(n);
+          for (d = 0; d < 6; d++) {
+            if (d === a || d === a + 3) continue;
+            var okSide = true;
+            for (var j = 0; j < line.length; j++) { var to = NB[line[j]][d]; if (to < 0 || cells[to] !== -1) { okSide = false; break; } }
+            if (okSide) out.push({ c: line.slice(), d: d, push: 0, off: false, side: true });
+          }
+        }
+      }
+    }
+    return out;
+  }
+  function moves(S) { return S.winner >= 0 ? [] : genMoves(S.cells, S.turn); }
+  function key(mv) { return mv.c.slice().sort(function (x, y) { return x - y; }).join('.') + '>' + mv.d; }
+  // The cells a move empties and fills, in the order to move them: far end first
+  function apply(cells, lost, mv) {
+    var d = mv.d, j, v;
+    if (mv.side) {
+      var col = cells[mv.c[0]];
+      for (j = 0; j < mv.c.length; j++) cells[mv.c[j]] = -1;
+      for (j = 0; j < mv.c.length; j++) cells[NB[mv.c[j]][d]] = col;
+      return;
+    }
+    var head = mv.c[mv.c.length - 1], chain = mv.c.slice(), x = NB[head][d];
+    for (j = 0; j < mv.push; j++) { chain.push(x); x = NB[x][d]; }
+    for (j = chain.length - 1; j >= 0; j--) {
+      var from = chain[j], to = NB[from][d];
+      v = cells[from]; cells[from] = -1;
+      if (to < 0) lost[v]++; else cells[to] = v;
+    }
+  }
+  // The engine is the only judge: a move is played only if it is in its own list
+  function play(S, mv) {
+    if (!mv || S.winner >= 0) return false;
+    var k = key(mv), list = moves(S), found = null;
+    for (var j = 0; j < list.length; j++) if (key(list[j]) === k) { found = list[j]; break; }
+    if (!found) return false;
+    apply(S.cells, S.lost, found);
+    S.last = { c: found.c.slice(), d: found.d, push: found.push, off: found.off };
+    S.plies++;
+    var t = S.turn;
+    S.turn = 1 - t;
+    settle(S);
+    return found;
+  }
+  // Six off ends it; so does the move cap, decided by who pushed off more (2 is a draw)
+  function settle(S) {
+    if (S.lost[1] >= WIN) S.winner = 0;
+    else if (S.lost[0] >= WIN) S.winner = 1;
+    else if (S.plies >= MAX_PLIES || !genMoves(S.cells, S.turn).length) S.winner = S.lost[1] > S.lost[0] ? 0 : S.lost[0] > S.lost[1] ? 1 : 2;
+  }
+  // Where each marble of a move ends up, for the slide animation: [from, to] with to -1
+  // for a marble that falls off
+  function trail(cells, mv) {
+    if (mv.side) return mv.c.map(function (c) { return [c, NB[c][mv.d]]; });
+    var chain = mv.c.slice(), x = NB[mv.c[mv.c.length - 1]][mv.d];
+    for (var j = 0; j < mv.push; j++) { chain.push(x); x = NB[x][mv.d]; }
+    return chain.map(function (c) { return [c, NB[c][mv.d]]; });
+  }
+
+  // Which marbles the player may hold together: 1 to 3 own marbles in one straight,
+  // unbroken line. Returns them ordered along the line, or null.
+  function lineOf(cells, t, sel) {
+    if (!sel.length || sel.length > 3) return null;
+    for (var j = 0; j < sel.length; j++) if (cells[sel[j]] !== t) return null;
+    if (sel.length === 1) return sel.slice();
+    for (var a = 0; a < 3; a++) {
+      // walk from each candidate start along axis a and see whether it covers the set
+      for (var s = 0; s < sel.length; s++) {
+        var run = [sel[s]], n = sel[s];
+        while (run.length < sel.length) { n = NB[n][a]; if (n < 0) break; run.push(n); }
+        if (run.length === sel.length && run.every(function (c) { return sel.indexOf(c) >= 0; })) return run;
+      }
+    }
+    return null;
+  }
+  // The pits strictly between two own marbles on one line, if they are all own and the
+  // whole run is at most three: lets a tap on the far end of a row of three take all three
+  function span(cells, t, a, b) {
+    for (var d = 0; d < 6; d++) {
+      var run = [a], n = a;
+      while (run.length < 3) { n = NB[n][d]; if (n < 0 || cells[n] !== t) break; run.push(n); if (n === b) return run; }
+    }
+    return null;
+  }
+  // The legal moves of exactly these marbles
+  function movesOf(S, sel) {
+    var k = sel.slice().sort(function (x, y) { return x - y; }).join('.');
+    return moves(S).filter(function (mv) { return mv.c.slice().sort(function (x, y) { return x - y; }).join('.') === k; });
+  }
+
+  /* --------------------------------------------------------------- bot */
+
+  // From side t's view. A marble off is worth far more than any shape; then the middle
+  // (marbles near the rim are the ones that get pushed off), then marbles touching their
+  // own (a tight group cannot be outnumbered in a line).
+  function evaluate(cells, lost, t) {
+    var v = (lost[1 - t] - lost[t]) * 1000;
+    if (lost[1 - t] >= WIN) return 100000;
+    if (lost[t] >= WIN) return -100000;
+    for (var i = 0; i < CELLS; i++) {
+      var o = cells[i];
+      if (o < 0) continue;
+      var s = o === t ? 1 : -1, nb = NB[i], tie = 0;
+      for (var d = 0; d < 3; d++) { var n = nb[d]; if (n >= 0 && cells[n] === o) tie++; }
+      var n3 = nb[3], n4 = nb[4], n5 = nb[5];
+      if (n3 >= 0 && cells[n3] === o) tie++;
+      if (n4 >= 0 && cells[n4] === o) tie++;
+      if (n5 >= 0 && cells[n5] === o) tie++;
+      v += s * ((4 - RING[i]) * 12 + tie * 3 - (RING[i] === 4 ? 8 : 0));
+    }
+    return v;
+  }
+  // pushes off first, then other pushes, then moves toward the middle: alpha-beta cuts
+  // far more when the strong moves come first
+  function order(list) {
+    for (var j = 0; j < list.length; j++) {
+      var mv = list[j], g = 0;
+      if (mv.off) g += 1000; else if (mv.push) g += 100 * mv.push;
+      var h = mv.c[mv.c.length - 1], to = NB[h][mv.d];
+      if (to >= 0) g += (RING[h] - RING[to]) * 5;
+      mv.o = g;
+    }
+    list.sort(function (x, y) { return y.o - x.o; });
+    return list;
+  }
+  var nodes = 0;
+  function search(cells, lost, t, plies, depth, alpha, beta) {
+    nodes++;
+    if (lost[0] >= WIN || lost[1] >= WIN || depth === 0 || plies >= MAX_PLIES) {
+      var e = evaluate(cells, lost, t);
+      // a win sooner is better than a win later
+      return e > 50000 ? e + depth : e < -50000 ? e - depth : e;
+    }
+    var list = order(genMoves(cells, t));
+    if (!list.length) return evaluate(cells, lost, t);
+    var best = -Infinity;
+    for (var j = 0; j < list.length; j++) {
+      var c2 = cells.slice(), l2 = lost.slice();
+      apply(c2, l2, list[j]);
+      var v = -search(c2, l2, 1 - t, plies + 1, depth - 1, -beta, -alpha);
+      if (v > best) best = v;
+      if (v > alpha) alpha = v;
+      if (alpha >= beta) break;
+    }
+    return best;
+  }
+  var DEPTH = { easy: 1, medium: 2, hard: 4 }, NOISE = { easy: 70, medium: 10, hard: 0.5 };
+  function think(S, level, rnd) {
+    if (S.winner >= 0) return null;
+    var t = S.turn, list = order(moves(S));
+    if (!list.length) return null;
+    nodes = 0;
+    if (!DEPTH[level]) level = 'medium';
+    // easy now and then just plays something, but still takes a marble that is free
+    if (level === 'easy' && rnd() < 0.25) {
+      var offs = list.filter(function (mv) { return mv.off; });
+      return offs.length && rnd() < 0.5 ? offs[0] : list[Math.floor(rnd() * list.length)];
+    }
+    var depth = DEPTH[level], best = null, bestV = -Infinity, alpha = -Infinity;
+    for (var j = 0; j < list.length; j++) {
+      var c2 = S.cells.slice(), l2 = S.lost.slice();
+      apply(c2, l2, list[j]);
+      // noise only ever reorders moves of nearly the same worth, so it keeps the bot from
+      // playing the same game twice without making it throw a marble away
+      var nz = rnd() * NOISE[level];
+      var v = -search(c2, l2, 1 - t, S.plies + 1, depth - 1, -Infinity, -(alpha - NOISE[level])) + nz;
+      if (v > bestV) { bestV = v; best = list[j]; }
+      if (v - nz > alpha) alpha = v - nz;
+    }
+    return { c: best.c.slice(), d: best.d, push: best.push, off: best.off, side: best.side };
+  }
+
+  function valid(S) {
+    if (!S || !Array.isArray(S.cells) || S.cells.length !== CELLS || !Array.isArray(S.lost) || S.lost.length !== 2) return false;
+    if (S.first !== 0 && S.first !== 1) return false;
+    if (!(S.turn === 0 || S.turn === 1) || S.turn !== (S.first + S.plies) % 2) return false;
+    if (!(S.plies >= 0 && S.plies <= MAX_PLIES && S.plies === Math.floor(S.plies))) return false;
+    var n = [0, 0];
+    for (var i = 0; i < CELLS; i++) { var o = S.cells[i]; if (o === 0 || o === 1) n[o]++; else if (o !== -1) return false; }
+    for (var t = 0; t < 2; t++) if (!(S.lost[t] >= 0 && S.lost[t] <= WIN && n[t] + S.lost[t] === START)) return false;
+    var w = S.lost[1] >= WIN ? 0 : S.lost[0] >= WIN ? 1 : S.plies >= MAX_PLIES ? (S.lost[1] > S.lost[0] ? 0 : S.lost[0] > S.lost[1] ? 1 : 2) : -1;
+    if (S.winner !== w && !(w === -1 && S.winner >= 0 && !genMoves(S.cells, S.turn).length)) return false;
+    return true;
+  }
+
+  return { R: R, CELLS: CELLS, LEVELS: LEVELS, START: START, WIN: WIN, MAX_PLIES: MAX_PLIES, DIRS: DIRS, Q: Q, RR: RR, NB: NB, RING: RING,
+    at: at, newGame: newGame, clone: clone, moves: moves, genMoves: genMoves, key: key, play: play, apply: apply, trail: trail,
+    lineOf: lineOf, span: span, movesOf: movesOf, evaluate: evaluate, think: think, valid: valid, nodes: function () { return nodes; } };
+}
+if (typeof module !== 'undefined') module.exports = PushOutEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = PushOutEngineFactory();
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'pushout',
+    name: { fa: 'تیله‌ران', en: 'Push Out', zh: '推珠', de: 'Kugelschubs', es: 'Empuja Fuera', pl: 'Wypychanka', fr: 'Pousse-billes', ar: 'دفع الكرات', hi: 'कंचा धक्का' },
+    accent: '#6F3030',
+    mood: 'sudoku',
+    strings: {
+      fa: {
+        board: 'صفحه‌ی تیله‌ران', vsBot: 'مقابل ربات', two: 'دو نفره', bot: 'ربات', playerN: 'بازیکن {n}', modeT: 'بازیکن‌ها', levelT: 'سطح ربات',
+        firstT: 'شروع‌کننده', firstMe: 'من', firstBot: 'ربات',
+        newMatch: 'بازی تازه', begin: 'شروع', undoMove: 'برگرداندن حرکت', endWarn: 'بازی فعلی تمام می‌شود. ادامه؟', settingsT: 'بازی تازه',
+        onyx: 'سیاه', pearl: 'سفید', pick: 'یک تا سه تیله‌ی هم‌ردیفت را انتخاب کن', pickDir: 'روی یکی از نقطه‌ها بزن تا حرکت کنند',
+        noMove: 'این تیله‌ها حرکتی ندارند', turnOf: 'نوبت {n} ({c})', thinking: 'ربات فکر می‌کند…',
+        dailyPo: 'تیله‌ران روزانه', vsMedium: 'مقابل ربات متوسط', playerWon: '{n} برد', drawT: 'مساوی', offL: 'بیرون‌انداخته', movesLeft: '{n} حرکت مانده',
+        rules: 'هر طرف ۱۴ تیله دارد. هر نوبت یک، دو یا سه تیله‌ی خودت را که در یک خط پشت هم‌اند یک خانه جابه‌جا می‌کنی: در امتداد خط، یا با هم به پهلو به خانه‌های خالی. اگر در امتداد خط به تیله‌های حریف برسی و تیله‌هایت بیشتر باشند (دو در برابر یک، سه در برابر یک یا دو)، آن‌ها را هل می‌دهی؛ پشت آخرین تیله‌ی حریف باید خانه‌ی خالی یا لبه‌ی صفحه باشد، نه تیله‌ی خودت. تیله‌ای که از لبه هل داده شود بیرون می‌افتد. اولین کسی که شش تیله بیرون بیندازد می‌برد. بعد از {m} حرکت، هر کس بیشتر بیرون انداخته برنده است و اگر برابر باشند مساوی است.',
+        kCursor: 'جابه‌جایی بین خانه‌ها', kGo: 'انتخاب تیله یا رفتن به خانه', kClear: 'لغو انتخاب',
+        tutTitle1: 'شش تا بیرون بینداز', tutText1: 'اولین کسی که شش تیله‌ی حریف را از صفحه بیرون بیندازد می‌برد.',
+        tutTitle2: 'یک تا سه تیله در یک خط', tutText2: 'تیله‌هایت را انتخاب کن و روی یکی از نقطه‌ها بزن. همه با هم یک خانه می‌روند.',
+        tutTitle3: 'با تعداد بیشتر هل بده', tutText3: 'سه در برابر دو یا یک، دو در برابر یک هل می‌دهد. تعداد برابر هل نمی‌دهد.'
+      },
+      en: {
+        board: 'Push Out board', vsBot: 'vs bot', two: 'Two players', bot: 'Bot', playerN: 'Player {n}', modeT: 'Players', levelT: 'Bot level',
+        firstT: 'Who starts', firstMe: 'Me', firstBot: 'Bot',
+        newMatch: 'New game', begin: 'Start', undoMove: 'Undo move', endWarn: 'The current game will end. Continue?', settingsT: 'New game',
+        onyx: 'Black', pearl: 'White', pick: 'Pick one to three of your marbles in a line', pickDir: 'Tap a dot to move them',
+        noMove: 'These marbles cannot move', turnOf: '{n}’s turn ({c})', thinking: 'Bot is thinking…',
+        dailyPo: 'Daily Push Out', vsMedium: 'vs medium bot', playerWon: '{n} wins', drawT: 'Draw', offL: 'Pushed off', movesLeft: '{n} moves left',
+        rules: 'Each side has 14 marbles. On your turn, move one, two or three of your marbles that sit in a line by one step: along the line, or sideways together into empty pits. Moving along the line into the other side’s marbles pushes them if you have more (two against one, three against one or two); behind their last marble there must be an empty pit or the edge, never one of yours. A marble pushed over the edge falls off. The first to push off six wins. After {m} moves, whoever pushed off more wins; equal is a draw.',
+        kCursor: 'Move between pits', kGo: 'Pick a marble or move to a pit', kClear: 'Clear the selection',
+        tutTitle1: 'Push six off', tutText1: 'The first to push six of the other side’s marbles off the board wins.',
+        tutTitle2: 'One to three in a line', tutText2: 'Pick your marbles, then tap a dot. They all move one step together.',
+        tutTitle3: 'Outnumber to push', tutText3: 'Three push two or one, two push one. Equal numbers cannot push.'
+      },
+      zh: {
+        board: '推珠棋盘', vsBot: '对战机器人', two: '双人', bot: '机器人', playerN: '玩家{n}', modeT: '玩家', levelT: '机器人难度',
+        firstT: '先手', firstMe: '我', firstBot: '机器人',
+        newMatch: '新对局', begin: '开始', undoMove: '撤销一步', endWarn: '当前对局将结束。继续吗？', settingsT: '新对局',
+        onyx: '黑', pearl: '白', pick: '选一到三颗连成一线的己方珠子', pickDir: '点一个圆点来移动它们',
+        noMove: '这些珠子无法移动', turnOf: '{n}的回合（{c}）', thinking: '机器人思考中…',
+        dailyPo: '每日推珠', vsMedium: '对战中等机器人', playerWon: '{n}获胜', drawT: '平局', offL: '推出', movesLeft: '还剩{n}步',
+        rules: '每方 14 颗珠子。轮到你时，把一到三颗连成一线的己方珠子移动一格：沿着这条线移动，或一起横向移入空位。沿线撞上对方珠子时，若你的数量更多（二对一、三对一或三对二）就能推动它们；对方最后一颗珠子后面必须是空位或棋盘边缘，不能是你的珠子。被推过边缘的珠子出局。先推出六颗者获胜。{m} 步之后，推出更多者获胜，相同则为平局。',
+        kCursor: '在空位间移动', kGo: '选珠子或移到空位', kClear: '取消选择',
+        tutTitle1: '推出六颗', tutText1: '先把对方六颗珠子推出棋盘的一方获胜。',
+        tutTitle2: '一到三颗成一线', tutText2: '选好你的珠子，再点一个圆点。它们一起移动一格。',
+        tutTitle3: '以多推少', tutText3: '三推二或一，二推一。数量相同不能推。'
+      },
+      de: {
+        board: 'Kugelschubs-Brett', vsBot: 'gegen Bot', two: 'Zwei Spieler', bot: 'Bot', playerN: 'Spieler {n}', modeT: 'Spieler', levelT: 'Bot-Stufe',
+        firstT: 'Wer beginnt', firstMe: 'Ich', firstBot: 'Bot',
+        newMatch: 'Neues Spiel', begin: 'Start', undoMove: 'Zug zurück', endWarn: 'Das laufende Spiel endet. Weiter?', settingsT: 'Neues Spiel',
+        onyx: 'Schwarz', pearl: 'Weiß', pick: 'Wähle eine bis drei deiner Kugeln in einer Linie', pickDir: 'Tippe auf einen Punkt, um sie zu ziehen',
+        noMove: 'Diese Kugeln können nicht ziehen', turnOf: 'Am Zug: {n} ({c})', thinking: 'Bot denkt nach…',
+        dailyPo: 'Tägliches Kugelschubs', vsMedium: 'gegen mittleren Bot', playerWon: 'Sieg: {n}', drawT: 'Unentschieden', offL: 'Hinausgeschoben', movesLeft: 'noch {n} Züge',
+        rules: 'Jede Seite hat 14 Kugeln. Ziehe eine, zwei oder drei deiner Kugeln, die in einer Linie liegen, um ein Feld: entlang der Linie oder gemeinsam seitwärts in leere Mulden. Triffst du entlang der Linie auf gegnerische Kugeln, schiebst du sie, wenn du mehr hast (zwei gegen eine, drei gegen eine oder zwei); hinter der letzten gegnerischen Kugel muss eine leere Mulde oder der Rand liegen, nie eine eigene. Eine über den Rand geschobene Kugel fällt hinaus. Wer zuerst sechs hinausschiebt, gewinnt. Nach {m} Zügen gewinnt, wer mehr hinausgeschoben hat; bei Gleichstand ist es unentschieden.',
+        kCursor: 'Zwischen Mulden wechseln', kGo: 'Kugel wählen oder in eine Mulde ziehen', kClear: 'Auswahl aufheben',
+        tutTitle1: 'Schiebe sechs hinaus', tutText1: 'Wer zuerst sechs gegnerische Kugeln vom Brett schiebt, gewinnt.',
+        tutTitle2: 'Eine bis drei in einer Linie', tutText2: 'Wähle deine Kugeln und tippe auf einen Punkt. Sie ziehen gemeinsam ein Feld.',
+        tutTitle3: 'Mit Übermacht schieben', tutText3: 'Drei schieben zwei oder eine, zwei schieben eine. Gleich viele schieben nicht.'
+      },
+      es: {
+        board: 'Tablero de Empuja Fuera', vsBot: 'contra el bot', two: 'Dos jugadores', bot: 'Bot', playerN: 'Jugador {n}', modeT: 'Jugadores', levelT: 'Nivel del bot',
+        firstT: 'Quién empieza', firstMe: 'Yo', firstBot: 'Bot',
+        newMatch: 'Partida nueva', begin: 'Empezar', undoMove: 'Deshacer jugada', endWarn: 'La partida actual terminará. ¿Seguir?', settingsT: 'Partida nueva',
+        onyx: 'Negras', pearl: 'Blancas', pick: 'Elige de una a tres canicas tuyas en línea', pickDir: 'Toca un punto para moverlas',
+        noMove: 'Estas canicas no pueden moverse', turnOf: 'Turno de {n} ({c})', thinking: 'El bot está pensando…',
+        dailyPo: 'Empuja Fuera diario', vsMedium: 'contra el bot medio', playerWon: 'Gana {n}', drawT: 'Empate', offL: 'Expulsadas', movesLeft: 'quedan {n} jugadas',
+        rules: 'Cada bando tiene 14 canicas. En tu turno mueves un paso una, dos o tres canicas tuyas que estén en línea: a lo largo de la línea, o juntas de lado a huecos vacíos. Si a lo largo de la línea chocas con canicas rivales y tienes más (dos contra una, tres contra una o dos), las empujas; detrás de la última rival debe haber un hueco vacío o el borde, nunca una tuya. Una canica empujada más allá del borde cae fuera. Gana quien primero saque seis. Tras {m} jugadas gana quien haya sacado más; si hay igualdad, es empate.',
+        kCursor: 'Moverse entre huecos', kGo: 'Elegir canica o mover a un hueco', kClear: 'Quitar la selección',
+        tutTitle1: 'Saca seis', tutText1: 'Gana quien primero saque del tablero seis canicas del rival.',
+        tutTitle2: 'De una a tres en línea', tutText2: 'Elige tus canicas y toca un punto. Se mueven juntas un paso.',
+        tutTitle3: 'Empuja con más', tutText3: 'Tres empujan a dos o a una, dos empujan a una. Con igual número no se empuja.'
+      },
+      pl: {
+        board: 'Plansza Wypychanki', vsBot: 'z botem', two: 'Dwóch graczy', bot: 'Bot', playerN: 'Gracz {n}', modeT: 'Gracze', levelT: 'Poziom bota',
+        firstT: 'Kto zaczyna', firstMe: 'Ja', firstBot: 'Bot',
+        newMatch: 'Nowa gra', begin: 'Start', undoMove: 'Cofnij ruch', endWarn: 'Bieżąca gra się skończy. Kontynuować?', settingsT: 'Nowa gra',
+        onyx: 'Czarne', pearl: 'Białe', pick: 'Wybierz od jednej do trzech swoich kulek w linii', pickDir: 'Dotknij kropki, aby je przesunąć',
+        noMove: 'Te kulki nie mogą się ruszyć', turnOf: 'Ruch: {n} ({c})', thinking: 'Bot myśli…',
+        dailyPo: 'Wypychanka dnia', vsMedium: 'ze średnim botem', playerWon: 'Wygrywa {n}', drawT: 'Remis', offL: 'Wypchnięte', movesLeft: 'zostało ruchów: {n}',
+        rules: 'Każda strona ma 14 kulek. W swoim ruchu przesuwasz o jedno pole jedną, dwie lub trzy swoje kulki leżące w linii: wzdłuż linii albo razem w bok na puste dołki. Gdy wzdłuż linii trafisz na kulki rywala i masz ich więcej (dwie na jedną, trzy na jedną lub dwie), wypychasz je; za ostatnią kulką rywala musi być pusty dołek albo krawędź, nigdy twoja kulka. Kulka wypchnięta za krawędź odpada. Wygrywa, kto pierwszy wypchnie sześć. Po {m} ruchach wygrywa ten, kto wypchnął więcej; przy równej liczbie jest remis.',
+        kCursor: 'Ruch między dołkami', kGo: 'Wybierz kulkę lub przesuń na dołek', kClear: 'Wyczyść wybór',
+        tutTitle1: 'Wypchnij sześć', tutText1: 'Wygrywa, kto pierwszy wypchnie z planszy sześć kulek rywala.',
+        tutTitle2: 'Od jednej do trzech w linii', tutText2: 'Wybierz swoje kulki i dotknij kropki. Przesuną się razem o jedno pole.',
+        tutTitle3: 'Przewagą wypychasz', tutText3: 'Trzy pchają dwie lub jedną, dwie pchają jedną. Równe liczby nie pchają.'
+      },
+      fr: {
+        board: 'Plateau de Pousse-billes', vsBot: 'contre le bot', two: 'Deux joueurs', bot: 'Bot', playerN: 'Joueur {n}', modeT: 'Joueurs', levelT: 'Niveau du bot',
+        firstT: 'Qui commence', firstMe: 'Moi', firstBot: 'Bot',
+        newMatch: 'Nouvelle partie', begin: 'Commencer', undoMove: 'Annuler le coup', endWarn: 'La partie en cours va se terminer. Continuer ?', settingsT: 'Nouvelle partie',
+        onyx: 'Noirs', pearl: 'Blancs', pick: 'Choisis une à trois de tes billes alignées', pickDir: 'Touche un point pour les déplacer',
+        noMove: 'Ces billes ne peuvent pas bouger', turnOf: 'Au tour de {n} ({c})', thinking: 'Le bot réfléchit…',
+        dailyPo: 'Pousse-billes du jour', vsMedium: 'contre le bot moyen', playerWon: '{n} gagne', drawT: 'Match nul', offL: 'Sorties', movesLeft: 'encore {n} coups',
+        rules: 'Chaque camp a 14 billes. À ton tour, déplace d’une case une, deux ou trois de tes billes alignées : dans l’axe de la ligne, ou ensemble de côté vers des trous vides. Si dans l’axe tu rencontres des billes adverses et que tu es plus nombreux (deux contre une, trois contre une ou deux), tu les pousses ; derrière la dernière bille adverse, il faut un trou vide ou le bord, jamais une des tiennes. Une bille poussée au-delà du bord tombe. Le premier qui en sort six gagne. Après {m} coups, celui qui en a sorti le plus gagne ; à égalité, c’est un match nul.',
+        kCursor: 'Aller d’un trou à l’autre', kGo: 'Choisir une bille ou aller sur un trou', kClear: 'Annuler la sélection',
+        tutTitle1: 'Sors-en six', tutText1: 'Le premier qui pousse six billes adverses hors du plateau gagne.',
+        tutTitle2: 'Une à trois alignées', tutText2: 'Choisis tes billes puis touche un point. Elles avancent ensemble d’une case.',
+        tutTitle3: 'Pousse en nombre', tutText3: 'Trois poussent deux ou une, deux poussent une. À nombre égal, on ne pousse pas.'
+      },
+      ar: {
+        board: 'لوحة دفع الكرات', vsBot: 'ضد الروبوت', two: 'لاعبان', bot: 'الروبوت', playerN: 'اللاعب {n}', modeT: 'اللاعبون', levelT: 'مستوى الروبوت',
+        firstT: 'من يبدأ', firstMe: 'أنا', firstBot: 'الروبوت',
+        newMatch: 'لعبة جديدة', begin: 'ابدأ', undoMove: 'تراجع عن الحركة', endWarn: 'ستنتهي اللعبة الحالية. هل تتابع؟', settingsT: 'لعبة جديدة',
+        onyx: 'الأسود', pearl: 'الأبيض', pick: 'اختر من كرة إلى ثلاث من كراتك على خط واحد', pickDir: 'انقر نقطة لتحريكها',
+        noMove: 'هذه الكرات لا تستطيع الحركة', turnOf: 'دور {n} ({c})', thinking: 'الروبوت يفكر…',
+        dailyPo: 'دفع الكرات اليومية', vsMedium: 'ضد الروبوت المتوسط', playerWon: 'فاز {n}', drawT: 'تعادل', offL: 'المدفوعة خارجًا', movesLeft: 'بقي {n} حركة',
+        rules: 'لكل جانب 14 كرة. في دورك حرّك خطوة واحدة كرة أو اثنتين أو ثلاثًا من كراتك المصطفة على خط: على امتداد الخط، أو معًا جانبيًا إلى حفر فارغة. إن اصطدمت على امتداد الخط بكرات الخصم وكانت كراتك أكثر (اثنتان مقابل واحدة، أو ثلاث مقابل واحدة أو اثنتين) دفعتها؛ ويجب أن يكون خلف آخر كرة للخصم حفرة فارغة أو حافة اللوحة، لا كرة لك. الكرة المدفوعة خارج الحافة تسقط. أول من يُخرج ست كرات يفوز. بعد {m} حركة يفوز من أخرج أكثر، وعند التساوي تعادل.',
+        kCursor: 'التنقل بين الحفر', kGo: 'اختيار كرة أو التحرك إلى حفرة', kClear: 'إلغاء الاختيار',
+        tutTitle1: 'أخرج ستًا', tutText1: 'أول من يدفع ست كرات للخصم خارج اللوحة يفوز.',
+        tutTitle2: 'من واحدة إلى ثلاث على خط', tutText2: 'اختر كراتك ثم انقر نقطة. تتحرك معًا خطوة واحدة.',
+        tutTitle3: 'ادفع بالأكثر', tutText3: 'الثلاث تدفع اثنتين أو واحدة، والاثنتان تدفعان واحدة. العدد المتساوي لا يدفع.'
+      },
+      hi: {
+        board: 'कंचा धक्का बोर्ड', vsBot: 'बॉट के विरुद्ध', two: 'दो खिलाड़ी', bot: 'बॉट', playerN: 'खिलाड़ी {n}', modeT: 'खिलाड़ी', levelT: 'बॉट का स्तर',
+        firstT: 'कौन शुरू करे', firstMe: 'मैं', firstBot: 'बॉट',
+        newMatch: 'नया खेल', begin: 'शुरू करें', undoMove: 'चाल वापस लें', endWarn: 'मौजूदा खेल ख़त्म हो जाएगा। जारी रखें?', settingsT: 'नया खेल',
+        onyx: 'काला', pearl: 'सफ़ेद', pick: 'एक सीध में अपने एक से तीन कंचे चुनें', pickDir: 'उन्हें चलाने के लिए किसी बिंदु पर टैप करें',
+        noMove: 'ये कंचे नहीं चल सकते', turnOf: '{n} की बारी ({c})', thinking: 'बॉट सोच रहा है…',
+        dailyPo: 'आज का कंचा धक्का', vsMedium: 'मध्यम बॉट के विरुद्ध', playerWon: '{n} जीते', drawT: 'बराबरी', offL: 'बाहर धकेले', movesLeft: '{n} चालें बाक़ी',
+        rules: 'हर पक्ष के पास 14 कंचे हैं। अपनी बारी में एक सीध में रखे अपने एक, दो या तीन कंचों को एक खाना चलाएँ: सीध के साथ-साथ, या एक साथ बगल में ख़ाली गड्ढों में। सीध में चलते हुए विरोधी कंचों से टकराएँ और आपके कंचे ज़्यादा हों (दो बनाम एक, तीन बनाम एक या दो), तो आप उन्हें धकेलते हैं; विरोधी के आख़िरी कंचे के पीछे ख़ाली गड्ढा या किनारा होना चाहिए, आपका कंचा नहीं। किनारे से धकेला गया कंचा बाहर गिर जाता है। जो पहले छह बाहर करे, वह जीतता है। {m} चालों के बाद जिसने ज़्यादा बाहर किए वह जीतता है; बराबर हों तो बराबरी।',
+        kCursor: 'गड्ढों के बीच चलें', kGo: 'कंचा चुनें या गड्ढे में चलें', kClear: 'चयन हटाएँ',
+        tutTitle1: 'छह बाहर करें', tutText1: 'जो पहले विरोधी के छह कंचे बोर्ड से बाहर धकेले, वह जीतता है।',
+        tutTitle2: 'एक सीध में एक से तीन', tutText2: 'अपने कंचे चुनें, फिर किसी बिंदु पर टैप करें। वे साथ में एक खाना चलते हैं।',
+        tutTitle3: 'ज़्यादा से धकेलें', tutText3: 'तीन, दो या एक को धकेलते हैं; दो, एक को। बराबर संख्या नहीं धकेलती।'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var MODES = ['bot', 'two'];
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs) prefs = { mode: 'bot', level: 'medium', first: 0 };
+  if (MODES.indexOf(prefs.mode) < 0) prefs.mode = 'bot';
+  if (E.LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+  prefs.first = prefs.first === 1 ? 1 : 0;
+
+  // G: the game around the engine's state S; sel, the marbles held; cur, the keyboard's pit;
+  // anim, the move being slid; view, the geometry last drawn, which a tap is read against
+  var G = null, timer = null, kbOn = false, cur = E.at(0, 0), sel = [], anim = null, view = null;
+
+  var cv = el('canvas', { class: 'po-canvas', role: 'img', 'aria-label': C.t('board') });
+  var box = el('div', { class: 'po-box' }, [cv]);
+  var top = el('div', { class: 'po-top ch-above' });
+  var sides = el('div', { class: 'po-sides ch-above' });
+  var status = el('div', { class: 'po-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'po-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, sides, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ setup */
+
+  function newGame(o) {
+    stop();
+    var daily = o.daily || null, mode = daily ? 'bot' : o.mode;
+    // the day's game: the same opponent for everyone, and the seed decides who starts
+    var first = daily ? (C.daily('pushout', daily).rng() < 0.5 ? 0 : 1) : mode === 'bot' ? (o.first === 1 ? 1 : 0) : 0;
+    G = { mode: mode, level: daily ? 'medium' : o.level, first: first, daily: daily, S: E.newGame(first), hist: [], startedAt: Date.now(), done: false };
+    if (!daily) { prefs.mode = o.mode; prefs.level = o.level; prefs.first = o.first === 1 ? 1 : 0; ctx.store.set('prefs', prefs); }
+    sel = []; anim = null; cur = E.at(0, 0);
+    render(); save();
+    maybeBot();
+  }
+  function current() { return { mode: G.mode, level: G.level, first: G.first }; }
+
+  function isBot(side) { return G.mode === 'bot' && side === 1; }
+  function busy() { return !G || G.done || !!anim || isBot(G.S.turn); }
+  function stop() { if (timer) { clearTimeout(timer); timer = null; } }
+
+  function maybeBot() {
+    if (!G || G.done || !isBot(G.S.turn)) return;
+    renderSide();
+    timer = setTimeout(function () {
+      timer = null;
+      if (!G || G.done || !isBot(G.S.turn)) return;
+      // the daily bot plays from the day's seed, so everyone meets the same opponent
+      var rnd = G.daily ? C.daily('pushout', G.daily + '|' + G.S.plies).rng : Math.random;
+      var m = E.think(G.S, G.level, rnd);
+      if (m) act(m);
+    }, C.ui.reduceMotion() ? 200 : 480);
+  }
+
+  /* ------------------------------------------------------------- moves */
+
+  function act(mv) {
+    var before = E.clone(G.S), who = G.S.turn;
+    // the engine is the judge: whatever asks for a move, only one in its own list is played
+    var found = E.play(G.S, mv);
+    if (!found) { C.feedback('bad'); return false; }
+    G.hist.push(before);
+    if (G.hist.length > 240) G.hist.shift();
+    sel = [];
+    C.feedback(found.off ? 'thud' : found.push ? 'clack' : isBot(who) ? 'tap' : 'place');
+    if (!C.ui.reduceMotion()) {
+      anim = { cells: before.cells, trail: E.trail(before.cells, found), d: found.d, t0: performance.now(), dur: found.off ? 360 : 230 };
+      requestAnimationFrame(tick);
+    }
+    if (G.S.winner >= 0) { G.done = true; render(); finish(); return true; }
+    render(); save();
+    maybeBot();
+    return true;
+  }
+  function tick() {
+    if (!anim) return;
+    if (performance.now() - anim.t0 >= anim.dur) { anim = null; render(); return; }
+    draw();
+    requestAnimationFrame(tick);
+  }
+
+  // Against the bot one undo takes back its reply and your move together
+  function undo() {
+    if (!G || G.done || !G.hist.length) return;
+    stop();
+    anim = null;
+    var steps = G.mode === 'bot' ? (isBot(G.S.turn) ? 1 : 2) : 1;
+    if (G.hist.length < steps) steps = G.hist.length;
+    var h;
+    for (var k = 0; k < steps; k++) h = G.hist.pop();
+    G.S = h;
+    sel = [];
+    C.feedback('tap');
+    render(); save();
+    maybeBot();
+  }
+
+  /* ------------------------------------------------------------ result */
+
+  function pname(side) {
+    if (G.mode === 'bot') return side === 0 ? (C.state.profile.name || C.t('you')) : C.t('bot') + ' · ' + C.t(G.level);
+    return C.t('playerN', { n: C.num(side + 1) });
+  }
+  function colourName(t) { return C.t(t === 0 ? 'onyx' : 'pearl'); }
+
+  function finish() {
+    stop();
+    var S = G.S, vsBot = G.mode === 'bot', even = S.winner === 2, won = vsBot ? S.winner === 0 : !even;
+    var base = vsBot ? ({ easy: 6, medium: 12, hard: 20 }[G.level] || 12) : 8;
+    var share = won ? 1 : even ? 0.6 : 0.3;
+    var coins = Math.max(2, Math.round(base * share)) + (G.daily ? 8 : 0);
+    var points = Math.max(3, Math.round(base * 4 * share)) + (G.daily ? 25 : 0);
+    if (vsBot && won) {
+      C.achievements.unlock('po-win');
+      if (G.level === 'hard') C.achievements.unlock('po-hard');
+      if (S.lost[0] === 0) C.achievements.unlock('po-clean');
+    }
+    var title = even ? C.t('drawT') : vsBot ? (won ? C.t('won') : C.t('lost')) : C.t('playerWon', { n: pname(S.winner) });
+    if (G.daily) {
+      var first = C.stats.daily('pushout', G.daily, { label: title, win: won });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    setTimeout(function () {
+      ctx.finish({
+        won: vsBot && !even ? won : null,
+        title: title,
+        timeMs: Date.now() - G.startedAt, coins: coins, points: points,
+        lines: [{ label: C.t('offL'), value: C.num(S.lost[1]) + ' / ' + C.num(S.lost[0]) }],
+        shareText: 'چوگان · تیله‌ران' + (G.daily ? ('\nروزانه ' + G.daily) : '') + '\n' + title + ' ' + S.lost[1] + '–' + S.lost[0],
+        paint: cardPaint(),
+        onAgain: G.daily ? null : function () { newGame(current()); }
+      });
+    }, C.ui.reduceMotion() ? 150 : 800);
+  }
+
+  /* ------------------------------------------------------------- saves */
+
+  ctx.autosave(function () {
+    if (!G || G.done || !G.hist.length) return { inProgress: false };
+    return { g: { mode: G.mode, level: G.level, first: G.first, daily: G.daily, S: G.S, elapsed: Date.now() - G.startedAt } };
+  });
+  function save() { ctx.save(); }
+  function validSave(sv) {
+    var g = sv && sv.g;
+    return !!(g && MODES.indexOf(g.mode) >= 0 && E.LEVELS.indexOf(g.level) >= 0 && E.valid(g.S) && g.S.winner < 0 && g.S.first === g.first);
+  }
+  function restore(g) {
+    G = { mode: g.mode, level: g.level, first: g.first, daily: g.daily || null, S: g.S, hist: [], startedAt: Date.now() - (g.elapsed || 0), done: false };
+    sel = []; anim = null;
+    render();
+    maybeBot();
+  }
+
+  function askNew() {
+    if (G && G.daily) { go({ daily: G.daily }); return; }
+    settings();
+    function go(o) { if (!G || G.done || !G.hist.length) newGame(o); else C.ui.confirm({ title: C.t('newMatch'), body: C.t('endWarn'), onOk: function () { newGame(o); } }); }
+  }
+  function settings() {
+    var o = G && !G.daily ? current() : { mode: prefs.mode, level: prefs.level, first: prefs.first };
+    var body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
+    function rows() {
+      body.innerHTML = '';
+      body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('modeT') }));
+      body.appendChild(C.ui.segmented([{ value: 'bot', label: C.t('vsBot') }, { value: 'two', label: C.t('two') }], o.mode, function (v) { o.mode = v; rows(); }));
+      if (o.mode === 'bot') {
+        body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('levelT') }));
+        body.appendChild(C.ui.segmented(E.LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), o.level, function (v) { o.level = v; }));
+        body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('firstT') }));
+        body.appendChild(C.ui.segmented([{ value: '0', label: C.t('firstMe') }, { value: '1', label: C.t('firstBot') }], String(o.first === 1 ? 1 : 0), function (v) { o.first = v === '1' ? 1 : 0; }));
+      }
+      if (G && !G.done && G.hist.length) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('endWarn') }));
+    }
+    rows();
+    C.ui.modal({
+      title: C.t('settingsT'), closeButton: true, body: [body],
+      actions: [{ label: C.t('cancel') }, { label: C.t('begin'), kind: 'primary', onClick: function () { newGame(o); } }]
+    });
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function colors() {
+    var cs = getComputedStyle(document.documentElement);
+    var v = function (k, f) { return cs.getPropertyValue(k).trim() || f; };
+    return { wood: v('--po-wood', '#C8955A'), wood2: v('--po-wood2', '#A87440'), edge: v('--po-edge', '#6E4520'), pit: v('--po-pit', '#6E4522'),
+      pit2: v('--po-pit2', '#A87A4C'), sel: v('--po-sel', '#1565C0'), ink: v('--po-ink', '#2B1D10'), rim: v('--po-rim', 'rgba(255,255,255,0)') };
+  }
+
+  // Board units: neighbouring pits are 1 apart. Pit i sits at (q + r/2, r·√3/2).
+  var S3 = Math.sqrt(3) / 2;
+  function unit(q, r) { return [q + r / 2, r * S3]; }
+  var UPOS = [];
+  for (var u0 = 0; u0 < E.CELLS; u0++) UPOS.push(unit(E.Q[u0], E.RR[u0]));
+  var UDIR = E.DIRS.map(function (d) { return unit(d[0], d[1]); });
+  // the frame: the six corner pits pushed outward, edges kept parallel
+  function inflate(poly, m) {
+    return poly.map(function (v, i) {
+      var p = poly[(i + poly.length - 1) % poly.length], q = poly[(i + 1) % poly.length];
+      var nrm = function (a, b) { var dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy), n = [dy / l, -dx / l]; if (n[0] * (a[0] + b[0]) + n[1] * (a[1] + b[1]) < 0) n = [-n[0], -n[1]]; return n; };
+      var n1 = nrm(p, v), n2 = nrm(v, q), k = m / (1 + n1[0] * n2[0] + n1[1] * n2[1]);
+      return [v[0] + (n1[0] + n2[0]) * k, v[1] + (n1[1] + n2[1]) * k];
+    });
+  }
+  var CORNERS = [unit(4, 0), unit(0, 4), unit(-4, 4), unit(-4, 0), unit(0, -4), unit(4, -4)];
+  var FRAME = inflate(CORNERS, 0.95), INNER = inflate(CORNERS, 0.62);
+  var FW = Math.max.apply(null, FRAME.map(function (p) { return p[0]; })), FH = Math.max.apply(null, FRAME.map(function (p) { return p[1]; }));
+
+  function geo(W, H) {
+    var pad = Math.min(W, H) * 0.02, d = Math.min((W - 2 * pad) / (2 * FW), (H - 2 * pad) / (2 * FH));
+    var ox = W / 2, oy = H / 2;
+    return { d: d, ox: ox, oy: oy, W: W, H: H, px: function (u) { return [ox + d * u[0], oy + d * u[1]]; } };
+  }
+  function poly(g, Q, pts) { g.beginPath(); pts.forEach(function (u, k) { var p = Q.px(u); if (k) g.lineTo(p[0], p[1]); else g.moveTo(p[0], p[1]); }); g.closePath(); }
+
+  function marble(g, x, y, rad, side, col, alpha) {
+    if (rad <= 0.5) return;
+    g.globalAlpha = alpha === undefined ? 1 : alpha;
+    g.fillStyle = 'rgba(0,0,0,.35)';
+    g.beginPath(); g.ellipse(x + rad * 0.12, y + rad * 0.2, rad * 0.95, rad * 0.9, 0, 0, Math.PI * 2); g.fill();
+    var gr = g.createRadialGradient(x - rad * 0.32, y - rad * 0.38, rad * 0.08, x, y, rad);
+    if (side === 0) { gr.addColorStop(0, '#8A8A94'); gr.addColorStop(0.4, '#2E2E35'); gr.addColorStop(1, '#09090C'); }
+    else { gr.addColorStop(0, '#FFFFFF'); gr.addColorStop(0.5, '#EEE8DD'); gr.addColorStop(1, '#B3A894'); }
+    g.fillStyle = gr;
+    g.beginPath(); g.arc(x, y, rad, 0, Math.PI * 2); g.fill();
+    if (side === 0) { g.strokeStyle = col.rim; g.lineWidth = Math.max(1, rad * 0.07); g.stroke(); }
+    g.fillStyle = 'rgba(255,255,255,' + (side === 0 ? 0.55 : 0.9) + ')';
+    g.beginPath(); g.ellipse(x - rad * 0.36, y - rad * 0.42, rad * 0.2, rad * 0.13, -0.6, 0, Math.PI * 2); g.fill();
+    g.globalAlpha = 1;
+  }
+
+  // Where a move's dot goes: an in-line move one step beyond its head, a sideways move one
+  // step from the middle of its marbles, so two different moves never share a dot
+  function dotOf(mv) {
+    var dv = UDIR[mv.d];
+    if (!mv.side) { var h = UPOS[mv.c[mv.c.length - 1]]; return [h[0] + dv[0], h[1] + dv[1]]; }
+    var cx = 0, cy = 0;
+    mv.c.forEach(function (c) { cx += UPOS[c][0] / mv.c.length; cy += UPOS[c][1] / mv.c.length; });
+    return [cx + dv[0], cy + dv[1]];
+  }
+
+  function paintBoard(g, W, H, o, col) {
+    var S = o.S, Q = geo(W, H), d = Q.d, i, p;
+    // the wooden frame, then a darker groove inside it where the pits sit
+    var top = Q.px([0, -FH]), bot = Q.px([0, FH]), wg = g.createLinearGradient(top[0], top[1], bot[0], bot[1]);
+    wg.addColorStop(0, col.wood); wg.addColorStop(1, col.wood2);
+    g.fillStyle = wg; poly(g, Q, FRAME); g.fill();
+    g.strokeStyle = col.edge; g.lineWidth = Math.max(1.5, d * 0.07); g.stroke();
+    g.strokeStyle = 'rgba(0,0,0,.18)'; g.lineWidth = Math.max(1, d * 0.04); poly(g, Q, INNER); g.stroke();
+    for (i = 0; i < E.CELLS; i++) {
+      p = Q.px(UPOS[i]);
+      var pg = g.createRadialGradient(p[0], p[1] - d * 0.12, d * 0.05, p[0], p[1], d * 0.4);
+      pg.addColorStop(0, col.pit); pg.addColorStop(1, col.pit2);
+      g.fillStyle = pg; g.beginPath(); g.arc(p[0], p[1], d * 0.38, 0, Math.PI * 2); g.fill();
+    }
+    var R = d * 0.43, A = o.anim, moving = {};
+    var cells = A ? A.cells : S.cells;
+    if (A) A.trail.forEach(function (t) { moving[t[0]] = 1; });
+    for (i = 0; i < E.CELLS; i++) {
+      if (cells[i] < 0 || moving[i]) continue;
+      p = Q.px(UPOS[i]);
+      marble(g, p[0], p[1], R, cells[i], col);
+    }
+    if (A) {
+      var f = Math.min(1, (performance.now() - A.t0) / A.dur), e = 1 - Math.pow(1 - f, 3), dv = UDIR[A.d];
+      A.trail.forEach(function (t) {
+        var a = UPOS[t[0]], side = A.cells[t[0]];
+        if (t[1] >= 0) { var b = UPOS[t[1]]; p = Q.px([a[0] + (b[0] - a[0]) * e, a[1] + (b[1] - a[1]) * e]); marble(g, p[0], p[1], R, side, col); return; }
+        // over the edge: it rolls one step out, then drops away, shrinking and fading
+        var go = Math.min(1, f * 1.6), fall = Math.max(0, (f - 0.45) / 0.55), s = 1 - 0.75 * fall;
+        p = Q.px([a[0] + dv[0] * (go + fall * 0.4), a[1] + dv[1] * (go + fall * 0.4) + fall * 0.5]);
+        marble(g, p[0], p[1], R * s, side, col, 1 - fall * 0.85);
+      });
+      return;
+    }
+    // the last move: a small mark on each marble it moved
+    if (o.last) {
+      g.fillStyle = col.sel;
+      o.last.c.forEach(function (c) {
+        var to = E.NB[c][o.last.d];
+        if (to < 0 || S.cells[to] < 0) return;
+        p = Q.px(UPOS[to]); g.beginPath(); g.arc(p[0], p[1], Math.max(2, d * 0.07), 0, Math.PI * 2); g.fill();
+      });
+    }
+    (o.sel || []).forEach(function (c) {
+      p = Q.px(UPOS[c]);
+      g.strokeStyle = col.sel; g.lineWidth = Math.max(2.5, d * 0.1);
+      g.beginPath(); g.arc(p[0], p[1], R + d * 0.03, 0, Math.PI * 2); g.stroke();
+    });
+    (o.moves || []).forEach(function (mv) {
+      var u = dotOf(mv), q = Q.px(u), dv2 = UDIR[mv.d], rr = Math.max(7, d * 0.19);
+      g.fillStyle = col.sel; g.strokeStyle = '#FFFFFF'; g.lineWidth = Math.max(1.5, d * 0.05);
+      g.beginPath(); g.arc(q[0], q[1], rr, 0, Math.PI * 2); g.fill(); g.stroke();
+      // a chevron pointing the way the marbles go
+      var ax = dv2[0], ay = dv2[1], nx = -ay, ny = ax, s2 = rr * 0.5;
+      g.strokeStyle = '#FFFFFF'; g.lineWidth = Math.max(1.5, rr * 0.22); g.lineCap = 'round'; g.lineJoin = 'round';
+      g.beginPath();
+      g.moveTo(q[0] - ax * s2 * 0.4 + nx * s2, q[1] - ay * s2 * 0.4 + ny * s2);
+      g.lineTo(q[0] + ax * s2 * 0.6, q[1] + ay * s2 * 0.6);
+      g.lineTo(q[0] - ax * s2 * 0.4 - nx * s2, q[1] - ay * s2 * 0.4 - ny * s2);
+      g.stroke();
+    });
+    if (o.cursor >= 0) {
+      p = Q.px(UPOS[o.cursor]);
+      g.strokeStyle = col.ink; g.lineWidth = Math.max(2, d * 0.07); g.setLineDash([d * 0.12, d * 0.08]);
+      g.beginPath(); g.arc(p[0], p[1], d * 0.5, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
+    }
+  }
+
+  function boxSize() {
+    var r = box.getBoundingClientRect();
+    return { w: Math.max(1, Math.floor(r.width)), h: Math.max(1, Math.floor(r.height || r.width)) };
+  }
+  function selMoves() { return sel.length && !busy() ? E.movesOf(G.S, sel) : []; }
+  function draw() {
+    if (!G) return;
+    var sz = boxSize(), W = sz.w, H = sz.h, dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    view = geo(W, H);
+    paintBoard(g, W, H, { S: G.S, anim: anim, last: G.S.last, sel: sel, moves: selMoves(), cursor: kbOn && !busy() ? cur : -1 }, colors());
+  }
+  function cardPaint() {
+    var o = { S: E.clone(G.S), last: null, sel: [], moves: [], cursor: -1 };
+    return function (g, W, H) { paintBoard(g, W, H, o, colors()); };
+  }
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (G.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyPo') + ' — ' + C.num(G.daily) })]));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('vsMedium') }));
+      return;
+    }
+    top.appendChild(el('button', { class: 'ch-badge ch-tap', type: 'button', onclick: settings,
+      text: G.mode === 'bot' ? C.t('vsBot') + ' · ' + C.t(G.level) : C.t('two') }));
+    var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', settings);
+    top.appendChild(gear);
+  }
+  function renderSide() {
+    sides.innerHTML = '';
+    var t = G.S.turn;
+    [0, 1].forEach(function (k) {
+      var tray = el('div', { class: 'po-tray', 'aria-label': C.t('offL') + ' ' + C.num(G.S.lost[1 - k]) });
+      for (var j = 0; j < E.WIN; j++) tray.appendChild(el('span', { class: 'po-slot' + (j < G.S.lost[1 - k] ? ' po-m' + (1 - k) : '') }));
+      sides.appendChild(el('div', { class: 'po-side' + (t === k && !G.done ? ' po-side--on' : '') + (isBot(k) && t === 1 && !G.done ? ' po-thinking' : '') }, [
+        el('div', { class: 'po-m po-m' + k, title: colourName(k) }),
+        el('div', { class: 'po-side__text' }, [el('div', { class: 'po-side__name', text: pname(k) }), tray])
+      ]));
+    });
+    status.innerHTML = '';
+    if (G.done) return;
+    var line;
+    if (isBot(t)) line = C.t('thinking');
+    else if (sel.length) line = E.movesOf(G.S, sel).length ? C.t('pickDir') : C.t('noMove');
+    else line = G.mode === 'bot' ? C.t('pick') : C.t('turnOf', { n: pname(t), c: colourName(t) });
+    status.appendChild(el('span', { text: line }));
+    status.appendChild(el('span', { class: 'po-left', text: C.t('movesLeft', { n: C.num(E.MAX_PLIES - G.S.plies) }) }));
+  }
+  function render() { renderTop(); renderSide(); draw(); }
+
+  /* -------------------------------------------------------------- input */
+
+  function toUnit(x, y) {
+    var r = cv.getBoundingClientRect(), Q = view || geo(r.width, r.height);
+    return [(x - r.left - Q.ox) / Q.d, (y - r.top - Q.oy) / Q.d];
+  }
+  function cellAt(u) {
+    var best = -1, bd = 0.5;
+    for (var i = 0; i < E.CELLS; i++) { var dd = Math.hypot(UPOS[i][0] - u[0], UPOS[i][1] - u[1]); if (dd < bd) { bd = dd; best = i; } }
+    return best;
+  }
+  // A move of the held marbles that lands on pit c (for the keyboard and a tap beside a dot)
+  function landing(c) {
+    var list = E.movesOf(G.S, sel);
+    for (var j = 0; j < list.length; j++) {
+      var mv = list[j];
+      if (!mv.side && E.NB[mv.c[mv.c.length - 1]][mv.d] === c) return mv;
+    }
+    for (j = 0; j < list.length; j++) {
+      if (list[j].side && list[j].c.some(function (x) { return E.NB[x][list[j].d] === c; })) return list[j];
+    }
+    return null;
+  }
+  // A tap on an own marble: an end of the held line lets go of it, the middle starts over
+  // from it, one in line with the held ones (or the far end of a row of three) joins them
+  function pick(c) {
+    var S = G.S, t = S.turn, i = sel.indexOf(c);
+    if (i >= 0) {
+      if (sel.length === 1) sel = [];
+      else if (i === 0 || i === sel.length - 1) { sel.splice(i, 1); sel = E.lineOf(S.cells, t, sel) || [c]; }
+      else sel = [c];
+    } else {
+      var next = sel.length < 3 ? E.lineOf(S.cells, t, sel.concat([c])) : null;
+      if (!next && sel.length) {
+        for (var j = 0; j < sel.length && !next; j++) {
+          var run = E.span(S.cells, t, sel[j], c);
+          if (run && sel.every(function (x) { return run.indexOf(x) >= 0; })) next = run;
+        }
+      }
+      sel = next || [c];
+    }
+    C.feedback('select');
+    renderSide(); draw();
+  }
+  function tapAt(u) {
+    var S = G.S;
+    if (sel.length) {
+      var list = E.movesOf(S, sel), best = null, bd = 0.45;
+      list.forEach(function (mv) { var p = dotOf(mv), dd = Math.hypot(p[0] - u[0], p[1] - u[1]); if (dd < bd) { bd = dd; best = mv; } });
+      if (best) { act(best); return; }
+    }
+    var c = cellAt(u);
+    tapCell(c);
+  }
+  function tapCell(c) {
+    var S = G.S;
+    if (c >= 0 && S.cells[c] === S.turn) { pick(c); return; }
+    if (sel.length && c >= 0) { var mv = landing(c); if (mv) { act(mv); return; } }
+    if (sel.length) { sel = []; renderSide(); draw(); }
+  }
+
+  // A swipe from one of your marbles moves it (or the held line it belongs to) the way of
+  // the swipe, if that way is a legal move
+  var drag = null;
+  cv.addEventListener('pointerdown', function (e) {
+    if (busy()) return;
+    e.preventDefault();
+    kbOn = false;
+    drag = { x: e.clientX, y: e.clientY, u: toUnit(e.clientX, e.clientY), done: false };
+    try { cv.setPointerCapture(e.pointerId); } catch (err) { /* an old WebView without capture still taps */ }
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (!drag || drag.done || busy() || !view) return;
+    var dx = e.clientX - drag.x, dy = e.clientY - drag.y, len = Math.hypot(dx, dy);
+    if (len < view.d * 0.6) return;
+    var c = cellAt(drag.u);
+    if (c < 0 || G.S.cells[c] !== G.S.turn) return;
+    drag.done = true;
+    var group = sel.indexOf(c) >= 0 ? sel.slice() : [c], best = null, bd = 0.8;
+    E.movesOf(G.S, group).forEach(function (mv) {
+      var v = UDIR[mv.d], dot = (v[0] * dx + v[1] * dy) / len;
+      if (dot > bd) { bd = dot; best = mv; }
+    });
+    if (best) act(best); else { C.feedback('bad'); }
+  });
+  cv.addEventListener('pointerup', function () {
+    var dr = drag;
+    drag = null;
+    if (!dr || dr.done || busy()) return;
+    tapAt(dr.u);
+  });
+  cv.addEventListener('pointercancel', function () { drag = null; });
+
+  window.addEventListener('keydown', function (e) {
+    if (!G || document.querySelector('.ch-scrim')) return;
+    if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
+    if (busy() || e.ctrlKey || e.metaKey || e.altKey) return;
+    var tg = e.target && e.target.tagName;
+    if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT') return;
+    if (e.key === 'Escape' && sel.length) { e.preventDefault(); sel = []; renderSide(); draw(); return; }
+    // the board is drawn the same way in every language, so the arrows are geometric (#338):
+    // each goes to the neighbour lying closest to its direction on the screen
+    var want = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.key];
+    if (want) {
+      e.preventDefault();
+      if (!kbOn) { kbOn = true; draw(); return; }
+      var best = -1, bd = 0.3;
+      for (var k = 0; k < 6; k++) {
+        var to = E.NB[cur][k];
+        if (to < 0) continue;
+        var dot = UDIR[k][0] * want[0] + UDIR[k][1] * want[1];
+        if (dot > bd + 1e-6) { bd = dot; best = to; }
+      }
+      if (best >= 0) cur = best;
+      draw(); return;
+    }
+    if ((e.key === 'Enter' || e.key === ' ') && kbOn && tg !== 'BUTTON') {
+      e.preventDefault();
+      tapCell(cur);
+    }
+  });
+
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  window.addEventListener('resize', draw);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules', { m: C.num(E.MAX_PLIES) }) }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← ↑ → ↓', C.t('kCursor')), kb('Space / Enter', C.t('kGo')), kb('Esc', C.t('kClear')), kb('U / Ctrl+Z', C.t('undoMove'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // One row of pits with the edge on the right, as drawn on the board
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 220 110" width="100%">';
+    var ball = function (x, y, b, op) {
+      var f = b ? 'url(#poB)' : 'url(#poW)';
+      return '<circle cx="' + x + '" cy="' + y + '" r="11" fill="' + f + '"' + (op ? ' opacity="' + op + '"' : '') + '/>';
+    };
+    s += '<defs><radialGradient id="poB" cx="35%" cy="30%"><stop offset="0" stop-color="#8A8A94"/><stop offset=".45" stop-color="#2E2E35"/><stop offset="1" stop-color="#09090C"/></radialGradient>' +
+      '<radialGradient id="poW" cx="35%" cy="30%"><stop offset="0" stop-color="#FFFFFF"/><stop offset=".5" stop-color="#EEE8DD"/><stop offset="1" stop-color="#B3A894"/></radialGradient></defs>';
+    var pits = function (y, n, x0) { var o = '<rect x="' + (x0 - 16) + '" y="' + (y - 16) + '" width="' + (n * 28 + 4) + '" height="32" rx="10" fill="#C8955A"/>'; for (var k = 0; k < n; k++) o += '<circle cx="' + (x0 + k * 28) + '" cy="' + y + '" r="10" fill="#6E4522"/>'; return o; };
+    var dot = function (x, y) { return '<circle cx="' + x + '" cy="' + y + '" r="6" fill="#1565C0" stroke="#fff" stroke-width="1.5"/>'; };
+    if (kind === 1) {
+      s += pits(38, 6, 40);
+      for (var k = 0; k < 6; k++) s += ball(40 + k * 28, 38, false);
+      s += '<rect x="24" y="72" width="172" height="26" rx="13" fill="#E7DACA"/>';
+      for (k = 0; k < 6; k++) s += ball(40 + k * 28, 85, false);
+    } else if (kind === 2) {
+      s += pits(55, 7, 26);
+      s += ball(82, 55, true) + ball(110, 55, true) + ball(138, 55, true);
+      s += '<circle cx="110" cy="55" r="45" fill="none" stroke="#1565C0" stroke-width="0" />';
+      s += dot(54, 55) + dot(166, 55) + dot(124, 28) + dot(96, 82) + dot(96, 28) + dot(124, 82);
+    } else {
+      s += pits(34, 6, 40) + '<line x1="200" y1="14" x2="200" y2="54" stroke="#6E4520" stroke-width="4"/>';
+      s += ball(68, 34, true) + ball(96, 34, true) + ball(124, 34, true) + ball(152, 34, false) + ball(180, 34, false) + ball(208, 40, false, 0.4);
+      s += pits(82, 6, 40);
+      s += ball(68, 82, true) + ball(96, 82, true) + ball(124, 82, false) + ball(152, 82, false);
+      s += '<path d="M100 72 l16 20 M116 72 l-16 20" stroke="#C0262D" stroke-width="4" stroke-linecap="round"/>';
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  var saved = ctx.loadSave();
+  if (validSave(saved) && (saved.g.daily || null) === (dailyDate || null)) restore(saved.g);
+  else newGame(dailyDate ? { daily: dailyDate } : { mode: prefs.mode, level: prefs.level, first: prefs.first });
+  if (dailyDate && C.stats.dailyDone('pushout', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).pushout;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
