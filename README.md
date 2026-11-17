@@ -1,12 +1,19 @@
 # Chogan — چوگان
 
+<p align="center">
+<a href="https://play.google.com/store/apps/details?id=io.github.choganhq.chogan"><img src="https://img.shields.io/badge/Google_Play-414141?style=for-the-badge&logo=googleplay&logoColor=white" alt="Google Play"></a>
+<a href="https://f-droid.org/packages/io.github.choganhq.chogan/"><img src="https://img.shields.io/badge/F--Droid-1976D2?style=for-the-badge&logo=fdroid&logoColor=white" alt="F-Droid"></a>
+<a href="https://playchogan.com"><img src="https://img.shields.io/badge/Web-2E7D32?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Play in the browser"></a>
+<a href="https://t.me/chogangamebot"><img src="https://img.shields.io/badge/Telegram-26A5E4?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram"></a>
+</p>
+
 ## English
 
 Chogan is a small collection of finishable games in a single app. Free, open source, no ads, no in-app purchases, no analytics or trackers, and fully offline.
 
 Ways to play:
 - **Web:** [playchogan.com](https://playchogan.com) (it opens [choganhq.github.io/chogan](https://choganhq.github.io/chogan/)), installable as an app from the browser.
-- **Android:** [F-Droid](https://f-droid.org/packages/io.github.choganhq.chogan/), or the APK on the [Releases page](https://github.com/choganhq/chogan/releases).
+- **Android:** [Google Play](https://play.google.com/store/apps/details?id=io.github.choganhq.chogan), [F-Droid](https://f-droid.org/packages/io.github.choganhq.chogan/), or the APK on the [Releases page](https://github.com/choganhq/chogan/releases).
 - **Telegram:** [@chogangamebot](https://t.me/chogangamebot) opens the web version inside Telegram.
 - **News:** every release is announced in the Telegram channel [@chogan_games](https://t.me/chogan_games).
 
@@ -82,7 +89,7 @@ MIT, see [LICENSE](LICENSE). The Vazirmatn font, the Latin subset of Nunito and 
 
 راه‌های بازی:
 - **وب:** [playchogan.com](https://playchogan.com) (که [choganhq.github.io/chogan](https://choganhq.github.io/chogan/) را باز می‌کند)، و از مرورگر مثل یک اپ نصب می‌شود.
-- **اندروید:** از [اف‌دروید](https://f-droid.org/packages/io.github.choganhq.chogan/)، یا فایل APK از بخش [Releases](https://github.com/choganhq/chogan/releases).
+- **اندروید:** از [گوگل پلی](https://play.google.com/store/apps/details?id=io.github.choganhq.chogan)، [اف‌دروید](https://f-droid.org/packages/io.github.choganhq.chogan/)، یا فایل APK از بخش [Releases](https://github.com/choganhq/chogan/releases).
 - **تلگرام:** [@chogangamebot](https://t.me/chogangamebot) نسخه‌ی وب را داخل تلگرام باز می‌کند.
 - **خبرها:** هر نسخه‌ی تازه در کانال تلگرام [@chogan_games](https://t.me/chogan_games) (به انگلیسی) اعلام می‌شود.
 
