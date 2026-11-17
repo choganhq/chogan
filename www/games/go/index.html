@@ -38,12 +38,27 @@
 <script src="../../lib/chogan.js"></script>
 <script>
 /* ==== ENGINE START ==== */
-function GoEngineFactory() {
+function GoEngineFactory(size) {
   'use strict';
 
-  // 9×9 only: a short, finishable game, and the size where a light bot plays decently.
+  // 9×9 is the default and the daily size: a short, finishable game where a light
+  // bot plays decently. 13×13 and 19×19 came later (#944), each with its own
+  // engine instance, so nothing here reads a size from outside.
   // Board cells: 0 empty, 1 black (moves first), 2 white. PASS is -1.
-  var N = 9, CELLS = 81, PASS = -1, KOMI = 6.5;
+  var SIZES = [9, 13, 19];
+  var N = SIZES.indexOf(size) >= 0 ? size : 9, CELLS = N * N, PASS = -1;
+  // 6.5 is what the 9×9 game always used; 7.5 is the usual komi under area
+  // scoring on the bigger boards
+  var KOMI = N === 9 ? 6.5 : 7.5;
+  // Star points: the 3-3 points and centre on 9×9, the 4-4 points and centre on
+  // 13×13, and the nine 4-4, side and centre points on 19×19
+  var STAR_LINES = { 9: [[2, 6], [4]], 13: [[3, 9], [6]], 19: [[3, 9, 15], []] }[N];
+  var STARS = [];
+  (function () {
+    var lines = STAR_LINES[0], mid = STAR_LINES[1];
+    for (var a = 0; a < lines.length; a++) for (var b = 0; b < lines.length; b++) STARS.push([lines[a], lines[b]]);
+    if (mid.length) STARS.push([mid[0], mid[0]]);
+  })();
 
   var NB = [];
   for (var i = 0; i < CELLS; i++) {
@@ -170,21 +185,36 @@ function GoEngineFactory() {
 
   // Random playout to the end: random legal moves that do not fill one's own
   // eye, until no such move is left for both sides. Returns the winner.
+  // The empty points are kept in one list across moves (tried ones are swapped
+  // past the end) instead of rescanning the board every move: the rescan made a
+  // playout grow with the square of the board, too slow on 19×19 (#944).
+  var empties = new Int32Array(CELLS);
   function playout(s, rnd) {
-    var limit = CELLS * 3, empties = [];
+    var limit = CELLS * 3, b = s.board, ne = 0, i;
+    for (i = 0; i < CELLS; i++) if (b[i] === 0) empties[ne++] = i;
     while (s.passes < 2 && s.moves < limit) {
-      empties.length = 0;
-      for (var i = 0; i < CELLS; i++) if (s.board[i] === 0) empties.push(i);
-      var moved = false;
-      while (empties.length) {
-        var k = Math.floor(rnd() * empties.length), m = empties[k];
-        empties[k] = empties[empties.length - 1]; empties.pop();
-        if (isEye(s.board, m, s.turn)) continue;
-        if (play(s, m)) { moved = true; break; }
+      var avail = ne, moved = false;
+      while (avail) {
+        var k = Math.floor(rnd() * avail), m = empties[k];
+        avail--;
+        empties[k] = empties[avail]; empties[avail] = m;
+        if (isEye(b, m, s.turn)) continue;
+        var caps = s.caps[s.turn];
+        if (!play(s, m)) continue;
+        moved = true;
+        if (s.caps[3 - s.turn] !== caps) {
+          // a capture emptied points: list them again
+          ne = 0;
+          for (i = 0; i < CELLS; i++) if (b[i] === 0) empties[ne++] = i;
+        } else {
+          ne--;
+          empties[avail] = empties[ne];
+        }
+        break;
       }
       if (!moved) play(s, PASS);
     }
-    return score(s.board).winner;
+    return score(b).winner;
   }
 
   // Stones a move at i captures, plus own stones in atari that it gives a second liberty.
@@ -208,11 +238,40 @@ function GoEngineFactory() {
   // Flat Monte Carlo with UCB1 over the candidate moves (pass included): each
   // playout goes to the most promising candidate so far. Strength is the playout
   // budget. Returns PASS when passing does at least as well as any move.
-  var BUDGET = { easy: 150, medium: 1500, hard: 5000 };
+  // A playout on a bigger board costs several times one on 9×9, so the bigger
+  // boards get smaller budgets to keep a move under about 0.3 s on a laptop,
+  // 1 s on a slow phone (#944; the measured bands are in tools/tests/go-sizes.js).
+  var BUDGETS = {
+    9: { easy: 150, medium: 1500, hard: 5000 },
+    13: { easy: 60, medium: 400, hard: 1000 },
+    19: { easy: 25, medium: 120, hard: 300 }
+  };
+  var BUDGET = BUDGETS[N];
+  // On the bigger boards the bot weighs only points near stones already played,
+  // and the star points, not every empty point: a few hundred playouts spread
+  // over 300 points give each about one, which is a random move. A first-line
+  // point needs a stone right next to it.
+  var STAR_IDX = STARS.map(function (q) { return q[0] * N + q[1]; });
+  function near(b, i) {
+    var r = (i / N) | 0, c = i % N, d = r === 0 || c === 0 || r === N - 1 || c === N - 1 ? 1 : 2;
+    for (var y = Math.max(0, r - d); y <= Math.min(N - 1, r + d); y++)
+      for (var x = Math.max(0, c - d); x <= Math.min(N - 1, c + d); x++) if (b[y * N + x]) return true;
+    return false;
+  }
+  function candidates(s) {
+    var p = s.turn, b = s.board, cands = [PASS], i;
+    for (i = 0; i < CELLS; i++) {
+      if (b[i] !== 0 || isEye(b, i, p)) continue;
+      if (N > 9 && STAR_IDX.indexOf(i) < 0 && !near(b, i)) continue;
+      if (legal(s, i)) cands.push(i);
+    }
+    // late in a big game nothing near the stones may be left: then every point counts
+    if (cands.length === 1 && N > 9) for (i = 0; i < CELLS; i++) if (b[i] === 0 && !isEye(b, i, p) && legal(s, i)) cands.push(i);
+    return cands;
+  }
   function think(s, level, rnd, budget) {
     rnd = rnd || Math.random;
-    var n = budget || BUDGET[level] || BUDGET.medium, p = s.turn, cands = [PASS];
-    for (var i = 0; i < CELLS; i++) if (s.board[i] === 0 && !isEye(s.board, i, p) && legal(s, i)) cands.push(i);
+    var n = budget || BUDGET[level] || BUDGET.medium, p = s.turn, cands = candidates(s), i;
     if (cands.length === 1) return PASS;
     // Random playouts capture a group in atari sooner or later anyway, so they
     // barely value taking it now (or saving one's own). A prior of won playouts,
@@ -221,7 +280,9 @@ function GoEngineFactory() {
     for (i = 0; i < cands.length; i++) {
       // easy plays without it, so a beginner's groups in atari can get away
       var stake = cands[i] === PASS || level === 'easy' ? 0 : atariStake(s, cands[i]);
-      var prior = stake ? Math.min(40, 8 * stake) : 0;
+      // the bigger boards' few hundred playouts cannot see one stone's worth at all,
+      // so their prior weighs twice as much (#944: a free stone in atari was left)
+      var prior = stake ? Math.min(N > 9 ? 80 : 40, (N > 9 ? 16 : 8) * stake) : 0;
       wins.push(prior); tries.push(prior);
     }
     for (var t = 0; t < n; t++) {
@@ -239,6 +300,14 @@ function GoEngineFactory() {
     for (i = 1; i < cands.length; i++) {
       var w = tries[i] ? wins[i] / tries[i] : 0;
       if (w > rate || (w === rate && tries[i] > tries[pick])) { rate = w; pick = i; }
+    }
+    // With a few hundred playouts over a hundred candidates, the best rate is
+    // often a point tried once that happened to win: the 13×13 bot left a free
+    // stone in atari that way. There the most-tried move is the one UCB trusted.
+    if (N > 9) {
+      var most = 1;
+      for (i = 2; i < cands.length; i++) if (tries[i] > tries[most] || (tries[i] === tries[most] && wins[i] > wins[most])) most = i;
+      pick = most; rate = wins[most] / tries[most];
     }
     // Pass only when no move does better and the game is effectively decided
     var passRate = tries[0] ? wins[0] / tries[0] : 0;
@@ -282,7 +351,7 @@ function GoEngineFactory() {
   }
 
   var api = {
-    N: N, CELLS: CELLS, PASS: PASS, KOMI: KOMI, NB: NB,
+    N: N, CELLS: CELLS, PASS: PASS, KOMI: KOMI, NB: NB, SIZES: SIZES, STARS: STARS, candidates: candidates,
     newState: newState, clone: clone, play: play, legal: legal, group: group, isEye: isEye,
     score: score, finalScore: finalScore, playout: playout, think: think, dailyOpening: dailyOpening, BUDGET: BUDGET
   };
@@ -297,8 +366,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
 (function () {
   'use strict';
   var C = window.Chogan, el = C.el;
-  var E = GoEngineFactory();
+  // one engine per board size (#944); E and N follow the game on the board
+  var ENGINES = {};
+  function engine(n) { return ENGINES[n] || (ENGINES[n] = GoEngineFactory(n)); }
+  var E = engine(9);
   var N = E.N, PASS = E.PASS;
+  function useSize(n) { E = engine(n); N = E.N; }
+  function validSize(n) { return E.SIZES.indexOf(n) >= 0; }
 
   C.boot({});
   var ctx = C.game({
@@ -311,14 +385,15 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
         twoPlayers: 'دو نفره', vsAi: 'با ربات',
         you: 'تو', rival: 'حریف', player2: 'بازیکن دو', renameP2: 'نام بازیکن دو',
         black: 'سیاه', white: 'سفید', playerWon: '{n} برد', newMatch: 'دست تازه', undoMove: 'برگرداندن حرکت',
-        boardLabel: 'تخته‌ی گو ۹×۹', pass: 'پاس', captured: 'اسیر',
+        boardLabel: 'تخته‌ی گو {n}', boardSize: 'اندازه‌ی تخته', sizeHint: 'گوی روزانه همیشه روی ۹×۹ است؛ تخته‌ی بزرگ‌تر یعنی بازی بلندتر.',
+        pass: 'پاس', captured: 'اسیر',
         playBlack: 'تو سیاه', playWhite: 'تو سفید',
         passedNote: '{n} پاس داد. اگر تو هم پاس بدهی بازی تمام می‌شود.', koNote: 'این خانه «کو» است؛ یک حرکت جای دیگر بزن، بعد می‌توانی بگیری.',
         suicideNote: 'این حرکت گروه خودت را بدون نفس می‌گذارد.',
         scoreLine: '{b} در برابر {w}', area: 'امتیاز', komi: 'کومی', deadNote: 'سنگ‌های ضربدری مرده حساب شدند.',
         dailyGo: 'گوی روزانه', vsMedium: 'مقابل حریف متوسط',
         resetWarn: 'دست فعلی تمام می‌شود. ادامه؟',
-        rules: 'به نوبت روی تقاطع‌ها مهره بگذارید؛ سیاه شروع می‌کند. گروهی که هیچ خانه‌ی خالیِ چسبیده (نفس) ندارد اسیر می‌شود و برداشته می‌شود. حرکتی که گروه خودت را بی‌نفس کند مجاز نیست، و سنگی را که همین الان گرفته‌اند نمی‌شود فوراً پس گرفت (کو). وقتی هر دو پشت سر هم پاس بدهید بازی تمام است: هر کس مهره‌ها و خانه‌های خالیِ محاصره‌شده‌اش را می‌شمارد و سفید ۶٫۵ امتیاز «کومی» می‌گیرد چون دوم شروع کرده.',
+        rules: 'به نوبت روی تقاطع‌ها مهره بگذارید؛ سیاه شروع می‌کند. گروهی که هیچ خانه‌ی خالیِ چسبیده (نفس) ندارد اسیر می‌شود و برداشته می‌شود. حرکتی که گروه خودت را بی‌نفس کند مجاز نیست، و سنگی را که همین الان گرفته‌اند نمی‌شود فوراً پس گرفت (کو). وقتی هر دو پشت سر هم پاس بدهید بازی تمام است: هر کس مهره‌ها و خانه‌های خالیِ محاصره‌شده‌اش را می‌شمارد و سفید {k} امتیاز «کومی» می‌گیرد چون دوم شروع کرده.',
         keyboard: 'صفحه‌کلید', moveCursor: 'جابه‌جایی نشانگر', place: 'گذاشتن مهره',
         tutTitle1: 'نفس و اسیر', tutText1: 'خانه‌های خالیِ کنار یک گروه نفس‌های آن‌اند. اگر همه‌ی نفس‌های گروهی را ببندی، اسیرش می‌کنی و از تخته برداشته می‌شود.',
         tutTitle2: 'زمین بگیر', tutText2: 'هدف، محاصره‌ی بیشترین خانه‌های خالی است. گروهی که دو «چشم» جدا داشته باشد هرگز اسیر نمی‌شود.',
@@ -328,14 +403,15 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
         twoPlayers: 'Two players', vsAi: 'Versus AI',
         you: 'You', rival: 'Opponent', player2: 'Player two', renameP2: 'Player two name',
         black: 'Black', white: 'White', playerWon: '{n} wins', newMatch: 'New game', undoMove: 'Undo move',
-        boardLabel: '9×9 Go board', pass: 'Pass', captured: 'captured',
+        boardLabel: '{n} Go board', boardSize: 'Board size', sizeHint: 'The daily go is always 9×9; a bigger board makes a longer game.',
+        pass: 'Pass', captured: 'captured',
         playBlack: 'You black', playWhite: 'You white',
         passedNote: '{n} passed. If you pass too, the game ends.', koNote: 'That point is ko: play elsewhere first, then you may take back.',
         suicideNote: 'That move would leave your own group with no liberties.',
         scoreLine: '{b} to {w}', area: 'Score', komi: 'komi', deadNote: 'Stones marked with a cross were counted as dead.',
         dailyGo: 'Daily go', vsMedium: 'against the medium AI',
         resetWarn: 'This ends the current game. Continue?',
-        rules: 'Take turns placing stones on the crossings; black starts. A group with no empty point next to it (no liberty) is captured and removed. You may not play a move that leaves your own group without liberties, nor retake a single stone straight away (ko). When both players pass in a row, the game ends: each side counts its stones plus the empty points it surrounds, and white gets 6.5 points of komi for moving second.',
+        rules: 'Take turns placing stones on the crossings; black starts. A group with no empty point next to it (no liberty) is captured and removed. You may not play a move that leaves your own group without liberties, nor retake a single stone straight away (ko). When both players pass in a row, the game ends: each side counts its stones plus the empty points it surrounds, and white gets {k} points of komi for moving second.',
         keyboard: 'Keyboard', moveCursor: 'Move the cursor', place: 'Place a stone',
         tutTitle1: 'Liberties and captures', tutText1: 'The empty points next to a group are its liberties. Fill all of a group\'s liberties and you capture it: it comes off the board.',
         tutTitle2: 'Surround territory', tutText2: 'The aim is to surround the most empty points. A group with two separate eyes can never be captured.',
@@ -345,14 +421,15 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
         twoPlayers: 'Dwóch graczy', vsAi: 'Przeciwko AI',
         you: 'Ty', rival: 'Przeciwnik', player2: 'Gracz drugi', renameP2: 'Nazwa drugiego gracza',
         black: 'Czarne', white: 'Białe', playerWon: '{n} wygrywa', newMatch: 'Nowa gra', undoMove: 'Cofnij ruch',
-        boardLabel: 'Plansza do Go 9×9', pass: 'Pas', captured: 'zbite',
+        boardLabel: 'Plansza do Go {n}', boardSize: 'Rozmiar planszy', sizeHint: 'Codzienne Go jest zawsze na 9×9; większa plansza to dłuższa gra.',
+        pass: 'Pas', captured: 'zbite',
         playBlack: 'Grasz czarnymi', playWhite: 'Grasz białymi',
         passedNote: '{n}: pas. Jeśli Ty też spasujesz, gra się zakończy.', koNote: 'Ten punkt to ko: zagraj najpierw w innym miejscu, a potem możesz odbić.',
         suicideNote: 'Ten ruch pozbawiłby Twoją własną grupę ostatnich oddechów.',
         scoreLine: '{b} do {w}', area: 'Wynik', komi: 'komi', deadNote: 'Kamienie oznaczone krzyżykiem zostały uznane za martwe.',
         dailyGo: 'Codzienne Go', vsMedium: 'przeciwko średniemu AI',
         resetWarn: 'To zakończy bieżącą grę. Kontynuować?',
-        rules: 'Gracze na przemian kładą kamienie na przecięciach linii; zaczynają czarne. Grupa, która nie ma obok siebie żadnego pustego skrzyżowania (brak oddechów), zostaje zbita i zdjęta z planszy. Nie możesz wykonać ruchu, który pozbawia Twoją własną grupę oddechów (samobójstwo), ani od razu odbić pojedynczego kamienia (ko). Gdy obaj gracze spasują po sobie, gra się kończy: każda strona podlicza swoje kamienie oraz otoczone przez siebie puste punkty, a białe otrzymują dodatkowo 6.5 punktu komi za ruch jako drugie.',
+        rules: 'Gracze na przemian kładą kamienie na przecięciach linii; zaczynają czarne. Grupa, która nie ma obok siebie żadnego pustego skrzyżowania (brak oddechów), zostaje zbita i zdjęta z planszy. Nie możesz wykonać ruchu, który pozbawia Twoją własną grupę oddechów (samobójstwo), ani od razu odbić pojedynczego kamienia (ko). Gdy obaj gracze spasują po sobie, gra się kończy: każda strona podlicza swoje kamienie oraz otoczone przez siebie puste punkty, a białe otrzymują dodatkowo {k} punktu komi za ruch jako drugie.',
         keyboard: 'Klawiatura', moveCursor: 'Ruch kursorem', place: 'Postaw kamień',
         tutTitle1: 'Oddechy i zbijanie', tutText1: 'Puste punkty sąsiadujące z grupą to jej oddechy. Zapełnij wszystkie oddechy grupy, aby ją zbić – wtedy kamienie są zdejmowane z planszy.',
         tutTitle2: 'Otaczanie terytorium', tutText2: 'Celem gry jest otoczenie jak największej liczby pustych punktów. Grupa posiadająca dwoje oddzielnych oczu nie może zostać zbita.',
@@ -362,14 +439,15 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
         twoPlayers: 'Deux joueurs', vsAi: 'Contre l’IA',
         you: 'Toi', rival: 'Adversaire', player2: 'Joueur deux', renameP2: 'Nom du joueur deux',
         black: 'Noir', white: 'Blanc', playerWon: '{n} gagne', newMatch: 'Nouvelle partie', undoMove: 'Annuler le coup',
-        boardLabel: 'Goban 9×9', pass: 'Passer', captured: 'capturées',
+        boardLabel: 'Goban {n}', boardSize: 'Taille du goban', sizeHint: 'Le go du jour se joue toujours sur 9×9 ; un goban plus grand donne une partie plus longue.',
+        pass: 'Passer', captured: 'capturées',
         playBlack: 'Toi en noir', playWhite: 'Toi en blanc',
         passedNote: '{n} a passé. Si tu passes aussi, la partie se termine.', koNote: 'Ce point est en ko : joue ailleurs d’abord, puis tu pourras reprendre.',
         suicideNote: 'Ce coup laisserait ton propre groupe sans libertés.',
         scoreLine: '{b} à {w}', area: 'Score', komi: 'komi', deadNote: 'Les pierres marquées d’une croix ont été comptées mortes.',
         dailyGo: 'Go du jour', vsMedium: 'contre l’IA moyenne',
         resetWarn: 'Cela met fin à la partie en cours. Continuer ?',
-        rules: 'Chacun à son tour pose une pierre sur une intersection ; noir commence. Un groupe sans point vide à côté (sans liberté) est capturé et retiré. Tu ne peux pas jouer un coup qui laisse ton propre groupe sans libertés, ni reprendre aussitôt une pierre seule (ko). Quand les deux joueurs passent l’un après l’autre, la partie se termine : chaque camp compte ses pierres plus les points vides qu’il entoure, et blanc reçoit 6,5 points de komi pour jouer en second.',
+        rules: 'Chacun à son tour pose une pierre sur une intersection ; noir commence. Un groupe sans point vide à côté (sans liberté) est capturé et retiré. Tu ne peux pas jouer un coup qui laisse ton propre groupe sans libertés, ni reprendre aussitôt une pierre seule (ko). Quand les deux joueurs passent l’un après l’autre, la partie se termine : chaque camp compte ses pierres plus les points vides qu’il entoure, et blanc reçoit {k} points de komi pour jouer en second.',
         keyboard: 'Clavier', moveCursor: 'Déplacer le curseur', place: 'Poser une pierre',
         tutTitle1: 'Libertés et captures', tutText1: 'Les points vides à côté d’un groupe sont ses libertés. Remplis toutes les libertés d’un groupe et tu le captures : il quitte le plateau.',
         tutTitle2: 'Entoure du territoire', tutText2: 'Le but est d’entourer le plus de points vides. Un groupe avec deux yeux séparés ne peut jamais être capturé.',
@@ -379,14 +457,15 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
         twoPlayers: 'لاعبان', vsAi: 'ضد الروبوت',
         you: 'أنت', rival: 'الخصم', player2: 'اللاعب الثاني', renameP2: 'اسم اللاعب الثاني',
         black: 'الأسود', white: 'الأبيض', playerWon: 'فاز {n}', newMatch: 'لعبة جديدة', undoMove: 'تراجع عن النقلة',
-        boardLabel: 'رقعة غو 9×9', pass: 'تمرير', captured: 'مأسورة',
+        boardLabel: 'رقعة غو {n}', boardSize: 'حجم الرقعة', sizeHint: 'غو اليوم دائمًا على 9×9؛ الرقعة الأكبر تعني لعبة أطول.',
+        pass: 'تمرير', captured: 'مأسورة',
         playBlack: 'أنت بالأسود', playWhite: 'أنت بالأبيض',
         passedNote: 'مرّر {n}. إن مرّرت أنت أيضًا تنتهي اللعبة.', koNote: 'هذه النقطة «كو»: العب في مكان آخر أولًا، ثم يمكنك الاسترداد.',
         suicideNote: 'هذه النقلة تترك مجموعتك بلا حريات.',
         scoreLine: '{b} مقابل {w}', area: 'النتيجة', komi: 'كومي', deadNote: 'الأحجار المعلَّمة بإشارة × حُسبت ميتة.',
         dailyGo: 'غو اليوم', vsMedium: 'ضد الروبوت المتوسط',
         resetWarn: 'ستنتهي اللعبة الحالية. هل تتابع؟',
-        rules: 'تناوبا على وضع الأحجار على التقاطعات؛ يبدأ الأسود. المجموعة التي لا تجاورها أي نقطة فارغة (بلا حرية) تؤسر وتُزال. لا يجوز أن تلعب نقلة تترك مجموعتك بلا حريات، ولا أن تسترد حجرًا واحدًا فورًا (كو). حين يمرّر اللاعبان على التوالي تنتهي اللعبة: يعدّ كل طرف أحجاره والنقاط الفارغة التي يحيط بها، ويحصل الأبيض على 6.5 نقطة كومي لأنه يلعب ثانيًا.',
+        rules: 'تناوبا على وضع الأحجار على التقاطعات؛ يبدأ الأسود. المجموعة التي لا تجاورها أي نقطة فارغة (بلا حرية) تؤسر وتُزال. لا يجوز أن تلعب نقلة تترك مجموعتك بلا حريات، ولا أن تسترد حجرًا واحدًا فورًا (كو). حين يمرّر اللاعبان على التوالي تنتهي اللعبة: يعدّ كل طرف أحجاره والنقاط الفارغة التي يحيط بها، ويحصل الأبيض على {k} نقطة كومي لأنه يلعب ثانيًا.',
         keyboard: 'لوحة المفاتيح', moveCursor: 'حرّك المؤشر', place: 'ضع حجرًا',
         tutTitle1: 'الحريات والأسر', tutText1: 'النقاط الفارغة المجاورة لمجموعة هي حرياتها. املأ كل حريات مجموعة فتأسرها: تُزال عن الرقعة.',
         tutTitle2: 'أحط بالأرض', tutText2: 'الهدف أن تحيط بأكبر عدد من النقاط الفارغة. المجموعة التي لها عينان منفصلتان لا يمكن أسرها أبدًا.',
@@ -396,14 +475,15 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
         twoPlayers: 'दो खिलाड़ी', vsAi: 'कंप्यूटर से',
         you: 'आप', rival: 'विरोधी', player2: 'खिलाड़ी दो', renameP2: 'खिलाड़ी दो का नाम',
         black: 'काला', white: 'सफ़ेद', playerWon: '{n} जीत गए', newMatch: 'नया खेल', undoMove: 'चाल वापस',
-        boardLabel: '9×9 गो बोर्ड', pass: 'पास', captured: 'पकड़े गए',
+        boardLabel: '{n} गो बोर्ड', boardSize: 'बोर्ड का आकार', sizeHint: 'रोज़ का गो हमेशा 9×9 पर होता है; बड़ा बोर्ड यानी लंबा खेल।',
+        pass: 'पास', captured: 'पकड़े गए',
         playBlack: 'आप काले', playWhite: 'आप सफ़ेद',
         passedNote: '{n} ने पास किया। अगर आप भी पास करें, तो खेल ख़त्म।', koNote: 'यह बिंदु को है: पहले कहीं और चलें, फिर वापस पकड़ सकते हैं।',
         suicideNote: 'इस चाल से आपके अपने समूह की कोई साँस नहीं बचेगी।',
         scoreLine: '{b} बनाम {w}', area: 'स्कोर', komi: 'कोमी', deadNote: 'क्रॉस वाले पत्थर मरे हुए गिने गए।',
         dailyGo: 'रोज़ का गो', vsMedium: 'मध्यम कंप्यूटर के ख़िलाफ़',
         resetWarn: 'इससे मौजूदा खेल ख़त्म हो जाएगा। जारी रखें?',
-        rules: 'बारी-बारी से रेखाओं के कटान बिंदुओं पर पत्थर रखें; काला पहले चलता है। जिस समूह के पास कोई ख़ाली बिंदु (साँस) न बचे, वह पकड़ा जाता है और हट जाता है। ऐसी चाल नहीं चल सकते जिससे आपके अपने समूह की साँसें ख़त्म हों, और न ही एक अकेला पत्थर तुरंत वापस पकड़ सकते हैं (को)। जब दोनों खिलाड़ी लगातार पास करें, खेल ख़त्म होता है: हर पक्ष अपने पत्थर और अपने घेरे ख़ाली बिंदु गिनता है, और दूसरे नंबर पर चलने के बदले सफ़ेद को 6.5 अंक कोमी मिलती है।',
+        rules: 'बारी-बारी से रेखाओं के कटान बिंदुओं पर पत्थर रखें; काला पहले चलता है। जिस समूह के पास कोई ख़ाली बिंदु (साँस) न बचे, वह पकड़ा जाता है और हट जाता है। ऐसी चाल नहीं चल सकते जिससे आपके अपने समूह की साँसें ख़त्म हों, और न ही एक अकेला पत्थर तुरंत वापस पकड़ सकते हैं (को)। जब दोनों खिलाड़ी लगातार पास करें, खेल ख़त्म होता है: हर पक्ष अपने पत्थर और अपने घेरे ख़ाली बिंदु गिनता है, और दूसरे नंबर पर चलने के बदले सफ़ेद को {k} अंक कोमी मिलती है।',
         keyboard: 'कीबोर्ड', moveCursor: 'कर्सर हिलाएँ', place: 'पत्थर रखें',
         tutTitle1: 'साँसें और पकड़', tutText1: 'किसी समूह के बगल के ख़ाली बिंदु उसकी साँसें हैं। किसी समूह की सारी साँसें भर दें तो वह पकड़ा जाता है और बोर्ड से हट जाता है।',
         tutTitle2: 'इलाक़ा घेरें', tutText2: 'लक्ष्य है सबसे ज़्यादा ख़ाली बिंदु घेरना। जिस समूह में दो अलग आँखें हों, वह कभी नहीं पकड़ा जा सकता।',
@@ -413,14 +493,15 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
         twoPlayers: '双人', vsAi: '对战电脑',
         you: '你', rival: '对手', player2: '玩家二', renameP2: '玩家二的名字',
         black: '黑方', white: '白方', playerWon: '{n}获胜', newMatch: '新一局', undoMove: '悔棋',
-        boardLabel: '9×9 围棋棋盘', pass: '停一手', captured: '提子',
+        boardLabel: '{n} 围棋棋盘', boardSize: '棋盘大小', sizeHint: '每日围棋总是 9×9；棋盘越大，对局越长。',
+        pass: '停一手', captured: '提子',
         playBlack: '你执黑', playWhite: '你执白',
         passedNote: '{n}停了一手。你也停一手，对局就结束。', koNote: '这里是劫：先在别处下一手，才能提回。',
         suicideNote: '这一手会让你自己的棋没有气。',
         scoreLine: '{b} 比 {w}', area: '得分', komi: '贴目', deadNote: '打叉的棋子被判为死子。',
         dailyGo: '每日围棋', vsMedium: '对战中等电脑',
         resetWarn: '将结束当前对局，是否继续？',
-        rules: '双方轮流在交叉点落子，黑方先行。没有气（相邻空点）的棋子会被提走。不能下让自己的棋没有气的一手，也不能马上提回刚被提的单子（劫）。双方连续停一手时对局结束：各自数棋子和围住的空点，白方因后行得 6.5 目贴目。',
+        rules: '双方轮流在交叉点落子，黑方先行。没有气（相邻空点）的棋子会被提走。不能下让自己的棋没有气的一手，也不能马上提回刚被提的单子（劫）。双方连续停一手时对局结束：各自数棋子和围住的空点，白方因后行得 {k} 目贴目。',
         keyboard: '键盘', moveCursor: '移动光标', place: '落子',
         tutTitle1: '气与提子', tutText1: '棋子旁边的空点就是它的气。堵住一块棋的所有气，就能把它提走。',
         tutTitle2: '围地', tutText2: '目标是围住最多的空点。有两个独立眼的棋永远不会被提。',
@@ -430,14 +511,15 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
         twoPlayers: 'Zu zweit', vsAi: 'Gegen KI',
         you: 'Du', rival: 'Gegner', player2: 'Spieler zwei', renameP2: 'Name von Spieler zwei',
         black: 'Schwarz', white: 'Weiß', playerWon: 'Sieg: {n}', newMatch: 'Neue Partie', undoMove: 'Zug zurück',
-        boardLabel: '9×9-Go-Brett', pass: 'Passen', captured: 'gefangen',
+        boardLabel: '{n}-Go-Brett', boardSize: 'Brettgröße', sizeHint: 'Das tägliche Go ist immer 9×9; ein größeres Brett heißt eine längere Partie.',
+        pass: 'Passen', captured: 'gefangen',
         playBlack: 'Du Schwarz', playWhite: 'Du Weiß',
         passedNote: 'Gepasst: {n}. Passt du auch, endet die Partie.', koNote: 'Dieser Punkt ist Ko: erst woanders spielen, dann darfst du zurückschlagen.',
         suicideNote: 'Dieser Zug ließe deiner eigenen Gruppe keine Freiheit.',
         scoreLine: '{b} zu {w}', area: 'Punkte', komi: 'Komi', deadNote: 'Durchgekreuzte Steine wurden als tot gezählt.',
         dailyGo: 'Tägliches Go', vsMedium: 'gegen die mittlere KI',
         resetWarn: 'Die aktuelle Partie endet. Weiter?',
-        rules: 'Setzt abwechselnd Steine auf die Kreuzungen; Schwarz beginnt. Eine Gruppe ohne freien Nachbarpunkt (ohne Freiheit) wird gefangen und entfernt. Ein Zug, der der eigenen Gruppe keine Freiheit lässt, ist verboten, ebenso das sofortige Zurückschlagen eines einzelnen Steins (Ko). Passen beide nacheinander, endet die Partie – jede Seite zählt ihre Steine und die umschlossenen leeren Punkte, und Weiß bekommt 6,5 Punkte Komi, weil Weiß als Zweiter zieht.',
+        rules: 'Setzt abwechselnd Steine auf die Kreuzungen; Schwarz beginnt. Eine Gruppe ohne freien Nachbarpunkt (ohne Freiheit) wird gefangen und entfernt. Ein Zug, der der eigenen Gruppe keine Freiheit lässt, ist verboten, ebenso das sofortige Zurückschlagen eines einzelnen Steins (Ko). Passen beide nacheinander, endet die Partie – jede Seite zählt ihre Steine und die umschlossenen leeren Punkte, und Weiß bekommt {k} Punkte Komi, weil Weiß als Zweiter zieht.',
         keyboard: 'Tastatur', moveCursor: 'Cursor bewegen', place: 'Stein setzen',
         tutTitle1: 'Freiheiten und Fangen', tutText1: 'Die leeren Punkte neben einer Gruppe sind ihre Freiheiten. Besetzt du alle, fängst du die Gruppe – sie kommt vom Brett.',
         tutTitle2: 'Gebiet umschließen', tutText2: 'Ziel ist, die meisten leeren Punkte zu umschließen. Eine Gruppe mit zwei getrennten Augen kann nie gefangen werden.',
@@ -447,14 +529,15 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
         twoPlayers: 'Dos jugadores', vsAi: 'Contra la IA',
         you: 'Tú', rival: 'Rival', player2: 'Jugador dos', renameP2: 'Nombre del jugador dos',
         black: 'Negras', white: 'Blancas', playerWon: 'Gana: {n}', newMatch: 'Nueva partida', undoMove: 'Deshacer jugada',
-        boardLabel: 'Tablero de go 9×9', pass: 'Pasar', captured: 'capturadas',
+        boardLabel: 'Tablero de go {n}', boardSize: 'Tamaño del tablero', sizeHint: 'El go diario siempre es en 9×9; un tablero más grande da una partida más larga.',
+        pass: 'Pasar', captured: 'capturadas',
         playBlack: 'Con negras', playWhite: 'Con blancas',
         passedNote: 'Pasa: {n}. Si tú también pasas, la partida termina.', koNote: 'Ese punto es ko: juega primero en otro sitio y luego podrás recapturar.',
         suicideNote: 'Esa jugada dejaría a tu propio grupo sin libertades.',
         scoreLine: '{b} a {w}', area: 'Puntos', komi: 'komi', deadNote: 'Las piedras marcadas con una cruz se contaron como muertas.',
         dailyGo: 'Go diario', vsMedium: 'contra la IA media',
         resetWarn: 'Esto termina la partida actual. ¿Seguir?',
-        rules: 'Por turnos, cada jugador coloca una piedra en un cruce; empiezan las negras. Un grupo sin ningún punto vacío al lado (sin libertades) queda capturado y se retira. No se puede jugar una piedra que deje a tu propio grupo sin libertades, ni recapturar al instante una sola piedra (ko). Cuando los dos jugadores pasan seguidos, la partida termina: cada lado cuenta sus piedras más los puntos vacíos que rodea, y las blancas reciben 6,5 puntos de komi por jugar en segundo lugar.',
+        rules: 'Por turnos, cada jugador coloca una piedra en un cruce; empiezan las negras. Un grupo sin ningún punto vacío al lado (sin libertades) queda capturado y se retira. No se puede jugar una piedra que deje a tu propio grupo sin libertades, ni recapturar al instante una sola piedra (ko). Cuando los dos jugadores pasan seguidos, la partida termina: cada lado cuenta sus piedras más los puntos vacíos que rodea, y las blancas reciben {k} puntos de komi por jugar en segundo lugar.',
         keyboard: 'Teclado', moveCursor: 'Mover el cursor', place: 'Colocar una piedra',
         tutTitle1: 'Libertades y capturas', tutText1: 'Los puntos vacíos junto a un grupo son sus libertades. Si ocupas todas las libertades de un grupo, lo capturas y sale del tablero.',
         tutTitle2: 'Rodea territorio', tutText2: 'El objetivo es rodear el mayor número de puntos vacíos. Un grupo con dos ojos separados nunca puede ser capturado.',
@@ -466,8 +549,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
   var params = new URLSearchParams(location.search);
   var dailyDate = params.get('daily');
   var DAILY_LEVEL = 'medium';
-  var prefs = ctx.store.get('prefs', { mode: 'ai', level: 'medium', color: 1, p2name: '' });
+  var prefs = ctx.store.get('prefs', { mode: 'ai', level: 'medium', color: 1, p2name: '', size: 9 });
   if (prefs.color !== 1 && prefs.color !== 2) prefs.color = 1;
+  // prefs saved before #944 have no size: they played 9×9
+  if (!validSize(prefs.size)) prefs.size = 9;
 
   var S = null, aiTimer = null, note = '';
   var kbOn = false, cur = { r: 4, c: 4 };
@@ -475,7 +560,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
   var cv = document.createElement('canvas');
   cv.className = 'go-canvas';
   cv.setAttribute('role', 'img');
-  cv.setAttribute('aria-label', C.t('boardLabel'));
+  function sizeText(n) { return C.num(n) + '×' + C.num(n); }
   var boardBox = el('div', { class: 'go-boardbox' }, [cv]);
   var top = el('div', { class: 'go-top ch-above' });
   var playersRow = el('div', { class: 'go-players ch-above' });
@@ -485,6 +570,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
 
   ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
   ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  // the board size lives behind a gear, never in the help window; the daily go is always 9×9
+  if (!dailyDate) ctx.button({ icon: 'gear', label: C.t('settings'), onClick: showSettings });
   ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
   ctx.main.appendChild(wrap);
   ctx.mount();
@@ -493,22 +580,26 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
 
   function newGame(o) {
     stopAi();
+    var size = o.daily ? 9 : (validSize(o.size) ? o.size : 9);
+    useSize(size);
     var g = o.daily ? E.dailyOpening(C.daily('go', o.daily).rng) : E.newState();
     S = {
       mode: o.mode, level: o.daily ? DAILY_LEVEL : o.level, human: o.mode === 'ai' && !o.daily ? o.color : 1,
-      daily: o.daily || null, g: g, history: [], last: -1, end: null, done: false, startedAt: Date.now()
+      size: size, daily: o.daily || null, g: g, history: [], last: -1, end: null, done: false, startedAt: Date.now()
     };
     if (!o.daily) {
-      prefs.mode = o.mode; prefs.level = o.level; prefs.color = o.color;
+      prefs.mode = o.mode; prefs.level = o.level; prefs.color = o.color; prefs.size = size;
       ctx.store.set('prefs', prefs);
     }
+    centreCursor();
     note = '';
     render();
     save();
     maybeAi();
   }
-  function fromPrefs() { return { mode: prefs.mode, level: prefs.level, color: prefs.color }; }
-  function current() { return { mode: S.mode, level: S.level, color: S.human }; }
+  function centreCursor() { cur.r = cur.c = (N - 1) / 2; }
+  function fromPrefs() { return { mode: prefs.mode, level: prefs.level, color: prefs.color, size: prefs.size }; }
+  function current() { return { mode: S.mode, level: S.level, color: S.human, size: S.size }; }
 
   function aiSide() { return 3 - S.human; }
   function busy() { return S && S.mode === 'ai' && !S.done && S.g.turn === aiSide(); }
@@ -616,25 +707,31 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
     if (!S || S.done || !S.history.length) return { inProgress: false };
     return {
       s: {
-        mode: S.mode, level: S.level, human: S.human, daily: S.daily, g: S.g, last: S.last,
+        mode: S.mode, level: S.level, human: S.human, size: S.size, daily: S.daily, g: S.g, last: S.last,
         history: S.history, elapsed: Date.now() - S.startedAt
       },
       prefs: prefs
     };
   });
   function save() { ctx.save(); }
-  function validGame(g) {
-    return !!(g && Array.isArray(g.board) && g.board.length === E.CELLS && (g.turn === 1 || g.turn === 2) && Array.isArray(g.caps));
+  // a save from before #944 has no size: it is a 9×9 game
+  function saveSize(s) { return s.size === undefined ? 9 : s.size; }
+  function validGame(g, n) {
+    return !!(g && Array.isArray(g.board) && g.board.length === n * n && (g.turn === 1 || g.turn === 2) && Array.isArray(g.caps));
   }
   function validSave(sv) {
-    var s = sv && sv.s;
-    return !!(s && validGame(s.g) && Array.isArray(s.history) && s.history.length && (s.human === 1 || s.human === 2));
+    var s = sv && sv.s, n = s && saveSize(s);
+    return !!(s && validSize(n) && (!s.daily || n === 9) && validGame(s.g, n) && Array.isArray(s.history) && s.history.length &&
+      validGame(s.history[0].g, n) && (s.human === 1 || s.human === 2));
   }
   function restore(v) {
+    var size = saveSize(v);
+    useSize(size);
     S = {
-      mode: v.mode, level: v.level, human: v.human, daily: v.daily || null, g: v.g, last: typeof v.last === 'number' ? v.last : -1,
+      mode: v.mode, level: v.level, human: v.human, size: size, daily: v.daily || null, g: v.g, last: typeof v.last === 'number' ? v.last : -1,
       history: v.history, end: null, done: false, startedAt: Date.now() - (v.elapsed || 0)
     };
+    centreCursor();
     note = '';
     render();
     maybeAi();
@@ -662,7 +759,6 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
   // Shared by drawing and hit-testing; the margin is 0.7 of a cell so corner stones
   // clear the board's rounded corners
   function geo(W) { var pad = W / (N + 0.4) * 0.7; return { pad: pad, cell: (W - pad * 2) / (N - 1) }; }
-  var STARS = [[2, 2], [2, 6], [4, 4], [6, 2], [6, 6]];
 
   function paintBoard(g, W, o, col) {
     var G = geo(W), pad = G.pad, cell = G.cell, k;
@@ -679,7 +775,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
     }
     g.stroke();
     g.fillStyle = col.line;
-    STARS.forEach(function (s) { g.beginPath(); g.arc(pad + s[1] * cell, pad + s[0] * cell, Math.max(2, cell * 0.08), 0, Math.PI * 2); g.fill(); });
+    E.STARS.forEach(function (s) { g.beginPath(); g.arc(pad + s[1] * cell, pad + s[0] * cell, Math.max(2, cell * 0.08), 0, Math.PI * 2); g.fill(); });
     var R = cell * 0.46, dead = {};
     (o.end ? o.end.dead : []).forEach(function (i) { dead[i] = true; });
     for (var i = 0; i < E.CELLS; i++) {
@@ -838,6 +934,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
   function drawNote() { noteEl.textContent = note; }
 
   function render() {
+    cv.setAttribute('aria-label', C.t('boardLabel', { n: sizeText(N) }));
     drawTop();
     drawPlayers();
     passBtn.disabled = S.done || busy();
@@ -900,11 +997,36 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
   function kb(k, what) {
     return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]);
   }
+  // the komi in the rules follows the board (6.5 on 9×9, 7.5 bigger) with the language's decimal mark
+  function komiText() {
+    var sep = { fa: '٫', fr: ',', de: ',', es: ',' }[C.state.settings.lang] || '.';
+    return C.num(String(E.KOMI).replace('.', sep));
+  }
+
+  // #944: 9×9 stays the default; a new size starts a new game, after a warning
+  // when one is under way
+  function showSettings() {
+    if (!S || S.daily) return;
+    var v = S.size, body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
+    body.appendChild(el('div', { class: 'ch-item__label', text: C.t('boardSize') }));
+    body.appendChild(C.ui.segmented(E.SIZES.map(function (n) { return { value: n, label: sizeText(n) }; }), v, function (x) { v = x; }));
+    body.appendChild(el('p', { class: 'ch-xs ch-dim', style: { 'text-align': 'center' }, text: C.t('sizeHint') }));
+    if (S.history.length && !S.done) body.appendChild(el('p', { class: 'ch-xs ch-dim', style: { 'text-align': 'center' }, text: C.t('resetWarn') }));
+    C.ui.modal({
+      title: C.t('settings'), closeButton: true, body: [body],
+      actions: [{ label: C.t('cancel') }, { label: C.t('start'), kind: 'primary', onClick: function () {
+        if (v === S.size) return;
+        var o = current(); o.size = v;
+        newGame(o);
+      } }]
+    });
+  }
+
   function showHelp() {
     C.ui.modal({
       title: C.t('help'),
       body: [
-        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('p', { class: 'ch-dim', text: C.t('rules', { k: komiText() }) }),
         el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
         el('div', { class: 'ch-list' }, [
           kb('← ↑ → ↓', C.t('moveCursor')), kb('Space / Enter', C.t('place')), kb('P', C.t('pass')), kb('U / Ctrl+Z', C.t('undoMove'))
@@ -948,6 +1070,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = GoEngineFa
     ctx.tutorialIfNew(TUT);
   } else if (validSave(saved)) {
     if (saved.prefs) prefs = saved.prefs;
+    if (!validSize(prefs.size)) prefs.size = 9;
     restore(saved.s);
   } else {
     newGame(fromPrefs());
