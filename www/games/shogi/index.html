@@ -1,0 +1,1429 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>شطرنج ژاپنی — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  /* the board is wood in both themes, like a real shogi-ban */
+  :root {
+    --sg-wood: #DDB46C;
+    --sg-wood-edge: #B98E47;
+    --sg-line: #5E4524;
+    --sg-stand: rgba(94, 69, 36, .12);
+    --sg-tile: #F8E7BE;
+    --sg-tile-gote: #EFD9A6;
+    --sg-tile-edge: #8B6833;
+    --sg-ink: #201912;
+    --sg-red: #B3261E;
+  }
+  .sg-wrap { flex: 1; min-height: 0; }
+  .sg-board {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 9 / 11.6;
+    max-height: 100%;
+    margin: 0 auto;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .sg-board:focus-visible { outline: 3px solid var(--game); outline-offset: 3px; border-radius: var(--r-md); }
+  .sg-grid {
+    position: absolute;
+    background: var(--sg-wood);
+    border-radius: 4px;
+    box-shadow: inset 0 0 0 2px var(--sg-wood-edge), var(--sh-1);
+    pointer-events: none;
+  }
+  .sg-grid svg { display: block; width: 100%; height: 100%; color: var(--sg-line); }
+  .sg-grid line { stroke: currentColor; stroke-width: 1.1; vector-effect: non-scaling-stroke; }
+  .sg-grid circle { fill: currentColor; }
+  .sg-stand {
+    position: absolute;
+    border-radius: var(--r-sm);
+    background: var(--sg-stand);
+    pointer-events: none;
+  }
+  .sg-stand--on { box-shadow: inset 0 0 0 2px var(--game); }
+  .sg-pc {
+    position: absolute;
+    width: var(--sg-pc);
+    height: var(--sg-pc);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 2;
+  }
+  .sg-pc svg { display: block; width: 100%; height: 100%; overflow: visible; }
+  .sg-tile { fill: var(--sg-tile); stroke: var(--sg-tile-edge); stroke-width: 2.5; stroke-linejoin: round; }
+  .sg-gote .sg-tile { fill: var(--sg-tile-gote); }
+  .sg-sel .sg-tile { stroke: var(--game); stroke-width: 7; }
+  .sg-glyph { fill: var(--sg-ink); font-weight: 700; text-anchor: middle; font-family: "Noto Serif JP", "Noto Serif CJK JP", "Hiragino Mincho ProN", "Yu Mincho", "Noto Sans JP", "Noto Sans CJK JP", serif; }
+  .sg-latin { font-family: var(--font, sans-serif); }
+  .sg-red .sg-glyph { fill: var(--sg-red); }
+  .sg-mark { fill: var(--sg-ink); stroke: var(--sg-ink); stroke-width: 4.5; stroke-linecap: round; opacity: .5; }
+  .sg-red .sg-mark { fill: var(--sg-red); stroke: var(--sg-red); }
+  .sg-count {
+    position: absolute;
+    right: -4px; bottom: -4px;
+    min-width: 18px; height: 18px;
+    padding: 0 4px;
+    border-radius: 9px;
+    background: var(--sg-ink);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+    box-sizing: border-box;
+  }
+  .sg-pc--gote .sg-count { right: auto; bottom: auto; left: -4px; top: -4px; }
+  .sg-last { position: absolute; background: rgba(255, 244, 170, .55); pointer-events: none; z-index: 1; }
+  .sg-dot {
+    position: absolute;
+    width: calc(var(--sg-cell) * .3);
+    height: calc(var(--sg-cell) * .3);
+    border-radius: 50%;
+    background: var(--game);
+    opacity: .7;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 3;
+  }
+  .sg-dot--cap {
+    width: calc(var(--sg-cell) * .9);
+    height: calc(var(--sg-cell) * .9);
+    background: transparent;
+    border: 3px solid var(--game);
+    border-radius: 6px;
+    box-sizing: border-box;
+  }
+  .sg-cursor {
+    position: absolute;
+    border: 3px solid var(--game);
+    border-radius: 6px;
+    box-sizing: border-box;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 6;
+  }
+  .sg-top { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .sg-gear { margin-inline-start: auto; }
+  .sg-status {
+    font-size: var(--fs-md);
+    font-weight: 600;
+    color: var(--c-text);
+    min-height: 52px;
+    line-height: 1.5;
+  }
+  .sg-status--bad { color: var(--c-bad); }
+  .sg-moves { display: flex; flex-wrap: wrap; gap: 5px; overflow: auto; max-height: 96px; direction: ltr; }
+  .sg-move {
+    font-size: var(--fs-xs);
+    background: var(--c-surface-2);
+    border-radius: var(--r-sm);
+    padding: 2px 7px;
+    color: var(--c-text-dim);
+  }
+  .sg-help-row { display: flex; gap: 10px; align-items: center; margin: 6px 0; }
+  .sg-help-row .sg-pc { position: relative; transform: none; flex: 0 0 auto; --sg-pc: 44px; }
+  .sg-help-row p { margin: 0; }
+  .sg-promos { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+  .sg-promos .sg-pc { position: relative; transform: none; --sg-pc: 40px; }
+  .sg-pick { display: flex; justify-content: center; gap: 22px; margin: 6px 0 4px; }
+  .sg-pick .sg-pc { position: relative; transform: none; --sg-pc: 58px; }
+  .sg-settings .ch-item__label { font-weight: 600; margin-bottom: 4px; }
+  .sg-note { color: var(--c-text-dim); font-size: var(--fs-sm); margin: 10px 0 0; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+
+/* ==== ENGINE START ==== */
+// Shogi rules and bot. Sente (side 0, positive values) sits at the bottom and moves up;
+// gote (side 1, negative values) sits at the top. Square i = rank * 9 + file, rank 0 at the top.
+// Kept free of the page so tools/test.js and the bot's Web Worker run the same code.
+function ShogiEngineFactory() {
+  var MAX_PLIES = 300, INF = 1e9, MATE = 1e7;
+  // 1 P, 2 L, 3 N, 4 S, 5 G, 6 B, 7 R, 8 K, 9 +P, 10 +L, 11 +N, 12 +S, 13 horse, 14 dragon
+  var PROMO = [0, 9, 10, 11, 12, 0, 13, 14, 0, 0, 0, 0, 0, 0, 0];
+  var BASE = [0, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 6, 7];
+  var VAL = [0, 100, 300, 350, 500, 550, 800, 1000, 0, 560, 540, 540, 540, 1050, 1250];
+  var HANDV = [0, 115, 330, 380, 560, 620, 900, 1120];
+  var COUNT = [0, 18, 4, 4, 4, 4, 2, 2, 2];
+  function D(df, dr) { return 1 << ((df + 1) * 3 + (dr + 1)); }
+  var ORTH = D(0, -1) | D(0, 1) | D(-1, 0) | D(1, 0);
+  var DIAG = D(-1, -1) | D(1, -1) | D(-1, 1) | D(1, 1);
+  var GOLD = D(-1, -1) | D(0, -1) | D(1, -1) | D(-1, 0) | D(1, 0) | D(0, 1);
+  var SILVER = D(-1, -1) | D(0, -1) | D(1, -1) | D(-1, 1) | D(1, 1);
+  // directions in the mover's own frame: dr -1 is forward
+  var STEP = [0, D(0, -1), 0, 0, SILVER, GOLD, 0, 0, ORTH | DIAG, GOLD, GOLD, GOLD, GOLD, ORTH, DIAG];
+  var SLIDE = [0, 0, D(0, -1), 0, 0, 0, DIAG, ORTH, 0, 0, 0, 0, 0, DIAG, ORTH];
+  var DIRS = [];
+  for (var a = -1; a <= 1; a++) for (var c = -1; c <= 1; c++) if (a || c) DIRS.push([a, c, 1 << ((a + 1) * 3 + (c + 1))]);
+  var START = [
+    -2, -3, -4, -5, -8, -5, -4, -3, -2,
+    0, -7, 0, 0, 0, 0, 0, -6, 0,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0,
+    1, 1, 1, 1, 1, 1, 1, 1, 1,
+    0, 6, 0, 0, 0, 0, 0, 7, 0,
+    2, 3, 4, 5, 8, 5, 4, 3, 2
+  ];
+
+  function sgn(s) { return s === 0 ? 1 : -1; }
+  function inZone(s, r) { return s === 0 ? r <= 2 : r >= 6; }
+  // ranks left in front of a piece: 0 on the last rank
+  function ahead(s, r) { return s === 0 ? r : 8 - r; }
+  function key(S) { return S.b.join(',') + '|' + S.hand[0].join('.') + '|' + S.hand[1].join('.') + '|' + S.turn; }
+  function kings(S) {
+    S.k = [-1, -1];
+    for (var i = 0; i < 81; i++) { if (S.b[i] === 8) S.k[0] = i; else if (S.b[i] === -8) S.k[1] = i; }
+  }
+
+  function deal(opts) {
+    opts = opts || {};
+    var S = {
+      b: START.slice(), hand: [[0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0]], turn: 0,
+      hist: [], keys: [], level: opts.level || 2, mode: opts.mode || 'ai', daily: opts.daily || null,
+      undos: 0, seed: opts.seed || 'x'
+    };
+    kings(S);
+    S.keys.push(key(S));
+    return S;
+  }
+  function clone(v) {
+    var S = JSON.parse(JSON.stringify(v));
+    kings(S);
+    return S;
+  }
+  function blank() {
+    var S = { b: [], hand: [[0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0]], turn: 0, hist: [], keys: [], level: 2, mode: 'ai', daily: null, undos: 0, seed: 'x' };
+    for (var i = 0; i < 81; i++) S.b.push(0);
+    return S;
+  }
+  // after hand-placing pieces (tests)
+  function fix(S) { kings(S); S.keys = [key(S)]; S.hist = []; return S; }
+
+  function addMove(out, s, p, from, to, fr, tr) {
+    var can = PROMO[p] > 0 && (inZone(s, fr) || inZone(s, tr));
+    var left = ahead(s, tr);
+    // a piece that could never move again must promote
+    var forced = ((p === 1 || p === 2) && left === 0) || (p === 3 && left <= 1);
+    if (can) out.push({ f: from, t: to, d: 0, pr: 1 });
+    if (!forced) out.push({ f: from, t: to, d: 0, pr: 0 });
+  }
+
+  // near: only drops within two squares of the enemy king or one of our own (search only, for speed)
+  function gen(S, capsOnly, near) {
+    var b = S.b, s = S.turn, sg = sgn(s), out = [];
+    var i, f, r, p, q, k, t;
+    for (i = 0; i < 81; i++) {
+      p = b[i] * sg;
+      if (p <= 0) continue;
+      f = i % 9; r = (i / 9) | 0;
+      var st = STEP[p], sl = SLIDE[p];
+      for (k = 0; k < 8; k++) {
+        var d = DIRS[k], bit = d[2];
+        if (!((st | sl) & bit)) continue;
+        var df = d[0] * sg, dr = d[1] * sg, nf = f + df, nr = r + dr;
+        while (nf >= 0 && nf < 9 && nr >= 0 && nr < 9) {
+          t = nr * 9 + nf; q = b[t] * sg;
+          if (q > 0) break;
+          if (!capsOnly || q < 0) addMove(out, s, p, i, t, r, nr);
+          if (q < 0 || !(sl & bit)) break;
+          nf += df; nr += dr;
+        }
+      }
+      if (p === 3) {
+        var kr = r - 2 * sg;
+        if (kr >= 0 && kr < 9) {
+          for (var kf = f - 1; kf <= f + 1; kf += 2) {
+            if (kf < 0 || kf > 8) continue;
+            t = kr * 9 + kf; q = b[t] * sg;
+            if (q > 0 || (capsOnly && !q)) continue;
+            addMove(out, s, p, i, t, r, kr);
+          }
+        }
+      }
+    }
+    if (capsOnly) return out;
+    var h = S.hand[s], files = 0;
+    if (h[1]) for (i = 0; i < 81; i++) if (b[i] * sg === 1) files |= 1 << (i % 9);
+    var ek = S.k[1 - s], ok = S.k[s];
+    for (t = 1; t <= 7; t++) {
+      if (!h[t]) continue;
+      for (i = 0; i < 81; i++) {
+        if (b[i]) continue;
+        r = (i / 9) | 0;
+        var left = ahead(s, r);
+        if ((t === 1 || t === 2) && left === 0) continue;
+        if (t === 3 && left <= 1) continue;
+        if (t === 1 && ((files >> (i % 9)) & 1)) continue;
+        if (near && dist(i, ek) > 2 && dist(i, ok) > 1) continue;
+        out.push({ f: -1, t: i, d: t, pr: 0 });
+      }
+    }
+    return out;
+  }
+  function dist(x, y) {
+    if (y < 0) return 9;
+    return Math.max(Math.abs(x % 9 - y % 9), Math.abs(((x / 9) | 0) - ((y / 9) | 0)));
+  }
+
+  function attacked(b, sq, by) {
+    if (sq < 0) return false;
+    var sg = sgn(by), f = sq % 9, r = (sq / 9) | 0;
+    for (var k = 0; k < 8; k++) {
+      var df = DIRS[k][0], dr = DIRS[k][1], nf = f + df, nr = r + dr, n = 1;
+      // a piece there reaches sq moving (-df, -dr), which is (-df*sg, -dr*sg) in its own frame
+      var bit = 1 << ((-df * sg + 1) * 3 + (-dr * sg + 1));
+      while (nf >= 0 && nf < 9 && nr >= 0 && nr < 9) {
+        var q = b[nr * 9 + nf];
+        if (q) {
+          q *= sg;
+          if (q > 0 && ((n === 1 && (STEP[q] & bit)) || (SLIDE[q] & bit))) return true;
+          break;
+        }
+        nf += df; nr += dr; n++;
+      }
+    }
+    var kr = r + 2 * sg;
+    if (kr >= 0 && kr < 9) {
+      if (f > 0 && b[kr * 9 + f - 1] * sg === 3) return true;
+      if (f < 8 && b[kr * 9 + f + 1] * sg === 3) return true;
+    }
+    return false;
+  }
+  function inCheck(S, s) { return attacked(S.b, S.k[s], 1 - s); }
+
+  function make(S, m) {
+    var s = S.turn, sg = sgn(s), b = S.b;
+    var h = { f: m.f, t: m.t, d: m.d, pr: m.pr ? 1 : 0, cap: 0, s: s, p: 0, chk: 0 };
+    if (m.d) {
+      S.hand[s][m.d]--;
+      b[m.t] = m.d * sg;
+      h.p = m.d;
+    } else {
+      var p = b[m.f] * sg;
+      h.p = p;
+      h.cap = b[m.t];
+      if (h.cap) S.hand[s][BASE[Math.abs(h.cap)]]++;
+      b[m.t] = (m.pr ? PROMO[p] : p) * sg;
+      b[m.f] = 0;
+      if (p === 8) S.k[s] = m.t;
+    }
+    S.turn = 1 - s;
+    S.hist.push(h);
+    return h;
+  }
+  function unmake(S) {
+    var h = S.hist.pop(), s = h.s, b = S.b;
+    S.turn = s;
+    if (h.d) {
+      b[h.t] = 0;
+      S.hand[s][h.d]++;
+    } else {
+      b[h.f] = h.p * sgn(s);
+      b[h.t] = h.cap;
+      if (h.cap) S.hand[s][BASE[Math.abs(h.cap)]]--;
+      if (h.p === 8) S.k[s] = h.f;
+    }
+    return h;
+  }
+
+  function anyLegal(S) {
+    var ms = gen(S, false), s = S.turn;
+    for (var i = 0; i < ms.length; i++) {
+      make(S, ms[i]);
+      var bad = inCheck(S, s);
+      unmake(S);
+      if (!bad) return true;
+    }
+    return false;
+  }
+
+  function legal(S) {
+    var ms = gen(S, false), out = [], s = S.turn;
+    for (var i = 0; i < ms.length; i++) {
+      var m = ms[i];
+      make(S, m);
+      var good = !inCheck(S, s);
+      // uchifuzume: a dropped pawn may give check but never mate
+      if (good && m.d === 1 && inCheck(S, 1 - s) && !anyLegal(S)) good = false;
+      unmake(S);
+      if (good) out.push(m);
+    }
+    return out;
+  }
+  function same(a, b) { return a.f === b.f && a.t === b.t && (a.d || 0) === (b.d || 0) && (a.pr ? 1 : 0) === (b.pr ? 1 : 0); }
+
+  // the only way the page changes the game: refuses anything legal() does not list
+  function play(S, m) {
+    var ms = legal(S), found = null;
+    for (var i = 0; i < ms.length; i++) if (same(ms[i], m)) { found = ms[i]; break; }
+    if (!found) return null;
+    var h = make(S, found);
+    h.chk = inCheck(S, S.turn) ? 1 : 0;
+    S.keys.push(key(S));
+    return h;
+  }
+  function undo(S) {
+    if (!S.hist.length) return null;
+    S.keys.pop();
+    return unmake(S);
+  }
+
+  // sennichite: the same position four times is a draw, unless one side checked on every
+  // move of the cycle; that side loses (perpetual check)
+  function repetition(S) {
+    var ks = S.keys, cur = ks[ks.length - 1], seen = [];
+    for (var i = ks.length - 1; i >= 0 && seen.length < 4; i--) if (ks[i] === cur) seen.push(i);
+    if (seen.length < 4) return null;
+    var all = [true, true], moved = [false, false];
+    for (var j = seen[3]; j < S.hist.length; j++) {
+      var h = S.hist[j];
+      moved[h.s] = true;
+      if (!h.chk) all[h.s] = false;
+    }
+    for (var sd = 0; sd < 2; sd++) if (moved[sd] && all[sd]) return { over: true, winner: 1 - sd, reason: 'perpetual', check: false };
+    return { over: true, winner: -1, reason: 'rep', check: false };
+  }
+
+  function status(S) {
+    var chk = inCheck(S, S.turn);
+    if (!legal(S).length) return { over: true, winner: 1 - S.turn, reason: chk ? 'mate' : 'stuck', check: chk };
+    var rep = repetition(S);
+    if (rep) return rep;
+    if (S.hist.length >= MAX_PLIES) return { over: true, winner: -1, reason: 'cap', check: chk };
+    return { over: false, winner: -1, reason: '', check: chk };
+  }
+
+  /* ---- the bot ---- */
+  function guard(S, s) {
+    var k = S.k[s], b = S.b, sg = sgn(s), n = 0;
+    if (k < 0) return 0;
+    var f = k % 9, r = (k / 9) | 0;
+    for (var dr = -1; dr <= 1; dr++) for (var df = -1; df <= 1; df++) {
+      var nf = f + df, nr = r + dr;
+      if ((!df && !dr) || nf < 0 || nf > 8 || nr < 0 || nr > 8) continue;
+      var q = b[nr * 9 + nf] * sg;
+      if (q === 4 || q === 5 || (q >= 9 && q <= 12)) n++;
+    }
+    return n * 22;
+  }
+  function pressure(S, s) {
+    var k = S.k[1 - s], b = S.b, sg = sgn(s), n = 0;
+    for (var i = 0; i < 81; i++) if (b[i] * sg > 0 && b[i] * sg !== 8 && dist(i, k) <= 2) n++;
+    return n * 9;
+  }
+  function evaluate(S) {
+    var b = S.b, sc = 0;
+    for (var i = 0; i < 81; i++) {
+      var p = b[i];
+      if (!p) continue;
+      if (p > 0) sc += VAL[p] + (p === 1 ? (6 - ((i / 9) | 0)) * 3 : 0);
+      else sc -= VAL[-p] + (p === -1 ? (((i / 9) | 0) - 2) * 3 : 0);
+    }
+    for (var t = 1; t <= 7; t++) sc += (S.hand[0][t] - S.hand[1][t]) * HANDV[t];
+    sc += guard(S, 0) - guard(S, 1) + pressure(S, 0) - pressure(S, 1);
+    return S.turn === 0 ? sc : -sc;
+  }
+  function score(S, m) {
+    if (m.d) return -50;
+    var v = 0, c = S.b[m.t];
+    if (c) v += VAL[Math.abs(c)] * 10 + 1000 - VAL[Math.abs(S.b[m.f])];
+    if (m.pr) v += 400;
+    return v;
+  }
+  function order(S, ms) {
+    for (var i = 0; i < ms.length; i++) ms[i].o = score(S, ms[i]);
+    ms.sort(function (x, y) { return y.o - x.o; });
+    return ms;
+  }
+  var nodes = 0, budget = 0, stop = false;
+  function quies(S, alpha, beta, qd) {
+    nodes++;
+    var sp = evaluate(S);
+    if (sp >= beta) return sp;
+    if (sp > alpha) alpha = sp;
+    if (qd >= 4) return sp;
+    var ms = order(S, gen(S, true)), s = S.turn;
+    for (var i = 0; i < ms.length; i++) {
+      make(S, ms[i]);
+      if (inCheck(S, s)) { unmake(S); continue; }
+      var v = -quies(S, -beta, -alpha, qd + 1);
+      unmake(S);
+      if (v >= beta) return v;
+      if (v > alpha) alpha = v;
+    }
+    return alpha;
+  }
+  function search(S, depth, alpha, beta, ply) {
+    if (budget && ++nodes > budget) { stop = true; return 0; }
+    if (depth <= 0) return quies(S, alpha, beta, 0);
+    var ms = order(S, gen(S, false, true)), s = S.turn, best = -INF, any = false;
+    for (var i = 0; i < ms.length; i++) {
+      make(S, ms[i]);
+      if (inCheck(S, s)) { unmake(S); continue; }
+      any = true;
+      var v = -search(S, depth - 1, -beta, -alpha, ply + 1);
+      unmake(S);
+      if (stop) return 0;
+      if (v > best) best = v;
+      if (v > alpha) alpha = v;
+      if (alpha >= beta) break;
+    }
+    // no move at all: mated (or stuck), which loses in shogi either way
+    return any ? best : -MATE + ply;
+  }
+  function hash(str) {
+    var h = 2166136261;
+    for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return (h >>> 0) / 4294967296;
+  }
+  function mkey(m) { return m.f + ':' + m.t + ':' + m.d + ':' + m.pr; }
+  function rootPass(S, ms, depth, span, salt) {
+    var best = -INF, pick = null, bestNoisy = -INF;
+    for (var i = 0; i < ms.length; i++) {
+      var m = ms[i];
+      make(S, m);
+      var v = -search(S, depth - 1, -INF, -(best - span - 1), 1);
+      unmake(S);
+      if (stop) return null;
+      m.v = v;
+      if (v > best) best = v;
+      var noisy = v + hash(salt + '|' + S.hist.length + '|' + mkey(m)) * (span + 1);
+      if (noisy > bestNoisy) { bestNoisy = noisy; pick = m; }
+    }
+    return pick;
+  }
+  // level 1 looks one move ahead with a lot of noise, 2 looks two moves ahead, 3 deepens to
+  // three under a node budget. Everything is seeded by salt, so a daily game plays the same.
+  function think(st, level, salt) {
+    var S = { b: st.b.slice(), hand: [st.hand[0].slice(), st.hand[1].slice()], turn: st.turn, hist: [], keys: [] };
+    kings(S);
+    var ms = legal(S);
+    if (!ms.length) return null;
+    var out = function (m) { return m ? { f: m.f, t: m.t, d: m.d, pr: m.pr } : null; };
+    if (ms.length === 1) return out(ms[0]);
+    salt = String(salt || '');
+    order(S, ms);
+    nodes = 0; stop = false; budget = 0;
+    if (level === 1) return out(rootPass(S, ms, 1, 220, salt));
+    if (level !== 3) return out(rootPass(S, ms, 2, 12, salt));
+    var pick = rootPass(S, ms, 2, 0, salt);
+    for (var depth = 3; depth <= 4; depth++) {
+      ms.sort(function (x, y) { return y.v - x.v; });
+      nodes = 0; budget = 120000;
+      var deeper = rootPass(S, ms, depth, 0, salt);
+      budget = 0;
+      if (!deeper) break;
+      pick = deeper;
+    }
+    return out(pick);
+  }
+
+  function validState(v) {
+    try {
+      if (!v || !Array.isArray(v.b) || v.b.length !== 81 || !Array.isArray(v.hand) || v.hand.length !== 2) return false;
+      if (v.turn !== 0 && v.turn !== 1) return false;
+      if (!Array.isArray(v.hist) || !Array.isArray(v.keys) || v.keys.length !== v.hist.length + 1 || v.hist.length > MAX_PLIES) return false;
+      var n = [0, 0, 0, 0, 0, 0, 0, 0, 0], kk = [0, 0], i, t;
+      for (i = 0; i < 81; i++) {
+        var p = v.b[i];
+        if (typeof p !== 'number' || (p | 0) !== p || p < -14 || p > 14) return false;
+        if (!p) continue;
+        var a = Math.abs(p), r = (i / 9) | 0, s = p > 0 ? 0 : 1;
+        n[BASE[a]]++;
+        if (a === 8) kk[s]++;
+        if (((a === 1 || a === 2) && ahead(s, r) === 0) || (a === 3 && ahead(s, r) <= 1)) return false;
+      }
+      for (var sd = 0; sd < 2; sd++) {
+        var h = v.hand[sd];
+        if (!Array.isArray(h) || h.length !== 8 || h[0] !== 0) return false;
+        for (t = 1; t < 8; t++) { if (typeof h[t] !== 'number' || (h[t] | 0) !== h[t] || h[t] < 0) return false; n[t] += h[t]; }
+      }
+      for (t = 1; t <= 8; t++) if (n[t] !== COUNT[t]) return false;
+      if (kk[0] !== 1 || kk[1] !== 1) return false;
+      var S = clone(v);
+      if (key(S) !== v.keys[v.keys.length - 1]) return false;
+      if (inCheck(S, 1 - S.turn)) return false;
+      for (i = 0; i < v.hist.length; i++) { var e = v.hist[i]; if (!e || (e.s !== 0 && e.s !== 1)) return false; }
+      return true;
+    } catch (err) { return false; }
+  }
+
+  var api = {
+    MAX_PLIES: MAX_PLIES, PROMO: PROMO, BASE: BASE, STEP: STEP, SLIDE: SLIDE, DIRS: DIRS,
+    deal: deal, clone: clone, blank: blank, fix: fix, key: key, legal: legal, play: play, undo: undo,
+    status: status, inCheck: inCheck, think: think, validState: validState, evaluate: evaluate,
+    nodes: function () { return nodes; }
+  };
+  if (typeof self !== 'undefined') self.ShogiEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = ShogiEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = ShogiEngineFactory();
+  C.boot({});
+  var ctx = C.game({
+    id: 'shogi',
+    name: { fa: 'شطرنج ژاپنی', en: 'Japanese chess', zh: '日本将棋', de: 'Shogi', es: 'Shogi', pl: 'Shogi', fr: 'Shogi', ar: 'الشطرنج الياباني', hi: 'शोगी' },
+    accent: '#4824BA',
+    mood: 'menu',
+    strings: {
+      fa: {
+        moveCount: 'حرکت‌ها',
+        table: 'صفحهٔ شطرنج ژاپنی', helpT: 'راهنما', settingsT: 'تنظیمات', newMatch: 'بازی تازه', undoMove: 'برگرداندن حرکت',
+        levelT: 'سطح', easy: 'آسان', normal: 'متوسط', hard: 'سخت', modeT: 'بازیکن‌ها', vsAi: 'با رایانه', twoPlayers: 'دو نفره',
+        yourMove: 'نوبت شماست (▲ پایین)', aiThinking: 'رایانه فکر می‌کند…', senteMove: 'نوبت ▲ پایینی', goteMove: 'نوبت △ بالایی', check: 'کیش!',
+        youWin: 'بردید', youLose: 'رایانه برد', senteWins: '▲ پایینی برد', goteWins: '△ بالایی برد', drawT: 'مساوی',
+        mateT: 'کیش‌ومات', stuckT: 'حرکت قانونی نماند', perpT: 'کیش پیاپی می‌بازد', repT: 'یک وضعیت چهار بار تکرار شد', capT: 'سقف ۳۰۰ حرکت',
+        movesN: '{n} حرکت', promoteQ: 'این مهره ارتقا بگیرد؟', promoteYes: 'ارتقا', promoteNo: 'بماند',
+        facesT: 'روی مهره‌ها', faceKanji: 'ژاپنی', faceLatin: 'حروف لاتین', marksT: 'نشان دادن حرکت هر مهره (نقطه‌های روی مهره)',
+        rules: 'شطرنج ژاپنی (شوگی) روی صفحهٔ ۹×۹ بازی می‌شود و نوک هر مهره رو به حریف است. شما از پایین (▲) شروع می‌کنید. مهرهٔ گرفته‌شده طرف عوض می‌کند و در دست شما می‌ماند و می‌توانید به جای حرکت، آن را در هر خانهٔ خالی بگذارید.',
+        piecesT: 'مهره‌ها',
+        pK: 'شاه: یک خانه به هر سو.', pR: 'رخ: هر چند خانه مستقیم. ارتقایافته (اژدها) یک خانه مورب هم می‌رود.',
+        pB: 'فیل: هر چند خانه مورب. ارتقایافته (اسب) یک خانه مستقیم هم می‌رود.', pG: 'طلا: یک خانه مستقیم یا مورب رو به جلو. ارتقا نمی‌گیرد.',
+        pS: 'نقره: یک خانه مورب یا مستقیم رو به جلو.', pN: 'اسب: دو خانه جلو و یکی کنار می‌پرد، فقط رو به جلو.',
+        pL: 'نیزه: هر چند خانه مستقیم رو به جلو.', pP: 'سرباز: یک خانه جلو و به همین شکل می‌گیرد.',
+        promoT: 'ارتقا', promoText: 'سه ردیف آخر منطقهٔ ارتقاست. مهره‌ای که به آن وارد شود، از آن بیرون برود یا درونش حرکت کند می‌تواند برگردد و ارتقا بگیرد؛ مهرهٔ ارتقایافته سرخ نوشته می‌شود. نقره، اسب، نیزه و سرباز بعد از ارتقا مثل طلا می‌روند. سرباز و نیزه در ردیف آخر و اسب در دو ردیف آخر باید ارتقا بگیرند.',
+        dropT: 'گذاشتن مهره', dropText: 'مهره‌ای از دستتان را بزنید و بعد یک خانهٔ خالی. مهرهٔ گذاشته‌شده ارتقایافته نیست. دو سرباز ارتقانیافتهٔ شما در یک ستون نمی‌شود، مهره را جایی که دیگر حرکتی ندارد نمی‌شود گذاشت، و سرباز گذاشته‌شده می‌تواند کیش بدهد ولی نه مات.',
+        endT: 'پایان', endText: 'شاه را مات کنید تا ببرید؛ کسی که حرکت قانونی ندارد می‌بازد. اگر یک وضعیت چهار بار تکرار شود مساوی است، مگر یک طرف در همهٔ حرکت‌هایش کیش داده باشد که آن طرف می‌بازد. بعد از ۳۰۰ حرکت بازی مساوی می‌شود.',
+        kbT: 'صفحه‌کلید', kbNav: 'جابه‌جایی نشانگر (پایین‌تر از صفحه به دستتان می‌رسد)', kbPick: 'انتخاب / حرکت', kbCancel: 'لغو', kbNew: 'بازی تازه',
+        ok: 'باشه', tutT: 'آموزش', restartDaily: 'بازی روزانه از نو شود؟', dailyT: 'بازی روزانه',
+        tutTitle1: 'نوک مهره رو به جلوست', tutText1: 'نوک هر مهره رو به حریف است و شما از پایین بازی می‌کنید. نقطه‌های روی مهره نشان می‌دهند به کجا می‌رود و خط یعنی هر چند خانه می‌لغزد.',
+        tutTitle2: 'مهرهٔ گرفته‌شده مال شماست', tutText2: 'مهره‌ای که می‌گیرید زیر صفحه در دستتان می‌ماند و در نوبتتان می‌توانید به جای حرکت، آن را در خانه‌ای خالی بگذارید.',
+        tutTitle3: 'ارتقا و برد', tutText3: 'با رسیدن به سه ردیف آخر مهره ارتقا می‌گیرد و قوی‌تر می‌شود. شاه را مات کنید تا ببرید. برگرداندن حرکت بی‌حد است.',
+        settingsNote: 'سطح تازه از حرکت بعدی رایانه اعمال می‌شود.'
+      },
+      en: {
+        moveCount: 'Moves',
+        table: 'Shogi board', helpT: 'How to play', settingsT: 'Options', newMatch: 'New game', undoMove: 'Take back',
+        levelT: 'Level', easy: 'Easy', normal: 'Medium', hard: 'Hard', modeT: 'Players', vsAi: 'Against the computer', twoPlayers: 'Two players',
+        yourMove: 'Your move (▲ bottom)', aiThinking: 'The computer is thinking…', senteMove: '▲ Bottom to move', goteMove: '△ Top to move', check: 'Check!',
+        youWin: 'You won', youLose: 'The computer won', senteWins: '▲ Bottom won', goteWins: '△ Top won', drawT: 'Draw',
+        mateT: 'checkmate', stuckT: 'no legal move left', perpT: 'perpetual check loses', repT: 'the same position four times', capT: '300-move limit',
+        movesN: '{n} moves', promoteQ: 'Promote this piece?', promoteYes: 'Promote', promoteNo: 'Keep',
+        facesT: 'Piece faces', faceKanji: 'Japanese', faceLatin: 'Letters', marksT: 'Show how each piece moves (dots on the piece)',
+        rules: 'Shogi is Japanese chess on a 9×9 board, and every piece points at the opponent. You start from the bottom (▲). A captured piece changes sides and waits in your hand, and instead of moving you may drop it on any empty square.',
+        piecesT: 'Pieces',
+        pK: 'King: one step in any direction.', pR: 'Rook: any distance straight. Promoted (dragon) it also steps one diagonally.',
+        pB: 'Bishop: any distance diagonally. Promoted (horse) it also steps one straight.', pG: 'Gold: one step straight, or diagonally forward. It never promotes.',
+        pS: 'Silver: one step diagonally, or straight forward.', pN: 'Knight: jumps two forward and one aside, forward only.',
+        pL: 'Lance: any distance straight forward.', pP: 'Pawn: one step forward, and it captures the same way.',
+        promoT: 'Promotion', promoText: 'The far three ranks are the promotion zone. A piece that moves into, out of or inside it may turn over and promote; promoted pieces are written in red. Silver, knight, lance and pawn then move like a gold. A pawn or lance on the last rank, or a knight on the last two, must promote.',
+        dropT: 'Drops', dropText: 'Tap a piece in your hand, then an empty square. A dropped piece is never promoted. You may not have two unpromoted pawns on one file, drop a piece where it could never move, or checkmate with a dropped pawn (check is fine).',
+        endT: 'The end', endText: 'Checkmate the king to win; a side with no legal move loses. The same position four times is a draw, unless one side gave check on every move, and then that side loses. After 300 moves the game is drawn.',
+        kbT: 'Keys', kbNav: 'Move the cursor (below the board is your hand)', kbPick: 'Pick / move', kbCancel: 'Cancel', kbNew: 'New game',
+        ok: 'OK', tutT: 'Tutorial', restartDaily: 'Restart the daily game?', dailyT: 'Daily game',
+        tutTitle1: 'Pieces point forward', tutText1: 'Every piece points at its opponent, and you play from the bottom. The dots on a piece show where it can step; a bar means it slides any distance.',
+        tutTitle2: 'Captures join your hand', tutText2: 'A piece you capture becomes yours. It waits below the board, and on your turn you can drop it on an empty square instead of moving.',
+        tutTitle3: 'Promote and win', tutText3: 'Reaching the far three ranks lets a piece promote and grow stronger. Checkmate the king to win. Take back as many moves as you like.',
+        settingsNote: 'A new level applies from the computer’s next move.'
+      },
+      pl: {
+        moveCount: 'Ruchy',
+        table: 'Plansza shogi', helpT: 'Jak grać', settingsT: 'Opcje', newMatch: 'Nowa gra', undoMove: 'Cofnij ruch',
+        levelT: 'Poziom', easy: 'Łatwy', normal: 'Średni', hard: 'Trudny', modeT: 'Gracze', vsAi: 'Z komputerem', twoPlayers: 'Dwóch graczy',
+        yourMove: 'Twój ruch (▲ dół)', aiThinking: 'Komputer myśli…', senteMove: 'Ruch ▲ dolnego', goteMove: 'Ruch △ górnego', check: 'Szach!',
+        youWin: 'Wygrana', youLose: 'Komputer wygrał', senteWins: 'Wygrał ▲ dolny', goteWins: 'Wygrał △ górny', drawT: 'Remis',
+        mateT: 'mat', stuckT: 'brak dozwolonego ruchu', perpT: 'wieczny szach przegrywa', repT: 'ta sama pozycja cztery razy', capT: 'limit 300 ruchów',
+        movesN: '{n} ruchów', promoteQ: 'Promować tę bierkę?', promoteYes: 'Promuj', promoteNo: 'Zostaw',
+        facesT: 'Oznaczenia bierek', faceKanji: 'Japońskie', faceLatin: 'Litery', marksT: 'Pokaż ruchy bierek (kropki na bierce)',
+        rules: 'Shogi to japońskie szachy na planszy 9×9; każda bierka wskazuje na przeciwnika. Zaczynasz z dołu (▲). Zbita bierka zmienia stronę i czeka w twojej ręce, a zamiast ruchu możesz ją zrzucić na dowolne puste pole.',
+        piecesT: 'Bierki',
+        pK: 'Król: jedno pole w dowolną stronę.', pR: 'Wieża: dowolnie daleko prosto. Promowana (smok) idzie też o jedno pole po skosie.',
+        pB: 'Goniec: dowolnie daleko po skosie. Promowany (koń) idzie też o jedno pole prosto.', pG: 'Złoty generał: jedno pole prosto lub po skosie do przodu. Nie promuje się.',
+        pS: 'Srebrny generał: jedno pole po skosie lub prosto do przodu.', pN: 'Skoczek: skacze dwa pola do przodu i jedno w bok, tylko do przodu.',
+        pL: 'Lanca: dowolnie daleko prosto do przodu.', pP: 'Pion: jedno pole do przodu i tak samo bije.',
+        promoT: 'Promocja', promoText: 'Trzy dalekie rzędy to strefa promocji. Bierka, która do niej wchodzi, wychodzi z niej lub rusza się w niej, może się odwrócić i promować; promowane bierki są czerwone. Srebrny, skoczek, lanca i pion chodzą wtedy jak złoty. Pion lub lanca na ostatnim rzędzie i skoczek na dwóch ostatnich muszą się promować.',
+        dropT: 'Zrzuty', dropText: 'Dotknij bierki w ręce, potem pustego pola. Zrzucona bierka nie jest promowana. Nie wolno mieć dwóch niepromowanych pionów w jednej kolumnie, zrzucać bierki tam, gdzie nie mogłaby się ruszyć, ani matować zrzuconym pionem (szach wolno).',
+        endT: 'Koniec', endText: 'Zamatuj króla, aby wygrać; strona bez dozwolonego ruchu przegrywa. Ta sama pozycja cztery razy to remis, chyba że jedna strona szachowała w każdym ruchu – wtedy ona przegrywa. Po 300 ruchach jest remis.',
+        kbT: 'Klawisze', kbNav: 'Ruch kursora (pod planszą jest twoja ręka)', kbPick: 'Wybierz / ruch', kbCancel: 'Anuluj', kbNew: 'Nowa gra',
+        ok: 'OK', tutT: 'Samouczek', restartDaily: 'Zacząć grę dnia od nowa?', dailyT: 'Gra dnia',
+        tutTitle1: 'Bierki wskazują do przodu', tutText1: 'Każda bierka wskazuje na przeciwnika, a ty grasz z dołu. Kropki na bierce pokazują, dokąd może iść; kreska oznacza ruch na dowolną odległość.',
+        tutTitle2: 'Zbite bierki trafiają do ręki', tutText2: 'Zbita bierka staje się twoja. Czeka pod planszą, a w swojej turze możesz ją zrzucić na puste pole zamiast ruchu.',
+        tutTitle3: 'Promuj i wygraj', tutText3: 'Bierka w trzech dalekich rzędach może się promować i wzmocnić. Zamatuj króla, aby wygrać. Cofać możesz bez limitu.',
+        settingsNote: 'Nowy poziom działa od następnego ruchu komputera.'
+      },
+      fr: {
+        moveCount: 'Coups',
+        table: 'Plateau de shogi', helpT: 'Comment jouer', settingsT: 'Options', newMatch: 'Nouvelle partie', undoMove: 'Annuler le coup',
+        levelT: 'Niveau', easy: 'Facile', normal: 'Moyen', hard: 'Difficile', modeT: 'Joueurs', vsAi: 'Contre l’ordinateur', twoPlayers: 'Deux joueurs',
+        yourMove: 'À vous (▲ en bas)', aiThinking: 'L’ordinateur réfléchit…', senteMove: 'Au tour de ▲ en bas', goteMove: 'Au tour de △ en haut', check: 'Échec !',
+        youWin: 'Gagné', youLose: 'L’ordinateur gagne', senteWins: '▲ en bas gagne', goteWins: '△ en haut gagne', drawT: 'Nulle',
+        mateT: 'échec et mat', stuckT: 'plus aucun coup légal', perpT: 'l’échec perpétuel perd', repT: 'même position quatre fois', capT: 'limite de 300 coups',
+        movesN: '{n} coups', promoteQ: 'Promouvoir cette pièce ?', promoteYes: 'Promouvoir', promoteNo: 'Garder',
+        facesT: 'Faces des pièces', faceKanji: 'Japonais', faceLatin: 'Lettres', marksT: 'Montrer les déplacements (points sur la pièce)',
+        rules: 'Le shogi est l’échecs japonais sur un plateau 9×9 ; chaque pièce pointe vers l’adversaire. Vous partez du bas (▲). Une pièce prise change de camp et attend dans votre main ; au lieu de jouer, vous pouvez la parachuter sur une case vide.',
+        piecesT: 'Pièces',
+        pK: 'Roi : un pas dans toutes les directions.', pR: 'Tour : en ligne droite, toute distance. Promue (dragon), elle fait aussi un pas en diagonale.',
+        pB: 'Fou : en diagonale, toute distance. Promu (cheval), il fait aussi un pas en ligne droite.', pG: 'Général d’or : un pas droit, ou en diagonale vers l’avant. Jamais promu.',
+        pS: 'Général d’argent : un pas en diagonale, ou droit devant.', pN: 'Cavalier : saute de deux en avant et un de côté, seulement en avant.',
+        pL: 'Lance : droit devant, toute distance.', pP: 'Pion : un pas en avant, et il prend de même.',
+        promoT: 'Promotion', promoText: 'Les trois rangées lointaines forment la zone de promotion. Une pièce qui y entre, en sort ou s’y déplace peut se retourner et être promue ; les pièces promues sont écrites en rouge. Argent, cavalier, lance et pion se déplacent alors comme un or. Un pion ou une lance sur la dernière rangée, ou un cavalier sur les deux dernières, doit être promu.',
+        dropT: 'Parachutages', dropText: 'Touchez une pièce de votre main, puis une case vide. Une pièce parachutée n’est jamais promue. Interdit : deux pions non promus sur une colonne, une pièce posée là où elle ne pourrait plus bouger, ou mater avec un pion parachuté (l’échec est permis).',
+        endT: 'La fin', endText: 'Matez le roi pour gagner ; un camp sans coup légal perd. La même position quatre fois donne la nulle, sauf si un camp a fait échec à chaque coup : ce camp perd. Après 300 coups, la partie est nulle.',
+        kbT: 'Touches', kbNav: 'Déplacer le curseur (sous le plateau : votre main)', kbPick: 'Choisir / jouer', kbCancel: 'Annuler', kbNew: 'Nouvelle partie',
+        ok: 'OK', tutT: 'Tutoriel', restartDaily: 'Recommencer la partie du jour ?', dailyT: 'Partie du jour',
+        tutTitle1: 'Les pièces pointent en avant', tutText1: 'Chaque pièce pointe vers l’adversaire, et vous jouez depuis le bas. Les points sur une pièce montrent où elle va ; un trait veut dire qu’elle glisse de toute distance.',
+        tutTitle2: 'Les prises vont dans la main', tutText2: 'Une pièce prise devient la vôtre. Elle attend sous le plateau, et à votre tour vous pouvez la poser sur une case vide au lieu de jouer.',
+        tutTitle3: 'Promouvoir et gagner', tutText3: 'Dans les trois rangées lointaines, une pièce peut être promue et devenir plus forte. Matez le roi pour gagner. Annulez autant de coups que vous voulez.',
+        settingsNote: 'Le nouveau niveau vaut dès le prochain coup de l’ordinateur.'
+      },
+      ar: {
+        moveCount: 'النقلات',
+        table: 'رقعة الشوغي', helpT: 'طريقة اللعب', settingsT: 'الخيارات', newMatch: 'لعبة جديدة', undoMove: 'تراجع عن نقلة',
+        levelT: 'المستوى', easy: 'سهل', normal: 'متوسط', hard: 'صعب', modeT: 'اللاعبون', vsAi: 'ضد الحاسوب', twoPlayers: 'لاعبان',
+        yourMove: 'دورك (▲ في الأسفل)', aiThinking: 'الحاسوب يفكر…', senteMove: 'دور ▲ السفلي', goteMove: 'دور △ العلوي', check: 'كش!',
+        youWin: 'فزت', youLose: 'فاز الحاسوب', senteWins: 'فاز ▲ السفلي', goteWins: 'فاز △ العلوي', drawT: 'تعادل',
+        mateT: 'كش مات', stuckT: 'لا نقلة قانونية', perpT: 'الكش الدائم يخسر', repT: 'الوضع نفسه أربع مرات', capT: 'حد 300 نقلة',
+        movesN: '{n} نقلة', promoteQ: 'ترقية هذه القطعة؟', promoteYes: 'رقِّ', promoteNo: 'أبقِ',
+        facesT: 'وجوه القطع', faceKanji: 'يابانية', faceLatin: 'حروف لاتينية', marksT: 'إظهار حركة كل قطعة (نقاط على القطعة)',
+        rules: 'الشوغي شطرنج ياباني على رقعة 9×9، وكل قطعة تشير نحو الخصم. تبدأ من الأسفل (▲). القطعة المأسورة تغيّر جانبها وتبقى في يدك، وبدل النقل يمكنك إسقاطها في أي مربع فارغ.',
+        piecesT: 'القطع',
+        pK: 'الملك: خطوة واحدة في أي اتجاه.', pR: 'الرخ: أي مسافة في خط مستقيم. بعد الترقية (التنين) يخطو أيضًا خطوة قطرية.',
+        pB: 'الفيل: أي مسافة قطريًا. بعد الترقية (الحصان) يخطو أيضًا خطوة مستقيمة.', pG: 'الذهبي: خطوة مستقيمة أو قطرية إلى الأمام. لا يُرقّى.',
+        pS: 'الفضي: خطوة قطرية أو مستقيمة إلى الأمام.', pN: 'الفارس: يقفز اثنتين إلى الأمام وواحدة جانبًا، إلى الأمام فقط.',
+        pL: 'الرمح: أي مسافة مستقيمًا إلى الأمام.', pP: 'الجندي: خطوة إلى الأمام ويأسر بالطريقة نفسها.',
+        promoT: 'الترقية', promoText: 'الصفوف الثلاثة البعيدة منطقة الترقية. القطعة التي تدخلها أو تخرج منها أو تتحرك داخلها يمكن أن تنقلب وتترقى، وتُكتب القطع المرقّاة بالأحمر. الفضي والفارس والرمح والجندي يتحركون بعدها كالذهبي. الجندي والرمح في الصف الأخير والفارس في الصفين الأخيرين يجب أن يترقوا.',
+        dropT: 'الإسقاط', dropText: 'المس قطعة في يدك ثم مربعًا فارغًا. القطعة المُسقطة غير مرقّاة. لا يجوز جنديان غير مرقّيين لك في عمود واحد، ولا إسقاط قطعة حيث لا تستطيع الحركة أبدًا، ولا الإماتة بجندي مُسقط (الكش مسموح).',
+        endT: 'النهاية', endText: 'أمِت الملك لتفوز؛ ومن لا يملك نقلة قانونية يخسر. تكرار الوضع نفسه أربع مرات تعادل، إلا إذا كشّ أحد الجانبين في كل نقلة فيخسر. بعد 300 نقلة تنتهي اللعبة بالتعادل.',
+        kbT: 'المفاتيح', kbNav: 'تحريك المؤشر (أسفل الرقعة يدك)', kbPick: 'اختيار / نقل', kbCancel: 'إلغاء', kbNew: 'لعبة جديدة',
+        ok: 'حسنًا', tutT: 'الدرس', restartDaily: 'إعادة لعبة اليوم من البداية؟', dailyT: 'لعبة اليوم',
+        tutTitle1: 'القطع تشير إلى الأمام', tutText1: 'كل قطعة تشير نحو خصمها، وأنت تلعب من الأسفل. النقاط على القطعة تُظهر أين تخطو، والخط يعني أنها تنزلق أي مسافة.',
+        tutTitle2: 'المأسور ينضم إلى يدك', tutText2: 'القطعة التي تأسرها تصبح لك. تنتظر أسفل الرقعة، وفي دورك يمكنك إسقاطها في مربع فارغ بدل النقل.',
+        tutTitle3: 'ترقَّ واربح', tutText3: 'بلوغ الصفوف الثلاثة البعيدة يسمح للقطعة بالترقية فتقوى. أمِت الملك لتفوز. تراجع كما تشاء.',
+        settingsNote: 'المستوى الجديد يسري من نقلة الحاسوب التالية.'
+      },
+      hi: {
+        moveCount: 'चालें',
+        table: 'शोगी बोर्ड', helpT: 'कैसे खेलें', settingsT: 'विकल्प', newMatch: 'नया खेल', undoMove: 'चाल वापस',
+        levelT: 'स्तर', easy: 'आसान', normal: 'मध्यम', hard: 'कठिन', modeT: 'खिलाड़ी', vsAi: 'कंप्यूटर से', twoPlayers: 'दो खिलाड़ी',
+        yourMove: 'आपकी चाल (▲ नीचे)', aiThinking: 'कंप्यूटर सोच रहा है…', senteMove: '▲ नीचे वाले की चाल', goteMove: '△ ऊपर वाले की चाल', check: 'शह!',
+        youWin: 'आप जीते', youLose: 'कंप्यूटर जीता', senteWins: '▲ नीचे वाला जीता', goteWins: '△ ऊपर वाला जीता', drawT: 'बराबरी',
+        mateT: 'शह और मात', stuckT: 'कोई वैध चाल नहीं बची', perpT: 'लगातार शह हारता है', repT: 'एक ही स्थिति चार बार', capT: '300 चालों की सीमा',
+        movesN: '{n} चालें', promoteQ: 'इस मोहरे को पदोन्नत करें?', promoteYes: 'पदोन्नत', promoteNo: 'रहने दें',
+        facesT: 'मोहरों पर', faceKanji: 'जापानी', faceLatin: 'अक्षर', marksT: 'हर मोहरे की चाल दिखाएँ (मोहरे पर बिंदु)',
+        rules: 'शोगी 9×9 बोर्ड पर जापानी शतरंज है, और हर मोहरे की नोक विरोधी की ओर होती है. आप नीचे (▲) से शुरू करते हैं. पकड़ा गया मोहरा पाला बदलकर आपके हाथ में रहता है, और चाल की जगह आप उसे किसी खाली खाने पर रख सकते हैं.',
+        piecesT: 'मोहरे',
+        pK: 'राजा: किसी भी दिशा में एक कदम.', pR: 'रथ: सीधा कितनी भी दूर. पदोन्नत (ड्रैगन) होकर एक कदम तिरछा भी.',
+        pB: 'ऊँट: तिरछा कितनी भी दूर. पदोन्नत (घोड़ा) होकर एक कदम सीधा भी.', pG: 'सोना: एक कदम सीधा या आगे तिरछा. पदोन्नत नहीं होता.',
+        pS: 'चाँदी: एक कदम तिरछा या सीधा आगे.', pN: 'घुड़सवार: दो आगे और एक बगल में कूदता है, केवल आगे.',
+        pL: 'भाला: सीधा आगे कितनी भी दूर.', pP: 'प्यादा: एक कदम आगे, और उसी तरह मारता है.',
+        promoT: 'पदोन्नति', promoText: 'दूर की तीन पंक्तियाँ पदोन्नति क्षेत्र हैं. जो मोहरा उसमें आए, उससे निकले या उसके भीतर चले, वह पलटकर पदोन्नत हो सकता है; पदोन्नत मोहरे लाल लिखे जाते हैं. तब चाँदी, घुड़सवार, भाला और प्यादा सोने की तरह चलते हैं. आखिरी पंक्ति पर प्यादा या भाला, और आखिरी दो पर घुड़सवार, पदोन्नत होना ही चाहिए.',
+        dropT: 'रखना', dropText: 'हाथ का मोहरा छुएँ, फिर कोई खाली खाना. रखा गया मोहरा पदोन्नत नहीं होता. एक स्तंभ में आपके दो अपदोन्नत प्यादे नहीं हो सकते, मोहरा वहाँ नहीं रख सकते जहाँ से वह कभी न चल सके, और रखे गए प्यादे से मात नहीं दे सकते (शह ठीक है).',
+        endT: 'अंत', endText: 'राजा को मात देकर जीतें; जिसके पास वैध चाल न हो वह हारता है. एक ही स्थिति चार बार आए तो बराबरी, जब तक किसी ने हर चाल पर शह न दी हो—तब वह हारता है. 300 चालों के बाद खेल बराबर रहता है.',
+        kbT: 'कुंजियाँ', kbNav: 'कर्सर चलाएँ (बोर्ड के नीचे आपका हाथ)', kbPick: 'चुनें / चलें', kbCancel: 'रद्द करें', kbNew: 'नया खेल',
+        ok: 'ठीक है', tutT: 'सीखें', restartDaily: 'आज का खेल फिर से शुरू करें?', dailyT: 'आज का खेल',
+        tutTitle1: 'मोहरे आगे की ओर', tutText1: 'हर मोहरे की नोक विरोधी की ओर है, और आप नीचे से खेलते हैं. मोहरे पर बिंदु बताते हैं कि वह कहाँ जा सकता है; रेखा का मतलब है कितनी भी दूर.',
+        tutTitle2: 'पकड़े मोहरे आपके हाथ में', tutText2: 'जो मोहरा आप पकड़ते हैं वह आपका हो जाता है. वह बोर्ड के नीचे रहता है, और अपनी बारी में आप उसे चलने के बजाय खाली खाने पर रख सकते हैं.',
+        tutTitle3: 'पदोन्नति और जीत', tutText3: 'दूर की तीन पंक्तियों में पहुँचकर मोहरा पदोन्नत होकर मज़बूत बनता है. राजा को मात देकर जीतें. जितनी चाहें चालें वापस लें.',
+        settingsNote: 'नया स्तर कंप्यूटर की अगली चाल से लागू होगा.'
+      },
+      zh: {
+        moveCount: '步数',
+        table: '将棋棋盘', helpT: '玩法', settingsT: '选项', newMatch: '新对局', undoMove: '悔棋',
+        levelT: '难度', easy: '简单', normal: '中等', hard: '困难', modeT: '玩家', vsAi: '对战电脑', twoPlayers: '双人',
+        yourMove: '轮到你（▲ 下方）', aiThinking: '电脑思考中…', senteMove: '轮到 ▲ 下方', goteMove: '轮到 △ 上方', check: '将军！',
+        youWin: '你赢了', youLose: '电脑赢了', senteWins: '▲ 下方获胜', goteWins: '△ 上方获胜', drawT: '和棋',
+        mateT: '将死', stuckT: '无合法着法', perpT: '连续将军判负', repT: '同一局面出现四次', capT: '300 步上限',
+        movesN: '{n} 步', promoteQ: '升变这枚棋子？', promoteYes: '升变', promoteNo: '不升',
+        facesT: '棋子字面', faceKanji: '日文', faceLatin: '字母', marksT: '显示每枚棋子的走法（棋子上的点）',
+        rules: '将棋是日本象棋，在 9×9 棋盘上进行，每枚棋子的尖端都指向对手。你从下方（▲）先走。吃掉的棋子归你所有，留在手中，你可以不走棋而把它打入任意空格。',
+        piecesT: '棋子',
+        pK: '王：向任意方向走一格。', pR: '飞车：直线任意格。升变为龙王后还可斜走一格。',
+        pB: '角行：斜线任意格。升变为龙马后还可直走一格。', pG: '金将：直走一格或向前斜走一格。不能升变。',
+        pS: '银将：斜走一格或向正前走一格。', pN: '桂马：向前两格再横一格跳跃，只能向前。',
+        pL: '香车：向正前方走任意格。', pP: '步兵：向前一格，吃子也一样。',
+        promoT: '升变', promoText: '对方一侧的三行是升变区。进入、离开或在其中移动的棋子可以翻面升变；升变后的棋子用红字表示。银、桂、香、步升变后按金将走法。走到最后一行的步和香、最后两行的桂必须升变。',
+        dropT: '打入', dropText: '先点手中的棋子，再点一个空格。打入的棋子都是未升变的。同一列不能有你两枚未升变的步，不能打在再也走不动的地方，打步可以将军但不能将死。',
+        endT: '结束', endText: '将死对方的王即获胜；无合法着法的一方判负。同一局面出现四次为和棋，但若一方每步都在将军，则该方判负。300 步后为和棋。',
+        kbT: '键盘', kbNav: '移动光标（棋盘下方是你的手牌）', kbPick: '选择 / 走棋', kbCancel: '取消', kbNew: '新对局',
+        ok: '好', tutT: '教程', restartDaily: '重新开始每日对局？', dailyT: '每日对局',
+        tutTitle1: '棋子朝前', tutText1: '每枚棋子都指向对手，你在下方。棋子上的点表示能走到哪里，短线表示可以走任意格。',
+        tutTitle2: '吃子进入手中', tutText2: '你吃掉的棋子归你所有。它在棋盘下方等候，轮到你时可以不走棋而把它打入空格。',
+        tutTitle3: '升变与获胜', tutText3: '棋子到达对方三行可以升变，变得更强。将死对方的王即获胜。悔棋不限次数。',
+        settingsNote: '新难度从电脑下一步起生效。'
+      },
+      de: {
+        moveCount: 'Züge',
+        table: 'Shogi-Brett', helpT: 'Spielanleitung', settingsT: 'Optionen', newMatch: 'Neues Spiel', undoMove: 'Zug zurück',
+        levelT: 'Stufe', easy: 'Leicht', normal: 'Mittel', hard: 'Schwer', modeT: 'Spieler', vsAi: 'Gegen den Computer', twoPlayers: 'Zwei Spieler',
+        yourMove: 'Du bist dran (▲ unten)', aiThinking: 'Der Computer denkt…', senteMove: '▲ Unten ist dran', goteMove: '△ Oben ist dran', check: 'Schach!',
+        youWin: 'Gewonnen', youLose: 'Der Computer gewinnt', senteWins: '▲ Unten gewinnt', goteWins: '△ Oben gewinnt', drawT: 'Remis',
+        mateT: 'Schachmatt', stuckT: 'kein erlaubter Zug mehr', perpT: 'Dauerschach verliert', repT: 'viermal dieselbe Stellung', capT: 'Grenze von 300 Zügen',
+        movesN: '{n} Züge', promoteQ: 'Diese Figur befördern?', promoteYes: 'Befördern', promoteNo: 'Lassen',
+        facesT: 'Figurenbeschriftung', faceKanji: 'Japanisch', faceLatin: 'Buchstaben', marksT: 'Zugrichtungen zeigen (Punkte auf der Figur)',
+        rules: 'Shogi ist japanisches Schach auf einem 9×9-Brett; jede Figur zeigt zum Gegner. Du beginnst unten (▲). Eine geschlagene Figur wechselt die Seite und wartet in deiner Hand; statt zu ziehen, kannst du sie auf ein beliebiges leeres Feld einsetzen.',
+        piecesT: 'Figuren',
+        pK: 'König: ein Schritt in jede Richtung.', pR: 'Turm: gerade, beliebig weit. Befördert (Drache) auch ein Schritt diagonal.',
+        pB: 'Läufer: diagonal, beliebig weit. Befördert (Pferd) auch ein Schritt gerade.', pG: 'Goldgeneral: ein Schritt gerade oder diagonal nach vorn. Wird nie befördert.',
+        pS: 'Silbergeneral: ein Schritt diagonal oder gerade nach vorn.', pN: 'Springer: springt zwei nach vorn und eins zur Seite, nur vorwärts.',
+        pL: 'Lanze: gerade nach vorn, beliebig weit.', pP: 'Bauer: ein Schritt nach vorn und schlägt ebenso.',
+        promoT: 'Beförderung', promoText: 'Die drei fernen Reihen sind die Beförderungszone. Eine Figur, die hineinzieht, herauszieht oder sich darin bewegt, darf sich umdrehen und befördert werden; beförderte Figuren sind rot beschriftet. Silber, Springer, Lanze und Bauer ziehen dann wie Gold. Bauer oder Lanze auf der letzten Reihe und ein Springer auf den letzten zwei müssen befördert werden.',
+        dropT: 'Einsetzen', dropText: 'Tippe eine Figur in deiner Hand an, dann ein leeres Feld. Eingesetzte Figuren sind nie befördert. Verboten sind zwei unbeförderte eigene Bauern in einer Linie, Figuren dort, wo sie nie mehr ziehen könnten, und ein Matt durch einen eingesetzten Bauern (Schach ist erlaubt).',
+        endT: 'Spielende', endText: 'Setze den König matt, um zu gewinnen; wer keinen erlaubten Zug hat, verliert. Viermal dieselbe Stellung ist remis, außer eine Seite hat bei jedem Zug Schach gegeben – dann verliert sie. Nach 300 Zügen endet das Spiel remis.',
+        kbT: 'Tasten', kbNav: 'Cursor bewegen (unter dem Brett liegt deine Hand)', kbPick: 'Wählen / ziehen', kbCancel: 'Abbrechen', kbNew: 'Neues Spiel',
+        ok: 'OK', tutT: 'Anleitung', restartDaily: 'Tagesspiel neu beginnen?', dailyT: 'Tagesspiel',
+        tutTitle1: 'Figuren zeigen nach vorn', tutText1: 'Jede Figur zeigt zum Gegner, und du spielst von unten. Die Punkte auf einer Figur zeigen ihre Schritte; ein Strich heißt, sie gleitet beliebig weit.',
+        tutTitle2: 'Geschlagenes kommt in die Hand', tutText2: 'Eine geschlagene Figur gehört dir. Sie wartet unter dem Brett, und in deinem Zug kannst du sie statt eines Zuges auf ein leeres Feld setzen.',
+        tutTitle3: 'Befördern und gewinnen', tutText3: 'In den drei fernen Reihen kann eine Figur befördert werden und wird stärker. Setze den König matt, um zu gewinnen. Züge zurücknehmen geht unbegrenzt.',
+        settingsNote: 'Eine neue Stufe gilt ab dem nächsten Zug des Computers.'
+      },
+      es: {
+        moveCount: 'Jugadas',
+        table: 'Tablero de shogi', helpT: 'Cómo jugar', settingsT: 'Opciones', newMatch: 'Partida nueva', undoMove: 'Deshacer jugada',
+        levelT: 'Nivel', easy: 'Fácil', normal: 'Medio', hard: 'Difícil', modeT: 'Jugadores', vsAi: 'Contra el ordenador', twoPlayers: 'Dos jugadores',
+        yourMove: 'Te toca (▲ abajo)', aiThinking: 'El ordenador piensa…', senteMove: 'Turno de ▲ abajo', goteMove: 'Turno de △ arriba', check: '¡Jaque!',
+        youWin: 'Has ganado', youLose: 'Gana el ordenador', senteWins: 'Gana ▲ abajo', goteWins: 'Gana △ arriba', drawT: 'Tablas',
+        mateT: 'jaque mate', stuckT: 'sin jugadas legales', perpT: 'el jaque perpetuo pierde', repT: 'la misma posición cuatro veces', capT: 'límite de 300 jugadas',
+        movesN: '{n} jugadas', promoteQ: '¿Promocionar esta pieza?', promoteYes: 'Promocionar', promoteNo: 'Dejar',
+        facesT: 'Caras de las piezas', faceKanji: 'Japonés', faceLatin: 'Letras', marksT: 'Mostrar cómo mueve cada pieza (puntos en la pieza)',
+        rules: 'El shogi es el ajedrez japonés en un tablero de 9×9; cada pieza apunta al rival. Empiezas desde abajo (▲). Una pieza capturada cambia de bando y espera en tu mano; en lugar de mover, puedes soltarla en cualquier casilla vacía.',
+        piecesT: 'Piezas',
+        pK: 'Rey: un paso en cualquier dirección.', pR: 'Torre: en línea recta, cualquier distancia. Promocionada (dragón), también un paso en diagonal.',
+        pB: 'Alfil: en diagonal, cualquier distancia. Promocionado (caballo), también un paso recto.', pG: 'General de oro: un paso recto o en diagonal hacia delante. Nunca promociona.',
+        pS: 'General de plata: un paso en diagonal o recto hacia delante.', pN: 'Caballo: salta dos hacia delante y uno a un lado, solo hacia delante.',
+        pL: 'Lanza: recto hacia delante, cualquier distancia.', pP: 'Peón: un paso adelante, y captura igual.',
+        promoT: 'Promoción', promoText: 'Las tres filas lejanas son la zona de promoción. Una pieza que entra, sale o se mueve dentro de ella puede darse la vuelta y promocionar; las promocionadas se escriben en rojo. Plata, caballo, lanza y peón mueven entonces como el oro. Un peón o una lanza en la última fila, o un caballo en las dos últimas, deben promocionar.',
+        dropT: 'Soltar piezas', dropText: 'Toca una pieza de tu mano y luego una casilla vacía. Una pieza soltada nunca está promocionada. No puedes tener dos peones sin promocionar en una columna, soltar una pieza donde no podría moverse nunca, ni dar mate con un peón soltado (el jaque sí vale).',
+        endT: 'El final', endText: 'Da mate al rey para ganar; el bando sin jugadas legales pierde. La misma posición cuatro veces es tablas, salvo que un bando diera jaque en cada jugada: ese bando pierde. Tras 300 jugadas la partida es tablas.',
+        kbT: 'Teclas', kbNav: 'Mover el cursor (bajo el tablero está tu mano)', kbPick: 'Elegir / mover', kbCancel: 'Cancelar', kbNew: 'Partida nueva',
+        ok: 'Vale', tutT: 'Tutorial', restartDaily: '¿Reiniciar la partida del día?', dailyT: 'Partida del día',
+        tutTitle1: 'Las piezas apuntan adelante', tutText1: 'Cada pieza apunta a su rival, y tú juegas desde abajo. Los puntos de una pieza muestran adónde va; una raya significa que se desliza cualquier distancia.',
+        tutTitle2: 'Lo capturado va a tu mano', tutText2: 'Una pieza que capturas pasa a ser tuya. Espera bajo el tablero y en tu turno puedes soltarla en una casilla vacía en lugar de mover.',
+        tutTitle3: 'Promociona y gana', tutText3: 'En las tres filas lejanas una pieza puede promocionar y hacerse más fuerte. Da mate al rey para ganar. Deshaz tantas jugadas como quieras.',
+        settingsNote: 'El nuevo nivel se aplica desde la próxima jugada del ordenador.'
+      }
+    }
+  });
+
+  var dailyDate = new URLSearchParams(location.search).get('daily');
+  var KANJI = ['', '歩', '香', '桂', '銀', '金', '角', '飛', '王', 'と', '杏', '圭', '全', '馬', '龍'];
+  var LATIN = ['', 'P', 'L', 'N', 'S', 'G', 'B', 'R', 'K', '+P', '+L', '+N', '+S', '+B', '+R'];
+  // hand stand slots, strongest first
+  var ORDER = [7, 6, 5, 4, 3, 2, 1];
+  var TILE = 'M50 4 L82 17 L92 96 L8 96 L18 17 Z';
+
+  var prefs = ctx.store.get('prefs', null) || {};
+  prefs = { level: prefs.level || 2, mode: prefs.mode === 'two' ? 'two' : 'ai', latin: !!prefs.latin, marks: prefs.marks !== false };
+
+  // a piece face as SVG markup: the tile, the move dots (bars for sliders) and the glyph.
+  // Gote is drawn by rotating the whole face, so its marks keep pointing the way it moves.
+  function face(t, gote, o) {
+    o = o || {};
+    var latin = o.latin != null ? o.latin : prefs.latin;
+    var marks = o.marks != null ? o.marks : prefs.marks;
+    var red = t > 8;
+    var g = '<path class="sg-tile" d="' + TILE + '"/>';
+    if (marks) {
+      var st = E.STEP[t], sl = E.SLIDE[t];
+      for (var i = 0; i < E.DIRS.length; i++) {
+        var df = E.DIRS[i][0], dr = E.DIRS[i][1], bit = E.DIRS[i][2];
+        var x = 50 + df * 29, y = 56 + dr * 32;
+        if (sl & bit) {
+          g += '<line class="sg-mark" x1="' + (x - df * 5) + '" y1="' + (y - dr * 5) + '" x2="' + (x + df * 5) + '" y2="' + (y + dr * 5) + '"/>';
+        } else if (st & bit) {
+          g += '<circle class="sg-mark" cx="' + x + '" cy="' + y + '" r="3.6" stroke="none"/>';
+        }
+      }
+      if (t === 3) g += '<circle class="sg-mark" cx="37" cy="13" r="3.4" stroke="none"/><circle class="sg-mark" cx="63" cy="13" r="3.4" stroke="none"/>';
+    }
+    var txt = latin ? LATIN[t] : (t === 8 && gote ? '玉' : KANJI[t]);
+    var size = latin ? (txt.length > 1 ? 30 : 38) : (marks ? 40 : 46);
+    var gy = marks ? 70 : 68;
+    g += '<text class="sg-glyph' + (latin ? ' sg-latin' : '') + '" x="50" y="' + gy + '" font-size="' + size + '">' + txt + '</text>';
+    return '<svg viewBox="0 0 100 100" aria-hidden="true"><g class="' + (red ? 'sg-red' : '') + (gote ? ' sg-gote' : '') + '"' +
+      (gote ? ' transform="rotate(180 50 50)"' : '') + '>' + g + '</g></svg>';
+  }
+
+  function pieceNode(t, gote, cls) {
+    var n = el('div', { class: 'sg-pc' + (gote ? ' sg-pc--gote' : '') + (cls ? ' ' + cls : '') });
+    n.innerHTML = face(t, gote);
+    return n;
+  }
+
+  var board = el('div', { class: 'sg-board', role: 'application', tabindex: '0', 'aria-label': C.t('table') });
+  var standG = el('div', { class: 'sg-stand' }), standS = el('div', { class: 'sg-stand' });
+  var grid = el('div', { class: 'sg-grid' });
+  var gs = '<svg viewBox="0 0 9 9" preserveAspectRatio="none" aria-hidden="true">';
+  for (var gi = 1; gi < 9; gi++) gs += '<line x1="' + gi + '" y1="0" x2="' + gi + '" y2="9"/><line x1="0" y1="' + gi + '" x2="9" y2="' + gi + '"/>';
+  gs += '<circle cx="3" cy="3" r=".07"/><circle cx="6" cy="3" r=".07"/><circle cx="3" cy="6" r=".07"/><circle cx="6" cy="6" r=".07"/></svg>';
+  grid.innerHTML = gs;
+  var layer = el('div', { style: 'position:absolute;top:0;right:0;bottom:0;left:0' });
+  board.appendChild(standG); board.appendChild(standS); board.appendChild(grid); board.appendChild(layer);
+
+  var topRow = el('div', { class: 'sg-top' });
+  var statusEl = el('div', { class: 'sg-status', role: 'status', 'aria-live': 'polite' });
+  var movesEl = el('div', { class: 'sg-moves' });
+  var side = el('div', { class: 'ch-side' }, [topRow, statusEl, movesEl]);
+  // a calc() ratio: a bare "9 / 11.6" would be divided twice by the core's 100cqw / var(--fit-ar)
+  var wrap = el('div', { class: 'sg-wrap ch-split', style: '--fit-ar: calc(9 / 11.6)' }, [
+    el('div', { class: 'ch-fit' }, [board]), side
+  ]);
+
+  var S = null, L = null, sel = null, targets = [], cur = { r: 6, f: 4 }, kbOn = false;
+  var busy = false, thinkSeq = 0, askedAt = 0, pausedAt = 0, finishing = false, worker = null, workerBad = false;
+
+  ctx.button({ icon: 'help', label: C.t('helpT'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  function place(n, x, y, w, h) {
+    n.style.left = x + 'px'; n.style.top = y + 'px';
+    if (w != null) { n.style.width = w + 'px'; n.style.height = h + 'px'; }
+  }
+
+  function layout() {
+    var W = board.clientWidth, H = board.clientHeight;
+    if (!W || !H) return false;
+    var cell = Math.min(W / 9.2, H / 11.6);
+    var x0 = (W - cell * 9) / 2, top = (H - cell * 11.6) / 2;
+    L = { cell: cell, x0: x0, gy: top + cell * 1.3, ty: top, by: top + cell * 10.5, slot: cell * 9 / 7 };
+    board.style.setProperty('--sg-cell', cell + 'px');
+    board.style.setProperty('--sg-pc', Math.round(cell * 0.94) + 'px');
+    place(grid, x0, L.gy, cell * 9, cell * 9);
+    place(standG, x0, L.ty, cell * 9, cell * 1.1);
+    place(standS, x0, L.by, cell * 9, cell * 1.1);
+    return true;
+  }
+
+  function sqXY(i) { return [L.x0 + (i % 9 + 0.5) * L.cell, L.gy + (((i / 9) | 0) + 0.5) * L.cell]; }
+  function slotXY(s, k) {
+    var col = s === 0 ? k : 6 - k;
+    return [L.x0 + (col + 0.5) * L.slot, (s === 0 ? L.by : L.ty) + 0.55 * L.cell];
+  }
+
+  function levelName(v) { return v === 1 ? 'easy' : v === 3 ? 'hard' : 'normal'; }
+  function badge(text, accent) { return el('span', { class: 'ch-badge' + (accent ? ' ch-badge--accent' : ''), text: text }); }
+  function sqName(i) { return (9 - i % 9) + 'abcdefghi'.charAt((i / 9) | 0); }
+  function note(h) {
+    return (h.s ? '△' : '▲') + LATIN[h.p] + (h.d ? '*' : (h.cap ? 'x' : '-')) + sqName(h.t) + (h.pr ? '+' : '');
+  }
+
+  function renderPieces() {
+    layer.textContent = '';
+    var i, xy, n, h = S.hist.length ? S.hist[S.hist.length - 1] : null;
+    if (h) {
+      [h.t].concat(h.d ? [] : [h.f]).forEach(function (q) {
+        var p = sqXY(q), d = el('div', { class: 'sg-last' });
+        place(d, p[0] - L.cell / 2, p[1] - L.cell / 2, L.cell, L.cell);
+        layer.appendChild(d);
+      });
+    }
+    for (i = 0; i < 81; i++) {
+      var v = S.b[i];
+      if (!v) continue;
+      n = pieceNode(Math.abs(v), v < 0, sel && sel.sq === i ? 'sg-sel' : '');
+      xy = sqXY(i);
+      place(n, xy[0], xy[1]);
+      layer.appendChild(n);
+    }
+    for (var s = 0; s < 2; s++) {
+      for (var k = 0; k < 7; k++) {
+        var t = ORDER[k], c = S.hand[s][t];
+        if (!c) continue;
+        n = pieceNode(t, s === 1, sel && sel.hand === t && S.turn === s ? 'sg-sel' : '');
+        if (c > 1) n.appendChild(el('span', { class: 'sg-count', text: C.num(c) }));
+        xy = slotXY(s, k);
+        place(n, xy[0], xy[1]);
+        layer.appendChild(n);
+      }
+    }
+    for (i = 0; i < targets.length; i++) {
+      xy = sqXY(targets[i]);
+      var dot = el('div', { class: 'sg-dot' + (S.b[targets[i]] ? ' sg-dot--cap' : '') });
+      place(dot, xy[0], xy[1]);
+      layer.appendChild(dot);
+    }
+    standS.classList.toggle('sg-stand--on', !S.finished && S.turn === 0);
+    standG.classList.toggle('sg-stand--on', !S.finished && S.turn === 1);
+    if (kbOn) {
+      var cu = el('div', { class: 'sg-cursor' });
+      xy = cur.r === 9 ? slotXY(S.turn, Math.min(cur.f, 6)) : sqXY(cur.r * 9 + cur.f);
+      place(cu, xy[0], xy[1], L.cell, L.cell);
+      layer.appendChild(cu);
+    }
+  }
+
+  function reasonText(st) {
+    return C.t({ mate: 'mateT', stuck: 'stuckT', perpetual: 'perpT', rep: 'repT', cap: 'capT' }[st.reason] || 'drawT');
+  }
+  function resultText(st) {
+    if (st.winner < 0) return C.t('drawT');
+    if (S.mode === 'ai') return st.winner === 0 ? C.t('youWin') : C.t('youLose');
+    return st.winner === 0 ? C.t('senteWins') : C.t('goteWins');
+  }
+
+  function renderSide(st) {
+    topRow.textContent = '';
+    topRow.appendChild(badge(C.t(S.mode === 'ai' ? 'vsAi' : 'twoPlayers')));
+    if (S.mode === 'ai') topRow.appendChild(badge(C.t(levelName(S.level))));
+    if (S.daily) topRow.appendChild(badge(C.t('dailyT'), true));
+    topRow.appendChild(badge(C.t('movesN', { n: C.num(S.hist.length) })));
+    // options behind a gear in this row: a fourth game-bar button cut the title (#409)
+    var gear = el('button', { class: 'ch-iconbtn sg-gear', type: 'button', 'aria-label': C.t('settingsT'), title: C.t('settingsT') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', showSettings);
+    topRow.appendChild(gear);
+    var txt;
+    if (st.over) txt = resultText(st) + ' — ' + reasonText(st);
+    else if (busy) txt = C.t('aiThinking');
+    else {
+      txt = S.mode === 'ai' ? (S.turn === 0 ? C.t('yourMove') : C.t('aiThinking')) : C.t(S.turn === 0 ? 'senteMove' : 'goteMove');
+      if (st.check) txt = C.t('check') + ' ' + txt;
+    }
+    statusEl.textContent = txt;
+    statusEl.classList.toggle('sg-status--bad', !!(st.check && !st.over));
+    movesEl.textContent = '';
+    for (var i = Math.max(0, S.hist.length - 12); i < S.hist.length; i++) {
+      movesEl.appendChild(el('span', { class: 'sg-move', text: (i + 1) + '. ' + note(S.hist[i]) }));
+    }
+    movesEl.scrollTop = movesEl.scrollHeight;
+  }
+
+  function render(st) {
+    if (!S || !layout()) return;
+    st = st || E.status(S);
+    renderPieces();
+    renderSide(st);
+    if (st.over && !finishing) finishGame(st);
+  }
+
+  function save() { if (S) ctx.save(); }
+
+  function newGame(o) {
+    o = o || {};
+    cancelThink();
+    finishing = false;
+    S = E.deal({
+      level: o.level || prefs.level, mode: o.mode || prefs.mode, daily: o.daily || null,
+      seed: o.daily || Math.random().toString(36).slice(2, 10)
+    });
+    S.startedAt = Date.now();
+    pausedAt = 0; sel = null; targets = []; kbOn = false; cur = { r: 6, f: 4 };
+    render();
+    save();
+  }
+
+  function resume(v) {
+    finishing = false;
+    S = E.clone(v.s);
+    S.startedAt = Date.now() - (v.elapsed || 0);
+    S.finished = false;
+    pausedAt = 0; sel = null; targets = [];
+    render();
+    if (S.mode === 'ai' && S.turn === 1) askBot();
+  }
+
+  function blocked() { return !S || S.finished || busy || finishing || !!document.querySelector('.ch-scrim'); }
+  function humanTurn() { return S.mode === 'two' || S.turn === 0; }
+
+  function pick(s) {
+    var ms = E.legal(S), out = [];
+    for (var i = 0; i < ms.length; i++) {
+      var m = ms[i];
+      if (s.sq != null ? (!m.d && m.f === s.sq) : m.d === s.hand) if (out.indexOf(m.t) < 0) out.push(m.t);
+    }
+    return out;
+  }
+
+  function select(s) {
+    sel = s; targets = pick(s);
+    if (!targets.length) { sel = null; C.feedback('bad'); } else C.feedback('select');
+    render();
+  }
+
+  function tapSquare(i) {
+    if (blocked() || !humanTurn()) return;
+    var v = S.b[i];
+    if (sel && targets.indexOf(i) >= 0) { moveTo(i); return; }
+    if (v && (v > 0 ? 0 : 1) === S.turn) { if (sel && sel.sq === i) { sel = null; targets = []; render(); } else select({ sq: i }); return; }
+    sel = null; targets = [];
+    C.feedback('tap');
+    render();
+  }
+
+  function tapHand(s, k) {
+    if (blocked() || !humanTurn() || s !== S.turn) return;
+    var t = ORDER[k];
+    if (!S.hand[s][t]) return;
+    if (sel && sel.hand === t) { sel = null; targets = []; render(); return; }
+    select({ hand: t });
+  }
+
+  function moveTo(i) {
+    var ms = E.legal(S), c = [];
+    for (var k = 0; k < ms.length; k++) {
+      var m = ms[k];
+      if (m.t === i && (sel.sq != null ? (!m.d && m.f === sel.sq) : m.d === sel.hand)) c.push(m);
+    }
+    if (!c.length) { C.feedback('bad'); return; }
+    if (c.length === 1) { doPlay(c[0]); return; }
+    // both promoting and keeping are legal: the player chooses, and closing the window cancels
+    var keep = c[0].pr ? c[1] : c[0], prom = c[0].pr ? c[0] : c[1];
+    var t = Math.abs(S.b[keep.f]), gote = S.turn === 1, chosen = false;
+    var row = el('div', { class: 'sg-pick' }, [pieceNode(t, gote), pieceNode(E.PROMO[t], gote)]);
+    C.ui.modal({
+      title: C.t('promoteQ'), body: row,
+      onClose: function (via) { if (via !== 'action') { sel = null; targets = []; render(); } },
+      actions: [
+        { label: C.t('promoteNo'), onClick: function () { if (!chosen) { chosen = true; doPlay(keep); } } },
+        { label: C.t('promoteYes'), kind: 'primary', onClick: function () { if (!chosen) { chosen = true; doPlay(prom); } } }
+      ]
+    });
+  }
+
+  function doPlay(m) {
+    var h = E.play(S, m);
+    if (!h) { C.feedback('bad'); return; }
+    C.audio.sfx(h.cap ? 'pop' : 'place');
+    C.haptic('tap');
+    sel = null; targets = [];
+    after();
+  }
+
+  function after() {
+    var st = E.status(S);
+    if (st.over) S.finished = true;
+    else if (st.check) C.feedback('bad');
+    render(st);
+    save();
+    if (!st.over && S.mode === 'ai' && S.turn === 1) askBot();
+  }
+
+  // the bot thinks in a Blob worker so the page never freezes; the engine's play() stays the judge
+  function getWorker() {
+    if (worker || workerBad || !window.Worker || !window.Blob) return worker;
+    try {
+      var src = ShogiEngineFactory.toString() + '\nvar E = ShogiEngineFactory();\n' +
+        'onmessage = function (e) { var d = e.data; postMessage({ id: d.id, m: E.think(d.s, d.level, d.salt) }); };';
+      var url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+      worker = new Worker(url);
+      worker.onmessage = function (e) { botReply(e.data.id, e.data.m); };
+      worker.onerror = function (e) {
+        if (e && e.preventDefault) e.preventDefault();
+        workerBad = true; worker = null;
+        localThink(thinkSeq);
+      };
+    } catch (err) { workerBad = true; worker = null; }
+    return worker;
+  }
+
+  function req() { return { b: S.b, hand: S.hand, turn: S.turn }; }
+  function salt() { return S.seed + ':' + S.hist.length; }
+
+  function localThink(id) {
+    setTimeout(function () {
+      if (id !== thinkSeq || !S) return;
+      var m = null;
+      try { m = E.think(req(), S.level, salt()); } catch (err) { m = null; }
+      botReply(id, m);
+    }, 30);
+  }
+
+  function askBot() {
+    if (!S || S.finished || S.mode !== 'ai' || S.turn !== 1) return;
+    busy = true;
+    var id = ++thinkSeq;
+    askedAt = Date.now();
+    render();
+    var w = getWorker();
+    if (w) {
+      try { w.postMessage({ id: id, s: req(), level: S.level, salt: salt() }); return; } catch (err) { workerBad = true; worker = null; }
+    }
+    localThink(id);
+  }
+
+  function botReply(id, m) {
+    if (id !== thinkSeq || !S || S.finished) return;
+    var wait = Math.max(0, 450 - (Date.now() - askedAt));
+    setTimeout(function () {
+      if (id !== thinkSeq || !S || S.finished || S.turn !== 1) return;
+      busy = false;
+      var h = m ? E.play(S, m) : null;
+      if (!h) { var ms = E.legal(S); if (ms.length) h = E.play(S, ms[0]); }
+      if (h) C.audio.sfx(h.cap ? 'pop' : 'place');
+      sel = null; targets = [];
+      after();
+    }, wait);
+  }
+
+  function cancelThink() { thinkSeq++; busy = false; }
+
+  function undo() {
+    if (!S || S.finished || document.querySelector('.ch-scrim')) return;
+    cancelThink();
+    if (!S.hist.length) { C.feedback('bad'); render(); return; }
+    E.undo(S);
+    // against the computer, step back to the player's own turn
+    while (S.mode === 'ai' && S.turn !== 0 && S.hist.length) E.undo(S);
+    if (S.mode === 'ai' && S.turn !== 0) { askBot(); }
+    S.undos++;
+    sel = null; targets = [];
+    C.feedback('tap');
+    render();
+    save();
+  }
+
+  function finishGame(st) {
+    finishing = true;
+    S.finished = true;
+    var ms = Date.now() - S.startedAt;
+    var draw = st.winner < 0, ai = S.mode === 'ai';
+    var won = ai ? st.winner === 0 : !draw;
+    var coins = draw ? 6 : (ai ? (st.winner === 0 ? 14 : 4) : 8) + (ai && S.level === 3 ? 4 : 0) + (S.daily ? 8 : 0);
+    var points = draw ? 16 : (won ? 50 : 12) + (ai && S.level === 3 ? 20 : 0) + (S.daily ? 25 : 0);
+    if (S.daily) {
+      var first = C.stats.daily('shogi', S.daily, { label: C.t('movesN', { n: C.num(S.hist.length) }), win: ai && st.winner === 0 });
+      if (!first) { coins = Math.max(1, Math.round(coins * 0.2)); points = Math.max(1, Math.round(points * 0.2)); }
+    }
+    if (ai && st.winner === 0) {
+      C.achievements.unlock('sg-win');
+      if (S.level === 3) C.achievements.unlock('sg-hard');
+      var last = S.hist[S.hist.length - 1];
+      if (st.reason === 'mate' && last && last.d && last.s === 0) C.achievements.unlock('sg-drop');
+      C.stats.best('shogi', 'moves' + S.level, S.hist.length, true);
+    }
+    ctx.clearSave();
+    ctx.finish({
+      won: won,
+      title: resultText(st),
+      timeMs: ms,
+      coins: coins,
+      points: points,
+      lines: [
+        { label: C.t('modeT'), value: C.t(ai ? 'vsAi' : 'twoPlayers') + (ai ? ' · ' + C.t(levelName(S.level)) : '') },
+        { label: C.t('endT'), value: reasonText(st) },
+        { label: C.t('moveCount'), value: C.num(S.hist.length) },
+        { label: C.t('time'), value: C.time(ms) }
+      ],
+      shareText: 'چوگان · شطرنج ژاپنی — ' + resultText(st) + ' · ' + C.num(S.hist.length) + ' حرکت',
+      paint: function (g, W, H, col) {
+        var w = Math.round(W * 0.15);
+        function one(cx, cy, glyph, flip) {
+          g.save(); g.translate(cx, cy); if (flip) g.rotate(Math.PI); g.scale(w / 100, w / 100); g.translate(-50, -50);
+          g.beginPath(); g.moveTo(50, 4); g.lineTo(82, 17); g.lineTo(92, 96); g.lineTo(8, 96); g.lineTo(18, 17); g.closePath();
+          g.fillStyle = '#F8E7BE'; g.fill(); g.lineWidth = 3; g.strokeStyle = '#8B6833'; g.stroke();
+          g.fillStyle = '#201912'; g.font = '700 44px "Noto Serif JP", serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+          g.fillText(glyph, 50, 60);
+          g.restore();
+        }
+        one(W / 2 - w * 0.7, H * 0.3, '玉', true);
+        one(W / 2 + w * 0.7, H * 0.3, '王', false);
+      },
+      onAgain: S.daily ? null : function () { newGame({ level: S.level, mode: S.mode }); }
+    });
+  }
+
+  function askNew() {
+    if (document.querySelector('.ch-scrim')) return;
+    C.ui.confirm({
+      title: S && S.daily ? C.t('restartDaily') : C.t('newMatch'),
+      body: C.t('resetWarn'),
+      onOk: function () { newGame({ daily: S && S.daily ? S.daily : null, level: S && S.daily ? 2 : prefs.level, mode: S && S.daily ? 'ai' : prefs.mode }); }
+    });
+  }
+
+  function storePrefs() { ctx.store.set('prefs', prefs); }
+
+  function showSettings() {
+    if (document.querySelector('.ch-scrim')) return;
+    var body = el('div', { class: 'sg-settings' });
+    body.appendChild(el('div', { class: 'ch-item__label', text: C.t('levelT') }));
+    body.appendChild(C.ui.segmented([
+      { value: 1, label: C.t('easy') }, { value: 2, label: C.t('normal') }, { value: 3, label: C.t('hard') }
+    ], S && !S.daily ? S.level : prefs.level, function (v) {
+      prefs.level = v; storePrefs();
+      // the daily game is always against the medium bot
+      if (S && !S.daily) { S.level = v; save(); }
+      render();
+    }));
+    body.appendChild(el('div', { class: 'ch-item__label', text: C.t('modeT'), style: 'margin-top:14px' }));
+    body.appendChild(C.ui.segmented([
+      { value: 'ai', label: C.t('vsAi') }, { value: 'two', label: C.t('twoPlayers') }
+    ], S && !S.daily ? S.mode : prefs.mode, function (v) {
+      prefs.mode = v === 'two' ? 'two' : 'ai'; storePrefs();
+      if (S && !S.daily && !S.finished) {
+        cancelThink();
+        S.mode = prefs.mode; save();
+        if (S.mode === 'ai' && S.turn === 1) { askBot(); return; }
+      }
+      render();
+    }));
+    body.appendChild(el('div', { class: 'ch-item__label', text: C.t('facesT'), style: 'margin-top:14px' }));
+    body.appendChild(C.ui.segmented([
+      { value: 'k', label: C.t('faceKanji') }, { value: 'l', label: C.t('faceLatin') }
+    ], prefs.latin ? 'l' : 'k', function (v) { prefs.latin = v === 'l'; storePrefs(); render(); }));
+    body.appendChild(el('div', { class: 'ch-item', style: 'margin-top:14px' }, [
+      el('div', { class: 'ch-item__label', text: C.t('marksT') }),
+      C.ui.switch(prefs.marks, function (v) { prefs.marks = !!v; storePrefs(); render(); })
+    ]));
+    body.appendChild(el('p', { class: 'sg-note', text: C.t('settingsNote') }));
+    C.ui.modal({ title: C.t('settingsT'), body: body, actions: [{ label: C.t('ok'), kind: 'primary' }] });
+  }
+
+  function kb(k, what) {
+    return el('div', { class: 'ch-item' }, [el('span', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]);
+  }
+  function helpRow(t, key) {
+    var n = pieceNode(t, false);
+    return el('div', { class: 'sg-help-row' }, [n, el('p', { text: C.t(key) })]);
+  }
+
+  function showHelp() {
+    if (document.querySelector('.ch-scrim')) return;
+    var promos = el('div', { class: 'sg-promos' });
+    [9, 10, 11, 12, 13, 14].forEach(function (t) { promos.appendChild(pieceNode(t, false)); });
+    C.ui.modal({
+      title: C.t('helpT'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { text: C.t('piecesT') }),
+        helpRow(8, 'pK'), helpRow(7, 'pR'), helpRow(6, 'pB'), helpRow(5, 'pG'),
+        helpRow(4, 'pS'), helpRow(3, 'pN'), helpRow(2, 'pL'), helpRow(1, 'pP'),
+        el('h3', { text: C.t('promoT') }),
+        el('p', { class: 'ch-dim', text: C.t('promoText') }),
+        promos,
+        el('h3', { text: C.t('dropT') }),
+        el('p', { class: 'ch-dim', text: C.t('dropText') }),
+        el('h3', { text: C.t('endT') }),
+        el('p', { class: 'ch-dim', text: C.t('endText') }),
+        el('h3', { text: C.t('kbT') }),
+        el('div', { class: 'ch-list' }, [
+          kb('← → ↑ ↓', C.t('kbNav')), kb('Enter', C.t('kbPick')), kb('Escape', C.t('kbCancel')),
+          kb('U / Ctrl+Z', C.t('undoMove')), kb('N', C.t('kbNew'))
+        ])
+      ],
+      actions: [
+        { label: C.t('tutT'), onClick: function () { ctx.showTutorial(TUT); } },
+        { label: C.t('ok'), kind: 'primary' }
+      ]
+    });
+  }
+
+  function hit(e) {
+    if (!L) return null;
+    var rect = board.getBoundingClientRect();
+    var x = e.clientX - rect.left, y = e.clientY - rect.top;
+    var f = Math.floor((x - L.x0) / L.cell), r = Math.floor((y - L.gy) / L.cell);
+    if (f >= 0 && f < 9 && r >= 0 && r < 9) return { sq: r * 9 + f };
+    var col = Math.floor((x - L.x0) / L.slot);
+    if (col < 0 || col > 6) return null;
+    if (y >= L.by - L.cell * 0.2 && y <= L.by + L.cell * 1.3) return { s: 0, k: col };
+    if (y >= L.ty - L.cell * 0.2 && y <= L.ty + L.cell * 1.3) return { s: 1, k: 6 - col };
+    return null;
+  }
+
+  board.addEventListener('pointerdown', function (e) {
+    if (e.button !== undefined && e.button !== 0) return;
+    kbOn = false;
+    var h = hit(e);
+    e.preventDefault();
+    if (!h) { if (sel) { sel = null; targets = []; render(); } return; }
+    if (h.sq != null) { cur = { r: (h.sq / 9) | 0, f: h.sq % 9 }; tapSquare(h.sq); } else tapHand(h.s, h.k);
+  }, { passive: false });
+
+  document.addEventListener('keydown', function (e) {
+    if (!S) return;
+    var tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (document.querySelector('.ch-scrim')) return;
+    if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var k = e.key;
+    // the board is positioned in pixels, not a CSS grid, so arrows are not flipped in RTL (#338)
+    if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {
+      kbOn = true;
+      if (k === 'ArrowLeft') cur.f = (cur.f + 8) % 9;
+      else if (k === 'ArrowRight') cur.f = (cur.f + 1) % 9;
+      else if (k === 'ArrowUp') cur.r = (cur.r + 9) % 10;
+      else cur.r = (cur.r + 1) % 10;
+      render();
+      e.preventDefault();
+      return;
+    }
+    if (k === 'Enter' || k === ' ') {
+      kbOn = true;
+      if (cur.r === 9) tapHand(S.turn, Math.min(cur.f, 6)); else tapSquare(cur.r * 9 + cur.f);
+      render();
+      e.preventDefault();
+      return;
+    }
+    if (k === 'Escape') { kbOn = false; sel = null; targets = []; render(); e.preventDefault(); return; }
+    if (C.keyIs(e, 'n')) { askNew(); e.preventDefault(); }
+  });
+
+  C.onPause(function () { cancelThink(); pausedAt = Date.now(); });
+  C.onResume(function () {
+    if (pausedAt && S) { S.startedAt += Date.now() - pausedAt; pausedAt = 0; }
+    if (S && !S.finished && S.mode === 'ai' && S.turn === 1) askBot();
+  });
+
+  ctx.autosave(function () {
+    if (!S || S.finished || !S.hist.length) return { inProgress: false };
+    return {
+      s: { b: S.b, hand: S.hand, turn: S.turn, hist: S.hist, keys: S.keys, level: S.level, mode: S.mode, daily: S.daily, undos: S.undos, seed: S.seed },
+      elapsed: (pausedAt || Date.now()) - S.startedAt
+    };
+  });
+
+  function art(list) {
+    var s = '<svg viewBox="0 0 200 110" width="100%" direction="ltr"><rect x="10" y="6" width="180" height="98" rx="8" fill="#DDB46C"/>';
+    list.forEach(function (p) {
+      s += '<svg x="' + p[0] + '" y="' + p[1] + '" width="' + p[2] + '" height="' + p[2] + '" viewBox="0 0 100 100">' +
+        face(p[3], !!p[4], { latin: false, marks: true }).replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '') + '</svg>';
+    });
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: art([[40, 14, 40, 7, 1], [80, 56, 44, 4], [126, 56, 44, 3]]) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: art([[30, 30, 46, 6], [82, 34, 38, 1], [130, 34, 38, 5]]) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: art([[36, 30, 46, 7], [118, 30, 46, 14]]) }
+  ];
+
+  function boot() {
+    var saved = ctx.loadSave();
+    var sv = saved && saved.s && E.validState(saved.s) ? saved.s : null;
+    if (dailyDate) {
+      if (sv && sv.daily === dailyDate) resume(saved);
+      else newGame({ daily: dailyDate, level: 2, mode: 'ai' });
+      if (C.stats.dailyDone('shogi', dailyDate)) {
+        var rec = C.stats.dailyOf(dailyDate).shogi;
+        C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+      }
+    } else if (sv && !sv.daily) {
+      resume(saved);
+    } else {
+      newGame({});
+    }
+    ctx.tutorialIfNew(TUT);
+    requestAnimationFrame(function () { render(); });
+  }
+
+  window.addEventListener('resize', function () { render(); });
+  if (window.ResizeObserver) { try { new ResizeObserver(function () { render(); }).observe(board); } catch (err) {} }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { render(); });
+
+  boot();
+})();
+</script>
+</body>
+</html>
