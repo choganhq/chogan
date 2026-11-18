@@ -20,7 +20,7 @@ module.exports = function (T) {
   }
 
   function testMinesweeperZoom() {
-    head('Minesweeper: the board zooms with a pinch, buttons or keys, and a tap still opens (#850)');
+    head('Minesweeper: the board zooms with a pinch, buttons or keys, and a tap still opens (#850, #950)');
     const E = loadEngine('minesweeper', 'MinesEngineFactory');
 
     // the engine: zoom grows the fitted cells, and the frame scrolls once they no longer fit
@@ -65,11 +65,31 @@ module.exports = function (T) {
         'fingers spread from 100px to 200px apart zoom 2× around their midpoint (' + JSON.stringify(seen) + ')');
       ok(prevented === 1, 'the two-finger move does not also scroll the board');
       ok(node.listeners.touchmove.opt && node.listeners.touchmove.opt.passive === false, 'touchmove is not passive, so it can stop that scroll');
+      // two thumbs playing fast: the next lands before the last lifts, and neither moves (#950)
+      seen.length = 0; prevented = 0;
+      node.fire('touchstart', ev([t(100, 300), t(260, 120)]));
+      node.fire('touchmove', ev([t(104, 302), t(258, 125)]));
+      node.fire('touchend', ev([t(258, 125)]));
+      node.fire('touchend', ev([]));
+      ok(seen.length === 0, 'two fingers that land and lift without spreading are taps, not a pinch (' + JSON.stringify(seen) + ')');
+      node.fire('touchstart', ev([t(100, 100), t(200, 100)]));
+      node.fire('touchmove', ev([t(95, 100), t(205, 100)]));
+      node.fire('touchmove', ev([t(80, 100), t(220, 100)]));
+      node.fire('touchend', ev([t(220, 100)]));
+      ok(seen.length === 3 && seen[0][0] === 'start' && seen[0][1] === 150 && seen[1][1] === 1.4 && seen[2][0] === 'end',
+        'the pinch begins once the fingers spread past the threshold, scaled from where they landed (' + JSON.stringify(seen) + ')');
       seen.length = 0;
       node.fire('wheel', { ctrlKey: true, deltaY: -100, clientX: 10, clientY: 20, preventDefault() {} });
       node.fire('wheel', { ctrlKey: false, deltaY: -100, clientX: 10, clientY: 20, preventDefault() {} });
       ok(seen.length === 3 && seen[1][1] > 1 && seen[1][2] === 10, 'Ctrl+wheel (a trackpad pinch) zooms in; a plain wheel scrolls');
     }
+
+    // the core's shake moves with translate, so a card placed by an inline transform shakes
+    // where it lies instead of jumping to the board's corner (Spider, #950)
+    const css = read('www/lib/chogan.css');
+    const shake = (css.match(/@keyframes ch-shake \{[\s\S]*?\n\}/) || [''])[0];
+    ok(shake.length > 0 && /translate:/.test(shake) && !/transform/.test(shake),
+      'the ch-shake keyframes use translate, never transform');
 
     // the page: wired to the pinch, the buttons and the keys, and the zoom is never saved
     const src = read('www/games/minesweeper/index.html');
