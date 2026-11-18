@@ -9864,7 +9864,7 @@ function testMenuSearch() {
   ok(games.length > 0, 'games listed (' + games.length + ')');
   const find = (q) => games.filter((g) => sb.m(g, q)).map((g) => g.id);
   const cases = [
-    ['شطرنج', ['chess', 'xiangqi']], ['chess', ['chess', 'xiangqi']], ['CHESS', ['chess', 'xiangqi']],
+    ['شطرنج', ['chess', 'xiangqi', 'shogi']], ['chess', ['chess', 'xiangqi', 'shogi']], ['CHESS', ['chess', 'xiangqi', 'shogi']],
     ['مین‌روب', ['minesweeper']], ['مین روب', ['minesweeper']], ['مينروب', ['minesweeper']],   // space, Arabic ي
     ['turmverteidigung', ['tower-defence']],                                                  // German soft hyphen
     ['数独', ['sudoku']], ['象棋', ['chess', 'xiangqi']], ['ajedrez', ['chess', 'xiangqi']], ['sudoku', ['sudoku']], ['फुटबॉल', ['football']], ['qqqzz', []]
