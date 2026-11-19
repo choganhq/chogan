@@ -91,6 +91,10 @@ module.exports = function (T) {
     const after = page.slice(page.indexOf('/* ==== ENGINE END ==== */'));
     ok(!/rngFor\('/.test(after) && (after.match(/seeded\('(field|wind|bot)/g) || []).length === 4, 'every field, wind and bot draw on the page goes through seeded()');
     ok(/C\.link\.available\(\)/.test(page), 'the two-phone mode is offered only where the link exists');
+    // a phone set to reduced motion lost every shell flight and showed only the result (#956)
+    const sh = (page.match(/function shoot\([^)]*\) \{[\s\S]*?\n {2}\}/) || [''])[0];
+    ok(sh.length > 0 && !/if \(C\.ui\.reduceMotion\(\)\) \{ landed\(\); return; \}/.test(sh) && /C\.ui\.motionOff\(\)/.test(sh) && /flight\.rate/.test(page),
+      'under reduced motion the shell still flies, quickly; only the Animations: Off setting skips the flight');
     const fin = (page.match(/function finish\(\) \{[\s\S]*?\n {2}\}/) || [''])[0];
     ok(fin.length > 0, 'finish() was found');
     // outside the bot-only block, every award must be fenced off from two phones

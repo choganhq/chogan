@@ -3070,6 +3070,9 @@
     });
   };
 
+  // the player's own Animations: Off, apart from the system preference
+  ui.motionOff = function () { return document.documentElement.getAttribute('data-motion') === 'off'; };
+
   ui.reduceMotion = function () {
     var m = document.documentElement.getAttribute('data-motion');
     if (m === 'off') return true;
