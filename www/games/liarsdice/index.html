@@ -1,0 +1,1062 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>تاس دروغگو — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  /* the table holds the bots' seats, the bid on the table and your own cup in one slot;
+     its sizes are in --u (a hundredth of its width), measured in code rather than set in
+     cq units, which the Android WebViews before Chrome 105 drop (#611) */
+  .ld-wrap > .ch-fit { --fit-ar: 0.95; }
+  .ch-fit > .ld-table { --u: 3.6px; aspect-ratio: 0.95; max-height: 100%; box-sizing: border-box;
+    display: flex; flex-direction: column; gap: calc(var(--u) * 2.4); padding: calc(var(--u) * 1.2) 0;
+    font-size: calc(var(--u) * 4); }
+  .ld-seats { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: calc(var(--u) * 2); }
+  .ld-seat { min-width: 0; display: flex; flex-direction: column; gap: calc(var(--u) * 1.2);
+    padding: calc(var(--u) * 1.8) calc(var(--u) * 2.2); border-radius: calc(var(--u) * 2.6);
+    background: var(--c-surface); box-shadow: var(--sh-1); transition: opacity var(--t-fast, .15s) ease; }
+  .ld-seat.ld-turn { box-shadow: inset 0 0 0 calc(var(--u) * .7) var(--game, var(--c-accent)), var(--sh-1); }
+  .ld-seat.ld-gone { opacity: .45; box-shadow: none; background: var(--c-surface-2); }
+  .ld-seat__h { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--u) * 1);
+    font-weight: 800; font-size: .9em; min-width: 0; }
+  .ld-seat__n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ld-seat__c { flex: none; font-variant-numeric: tabular-nums; color: var(--c-text-dim); }
+  .ld-seat__b { min-height: 1.5em; display: flex; align-items: center; gap: .3em; font-size: .85em; font-weight: 700;
+    color: var(--c-text-dim); white-space: nowrap; overflow: hidden; }
+  .ld-seat__b .ld-d { width: 1.35em; flex: none; }
+  /* cups read left to right in every language, so "the third die" is the same one for all */
+  .ld-cup { direction: ltr; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: calc(var(--u) * .8); }
+  .ld-d { display: block; aspect-ratio: 1; }
+  .ld-d svg { display: block; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+  .ld-face { fill: var(--c-surface); stroke: var(--c-line); stroke-width: 4; }
+  .ld-pip { fill: var(--c-text); }
+  .ld-back .ld-face { fill: var(--game, var(--c-accent)); stroke: var(--game, var(--c-accent)); }
+  .ld-back .ld-q { fill: var(--c-accent-ink); font: 800 52px sans-serif; }
+  .ld-none .ld-face { fill: none; stroke: var(--c-line); stroke-dasharray: 9 8; opacity: .6; }
+  .ld-dim { opacity: .35; }
+  .ld-hit .ld-face { fill: var(--game, var(--c-accent)); stroke: var(--game, var(--c-accent)); }
+  .ld-hit .ld-pip { fill: var(--c-accent-ink); }
+  .ld-mark .ld-face { stroke: var(--game, var(--c-accent)); stroke-width: 9; }
+  .ld-mid { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: calc(var(--u) * 1.4); border-radius: calc(var(--u) * 3.4); background: var(--game-soft, var(--c-accent-soft));
+    text-align: center; padding: calc(var(--u) * 2); }
+  .ld-mid__l { font-weight: 700; color: var(--c-text-dim); font-size: .95em; }
+  .ld-mid__b { display: flex; align-items: center; gap: calc(var(--u) * 2.4); font-weight: 800; font-size: calc(var(--u) * 10);
+    line-height: 1; font-variant-numeric: tabular-nums; color: var(--c-text); direction: ltr; }
+  .ld-mid__b .ld-d { width: calc(var(--u) * 13); }
+  .ld-mid__r { font-weight: 800; font-size: 1.05em; color: var(--c-text); min-height: 1.3em; }
+  .ld-mine { display: flex; flex-direction: column; align-items: center; gap: calc(var(--u) * 1.2); }
+  .ld-mine__l { font-weight: 700; font-size: .9em; color: var(--c-text-dim); }
+  .ld-mine .ld-cup { width: 82%; gap: calc(var(--u) * 2.6); }
+  .ld-side { align-items: stretch; }
+  .ld-top { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .ld-gear { margin-inline-start: auto; }
+  .ld-status { min-height: 2.8em; display: flex; align-items: center; justify-content: center; font-weight: 700;
+    color: var(--c-text); text-align: center; line-height: 1.35; }
+  .ld-pick { display: flex; flex-direction: column; gap: var(--s-2); }
+  .ld-step { display: flex; align-items: center; justify-content: center; gap: var(--s-3); }
+  .ld-step .ch-btn { width: 52px; min-height: 48px; padding: 0; }
+  .ld-step__v { min-width: 3.2ch; text-align: center; font-size: 1.7rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .ld-step__x { font-size: 1.3rem; font-weight: 800; color: var(--c-text-dim); }
+  .ld-faces { direction: ltr; display: grid; grid-template-columns: repeat(6, minmax(44px, 1fr)); gap: 6px; }
+  /* a side column beside the board in phone landscape is narrower than six 44 px buttons
+     (the sixth face was cut off), so the faces take two rows of three there */
+  .ld-faces.ld-two { grid-template-columns: repeat(3, minmax(44px, 1fr)); }
+  .ld-fb { min-height: 48px; padding: 6px; border: 0; border-radius: 12px; background: var(--c-surface); box-shadow: var(--sh-1);
+    cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; display: grid; place-items: center; }
+  .ld-fb .ld-d { width: min(36px, 100%); }
+  .ld-fb[aria-pressed="true"] { background: var(--game-soft, var(--c-accent-soft)); box-shadow: inset 0 0 0 3px var(--game, var(--c-accent)); }
+  .ld-fb:disabled { opacity: .35; cursor: default; box-shadow: none; }
+  .ld-fb:focus-visible { outline: 3px solid var(--game, var(--c-accent)); outline-offset: 2px; }
+  .ld-acts { display: grid; grid-template-columns: repeat(var(--acts, 2), minmax(0, 1fr)); gap: var(--s-2); }
+  .ld-acts .ch-btn { min-height: 54px; font-size: 1.1rem; font-weight: 800; }
+  .ld-acts .ch-btn[hidden] { display: none; }
+  /* phone landscape: the side column beside the board was taller than the window, and the
+     core centres it, so its top row and the Bid button were cut off (seen at 844×390).
+     Tighter rows make it fit; "safe" keeps the top reachable if a font still overflows */
+  @media (max-height: 480px) {
+    .ld-side { justify-content: safe center !important; gap: 6px !important; }
+    .ld-status { min-height: 2.2em; line-height: 1.2; }
+    .ld-pick { gap: 6px; }
+    .ld-step .ch-btn { min-height: 44px; width: 48px; }
+    .ld-step__v { font-size: 1.45rem; }
+    .ld-fb { min-height: 44px; padding: 4px; }
+    .ld-fb .ld-d { width: min(30px, 100%); }
+    .ld-acts .ch-btn { min-height: 46px; }
+    .ld-top .ch-badge, .ld-top .ch-chip { padding-block: 2px; }
+  }
+  /* 360 px tall (740×360 in Persian) was still 12 px over */
+  @media (max-height: 380px) {
+    .ld-side { gap: 4px !important; }
+    .ld-status { min-height: 0; font-size: .92rem; }
+    .ld-pick { gap: 4px; }
+    .ld-faces { gap: 4px; }
+    .ld-acts .ch-btn { min-height: 44px; font-size: 1rem; }
+  }
+  .ld-settings .ch-seg { margin-bottom: 4px; }
+  .ld-note { font-size: .85rem; color: var(--c-text-dim); margin-top: 12px; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function LiarsDiceEngineFactory() {
+  'use strict';
+
+  var START = 5, MAX_BOTS = 5;
+
+  // Every die is a fixed function of the game's seed and where it is rolled (round, cup,
+  // position), as in Five Dice: reopening a game can never reroll, and the daily game
+  // deals everyone the same cups
+  function fmix(x) {
+    x = Math.imul(x ^ (x >>> 16), 0x85EBCA6B);
+    x = Math.imul(x ^ (x >>> 13), 0xC2B2AE35);
+    return (x ^ (x >>> 16)) | 0;
+  }
+  function die(seed, round, p, i) {
+    var x = fmix(fmix(seed ^ 0x2C1B3C6D) + Math.imul((round * 8 + p) * 8 + i + 1, 0x9E3779B1));
+    return Math.floor((fmix(x) >>> 0) / 4294967296 * 6) + 1;
+  }
+  // The bots' own dice of chance, also fixed by the seed and the moment, so a reopened or
+  // daily game plays the same; the bots get the function, never the seed (the seed would
+  // give away every cup)
+  function rngFor(S) {
+    var a = fmix(fmix(S.seed ^ 0x6A09E667) + Math.imul(S.round * 64 + S.hist.length * 8 + S.turn + 1, 0x85EBCA6B)) >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function alive(S, p) { return S.counts[p] > 0; }
+  function nextAlive(S, p) {
+    for (var k = 1; k <= S.n; k++) { var q = (p + k) % S.n; if (alive(S, q)) return q; }
+    return -1;
+  }
+  function total(S) { var t = 0; for (var p = 0; p < S.n; p++) t += S.counts[p]; return t; }
+  function living(S) { var l = []; for (var p = 0; p < S.n; p++) if (alive(S, p)) l.push(p); return l; }
+  function winner(S) { var l = living(S); return l.length === 1 ? l[0] : -1; }
+
+  // Ones are wild: they count toward any face, and a bid on ones counts only ones
+  function matches(v, f) { return v === f || (f !== 1 && v === 1); }
+  function countFace(S, f) {
+    var c = 0;
+    for (var p = 0; p < S.n; p++) for (var i = 0; i < S.dice[p].length; i++) if (matches(S.dice[p][i], f)) c++;
+    return c;
+  }
+
+  // Is q × f a legal bid after `prev` (null when the round opens) with `tot` dice on the
+  // table? A raise is more dice, or as many on a higher face. Ones are worth double: onto
+  // ones needs half the count rounded up, off ones double plus one. No round opens on ones
+  function validBid(prev, q, f, tot) {
+    if (!Number.isInteger(q) || !Number.isInteger(f) || f < 1 || f > 6 || q < 1 || q > tot) return false;
+    if (!prev) return f !== 1;
+    if (prev.f === 1) return f === 1 ? q > prev.q : q >= prev.q * 2 + 1;
+    if (f === 1) return q >= Math.ceil(prev.q / 2);
+    return q > prev.q || (q === prev.q && f > prev.f);
+  }
+  // the smallest legal count on face f, or null when f cannot be bid any more
+  function minRaise(prev, f, tot) {
+    var q;
+    if (!prev) q = f === 1 ? 0 : 1;
+    else if (prev.f === 1) q = f === 1 ? prev.q + 1 : prev.q * 2 + 1;
+    else if (f === 1) q = Math.ceil(prev.q / 2);
+    else q = f > prev.f ? prev.q : prev.q + 1;
+    return q >= 1 && validBid(prev, q, f, tot) ? q : null;
+  }
+
+  function roll(S) {
+    S.dice = [];
+    for (var p = 0; p < S.n; p++) {
+      var cup = [];
+      for (var i = 0; i < S.counts[p]; i++) cup.push(die(S.seed, S.round, p, i));
+      S.dice.push(cup.sort(function (a, b) { return a - b; }));
+    }
+    S.bid = null; S.hist = []; S.phase = 'bid'; S.turn = S.starter;
+  }
+
+  // o: { seed, bots (1-5), level (1-3), exact }. Player 0 is the person, 1.. the bots
+  function newGame(o) {
+    o = o || {};
+    var bots = Math.max(1, Math.min(MAX_BOTS, o.bots | 0 || 3));
+    var S = { seed: o.seed | 0, n: bots + 1, level: o.level === 1 || o.level === 3 ? o.level : 2, exact: !!o.exact,
+      counts: [], round: 0, starter: 0, turn: 0, dice: [], bid: null, hist: [], phase: 'bid', last: null, out: [] };
+    for (var p = 0; p < S.n; p++) S.counts.push(START);
+    roll(S);
+    return S;
+  }
+
+  function bid(S, q, f) {
+    if (S.phase !== 'bid' || !validBid(S.bid, q, f, total(S))) return null;
+    S.bid = { q: q, f: f, p: S.turn };
+    S.hist.push([S.turn, q, f]);
+    S.turn = nextAlive(S, S.turn);
+    return S.bid;
+  }
+
+  // The player whose turn it is doubts the last bid. 'liar': every cup is shown, and if
+  // there are fewer than the bid says, the bidder loses a die, else the caller does.
+  // 'exact' (an option): right on the count gives the caller a die back (up to five),
+  // anything else costs the caller one
+  function call(S, kind) {
+    if (S.phase !== 'bid' || !S.bid || (kind !== 'liar' && kind !== 'exact') || (kind === 'exact' && !S.exact)) return null;
+    var caller = S.turn, b = S.bid, actual = countFace(S, b.f), loser = -1, gainer = -1, right;
+    if (kind === 'liar') { right = actual < b.q; loser = right ? b.p : caller; }
+    else { right = actual === b.q; if (right) { if (S.counts[caller] < START) { S.counts[caller]++; gainer = caller; } } else loser = caller; }
+    if (loser >= 0) { S.counts[loser]--; if (!S.counts[loser]) S.out.push(loser); }
+    S.last = { kind: kind, caller: caller, bidder: b.p, q: b.q, f: b.f, actual: actual, right: right, loser: loser, gainer: gainer };
+    // the one who lost a die opens the next round; if that was their last, the next in line
+    var from = loser >= 0 ? loser : caller;
+    S.starter = alive(S, from) ? from : nextAlive(S, from);
+    S.phase = winner(S) >= 0 ? 'over' : 'reveal';
+    return S.last;
+  }
+
+  function nextRound(S) {
+    if (S.phase !== 'reveal') return false;
+    S.round++;
+    roll(S);
+    return true;
+  }
+
+  // What player p may know: its own cup, how many dice everyone has, and the bids. Bots
+  // decide from this alone
+  function view(S, p) {
+    return { me: p, hand: S.dice[p].slice(), counts: S.counts.slice(), total: total(S), exact: S.exact,
+      bid: S.bid ? { q: S.bid.q, f: S.bid.f, p: S.bid.p } : null, hist: S.hist.map(function (h) { return h.slice(); }) };
+  }
+
+  /* --------------------------------------------------------------- bots */
+
+  var LN = [0];
+  for (var li = 1; li <= 64; li++) LN[li] = LN[li - 1] + Math.log(li);
+  function pmf(n, p, k) { return k < 0 || k > n ? 0 : Math.exp(LN[n] - LN[k] - LN[n - k] + k * Math.log(p) + (n - k) * Math.log(1 - p)); }
+  function atLeast(n, p, k) { if (k <= 0) return 1; if (k > n) return 0; var s = 0; for (var i = k; i <= n; i++) s += pmf(n, p, i); return Math.min(1, s); }
+
+  function own(v, f) { var c = 0; for (var i = 0; i < v.hand.length; i++) if (matches(v.hand[i], f)) c++; return c; }
+  // how many other players have bid this face in the round: the hard bot takes each of them
+  // to hold one more of it, and weighs that guess at one half (a bid may be a bluff)
+  function bidders(v, f) {
+    var seen = {}, m = 0;
+    for (var i = 0; i < v.hist.length; i++) {
+      var h = v.hist[i];
+      if (h[0] !== v.me && h[2] === f && v.counts[h[0]] > 0 && !seen[h[0]]) { seen[h[0]] = 1; m++; }
+    }
+    return m;
+  }
+  // chance that at least (or exactly) q dice show f, from the bot's own cup and binomial odds
+  // for every die it cannot see
+  function odds(v, q, f, read, exactly) {
+    var k = own(v, f), U = v.total - v.hand.length, p = f === 1 ? 1 / 6 : 1 / 3;
+    var plain = exactly ? pmf(U, p, q - k) : atLeast(U, p, q - k);
+    if (!read) return plain;
+    var m = Math.min(bidders(v, f), U);
+    if (!m) return plain;
+    var told = exactly ? pmf(U - m, p, q - k - m) : atLeast(U - m, p, q - k - m);
+    return (plain + told) / 2;
+  }
+
+  function act(v, level, rnd) {
+    rnd = rnd || Math.random;
+    var tot = v.total, b = v.bid, f, q;
+    if (level === 1) return easy(v, rnd);
+    var read = level === 3, noise = level === 3 ? 0.03 : 0.09;
+    if (!b) {
+      // open on the face the bot holds most of, as high as it still believes
+      var bestF = 2, bestQ = 1, bestS = -1;
+      for (f = 2; f <= 6; f++) {
+        q = 1;
+        while (q < tot && odds(v, q + 1, f, read) >= 0.6) q++;
+        var s = q + own(v, f) * 0.4 + rnd() * (level === 3 ? 0.6 : 1.2);
+        if (s > bestS) { bestS = s; bestF = f; bestQ = q; }
+      }
+      return { type: 'bid', q: bestQ, f: bestF };
+    }
+    var pTrue = odds(v, b.q, b.f, read) + (rnd() - 0.5) * 2 * noise;
+    var best = null;
+    for (f = 1; f <= 6; f++) {
+      var q0 = minRaise(b, f, tot);
+      if (q0 === null) continue;
+      for (q = q0; q <= Math.min(tot, q0 + 2); q++) {
+        var P = odds(v, q, f, read) + (rnd() - 0.5) * 2 * noise, sc = P - 0.04 * (q - q0);
+        if (!best || sc > best.sc) best = { q: q, f: f, P: P, sc: sc };
+      }
+    }
+    if (v.exact && b.p !== v.me) {
+      var pEx = odds(v, b.q, b.f, read, true);
+      if (pEx > 0.36 && (!best || pEx > best.P) && pEx > 1 - pTrue) return { type: 'exact' };
+    }
+    if (!best || 1 - pTrue > best.P) return { type: 'liar' };
+    return { type: 'bid', q: best.q, f: best.f };
+  }
+  // the easy bot only guesses the average and gives up late
+  function easy(v, rnd) {
+    var tot = v.total, b = v.bid, U = tot - v.hand.length, f, w = [], sum = 0;
+    for (f = 2; f <= 6; f++) { var x = own(v, f) + 1; w.push([f, x]); sum += x; }
+    var r = rnd() * sum, pick = 6;
+    for (var i = 0; i < w.length; i++) { r -= w[i][1]; if (r < 0) { pick = w[i][0]; break; } }
+    var expect = own(v, pick) + U / 3;
+    if (!b) return { type: 'bid', q: Math.max(1, Math.min(tot, Math.floor(expect * 0.8))), f: pick };
+    var bExpect = own(v, b.f) + U * (b.f === 1 ? 1 / 6 : 1 / 3);
+    if (b.q > bExpect + 0.5 + rnd() * 2) return { type: 'liar' };
+    var q = minRaise(b, pick, tot);
+    if (q === null || q > expect + 2.5) return { type: 'liar' };
+    return { type: 'bid', q: q, f: pick };
+  }
+
+  // A bot's move for the player whose turn it is, made from that player's view only, and
+  // always a legal one
+  function botMove(S) {
+    var a = act(view(S, S.turn), S.level, rngFor(S));
+    if (a.type === 'bid' && !validBid(S.bid, a.q, a.f, total(S))) a = S.bid ? { type: 'liar' } : { type: 'bid', q: 1, f: 2 };
+    if (a.type === 'exact' && (!S.exact || !S.bid)) a = { type: 'liar' };
+    return a;
+  }
+  function apply(S, a) { return a.type === 'bid' ? bid(S, a.q, a.f) : call(S, a.type); }
+
+  // A save is checked before it is restored
+  function valid(s) {
+    if (!s || !Number.isInteger(s.seed) || !Number.isInteger(s.n) || s.n < 2 || s.n > MAX_BOTS + 1) return false;
+    if ([1, 2, 3].indexOf(s.level) < 0 || typeof s.exact !== 'boolean' || !Number.isInteger(s.round) || s.round < 0) return false;
+    if (!Array.isArray(s.counts) || s.counts.length !== s.n || !Array.isArray(s.dice) || s.dice.length !== s.n) return false;
+    var tot = 0, liv = 0;
+    for (var p = 0; p < s.n; p++) {
+      var c = s.counts[p];
+      if (!Number.isInteger(c) || c < 0 || c > START) return false;
+      tot += c; if (c) liv++;
+      if (s.phase === 'bid') {
+        if (!Array.isArray(s.dice[p]) || s.dice[p].length !== c) return false;
+      }
+    }
+    if (['bid', 'reveal', 'over'].indexOf(s.phase) < 0 || liv < 1 || (s.phase !== 'over' && liv < 2)) return false;
+    if (!Number.isInteger(s.turn) || s.turn < 0 || s.turn >= s.n || !Number.isInteger(s.starter) || s.starter < 0 || s.starter >= s.n) return false;
+    if (!Array.isArray(s.hist) || !Array.isArray(s.out)) return false;
+    // a reopened reveal shows the call it ended on, so that call must be readable
+    if (s.phase === 'reveal') {
+      var L = s.last;
+      if (!L || (L.kind !== 'liar' && L.kind !== 'exact') || [L.caller, L.bidder, L.q, L.f, L.actual, L.loser, L.gainer].some(function (x) { return !Number.isInteger(x); })) return false;
+      if (L.f < 1 || L.f > 6 || L.caller < 0 || L.caller >= s.n || L.bidder < 0 || L.bidder >= s.n) return false;
+      if (s.dice.length !== s.n || !s.dice.every(Array.isArray)) return false;
+    }
+    if (s.phase === 'bid') {
+      if (!alive(s, s.turn)) return false;
+      var prev = null;
+      for (var h = 0; h < s.hist.length; h++) {
+        var x = s.hist[h];
+        if (!Array.isArray(x) || x.length !== 3 || !validBid(prev, x[1], x[2], tot)) return false;
+        prev = { q: x[1], f: x[2], p: x[0] };
+      }
+      if (s.hist.length && (!s.bid || s.bid.q !== prev.q || s.bid.f !== prev.f)) return false;
+      if (!s.hist.length && s.bid) return false;
+      // the cups must be the ones this seed rolls: an edited save cannot pick its dice
+      var again = { seed: s.seed, n: s.n, counts: s.counts, round: s.round, starter: s.starter, hist: [] };
+      roll(again);
+      if (JSON.stringify(again.dice) !== JSON.stringify(s.dice)) return false;
+    }
+    return true;
+  }
+
+  return { START: START, MAX_BOTS: MAX_BOTS, die: die, newGame: newGame, validBid: validBid, minRaise: minRaise, matches: matches,
+    countFace: countFace, total: total, alive: alive, living: living, winner: winner, nextAlive: nextAlive, bid: bid, call: call,
+    nextRound: nextRound, view: view, act: act, botMove: botMove, apply: apply, rngFor: rngFor, odds: odds, valid: valid };
+}
+if (typeof module !== 'undefined') module.exports = LiarsDiceEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = LiarsDiceEngineFactory();
+  var ACCENT = '#CF032D';
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'liarsdice',
+    name: { fa: 'تاس دروغگو', en: 'Liar’s Dice', zh: '吹牛骰', de: 'Lügenwürfel', es: 'Dados del Mentiroso', pl: 'Kości Kłamcy', fr: 'Dés du Menteur', ar: 'نرد الكذّاب', hi: 'झूठे पासे' },
+    accent: ACCENT,
+    mood: 'menu',
+    strings: {
+      fa: {
+        ldBot: 'ربات {n}', ldOut: 'بیرون', ldBid: 'پیشنهاد', ldLiar: 'دروغه!', ldExact: 'دقیقاً!', ldNext: 'دست بعد',
+        ldLess: 'کمتر', ldMore: 'بیشتر', ldFaceN: 'خال {f}', ldCountA: 'تعداد {n}', ldNoBid: 'هنوز پیشنهادی نیست', ldWild: 'یک‌ها جوکرند',
+        ldOpenYou: 'نوبت توست: دست را باز کن', ldYourTurn: 'نوبت توست: بالاتر بگو یا «دروغه!»', ldThinks: '{p} فکر می‌کند…',
+        ldBidBy: 'پیشنهاد {p}', ldBidYou: 'پیشنهاد تو', ldCalls: '{p} می‌گوید: دروغه!', ldCallsEx: '{p} می‌گوید: دقیقاً!',
+        ldYouCall: 'تو گفتی: دروغه!', ldYouCallEx: 'تو گفتی: دقیقاً!', ldVs: 'روی میز هست؛ پیشنهاد {q} بود',
+        ldLoseYou: 'یک تاس از دست دادی', ldLoseBot: '{p} یک تاس از دست داد', ldGainYou: 'درست گفتی! یک تاس پس گرفتی',
+        ldGainBot: '{p} درست گفت و یک تاس پس گرفت', ldFull: 'درست بود، ولی بیش از پنج تاس نمی‌شود', ldOutYou: 'تاس‌هایت تمام شد', ldOutBot: '{p} بیرون رفت',
+        ldDiceN: 'تاس‌ها: {n}', ldYourDice: 'تاس‌های تو', ldRound: 'دست {n}', ldDaily: 'تاس دروغگوی روزانه',
+        ldOppT: 'حریف‌ها', ldExactT: 'اعلام «دقیقاً!»', ldExactD: 'به جای «دروغه!» می‌توانی بگویی تعداد دقیقاً همین است: اگر درست باشد یک تاس پس می‌گیری، وگرنه یکی از دست می‌دهی.',
+        ldNote: 'تغییرها از بازی بعد اعمال می‌شوند. چالش روزانه همیشه با سه ربات متوسط است.', ldWonT: 'بردی!', ldLostT: 'باختی',
+        ldPlace: 'رتبه', ldPlaceV: '{p} از {n}', ldRoundsL: 'دست‌ها',
+        ldKCount: 'کم و زیاد کردن تعداد', ldKFace: 'انتخاب خال', ldKBid: 'پیشنهاد / دست بعد', ldKLiar: 'گفتن «دروغه!»', ldKExact: 'گفتن «دقیقاً!»', ldKNew: 'بازی تازه',
+        ldRules: 'هر بازیکن پنج تاس دارد که پنهانی می‌ریزد. به نوبت، هر کس می‌گوید روی کل میز دست‌کم چند تاس با یک خال هست، مثلاً «پنج تا چهار». نفر بعد باید بالاتر بگوید: تعداد بیشتر، یا همان تعداد با خال بالاتر. یک‌ها جوکرند و برای هر خالی حساب می‌شوند. رفتن به یک‌ها نصف تعداد (رو به بالا) کافی است و برگشتن از یک‌ها دو برابر به‌علاوه‌ی یک می‌خواهد؛ هیچ دستی با یک‌ها باز نمی‌شود. اگر فکر می‌کنی پیشنهاد قبلی زیادی است، بگو «دروغه!»: همه‌ی تاس‌ها رو می‌شوند. اگر کمتر بود، صاحب پیشنهاد یک تاس از دست می‌دهد، وگرنه تو. کسی که یک تاس از دست داد دست بعد را باز می‌کند. هر کس تاس‌هایش تمام شود بیرون می‌رود و آخرین کسی که تاس دارد می‌برد.',
+        ldTut1T: 'تاس‌هایت پنهان‌اند', ldTut1: 'فقط تاس‌های خودت را می‌بینی. از ربات‌ها فقط می‌دانی چند تاس دارند.',
+        ldTut2T: 'بالاتر بگو', ldTut2: 'تعداد و خال را انتخاب کن و «پیشنهاد» را بزن. یک‌ها جوکرند و برای هر خالی حساب می‌شوند.',
+        ldTut3T: 'دروغه!', ldTut3: 'اگر باور نداری، «دروغه!» را بزن. هر که اشتباه کرده باشد یک تاس از دست می‌دهد.'
+      },
+      en: {
+        ldBot: 'Bot {n}', ldOut: 'Out', ldBid: 'Bid', ldLiar: 'Liar!', ldExact: 'Exact!', ldNext: 'Next round',
+        ldLess: 'Fewer', ldMore: 'More', ldFaceN: 'Face {f}', ldCountA: 'Count {n}', ldNoBid: 'No bid yet', ldWild: 'Ones are wild',
+        ldOpenYou: 'Your turn: open the bidding', ldYourTurn: 'Your turn: raise, or call Liar!', ldThinks: '{p} is thinking…',
+        ldBidBy: '{p} bids', ldBidYou: 'You bid', ldCalls: '{p} calls Liar!', ldCallsEx: '{p} calls Exact!',
+        ldYouCall: 'You call Liar!', ldYouCallEx: 'You call Exact!', ldVs: 'on the table; the bid said {q}',
+        ldLoseYou: 'You lose a die', ldLoseBot: '{p} loses a die', ldGainYou: 'Spot on! You win a die back',
+        ldGainBot: 'Spot on! {p} wins a die back', ldFull: 'Spot on, but five dice is the most', ldOutYou: 'You are out of dice', ldOutBot: '{p} is out',
+        ldDiceN: 'Dice: {n}', ldYourDice: 'Your dice', ldRound: 'Round {n}', ldDaily: 'Daily Liar’s Dice',
+        ldOppT: 'Opponents', ldExactT: 'Exact call', ldExactD: 'Instead of Liar!, say the count is exactly right: if it is, you win a die back; if not, you lose one.',
+        ldNote: 'Changes start with the next game. The daily game is always three medium bots.', ldWonT: 'You win!', ldLostT: 'You lose',
+        ldPlace: 'Place', ldPlaceV: '{p} of {n}', ldRoundsL: 'Rounds',
+        ldKCount: 'Change the count', ldKFace: 'Pick a face', ldKBid: 'Bid / next round', ldKLiar: 'Call Liar!', ldKExact: 'Call Exact!', ldKNew: 'New game',
+        ldRules: 'Everyone has five dice, rolled in secret. In turn, each player claims how many dice of one face there are at least on the whole table, say “five 4s”. The next player must go higher: more dice, or as many on a higher face. Ones are wild and count for every face. Going onto ones needs only half the count (rounded up); coming off ones needs double plus one; no round opens on ones. If you think the last bid is too high, call Liar!: every cup is shown. If there are fewer than the bid, the bidder loses a die, otherwise you do. Whoever loses a die opens the next round. A player with no dice left is out, and the last player with dice wins.',
+        ldTut1T: 'Your dice are hidden', ldTut1: 'You only see your own dice. Of the bots, you only know how many dice they have.',
+        ldTut2T: 'Raise the bid', ldTut2: 'Pick a count and a face and tap Bid. Ones are wild: they count for every face.',
+        ldTut3T: 'Liar!', ldTut3: 'If you don’t believe it, tap Liar!. Whoever was wrong loses a die.'
+      },
+      zh: {
+        ldBot: '机器人{n}', ldOut: '出局', ldBid: '叫数', ldLiar: '开！', ldExact: '刚好！', ldNext: '下一轮',
+        ldLess: '减少', ldMore: '增加', ldFaceN: '{f}点', ldCountA: '数量 {n}', ldNoBid: '还没人叫数', ldWild: '1点是万能的',
+        ldOpenYou: '轮到你：先叫数', ldYourTurn: '轮到你：加叫，或者喊“开！”', ldThinks: '{p}在思考…',
+        ldBidBy: '{p}叫', ldBidYou: '你叫', ldCalls: '{p}喊：开！', ldCallsEx: '{p}喊：刚好！',
+        ldYouCall: '你喊：开！', ldYouCallEx: '你喊：刚好！', ldVs: '桌上实有；叫的是 {q} 个',
+        ldLoseYou: '你失去一颗骰子', ldLoseBot: '{p}失去一颗骰子', ldGainYou: '猜中了！你拿回一颗骰子',
+        ldGainBot: '猜中了！{p}拿回一颗骰子', ldFull: '猜中了，但最多五颗骰子', ldOutYou: '你的骰子用完了', ldOutBot: '{p}出局',
+        ldDiceN: '骰子：{n}', ldYourDice: '你的骰子', ldRound: '第 {n} 轮', ldDaily: '每日吹牛骰',
+        ldOppT: '对手', ldExactT: '“刚好”叫法', ldExactD: '不喊“开！”，而是说数量刚好：说对了拿回一颗骰子，说错了失去一颗。',
+        ldNote: '更改从下一局开始生效。每日挑战总是三个中等机器人。', ldWonT: '你赢了！', ldLostT: '你输了',
+        ldPlace: '名次', ldPlaceV: '{n} 人中第 {p}', ldRoundsL: '轮数',
+        ldKCount: '调整数量', ldKFace: '选择点数', ldKBid: '叫数 / 下一轮', ldKLiar: '喊“开！”', ldKExact: '喊“刚好！”', ldKNew: '新游戏',
+        ldRules: '每人五颗骰子，偷偷摇。轮流叫数：说全桌至少有几个某点数，比如“五个4”。下一个人必须叫得更高：更多个数，或同样个数但点数更大。1点是万能的，算作任何点数。叫到1点只需一半个数（向上取整），从1点叫回要两倍加一；不能用1点开局。如果你觉得上一个叫数太高，就喊“开！”：所有骰子亮出来。如果实际比叫的少，叫数的人失去一颗骰子，否则你失去一颗。失去骰子的人开始下一轮。骰子用完就出局，最后还有骰子的人获胜。',
+        ldTut1T: '你的骰子是秘密', ldTut1: '你只能看到自己的骰子。对机器人，你只知道他们有几颗。',
+        ldTut2T: '加叫', ldTut2: '选好数量和点数，点“叫数”。1点是万能的，算作任何点数。',
+        ldTut3T: '开！', ldTut3: '不相信就点“开！”。错的一方失去一颗骰子。'
+      },
+      de: {
+        ldBot: 'Bot {n}', ldOut: 'Raus', ldBid: 'Bieten', ldLiar: 'Lüge!', ldExact: 'Genau!', ldNext: 'Nächste Runde',
+        ldLess: 'Weniger', ldMore: 'Mehr', ldFaceN: 'Augenzahl {f}', ldCountA: 'Anzahl {n}', ldNoBid: 'Noch kein Gebot', ldWild: 'Einsen sind Joker',
+        ldOpenYou: 'Du bist dran: eröffne das Bieten', ldYourTurn: 'Du bist dran: erhöhe oder rufe Lüge!', ldThinks: '{p} überlegt…',
+        ldBidBy: '{p} bietet', ldBidYou: 'Du bietest', ldCalls: '{p} ruft Lüge!', ldCallsEx: '{p} ruft Genau!',
+        ldYouCall: 'Du rufst Lüge!', ldYouCallEx: 'Du rufst Genau!', ldVs: 'auf dem Tisch; geboten waren {q}',
+        ldLoseYou: 'Du verlierst einen Würfel', ldLoseBot: '{p} verliert einen Würfel', ldGainYou: 'Genau richtig! Du bekommst einen Würfel zurück',
+        ldGainBot: 'Genau richtig! {p} bekommt einen Würfel zurück', ldFull: 'Genau richtig, aber mehr als fünf Würfel gibt es nicht', ldOutYou: 'Du hast keine Würfel mehr', ldOutBot: '{p} ist raus',
+        ldDiceN: 'Würfel: {n}', ldYourDice: 'Deine Würfel', ldRound: 'Runde {n}', ldDaily: 'Tägliche Lügenwürfel',
+        ldOppT: 'Gegner', ldExactT: 'Genau-Ruf', ldExactD: 'Statt Lüge! sagst du, die Anzahl stimmt genau: Stimmt sie, bekommst du einen Würfel zurück, sonst verlierst du einen.',
+        ldNote: 'Änderungen gelten ab dem nächsten Spiel. Die Tagesaufgabe spielt immer gegen drei mittlere Bots.', ldWonT: 'Gewonnen!', ldLostT: 'Verloren',
+        ldPlace: 'Platz', ldPlaceV: '{p} von {n}', ldRoundsL: 'Runden',
+        ldKCount: 'Anzahl ändern', ldKFace: 'Augenzahl wählen', ldKBid: 'Bieten / nächste Runde', ldKLiar: 'Lüge! rufen', ldKExact: 'Genau! rufen', ldKNew: 'Neues Spiel',
+        ldRules: 'Alle haben fünf Würfel, geheim gewürfelt. Reihum behauptet jeder, wie viele Würfel einer Augenzahl mindestens auf dem ganzen Tisch liegen, etwa „fünf Vieren“. Der Nächste muss höher bieten: mehr Würfel oder gleich viele mit höherer Augenzahl. Einsen sind Joker und zählen für jede Augenzahl. Auf Einsen zu wechseln braucht nur die halbe Anzahl (aufgerundet), von Einsen weg das Doppelte plus eins; keine Runde beginnt mit Einsen. Hältst du das letzte Gebot für zu hoch, rufe Lüge!: Alle Becher werden aufgedeckt. Sind es weniger als geboten, verliert der Bieter einen Würfel, sonst du. Wer einen Würfel verliert, eröffnet die nächste Runde. Wer keine Würfel mehr hat, ist raus; der Letzte mit Würfeln gewinnt.',
+        ldTut1T: 'Deine Würfel sind geheim', ldTut1: 'Du siehst nur deine eigenen Würfel. Von den Bots weißt du nur, wie viele sie haben.',
+        ldTut2T: 'Erhöhe das Gebot', ldTut2: 'Wähle Anzahl und Augenzahl und tippe auf Bieten. Einsen sind Joker und zählen für jede Augenzahl.',
+        ldTut3T: 'Lüge!', ldTut3: 'Glaubst du es nicht, tippe auf Lüge!. Wer falschlag, verliert einen Würfel.'
+      },
+      es: {
+        ldBot: 'Bot {n}', ldOut: 'Fuera', ldBid: 'Apostar', ldLiar: '¡Mentira!', ldExact: '¡Exacto!', ldNext: 'Siguiente ronda',
+        ldLess: 'Menos', ldMore: 'Más', ldFaceN: 'Cara {f}', ldCountA: 'Cantidad {n}', ldNoBid: 'Aún no hay apuesta', ldWild: 'Los unos son comodines',
+        ldOpenYou: 'Tu turno: abre la apuesta', ldYourTurn: 'Tu turno: sube o di ¡Mentira!', ldThinks: '{p} está pensando…',
+        ldBidBy: '{p} apuesta', ldBidYou: 'Tú apuestas', ldCalls: '{p} dice ¡Mentira!', ldCallsEx: '{p} dice ¡Exacto!',
+        ldYouCall: 'Dices ¡Mentira!', ldYouCallEx: 'Dices ¡Exacto!', ldVs: 'en la mesa; la apuesta decía {q}',
+        ldLoseYou: 'Pierdes un dado', ldLoseBot: '{p} pierde un dado', ldGainYou: '¡Exacto! Recuperas un dado',
+        ldGainBot: '¡Exacto! {p} recupera un dado', ldFull: 'Exacto, pero cinco dados es el máximo', ldOutYou: 'Te has quedado sin dados', ldOutBot: '{p} queda fuera',
+        ldDiceN: 'Dados: {n}', ldYourDice: 'Tus dados', ldRound: 'Ronda {n}', ldDaily: 'Dados del Mentiroso diario',
+        ldOppT: 'Rivales', ldExactT: 'Cantar exacto', ldExactD: 'En vez de ¡Mentira!, di que la cantidad es exacta: si aciertas, recuperas un dado; si no, pierdes uno.',
+        ldNote: 'Los cambios valen desde la próxima partida. El reto diario siempre es contra tres bots medios.', ldWonT: '¡Ganaste!', ldLostT: 'Perdiste',
+        ldPlace: 'Puesto', ldPlaceV: '{p} de {n}', ldRoundsL: 'Rondas',
+        ldKCount: 'Cambiar la cantidad', ldKFace: 'Elegir cara', ldKBid: 'Apostar / siguiente ronda', ldKLiar: 'Decir ¡Mentira!', ldKExact: 'Decir ¡Exacto!', ldKNew: 'Partida nueva',
+        ldRules: 'Cada jugador tiene cinco dados que tira en secreto. Por turnos, cada uno afirma cuántos dados de una cara hay como mínimo en toda la mesa, por ejemplo «cinco cuatros». El siguiente debe subir: más dados, o los mismos con una cara mayor. Los unos son comodines y cuentan para cualquier cara. Pasar a unos pide solo la mitad (redondeando hacia arriba); salir de unos pide el doble más uno; ninguna ronda se abre con unos. Si crees que la última apuesta es demasiado alta, di ¡Mentira!: se muestran todos los cubiletes. Si hay menos de lo apostado, quien apostó pierde un dado; si no, lo pierdes tú. Quien pierde un dado abre la siguiente ronda. Quien se queda sin dados queda fuera, y gana el último con dados.',
+        ldTut1T: 'Tus dados son secretos', ldTut1: 'Solo ves tus dados. De los bots solo sabes cuántos dados tienen.',
+        ldTut2T: 'Sube la apuesta', ldTut2: 'Elige cantidad y cara y toca Apostar. Los unos son comodines: cuentan para cualquier cara.',
+        ldTut3T: '¡Mentira!', ldTut3: 'Si no te lo crees, toca ¡Mentira!. Quien se equivocó pierde un dado.'
+      },
+      pl: {
+        ldBot: 'Bot {n}', ldOut: 'Odpada', ldBid: 'Licytuj', ldLiar: 'Kłamiesz!', ldExact: 'Dokładnie!', ldNext: 'Następna runda',
+        ldLess: 'Mniej', ldMore: 'Więcej', ldFaceN: 'Oczka {f}', ldCountA: 'Liczba {n}', ldNoBid: 'Jeszcze nikt nie licytował', ldWild: 'Jedynki są dżokerami',
+        ldOpenYou: 'Twoja kolej: zacznij licytację', ldYourTurn: 'Twoja kolej: podbij albo powiedz Kłamiesz!', ldThinks: '{p} myśli…',
+        ldBidBy: '{p} licytuje', ldBidYou: 'Licytujesz', ldCalls: '{p} mówi Kłamiesz!', ldCallsEx: '{p} mówi Dokładnie!',
+        ldYouCall: 'Mówisz Kłamiesz!', ldYouCallEx: 'Mówisz Dokładnie!', ldVs: 'na stole; licytacja mówiła {q}',
+        ldLoseYou: 'Tracisz kość', ldLoseBot: '{p} traci kość', ldGainYou: 'Trafione! Odzyskujesz kość',
+        ldGainBot: 'Trafione! {p} odzyskuje kość', ldFull: 'Trafione, ale pięć kości to maksimum', ldOutYou: 'Skończyły ci się kości', ldOutBot: '{p} odpada',
+        ldDiceN: 'Kości: {n}', ldYourDice: 'Twoje kości', ldRound: 'Runda {n}', ldDaily: 'Dzienne Kości Kłamcy',
+        ldOppT: 'Przeciwnicy', ldExactT: 'Wołanie „Dokładnie”', ldExactD: 'Zamiast Kłamiesz! powiedz, że liczba jest dokładna: jeśli tak, odzyskujesz kość, jeśli nie, tracisz jedną.',
+        ldNote: 'Zmiany obowiązują od następnej gry. Wyzwanie dnia to zawsze trzy średnie boty.', ldWonT: 'Wygrana!', ldLostT: 'Przegrana',
+        ldPlace: 'Miejsce', ldPlaceV: '{p} z {n}', ldRoundsL: 'Rundy',
+        ldKCount: 'Zmień liczbę', ldKFace: 'Wybierz oczka', ldKBid: 'Licytuj / następna runda', ldKLiar: 'Powiedz Kłamiesz!', ldKExact: 'Powiedz Dokładnie!', ldKNew: 'Nowa gra',
+        ldRules: 'Każdy ma pięć kości, rzucanych w tajemnicy. Po kolei każdy twierdzi, ile co najmniej kości z danymi oczkami leży na całym stole, np. „pięć czwórek”. Następny musi podbić: więcej kości albo tyle samo z wyższymi oczkami. Jedynki są dżokerami i liczą się do każdych oczek. Przejście na jedynki wymaga połowy liczby (w górę), zejście z jedynek podwojenia plus jeden; żadna runda nie zaczyna się od jedynek. Jeśli uważasz, że ostatnia licytacja jest za wysoka, powiedz Kłamiesz!: wszystkie kubki się odkrywa. Jeśli jest mniej, licytujący traci kość, a jeśli nie, tracisz ty. Kto stracił kość, zaczyna następną rundę. Kto nie ma już kości, odpada; wygrywa ostatni z kośćmi.',
+        ldTut1T: 'Twoje kości są ukryte', ldTut1: 'Widzisz tylko swoje kości. O botach wiesz tylko, ile mają kości.',
+        ldTut2T: 'Podbij', ldTut2: 'Wybierz liczbę i oczka, a potem dotknij Licytuj. Jedynki są dżokerami i liczą się do każdych oczek.',
+        ldTut3T: 'Kłamiesz!', ldTut3: 'Jeśli nie wierzysz, dotknij Kłamiesz!. Kto się mylił, traci kość.'
+      },
+      fr: {
+        ldBot: 'Bot {n}', ldOut: 'Éliminé', ldBid: 'Annoncer', ldLiar: 'Menteur !', ldExact: 'Exact !', ldNext: 'Manche suivante',
+        ldLess: 'Moins', ldMore: 'Plus', ldFaceN: 'Face {f}', ldCountA: 'Nombre {n}', ldNoBid: 'Pas encore d’annonce', ldWild: 'Les 1 sont jokers',
+        ldOpenYou: 'À toi : ouvre les enchères', ldYourTurn: 'À toi : surenchéris ou crie Menteur !', ldThinks: '{p} réfléchit…',
+        ldBidBy: '{p} annonce', ldBidYou: 'Tu annonces', ldCalls: '{p} crie Menteur !', ldCallsEx: '{p} crie Exact !',
+        ldYouCall: 'Tu cries Menteur !', ldYouCallEx: 'Tu cries Exact !', ldVs: 'sur la table ; l’annonce disait {q}',
+        ldLoseYou: 'Tu perds un dé', ldLoseBot: '{p} perd un dé', ldGainYou: 'Pile juste ! Tu récupères un dé',
+        ldGainBot: 'Pile juste ! {p} récupère un dé', ldFull: 'Pile juste, mais cinq dés au maximum', ldOutYou: 'Tu n’as plus de dés', ldOutBot: '{p} est éliminé',
+        ldDiceN: 'Dés : {n}', ldYourDice: 'Tes dés', ldRound: 'Manche {n}', ldDaily: 'Dés du Menteur du jour',
+        ldOppT: 'Adversaires', ldExactT: 'Annonce « Exact »', ldExactD: 'Au lieu de Menteur !, dis que le nombre est exact : si oui, tu récupères un dé ; sinon, tu en perds un.',
+        ldNote: 'Les changements s’appliquent à la prochaine partie. Le défi du jour se joue toujours contre trois bots moyens.', ldWonT: 'Gagné !', ldLostT: 'Perdu',
+        ldPlace: 'Place', ldPlaceV: '{p} sur {n}', ldRoundsL: 'Manches',
+        ldKCount: 'Changer le nombre', ldKFace: 'Choisir la face', ldKBid: 'Annoncer / manche suivante', ldKLiar: 'Crier Menteur !', ldKExact: 'Crier Exact !', ldKNew: 'Nouvelle partie',
+        ldRules: 'Chacun a cinq dés, lancés en secret. À tour de rôle, chacun annonce combien de dés d’une face il y a au moins sur toute la table, par exemple « cinq 4 ». Le suivant doit monter : plus de dés, ou autant sur une face plus haute. Les 1 sont jokers et comptent pour toutes les faces. Passer aux 1 demande seulement la moitié (arrondie au-dessus) ; quitter les 1 demande le double plus un ; aucune manche ne s’ouvre sur les 1. Si tu trouves la dernière annonce trop haute, crie Menteur ! : tous les gobelets sont montrés. S’il y en a moins, celui qui a annoncé perd un dé, sinon c’est toi. Celui qui perd un dé ouvre la manche suivante. Sans dés, on est éliminé ; le dernier qui a des dés gagne.',
+        ldTut1T: 'Tes dés sont cachés', ldTut1: 'Tu ne vois que tes dés. Des bots, tu sais seulement combien de dés ils ont.',
+        ldTut2T: 'Surenchéris', ldTut2: 'Choisis un nombre et une face, puis touche Annoncer. Les 1 sont jokers : ils comptent pour toutes les faces.',
+        ldTut3T: 'Menteur !', ldTut3: 'Si tu n’y crois pas, touche Menteur !. Celui qui s’est trompé perd un dé.'
+      },
+      ar: {
+        ldBot: 'روبوت {n}', ldOut: 'خارج', ldBid: 'راهن', ldLiar: 'كاذب!', ldExact: 'بالضبط!', ldNext: 'الجولة التالية',
+        ldLess: 'أقل', ldMore: 'أكثر', ldFaceN: 'الوجه {f}', ldCountA: 'العدد {n}', ldNoBid: 'لا رهان بعد', ldWild: 'الآحاد جوكر',
+        ldOpenYou: 'دورك: افتتح الرهان', ldYourTurn: 'دورك: ارفع الرهان أو قل «كاذب!»', ldThinks: '{p} يفكّر…',
+        ldBidBy: '{p} يراهن', ldBidYou: 'رهانك', ldCalls: '{p} يقول: كاذب!', ldCallsEx: '{p} يقول: بالضبط!',
+        ldYouCall: 'قلتَ: كاذب!', ldYouCallEx: 'قلتَ: بالضبط!', ldVs: 'على الطاولة؛ والرهان كان {q}',
+        ldLoseYou: 'خسرتَ نردًا', ldLoseBot: '{p} خسر نردًا', ldGainYou: 'أصبت! استعدتَ نردًا',
+        ldGainBot: 'أصاب {p} واستعاد نردًا', ldFull: 'إصابة، لكن خمسة نرد هي الحد الأقصى', ldOutYou: 'نفدت نردك', ldOutBot: '{p} خرج',
+        ldDiceN: 'النرد: {n}', ldYourDice: 'نردك', ldRound: 'الجولة {n}', ldDaily: 'نرد الكذّاب اليومي',
+        ldOppT: 'الخصوم', ldExactT: 'نداء «بالضبط»', ldExactD: 'بدل «كاذب!» قل إن العدد صحيح تمامًا: إن أصبت استعدت نردًا، وإلا خسرت واحدًا.',
+        ldNote: 'تسري التغييرات من اللعبة التالية. التحدي اليومي دائمًا ضد ثلاثة روبوتات متوسطة.', ldWonT: 'فزت!', ldLostT: 'خسرت',
+        ldPlace: 'المركز', ldPlaceV: '{p} من {n}', ldRoundsL: 'الجولات',
+        ldKCount: 'تغيير العدد', ldKFace: 'اختيار الوجه', ldKBid: 'راهن / الجولة التالية', ldKLiar: 'قل «كاذب!»', ldKExact: 'قل «بالضبط!»', ldKNew: 'لعبة جديدة',
+        ldRules: 'لكل لاعب خمسة نرد يرميها سرًا. بالدور يعلن كل لاعب كم نردًا بوجه معيّن على الطاولة كلها على الأقل، مثل «خمسة أربعات». على التالي أن يرفع: نرد أكثر، أو العدد نفسه بوجه أعلى. الآحاد جوكر وتُحسب لكل وجه. الانتقال إلى الآحاد يكفيه نصف العدد (مقرّبًا لأعلى)، والخروج منها يحتاج الضعف زائد واحد؛ ولا تبدأ جولة بالآحاد. إن ظننت الرهان الأخير مبالغًا فيه فقل «كاذب!»: تُكشف كل الأكواب. إن كان العدد أقل خسر صاحب الرهان نردًا، وإلا خسرته أنت. من يخسر نردًا يفتتح الجولة التالية. من تنفد نرده يخرج، وآخر من بقي معه نرد يفوز.',
+        ldTut1T: 'نردك مخفي', ldTut1: 'ترى نردك فقط. أما الروبوتات فتعرف فقط كم نردًا معها.',
+        ldTut2T: 'ارفع الرهان', ldTut2: 'اختر العدد والوجه ثم اضغط «راهن». الآحاد جوكر وتُحسب لكل وجه.',
+        ldTut3T: 'كاذب!', ldTut3: 'إن لم تصدّق فاضغط «كاذب!». من أخطأ يخسر نردًا.'
+      },
+      hi: {
+        ldBot: 'बॉट {n}', ldOut: 'बाहर', ldBid: 'बोली', ldLiar: 'झूठ!', ldExact: 'बिल्कुल!', ldNext: 'अगला दौर',
+        ldLess: 'कम', ldMore: 'ज़्यादा', ldFaceN: 'अंक {f}', ldCountA: 'गिनती {n}', ldNoBid: 'अभी कोई बोली नहीं', ldWild: '1 जोकर हैं',
+        ldOpenYou: 'आपकी बारी: बोली शुरू करें', ldYourTurn: 'आपकी बारी: बोली बढ़ाएँ या झूठ! कहें', ldThinks: '{p} सोच रहा है…',
+        ldBidBy: '{p} की बोली', ldBidYou: 'आपकी बोली', ldCalls: '{p} कहता है: झूठ!', ldCallsEx: '{p} कहता है: बिल्कुल!',
+        ldYouCall: 'आपने कहा: झूठ!', ldYouCallEx: 'आपने कहा: बिल्कुल!', ldVs: 'मेज़ पर; बोली {q} की थी',
+        ldLoseYou: 'आपने एक पासा खोया', ldLoseBot: '{p} ने एक पासा खोया', ldGainYou: 'सही! आपको एक पासा वापस मिला',
+        ldGainBot: 'सही! {p} को एक पासा वापस मिला', ldFull: 'सही, पर पाँच पासे ही अधिकतम हैं', ldOutYou: 'आपके पासे ख़त्म हो गए', ldOutBot: '{p} बाहर',
+        ldDiceN: 'पासे: {n}', ldYourDice: 'आपके पासे', ldRound: 'दौर {n}', ldDaily: 'रोज़ाना झूठे पासे',
+        ldOppT: 'विरोधी', ldExactT: '“बिल्कुल” बोलना', ldExactD: 'झूठ! की जगह कहें कि गिनती बिल्कुल सही है: सही हुई तो एक पासा वापस मिलेगा, नहीं तो एक खोएँगे.',
+        ldNote: 'बदलाव अगले खेल से लागू होंगे. रोज़ाना चुनौती हमेशा तीन मध्यम बॉट के साथ होती है.', ldWonT: 'आप जीते!', ldLostT: 'आप हारे',
+        ldPlace: 'स्थान', ldPlaceV: '{n} में {p}', ldRoundsL: 'दौर',
+        ldKCount: 'गिनती बदलें', ldKFace: 'अंक चुनें', ldKBid: 'बोली / अगला दौर', ldKLiar: 'झूठ! कहें', ldKExact: 'बिल्कुल! कहें', ldKNew: 'नया खेल',
+        ldRules: 'हर खिलाड़ी के पास पाँच पासे हैं, जो छिपाकर फेंके जाते हैं. बारी-बारी से हर कोई कहता है कि पूरी मेज़ पर किसी अंक के कम से कम कितने पासे हैं, जैसे “पाँच 4”. अगले को ऊँची बोली लगानी होती है: ज़्यादा पासे, या उतने ही पर ऊँचा अंक. 1 जोकर हैं और हर अंक में गिने जाते हैं. 1 पर जाने के लिए आधी गिनती (ऊपर की ओर) काफ़ी है, 1 से लौटने के लिए दोगुना और एक; कोई दौर 1 से शुरू नहीं होता. अगर पिछली बोली बहुत ऊँची लगे तो झूठ! कहें: सारे पासे खुलते हैं. कम निकले तो बोली लगाने वाला एक पासा खोता है, नहीं तो आप. जो पासा खोता है वही अगला दौर शुरू करता है. जिसके पासे ख़त्म हों वह बाहर; आख़िरी पासे वाला जीतता है.',
+        ldTut1T: 'आपके पासे छिपे हैं', ldTut1: 'आप सिर्फ़ अपने पासे देखते हैं. बॉट के बारे में बस इतना पता है कि उनके पास कितने पासे हैं.',
+        ldTut2T: 'बोली बढ़ाएँ', ldTut2: 'गिनती और अंक चुनें और बोली दबाएँ. 1 जोकर हैं और हर अंक में गिने जाते हैं.',
+        ldTut3T: 'झूठ!', ldTut3: 'यक़ीन न हो तो झूठ! दबाएँ. जो ग़लत था वह एक पासा खोता है.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  // the daily game is the same table for everyone: three medium bots, no exact call
+  var DAILY = { bots: 3, level: 2, exact: false };
+  var prefs = { bots: 3, level: 2, exact: false };
+  (function () {
+    var p = ctx.store.get('prefs');
+    if (!p || typeof p !== 'object') return;
+    if (Number.isInteger(p.bots) && p.bots >= 1 && p.bots <= E.MAX_BOTS) prefs.bots = p.bots;
+    if (p.level === 1 || p.level === 2 || p.level === 3) prefs.level = p.level;
+    prefs.exact = p.exact === true;
+  })();
+  function storePrefs() { ctx.store.set('prefs', prefs); }
+
+  var S = null, startedAt = 0, ended = false, timer = 0;
+  var sel = { q: 1, f: 2 }, selFor = '';
+
+  function who(p) { return p === 0 ? C.t('you') : C.t('ldBot', { n: C.num(p) }); }
+  function slow() { return C.ui.reduceMotion(); }
+
+  /* --------------------------------------------------------------- dice */
+
+  // pips on a 100-unit face: the positions of each value
+  var PIPS = { 1: [[50, 50]], 2: [[28, 28], [72, 72]], 3: [[28, 28], [50, 50], [72, 72]], 4: [[28, 28], [72, 28], [28, 72], [72, 72]],
+    5: [[28, 28], [72, 28], [50, 50], [28, 72], [72, 72]], 6: [[28, 26], [72, 26], [28, 50], [72, 50], [28, 74], [72, 74]] };
+  function faceSvg(v) {
+    var s = '<svg viewBox="0 0 100 100" aria-hidden="true"><rect class="ld-face" x="4" y="4" width="92" height="92" rx="20"/>';
+    if (v > 0) PIPS[v].forEach(function (p) { s += '<circle class="ld-pip" cx="' + p[0] + '" cy="' + p[1] + '" r="9.5"/>'; });
+    else if (v < 0) s += '<text class="ld-q" x="50" y="68" text-anchor="middle">?</text>';
+    return s + '</svg>';
+  }
+  function dieNode() { return el('span', { class: 'ld-d' }); }
+  // one die picture: v 1-6 a face, -1 a hidden die, 0 an empty place. Writes only what
+  // changed, so nothing is rebuilt under a finger (#750)
+  function setDie(n, v, cls) {
+    if (n._v !== v) { n.innerHTML = faceSvg(v); n._v = v; }
+    var c = 'ld-d' + (v < 0 ? ' ld-back' : v === 0 ? ' ld-none' : '') + (cls ? ' ' + cls : '');
+    if (n.className !== c) n.className = c;
+  }
+
+  /* --------------------------------------------------------------- view */
+
+  var seatsBox = el('div', { class: 'ld-seats' });
+  var seats = [];
+  var midL = el('div', { class: 'ld-mid__l' });
+  var midQ = el('span'), midD = dieNode();
+  var midB = el('div', { class: 'ld-mid__b' }, [midQ, el('span', { text: '×' }), midD]);
+  var midR = el('div', { class: 'ld-mid__r' });
+  var mid = el('div', { class: 'ld-mid', 'aria-live': 'polite' }, [midL, midB, midR]);
+  var mineDice = [];
+  for (var mi = 0; mi < E.START; mi++) mineDice.push(dieNode());
+  var mineCup = el('div', { class: 'ld-cup' }, mineDice);
+  var mine = el('div', { class: 'ld-mine' }, [el('div', { class: 'ld-mine__l', text: C.t('ldYourDice') }), mineCup]);
+  var table = el('div', { class: 'ld-table' }, [seatsBox, mid, mine]);
+
+  var top = el('div', { class: 'ld-top ch-above' });
+  var status = el('div', { class: 'ld-status', role: 'status', 'aria-live': 'polite' });
+  var lessBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button', 'aria-label': C.t('ldLess'), onclick: function () { step(-1); } }, [C.icon('minus', 22)]);
+  var moreBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button', 'aria-label': C.t('ldMore'), onclick: function () { step(1); } }, [C.icon('plus', 22)]);
+  var qV = el('span', { class: 'ld-step__v' });
+  var stepRow = el('div', { class: 'ld-step' }, [lessBtn, qV, el('span', { class: 'ld-step__x', text: '×' }), moreBtn]);
+  var faceBtns = [];
+  for (var fi = 1; fi <= 6; fi++) {
+    (function (f) {
+      var d = dieNode();
+      setDie(d, f);
+      faceBtns.push(el('button', { class: 'ld-fb', type: 'button', 'aria-label': C.t('ldFaceN', { f: C.num(f) }), 'aria-pressed': 'false', onclick: function () { setFace(f, true); } }, [d]));
+    })(fi);
+  }
+  var facesRow = el('div', { class: 'ld-faces' }, faceBtns);
+  var pick = el('div', { class: 'ld-pick' }, [stepRow, facesRow]);
+  var bidBtn = el('button', { class: 'ch-btn ch-btn--primary', type: 'button', text: C.t('ldBid'), onclick: myBid });
+  var liarBtn = el('button', { class: 'ch-btn ch-btn--danger', type: 'button', text: C.t('ldLiar'), onclick: function () { myCall('liar'); } });
+  var exactBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button', text: C.t('ldExact'), onclick: function () { myCall('exact'); } });
+  var nextBtn = el('button', { class: 'ch-btn ch-btn--primary', type: 'button', text: C.t('ldNext'), onclick: nextRound });
+  var acts = el('div', { class: 'ld-acts' }, [bidBtn, exactBtn, liarBtn, nextBtn]);
+  var wrap = el('div', { class: 'ld-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [table]), el('div', { class: 'ch-side ld-side' }, [top, status, pick, acts])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  if (!dailyDate) ctx.button({ icon: 'refresh', label: C.t('newGame'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  function buildSeats() {
+    seatsBox.textContent = '';
+    seats = [null];
+    var bots = S.n - 1, cols = bots === 4 ? 2 : Math.min(bots, 3);
+    // one or two bots keep a third of the width each, so a lone cup is not drawn huge
+    seatsBox.style.gridTemplateColumns = 'repeat(' + cols + ', minmax(0, ' + (bots < 3 ? '33%' : '1fr') + '))';
+    seatsBox.style.justifyContent = 'center';
+    for (var p = 1; p < S.n; p++) {
+      var name = el('span', { class: 'ld-seat__n', text: who(p) }), cnt = el('span', { class: 'ld-seat__c' });
+      var cup = [];
+      for (var i = 0; i < E.START; i++) cup.push(dieNode());
+      var bid = el('div', { class: 'ld-seat__b' });
+      var root = el('div', { class: 'ld-seat' }, [el('div', { class: 'ld-seat__h' }, [name, cnt]), el('div', { class: 'ld-cup' }, cup), bid]);
+      seats.push({ root: root, cnt: cnt, cup: cup, bid: bid, shown: '' });
+      seatsBox.appendChild(root);
+    }
+  }
+
+  function myTurn() { return !!S && !ended && S.phase === 'bid' && S.turn === 0; }
+  function shownFace() { return S.phase === 'bid' ? 0 : S.last ? S.last.f : 0; }
+  function lastBidOf(p) {
+    for (var h = S.hist.length - 1; h >= 0; h--) if (S.hist[h][0] === p) return S.hist[h];
+    return null;
+  }
+
+  function render() {
+    if (!S) return;
+    var open = S.phase !== 'bid', f0 = shownFace(), tot = E.total(S);
+    for (var p = 1; p < S.n; p++) {
+      var st = seats[p], gone = S.counts[p] === 0 && !(open && S.dice[p].length);
+      st.root.classList.toggle('ld-turn', S.phase === 'bid' && S.turn === p && !ended);
+      st.root.classList.toggle('ld-gone', S.counts[p] === 0);
+      var c = S.counts[p] ? C.num(S.counts[p]) : C.t('ldOut');
+      if (st.cnt.textContent !== c) st.cnt.textContent = c;
+      st.root.setAttribute('aria-label', who(p) + ' — ' + C.t('ldDiceN', { n: C.num(S.counts[p]) }));
+      for (var i = 0; i < E.START; i++) {
+        if (open && i < S.dice[p].length) { var v = S.dice[p][i]; setDie(st.cup[i], v, E.matches(v, f0) ? 'ld-hit' : 'ld-dim'); }
+        else setDie(st.cup[i], !gone && i < S.counts[p] ? -1 : 0);
+      }
+      var lb = lastBidOf(p), key = lb ? lb[1] + 'x' + lb[2] : '';
+      if (st.shown !== key) {
+        st.shown = key;
+        st.bid.textContent = '';
+        if (lb) { var d = dieNode(); setDie(d, lb[2]); st.bid.appendChild(el('span', { text: C.num(lb[1]) + ' ×' })); st.bid.appendChild(d); }
+      }
+    }
+    // your own cup: in a round the dice that would count for the face picked are marked
+    for (var k = 0; k < E.START; k++) {
+      var hand = S.dice[0] || [], has = k < hand.length && (open || k < S.counts[0]);
+      if (!has) { setDie(mineDice[k], 0); continue; }
+      var hv = hand[k];
+      setDie(mineDice[k], hv, open ? (E.matches(hv, f0) ? 'ld-hit' : 'ld-dim') : myTurn() && E.matches(hv, sel.f) ? 'ld-mark' : '');
+    }
+    renderMid();
+    // the pick follows the bid on the table each time your turn comes round
+    var stamp = S.round + ':' + S.hist.length;
+    if (myTurn() && selFor !== stamp) { selFor = stamp; defaultPick(); }
+    renderPick(tot);
+    renderSide();
+  }
+
+  function renderMid() {
+    var L = S.last;
+    if (S.phase === 'bid') {
+      if (!S.bid) { midL.textContent = C.t('ldNoBid'); midB.style.visibility = 'hidden'; }
+      else {
+        midL.textContent = S.bid.p === 0 ? C.t('ldBidYou') : C.t('ldBidBy', { p: who(S.bid.p) });
+        midB.style.visibility = '';
+        midQ.textContent = C.num(S.bid.q); setDie(midD, S.bid.f);
+      }
+      midR.textContent = C.t('ldWild');
+    } else if (L) {
+      midL.textContent = L.kind === 'exact' ? (L.caller === 0 ? C.t('ldYouCallEx') : C.t('ldCallsEx', { p: who(L.caller) })) : (L.caller === 0 ? C.t('ldYouCall') : C.t('ldCalls', { p: who(L.caller) }));
+      midB.style.visibility = '';
+      midQ.textContent = C.num(L.actual); setDie(midD, L.f, 'ld-hit');
+      midR.textContent = C.t('ldVs', { q: C.num(L.q) });
+    }
+  }
+
+  function outcome() {
+    var L = S.last;
+    if (!L) return '';
+    var t;
+    if (L.gainer >= 0) t = L.gainer === 0 ? C.t('ldGainYou') : C.t('ldGainBot', { p: who(L.gainer) });
+    else if (L.loser < 0) t = C.t('ldFull');
+    else if (!S.counts[L.loser]) t = L.loser === 0 ? C.t('ldOutYou') : C.t('ldOutBot', { p: who(L.loser) });
+    else t = L.loser === 0 ? C.t('ldLoseYou') : C.t('ldLoseBot', { p: who(L.loser) });
+    return t;
+  }
+
+  function renderSide() {
+    top.textContent = '';
+    if (S.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('ldDaily') })]));
+    else top.appendChild(el('span', { class: 'ch-badge', text: C.t(S.level === 1 ? 'easy' : S.level === 3 ? 'hard' : 'medium') }));
+    top.appendChild(el('span', { class: 'ch-badge', text: C.t('ldRound', { n: C.num(S.round + 1) }) }));
+    // options behind a gear in this row: a fourth game-bar button cut the title (#409)
+    var gear = el('button', { class: 'ch-iconbtn ld-gear', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', showSettings);
+    top.appendChild(gear);
+    var t = '';
+    if (S.phase === 'bid' && !ended) t = S.turn === 0 ? (S.bid ? C.t('ldYourTurn') : C.t('ldOpenYou')) : C.t('ldThinks', { p: who(S.turn) });
+    else if (S.last) t = outcome();
+    if (status.textContent !== t) status.textContent = t;
+  }
+
+  function renderPick(tot) {
+    var mt = myTurn(), reveal = S.phase === 'reveal' && !ended;
+    var minQ = E.minRaise(S.bid, sel.f, tot);
+    qV.textContent = C.num(sel.q);
+    qV.setAttribute('aria-label', C.t('ldCountA', { n: C.num(sel.q) }));
+    lessBtn.disabled = !mt || minQ === null || sel.q <= minQ;
+    moreBtn.disabled = !mt || sel.q >= tot;
+    for (var f = 1; f <= 6; f++) {
+      var b = faceBtns[f - 1];
+      b.setAttribute('aria-pressed', sel.f === f ? 'true' : 'false');
+      b.disabled = !mt || E.minRaise(S.bid, f, tot) === null;
+    }
+    bidBtn.disabled = !mt || !E.validBid(S.bid, sel.q, sel.f, tot);
+    bidBtn.textContent = C.t('ldBid');
+    liarBtn.disabled = !mt || !S.bid;
+    exactBtn.disabled = !mt || !S.bid;
+    bidBtn.hidden = reveal; liarBtn.hidden = reveal; exactBtn.hidden = reveal || !S.exact; nextBtn.hidden = !reveal;
+    nextBtn.disabled = !reveal;
+    acts.style.setProperty('--acts', reveal ? 1 : S.exact ? 3 : 2);
+    // the pick keeps its room while it is not your turn, so the buttons never move
+    // under a finger between two taps
+    pick.style.visibility = reveal ? 'hidden' : '';
+  }
+
+  function fitSize() {
+    var w = table.getBoundingClientRect().width;
+    if (w) table.style.setProperty('--u', (w / 100).toFixed(2) + 'px');
+    var pw = pick.getBoundingClientRect().width;
+    if (pw) facesRow.classList.toggle('ld-two', pw < 6 * 44 + 5 * 6);
+  }
+  if (window.ResizeObserver) { var ro = new ResizeObserver(fitSize); ro.observe(table); ro.observe(pick); } else window.addEventListener('resize', fitSize);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitSize);
+
+  /* --------------------------------------------------------------- pick */
+
+  function defaultPick() {
+    var tot = E.total(S), hand = S.dice[0];
+    if (!S.bid) {
+      // open on the face you hold most of, ones counted in, at what you can see
+      var bestF = 2, bestN = -1;
+      for (var f = 2; f <= 6; f++) {
+        var n = 0;
+        hand.forEach(function (v) { if (E.matches(v, f)) n++; });
+        if (n > bestN || (n === bestN && f > bestF)) { bestN = n; bestF = f; }
+      }
+      sel.f = bestF; sel.q = Math.max(1, bestN);
+      return;
+    }
+    var q = E.minRaise(S.bid, S.bid.f, tot);
+    if (q !== null) { sel.f = S.bid.f; sel.q = q; return; }
+    for (var g = 6; g >= 1; g--) { q = E.minRaise(S.bid, g, tot); if (q !== null) { sel.f = g; sel.q = q; return; } }
+  }
+  function setFace(f, tap) {
+    if (!myTurn()) return;
+    var tot = E.total(S), m = E.minRaise(S.bid, f, tot);
+    if (m === null) return;
+    sel.f = f;
+    if (!E.validBid(S.bid, sel.q, f, tot)) sel.q = m;
+    if (tap) C.feedback('select');
+    render();
+  }
+  function step(d) {
+    if (!myTurn()) return;
+    var tot = E.total(S), m = E.minRaise(S.bid, sel.f, tot);
+    if (m === null) return;
+    var q = Math.max(m, Math.min(tot, sel.q + d));
+    if (q === sel.q) return;
+    sel.q = q;
+    C.feedback('tap');
+    render();
+  }
+
+  /* ------------------------------------------------------------- game */
+
+  function seedFor() {
+    var r = dailyDate ? C.daily('liarsdice', dailyDate).rng : Math.random;
+    return Math.floor(r() * 4294967296) | 0;
+  }
+  function newGame() {
+    clearTimeout(timer);
+    var o = dailyDate ? DAILY : prefs;
+    S = E.newGame({ seed: seedFor(), bots: o.bots, level: o.level, exact: o.exact });
+    S.daily = dailyDate || null;
+    startedAt = Date.now(); ended = false; selFor = '';
+    buildSeats();
+    render();
+    rollIn();
+    save();
+    schedule();
+  }
+  function untouched() { return S && S.round === 0 && !S.hist.length; }
+  function askNew() {
+    if (S && !ended && !untouched()) C.ui.confirm({ title: C.t('newGame'), body: C.t('resetWarn'), onOk: newGame });
+    else newGame();
+  }
+
+  // your dice tumble in from the table at the start of a round
+  function rollIn() {
+    C.feedback('clack');
+    if (slow()) return;
+    mineDice.forEach(function (d, i) {
+      if (d._v <= 0) return;
+      C.ui.fly(d, mid, { ms: 360, delay: i * 40 });
+      var svg = d.firstChild;
+      if (svg && svg.animate) svg.animate([{ transform: 'rotate(' + (i % 2 ? 240 : -240) + 'deg) scale(.7)' }, { transform: 'none' }],
+        { duration: 420, delay: i * 40, easing: 'cubic-bezier(.2,.8,.3,1)', fill: 'backwards' });
+    });
+  }
+
+  function schedule() {
+    clearTimeout(timer);
+    if (!S || ended || S.phase !== 'bid' || S.turn === 0) return;
+    timer = setTimeout(botTurn, slow() ? 380 : 760);
+  }
+  function botTurn() {
+    if (!S || ended || S.phase !== 'bid' || S.turn === 0) return;
+    var p = S.turn, a = E.botMove(S);
+    if (a.type === 'bid') {
+      E.bid(S, a.q, a.f);
+      C.feedback('place');
+      render();
+      C.ui.fly(midB, seats[p].root, { ms: 300 });
+      save();
+      schedule();
+    } else afterCall(E.call(S, a.type));
+  }
+
+  function myBid() {
+    if (!myTurn()) return;
+    if (!E.bid(S, sel.q, sel.f)) return;
+    C.feedback('place');
+    render();
+    C.ui.fly(midB, pick, { ms: 300 });
+    save();
+    schedule();
+  }
+  function myCall(kind) {
+    if (!myTurn() || !S.bid || (kind === 'exact' && !S.exact)) return;
+    afterCall(E.call(S, kind));
+  }
+
+  function afterCall(L) {
+    if (!L) return;
+    clearTimeout(timer);
+    render();
+    // every cup turns over
+    if (!slow()) {
+      seats.forEach(function (st, p) {
+        if (!st) return;
+        st.cup.forEach(function (d, i) {
+          var svg = d.firstChild;
+          if (d._v > 0 && svg && svg.animate) svg.animate([{ transform: 'scaleX(0)' }, { transform: 'none' }], { duration: 260, delay: p * 60 + i * 25, easing: 'ease-out', fill: 'backwards' });
+        });
+      });
+      C.ui.fly(midB, mid, { ms: 280 });
+    }
+    if (L.loser === 0) { C.feedback('bad'); C.ui.shake(mineCup); }
+    else if (L.loser > 0) { C.feedback(L.caller === 0 || L.kind === 'liar' && L.bidder !== 0 ? 'good' : 'tap'); C.ui.shake(seats[L.loser].root); }
+    if (L.gainer >= 0) { C.feedback('good'); C.ui.burst(L.gainer === 0 ? mineCup : seats[L.gainer].root, { colors: [ACCENT, '#FFD27A', '#FFFFFF'], count: 26 }); }
+    // your bid called a lie when it was right to the die
+    if (L.kind === 'liar' && L.bidder === 0 && L.actual === L.q) C.achievements.unlock('ld-edge');
+    if (!S.counts[0] || S.phase === 'over') { finishGame(); return; }
+    save();
+    nextBtn.focus({ preventScroll: true });
+  }
+
+  function nextRound() {
+    if (!S || ended || !E.nextRound(S)) return;
+    selFor = '';
+    render();
+    rollIn();
+    save();
+    schedule();
+  }
+
+  function finishGame() {
+    ended = true;
+    clearTimeout(timer);
+    var won = S.counts[0] > 0 && E.winner(S) === 0;
+    var place = won ? 1 : E.living(S).length + 1, mul = [0.6, 1, 1.5][S.level - 1], bots = S.n - 1;
+    var coins = won ? Math.round((4 + bots * 2) * mul) : Math.max(1, Math.round((S.n - place) * mul));
+    var points = won ? Math.round((10 + bots * 8) * mul) : Math.max(1, Math.round((S.n - place) * 5 * mul));
+    if (won) {
+      C.achievements.unlock('ld-win');
+      if (S.level === 3 && bots >= 3) C.achievements.unlock('ld-hard');
+    }
+    var placeV = C.t('ldPlaceV', { p: C.num(place), n: C.num(S.n) });
+    if (S.daily) {
+      C.achievements.unlock('ld-daily');
+      if (!C.stats.daily('liarsdice', S.daily, { label: placeV, win: won })) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    render();
+    var lines = [];
+    if (S.daily) lines.push({ label: C.t('daily'), value: C.num(S.daily) });
+    lines.push({ label: C.t('ldPlace'), value: placeV });
+    lines.push({ label: C.t('ldRoundsL'), value: C.num(S.round + 1) });
+    lines.push({ label: C.t('ldOppT'), value: C.num(bots) + ' · ' + C.t(S.level === 1 ? 'easy' : S.level === 3 ? 'hard' : 'medium') });
+    setTimeout(function () {
+      ctx.finish({
+        won: won, title: won ? C.t('ldWonT') : C.t('ldLostT'), note: outcome(), timeMs: Date.now() - startedAt, coins: coins, points: points,
+        lines: lines,
+        shareText: 'چوگان · تاس دروغگو' + (S.daily ? '\nروزانه ' + S.daily : '') + '\n' + place + '/' + S.n,
+        againLabel: S.daily ? null : C.t('newGame'), onAgain: S.daily ? null : newGame
+      });
+    }, slow() ? 500 : 1500);
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim') || e.ctrlKey || e.metaKey || e.altKey || !S) return;
+    var t = e.target, onButton = t && t.tagName === 'BUTTON';
+    if (e.key === 'ArrowUp' || e.key === '+' || e.key === '=') { e.preventDefault(); step(1); return; }
+    if (e.key === 'ArrowDown' || e.key === '-') { e.preventDefault(); step(-1); return; }
+    var n = '123456'.indexOf(e.key);
+    if (n < 0 && /^Digit[1-6]$/.test(e.code || '')) n = +e.code.slice(5) - 1;
+    if (n >= 0) { e.preventDefault(); setFace(n + 1, true); return; }
+    if (e.key === 'Enter' && !onButton) { e.preventDefault(); if (S.phase === 'reveal') nextRound(); else myBid(); return; }
+    if (C.keyIs(e, 'l')) { e.preventDefault(); myCall('liar'); return; }
+    if (C.keyIs(e, 'e')) { e.preventDefault(); myCall('exact'); return; }
+    if (C.keyIs(e, 'n') && !dailyDate) { e.preventDefault(); askNew(); }
+  });
+
+  /* ----------------------------------------------------------- settings */
+
+  function showSettings() {
+    if (document.querySelector('.ch-scrim')) return;
+    var body = el('div', { class: 'ld-settings' });
+    function changed() {
+      storePrefs();
+      // a game nobody has bid in yet simply starts again with the new table
+      if (!dailyDate && untouched()) newGame();
+    }
+    body.appendChild(el('div', { class: 'ch-item__label', text: C.t('ldOppT') }));
+    body.appendChild(C.ui.segmented([1, 2, 3, 4, 5].map(function (n) { return { value: n, label: C.num(n) }; }), prefs.bots, function (v) { prefs.bots = v; changed(); }));
+    body.appendChild(el('div', { class: 'ch-item__label', text: C.t('difficulty'), style: 'margin-top:14px' }));
+    body.appendChild(C.ui.segmented([{ value: 1, label: C.t('easy') }, { value: 2, label: C.t('medium') }, { value: 3, label: C.t('hard') }],
+      prefs.level, function (v) { prefs.level = v; changed(); }));
+    body.appendChild(el('div', { class: 'ch-item', style: 'margin-top:14px' }, [
+      el('div', { class: 'ch-item__label', text: C.t('ldExactT') }),
+      C.ui.switch(prefs.exact, function (v) { prefs.exact = !!v; changed(); })
+    ]));
+    body.appendChild(el('p', { class: 'ld-note', text: C.t('ldExactD') }));
+    body.appendChild(el('p', { class: 'ld-note', text: C.t('ldNote') }));
+    C.ui.modal({ title: C.t('settings'), body: body, actions: [{ label: C.t('done'), kind: 'primary' }] });
+  }
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    if (document.querySelector('.ch-scrim')) return;
+    var keys = [kb('↑ ↓ · + −', C.t('ldKCount')), kb('1–6', C.t('ldKFace')), kb('Enter', C.t('ldKBid')), kb('L', C.t('ldKLiar'))];
+    if (S && S.exact) keys.push(kb('E', C.t('ldKExact')));
+    if (!dailyDate) keys.push(kb('N', C.t('ldKNew')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('ldRules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, keys)
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // rows of small dice for the tutorial: a value is a face, 0 a hidden die. The theme's
+  // own colours, so the art fits the dark dialog too
+  function tArt(rows, bid) {
+    var s = '<svg viewBox="0 0 200 120" width="100%" direction="ltr" font-family="sans-serif" font-weight="800">';
+    rows.forEach(function (r, k) {
+      var y = 8 + k * 38, x0 = 100 - r.length * 17;
+      r.forEach(function (v, i) {
+        var x = x0 + i * 34, hit = bid && v > 0 && (v === bid[1] || v === 1);
+        var fill = v === 0 || hit ? ACCENT : 'var(--c-surface)';
+        s += '<rect x="' + x + '" y="' + y + '" width="28" height="28" rx="6" fill="' + fill + '" stroke="' + (v === 0 || hit ? ACCENT : 'var(--c-line)') + '" stroke-width="1.2"/>';
+        if (v === 0) s += '<text x="' + (x + 14) + '" y="' + (y + 20) + '" font-size="16" text-anchor="middle" fill="#FFFFFF">?</text>';
+        else PIPS[v].forEach(function (p) { s += '<circle cx="' + (x + p[0] * 0.28) + '" cy="' + (y + p[1] * 0.28) + '" r="2.7" fill="' + (hit ? '#FFFFFF' : 'var(--c-text)') + '"/>'; });
+      });
+    });
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('ldTut1T'), text: C.t('ldTut1'), art: tArt([[0, 0, 0, 0, 0], [0, 0, 0], [2, 4, 4, 1, 6]]) },
+    { title: C.t('ldTut2T'), text: C.t('ldTut2'), art: tArt([[0, 0, 0, 0], [2, 4, 4, 1, 6]], [0, 4]) },
+    { title: C.t('ldTut3T'), text: C.t('ldTut3'), art: tArt([[4, 3, 1, 5], [6, 2, 4], [2, 4, 4, 1, 6]], [0, 4]) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // saved after every bid, call and new round; the daily game has its own slot
+  ctx.autosave(function () {
+    if (!S || ended || S.phase === 'over') return { inProgress: false };
+    var o = JSON.parse(JSON.stringify(S));
+    o.elapsed = Date.now() - startedAt;
+    return o;
+  });
+  function save() { ctx.save(); }
+  var saved = ctx.loadSave();
+  if (saved && E.valid(saved) && (saved.daily || null) === (dailyDate || null) &&
+      (!dailyDate || (saved.n === DAILY.bots + 1 && saved.level === DAILY.level && saved.exact === DAILY.exact))) {
+    S = JSON.parse(JSON.stringify(saved));
+    startedAt = Date.now() - (saved.elapsed || 0);
+    delete S.elapsed;
+    S.daily = saved.daily || null;
+    buildSeats();
+    render();
+    schedule();
+  } else newGame();
+  if (dailyDate && C.stats.dailyDone('liarsdice', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).liarsdice;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  // a bot's turn waits on a timer, which a phone may drop while the app is away
+  C.onResume(schedule);
+  fitSize();
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
