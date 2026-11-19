@@ -1,0 +1,1028 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>چنگک — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  /* the cabinet is taller than wide in every window; a wide one puts the side rows beside it */
+  .cw-wrap > .ch-fit { --fit-ar: calc(100 / 140); }
+  .ch-fit > .cw-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+  /* the cabinet is drawn left to right in every language, so the claw follows the finger */
+  .cw-canvas { display: block; touch-action: none; direction: ltr; user-select: none; -webkit-user-select: none; max-width: 100%; max-height: 100%; }
+  .cw-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .cw-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 999px; background: var(--c-surface-2); font-weight: 700; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+  .cw-goals { display: flex; justify-content: center; gap: var(--s-2); flex-wrap: wrap; }
+  .cw-goal { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--c-line); font-size: var(--fs-sm); color: var(--c-text-dim); font-variant-numeric: tabular-nums; }
+  .cw-goal svg { opacity: .45; }
+  .cw-goal--on { border-color: var(--c-gold); color: var(--c-text); }
+  .cw-goal--on svg { opacity: 1; fill: currentColor; color: var(--c-gold); }
+  .cw-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+  /* the drop button keeps its room while a grab runs, so nothing moves under the finger */
+  .cw-drop { min-height: 52px; min-width: min(240px, 100%); font-size: var(--fs-lg); align-self: center; }
+  .cw-levels { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--s-2); }
+  .cw-lv {
+    min-height: 56px; border: 2px solid transparent; border-radius: var(--r-md);
+    background: var(--c-surface-2); color: var(--c-text); font: inherit; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    touch-action: manipulation;
+  }
+  .cw-lv b { font-size: var(--fs-lg); font-variant-numeric: tabular-nums; }
+  .cw-lv--on { border-color: var(--game); }
+  .cw-lv--done { background: var(--game-soft); }
+  .cw-lv[disabled] { opacity: .45; cursor: default; }
+  .cw-lv__stars { display: flex; gap: 1px; color: var(--c-gold); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function ClawEngineFactory() {
+  'use strict';
+
+  // Cabinet units, y down: 100 across and 140 tall, the chute on the left. One fixed step
+  // of 1/60 s and no randomness or trigonometry in the play, so the same moves give the
+  // same grab on every device and a player can learn the machine (#949). Whether a toy is
+  // held depends only on how well the claw is centred on it and on the toy itself: there
+  // is no random claw strength.
+  var W = 100, H = 140, FLOOR = 130, TOP = 14, PRONG = 7, DT = 1 / 60;
+  var VD = 55, VU = 55, VC = 40, CLOSE = 20, OPEN = 20, REACH = 3;
+  // the claw head swings on its cable: a damped spring kicked by every start and stop
+  var K = 23.4, GAIN = 0.45;
+  var LEVELS = 10, TRIES = 8;
+  // shares of a steady player's median for one, two and three stars
+  var STAR_K = [0.35, 0.6, 0.85], AIM = 1.2, BOT_ROUNDS = 24;
+
+  // toy kinds: radius, weight and points. Heavier and smaller toys need a better-centred
+  // claw (tolerance r * 0.38 / weight), and the harder ones are worth more
+  var KINDS = {
+    duck:  { r: 5,   w: 1,   pts: 10 },
+    ball:  { r: 4.2, w: 1,   pts: 15 },
+    bear:  { r: 6.2, w: 1.4, pts: 20 },
+    whale: { r: 7.5, w: 2,   pts: 30 },
+    star:  { r: 3.8, w: 1.1, pts: 40 }
+  };
+  var KIND_IDS = ['duck', 'ball', 'bear', 'whale', 'star'];
+
+  function rng(seed) {
+    var s = seed >>> 0;
+    return function () {
+      s = (s + 0x6D2B79F5) >>> 0;
+      var t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function tolA(t) { return t.r * 0.38 / t.w; }
+  function tolB(t) { return 2 * tolA(t); }
+
+  /* The machine by level: the chute narrows, the carriage gets faster, the head starts to
+     swing from level 6 (so a player waits for it to settle or times it), and the toy belt
+     moves from level 7 (so a drop leads the toy). Level 0 is the daily board's mix. */
+  function params(level) {
+    var n = clamp(level | 0, 1, LEVELS);
+    return {
+      chute: n >= 9 ? 14 : n >= 5 ? 16 : 19,
+      speed: n >= 4 ? 45 : 35,
+      damp: n >= 6 ? 1.2 : 9,
+      belt: n >= 7 ? (n >= 9 ? 6 : 5) : 0,
+      period: n >= 9 ? 300 : 420,
+      toys: n >= 8 ? 7 : n >= 4 ? 6 : 5,
+      kinds: n >= 3 ? (n >= 6 ? KIND_IDS : ['duck', 'ball', 'bear', 'star']) : ['duck', 'ball', 'bear']
+    };
+  }
+
+  /* A board from a seed and a level: toys of the level's kinds placed on the floor left
+     to right with small gaps, never overlapping and never over the chute. */
+  function make(seed, level) {
+    seed = seed >>> 0;
+    var r = rng(seed), P = params(level), toys = [], i;
+    var lo = P.chute + 2 + P.belt, hi = W - 2 - P.belt;
+    var picks = [];
+    for (i = 0; i < P.toys; i++) picks.push(P.kinds[Math.floor(r() * P.kinds.length)]);
+    // at most one rare star on a board
+    var stars = 0;
+    picks = picks.map(function (k) { if (k === 'star' && stars++) return 'duck'; return k; });
+    // a board never holds more toys than fit with room to spare
+    var need = 0;
+    picks.forEach(function (k) { need += KINDS[k].r * 2; });
+    while (need > (hi - lo) * 0.85) { need -= KINDS[picks.pop()].r * 2; }
+    var spare = Math.max(0, hi - lo - need), gaps = [], gs = 0;
+    for (i = 0; i <= picks.length; i++) { var g = 0.3 + r(); gaps.push(g); gs += g; }
+    var x = lo;
+    for (i = 0; i < picks.length; i++) {
+      x += spare * gaps[i] / gs;
+      var K0 = KINDS[picks[i]];
+      toys.push({ id: i, k: picks[i], x: Math.round((x + K0.r) * 10) / 10, r: K0.r, w: K0.w, pts: K0.pts });
+      x += K0.r * 2;
+    }
+    var B = { seed: seed, level: level | 0, P: P, toys: toys, tries: Math.min(TRIES, toys.length + 2), ph: Math.floor(r() * P.period) };
+    return B;
+  }
+  // the campaign boards' targets, worked out once by thresholds() and checked by the tests,
+  // so opening a board never waits for the bot rounds
+  var TH = [[30, 50, 70], [20, 35, 50], [30, 55, 75], [40, 65, 95], [40, 70, 100],
+    [35, 65, 90], [35, 65, 90], [35, 60, 85], [35, 65, 90], [30, 50, 70]];
+  function level(n, fresh) { var B = make((9491 + n * 7919) >>> 0, n); if (!fresh) B.th = TH[n - 1]; return B; }
+  function daily(seed) { var B = make(seed >>> 0, 8); B.level = 0; return B; }
+  function home(B) { return B.P.chute / 2; }
+
+  // the belt slides the whole floor back and forth on the board clock (a triangle wave)
+  function shift(B, clock) {
+    if (!B.P.belt) return 0;
+    var p = B.P.period, u = (((clock + B.ph) % p) + p) % p / p;
+    return B.P.belt * (4 * Math.abs(u - 0.5) - 1);
+  }
+
+  /* A round: the board's toys as they lie now, the drops made so far (where the
+     carriage stood, the swing and the clock at each drop), the score and the clock. The
+     whole round follows from the board and its drops, which is also what a save holds. */
+  function round(B) {
+    return { B: B, toys: B.toys.map(function (t) { return { id: t.id, k: t.k, x: t.x, r: t.r, w: t.w, pts: t.pts }; }), drops: [], got: [], score: 0, clock: 0, cx: home(B), v: 0, s: 0, sv: 0 };
+  }
+  function over(Rd) { return Rd.drops.length >= Rd.B.tries || !Rd.toys.length; }
+
+  function swing(Rd, damp) {
+    Rd.sv += (-K * Rd.s - damp * Rd.sv) * DT;
+    Rd.s += Rd.sv * DT;
+  }
+
+  /* One step between drops: the carriage heads for tx (null = stay) at the level's
+     speed, the head swings, and the clock runs. */
+  function move(Rd, tx) {
+    var P = Rd.B.P, v = 0;
+    if (tx != null) {
+      tx = clamp(tx, home(Rd.B), W - 4);
+      var dx = tx - Rd.cx, st = P.speed * DT;
+      if (Math.abs(dx) <= st) Rd.cx = tx;
+      else { v = dx > 0 ? P.speed : -P.speed; Rd.cx += v * DT; }
+    }
+    if (v !== Rd.v) { Rd.sv -= (v - Rd.v) * GAIN; Rd.v = v; }
+    swing(Rd, P.damp);
+    Rd.clock++;
+  }
+
+  // the nearest free spot on the floor for a toy, in belt coordinates
+  function place(Rd, toy, x) {
+    var P = Rd.B.P, lo = P.chute + 1.5 + toy.r + P.belt, hi = W - 1.5 - toy.r - P.belt;
+    function free(c) {
+      if (c < lo || c > hi) return false;
+      for (var i = 0; i < Rd.toys.length; i++) { var o = Rd.toys[i]; if (o !== toy && Math.abs(o.x - c) < o.r + toy.r + 0.4) return false; }
+      return true;
+    }
+    x = Math.round(x * 10) / 10;
+    for (var d = 0; d <= 100; d += 0.1) {
+      if (free(Math.round((x - d) * 10) / 10)) return Math.round((x - d) * 10) / 10;
+      if (free(Math.round((x + d) * 10) / 10)) return Math.round((x + d) * 10) / 10;
+    }
+    return clamp(x, lo, hi);
+  }
+
+  /* A drop: from here the machine runs on its own. A = the claw's state; step it until
+     A.done. Events: ['touch', toyId|-1], ['grip', 'firm'|'loose'|'nudge'|'miss'],
+     ['slip', toyId, delivered], ['deliver', toyId, points]. */
+  function drop(Rd) {
+    Rd.drops.push({ x: Rd.cx, s: Rd.s, sv: Rd.sv, clock: Rd.clock });
+    if (Rd.v) { Rd.sv -= -Rd.v * GAIN; Rd.v = 0; }
+    return { phase: 'down', y: TOP, t: 0, held: null, grip: null, d: 0, slipU: 2, u: 0, x0: Rd.cx, open: 1, done: false };
+  }
+  function tipsOver(Rd, gx, tips) {
+    var best = null, bd = 1e9, sh = shift(Rd.B, Rd.clock);
+    for (var i = 0; i < Rd.toys.length; i++) {
+      var t = Rd.toys[i], dx = gx - (t.x + sh);
+      if (Math.abs(dx) < t.r + REACH && tips >= FLOOR - 2 * t.r && Math.abs(dx) < bd) { bd = Math.abs(dx); best = t; }
+    }
+    return best;
+  }
+  function slipNow(Rd, A, ev) {
+    var t = A.held, x = Rd.cx;
+    A.held = null;
+    if (x <= Rd.B.P.chute - 0.5) { deliver(Rd, t, ev); ev.push(['slip', t.id, true]); return; }
+    Rd.toys.push(t);
+    t.x = place(Rd, t, x - shift(Rd.B, Rd.clock));
+    ev.push(['slip', t.id, false]);
+  }
+  function deliver(Rd, t, ev) {
+    Rd.got.push(t.id); Rd.score += t.pts;
+    ev.push(['deliver', t.id, t.pts]);
+  }
+  function step(Rd, A) {
+    var ev = [], P = Rd.B.P, H0 = FLOOR - TOP;
+    if (A.done) return ev;
+    swing(Rd, P.damp);
+    Rd.clock++; A.t++;
+    if (A.phase === 'down') {
+      A.y += VD * DT;
+      var gx = Rd.cx + Rd.s, tips = A.y + PRONG, t = tipsOver(Rd, gx, tips);
+      if (t || tips >= FLOOR - 1) {
+        A.phase = 'close'; A.t = 0;
+        if (!t) { A.grip = 'miss'; ev.push(['touch', -1], ['grip', 'miss']); return ev; }
+        var d = Math.abs(gx - (t.x + shift(Rd.B, Rd.clock)));
+        A.d = d; A.toy = t.id;
+        ev.push(['touch', t.id]);
+        if (d <= tolA(t)) A.grip = 'firm';
+        else if (d <= tolB(t)) { A.grip = 'loose'; A.slipU = 0.1 + 0.88 * (tolB(t) - d) / (tolB(t) - tolA(t)); }
+        else {
+          // a claw coming down on a toy's side shoves it away, always the same way
+          A.grip = 'nudge';
+          var dir = gx < t.x + shift(Rd.B, Rd.clock) ? 1 : -1;
+          t.x = place(Rd, t, t.x + dir * Math.min(3, t.r + REACH - d) * 0.8);
+        }
+        ev.push(['grip', A.grip]);
+        if (A.grip === 'firm' || A.grip === 'loose') {
+          A.held = t; A.hx = t.x + shift(Rd.B, Rd.clock) - Rd.cx;
+          Rd.toys.splice(Rd.toys.indexOf(t), 1);
+        }
+      }
+    } else if (A.phase === 'close') {
+      A.open = Math.max(0, 1 - A.t / CLOSE);
+      if (A.t >= CLOSE) { A.phase = 'up'; A.t = 0; A.y0 = A.y; }
+    } else if (A.phase === 'up') {
+      A.y = Math.max(TOP, A.y - VU * DT);
+      A.u = 0.3 * (A.y0 - A.y) / Math.max(1, A.y0 - TOP);
+      if (A.held && A.u >= A.slipU) slipNow(Rd, A, ev);
+      if (A.y <= TOP) { A.phase = 'carry'; A.t = 0; A.x0 = Rd.cx; }
+    } else if (A.phase === 'carry') {
+      var hx = home(Rd.B), dxc = hx - Rd.cx, stc = VC * DT;
+      if (Math.abs(dxc) <= stc) Rd.cx = hx; else Rd.cx += dxc > 0 ? stc : -stc;
+      A.u = 0.3 + 0.7 * (A.x0 === hx ? 1 : (A.x0 - Rd.cx) / (A.x0 - hx));
+      if (A.held && A.u >= A.slipU) slipNow(Rd, A, ev);
+      if (Rd.cx === hx) { A.phase = 'open'; A.t = 0; }
+    } else if (A.phase === 'open') {
+      A.open = Math.min(1, A.t / OPEN);
+      if (A.held && A.t === 4) { var h = A.held; A.held = null; deliver(Rd, h, ev); }
+      if (A.t >= OPEN) { A.done = true; Rd.v = 0; }
+    }
+    void H0;
+    return ev;
+  }
+  function finishDrop(Rd, A) { var ev = []; while (!A.done) ev = ev.concat(step(Rd, A)); return ev; }
+
+  // descent steps from the top until the tips reach a toy of radius r lying on the floor
+  function descentSteps(r) { return Math.ceil((FLOOR - 2 * r - PRONG - TOP) / (VD * DT)); }
+
+  /* ---------------------------------------------------------------- players
+     Bots used for the star targets and the tests. A player is a function that, before
+     each drop, returns where to send the carriage and whether to wait for the swing. */
+  function play(B, player) {
+    var Rd = round(B), guard = 0;
+    while (!over(Rd) && guard++ < 100) {
+      var plan = player(Rd);
+      var n = 0;
+      while (Math.abs(Rd.cx - clamp(plan.x, home(B), W - 4)) > 1e-9 && n++ < 2000) move(Rd, plan.x);
+      move(Rd, plan.x);
+      n = 0;
+      if (plan.settle) while ((Math.abs(Rd.s) > 0.05 || Math.abs(Rd.sv) > 0.3) && n++ < 600) move(Rd, null);
+      if (plan.wait) for (n = 0; n < plan.wait; n++) move(Rd, null);
+      finishDrop(Rd, drop(Rd));
+    }
+    return Rd;
+  }
+  // where the carriage must stand so the claw meets toy t square on, dropping at clock c
+  // after a settled swing
+  function lead(Rd, t, c) { return t.x + shift(Rd.B, c + descentSteps(t.r)); }
+
+  /* A player who knows the machine but whose aim is off by up to `aim` units: goes for
+     the toy with the best points times its chance of a firm grip, waits for the swing,
+     leads a moving toy, and stands off by the error. */
+  function skilled(seed, aim) {
+    var r = rng(seed);
+    return function (Rd) {
+      var best = null, bv = -1;
+      Rd.toys.forEach(function (t) { var v = t.pts * Math.min(1, tolA(t) / aim); if (v > bv) { bv = v; best = t; } });
+      var e = (r() * 2 - 1) * aim;
+      // the carriage takes time to get there; the bot plans the drop for when it arrives
+      var c = Rd.clock, x = lead(Rd, best, c), arrive = Math.ceil(Math.abs(x - Rd.cx) / (Rd.B.P.speed * DT)) + 1;
+      var settle = Rd.B.P.damp < 5 ? 150 : 40, cd = c + arrive + settle;
+      return { x: lead(Rd, best, cd) + e, wait: settle };
+    };
+  }
+  function randomPlayer(seed) {
+    var r = rng(seed);
+    return function () { return { x: home({ P: { chute: 19 } }) + r() * 90, wait: 0 }; };
+  }
+  function fixedPlayer(x) { return function () { return { x: x, wait: 0 }; }; }
+
+  function thresholds(B) {
+    if (B.th) return B.th;
+    var sc = [];
+    for (var i = 0; i < BOT_ROUNDS; i++) sc.push(play(B, skilled((B.seed ^ 0x51) + i * 977, AIM)).score);
+    sc.sort(function (a, b) { return a - b; });
+    var med = sc[Math.floor(sc.length / 2)];
+    B.th = STAR_K.map(function (f) { return Math.max(10, Math.round(med * f / 5) * 5); });
+    B.med = med;
+    return B.th;
+  }
+  function stars(B, score) { var t = thresholds(B); return score >= t[2] ? 3 : score >= t[1] ? 2 : score >= t[0] ? 1 : 0; }
+
+  /* Saves: the board and its drops. A drop in progress is saved as it left and replayed
+     on restore, so leaving mid-grab never gives a try back or changes its outcome. */
+  function snapshot(Rd) { return { seed: Rd.B.seed, level: Rd.B.level, drops: Rd.drops.map(function (d) { return { x: d.x, s: d.s, sv: d.sv, clock: d.clock }; }) }; }
+  function num(x) { return typeof x === 'number' && isFinite(x); }
+  function restore(o) {
+    if (!o || typeof o !== 'object' || !Array.isArray(o.drops)) return null;
+    if (o.seed !== (o.seed >>> 0) || o.level !== (o.level | 0) || o.level < 0 || o.level > LEVELS) return null;
+    if (o.drops.length > TRIES) return null;
+    var B = o.level ? make(o.seed, o.level) : daily(o.seed), Rd = round(B);
+    for (var i = 0; i < o.drops.length; i++) {
+      var d = o.drops[i];
+      if (!d || !num(d.x) || !num(d.s) || !num(d.sv) || d.clock !== (d.clock | 0)) return null;
+      if (d.x < home(B) - 1e-9 || d.x > W - 4 + 1e-9 || d.clock < Rd.clock || Math.abs(d.s) > 30 || Math.abs(d.sv) > 200 || !Rd.toys.length) return null;
+      Rd.cx = d.x; Rd.s = d.s; Rd.sv = d.sv; Rd.clock = d.clock; Rd.v = 0;
+      finishDrop(Rd, drop(Rd));
+      Rd.drops[i] = { x: d.x, s: d.s, sv: d.sv, clock: d.clock };
+    }
+    return Rd;
+  }
+
+  var api = {
+    W: W, H: H, FLOOR: FLOOR, TOP: TOP, PRONG: PRONG, DT: DT, LEVELS: LEVELS, TRIES: TRIES, KINDS: KINDS, KIND_IDS: KIND_IDS, STAR_K: STAR_K, AIM: AIM, REACH: REACH,
+    rng: rng, params: params, make: make, level: level, daily: daily, home: home, shift: shift, tolA: tolA, tolB: tolB,
+    round: round, over: over, move: move, drop: drop, step: step, finishDrop: finishDrop, place: place, descentSteps: descentSteps, lead: lead,
+    play: play, skilled: skilled, randomPlayer: randomPlayer, fixedPlayer: fixedPlayer, thresholds: thresholds, stars: stars, snapshot: snapshot, restore: restore
+  };
+  if (typeof self !== 'undefined') self.ClawEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = ClawEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = ClawEngineFactory();
+  // a deep plum, apart from every other game's colour; white text on it passes 4.5:1 (#949)
+  var ACCENT = '#783053';
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'claw',
+    name: { fa: 'چنگک', en: 'Grabber', zh: '抓娃娃', de: 'Greifer', es: 'Gancho', pl: 'Chwytak', fr: 'Grappin', ar: 'المخلب', hi: 'पंजा' },
+    accent: ACCENT,
+    mood: 'dots',
+    strings: {
+      fa: {
+        cwScene: 'دستگاه چنگک با عروسک‌ها و دریچه', cwLevelN: 'دستگاه {n}', cwDaily: 'دستگاه روزانه', cwTriesN: 'نوبت: {n}', cwScoreN: 'امتیاز: {n}',
+        cwHint: 'چنگک را بالای یک عروسک ببر و «بنداز» را بزن.', cwSwingHint: 'سر چنگک تاب می‌خورد؛ صبر کن آرام شود.', cwBeltHint: 'کف دستگاه حرکت می‌کند؛ کمی جلوتر بنداز.', cwLast: 'نوبت آخر!',
+        cwGot: 'گرفتی! +{n}', cwSlip: 'لیز خورد…', cwMiss: 'خالی', cwNudge: 'هلش دادی',
+        cwCleared: 'دستگاه تمام شد!', cwNoStar: 'این بار ستاره‌ای نشد', cwNext: 'دستگاه بعدی', cwRetry: 'دوباره همین دستگاه',
+        cwDrop: 'بنداز', cwTries: 'نوبت‌ها', cwScore: 'امتیاز', cwBest: 'بهترین', cwStarsAt: 'ستاره‌ها از', cwNewBest: 'رکورد تازه: {n}', cwUnlocked: 'دستگاه {n} باز شد',
+        cwChoose: 'انتخاب دستگاه', cwLocked: 'قفل', cwAimLine: 'خط نشانه زیر چنگک',
+        cwRules: 'چند نوبت داری. چنگک را با کشیدن انگشت روی دستگاه یا با کلیدهای چپ و راست جابه‌جا کن و «بنداز» را بزن. چنگک پایین می‌رود، می‌بندد و هر چه گرفته به دریچه‌ی گوشه می‌برد. چیزی شانسی نیست: اگر چنگک درست وسط عروسک بنشیند محکم می‌گیرد، کمی کنار بگیرد در راه لیز می‌خورد، و خیلی کنار فقط هلش می‌دهد. عروسک‌های کوچک‌تر و سنگین‌تر دقت بیشتری می‌خواهند و امتیاز بیشتری دارند. در دستگاه‌های بالاتر سر چنگک تاب می‌خورد، کف حرکت می‌کند و دریچه تنگ‌تر می‌شود. با رسیدن به امتیاز ستاره‌ها یک، دو یا سه ستاره می‌گیری و با یک ستاره دستگاه بعدی باز می‌شود.',
+        cwKMove: 'جابه‌جا کردن چنگک', cwKDrop: 'انداختن چنگک', cwKAgain: 'شروع دوباره‌ی دستگاه',
+        cwTut1: 'ببر و بنداز', cwTutText1: 'انگشتت را روی دستگاه بکش تا چنگک بالای عروسک برود، بعد «بنداز» را بزن.',
+        cwTut2: 'درست وسط', cwTutText2: 'چنگکی که وسط عروسک بنشیند محکم می‌گیرد. کمی کنار، عروسک در راه لیز می‌خورد. شانسی در کار نیست.',
+        cwTut3: 'تاب و نوار', cwTutText3: 'در دستگاه‌های بالاتر سر چنگک تاب می‌خورد و کف حرکت می‌کند. صبر کن و زمان را درست بگیر.'
+      },
+      en: {
+        cwScene: 'Claw machine with plush toys and a chute', cwLevelN: 'Machine {n}', cwDaily: 'Daily machine', cwTriesN: 'Tries: {n}', cwScoreN: 'Score: {n}',
+        cwHint: 'Move the claw over a toy, then press Drop.', cwSwingHint: 'The claw swings: let it settle first.', cwBeltHint: 'The floor moves: drop a little ahead.', cwLast: 'Last try!',
+        cwGot: 'Got it! +{n}', cwSlip: 'It slipped…', cwMiss: 'Empty', cwNudge: 'Nudged it',
+        cwCleared: 'Machine cleared!', cwNoStar: 'No star this time', cwNext: 'Next machine', cwRetry: 'Try this machine again',
+        cwDrop: 'Drop', cwTries: 'Tries', cwScore: 'Score', cwBest: 'Best', cwStarsAt: 'Stars at', cwNewBest: 'New best: {n}', cwUnlocked: 'Machine {n} unlocked',
+        cwChoose: 'Choose a machine', cwLocked: 'Locked', cwAimLine: 'Aim line under the claw',
+        cwRules: 'You have a few tries. Move the claw by dragging on the machine or with the left and right keys, then press Drop. The claw goes down, closes and carries whatever it holds to the chute in the corner. Nothing is luck: a claw that lands right over the middle of a toy holds it firmly, a little off and the toy slips on the way, and far off it only nudges it. Smaller and heavier toys need a better aim and are worth more. On later machines the claw swings, the floor moves and the chute gets narrower. Reach the targets for one, two or three stars; one star opens the next machine.',
+        cwKMove: 'Move the claw', cwKDrop: 'Drop the claw', cwKAgain: 'Restart the machine',
+        cwTut1: 'Move and drop', cwTutText1: 'Drag on the machine to bring the claw over a toy, then press Drop.',
+        cwTut2: 'Right in the middle', cwTutText2: 'A claw that lands over the middle of a toy holds it firmly. A little off, and it slips on the way. There is no luck in it.',
+        cwTut3: 'Swing and belt', cwTutText3: 'On later machines the claw swings and the floor moves. Wait, and time your drop.'
+      },
+      zh: {
+        cwScene: '有毛绒玩具和出口的抓娃娃机', cwLevelN: '第 {n} 台', cwDaily: '每日机台', cwTriesN: '次数：{n}', cwScoreN: '得分：{n}',
+        cwHint: '把爪子移到玩具上方，然后按“放下”。', cwSwingHint: '爪子在摆动：先等它停稳。', cwBeltHint: '底板在移动：稍微提前放下。', cwLast: '最后一次！',
+        cwGot: '抓到了！+{n}', cwSlip: '滑掉了……', cwMiss: '空了', cwNudge: '推开了',
+        cwCleared: '机器完成！', cwNoStar: '这次没有星星', cwNext: '下一台', cwRetry: '再玩这一台',
+        cwDrop: '放下', cwTries: '次数', cwScore: '得分', cwBest: '最佳', cwStarsAt: '星星目标', cwNewBest: '新纪录：{n}', cwUnlocked: '第 {n} 台已解锁',
+        cwChoose: '选择机台', cwLocked: '未解锁', cwAimLine: '爪子下方的瞄准线',
+        cwRules: '你有几次机会。在机器上拖动或用左右键移动爪子，然后按“放下”。爪子下降、合拢，把抓到的东西送到角落的出口。没有运气成分：爪子正好落在玩具中间就能抓牢，稍微偏一点玩具会在途中滑落，偏太多只会把它推开。更小、更重的玩具需要更准，分数也更高。后面的机台爪子会摆动、底板会移动、出口会变窄。达到目标可得一到三颗星，一颗星解锁下一台。',
+        cwKMove: '移动爪子', cwKDrop: '放下爪子', cwKAgain: '重新开始本台',
+        cwTut1: '移动并放下', cwTutText1: '在机器上拖动，把爪子移到玩具上方，然后按“放下”。',
+        cwTut2: '对准中间', cwTutText2: '爪子落在玩具中间就能抓牢。稍微偏一点，玩具会在途中滑落。这里没有运气。',
+        cwTut3: '摆动和传送带', cwTutText3: '后面的机台爪子会摆动，底板会移动。耐心等待，把握时机。'
+      },
+      de: {
+        cwScene: 'Greifautomat mit Plüschtieren und Ausgabeschacht', cwLevelN: 'Automat {n}', cwDaily: 'Tagesautomat', cwTriesN: 'Versuche: {n}', cwScoreN: 'Punkte: {n}',
+        cwHint: 'Fahr den Greifer über ein Tier und tippe auf Ablassen.', cwSwingHint: 'Der Greifer schwingt: lass ihn erst zur Ruhe kommen.', cwBeltHint: 'Der Boden bewegt sich: lass etwas früher ab.', cwLast: 'Letzter Versuch!',
+        cwGot: 'Erwischt! +{n}', cwSlip: 'Abgerutscht…', cwMiss: 'Leer', cwNudge: 'Angestoßen',
+        cwCleared: 'Automat geschafft!', cwNoStar: 'Diesmal kein Stern', cwNext: 'Nächster Automat', cwRetry: 'Diesen Automaten nochmal',
+        cwDrop: 'Ablassen', cwTries: 'Versuche', cwScore: 'Punkte', cwBest: 'Bestwert', cwStarsAt: 'Sterne ab', cwNewBest: 'Neuer Bestwert: {n}', cwUnlocked: 'Automat {n} freigeschaltet',
+        cwChoose: 'Automat wählen', cwLocked: 'Gesperrt', cwAimLine: 'Ziellinie unter dem Greifer',
+        cwRules: 'Du hast ein paar Versuche. Bewege den Greifer durch Ziehen auf dem Automaten oder mit den Pfeiltasten links und rechts und tippe auf Ablassen. Der Greifer senkt sich, schließt und bringt, was er hält, zum Schacht in der Ecke. Nichts ist Glück: Sitzt der Greifer genau über der Mitte eines Tiers, hält er es fest; etwas daneben rutscht es unterwegs ab, weit daneben stößt er es nur an. Kleinere und schwerere Tiere brauchen mehr Genauigkeit und bringen mehr Punkte. Auf späteren Automaten schwingt der Greifer, der Boden bewegt sich und der Schacht wird enger. Erreiche die Ziele für einen, zwei oder drei Sterne; ein Stern öffnet den nächsten Automaten.',
+        cwKMove: 'Greifer bewegen', cwKDrop: 'Greifer ablassen', cwKAgain: 'Automat neu starten',
+        cwTut1: 'Fahren und ablassen', cwTutText1: 'Zieh auf dem Automaten, um den Greifer über ein Tier zu bringen, und tippe dann auf Ablassen.',
+        cwTut2: 'Genau in die Mitte', cwTutText2: 'Über der Mitte hält der Greifer fest. Etwas daneben rutscht das Tier unterwegs ab. Glück spielt keine Rolle.',
+        cwTut3: 'Schwung und Band', cwTutText3: 'Auf späteren Automaten schwingt der Greifer und der Boden bewegt sich. Warte und wähle den richtigen Moment.'
+      },
+      es: {
+        cwScene: 'Máquina de gancho con peluches y una rampa', cwLevelN: 'Máquina {n}', cwDaily: 'Máquina diaria', cwTriesN: 'Intentos: {n}', cwScoreN: 'Puntos: {n}',
+        cwHint: 'Lleva el gancho sobre un peluche y pulsa Soltar.', cwSwingHint: 'El gancho se balancea: espera a que se calme.', cwBeltHint: 'El suelo se mueve: suelta un poco antes.', cwLast: '¡Último intento!',
+        cwGot: '¡Atrapado! +{n}', cwSlip: 'Se resbaló…', cwMiss: 'Vacío', cwNudge: 'Lo empujaste',
+        cwCleared: '¡Máquina superada!', cwNoStar: 'Esta vez sin estrellas', cwNext: 'Siguiente máquina', cwRetry: 'Repetir esta máquina',
+        cwDrop: 'Soltar', cwTries: 'Intentos', cwScore: 'Puntos', cwBest: 'Mejor', cwStarsAt: 'Estrellas desde', cwNewBest: 'Nuevo récord: {n}', cwUnlocked: 'Máquina {n} desbloqueada',
+        cwChoose: 'Elegir máquina', cwLocked: 'Bloqueada', cwAimLine: 'Línea de mira bajo el gancho',
+        cwRules: 'Tienes unos pocos intentos. Mueve el gancho arrastrando sobre la máquina o con las flechas izquierda y derecha, y pulsa Soltar. El gancho baja, se cierra y lleva lo que sujeta a la rampa de la esquina. Nada es suerte: si el gancho cae justo sobre el centro de un peluche, lo sujeta firme; un poco desviado, se resbala por el camino, y muy desviado solo lo empuja. Los peluches más pequeños y pesados piden más puntería y valen más. En las máquinas avanzadas el gancho se balancea, el suelo se mueve y la rampa se estrecha. Alcanza las metas para una, dos o tres estrellas; una estrella abre la siguiente máquina.',
+        cwKMove: 'Mover el gancho', cwKDrop: 'Soltar el gancho', cwKAgain: 'Reiniciar la máquina',
+        cwTut1: 'Mueve y suelta', cwTutText1: 'Arrastra sobre la máquina para llevar el gancho sobre un peluche y pulsa Soltar.',
+        cwTut2: 'Justo en el centro', cwTutText2: 'Sobre el centro del peluche, el gancho lo sujeta firme. Un poco desviado, se resbala por el camino. No hay suerte.',
+        cwTut3: 'Balanceo y cinta', cwTutText3: 'En las máquinas avanzadas el gancho se balancea y el suelo se mueve. Espera y elige el momento.'
+      },
+      pl: {
+        cwScene: 'Automat z chwytakiem, pluszakami i zsypem', cwLevelN: 'Automat {n}', cwDaily: 'Automat dnia', cwTriesN: 'Próby: {n}', cwScoreN: 'Punkty: {n}',
+        cwHint: 'Przesuń chwytak nad pluszaka i naciśnij Opuść.', cwSwingHint: 'Chwytak się kołysze: poczekaj, aż się uspokoi.', cwBeltHint: 'Podłoga się rusza: opuść trochę wcześniej.', cwLast: 'Ostatnia próba!',
+        cwGot: 'Mam go! +{n}', cwSlip: 'Wyślizgnął się…', cwMiss: 'Pusto', cwNudge: 'Przesunięty',
+        cwCleared: 'Automat ukończony!', cwNoStar: 'Tym razem bez gwiazdki', cwNext: 'Następny automat', cwRetry: 'Jeszcze raz ten automat',
+        cwDrop: 'Opuść', cwTries: 'Próby', cwScore: 'Punkty', cwBest: 'Rekord', cwStarsAt: 'Gwiazdki od', cwNewBest: 'Nowy rekord: {n}', cwUnlocked: 'Odblokowano automat {n}',
+        cwChoose: 'Wybierz automat', cwLocked: 'Zablokowany', cwAimLine: 'Linia celowania pod chwytakiem',
+        cwRules: 'Masz kilka prób. Przesuwaj chwytak, przeciągając po automacie albo strzałkami w lewo i w prawo, i naciśnij Opuść. Chwytak zjeżdża, zamyka się i zanosi to, co trzyma, do zsypu w rogu. Nic nie zależy od szczęścia: chwytak dokładnie nad środkiem pluszaka trzyma go mocno, trochę obok i pluszak wyślizguje się po drodze, daleko obok tylko go przesuwa. Mniejsze i cięższe pluszaki wymagają lepszego celowania i są warte więcej. W dalszych automatach chwytak się kołysze, podłoga się rusza, a zsyp jest węższy. Osiągnij progi, by zdobyć jedną, dwie lub trzy gwiazdki; jedna otwiera następny automat.',
+        cwKMove: 'Przesuń chwytak', cwKDrop: 'Opuść chwytak', cwKAgain: 'Zacznij automat od nowa',
+        cwTut1: 'Przesuń i opuść', cwTutText1: 'Przeciągnij po automacie, by ustawić chwytak nad pluszakiem, potem naciśnij Opuść.',
+        cwTut2: 'Dokładnie w środek', cwTutText2: 'Nad środkiem pluszaka chwytak trzyma mocno. Trochę obok, a pluszak wyślizgnie się po drodze. Bez szczęścia.',
+        cwTut3: 'Kołysanie i taśma', cwTutText3: 'W dalszych automatach chwytak się kołysze, a podłoga się rusza. Poczekaj i wybierz chwilę.'
+      },
+      fr: {
+        cwScene: 'Machine à pince avec des peluches et une trappe', cwLevelN: 'Machine {n}', cwDaily: 'Machine du jour', cwTriesN: 'Essais : {n}', cwScoreN: 'Score : {n}',
+        cwHint: 'Place la pince au-dessus d’une peluche, puis appuie sur Lâcher.', cwSwingHint: 'La pince se balance : attends qu’elle se calme.', cwBeltHint: 'Le sol bouge : lâche un peu en avance.', cwLast: 'Dernier essai !',
+        cwGot: 'Attrapé ! +{n}', cwSlip: 'Ça a glissé…', cwMiss: 'Raté', cwNudge: 'Poussé',
+        cwCleared: 'Machine terminée !', cwNoStar: 'Pas d’étoile cette fois', cwNext: 'Machine suivante', cwRetry: 'Rejouer cette machine',
+        cwDrop: 'Lâcher', cwTries: 'Essais', cwScore: 'Score', cwBest: 'Record', cwStarsAt: 'Étoiles à', cwNewBest: 'Nouveau record : {n}', cwUnlocked: 'Machine {n} débloquée',
+        cwChoose: 'Choisir une machine', cwLocked: 'Verrouillée', cwAimLine: 'Ligne de visée sous la pince',
+        cwRules: 'Tu as quelques essais. Déplace la pince en glissant sur la machine ou avec les flèches gauche et droite, puis appuie sur Lâcher. La pince descend, se ferme et porte ce qu’elle tient jusqu’à la trappe du coin. Rien n’est dû au hasard : une pince qui tombe juste au-dessus du milieu d’une peluche la tient bien, un peu à côté la peluche glisse en route, et trop à côté elle ne fait que la pousser. Les peluches plus petites et plus lourdes demandent plus de précision et rapportent plus. Sur les machines suivantes, la pince se balance, le sol bouge et la trappe rétrécit. Atteins les seuils pour une, deux ou trois étoiles ; une étoile ouvre la machine suivante.',
+        cwKMove: 'Déplacer la pince', cwKDrop: 'Lâcher la pince', cwKAgain: 'Recommencer la machine',
+        cwTut1: 'Déplace et lâche', cwTutText1: 'Glisse sur la machine pour amener la pince au-dessus d’une peluche, puis appuie sur Lâcher.',
+        cwTut2: 'Pile au milieu', cwTutText2: 'Au-dessus du milieu, la pince tient bien la peluche. Un peu à côté, elle glisse en route. Aucun hasard.',
+        cwTut3: 'Balancement et tapis', cwTutText3: 'Sur les machines suivantes, la pince se balance et le sol bouge. Attends et choisis ton moment.'
+      },
+      ar: {
+        cwScene: 'آلة مخلب فيها دمى وفتحة', cwLevelN: 'الآلة {n}', cwDaily: 'آلة اليوم', cwTriesN: 'المحاولات: {n}', cwScoreN: 'النقاط: {n}',
+        cwHint: 'حرّك المخلب فوق دمية ثم اضغط «أنزِل».', cwSwingHint: 'المخلب يتأرجح: انتظر حتى يهدأ.', cwBeltHint: 'الأرضية تتحرك: أنزِل قبلها بقليل.', cwLast: 'المحاولة الأخيرة!',
+        cwGot: 'أمسكتها! +{n}', cwSlip: 'انزلقت…', cwMiss: 'لا شيء', cwNudge: 'دفعتها',
+        cwCleared: 'أنهيت الآلة!', cwNoStar: 'لا نجوم هذه المرة', cwNext: 'الآلة التالية', cwRetry: 'أعد هذه الآلة',
+        cwDrop: 'أنزِل', cwTries: 'المحاولات', cwScore: 'النقاط', cwBest: 'الأفضل', cwStarsAt: 'النجوم عند', cwNewBest: 'رقم قياسي جديد: {n}', cwUnlocked: 'فُتحت الآلة {n}',
+        cwChoose: 'اختر آلة', cwLocked: 'مقفلة', cwAimLine: 'خط التصويب تحت المخلب',
+        cwRules: 'لديك بضع محاولات. حرّك المخلب بالسحب على الآلة أو بمفتاحي اليسار واليمين، ثم اضغط «أنزِل». ينزل المخلب ويُغلق ويحمل ما أمسكه إلى الفتحة في الزاوية. لا شيء بالحظ: المخلب الذي ينزل فوق منتصف الدمية تمامًا يمسكها بقوة، وإن انحرف قليلًا انزلقت في الطريق، وإن انحرف كثيرًا دفعها فقط. الدمى الأصغر والأثقل تحتاج دقة أكبر ونقاطها أكثر. في الآلات المتقدمة يتأرجح المخلب وتتحرك الأرضية وتضيق الفتحة. بلوغ الأهداف يعطيك نجمة أو اثنتين أو ثلاثًا، ونجمة واحدة تفتح الآلة التالية.',
+        cwKMove: 'حرّك المخلب', cwKDrop: 'أنزِل المخلب', cwKAgain: 'ابدأ الآلة من جديد',
+        cwTut1: 'حرّك وأنزِل', cwTutText1: 'اسحب على الآلة لتضع المخلب فوق دمية، ثم اضغط «أنزِل».',
+        cwTut2: 'في المنتصف تمامًا', cwTutText2: 'فوق منتصف الدمية يمسكها المخلب بقوة. إن انحرف قليلًا انزلقت في الطريق. لا حظ في ذلك.',
+        cwTut3: 'التأرجح والحزام', cwTutText3: 'في الآلات المتقدمة يتأرجح المخلب وتتحرك الأرضية. انتظر واختر اللحظة.'
+      },
+      hi: {
+        cwScene: 'खिलौनों और ढलान वाली पंजा मशीन', cwLevelN: 'मशीन {n}', cwDaily: 'आज की मशीन', cwTriesN: 'मौके: {n}', cwScoreN: 'अंक: {n}',
+        cwHint: 'पंजे को किसी खिलौने के ऊपर लाएँ, फिर गिराएँ दबाएँ।', cwSwingHint: 'पंजा झूल रहा है: पहले उसे रुकने दें।', cwBeltHint: 'फ़र्श चल रहा है: थोड़ा पहले गिराएँ।', cwLast: 'आख़िरी मौका!',
+        cwGot: 'पकड़ लिया! +{n}', cwSlip: 'फिसल गया…', cwMiss: 'खाली', cwNudge: 'धकेल दिया',
+        cwCleared: 'मशीन पूरी हुई!', cwNoStar: 'इस बार कोई तारा नहीं', cwNext: 'अगली मशीन', cwRetry: 'यही मशीन फिर से',
+        cwDrop: 'गिराएँ', cwTries: 'मौके', cwScore: 'अंक', cwBest: 'सर्वश्रेष्ठ', cwStarsAt: 'तारे', cwNewBest: 'नया रिकॉर्ड: {n}', cwUnlocked: 'मशीन {n} खुल गई',
+        cwChoose: 'मशीन चुनें', cwLocked: 'बंद', cwAimLine: 'पंजे के नीचे निशाने की रेखा',
+        cwRules: 'आपके पास कुछ मौके हैं। मशीन पर उँगली खींचकर या बाएँ-दाएँ कुंजियों से पंजा हिलाएँ, फिर गिराएँ दबाएँ। पंजा नीचे जाता है, बंद होता है और जो पकड़ा उसे कोने की ढलान तक ले जाता है। कुछ भी किस्मत पर नहीं: खिलौने के ठीक बीच के ऊपर उतरा पंजा उसे मज़बूती से पकड़ता है, थोड़ा हटकर खिलौना रास्ते में फिसल जाता है, और बहुत हटकर पंजा उसे बस धकेल देता है। छोटे और भारी खिलौनों को ज़्यादा सटीक निशाना चाहिए और उनके अंक ज़्यादा हैं। आगे की मशीनों में पंजा झूलता है, फ़र्श चलता है और ढलान पतली होती है। लक्ष्य पाकर एक, दो या तीन तारे पाएँ; एक तारे से अगली मशीन खुलती है।',
+        cwKMove: 'पंजा हिलाएँ', cwKDrop: 'पंजा गिराएँ', cwKAgain: 'मशीन फिर से शुरू करें',
+        cwTut1: 'हिलाएँ और गिराएँ', cwTutText1: 'पंजे को खिलौने के ऊपर लाने के लिए मशीन पर खींचें, फिर गिराएँ दबाएँ।',
+        cwTut2: 'ठीक बीच में', cwTutText2: 'खिलौने के बीच के ऊपर पंजा मज़बूती से पकड़ता है। थोड़ा हटकर खिलौना रास्ते में फिसल जाता है। इसमें किस्मत नहीं।',
+        cwTut3: 'झूला और पट्टा', cwTutText3: 'आगे की मशीनों में पंजा झूलता है और फ़र्श चलता है। रुकें और सही पल चुनें।'
+      }
+    }
+  });
+
+  // the aim line stays under the claw unless the player turns it off behind the gear
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || typeof prefs !== 'object') prefs = {};
+  prefs.line = prefs.line !== false;
+
+  // campaign progress: the best score and stars per machine, and how many machines are open
+  function loadProg() {
+    var p = ctx.store.get('prog', null), out = { best: [], unlocked: 1, cur: 1 };
+    for (var i = 0; i < E.LEVELS; i++) {
+      var b = p && Array.isArray(p.best) ? p.best[i] : null;
+      out.best.push(b && b.score >= 0 && b.stars >= 0 && b.stars <= 3 ? { score: b.score | 0, stars: b.stars | 0 } : null);
+    }
+    if (p && p.unlocked >= 1) out.unlocked = Math.min(E.LEVELS, p.unlocked | 0);
+    if (p && p.cur >= 1 && p.cur <= out.unlocked) out.cur = p.cur | 0;
+    return out;
+  }
+  var prog = loadProg();
+  function saveProg() { ctx.store.set('prog', prog); }
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  // the day's machine, the same for everyone: one seed from the day's own generator
+  var dailySeed = dailyDate ? Math.floor(C.daily('claw', dailyDate).rng() * 4294967296) >>> 0 : 0;
+
+  // the round, the grab in progress, where the claw is heading, and what is drawn
+  var Rd = null, A = null, target = null, keyDir = 0, ended = false, startedAt = 0, tries = 0;
+  var pops = [], falls = [], msg = '', msgAt = 0;
+  var raf = 0, last = 0, acc = 0, paused = false, dragging = false;
+
+  var cv = el('canvas', { class: 'cw-canvas', role: 'img', 'aria-label': C.t('cwScene') });
+  var box = el('div', { class: 'cw-box' }, [cv]);
+  var top = el('div', { class: 'cw-top ch-above' });
+  var goals = el('div', { class: 'cw-goals' });
+  var status = el('div', { class: 'cw-status', role: 'status', 'aria-live': 'polite' });
+  var dropBtn = el('button', { class: 'ch-btn ch-btn--primary cw-drop', type: 'button', text: C.t('cwDrop') });
+  dropBtn.addEventListener('click', function () { drop(); });
+  var wrap = el('div', { class: 'cw-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, goals, dropBtn, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  if (!dailyDate) ctx.button({ icon: 'grid', label: C.t('cwChoose'), onClick: showLevels });
+  ctx.button({ icon: 'gear', label: C.t('settings'), onClick: showSettings });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- rounds */
+
+  function boardFor(n) { return dailyDate ? E.daily(dailySeed) : E.level(n); }
+
+  function startRound(n) {
+    if (!dailyDate) { prog.cur = n; saveProg(); }
+    Rd = E.round(boardFor(n));
+    tries++;
+    startedAt = Date.now();
+    begin();
+  }
+  function begin() {
+    A = null; target = null; ended = false; pops = []; falls = []; msg = '';
+    // a daily machine's targets come from the bot rounds once, on the way in
+    E.thresholds(Rd.B);
+    renderSide(); draw(); kick();
+  }
+  function busy() { return !Rd || A || ended || E.over(Rd) || paused; }
+
+  function drop() {
+    if (busy()) return;
+    A = E.drop(Rd);
+    target = null; keyDir = 0; dragging = false;
+    C.feedback('tap');
+    C.audio.sfx('claw');
+    ctx.save();
+    renderSide(); kick();
+  }
+
+  // what the grab did, as it happens
+  function onEvents(ev) {
+    for (var i = 0; i < ev.length; i++) {
+      var e = ev[i];
+      if (e[0] === 'grip') {
+        if (e[1] === 'miss' || e[1] === 'nudge') { say(C.t(e[1] === 'miss' ? 'cwMiss' : 'cwNudge')); C.feedback('thud'); }
+        else C.audio.sfx('pin');
+      } else if (e[0] === 'slip') {
+        if (!e[2]) { say(C.t('cwSlip')); C.feedback('thud'); }
+      } else if (e[0] === 'deliver') delivered(e[1], e[2]);
+    }
+  }
+  function delivered(id, pts) {
+    var t = Rd.B.toys[id];
+    falls.push({ k: t.k, r: t.r, x: Rd.cx, y: E.TOP + E.PRONG + t.r, t: 0 });
+    pops.push({ x: Math.max(12, Rd.B.P.chute / 2 + 6), y: E.FLOOR - 24, text: '+' + C.num(pts), t: 0, star: t.k === 'star' });
+    if (t.k === 'star') C.achievements.unlock('cw-star');
+    say(C.t('cwGot', { n: C.num(pts) }));
+    C.feedback('good');
+    var V = view(), r = cv.getBoundingClientRect();
+    if (r.width) C.ui.burst({ x: r.left + V.ox + Rd.B.P.chute / 2 * V.k, y: r.top + V.oy + (E.FLOOR - 6) * V.k }, { colors: t.k === 'star' ? ['#F5B82E', '#FFE08A', ACCENT] : [ACCENT, '#E7A9C6', '#FFFFFF'], count: t.k === 'star' ? 22 : 14, speed: 0.9 });
+  }
+  function grabDone() {
+    A = null;
+    ctx.save();
+    renderSide();
+    if (E.over(Rd)) setTimeout(finish, 600);
+  }
+  function say(t) { msg = t; msgAt = performance.now(); renderSide(); }
+
+  /* --------------------------------------------------------------- loop */
+
+  function kick() { if (!raf) { last = 0; raf = requestAnimationFrame(frame); } }
+  function frame(t) {
+    raf = 0;
+    if (paused || !Rd) return;
+    var dt = last ? Math.min(0.1, (t - last) / 1000) : 0;
+    last = t;
+    acc += dt;
+    var n = 0;
+    while (acc >= E.DT && n < 12) {
+      acc -= E.DT; n++;
+      if (A) {
+        onEvents(E.step(Rd, A));
+        if (A && A.done) grabDone();
+      } else if (!ended && !E.over(Rd)) {
+        E.move(Rd, keyDir ? Rd.cx + keyDir * 50 : target);
+        if (target != null && Math.abs(Rd.cx - target) < 1e-6) target = null;
+      }
+    }
+    if (n === 12) acc = 0;
+    pops = pops.filter(function (p) { p.t += dt; return p.t < 1; });
+    falls = falls.filter(function (f) { f.t += dt; return f.t < 0.6; });
+    draw(t);
+    // the machine runs between tries too: the claw swings and the belt moves
+    if (A || pops.length || falls.length || (!ended && !E.over(Rd))) raf = requestAnimationFrame(frame);
+  }
+
+  /* ------------------------------------------------------------- finish */
+
+  function finish() {
+    if (ended || !Rd || !E.over(Rd) || A) return;
+    ended = true;
+    ctx.clearSave();
+    var score = Rd.score, st = E.stars(Rd.B, score), note = null, won = st >= 1, L = Rd.B.level;
+    var coins = 2 + st * 2, points = 6 + st * 6, next = 0;
+    if (won) C.achievements.unlock('cw-win');
+    if (st === 3) C.achievements.unlock('cw-three');
+    if (dailyDate) {
+      coins += 8; points += 25;
+      if (won) C.achievements.unlock('cw-daily');
+      if (!C.stats.daily('claw', dailyDate, { label: C.num(score), win: won, stars: st, tries: tries })) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    } else {
+      var b = prog.best[L - 1];
+      if (b && score > b.score) note = C.t('cwNewBest', { n: C.num(score) });
+      prog.best[L - 1] = { score: Math.max(score, b ? b.score : 0), stars: Math.max(st, b ? b.stars : 0) };
+      if (won && L < E.LEVELS && prog.unlocked < L + 1) { prog.unlocked = L + 1; note = C.t('cwUnlocked', { n: C.num(L + 1) }); }
+      if (won && L < E.LEVELS) next = L + 1;
+      saveProg();
+      C.stats.best('claw', 'stars', prog.best.reduce(function (s, x) { return s + (x ? x.stars : 0); }, 0));
+    }
+    renderSide(); draw();
+    var best = dailyDate ? null : prog.best[L - 1];
+    ctx.finish({
+      won: won, stars: st,
+      title: won ? C.t('cwCleared') : C.t('cwNoStar'),
+      note: note, timeMs: Date.now() - startedAt, coins: coins, points: points,
+      lines: [
+        { label: C.t('cwScore'), value: C.num(score) },
+        { label: C.t('cwStarsAt'), value: Rd.B.th.map(function (x) { return C.num(x); }).join(' · ') },
+        best ? { label: C.t('cwBest'), value: C.num(best.score) } : { label: C.t('cwTries'), value: C.num(Rd.B.tries) }
+      ],
+      shareText: 'چوگان · چنگک' + (dailyDate ? ('\nروزانه ' + dailyDate) : ('\nدستگاه ' + L)) + '\n' + score + ' امتیاز · ' + '★'.repeat(st) + '☆'.repeat(3 - st),
+      againLabel: next ? C.t('cwNext') : C.t('cwRetry'),
+      onAgain: dailyDate && won ? null : function () { startRound(next || L); }
+    });
+  }
+
+  /* ----------------------------------------------------------- side rows */
+
+  function chip(text, icon) { return el('span', { class: 'cw-chip' }, icon ? [C.icon(icon, 14), el('span', { text: text })] : [el('span', { text: text })]); }
+  function renderSide() {
+    if (!Rd) return;
+    top.textContent = '';
+    top.appendChild(chip(dailyDate ? C.t('cwDaily') : C.t('cwLevelN', { n: C.num(Rd.B.level) }), dailyDate ? 'calendar' : null));
+    top.appendChild(chip(C.t('cwTriesN', { n: C.num(Rd.B.tries - Rd.drops.length) })));
+    top.appendChild(chip(C.t('cwScoreN', { n: C.num(Rd.score) })));
+    goals.textContent = '';
+    for (var i = 0; i < 3; i++) {
+      var th = Rd.B.th[i], on = Rd.score >= th, g = el('span', { class: 'cw-goal' + (on ? ' cw-goal--on' : '') });
+      for (var s = 0; s <= i; s++) g.appendChild(C.icon('star', 12));
+      g.appendChild(el('span', { text: C.num(th) }));
+      goals.appendChild(g);
+    }
+    dropBtn.disabled = !!busy();
+    var left = Rd.B.tries - Rd.drops.length, P = Rd.B.P;
+    status.textContent = ended || E.over(Rd) ? '' : msg && performance.now() - msgAt < 2500 ? msg
+      : left === 1 && !A ? C.t('cwLast') : Rd.drops.length === 0 ? (P.belt ? C.t('cwBeltHint') : P.damp < 5 ? C.t('cwSwingHint') : C.t('cwHint'))
+      : P.belt ? C.t('cwBeltHint') : P.damp < 5 ? C.t('cwSwingHint') : C.t('cwHint');
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  function palette() {
+    return dark()
+      ? { bg0: '#2A1823', bg1: '#170D13', frame: '#5A3248', rail: '#9C7B8D', floor: '#3B2431', stripe: '#4C2F3F', chute: '#0C0609', chuteEdge: '#C98AA9', metal: '#D9C6D0', metal2: '#8F7684', cable: '#B9A3AF', text: '#F7EAF1', glass: 'rgba(255,255,255,0.05)', line: 'rgba(231,169,198,0.45)', star: '#F5B82E' }
+      : { bg0: '#FFF8FB', bg1: '#F6E6EE', frame: '#E4C9D6', rail: '#8C5B74', floor: '#E9D2DD', stripe: '#DDBFCD', chute: '#3A1F2D', chuteEdge: ACCENT, metal: '#9A8A93', metal2: '#5E4D57', cable: '#6F5E68', text: '#3A1F2D', glass: 'rgba(255,255,255,0.35)', line: 'rgba(120,48,83,0.45)', star: '#F2A900' };
+  }
+  function size() {
+    var r = box.getBoundingClientRect();
+    return { w: Math.max(120, Math.floor(r.width) || 0), h: Math.max(168, Math.floor(r.height) || 0) };
+  }
+  var fontFam = '';
+  function font(px, weight) {
+    if (!fontFam) fontFam = getComputedStyle(document.body).fontFamily || 'sans-serif';
+    return (weight || 700) + ' ' + Math.round(px) + 'px ' + fontFam;
+  }
+  // the view last drawn: a touch is read against what the player saw (#bowling lesson)
+  var drawn = { w: 0, h: 0, k: 0, ox: 0, oy: 0 };
+  function view() { return drawn.k ? drawn : layout(size()); }
+  function layout(Z) {
+    var k = Math.min(Z.w / E.W, Z.h / E.H);
+    return { w: Z.w, h: Z.h, k: k, ox: (Z.w - E.W * k) / 2, oy: (Z.h - E.H * k) / 2 };
+  }
+  function starPath(g, x, y, r) {
+    g.beginPath();
+    for (var i = 0; i < 10; i++) {
+      var a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.48 : r;
+      g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    }
+    g.closePath();
+  }
+  function eyes(g, x, y, r, gap) {
+    g.fillStyle = '#2A1A22';
+    g.beginPath(); g.arc(x - gap, y, r, 0, Math.PI * 2); g.arc(x + gap, y, r, 0, Math.PI * 2); g.fill();
+  }
+  // the plush toys, drawn in code: centre (x, y) and radius r in pixels
+  function drawToy(g, kind, x, y, r) {
+    g.save();
+    g.lineWidth = Math.max(1, r * 0.08);
+    g.strokeStyle = 'rgba(40,20,30,0.55)';
+    if (kind === 'duck') {
+      g.fillStyle = '#F7CB3C';
+      g.beginPath(); g.ellipse(x, y + r * 0.2, r, r * 0.78, 0, 0, Math.PI * 2); g.fill(); g.stroke();
+      g.beginPath(); g.arc(x + r * 0.35, y - r * 0.45, r * 0.5, 0, Math.PI * 2); g.fill(); g.stroke();
+      g.fillStyle = '#F08A24';
+      g.beginPath(); g.moveTo(x + r * 0.78, y - r * 0.5); g.lineTo(x + r * 1.15, y - r * 0.38); g.lineTo(x + r * 0.78, y - r * 0.28); g.closePath(); g.fill();
+      eyes(g, x + r * 0.45, y - r * 0.55, r * 0.08, 0);
+    } else if (kind === 'ball') {
+      g.fillStyle = '#4FA3E0';
+      g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+      g.save(); g.clip();
+      g.fillStyle = '#F4F1EC'; g.fillRect(x - r, y - r * 0.28, r * 2, r * 0.56);
+      g.fillStyle = '#E2574C'; g.fillRect(x - r, y - r * 0.12, r * 2, r * 0.24);
+      g.restore();
+      g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.stroke();
+    } else if (kind === 'bear') {
+      g.fillStyle = '#B07A4E';
+      g.beginPath(); g.arc(x - r * 0.62, y - r * 0.66, r * 0.34, 0, Math.PI * 2); g.arc(x + r * 0.62, y - r * 0.66, r * 0.34, 0, Math.PI * 2); g.fill(); g.stroke();
+      g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill(); g.stroke();
+      g.fillStyle = '#E3C29E';
+      g.beginPath(); g.ellipse(x, y + r * 0.3, r * 0.42, r * 0.32, 0, 0, Math.PI * 2); g.fill();
+      eyes(g, x, y - r * 0.18, r * 0.09, r * 0.34);
+      g.fillStyle = '#2A1A22'; g.beginPath(); g.arc(x, y + r * 0.2, r * 0.1, 0, Math.PI * 2); g.fill();
+    } else if (kind === 'whale') {
+      g.fillStyle = '#5C7FD6';
+      g.beginPath(); g.moveTo(x + r * 0.7, y); g.lineTo(x + r * 1.1, y - r * 0.55); g.lineTo(x + r * 1.1, y + r * 0.1); g.closePath(); g.fill(); g.stroke();
+      g.beginPath(); g.ellipse(x - r * 0.1, y + r * 0.1, r * 0.95, r * 0.8, 0, 0, Math.PI * 2); g.fill(); g.stroke();
+      g.fillStyle = '#C9D7F6';
+      g.beginPath(); g.ellipse(x - r * 0.15, y + r * 0.5, r * 0.6, r * 0.3, 0, 0, Math.PI * 2); g.fill();
+      eyes(g, x - r * 0.5, y - r * 0.05, r * 0.08, 0);
+    } else {
+      g.fillStyle = '#F5B82E';
+      starPath(g, x, y + r * 0.08, r * 1.08); g.fill(); g.stroke();
+      eyes(g, x, y, r * 0.1, r * 0.25);
+    }
+    g.restore();
+  }
+
+  function draw(t) {
+    if (!Rd) return;
+    t = t || performance.now();
+    var Z = size(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
+    cv.style.width = Z.w + 'px'; cv.style.height = Z.h + 'px';
+    var V = layout(Z), k = V.k, B = Rd.B, P = palette(), still = C.ui.reduceMotion();
+    drawn = V;
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, Z.w, Z.h);
+    g.save();
+    g.translate(V.ox, V.oy);
+    function X(x) { return x * k; }
+    var ch = B.P.chute, sh = E.shift(B, Rd.clock);
+
+    // the cabinet
+    var bg = g.createLinearGradient(0, 0, 0, E.H * k);
+    bg.addColorStop(0, P.bg0); bg.addColorStop(1, P.bg1);
+    g.fillStyle = bg;
+    C.rrect(g, 0, 0, E.W * k, E.H * k, Math.max(6, 3 * k)); g.fill();
+    g.strokeStyle = P.frame; g.lineWidth = Math.max(2, 1.2 * k); g.stroke();
+    g.save();
+    C.rrect(g, 0, 0, E.W * k, E.H * k, Math.max(6, 3 * k)); g.clip();
+
+    // the rail the carriage runs on
+    g.fillStyle = P.rail;
+    g.fillRect(X(2), X(5), X(E.W - 4), Math.max(2, X(1.2)));
+
+    // the floor, with belt stripes that move with it
+    g.fillStyle = P.floor;
+    g.fillRect(X(ch), X(E.FLOOR), X(E.W - ch), X(E.H - E.FLOOR));
+    g.fillStyle = P.stripe;
+    for (var sx = ch - 8; sx < E.W + 8; sx += 6) {
+      var xx = sx + (((sh % 6) + 6) % 6);
+      if (xx > ch && xx < E.W) g.fillRect(X(xx), X(E.FLOOR + 1.5), Math.max(1, X(2.4)), X(E.H - E.FLOOR - 3));
+    }
+    // the chute in the corner
+    g.fillStyle = P.chute;
+    g.fillRect(0, X(E.FLOOR - 12), X(ch), X(E.H - E.FLOOR + 12));
+    g.strokeStyle = P.chuteEdge; g.lineWidth = Math.max(2, X(1));
+    g.beginPath(); g.moveTo(X(ch), X(E.FLOOR - 12)); g.lineTo(X(ch), X(E.H)); g.stroke();
+    g.fillStyle = P.chuteEdge;
+    g.fillRect(0, X(E.FLOOR - 13), X(ch) + 1, Math.max(2, X(1)));
+
+    // the toys on the floor
+    for (var i = 0; i < Rd.toys.length; i++) {
+      var to = Rd.toys[i];
+      drawToy(g, to.k, X(to.x + sh), X(E.FLOOR - to.r), X(to.r));
+    }
+    // toys falling into the chute
+    falls.forEach(function (f) {
+      var u = Math.min(1, f.t / 0.6), y = f.y + (E.H - f.y + f.r * 2) * u * u;
+      g.save(); g.beginPath(); g.rect(0, 0, X(ch), X(E.H)); g.clip();
+      drawToy(g, f.k, X(Math.min(f.x, ch / 2)), X(y), X(f.r));
+      g.restore();
+    });
+
+    // the claw: carriage, cable, head and prongs
+    var cx = Rd.cx, y = A ? A.y : E.TOP, gx = cx + Rd.s, open = A ? A.open : 1;
+    if (prefs.line && !A && !ended && !E.over(Rd)) {
+      g.strokeStyle = P.line; g.lineWidth = Math.max(1, X(0.4)); g.setLineDash([X(1.5), X(1.5)]);
+      g.beginPath(); g.moveTo(X(gx), X(y + E.PRONG)); g.lineTo(X(gx), X(E.FLOOR)); g.stroke();
+      g.setLineDash([]);
+    }
+    g.fillStyle = P.metal2;
+    C.rrect(g, X(cx - 4), X(3.5), X(8), X(4), X(1)); g.fill();
+    g.strokeStyle = P.cable; g.lineWidth = Math.max(1, X(0.5));
+    g.beginPath(); g.moveTo(X(cx), X(7.5)); g.lineTo(X(gx), X(y)); g.stroke();
+    if (A && A.held) drawToy(g, A.held.k, X(cx + A.hx), X(y + E.PRONG + A.held.r * 0.6), X(A.held.r));
+    g.fillStyle = P.metal;
+    g.beginPath(); g.arc(X(gx), X(y + 0.5), X(2.4), Math.PI, 0); g.fill();
+    g.fillRect(X(gx - 2.4), X(y + 0.5), X(4.8), X(1.4));
+    g.strokeStyle = P.metal2; g.lineWidth = Math.max(1.5, X(0.9)); g.lineCap = 'round';
+    var spread = 1.2 + open * 3.2;
+    [-1, 1].forEach(function (sd) {
+      g.beginPath();
+      g.moveTo(X(gx + sd * 1.8), X(y + 1.8));
+      g.lineTo(X(gx + sd * (1.8 + spread)), X(y + E.PRONG * 0.6));
+      g.lineTo(X(gx + sd * (0.9 + spread * 0.55)), X(y + E.PRONG));
+      g.stroke();
+    });
+    g.lineCap = 'butt';
+
+    // glass shine
+    g.fillStyle = P.glass;
+    g.beginPath(); g.moveTo(X(70), 0); g.lineTo(X(82), 0); g.lineTo(X(58), X(E.H)); g.lineTo(X(46), X(E.H)); g.closePath(); g.fill();
+
+    // points rising from the chute
+    pops.forEach(function (p) {
+      g.globalAlpha = Math.max(0, 1 - p.t);
+      g.font = font(Math.max(12, X(5)), 800); g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillStyle = p.star ? P.star : P.text;
+      g.fillText(p.text, X(p.x), X(p.y - (still ? 0 : p.t * 10)));
+      g.globalAlpha = 1;
+    });
+    g.restore();
+    g.restore();
+    void t;
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  // the claw heads for the finger anywhere on the machine; it moves at the machine's
+  // speed, so a long drag takes time, as on a real cabinet
+  function aimAt(e) {
+    var r = cv.getBoundingClientRect(), V = view();
+    target = (e.clientX - r.left - V.ox) / V.k;
+    kick();
+  }
+  cv.addEventListener('pointerdown', function (e) {
+    if (busy()) return;
+    dragging = true;
+    try { cv.setPointerCapture(e.pointerId); } catch (er) { /* an old WebView */ }
+    aimAt(e);
+    e.preventDefault();
+  });
+  cv.addEventListener('pointermove', function (e) { if (dragging && !busy()) aimAt(e); });
+  cv.addEventListener('pointerup', function () { dragging = false; });
+  cv.addEventListener('pointercancel', function () { dragging = false; });
+
+  window.addEventListener('keydown', function (e) {
+    if (!Rd || e.target && e.target.closest && e.target.closest('.ch-modal')) return;
+    var k = e.key;
+    if (k === 'ArrowLeft' || C.keyIs(e, 'a')) { e.preventDefault(); if (!busy()) { keyDir = -1; target = null; kick(); } }
+    else if (k === 'ArrowRight' || C.keyIs(e, 'd')) { e.preventDefault(); if (!busy()) { keyDir = 1; target = null; kick(); } }
+    else if (k === ' ' || k === 'Enter' || k === 'ArrowDown') { if (!e.repeat) { e.preventDefault(); drop(); } }
+    else if (C.keyIs(e, 'r') && !dailyDate) { e.preventDefault(); restartAsk(); }
+    else if (C.keyIs(e, 'l') && !dailyDate) { e.preventDefault(); showLevels(); }
+  });
+  window.addEventListener('keyup', function (e) {
+    var k = e.key;
+    if ((k === 'ArrowLeft' || C.keyIs(e, 'a')) && keyDir < 0) keyDir = 0;
+    if ((k === 'ArrowRight' || C.keyIs(e, 'd')) && keyDir > 0) keyDir = 0;
+  });
+  window.addEventListener('blur', function () { keyDir = 0; dragging = false; });
+
+  C.onPause(function () { paused = true; dragging = false; keyDir = 0; ctx.save(); });
+  C.onResume(function () { paused = false; last = 0; kick(); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { last = 0; kick(); } });
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { fontFam = ''; draw(); });
+  if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { draw(); }); } catch (er) { /* old WebViews */ } }
+
+  /* ----------------------------------------------------- machines, gear */
+
+  function restartAsk() {
+    if (!Rd) return;
+    if (Rd.drops.length > 0 && !ended) C.ui.confirm({ title: C.t('restart'), body: C.t('resetWarn'), onOk: function () { ctx.clearSave(); startRound(Rd.B.level); } });
+    else startRound(Rd.B.level);
+  }
+  function showLevels() {
+    if (dailyDate) return;
+    var grid = el('div', { class: 'cw-levels' }), m = null;
+    for (var i = 0; i < E.LEVELS; i++) {
+      (function (n) {
+        var locked = n > prog.unlocked, best = prog.best[n - 1], kids = [el('b', { text: C.num(n) })];
+        if (locked) kids.push(C.icon('lock', 14));
+        else if (best) {
+          var sr = el('span', { class: 'cw-lv__stars' });
+          for (var s = 1; s <= 3; s++) { var ic = C.icon('star', 11); if (s <= best.stars) ic.setAttribute('fill', 'currentColor'); else ic.style.opacity = '.4'; sr.appendChild(ic); }
+          kids.push(sr);
+        }
+        var b = el('button', {
+          class: 'cw-lv' + (Rd && n === Rd.B.level ? ' cw-lv--on' : '') + (best ? ' cw-lv--done' : ''),
+          type: 'button', disabled: locked,
+          'aria-label': C.t('cwLevelN', { n: C.num(n) }) + (locked ? ' — ' + C.t('cwLocked') : '')
+        }, kids);
+        b.addEventListener('click', function () {
+          if (m) m.close();
+          if (Rd && Rd.drops.length > 0 && !ended) C.ui.confirm({ title: C.t('restart'), body: C.t('resetWarn'), onOk: function () { ctx.clearSave(); startRound(n); } });
+          else startRound(n);
+        });
+        grid.appendChild(b);
+      })(i + 1);
+    }
+    m = C.ui.modal({ title: C.t('cwChoose'), body: [grid], actions: [{ label: C.t('cancel') }] });
+  }
+  function showSettings() {
+    var sw = C.ui.switch(prefs.line, function (v) { prefs.line = !!v; ctx.store.set('prefs', prefs); draw(); });
+    C.ui.modal({
+      title: C.t('settings'), closeButton: true,
+      body: [el('div', { class: 'ch-list' }, [el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('cwAimLine') }), sw])])],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    var keys = [kb('← → / A D', C.t('cwKMove')), kb('Space / Enter / ↓', C.t('cwKDrop'))];
+    if (!dailyDate) keys.push(kb('L', C.t('cwChoose')), kb('R', C.t('cwKAgain')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('cwRules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, keys)
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 110" width="100%" direction="ltr"><rect width="200" height="110" rx="10" fill="#F6E6EE"/>' +
+      '<rect x="10" y="10" width="180" height="3" rx="1.5" fill="#8C5B74"/><rect x="10" y="94" width="180" height="12" fill="#E9D2DD"/>' +
+      '<rect x="10" y="84" width="26" height="22" fill="#3A1F2D"/>';
+    var cx = kind === 1 ? 120 : 104, gy = kind === 1 ? 30 : 62;
+    s += '<circle cx="80" cy="85" r="9" fill="#F7CB3C" stroke="#5a3a48"/><circle cx="104" cy="83" r="11" fill="#B07A4E" stroke="#5a3a48"/><circle cx="150" cy="86" r="8" fill="#4FA3E0" stroke="#5a3a48"/>';
+    s += '<rect x="' + (cx - 8) + '" y="8" width="16" height="7" rx="2" fill="#5E4D57"/><path d="M' + cx + ' 15 V' + gy + '" stroke="#6F5E68" stroke-width="1.5"/>' +
+      '<path d="M' + (cx - 4) + ' ' + gy + ' l-7 9 l3 6 M' + (cx + 4) + ' ' + gy + ' l7 9 l-3 6" stroke="#5E4D57" stroke-width="2.5" fill="none" stroke-linecap="round"/>' +
+      '<circle cx="' + cx + '" cy="' + gy + '" r="5" fill="#9A8A93"/>';
+    if (kind === 1) s += '<path d="M60 40 H96 M96 40 L90 35 M96 40 L90 45" stroke="' + ACCENT + '" stroke-width="2.5" stroke-linecap="round" fill="none"/>';
+    if (kind === 2) s += '<path d="M104 74 V96" stroke="' + ACCENT + '" stroke-width="1.5" stroke-dasharray="3 3"/><text x="160" y="40" font-size="14" font-weight="700" font-family="sans-serif" fill="' + ACCENT + '">✓</text>';
+    if (kind === 3) s += '<path d="M' + (cx - 14) + ' 40 q14 10 28 0" stroke="' + ACCENT + '" stroke-width="2" fill="none" stroke-dasharray="3 3"/><path d="M60 100 H140 M140 100 l-5 -4 M140 100 l-5 4" stroke="' + ACCENT + '" stroke-width="2" fill="none"/>';
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('cwTut1'), text: C.t('cwTutText1'), art: tArt(1) },
+    { title: C.t('cwTut2'), text: C.t('cwTutText2'), art: tArt(2) },
+    { title: C.t('cwTut3'), text: C.t('cwTutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // saved at every drop and after every grab: a grab in progress comes back as the drop
+  // that started it and finishes at once, exactly as it would have
+  ctx.autosave(function () {
+    if (!Rd || ended || E.over(Rd) || !Rd.drops.length) return { inProgress: false };
+    return { r: E.snapshot(Rd), daily: dailyDate || null, tries: tries, elapsed: Date.now() - startedAt };
+  });
+  function resume(sv) {
+    if (!sv || typeof sv !== 'object' || (sv.daily || null) !== (dailyDate || null)) return false;
+    var R = E.restore(sv.r);
+    if (!R) return false;
+    // a save must be on the machine it claims: the day's machine, or an open campaign one
+    if (dailyDate ? R.B.seed !== dailySeed || R.B.level !== 0 : R.B.seed !== E.level(R.B.level).seed || R.B.level < 1 || R.B.level > prog.unlocked) return false;
+    if (!dailyDate) R.B.th = E.level(R.B.level).th;
+    Rd = R;
+    tries = sv.tries >= 1 ? sv.tries | 0 : 1;
+    startedAt = Date.now() - (sv.elapsed > 0 ? sv.elapsed : 0);
+    begin();
+    if (!dailyDate) { prog.cur = Rd.B.level; saveProg(); }
+    if (E.over(Rd)) setTimeout(finish, 300);
+    return true;
+  }
+  var saved = ctx.loadSave();
+  if (!(saved && resume(saved))) startRound(prog.cur);
+  if (dailyDate && C.stats.dailyDone('claw', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).claw;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
