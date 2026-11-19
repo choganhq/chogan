@@ -10190,7 +10190,7 @@ function testSpider() {
   ok(!E.validState(Object.assign(E.clone(D), { suits: 3 })) && !E.validState(Object.assign(E.clone(D), { stock: D.stock.slice(1) })), 'a damaged save is refused');
 
   // Page: cards from the shared deck, the deal through the shared fly helper, options behind a gear
-  ok(/C\.cards\.el\(E\.face\(S, c\)\), C\.cards\.back\(\)/.test(html) && /C\.ui\.fly\(nodes\[c\], from, \{ ms: 200, delay: n\+\+ \* 18, flip: row === S\.down\[col\] \}\)/.test(html), 'the cards are Chogan.cards and the deal uses Chogan.ui.fly');
+  ok(/C\.cards\.el\(E\.face\(S, c\), '', true\), C\.cards\.back\(\)/.test(html) && /C\.ui\.fly\(nodes\[c\], from, \{ ms: 200, delay: n\+\+ \* 18, flip: row === S\.down\[col\] \}\)/.test(html), 'the cards are Chogan.cards and the deal uses Chogan.ui.fly');
   ok(/class: 'ch-iconbtn sp-gear', type: 'button', 'aria-label': C\.t\('settings'\)/.test(html) && /function showSettings\(\)/.test(html) && !/suitsRule[^\n]*showHelp/.test(html), 'the number of suits is chosen behind a gear, not in help');
   ok(/if \(C\.ui\.reduceMotion\(\) \|\| !L\) \{ done\(\); return; \}/.test(html) && /if \(C\.ui\.reduceMotion\(\) \|\| !L\) return;/.test(html), 'no deal animation and no win cascade with reduced motion');
   ok(/\.sp-board \{ direction: ltr;/.test(html), 'the table is not mirrored in Persian');

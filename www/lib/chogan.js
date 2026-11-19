@@ -2780,13 +2780,18 @@
     function suit(c) { return c & 3; }
     function isRed(c) { return suit(c) === 1 || suit(c) === 2; }
     function label(c) { return rankText(rank(c)) + GLYPH[suit(c)]; }
-    // A card face as a button; extra classes carry the game's own states
-    function cardEl(c, extra) {
+    // A card face as a button; extra classes carry the game's own states. `corner` puts
+    // the suit beside the rank on number cards too: in four-suit Spider a column shows
+    // only each card's top strip, and a 7 of clubs and a 7 of spades looked the same (#966).
+    function cardEl(c, extra, corner) {
       var r = rank(c), kids = [el('span', { class: 'ch-pcard__r', text: rankText(r) })];
       if (r >= 10) {
         kids.push(el('span', { class: 'ch-pcard__mini', text: GLYPH[suit(c)] }));
         kids.push(el('span', { class: 'ch-pcard__face', html: faceSvg(r) }));
-      } else kids.push(el('span', { class: 'ch-pcard__s', text: GLYPH[suit(c)] }));
+      } else {
+        if (corner) kids.push(el('span', { class: 'ch-pcard__mini', text: GLYPH[suit(c)] }));
+        kids.push(el('span', { class: 'ch-pcard__s', text: GLYPH[suit(c)] }));
+      }
       return el('button', { class: 'ch-pcard' + (isRed(c) ? ' ch-pcard--red' : '') + (extra ? ' ' + extra : ''),
         type: 'button', 'aria-label': label(c) }, kids);
     }
