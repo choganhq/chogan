@@ -166,6 +166,9 @@ module.exports = function (T) {
     const near = gm ? others.map((g) => [g.id, dE(g.color, gm.color)]).sort((x, y) => x[1] - y[1])[0] : ['none', 0];
     ok(!!gm && near[1] >= 15 && 1.05 / (lumC(gm.color) + 0.05) >= 4.5 && html.indexOf("accent: '" + gm.color + "'") > 0,
       'the accent differs from every other game by ΔE ≥ 15 (nearest ' + near[0] + ', ' + near[1].toFixed(1) + '), keeps white text at 4.5:1 and matches the page');
+    // an empty hand looked like a blank box, and a reporter took the drops for missing (#955)
+    ok((html.match(/^ {8}handLbl: '/gm) || []).length === LOCALE_CODES.length && /sg-stand'[^\n]*C\.t\('handLbl'\)/.test(html) && /sg-stand--full/.test(html),
+      'each hand says what it is for while empty: a label in every language, hidden once it holds a piece');
     ok(Date.now() - t0 < 3000, 'the Japanese chess tests finish in under 3 s (' + (Date.now() - t0) + ' ms)');
   }
   return { testShogi };

@@ -37,7 +37,7 @@ module.exports = function (T) {
     let nextId = 1;
     const C = {
       t: (k) => k, num: String, feedback() {}, haptic() {}, version: '1', state: { profile: { name: '' } },
-      ui: { reduceMotion: () => false }, link: { send: (d) => send(side, d), open() {} }
+      ui: { reduceMotion: () => false, motionOff: () => false }, link: { send: (d) => send(side, d), open() {} }
     };
     const env = {
       E, C, RNG: rngFor, clone: (x) => JSON.parse(JSON.stringify(x)),
