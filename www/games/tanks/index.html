@@ -743,7 +743,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
       C.link.send(G.sent);
     }
     renderStatus(); renderPlayers(); renderArms(); renderPad();
-    if (C.ui.reduceMotion()) { landed(); return; }
+    // The shell's path is the information (why it missed), not decoration. A phone whose system
+    // asks for less motion (Android's animation scale 0 reads as that) lost every flight and
+    // showed only the result, so on a two-phone game the other player saw nothing (#956);
+    // it now gets a quick flight. Only the player's own Animations: Off skips it.
+    if (document.documentElement.getAttribute('data-motion') === 'off') { landed(); return; }
+    if (C.ui.reduceMotion()) flight.rate = 3;
     kick();
   }
 
@@ -961,7 +966,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TanksEngin
     }
     // shots in flight, each with a short trail
     if (flight && !card) {
-      var n = Math.floor((now - flight.t0) / 1000 * 60), done = true;
+      var n = Math.floor((now - flight.t0) / 1000 * 60 * (flight.rate || 1)), done = true;
       flight.sim.paths.forEach(function (path) {
         var m = Math.min(path.length - 1, n);
         if (m < path.length - 1) done = false;
