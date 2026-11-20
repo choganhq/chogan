@@ -45,6 +45,9 @@
 /* ==== ENGINE START ==== */
 function ClawEngineFactory() {
   'use strict';
+  // a local Math: in the tests' vm sandbox every global lookup is slow, and the bot rounds
+  // that measure the star targets took seconds there (#979)
+  var Math = globalThis.Math;
 
   // Cabinet units, y down: 100 across and 140 tall, the chute on the left. One fixed step
   // of 1/60 s and no randomness or trigonometry in the play, so the same moves give the
@@ -53,11 +56,10 @@ function ClawEngineFactory() {
   // is no random claw strength.
   var W = 100, H = 140, FLOOR = 130, TOP = 14, PRONG = 7, DT = 1 / 60;
   var VD = 55, VU = 55, VC = 40, CLOSE = 20, OPEN = 20, REACH = 3;
-  // the claw head swings on its cable: a damped spring kicked by every start and stop
-  var K = 23.4, GAIN = 0.45;
   var LEVELS = 10, TRIES = 8;
-  // shares of a steady player's median for one, two and three stars
-  var STAR_K = [0.35, 0.6, 0.85], AIM = 1.2, BOT_ROUNDS = 24;
+  // shares of a steady player's median for one, two and three stars. AIM is that player's
+  // timing: they let go up to 3 steps (50 ms) early or late, so a faster carriage misses more
+  var STAR_K = [0.35, 0.6, 0.85], AIM = 3, BOT_ROUNDS = 24;
 
   // toy kinds: radius, weight and points. Heavier and smaller toys need a better-centred
   // claw (tolerance r * 0.38 / weight), and the harder ones are worth more
@@ -84,17 +86,19 @@ function ClawEngineFactory() {
   function tolA(t) { return t.r * 0.38 / t.w; }
   function tolB(t) { return 2 * tolA(t); }
 
-  /* The machine by level: the chute narrows, the carriage gets faster, the head starts to
-     swing from level 6 (so a player waits for it to settle or times it), and the toy belt
-     moves from level 7 (so a drop leads the toy). Level 0 is the daily board's mix. */
+  /* The machine by level. One press a try, as on a real cabinet (#949, #979): holding moves
+     the carriage right from the chute, letting go drops the claw, and there is no way
+     back. A long hold that could be corrected made every machine the same, so the
+     difficulty is in the press itself: the carriage gets faster on every machine, the
+     floor is a conveyor from machine 3 that runs faster later on (so a press leads the
+     toy), and the chute narrows. Level 0 is the daily board's mix. */
   function params(level) {
     var n = clamp(level | 0, 1, LEVELS);
     return {
       chute: n >= 9 ? 14 : n >= 5 ? 16 : 19,
-      speed: n >= 4 ? 45 : 35,
-      damp: n >= 6 ? 1.2 : 9,
-      belt: n >= 7 ? (n >= 9 ? 6 : 5) : 0,
-      period: n >= 9 ? 300 : 420,
+      speed: 24 + 3 * n,
+      belt: n >= 3 ? (n >= 7 ? 6 : n >= 5 ? 5 : 4) : 0,
+      period: n >= 9 ? 220 : n >= 7 ? 300 : n >= 5 ? 360 : 480,
       toys: n >= 8 ? 7 : n >= 4 ? 6 : 5,
       kinds: n >= 3 ? (n >= 6 ? KIND_IDS : ['duck', 'ball', 'bear', 'star']) : ['duck', 'ball', 'bear']
     };
@@ -129,8 +133,8 @@ function ClawEngineFactory() {
   }
   // the campaign boards' targets, worked out once by thresholds() and checked by the tests,
   // so opening a board never waits for the bot rounds
-  var TH = [[30, 50, 70], [20, 35, 50], [30, 55, 75], [40, 65, 95], [40, 70, 100],
-    [35, 65, 90], [35, 65, 90], [35, 60, 85], [35, 65, 90], [30, 50, 70]];
+  var TH = [[30, 50, 70], [20, 35, 50], [30, 55, 75], [40, 65, 95], [25, 45, 65],
+    [35, 55, 80], [35, 55, 80], [35, 60, 85], [35, 65, 90], [30, 50, 70]];
   function level(n, fresh) { var B = make((9491 + n * 7919) >>> 0, n); if (!fresh) B.th = TH[n - 1]; return B; }
   function daily(seed) { var B = make(seed >>> 0, 8); B.level = 0; return B; }
   function home(B) { return B.P.chute / 2; }
@@ -143,30 +147,20 @@ function ClawEngineFactory() {
   }
 
   /* A round: the board's toys as they lie now, the drops made so far (where the
-     carriage stood, the swing and the clock at each drop), the score and the clock. The
-     whole round follows from the board and its drops, which is also what a save holds. */
+     carriage stood and the clock at each drop), the score and the clock. The whole round
+     follows from the board and its drops, which is also what a save holds. */
   function round(B) {
-    return { B: B, toys: B.toys.map(function (t) { return { id: t.id, k: t.k, x: t.x, r: t.r, w: t.w, pts: t.pts }; }), drops: [], got: [], score: 0, clock: 0, cx: home(B), v: 0, s: 0, sv: 0 };
+    return { B: B, toys: B.toys.map(function (t) { return { id: t.id, k: t.k, x: t.x, r: t.r, w: t.w, pts: t.pts }; }), drops: [], got: [], score: 0, clock: 0, cx: home(B) };
   }
   function over(Rd) { return Rd.drops.length >= Rd.B.tries || !Rd.toys.length; }
+  // the far end of the rail: a carriage held all the way drops there on its own
+  function end() { return W - 4; }
+  function atEnd(Rd) { return Rd.cx >= end() - 1e-9; }
 
-  function swing(Rd, damp) {
-    Rd.sv += (-K * Rd.s - damp * Rd.sv) * DT;
-    Rd.s += Rd.sv * DT;
-  }
-
-  /* One step between drops: the carriage heads for tx (null = stay) at the level's
-     speed, the head swings, and the clock runs. */
-  function move(Rd, tx) {
-    var P = Rd.B.P, v = 0;
-    if (tx != null) {
-      tx = clamp(tx, home(Rd.B), W - 4);
-      var dx = tx - Rd.cx, st = P.speed * DT;
-      if (Math.abs(dx) <= st) Rd.cx = tx;
-      else { v = dx > 0 ? P.speed : -P.speed; Rd.cx += v * DT; }
-    }
-    if (v !== Rd.v) { Rd.sv -= (v - Rd.v) * GAIN; Rd.v = v; }
-    swing(Rd, P.damp);
+  /* One step between drops: while held, the carriage runs right at the machine's speed;
+     it never runs left, so where it stops is final. The clock runs either way. */
+  function move(Rd, held) {
+    if (held === true && !atEnd(Rd)) Rd.cx = Math.min(end(), Rd.cx + Rd.B.P.speed * DT);
     Rd.clock++;
   }
 
@@ -190,8 +184,7 @@ function ClawEngineFactory() {
      A.done. Events: ['touch', toyId|-1], ['grip', 'firm'|'loose'|'nudge'|'miss'],
      ['slip', toyId, delivered], ['deliver', toyId, points]. */
   function drop(Rd) {
-    Rd.drops.push({ x: Rd.cx, s: Rd.s, sv: Rd.sv, clock: Rd.clock });
-    if (Rd.v) { Rd.sv -= -Rd.v * GAIN; Rd.v = 0; }
+    Rd.drops.push({ x: Rd.cx, clock: Rd.clock });
     return { phase: 'down', y: TOP, t: 0, held: null, grip: null, d: 0, slipU: 2, u: 0, x0: Rd.cx, open: 1, done: false };
   }
   function tipsOver(Rd, gx, tips) {
@@ -215,13 +208,12 @@ function ClawEngineFactory() {
     ev.push(['deliver', t.id, t.pts]);
   }
   function step(Rd, A) {
-    var ev = [], P = Rd.B.P, H0 = FLOOR - TOP;
+    var ev = [];
     if (A.done) return ev;
-    swing(Rd, P.damp);
     Rd.clock++; A.t++;
     if (A.phase === 'down') {
       A.y += VD * DT;
-      var gx = Rd.cx + Rd.s, tips = A.y + PRONG, t = tipsOver(Rd, gx, tips);
+      var gx = Rd.cx, tips = A.y + PRONG, t = tipsOver(Rd, gx, tips);
       if (t || tips >= FLOOR - 1) {
         A.phase = 'close'; A.t = 0;
         if (!t) { A.grip = 'miss'; ev.push(['touch', -1], ['grip', 'miss']); return ev; }
@@ -259,9 +251,8 @@ function ClawEngineFactory() {
     } else if (A.phase === 'open') {
       A.open = Math.min(1, A.t / OPEN);
       if (A.held && A.t === 4) { var h = A.held; A.held = null; deliver(Rd, h, ev); }
-      if (A.t >= OPEN) { A.done = true; Rd.v = 0; }
+      if (A.t >= OPEN) A.done = true;
     }
-    void H0;
     return ev;
   }
   function finishDrop(Rd, A) { var ev = []; while (!A.done) ev = ev.concat(step(Rd, A)); return ev; }
@@ -271,45 +262,54 @@ function ClawEngineFactory() {
 
   /* ---------------------------------------------------------------- players
      Bots used for the star targets and the tests. A player is a function that, before
-     each drop, returns where to send the carriage and whether to wait for the swing. */
+     each drop, returns how many steps to wait at the chute and how many to hold. */
   function play(B, player) {
     var Rd = round(B), guard = 0;
     while (!over(Rd) && guard++ < 100) {
-      var plan = player(Rd);
-      var n = 0;
-      while (Math.abs(Rd.cx - clamp(plan.x, home(B), W - 4)) > 1e-9 && n++ < 2000) move(Rd, plan.x);
-      move(Rd, plan.x);
-      n = 0;
-      if (plan.settle) while ((Math.abs(Rd.s) > 0.05 || Math.abs(Rd.sv) > 0.3) && n++ < 600) move(Rd, null);
-      if (plan.wait) for (n = 0; n < plan.wait; n++) move(Rd, null);
+      var plan = player(Rd), n;
+      for (n = 0; n < (plan.wait | 0); n++) move(Rd, false);
+      for (n = 0; n < (plan.hold | 0) && !atEnd(Rd); n++) move(Rd, true);
       finishDrop(Rd, drop(Rd));
     }
     return Rd;
   }
-  // where the carriage must stand so the claw meets toy t square on, dropping at clock c
-  // after a settled swing
+  // where toy t will be when a claw dropped at clock c reaches it
   function lead(Rd, t, c) { return t.x + shift(Rd.B, c + descentSteps(t.r)); }
+  // the longest useful hold on a board: from the chute to the end of the rail
+  function maxHold(B) { return Math.ceil((end() - home(B)) / (B.P.speed * DT)); }
 
-  /* A player who knows the machine but whose aim is off by up to `aim` units: goes for
-     the toy with the best points times its chance of a firm grip, waits for the swing,
-     leads a moving toy, and stands off by the error. */
+  /* The press that meets toy t square on: how long to wait at the chute and how long to
+     hold, so the carriage stops over the toy as the belt brings it there. Returns the
+     plan with the smallest miss, preferring the shortest wait. */
+  function aimAt(Rd, t) {
+    var B = Rd.B, st = B.P.speed * DT, x0 = home(B), c0 = Rd.clock, best = null;
+    var waits = B.P.belt ? B.P.period : 1;
+    for (var w = 0; w < waits; w++) {
+      var h = Math.round((t.x - x0) / st);
+      for (var k = 0; k < 3; k++) h = Math.max(1, Math.round((lead(Rd, t, c0 + w + h) - x0) / st));
+      var miss = Math.abs(Math.min(end(), x0 + h * st) - lead(Rd, t, c0 + w + h));
+      if (!best || miss < best.miss - 0.05) best = { wait: w, hold: h, miss: miss };
+    }
+    return best;
+  }
+
+  /* A player who knows the machine but lets go up to `aim` steps early or late: goes for
+     the toy with the best points times its chance of a firm grip at this speed, and
+     times the press to meet it, belt included. */
   function skilled(seed, aim) {
     var r = rng(seed);
     return function (Rd) {
-      var best = null, bv = -1;
-      Rd.toys.forEach(function (t) { var v = t.pts * Math.min(1, tolA(t) / aim); if (v > bv) { bv = v; best = t; } });
-      var e = (r() * 2 - 1) * aim;
-      // the carriage takes time to get there; the bot plans the drop for when it arrives
-      var c = Rd.clock, x = lead(Rd, best, c), arrive = Math.ceil(Math.abs(x - Rd.cx) / (Rd.B.P.speed * DT)) + 1;
-      var settle = Rd.B.P.damp < 5 ? 150 : 40, cd = c + arrive + settle;
-      return { x: lead(Rd, best, cd) + e, wait: settle };
+      var best = null, bv = -1, err = Math.max(1e-6, aim * Rd.B.P.speed * DT);
+      Rd.toys.forEach(function (t) { var v = t.pts * Math.min(1, tolA(t) / err); if (v > bv) { bv = v; best = t; } });
+      var plan = aimAt(Rd, best);
+      return { wait: plan.wait, hold: Math.max(1, plan.hold + Math.round((r() * 2 - 1) * aim)) };
     };
   }
   function randomPlayer(seed) {
     var r = rng(seed);
-    return function () { return { x: home({ P: { chute: 19 } }) + r() * 90, wait: 0 }; };
+    return function (Rd) { return { wait: Math.floor(r() * 60), hold: 1 + Math.floor(r() * maxHold(Rd.B)) }; };
   }
-  function fixedPlayer(x) { return function () { return { x: x, wait: 0 }; }; }
+  function fixedPlayer(h) { return function () { return { wait: 0, hold: h }; }; }
 
   function thresholds(B) {
     if (B.th) return B.th;
@@ -325,20 +325,22 @@ function ClawEngineFactory() {
 
   /* Saves: the board and its drops. A drop in progress is saved as it left and replayed
      on restore, so leaving mid-grab never gives a try back or changes its outcome. */
-  function snapshot(Rd) { return { seed: Rd.B.seed, level: Rd.B.level, drops: Rd.drops.map(function (d) { return { x: d.x, s: d.s, sv: d.sv, clock: d.clock }; }) }; }
+  // v 2: one press a try (#979). A round saved under the old free control would replay
+  // differently on the new machine, so it is refused and the machine starts fresh
+  function snapshot(Rd) { return { v: 2, seed: Rd.B.seed, level: Rd.B.level, drops: Rd.drops.map(function (d) { return { x: d.x, clock: d.clock }; }) }; }
   function num(x) { return typeof x === 'number' && isFinite(x); }
   function restore(o) {
-    if (!o || typeof o !== 'object' || !Array.isArray(o.drops)) return null;
+    if (!o || typeof o !== 'object' || o.v !== 2 || !Array.isArray(o.drops)) return null;
     if (o.seed !== (o.seed >>> 0) || o.level !== (o.level | 0) || o.level < 0 || o.level > LEVELS) return null;
     if (o.drops.length > TRIES) return null;
     var B = o.level ? make(o.seed, o.level) : daily(o.seed), Rd = round(B);
     for (var i = 0; i < o.drops.length; i++) {
       var d = o.drops[i];
-      if (!d || !num(d.x) || !num(d.s) || !num(d.sv) || d.clock !== (d.clock | 0)) return null;
-      if (d.x < home(B) - 1e-9 || d.x > W - 4 + 1e-9 || d.clock < Rd.clock || Math.abs(d.s) > 30 || Math.abs(d.sv) > 200 || !Rd.toys.length) return null;
-      Rd.cx = d.x; Rd.s = d.s; Rd.sv = d.sv; Rd.clock = d.clock; Rd.v = 0;
+      if (!d || !num(d.x) || d.clock !== (d.clock | 0)) return null;
+      if (d.x < home(B) - 1e-9 || d.x > end() + 1e-9 || d.clock < Rd.clock || !Rd.toys.length) return null;
+      Rd.cx = d.x; Rd.clock = d.clock;
       finishDrop(Rd, drop(Rd));
-      Rd.drops[i] = { x: d.x, s: d.s, sv: d.sv, clock: d.clock };
+      Rd.drops[i] = { x: d.x, clock: d.clock };
     }
     return Rd;
   }
@@ -346,7 +348,7 @@ function ClawEngineFactory() {
   var api = {
     W: W, H: H, FLOOR: FLOOR, TOP: TOP, PRONG: PRONG, DT: DT, LEVELS: LEVELS, TRIES: TRIES, KINDS: KINDS, KIND_IDS: KIND_IDS, STAR_K: STAR_K, AIM: AIM, REACH: REACH,
     rng: rng, params: params, make: make, level: level, daily: daily, home: home, shift: shift, tolA: tolA, tolB: tolB,
-    round: round, over: over, move: move, drop: drop, step: step, finishDrop: finishDrop, place: place, descentSteps: descentSteps, lead: lead,
+    round: round, over: over, end: end, atEnd: atEnd, maxHold: maxHold, aimAt: aimAt, move: move, drop: drop, step: step, finishDrop: finishDrop, place: place, descentSteps: descentSteps, lead: lead,
     play: play, skilled: skilled, randomPlayer: randomPlayer, fixedPlayer: fixedPlayer, thresholds: thresholds, stars: stars, snapshot: snapshot, restore: restore
   };
   if (typeof self !== 'undefined') self.ClawEngine = api;
@@ -372,120 +374,120 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ClawEngine
     strings: {
       fa: {
         cwScene: 'دستگاه چنگک با عروسک‌ها و دریچه', cwLevelN: 'دستگاه {n}', cwDaily: 'دستگاه روزانه', cwTriesN: 'نوبت: {n}', cwScoreN: 'امتیاز: {n}',
-        cwHint: 'چنگک را بالای یک عروسک ببر و «بنداز» را بزن.', cwSwingHint: 'سر چنگک تاب می‌خورد؛ صبر کن آرام شود.', cwBeltHint: 'کف دستگاه حرکت می‌کند؛ کمی جلوتر بنداز.', cwLast: 'نوبت آخر!',
+        cwHint: 'نگه دار تا چنگک برود، بالای عروسک رها کن تا بیفتد.', cwBeltHint: 'کف دستگاه حرکت می‌کند؛ کمی جلوتر از عروسک رها کن.', cwLast: 'نوبت آخر!',
         cwGot: 'گرفتی! +{n}', cwSlip: 'لیز خورد…', cwMiss: 'خالی', cwNudge: 'هلش دادی',
         cwCleared: 'دستگاه تمام شد!', cwNoStar: 'این بار ستاره‌ای نشد', cwNext: 'دستگاه بعدی', cwRetry: 'دوباره همین دستگاه',
-        cwDrop: 'بنداز', cwTries: 'نوبت‌ها', cwScore: 'امتیاز', cwBest: 'بهترین', cwStarsAt: 'ستاره‌ها از', cwNewBest: 'رکورد تازه: {n}', cwUnlocked: 'دستگاه {n} باز شد',
+        cwHold: 'نگه دار، بعد رها کن', cwTries: 'نوبت‌ها', cwScore: 'امتیاز', cwBest: 'بهترین', cwStarsAt: 'ستاره‌ها از', cwNewBest: 'رکورد تازه: {n}', cwUnlocked: 'دستگاه {n} باز شد',
         cwChoose: 'انتخاب دستگاه', cwLocked: 'قفل', cwAimLine: 'خط نشانه زیر چنگک',
-        cwRules: 'چند نوبت داری. چنگک را با کشیدن انگشت روی دستگاه یا با کلیدهای چپ و راست جابه‌جا کن و «بنداز» را بزن. چنگک پایین می‌رود، می‌بندد و هر چه گرفته به دریچه‌ی گوشه می‌برد. چیزی شانسی نیست: اگر چنگک درست وسط عروسک بنشیند محکم می‌گیرد، کمی کنار بگیرد در راه لیز می‌خورد، و خیلی کنار فقط هلش می‌دهد. عروسک‌های کوچک‌تر و سنگین‌تر دقت بیشتری می‌خواهند و امتیاز بیشتری دارند. در دستگاه‌های بالاتر سر چنگک تاب می‌خورد، کف حرکت می‌کند و دریچه تنگ‌تر می‌شود. با رسیدن به امتیاز ستاره‌ها یک، دو یا سه ستاره می‌گیری و با یک ستاره دستگاه بعدی باز می‌شود.',
-        cwKMove: 'جابه‌جا کردن چنگک', cwKDrop: 'انداختن چنگک', cwKAgain: 'شروع دوباره‌ی دستگاه',
-        cwTut1: 'ببر و بنداز', cwTutText1: 'انگشتت را روی دستگاه بکش تا چنگک بالای عروسک برود، بعد «بنداز» را بزن.',
+        cwRules: 'چند نوبت داری و هر نوبت فقط یک فشار است، مثل دستگاه واقعی. دکمه یا خود دستگاه را نگه دار تا چنگک از کنار دریچه به راست برود؛ رها کن تا همان‌جا پایین بیفتد. چنگک برنمی‌گردد، پس لحظه‌ی رها کردن را درست بگیر. چنگک پایین می‌رود، می‌بندد و هر چه گرفته به دریچه‌ی گوشه می‌برد. چیزی شانسی نیست: اگر چنگک درست وسط عروسک بنشیند محکم می‌گیرد، کمی کنار بگیرد در راه لیز می‌خورد، و خیلی کنار فقط هلش می‌دهد. عروسک‌های کوچک‌تر و سنگین‌تر دقت بیشتری می‌خواهند و امتیاز بیشتری دارند. در دستگاه‌های بالاتر چنگک تندتر می‌رود، کف مثل نوار نقاله حرکت می‌کند و دریچه تنگ‌تر می‌شود. به هدف‌ها برس تا یک، دو یا سه ستاره بگیری؛ یک ستاره دستگاه بعدی را باز می‌کند.',
+        cwKMove: 'نگه دار تا چنگک برود، رها کن تا بیفتد', cwKAgain: 'شروع دوباره‌ی دستگاه',
+        cwTut1: 'نگه دار و رها کن', cwTutText1: 'دکمه یا دستگاه را نگه دار تا چنگک به راست برود. بالای عروسک رها کن تا بیفتد. هر نوبت یک فشار، بدون برگشت.',
         cwTut2: 'درست وسط', cwTutText2: 'چنگکی که وسط عروسک بنشیند محکم می‌گیرد. کمی کنار، عروسک در راه لیز می‌خورد. شانسی در کار نیست.',
-        cwTut3: 'تاب و نوار', cwTutText3: 'در دستگاه‌های بالاتر سر چنگک تاب می‌خورد و کف حرکت می‌کند. صبر کن و زمان را درست بگیر.'
+        cwTut3: 'سرعت و نوار نقاله', cwTutText3: 'در دستگاه‌های بالاتر چنگک تندتر می‌رود و کف حرکت می‌کند. کمی جلوتر از عروسک رها کن.'
       },
       en: {
         cwScene: 'Claw machine with plush toys and a chute', cwLevelN: 'Machine {n}', cwDaily: 'Daily machine', cwTriesN: 'Tries: {n}', cwScoreN: 'Score: {n}',
-        cwHint: 'Move the claw over a toy, then press Drop.', cwSwingHint: 'The claw swings: let it settle first.', cwBeltHint: 'The floor moves: drop a little ahead.', cwLast: 'Last try!',
+        cwHint: 'Hold to move the claw, let go over a toy to drop it.', cwBeltHint: 'The floor moves: let go a little ahead of the toy.', cwLast: 'Last try!',
         cwGot: 'Got it! +{n}', cwSlip: 'It slipped…', cwMiss: 'Empty', cwNudge: 'Nudged it',
         cwCleared: 'Machine cleared!', cwNoStar: 'No star this time', cwNext: 'Next machine', cwRetry: 'Try this machine again',
-        cwDrop: 'Drop', cwTries: 'Tries', cwScore: 'Score', cwBest: 'Best', cwStarsAt: 'Stars at', cwNewBest: 'New best: {n}', cwUnlocked: 'Machine {n} unlocked',
+        cwHold: 'Hold, then let go', cwTries: 'Tries', cwScore: 'Score', cwBest: 'Best', cwStarsAt: 'Stars at', cwNewBest: 'New best: {n}', cwUnlocked: 'Machine {n} unlocked',
         cwChoose: 'Choose a machine', cwLocked: 'Locked', cwAimLine: 'Aim line under the claw',
-        cwRules: 'You have a few tries. Move the claw by dragging on the machine or with the left and right keys, then press Drop. The claw goes down, closes and carries whatever it holds to the chute in the corner. Nothing is luck: a claw that lands right over the middle of a toy holds it firmly, a little off and the toy slips on the way, and far off it only nudges it. Smaller and heavier toys need a better aim and are worth more. On later machines the claw swings, the floor moves and the chute gets narrower. Reach the targets for one, two or three stars; one star opens the next machine.',
-        cwKMove: 'Move the claw', cwKDrop: 'Drop the claw', cwKAgain: 'Restart the machine',
-        cwTut1: 'Move and drop', cwTutText1: 'Drag on the machine to bring the claw over a toy, then press Drop.',
+        cwRules: 'You have a few tries, and each try is one press, as on a real machine. Hold the button or the machine and the claw runs right from the chute; let go and it drops where it is. It never goes back, so time the moment you let go. The claw goes down, closes and carries whatever it holds to the chute in the corner. Nothing is luck: a claw that lands right over the middle of a toy holds it firmly, a little off and the toy slips on the way, and far off it only nudges it. Smaller and heavier toys need a better aim and are worth more. On later machines the claw runs faster, the floor moves like a conveyor and the chute gets narrower. Reach the targets for one, two or three stars; one star opens the next machine.',
+        cwKMove: 'Hold to move the claw, let go to drop it', cwKAgain: 'Restart the machine',
+        cwTut1: 'Hold and let go', cwTutText1: 'Hold the button or the machine: the claw runs right. Let go over a toy and it drops. One press a try, no going back.',
         cwTut2: 'Right in the middle', cwTutText2: 'A claw that lands over the middle of a toy holds it firmly. A little off, and it slips on the way. There is no luck in it.',
-        cwTut3: 'Swing and belt', cwTutText3: 'On later machines the claw swings and the floor moves. Wait, and time your drop.'
+        cwTut3: 'Speed and conveyor', cwTutText3: 'On later machines the claw runs faster and the floor moves. Let go a little ahead of the toy.'
       },
       zh: {
         cwScene: '有毛绒玩具和出口的抓娃娃机', cwLevelN: '第 {n} 台', cwDaily: '每日机台', cwTriesN: '次数：{n}', cwScoreN: '得分：{n}',
-        cwHint: '把爪子移到玩具上方，然后按“放下”。', cwSwingHint: '爪子在摆动：先等它停稳。', cwBeltHint: '底板在移动：稍微提前放下。', cwLast: '最后一次！',
+        cwHint: '按住让爪子移动，到玩具上方松开就会放下。', cwBeltHint: '底板在移动：在玩具前方一点松开。', cwLast: '最后一次！',
         cwGot: '抓到了！+{n}', cwSlip: '滑掉了……', cwMiss: '空了', cwNudge: '推开了',
         cwCleared: '机器完成！', cwNoStar: '这次没有星星', cwNext: '下一台', cwRetry: '再玩这一台',
-        cwDrop: '放下', cwTries: '次数', cwScore: '得分', cwBest: '最佳', cwStarsAt: '星星目标', cwNewBest: '新纪录：{n}', cwUnlocked: '第 {n} 台已解锁',
+        cwHold: '按住，再松开', cwTries: '次数', cwScore: '得分', cwBest: '最佳', cwStarsAt: '星星目标', cwNewBest: '新纪录：{n}', cwUnlocked: '第 {n} 台已解锁',
         cwChoose: '选择机台', cwLocked: '未解锁', cwAimLine: '爪子下方的瞄准线',
-        cwRules: '你有几次机会。在机器上拖动或用左右键移动爪子，然后按“放下”。爪子下降、合拢，把抓到的东西送到角落的出口。没有运气成分：爪子正好落在玩具中间就能抓牢，稍微偏一点玩具会在途中滑落，偏太多只会把它推开。更小、更重的玩具需要更准，分数也更高。后面的机台爪子会摆动、底板会移动、出口会变窄。达到目标可得一到三颗星，一颗星解锁下一台。',
-        cwKMove: '移动爪子', cwKDrop: '放下爪子', cwKAgain: '重新开始本台',
-        cwTut1: '移动并放下', cwTutText1: '在机器上拖动，把爪子移到玩具上方，然后按“放下”。',
+        cwRules: '你有几次机会，每次只能按一下，就像真正的娃娃机。按住按钮或机器，爪子会从出口向右移动；松开后就在原地放下。爪子不会往回走，所以要把握松开的时机。爪子下降、合拢，把抓到的东西送到角落的出口。没有运气成分：爪子正好落在玩具中间就能抓牢，稍微偏一点玩具会在途中滑落，偏太多只会把它推开。更小、更重的玩具需要更准，分数也更高。后面的机台爪子移动更快，底板像传送带一样移动，出口也会变窄。达到目标可得一到三颗星，一颗星解锁下一台。',
+        cwKMove: '按住移动爪子，松开放下', cwKAgain: '重新开始本台',
+        cwTut1: '按住再松开', cwTutText1: '按住按钮或机器，爪子向右移动。在玩具上方松开就会放下。每次一按，不能回头。',
         cwTut2: '对准中间', cwTutText2: '爪子落在玩具中间就能抓牢。稍微偏一点，玩具会在途中滑落。这里没有运气。',
-        cwTut3: '摆动和传送带', cwTutText3: '后面的机台爪子会摆动，底板会移动。耐心等待，把握时机。'
+        cwTut3: '速度和传送带', cwTutText3: '后面的机台爪子更快，底板也会移动。在玩具前方一点松开。'
       },
       de: {
         cwScene: 'Greifautomat mit Plüschtieren und Ausgabeschacht', cwLevelN: 'Automat {n}', cwDaily: 'Tagesautomat', cwTriesN: 'Versuche: {n}', cwScoreN: 'Punkte: {n}',
-        cwHint: 'Fahr den Greifer über ein Tier und tippe auf Ablassen.', cwSwingHint: 'Der Greifer schwingt: lass ihn erst zur Ruhe kommen.', cwBeltHint: 'Der Boden bewegt sich: lass etwas früher ab.', cwLast: 'Letzter Versuch!',
+        cwHint: 'Halte gedrückt, um den Greifer zu fahren, und lass über einem Tier los.', cwBeltHint: 'Der Boden bewegt sich: lass etwas vor dem Tier los.', cwLast: 'Letzter Versuch!',
         cwGot: 'Erwischt! +{n}', cwSlip: 'Abgerutscht…', cwMiss: 'Leer', cwNudge: 'Angestoßen',
         cwCleared: 'Automat geschafft!', cwNoStar: 'Diesmal kein Stern', cwNext: 'Nächster Automat', cwRetry: 'Diesen Automaten nochmal',
-        cwDrop: 'Ablassen', cwTries: 'Versuche', cwScore: 'Punkte', cwBest: 'Bestwert', cwStarsAt: 'Sterne ab', cwNewBest: 'Neuer Bestwert: {n}', cwUnlocked: 'Automat {n} freigeschaltet',
+        cwHold: 'Halten, dann loslassen', cwTries: 'Versuche', cwScore: 'Punkte', cwBest: 'Bestwert', cwStarsAt: 'Sterne ab', cwNewBest: 'Neuer Bestwert: {n}', cwUnlocked: 'Automat {n} freigeschaltet',
         cwChoose: 'Automat wählen', cwLocked: 'Gesperrt', cwAimLine: 'Ziellinie unter dem Greifer',
-        cwRules: 'Du hast ein paar Versuche. Bewege den Greifer durch Ziehen auf dem Automaten oder mit den Pfeiltasten links und rechts und tippe auf Ablassen. Der Greifer senkt sich, schließt und bringt, was er hält, zum Schacht in der Ecke. Nichts ist Glück: Sitzt der Greifer genau über der Mitte eines Tiers, hält er es fest; etwas daneben rutscht es unterwegs ab, weit daneben stößt er es nur an. Kleinere und schwerere Tiere brauchen mehr Genauigkeit und bringen mehr Punkte. Auf späteren Automaten schwingt der Greifer, der Boden bewegt sich und der Schacht wird enger. Erreiche die Ziele für einen, zwei oder drei Sterne; ein Stern öffnet den nächsten Automaten.',
-        cwKMove: 'Greifer bewegen', cwKDrop: 'Greifer ablassen', cwKAgain: 'Automat neu starten',
-        cwTut1: 'Fahren und ablassen', cwTutText1: 'Zieh auf dem Automaten, um den Greifer über ein Tier zu bringen, und tippe dann auf Ablassen.',
+        cwRules: 'Du hast ein paar Versuche, und jeder Versuch ist ein einziger Druck, wie an einem echten Automaten. Halte die Taste oder den Automaten gedrückt, dann fährt der Greifer vom Schacht nach rechts; lass los, und er senkt sich genau dort. Er fährt nie zurück, also wähle den Moment des Loslassens gut. Der Greifer senkt sich, schließt und bringt, was er hält, zum Schacht in der Ecke. Nichts ist Glück: Sitzt der Greifer genau über der Mitte eines Tiers, hält er es fest; etwas daneben rutscht es unterwegs ab, weit daneben stößt er es nur an. Kleinere und schwerere Tiere brauchen mehr Genauigkeit und bringen mehr Punkte. Auf späteren Automaten fährt der Greifer schneller, der Boden läuft wie ein Förderband und der Schacht wird enger. Erreiche die Ziele für einen, zwei oder drei Sterne; ein Stern öffnet den nächsten Automaten.',
+        cwKMove: 'Halten fährt den Greifer, Loslassen lässt ihn ab', cwKAgain: 'Automat neu starten',
+        cwTut1: 'Halten und loslassen', cwTutText1: 'Halte die Taste oder den Automaten: der Greifer fährt nach rechts. Lass über einem Tier los, dann senkt er sich. Ein Druck pro Versuch, kein Zurück.',
         cwTut2: 'Genau in die Mitte', cwTutText2: 'Über der Mitte hält der Greifer fest. Etwas daneben rutscht das Tier unterwegs ab. Glück spielt keine Rolle.',
-        cwTut3: 'Schwung und Band', cwTutText3: 'Auf späteren Automaten schwingt der Greifer und der Boden bewegt sich. Warte und wähle den richtigen Moment.'
+        cwTut3: 'Tempo und Förderband', cwTutText3: 'Auf späteren Automaten fährt der Greifer schneller und der Boden bewegt sich. Lass etwas vor dem Tier los.'
       },
       es: {
         cwScene: 'Máquina de gancho con peluches y una rampa', cwLevelN: 'Máquina {n}', cwDaily: 'Máquina diaria', cwTriesN: 'Intentos: {n}', cwScoreN: 'Puntos: {n}',
-        cwHint: 'Lleva el gancho sobre un peluche y pulsa Soltar.', cwSwingHint: 'El gancho se balancea: espera a que se calme.', cwBeltHint: 'El suelo se mueve: suelta un poco antes.', cwLast: '¡Último intento!',
+        cwHint: 'Mantén pulsado para mover el gancho y suelta sobre un peluche.', cwBeltHint: 'El suelo se mueve: suelta un poco antes del peluche.', cwLast: '¡Último intento!',
         cwGot: '¡Atrapado! +{n}', cwSlip: 'Se resbaló…', cwMiss: 'Vacío', cwNudge: 'Lo empujaste',
         cwCleared: '¡Máquina superada!', cwNoStar: 'Esta vez sin estrellas', cwNext: 'Siguiente máquina', cwRetry: 'Repetir esta máquina',
-        cwDrop: 'Soltar', cwTries: 'Intentos', cwScore: 'Puntos', cwBest: 'Mejor', cwStarsAt: 'Estrellas desde', cwNewBest: 'Nuevo récord: {n}', cwUnlocked: 'Máquina {n} desbloqueada',
+        cwHold: 'Mantén y suelta', cwTries: 'Intentos', cwScore: 'Puntos', cwBest: 'Mejor', cwStarsAt: 'Estrellas desde', cwNewBest: 'Nuevo récord: {n}', cwUnlocked: 'Máquina {n} desbloqueada',
         cwChoose: 'Elegir máquina', cwLocked: 'Bloqueada', cwAimLine: 'Línea de mira bajo el gancho',
-        cwRules: 'Tienes unos pocos intentos. Mueve el gancho arrastrando sobre la máquina o con las flechas izquierda y derecha, y pulsa Soltar. El gancho baja, se cierra y lleva lo que sujeta a la rampa de la esquina. Nada es suerte: si el gancho cae justo sobre el centro de un peluche, lo sujeta firme; un poco desviado, se resbala por el camino, y muy desviado solo lo empuja. Los peluches más pequeños y pesados piden más puntería y valen más. En las máquinas avanzadas el gancho se balancea, el suelo se mueve y la rampa se estrecha. Alcanza las metas para una, dos o tres estrellas; una estrella abre la siguiente máquina.',
-        cwKMove: 'Mover el gancho', cwKDrop: 'Soltar el gancho', cwKAgain: 'Reiniciar la máquina',
-        cwTut1: 'Mueve y suelta', cwTutText1: 'Arrastra sobre la máquina para llevar el gancho sobre un peluche y pulsa Soltar.',
+        cwRules: 'Tienes unos pocos intentos, y cada intento es una sola pulsación, como en una máquina de verdad. Mantén pulsado el botón o la máquina y el gancho avanza a la derecha desde la rampa; suelta y baja justo ahí. Nunca vuelve atrás, así que elige bien el momento de soltar. El gancho baja, se cierra y lleva lo que sujeta a la rampa de la esquina. Nada es suerte: si el gancho cae justo sobre el centro de un peluche, lo sujeta firme; un poco desviado, se resbala por el camino, y muy desviado solo lo empuja. Los peluches más pequeños y pesados piden más puntería y valen más. En las máquinas avanzadas el gancho va más rápido, el suelo se mueve como una cinta y la rampa se estrecha. Alcanza las metas para una, dos o tres estrellas; una estrella abre la siguiente máquina.',
+        cwKMove: 'Mantén para mover el gancho, suelta para bajarlo', cwKAgain: 'Reiniciar la máquina',
+        cwTut1: 'Mantén y suelta', cwTutText1: 'Mantén pulsado el botón o la máquina: el gancho avanza a la derecha. Suelta sobre un peluche y baja. Una pulsación por intento, sin vuelta atrás.',
         cwTut2: 'Justo en el centro', cwTutText2: 'Sobre el centro del peluche, el gancho lo sujeta firme. Un poco desviado, se resbala por el camino. No hay suerte.',
-        cwTut3: 'Balanceo y cinta', cwTutText3: 'En las máquinas avanzadas el gancho se balancea y el suelo se mueve. Espera y elige el momento.'
+        cwTut3: 'Velocidad y cinta', cwTutText3: 'En las máquinas avanzadas el gancho va más rápido y el suelo se mueve. Suelta un poco antes del peluche.'
       },
       pl: {
         cwScene: 'Automat z chwytakiem, pluszakami i zsypem', cwLevelN: 'Automat {n}', cwDaily: 'Automat dnia', cwTriesN: 'Próby: {n}', cwScoreN: 'Punkty: {n}',
-        cwHint: 'Przesuń chwytak nad pluszaka i naciśnij Opuść.', cwSwingHint: 'Chwytak się kołysze: poczekaj, aż się uspokoi.', cwBeltHint: 'Podłoga się rusza: opuść trochę wcześniej.', cwLast: 'Ostatnia próba!',
+        cwHint: 'Przytrzymaj, by przesuwać chwytak, i puść nad pluszakiem.', cwBeltHint: 'Podłoga się rusza: puść trochę przed pluszakiem.', cwLast: 'Ostatnia próba!',
         cwGot: 'Mam go! +{n}', cwSlip: 'Wyślizgnął się…', cwMiss: 'Pusto', cwNudge: 'Przesunięty',
         cwCleared: 'Automat ukończony!', cwNoStar: 'Tym razem bez gwiazdki', cwNext: 'Następny automat', cwRetry: 'Jeszcze raz ten automat',
-        cwDrop: 'Opuść', cwTries: 'Próby', cwScore: 'Punkty', cwBest: 'Rekord', cwStarsAt: 'Gwiazdki od', cwNewBest: 'Nowy rekord: {n}', cwUnlocked: 'Odblokowano automat {n}',
+        cwHold: 'Przytrzymaj i puść', cwTries: 'Próby', cwScore: 'Punkty', cwBest: 'Rekord', cwStarsAt: 'Gwiazdki od', cwNewBest: 'Nowy rekord: {n}', cwUnlocked: 'Odblokowano automat {n}',
         cwChoose: 'Wybierz automat', cwLocked: 'Zablokowany', cwAimLine: 'Linia celowania pod chwytakiem',
-        cwRules: 'Masz kilka prób. Przesuwaj chwytak, przeciągając po automacie albo strzałkami w lewo i w prawo, i naciśnij Opuść. Chwytak zjeżdża, zamyka się i zanosi to, co trzyma, do zsypu w rogu. Nic nie zależy od szczęścia: chwytak dokładnie nad środkiem pluszaka trzyma go mocno, trochę obok i pluszak wyślizguje się po drodze, daleko obok tylko go przesuwa. Mniejsze i cięższe pluszaki wymagają lepszego celowania i są warte więcej. W dalszych automatach chwytak się kołysze, podłoga się rusza, a zsyp jest węższy. Osiągnij progi, by zdobyć jedną, dwie lub trzy gwiazdki; jedna otwiera następny automat.',
-        cwKMove: 'Przesuń chwytak', cwKDrop: 'Opuść chwytak', cwKAgain: 'Zacznij automat od nowa',
-        cwTut1: 'Przesuń i opuść', cwTutText1: 'Przeciągnij po automacie, by ustawić chwytak nad pluszakiem, potem naciśnij Opuść.',
+        cwRules: 'Masz kilka prób, a każda próba to jedno naciśnięcie, jak w prawdziwym automacie. Przytrzymaj przycisk albo automat, a chwytak jedzie w prawo od zsypu; puść, a opuści się dokładnie tam. Nigdy nie wraca, więc dobrze wybierz chwilę puszczenia. Chwytak zjeżdża, zamyka się i zanosi to, co trzyma, do zsypu w rogu. Nic nie zależy od szczęścia: chwytak dokładnie nad środkiem pluszaka trzyma go mocno, trochę obok i pluszak wyślizguje się po drodze, daleko obok tylko go przesuwa. Mniejsze i cięższe pluszaki wymagają lepszego celowania i są warte więcej. W dalszych automatach chwytak jedzie szybciej, podłoga rusza się jak taśma, a zsyp jest węższy. Osiągnij progi, by zdobyć jedną, dwie lub trzy gwiazdki; jedna otwiera następny automat.',
+        cwKMove: 'Przytrzymaj, by przesuwać chwytak, puść, by go opuścić', cwKAgain: 'Zacznij automat od nowa',
+        cwTut1: 'Przytrzymaj i puść', cwTutText1: 'Przytrzymaj przycisk albo automat: chwytak jedzie w prawo. Puść nad pluszakiem, a się opuści. Jedno naciśnięcie na próbę, bez powrotu.',
         cwTut2: 'Dokładnie w środek', cwTutText2: 'Nad środkiem pluszaka chwytak trzyma mocno. Trochę obok, a pluszak wyślizgnie się po drodze. Bez szczęścia.',
-        cwTut3: 'Kołysanie i taśma', cwTutText3: 'W dalszych automatach chwytak się kołysze, a podłoga się rusza. Poczekaj i wybierz chwilę.'
+        cwTut3: 'Prędkość i taśma', cwTutText3: 'W dalszych automatach chwytak jedzie szybciej, a podłoga się rusza. Puść trochę przed pluszakiem.'
       },
       fr: {
         cwScene: 'Machine à pince avec des peluches et une trappe', cwLevelN: 'Machine {n}', cwDaily: 'Machine du jour', cwTriesN: 'Essais : {n}', cwScoreN: 'Score : {n}',
-        cwHint: 'Place la pince au-dessus d’une peluche, puis appuie sur Lâcher.', cwSwingHint: 'La pince se balance : attends qu’elle se calme.', cwBeltHint: 'Le sol bouge : lâche un peu en avance.', cwLast: 'Dernier essai !',
+        cwHint: 'Maintiens pour déplacer la pince, lâche au-dessus d’une peluche.', cwBeltHint: 'Le sol bouge : lâche un peu avant la peluche.', cwLast: 'Dernier essai !',
         cwGot: 'Attrapé ! +{n}', cwSlip: 'Ça a glissé…', cwMiss: 'Raté', cwNudge: 'Poussé',
         cwCleared: 'Machine terminée !', cwNoStar: 'Pas d’étoile cette fois', cwNext: 'Machine suivante', cwRetry: 'Rejouer cette machine',
-        cwDrop: 'Lâcher', cwTries: 'Essais', cwScore: 'Score', cwBest: 'Record', cwStarsAt: 'Étoiles à', cwNewBest: 'Nouveau record : {n}', cwUnlocked: 'Machine {n} débloquée',
+        cwHold: 'Maintiens, puis lâche', cwTries: 'Essais', cwScore: 'Score', cwBest: 'Record', cwStarsAt: 'Étoiles à', cwNewBest: 'Nouveau record : {n}', cwUnlocked: 'Machine {n} débloquée',
         cwChoose: 'Choisir une machine', cwLocked: 'Verrouillée', cwAimLine: 'Ligne de visée sous la pince',
-        cwRules: 'Tu as quelques essais. Déplace la pince en glissant sur la machine ou avec les flèches gauche et droite, puis appuie sur Lâcher. La pince descend, se ferme et porte ce qu’elle tient jusqu’à la trappe du coin. Rien n’est dû au hasard : une pince qui tombe juste au-dessus du milieu d’une peluche la tient bien, un peu à côté la peluche glisse en route, et trop à côté elle ne fait que la pousser. Les peluches plus petites et plus lourdes demandent plus de précision et rapportent plus. Sur les machines suivantes, la pince se balance, le sol bouge et la trappe rétrécit. Atteins les seuils pour une, deux ou trois étoiles ; une étoile ouvre la machine suivante.',
-        cwKMove: 'Déplacer la pince', cwKDrop: 'Lâcher la pince', cwKAgain: 'Recommencer la machine',
-        cwTut1: 'Déplace et lâche', cwTutText1: 'Glisse sur la machine pour amener la pince au-dessus d’une peluche, puis appuie sur Lâcher.',
+        cwRules: 'Tu as quelques essais, et chaque essai est une seule pression, comme sur une vraie machine. Maintiens le bouton ou la machine et la pince part vers la droite depuis la trappe ; lâche et elle descend juste là. Elle ne revient jamais en arrière, alors choisis bien le moment de lâcher. La pince descend, se ferme et porte ce qu’elle tient jusqu’à la trappe du coin. Rien n’est dû au hasard : une pince qui tombe juste au-dessus du milieu d’une peluche la tient bien, un peu à côté la peluche glisse en route, et trop à côté elle ne fait que la pousser. Les peluches plus petites et plus lourdes demandent plus de précision et rapportent plus. Sur les machines suivantes, la pince va plus vite, le sol avance comme un tapis roulant et la trappe rétrécit. Atteins les seuils pour une, deux ou trois étoiles ; une étoile ouvre la machine suivante.',
+        cwKMove: 'Maintiens pour déplacer la pince, lâche pour la descendre', cwKAgain: 'Recommencer la machine',
+        cwTut1: 'Maintiens et lâche', cwTutText1: 'Maintiens le bouton ou la machine : la pince part vers la droite. Lâche au-dessus d’une peluche et elle descend. Une pression par essai, sans retour.',
         cwTut2: 'Pile au milieu', cwTutText2: 'Au-dessus du milieu, la pince tient bien la peluche. Un peu à côté, elle glisse en route. Aucun hasard.',
-        cwTut3: 'Balancement et tapis', cwTutText3: 'Sur les machines suivantes, la pince se balance et le sol bouge. Attends et choisis ton moment.'
+        cwTut3: 'Vitesse et tapis', cwTutText3: 'Sur les machines suivantes, la pince va plus vite et le sol bouge. Lâche un peu avant la peluche.'
       },
       ar: {
         cwScene: 'آلة مخلب فيها دمى وفتحة', cwLevelN: 'الآلة {n}', cwDaily: 'آلة اليوم', cwTriesN: 'المحاولات: {n}', cwScoreN: 'النقاط: {n}',
-        cwHint: 'حرّك المخلب فوق دمية ثم اضغط «أنزِل».', cwSwingHint: 'المخلب يتأرجح: انتظر حتى يهدأ.', cwBeltHint: 'الأرضية تتحرك: أنزِل قبلها بقليل.', cwLast: 'المحاولة الأخيرة!',
+        cwHint: 'اضغط مطوّلًا لتحريك المخلب، وارفع إصبعك فوق دمية لإنزاله.', cwBeltHint: 'الأرضية تتحرك: ارفع إصبعك قبل الدمية بقليل.', cwLast: 'المحاولة الأخيرة!',
         cwGot: 'أمسكتها! +{n}', cwSlip: 'انزلقت…', cwMiss: 'لا شيء', cwNudge: 'دفعتها',
         cwCleared: 'أنهيت الآلة!', cwNoStar: 'لا نجوم هذه المرة', cwNext: 'الآلة التالية', cwRetry: 'أعد هذه الآلة',
-        cwDrop: 'أنزِل', cwTries: 'المحاولات', cwScore: 'النقاط', cwBest: 'الأفضل', cwStarsAt: 'النجوم عند', cwNewBest: 'رقم قياسي جديد: {n}', cwUnlocked: 'فُتحت الآلة {n}',
+        cwHold: 'اضغط مطوّلًا ثم اترك', cwTries: 'المحاولات', cwScore: 'النقاط', cwBest: 'الأفضل', cwStarsAt: 'النجوم عند', cwNewBest: 'رقم قياسي جديد: {n}', cwUnlocked: 'فُتحت الآلة {n}',
         cwChoose: 'اختر آلة', cwLocked: 'مقفلة', cwAimLine: 'خط التصويب تحت المخلب',
-        cwRules: 'لديك بضع محاولات. حرّك المخلب بالسحب على الآلة أو بمفتاحي اليسار واليمين، ثم اضغط «أنزِل». ينزل المخلب ويُغلق ويحمل ما أمسكه إلى الفتحة في الزاوية. لا شيء بالحظ: المخلب الذي ينزل فوق منتصف الدمية تمامًا يمسكها بقوة، وإن انحرف قليلًا انزلقت في الطريق، وإن انحرف كثيرًا دفعها فقط. الدمى الأصغر والأثقل تحتاج دقة أكبر ونقاطها أكثر. في الآلات المتقدمة يتأرجح المخلب وتتحرك الأرضية وتضيق الفتحة. بلوغ الأهداف يعطيك نجمة أو اثنتين أو ثلاثًا، ونجمة واحدة تفتح الآلة التالية.',
-        cwKMove: 'حرّك المخلب', cwKDrop: 'أنزِل المخلب', cwKAgain: 'ابدأ الآلة من جديد',
-        cwTut1: 'حرّك وأنزِل', cwTutText1: 'اسحب على الآلة لتضع المخلب فوق دمية، ثم اضغط «أنزِل».',
+        cwRules: 'لديك بضع محاولات، وكل محاولة ضغطة واحدة كما في الآلة الحقيقية. اضغط مطوّلًا على الزر أو على الآلة فيتحرك المخلب يمينًا من الفتحة؛ اترك فينزل في مكانه. لا يعود إلى الوراء أبدًا، فاختر لحظة الترك جيدًا. ينزل المخلب ويُغلق ويحمل ما أمسكه إلى الفتحة في الزاوية. لا شيء بالحظ: المخلب الذي ينزل فوق منتصف الدمية تمامًا يمسكها بقوة، وإن انحرف قليلًا انزلقت في الطريق، وإن انحرف كثيرًا دفعها فقط. الدمى الأصغر والأثقل تحتاج دقة أكبر ونقاطها أكثر. في الآلات المتقدمة يتحرك المخلب أسرع وتتحرك الأرضية كحزام ناقل وتضيق الفتحة. حقق الأهداف لتنال نجمة أو اثنتين أو ثلاثًا؛ النجمة الواحدة تفتح الآلة التالية.',
+        cwKMove: 'اضغط مطوّلًا لتحريك المخلب، واترك لإنزاله', cwKAgain: 'ابدأ الآلة من جديد',
+        cwTut1: 'اضغط واترك', cwTutText1: 'اضغط مطوّلًا على الزر أو الآلة: يتحرك المخلب يمينًا. اترك فوق دمية فينزل. ضغطة واحدة لكل محاولة، بلا رجوع.',
         cwTut2: 'في المنتصف تمامًا', cwTutText2: 'فوق منتصف الدمية يمسكها المخلب بقوة. إن انحرف قليلًا انزلقت في الطريق. لا حظ في ذلك.',
-        cwTut3: 'التأرجح والحزام', cwTutText3: 'في الآلات المتقدمة يتأرجح المخلب وتتحرك الأرضية. انتظر واختر اللحظة.'
+        cwTut3: 'السرعة والحزام', cwTutText3: 'في الآلات المتقدمة يتحرك المخلب أسرع وتتحرك الأرضية. اترك قبل الدمية بقليل.'
       },
       hi: {
         cwScene: 'खिलौनों और ढलान वाली पंजा मशीन', cwLevelN: 'मशीन {n}', cwDaily: 'आज की मशीन', cwTriesN: 'मौके: {n}', cwScoreN: 'अंक: {n}',
-        cwHint: 'पंजे को किसी खिलौने के ऊपर लाएँ, फिर गिराएँ दबाएँ।', cwSwingHint: 'पंजा झूल रहा है: पहले उसे रुकने दें।', cwBeltHint: 'फ़र्श चल रहा है: थोड़ा पहले गिराएँ।', cwLast: 'आख़िरी मौका!',
+        cwHint: 'पंजा चलाने के लिए दबाए रखें, खिलौने के ऊपर छोड़ें।', cwBeltHint: 'फ़र्श चल रहा है: खिलौने से थोड़ा पहले छोड़ें।', cwLast: 'आख़िरी मौका!',
         cwGot: 'पकड़ लिया! +{n}', cwSlip: 'फिसल गया…', cwMiss: 'खाली', cwNudge: 'धकेल दिया',
         cwCleared: 'मशीन पूरी हुई!', cwNoStar: 'इस बार कोई तारा नहीं', cwNext: 'अगली मशीन', cwRetry: 'यही मशीन फिर से',
-        cwDrop: 'गिराएँ', cwTries: 'मौके', cwScore: 'अंक', cwBest: 'सर्वश्रेष्ठ', cwStarsAt: 'तारे', cwNewBest: 'नया रिकॉर्ड: {n}', cwUnlocked: 'मशीन {n} खुल गई',
+        cwHold: 'दबाए रखें, फिर छोड़ें', cwTries: 'मौके', cwScore: 'अंक', cwBest: 'सर्वश्रेष्ठ', cwStarsAt: 'तारे', cwNewBest: 'नया रिकॉर्ड: {n}', cwUnlocked: 'मशीन {n} खुल गई',
         cwChoose: 'मशीन चुनें', cwLocked: 'बंद', cwAimLine: 'पंजे के नीचे निशाने की रेखा',
-        cwRules: 'आपके पास कुछ मौके हैं। मशीन पर उँगली खींचकर या बाएँ-दाएँ कुंजियों से पंजा हिलाएँ, फिर गिराएँ दबाएँ। पंजा नीचे जाता है, बंद होता है और जो पकड़ा उसे कोने की ढलान तक ले जाता है। कुछ भी किस्मत पर नहीं: खिलौने के ठीक बीच के ऊपर उतरा पंजा उसे मज़बूती से पकड़ता है, थोड़ा हटकर खिलौना रास्ते में फिसल जाता है, और बहुत हटकर पंजा उसे बस धकेल देता है। छोटे और भारी खिलौनों को ज़्यादा सटीक निशाना चाहिए और उनके अंक ज़्यादा हैं। आगे की मशीनों में पंजा झूलता है, फ़र्श चलता है और ढलान पतली होती है। लक्ष्य पाकर एक, दो या तीन तारे पाएँ; एक तारे से अगली मशीन खुलती है।',
-        cwKMove: 'पंजा हिलाएँ', cwKDrop: 'पंजा गिराएँ', cwKAgain: 'मशीन फिर से शुरू करें',
-        cwTut1: 'हिलाएँ और गिराएँ', cwTutText1: 'पंजे को खिलौने के ऊपर लाने के लिए मशीन पर खींचें, फिर गिराएँ दबाएँ।',
+        cwRules: 'आपके पास कुछ मौके हैं, और हर मौका एक ही दबाव है, असली मशीन की तरह। बटन या मशीन को दबाए रखें, पंजा ढलान से दाईं ओर चलता है; छोड़ें और वह वहीं गिरता है। वह कभी पीछे नहीं लौटता, इसलिए छोड़ने का पल सही चुनें। पंजा नीचे जाता है, बंद होता है और जो पकड़ा उसे कोने की ढलान तक ले जाता है। कुछ भी किस्मत पर नहीं: खिलौने के ठीक बीच के ऊपर उतरा पंजा उसे मज़बूती से पकड़ता है, थोड़ा हटकर खिलौना रास्ते में फिसल जाता है, और बहुत हटकर पंजा उसे बस धकेलता है। छोटे और भारी खिलौनों के लिए ज़्यादा सटीकता चाहिए और उनके अंक ज़्यादा हैं। आगे की मशीनों में पंजा तेज़ चलता है, फ़र्श कन्वेयर की तरह चलता है और ढलान संकरी होती है। एक, दो या तीन तारों के लक्ष्य पाएँ; एक तारा अगली मशीन खोलता है।',
+        cwKMove: 'दबाए रखने से पंजा चलता है, छोड़ने से गिरता है', cwKAgain: 'मशीन फिर से शुरू करें',
+        cwTut1: 'दबाएँ और छोड़ें', cwTutText1: 'बटन या मशीन को दबाए रखें: पंजा दाईं ओर चलता है। खिलौने के ऊपर छोड़ें और वह गिरता है। हर मौके में एक दबाव, वापसी नहीं।',
         cwTut2: 'ठीक बीच में', cwTutText2: 'खिलौने के बीच के ऊपर पंजा मज़बूती से पकड़ता है। थोड़ा हटकर खिलौना रास्ते में फिसल जाता है। इसमें किस्मत नहीं।',
-        cwTut3: 'झूला और पट्टा', cwTutText3: 'आगे की मशीनों में पंजा झूलता है और फ़र्श चलता है। रुकें और सही पल चुनें।'
+        cwTut3: 'रफ़्तार और कन्वेयर', cwTutText3: 'आगे की मशीनों में पंजा तेज़ चलता है और फ़र्श चलता है। खिलौने से थोड़ा पहले छोड़ें।'
       }
     }
   });
@@ -515,17 +517,18 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ClawEngine
   var dailySeed = dailyDate ? Math.floor(C.daily('claw', dailyDate).rng() * 4294967296) >>> 0 : 0;
 
   // the round, the grab in progress, where the claw is heading, and what is drawn
-  var Rd = null, A = null, target = null, keyDir = 0, ended = false, startedAt = 0, tries = 0;
+  var Rd = null, A = null, holding = false, ended = false, startedAt = 0, tries = 0;
   var pops = [], falls = [], msg = '', msgAt = 0;
-  var raf = 0, last = 0, acc = 0, paused = false, dragging = false;
+  var raf = 0, last = 0, acc = 0, paused = false;
 
   var cv = el('canvas', { class: 'cw-canvas', role: 'img', 'aria-label': C.t('cwScene') });
   var box = el('div', { class: 'cw-box' }, [cv]);
   var top = el('div', { class: 'cw-top ch-above' });
   var goals = el('div', { class: 'cw-goals' });
   var status = el('div', { class: 'cw-status', role: 'status', 'aria-live': 'polite' });
-  var dropBtn = el('button', { class: 'ch-btn ch-btn--primary cw-drop', type: 'button', text: C.t('cwDrop') });
-  dropBtn.addEventListener('click', function () { drop(); });
+  // one press a try (#949, #979): hold this, or anywhere on the machine, and let go to drop
+  var dropBtn = el('button', { class: 'ch-btn ch-btn--primary cw-drop', type: 'button', text: C.t('cwHold') });
+  holdOn(dropBtn);
   var wrap = el('div', { class: 'cw-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, goals, dropBtn, status])]);
 
   ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
@@ -549,17 +552,28 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ClawEngine
     begin();
   }
   function begin() {
-    A = null; target = null; ended = false; pops = []; falls = []; msg = '';
+    A = null; holding = false; ended = false; pops = []; falls = []; msg = '';
     // a daily machine's targets come from the bot rounds once, on the way in
     E.thresholds(Rd.B);
     renderSide(); draw(); kick();
   }
   function busy() { return !Rd || A || ended || E.over(Rd) || paused; }
 
+  // a press starts the carriage; it runs right until the press ends, then the claw drops
+  function press() {
+    if (busy() || holding) return;
+    holding = true;
+    renderSide(); kick();
+  }
+  function letGo() {
+    if (!holding) return;
+    holding = false;
+    drop();
+  }
   function drop() {
     if (busy()) return;
     A = E.drop(Rd);
-    target = null; keyDir = 0; dragging = false;
+    holding = false;
     C.feedback('tap');
     C.audio.sfx('claw');
     ctx.save();
@@ -612,15 +626,16 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ClawEngine
         onEvents(E.step(Rd, A));
         if (A && A.done) grabDone();
       } else if (!ended && !E.over(Rd)) {
-        E.move(Rd, keyDir ? Rd.cx + keyDir * 50 : target);
-        if (target != null && Math.abs(Rd.cx - target) < 1e-6) target = null;
+        E.move(Rd, holding);
+        // held to the end of the rail, the claw drops there, as on a real cabinet
+        if (holding && E.atEnd(Rd)) letGo();
       }
     }
     if (n === 12) acc = 0;
     pops = pops.filter(function (p) { p.t += dt; return p.t < 1; });
     falls = falls.filter(function (f) { f.t += dt; return f.t < 0.6; });
     draw(t);
-    // the machine runs between tries too: the claw swings and the belt moves
+    // the machine runs between tries too: the belt moves
     if (A || pops.length || falls.length || (!ended && !E.over(Rd))) raf = requestAnimationFrame(frame);
   }
 
@@ -683,8 +698,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ClawEngine
     dropBtn.disabled = !!busy();
     var left = Rd.B.tries - Rd.drops.length, P = Rd.B.P;
     status.textContent = ended || E.over(Rd) ? '' : msg && performance.now() - msgAt < 2500 ? msg
-      : left === 1 && !A ? C.t('cwLast') : Rd.drops.length === 0 ? (P.belt ? C.t('cwBeltHint') : P.damp < 5 ? C.t('cwSwingHint') : C.t('cwHint'))
-      : P.belt ? C.t('cwBeltHint') : P.damp < 5 ? C.t('cwSwingHint') : C.t('cwHint');
+      : left === 1 && !A ? C.t('cwLast') : Rd.drops.length === 0 ? (P.belt ? C.t('cwBeltHint') : C.t('cwHint'))
+      : P.belt ? C.t('cwBeltHint') : C.t('cwHint');
   }
 
   /* --------------------------------------------------------------- draw */
@@ -831,7 +846,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ClawEngine
     });
 
     // the claw: carriage, cable, head and prongs
-    var cx = Rd.cx, y = A ? A.y : E.TOP, gx = cx + Rd.s, open = A ? A.open : 1;
+    var cx = Rd.cx, y = A ? A.y : E.TOP, gx = cx, open = A ? A.open : 1;
     if (prefs.line && !A && !ended && !E.over(Rd)) {
       g.strokeStyle = P.line; g.lineWidth = Math.max(1, X(0.4)); g.setLineDash([X(1.5), X(1.5)]);
       g.beginPath(); g.moveTo(X(gx), X(y + E.PRONG)); g.lineTo(X(gx), X(E.FLOOR)); g.stroke();
@@ -875,41 +890,38 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ClawEngine
 
   /* -------------------------------------------------------------- input */
 
-  // the claw heads for the finger anywhere on the machine; it moves at the machine's
-  // speed, so a long drag takes time, as on a real cabinet
-  function aimAt(e) {
-    var r = cv.getBoundingClientRect(), V = view();
-    target = (e.clientX - r.left - V.ox) / V.k;
-    kick();
+  // a press anywhere on the machine or on the button runs the claw; lifting the finger,
+  // even off the element, drops it, so the pointer is captured for the whole press
+  function holdOn(node) {
+    node.addEventListener('pointerdown', function (e) {
+      if (e.button > 0 || busy()) return;
+      try { node.setPointerCapture(e.pointerId); } catch (er) { /* an old WebView */ }
+      press();
+      e.preventDefault();
+    });
+    node.addEventListener('pointerup', letGo);
+    node.addEventListener('pointercancel', letGo);
+    node.addEventListener('lostpointercapture', letGo);
+    node.addEventListener('contextmenu', function (e) { e.preventDefault(); });
   }
-  cv.addEventListener('pointerdown', function (e) {
-    if (busy()) return;
-    dragging = true;
-    try { cv.setPointerCapture(e.pointerId); } catch (er) { /* an old WebView */ }
-    aimAt(e);
-    e.preventDefault();
-  });
-  cv.addEventListener('pointermove', function (e) { if (dragging && !busy()) aimAt(e); });
-  cv.addEventListener('pointerup', function () { dragging = false; });
-  cv.addEventListener('pointercancel', function () { dragging = false; });
+  holdOn(cv);
 
+  // the keys work the same way: hold Space, Enter, → or D, and let go to drop
+  function holdKey(e) { return e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowRight' || e.key === 'ArrowDown' || C.keyIs(e, 'd'); }
   window.addEventListener('keydown', function (e) {
     if (!Rd || e.target && e.target.closest && e.target.closest('.ch-modal')) return;
-    var k = e.key;
-    if (k === 'ArrowLeft' || C.keyIs(e, 'a')) { e.preventDefault(); if (!busy()) { keyDir = -1; target = null; kick(); } }
-    else if (k === 'ArrowRight' || C.keyIs(e, 'd')) { e.preventDefault(); if (!busy()) { keyDir = 1; target = null; kick(); } }
-    else if (k === ' ' || k === 'Enter' || k === 'ArrowDown') { if (!e.repeat) { e.preventDefault(); drop(); } }
+    if (holdKey(e)) { e.preventDefault(); if (!e.repeat) press(); }
     else if (C.keyIs(e, 'r') && !dailyDate) { e.preventDefault(); restartAsk(); }
     else if (C.keyIs(e, 'l') && !dailyDate) { e.preventDefault(); showLevels(); }
   });
   window.addEventListener('keyup', function (e) {
-    var k = e.key;
-    if ((k === 'ArrowLeft' || C.keyIs(e, 'a')) && keyDir < 0) keyDir = 0;
-    if ((k === 'ArrowRight' || C.keyIs(e, 'd')) && keyDir > 0) keyDir = 0;
+    // a focused button would also take Space or Enter as a click
+    if (holdKey(e)) { e.preventDefault(); letGo(); }
   });
-  window.addEventListener('blur', function () { keyDir = 0; dragging = false; });
+  window.addEventListener('blur', letGo);
 
-  C.onPause(function () { paused = true; dragging = false; keyDir = 0; ctx.save(); });
+  // leaving mid-press lets go first, so the drop is saved and replayed, never lost
+  C.onPause(function () { letGo(); paused = true; ctx.save(); });
   C.onResume(function () { paused = false; last = 0; kick(); });
   document.addEventListener('visibilitychange', function () { if (!document.hidden) { last = 0; kick(); } });
   if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
@@ -963,7 +975,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ClawEngine
 
   function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
   function showHelp() {
-    var keys = [kb('← → / A D', C.t('cwKMove')), kb('Space / Enter / ↓', C.t('cwKDrop'))];
+    var keys = [kb('Space / Enter / → / D', C.t('cwKMove'))];
     if (!dailyDate) keys.push(kb('L', C.t('cwChoose')), kb('R', C.t('cwKAgain')));
     C.ui.modal({
       title: C.t('help'),
@@ -986,7 +998,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ClawEngine
       '<circle cx="' + cx + '" cy="' + gy + '" r="5" fill="#9A8A93"/>';
     if (kind === 1) s += '<path d="M60 40 H96 M96 40 L90 35 M96 40 L90 45" stroke="' + ACCENT + '" stroke-width="2.5" stroke-linecap="round" fill="none"/>';
     if (kind === 2) s += '<path d="M104 74 V96" stroke="' + ACCENT + '" stroke-width="1.5" stroke-dasharray="3 3"/><text x="160" y="40" font-size="14" font-weight="700" font-family="sans-serif" fill="' + ACCENT + '">✓</text>';
-    if (kind === 3) s += '<path d="M' + (cx - 14) + ' 40 q14 10 28 0" stroke="' + ACCENT + '" stroke-width="2" fill="none" stroke-dasharray="3 3"/><path d="M60 100 H140 M140 100 l-5 -4 M140 100 l-5 4" stroke="' + ACCENT + '" stroke-width="2" fill="none"/>';
+    if (kind === 3) s += '<path d="M60 100 H140 M140 100 l-5 -4 M140 100 l-5 4" stroke="' + ACCENT + '" stroke-width="2" fill="none"/>';
     return s + '</svg>';
   }
   var TUT = [
