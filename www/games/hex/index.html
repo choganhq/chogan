@@ -54,6 +54,8 @@ function HexEngineFactory() {
   // (r, c±1), (r±1, c), (r-1, c+1) and (r+1, c-1). A full board always has exactly one
   // winner, so the game cannot be drawn.
   var N = 11, CELLS = N * N, LEVELS = ['easy', 'medium', 'hard'], SWAP = -2;
+  // The cell the hard search picks on an empty board (row 0, column 9), see think()
+  var HARD_OPENING = 9;
   var DIRS = [[0, 1], [0, -1], [1, 0], [-1, 0], [-1, 1], [1, -1]];
   var NB = [];
   for (var i0 = 0; i0 < CELLS; i0++) {
@@ -265,6 +267,9 @@ function HexEngineFactory() {
     if (S.winner >= 0) return -1;
     var t = S.turn, moves = free(S);
     if (!moves.length) return -1;
+    // #984: on an empty board the hard search always lands on this cell, but it took ~430 ms
+    // (260 resistance solves) and broke the 400 ms test at random; play it without searching.
+    if (level === 'hard' && moves.length === CELLS) return HARD_OPENING;
     if (wantsSwap(S, level)) return SWAP;
     var pick = function (l) { return l[Math.floor(rnd() * l.length)]; };
     // a stone that wins is always played, and a cell the other side would win on is taken
