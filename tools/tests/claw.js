@@ -30,14 +30,15 @@ module.exports = function (T) {
       if (xs.length >= 4 && apart && inside && B.tries === Math.min(E.TRIES, B.toys.length + 2)) fits++;
     }
     ok(boards === 11 && fits === boards, 'all ' + boards + ' boards keep their toys inside the cabinet, apart, with toys + 2 drops (' + fits + ')');
-    ok(E.params(1).damp > 5 && E.params(5).damp > 5 && E.params(6).damp < 5 && !E.params(6).belt && E.params(7).belt > 0 && E.params(1).chute > E.params(9).chute, 'the head swings from level 6, the belt moves from 7, the chute narrows');
+    const spd = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => E.params(n).speed);
+    ok(spd.every((v, i) => i === 0 || v > spd[i - 1]) && !E.params(2).belt && E.params(3).belt > 0 && E.params(10).belt > E.params(3).belt && E.params(1).chute > E.params(9).chute, 'the claw runs faster on every machine (' + spd.join(', ') + '), the floor moves from machine 3 and faster later, the chute narrows');
 
     // hold and slip: only the aim decides. Square on holds, near the edge slips on the way
     // up, beside the toy nudges it, and far off grabs nothing
     function grabAt(L, dx) {
       const Rd = E.round(E.level(L));
       const t = Rd.toys.slice().sort((a, b) => b.x - a.x)[0];
-      Rd.cx = t.x + dx; Rd.s = 0; Rd.sv = 0; Rd.v = 0;
+      Rd.cx = t.x + dx;
       const ev = E.finishDrop(Rd, E.drop(Rd));
       const grip = (ev.find((e) => e[0] === 'grip') || [])[1];
       return { Rd, t, grip, got: Rd.got.includes(t.id), slip: ev.some((e) => e[0] === 'slip' && e[1] === t.id), left: Rd.toys.length };
@@ -59,40 +60,45 @@ module.exports = function (T) {
     const slipAt = (f) => { const Rd = E.round(E.level(1)), t = Rd.toys.slice().sort((a, b) => b.x - a.x)[0]; Rd.cx = t.x + E.tolA(t) + f * (E.tolB(t) - E.tolA(t)); const A = E.drop(Rd); let n = 0; while (!A.done) { const ev = E.step(Rd, A); n++; if (ev.some((e) => e[0] === 'slip')) return n; } return Infinity; };
     ok(slipAt(0.9) < slipAt(0.5) && slipAt(0.5) < slipAt(0.1), 'a looser grip slips sooner (' + [0.9, 0.5, 0.1].map(slipAt).join(' < ') + ' steps)');
 
-    // the swing: a carriage that stops makes the head swing on later levels, and a still
-    // head stays still
-    const sw = E.round(E.level(6));
-    for (let i = 0; i < 60; i++) E.move(sw, 80);
-    for (let i = 0; i < 5; i++) E.move(sw, null);
-    const s1 = Math.abs(sw.s);
-    for (let i = 0; i < 400; i++) E.move(sw, null);
-    ok(s1 > 1 && Math.abs(sw.s) < s1 / 4, 'on level 6 the head swings after the carriage stops (' + s1.toFixed(1) + ') and settles when you wait (' + Math.abs(sw.s).toFixed(2) + ')');
-    const B7 = E.level(7);
-    ok(E.shift(B7, 0) !== E.shift(B7, B7.P.period / 2) && E.shift(B7, 17) === E.shift(B7, 17 + B7.P.period) && E.shift(E.level(3), 99) === 0, 'the belt moves on a fixed period from level 7 and stands still before');
+    // one press a try (#949, #979): the claw runs right only while held, by its speed each
+    // step, never back, and stops at the far wall
+    const mv = E.round(E.level(4)), x0 = mv.cx, v4 = E.params(4).speed * E.DT;
+    E.move(mv, true); const x1 = mv.cx;
+    E.move(mv, false); E.move(mv, null); E.move(mv, 80); const x2 = mv.cx;
+    ok(Math.abs(x1 - x0 - v4) < 1e-9 && x2 === x1 && mv.clock === 4, 'held, the claw moves right by its speed a step (' + v4.toFixed(3) + '); let go, it stays put and the clock still runs');
+    let wentBack = false;
+    for (let i = 0; i < 2000; i++) { const b = mv.cx; E.move(mv, true); if (mv.cx < b) wentBack = true; }
+    ok(!wentBack && E.atEnd(mv) && mv.cx === E.end() && E.maxHold(E.level(4)) * v4 >= E.end() - E.home(E.level(4)), 'it never goes back and stops at the far wall, reached within the longest hold');
+    const B3 = E.level(3);
+    ok(E.shift(B3, 0) !== E.shift(B3, B3.P.period / 2) && E.shift(B3, 17) === E.shift(B3, 17 + B3.P.period) && E.shift(E.level(2), 99) === 0, 'the conveyor moves on a fixed period from machine 3 and stands still before');
 
     // star targets: the kept table is what the engine measures, for every board
     const remeasured = [];
     for (let L = 1; L <= E.LEVELS; L++) remeasured.push([L, E.level(L).th, E.thresholds(E.level(L, true))]);
     ok(remeasured.length === 10 && remeasured.every(([, k, m]) => same(k, m) && k[0] >= 10 && k[0] < k[1] && k[1] < k[2]), 'the kept targets match the engine on all ten boards (' + remeasured.map(([L, k]) => L + ': ' + k.join('/')).join(', ') + ')');
 
-    // winnability bands, measured 2026-11-19 over 100 rounds a board: a player who knows the
-    // machine and is off by up to 1.2 units gets three stars in every round on every board
-    // (93-100% when off by 1.8); random drops get three stars in at most 1%, and the best
-    // single fixed spot never reaches two stars
+    // winnability bands, measured 2026-11-20: perfect timing clears every board; a player off
+    // by up to AIM frames when letting go gets three stars on every round of machines 1-5 and
+    // on 65-100% of the later ones; random presses get three stars in at most 3% of 100 rounds,
+    // and no single fixed hold reaches three stars
     const bands = [];
     for (let L = 0; L <= E.LEVELS; L++) {
       const B = L ? E.level(L) : E.daily(20261119);
-      const th = E.thresholds(B);
+      const th = L ? B.th : E.thresholds(B);
       let sk3 = 0, rn3 = 0;
       const sk = [];
+      const perfect = E.play(B, E.skilled(1, 0)).score;
       for (let i = 0; i < 20; i++) { const s = E.play(B, E.skilled(1000 + i, E.AIM)).score; sk.push(s); if (E.stars(B, s) === 3) sk3++; }
-      for (let i = 0; i < 50; i++) if (E.stars(B, E.play(B, E.randomPlayer(9000 + i)).score) === 3) rn3++;
+      for (let i = 0; i < 100; i++) if (E.stars(B, E.play(B, E.randomPlayer(9000 + i)).score) === 3) rn3++;
       let fix = 0;
-      for (let x = 0; x <= 100; x += 1) fix = Math.max(fix, E.play(B, E.fixedPlayer(x)).score);
+      for (let h = 1; h <= E.maxHold(B); h++) fix = Math.max(fix, E.play(B, E.fixedPlayer(h)).score);
       sk.sort((a, b) => a - b);
-      bands.push({ L, th, med: sk[10], sk3: sk3 / 20, rn3: rn3 / 50, fix });
+      bands.push({ L, th, perfect, med: sk[10], sk3: sk3 / 20, rn3: rn3 / 100, fix });
     }
-    ok(bands.length === 11 && bands.every((b) => b.sk3 >= 0.9), 'a skilled player gets three stars on every board (' + bands.map((b) => b.L + ': ' + Math.round(b.sk3 * 100) + '%').join(', ') + ')');
+    ok(bands.length === 11 && bands.every((b) => b.perfect >= b.th[2]), 'perfect timing earns three stars on every board (' + bands.map((b) => b.perfect + '≥' + b.th[2]).join(', ') + ')');
+    const early = bands.filter((b) => b.L >= 1 && b.L <= 3), late = bands.filter((b) => b.L >= 8);
+    const avg = (a) => a.reduce((s, b) => s + b.sk3, 0) / a.length;
+    ok(early.every((b) => b.sk3 >= 0.9) && bands.every((b) => b.sk3 >= 0.5) && avg(late) < avg(early), 'a skilled player gets three stars on most rounds, and the later machines are harder (' + bands.map((b) => b.L + ': ' + Math.round(b.sk3 * 100) + '%').join(', ') + ')');
     ok(bands.every((b) => b.rn3 <= 0.04), 'random drops almost never get three stars (' + bands.map((b) => Math.round(b.rn3 * 100) + '%').join(', ') + ')');
     ok(bands.every((b) => b.fix < b.th[2]), 'one fixed spot never earns three stars (' + bands.map((b) => b.fix + '<' + b.th[2]).join(', ') + ')');
     ok(bands.every((b) => b.med >= b.th[2]), 'the skilled median clears the three-star target everywhere (' + bands.map((b) => b.med + '≥' + b.th[2]).join(', ') + ')');
@@ -110,7 +116,7 @@ module.exports = function (T) {
     // saves: the board and its drops; a grab in progress is replayed as it left
     const R2 = E.round(E.level(8));
     const pl = E.skilled(3, E.AIM);
-    for (let k = 0; k < 3; k++) { const p = pl(R2); for (let i = 0; i < 300 && Math.abs(R2.cx - p.x) > 1e-9; i++) E.move(R2, p.x); E.finishDrop(R2, E.drop(R2)); }
+    for (let k = 0; k < 3; k++) { const p = pl(R2); for (let i = 0; i < p.wait; i++) E.move(R2, false); for (let i = 0; i < p.hold; i++) E.move(R2, true); E.finishDrop(R2, E.drop(R2)); }
     const snap = JSON.parse(JSON.stringify(E.snapshot(R2)));
     const back = E.restore(snap);
     ok(!!back && back.drops.length === 3 && back.score === R2.score && same(back.got, R2.got) && same(back.toys.map((t) => [t.id, t.x]), R2.toys.map((t) => [t.id, t.x])), 'a saved round comes back with the same toys, catches and score');
@@ -120,8 +126,8 @@ module.exports = function (T) {
     const dl = E.restore(E.snapshot(E.round(E.daily(555))));
     ok(!!dl && dl.B.level === 0 && same(strip(dl.B), strip(E.daily(555))), 'a daily round restores to the same daily board');
     const d0 = snap.drops[0], mk = (o) => Object.assign({}, snap, o), md = (o) => mk({ drops: [Object.assign({}, d0, o)] });
-    const bad = [null, 'x', {}, mk({ seed: -4 }), mk({ seed: 1.5 }), mk({ level: 11 }), mk({ level: -1 }), mk({ drops: 'x' }), mk({ drops: Array(9).fill(d0) }),
-      md({ x: 'a' }), md({ x: 1 }), md({ x: 200 }), md({ s: NaN }), md({ s: 99 }), md({ sv: 999 }), md({ clock: 1.5 }),
+    const bad = [null, 'x', {}, mk({ v: undefined }), mk({ v: 1 }), mk({ seed: -4 }), mk({ seed: 1.5 }), mk({ level: 11 }), mk({ level: -1 }), mk({ drops: 'x' }), mk({ drops: Array(9).fill(d0) }),
+      md({ x: 'a' }), md({ x: 1 }), md({ x: 200 }), md({ x: NaN }), md({ clock: 1.5 }), md({ clock: -1 }),
       mk({ drops: [Object.assign({}, snap.drops[1]), Object.assign({}, d0)] })];
     ok(bad.every((s) => E.restore(s) === null), 'a damaged save is refused (' + bad.length + ' kinds)');
     ok(/ctx\.autosave\(/.test(html) && /E\.snapshot\(Rd\)/.test(html) && /ctx\.save\(\)/.test(html), 'the page saves its round');
@@ -157,7 +163,8 @@ module.exports = function (T) {
     ok(/\bclaw: function/.test(core) && /C\.audio\.sfx\('claw'\)/.test(html) && !/\.(mp3|ogg|wav)\b/.test(html), 'the claw sound is synthesized in the core, no audio files');
     ok(/C\.ui\.burst\(/.test(html) && /C\.ui\.reduceMotion\(\)/.test(html) && /document\.fonts\.ready/.test(html) && /drawn = V/.test(html), 'a burst on a catch, reduced motion honoured, a redraw when fonts arrive, and touches read against the view last drawn');
     ok(/ctx\.button\(\{ icon: 'gear', label: C\.t\('settings'\)/.test(html) && /title: C\.t\('settings'\), closeButton: true/.test(html) && !/cwAimLine/.test(html.slice(html.indexOf('function showHelp'), html.indexOf('function tArt'))), 'the aim line option sits behind a gear, not in help');
-    ok(/C\.keyIs\(e, 'a'\)/.test(html) && /C\.keyIs\(e, 'd'\)/.test(html) && /k === ' ' \|\| k === 'Enter'/.test(html) && !/dir === 'rtl'|isRtl|C\.rtl/.test(html), 'arrows, A/D and Space/Enter play it, never flipped in RTL');
+    ok(/function holdKey\(e\) \{ return e\.key === ' ' \|\| e\.key === 'Enter' \|\| e\.key === 'ArrowRight'[^}]*C\.keyIs\(e, 'd'\)/.test(html) && /keyup[\s\S]{0,160}holdKey\(e\)[^}]*letGo\(\)/.test(html) && !/C\.keyIs\(e, 'a'\)/.test(html) && !/dir === 'rtl'|isRtl|C\.rtl/.test(html), 'Space, Enter, → and D are held and let go like a finger; no key moves it back; never flipped in RTL');
+    ok(/addEventListener\('pointerup', letGo\)/.test(html) && /addEventListener\('pointercancel', letGo\)/.test(html) && /setPointerCapture/.test(html) && /holdOn\(cv\)/.test(html) && /holdOn\(dropBtn\)/.test(html) && /E\.move\(Rd, holding\)/.test(html) && /C\.onPause\(function \(\) \{ letGo\(\)/.test(html) && !/cwSwing|cwDrop'/.test(html), 'a press on the machine or the button runs the claw and lifting the finger drops it, even when leaving the app');
     ok(/\.cw-canvas \{[^}]*direction: ltr/.test(html) && /cv\.width !== Math\.round\(Z\.w \* dpr\) \|\| cv\.height !== Math\.round\(Z\.h \* dpr\)/.test(html) && /cv\.style\.width = Z\.w \+ 'px'; cv\.style\.height = Z\.h \+ 'px'/.test(html), 'the canvas is drawn left to right, resized on both sides, and its CSS size set apart from its backing (#919)');
     ok(/ctx\.tutorialIfNew\(TUT\)/.test(html) && !/history\.(push|replace)State|localStorage/.test(html), 'a tutorial, no history or direct storage');
     const blockOf = (l) => { const m = html.match(new RegExp('\\n      ' + l + ': \\{([\\s\\S]*?)\\n      \\}')); return m ? m[1] : ''; };
