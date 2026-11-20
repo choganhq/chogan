@@ -178,6 +178,38 @@
   var appStore = Chogan.storage(APP);
   Chogan.store = appStore;
 
+  /* ============================================ نسخه‌ی قالب ذخیره‌سازی */
+
+  // 1.0.0 promises that an update never loses a player's progress, and the saved shapes
+  // are plain JSON with nothing to say which release wrote them. SCHEMA numbers the shape
+  // of everything under `chogan.`. Shape 0 is every release up to 0.35.0 (no key at all);
+  // shape 1 is the same data with the number stamped. A change that renames or reshapes a
+  // key adds MIGRATIONS[n], which turns shape n into n+1 and must tolerate data it does
+  // not recognise, never rename a key without it, and never delete what it cannot convert.
+  // A save from a newer app than this one (a downgrade, an older F-Droid build) is left
+  // alone and not stamped over.
+  var SCHEMA = 1;
+  var SCHEMA_KEY = NS + '.' + APP + '.schema';
+  var MIGRATIONS = [];
+  function migrateSaves(io, target, steps) {
+    var cur = parseInt(io.get(SCHEMA_KEY), 10);
+    if (!(cur >= 0)) cur = 0;
+    if (cur > target) return { from: cur, to: cur, status: 'newer' };
+    var from = cur;
+    while (cur < target) {
+      // a step that throws stops here and the stamp stays, so the next launch retries it
+      // on data that earlier steps already converted
+      try { if (steps[cur]) steps[cur](io); } catch (e) { return { from: from, to: cur, status: 'failed' }; }
+      cur++;
+      io.set(SCHEMA_KEY, String(cur));
+    }
+    return { from: from, to: cur, status: cur === from ? 'current' : 'migrated' };
+  }
+  var schemaResult = migrateSaves({
+    get: rawGet, set: rawSet, del: rawDel, keys: lsKeys
+  }, SCHEMA, MIGRATIONS);
+  Chogan.schema = { version: SCHEMA, result: schemaResult, steps: MIGRATIONS };
+
   /* ========================================================= وضعیت اپ */
 
   // زبان پیش‌فرض از خود دستگاه. فارسی زبان اول پروژه است ولی روی گوشی
@@ -4219,6 +4251,10 @@
           if (k.indexOf(NS + '.') === 0 && typeof d.keys[k] === 'string') { io.set(k, d.keys[k]); n++; }
         }
         if (!n) return 'empty';
+        // A copy from before the schema stamp has no such key, and this fresh install already
+        // stamped itself current; without this the old shapes would skip their migrations.
+        var sk = NS + '.app.schema';
+        if (!Object.prototype.hasOwnProperty.call(d.keys, sk)) io.set(sk, '0');
         io.reload();
         return 'restored';
       });
