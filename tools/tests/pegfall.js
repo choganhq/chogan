@@ -101,6 +101,13 @@ module.exports = function (T) {
     ok(E.value(Rd.B, s0, 0) === 2 * Rd.B.slots[s0] && E.value(Rd.B, plain, 0) === Rd.B.slots[plain], 'the star slot pays double, the others their face value');
     const moves = new Set(); for (let k = 0; k < 10; k++) moves.add(E.starAt(Rd.B, k));
     ok(moves.size >= 2, 'the star slot moves between balls (' + moves.size + ' places in a round)');
+    // #971: the star never stays in the same slot for the next ball, on any board or daily
+    const starBoards = [];
+    for (let L = 1; L <= E.LEVELS; L++) starBoards.push(E.level(L));
+    for (let s = 0; s < 400; s++) starBoards.push(E.daily(20260000 + s * 37));
+    let repeats = 0;
+    starBoards.forEach((B) => { for (let k = 1; k < 10; k++) if (E.starAt(B, k) === E.starAt(B, k - 1)) repeats++; });
+    ok(starBoards.length === E.LEVELS + 400 && repeats === 0, 'the star slot moves after every ball on ' + starBoards.length + ' boards (' + repeats + ' repeats)');
     let expect = 0;
     for (let k = 0; k < 10; k++) { expect += E.value(Rd.B, k % E.NSLOT, k); E.land(Rd, k % E.NSLOT); }
     ok(Rd.score === expect && Rd.k === 10 && E.over(Rd), 'ten balls are a round and the score is the sum of their slots');
