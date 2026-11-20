@@ -50,6 +50,8 @@ function PegfallEngineFactory() {
   var W = 100, H = 150, R = 2.2, PR = 1.3, DT = 1 / 120, G = 150, VMAX = 150;
   var E_PEG = 0.42, E_WALL = 0.4, E_BUMP = 0.85, FRICT = 0.04, DROP_Y = 7;
   var SLOT_H = 14, NSLOT = 9, SW = W / NSLOT, XQ = 0.5;
+  // where the narrow rows' outermost pegs sit, in from each wall (#949)
+  var EDGE = 6.5;
   // a ball that has not landed after 40 s of board time is put in the slot under it
   var CAP = 40 * 120;
   var BALLS = 10, LEVELS = 15, PERIOD = 240, PHASES = 8;
@@ -98,6 +100,10 @@ function PegfallEngineFactory() {
         if (i >= 2 && j > 0 && j < 100 && r() < P.holes) continue;
         pegs.push({ x: j, y: y, r: PR });
       }
+      // #949: with nothing between a wall and 15, a ball dropped by a wall fell straight to
+      // the corner slot on every narrow row. These pegs close that lane and are never holes;
+      // the gap to the wall (5.2) is wider than a ball (4.4), so nothing can wedge there.
+      if (odd) { pegs.push({ x: EDGE, y: y, r: PR }); pegs.push({ x: W - EDGE, y: y, r: PR }); }
     }
     for (i = 0; i < P.rails; i++) {
       var left = r() < 0.5, ry = top + dy * (2 + Math.floor(r() * (P.rows - 4)));
@@ -304,9 +310,9 @@ function PegfallEngineFactory() {
   // measured once with thresholds() and kept, so opening a board costs nothing. The test
   // recomputes boards 1, 4 and 6 (all fifteen take 9 s); after a physics change, rebuild
   // every row from thresholds(level(n, true))
-  var TH = [[450, 670, 850], [280, 420, 530], [320, 480, 610], [390, 580, 740], [330, 490, 620],
-    [680, 1020, 1290], [480, 710, 900], [300, 460, 580], [460, 700, 880], [440, 650, 830],
-    [710, 1070, 1350], [540, 810, 1020], [390, 590, 740], [360, 540, 690], [540, 820, 1030]];
+  var TH = [[670, 1000, 1270], [260, 390, 500], [380, 570, 720], [500, 740, 940], [310, 470, 590],
+    [640, 960, 1210], [460, 690, 880], [310, 470, 600], [440, 650, 830], [420, 620, 790],
+    [800, 1200, 1520], [450, 670, 850], [390, 580, 730], [330, 500, 640], [490, 740, 940]];
   function level(n, fresh) { var B = make((9490 + n * 7919) >>> 0, n); if (!fresh) B.th = TH[n - 1]; return B; }
   function daily(seed) { return make(seed >>> 0, 8); }
 
