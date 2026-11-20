@@ -41,6 +41,15 @@ module.exports = function (T) {
     ok(drops > 700 && landedOk === drops, 'every one of ' + drops + ' drops on ' + boards.length + ' boards lands in a slot without the step cap (' + landedOk + ')');
     ok(inside === drops && maxN < E.CAP / 2, 'no ball leaves the walls, and the slowest took ' + maxN + ' steps of ' + E.CAP);
 
+    // #949: a lane by each wall had no peg on the narrow rows, so a drop there fell straight
+    // into the corner slot; now every drop on every campaign board meets something
+    const lanes = [];
+    for (let L = 1; L <= E.LEVELS; L++) {
+      const B = E.level(L);
+      for (const x of xs) { const b = E.ball(B, x, 0); let hit = false; while (!b.done) { E.step(B, b); if (b.vx !== 0) hit = true; } if (!hit) lanes.push(L + '@' + x); }
+    }
+    ok(lanes.length === 0 && xs.length > 150, 'no drop on the ' + E.LEVELS + ' boards falls straight through without touching a peg (' + (lanes.length ? lanes.slice(0, 6).join(', ') : 'none') + ')');
+
     // every slot can be reached on the first board, so a player can aim for any of them
     ok(same(E.slotsReached(E.level(1)), [0, 1, 2, 3, 4, 5, 6, 7, 8]), 'every slot of board 1 can be reached');
 
