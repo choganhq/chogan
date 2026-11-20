@@ -123,7 +123,14 @@ function PegfallEngineFactory() {
     // one value swapped with a neighbour, so two boards of one pattern differ
     var sw = 1 + Math.floor(r() * 7), t = pat[sw]; pat[sw] = pat[sw + 1]; pat[sw + 1] = t;
     var star = [];
-    for (i = 0; i < 4; i++) star.push(Math.floor(r() * NSLOT));
+    // the star must leave its slot after every ball, the fourth one wrapping back to the
+    // first: a star that stayed paid one good aim double twice (#971). One draw per
+    // place as before, stepped on past a clash, so boards without a repeat keep theirs
+    for (i = 0; i < 4; i++) {
+      var s = Math.floor(r() * NSLOT);
+      while ((i && s === star[i - 1]) || (i === 3 && s === star[0])) s = (s + 1) % NSLOT;
+      star.push(s);
+    }
     var B0 = { seed: seed, level: level | 0, pegs: pegs, segs: segs, bumpers: bumpers, slots: pat, star: star, balls: BALLS };
     for (i = 1; i < NSLOT; i++) B0.segs.push({ ax: i * SW, ay: H - SLOT_H, bx: i * SW, by: H, r: 0.8, wall: true });
     index(B0);
@@ -300,9 +307,9 @@ function PegfallEngineFactory() {
   // measured once with thresholds() and kept, so opening a board costs nothing. The test
   // recomputes boards 1, 4 and 6 (all fifteen take 9 s); after a physics change, rebuild
   // every row from thresholds(level(n, true))
-  var TH = [[470, 710, 900], [290, 440, 560], [320, 480, 610], [390, 580, 740], [330, 490, 620],
-    [680, 1020, 1290], [550, 820, 1040], [300, 460, 580], [460, 700, 880], [440, 650, 830],
-    [710, 1070, 1350], [540, 810, 1020], [390, 590, 740], [370, 550, 690], [540, 820, 1030]];
+  var TH = [[450, 670, 850], [280, 420, 530], [320, 480, 610], [390, 580, 740], [330, 490, 620],
+    [680, 1020, 1290], [480, 710, 900], [300, 460, 580], [460, 700, 880], [440, 650, 830],
+    [710, 1070, 1350], [540, 810, 1020], [390, 590, 740], [360, 540, 690], [540, 820, 1030]];
   function level(n, fresh) { var B = make((9490 + n * 7919) >>> 0, n); if (!fresh) B.th = TH[n - 1]; return B; }
   function daily(seed) { return make(seed >>> 0, 8); }
 
