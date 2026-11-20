@@ -108,6 +108,18 @@ module.exports = function (T) {
       (fs19 ? ' (' + fs19.black + ' to ' + fs19.white + ', ' + fs19.dead.length + ' dead)' : ''));
     ok(tfs < 3000, '19×19 final count runs in under 3 s (' + tfs + ' ms)');
 
+    // #992 (from PR #991): playout() stopped at s.moves < CELLS * 3, but s.moves is the
+    // whole game's count, so after a long game every playout returned on the spot and the
+    // bot and the final count saw the unfinished board. Each playout counts from zero.
+    const long9 = E9.newState();
+    long9.moves = E9.CELLS * 3 + 10;
+    E9.playout(long9, rng(7));
+    ok(long9.board.some((v) => v !== 0), '9×9: a game already past ' + (E9.CELLS * 3) + ' moves still gets a full playout');
+    const late = E19.clone(end);
+    late.moves = E19.CELLS * 3 + 10;
+    const fsLate = E19.finalScore(late, rng(5), 300);
+    ok(fsLate && fsLate.dead.join() === String(3 * 19 + 4), '19×19: the final count of a long game still removes the dead stone (' + (fsLate ? fsLate.dead.length : '?') + ' dead)');
+
     // the page: a gear for the size, the size in prefs and saves, old saves are 9×9, daily is 9×9
     ok(/ctx\.button\(\{ icon: 'gear', label: C\.t\('settings'\), onClick: showSettings \}\)/.test(html) && /if \(!dailyDate\) ctx\.button\(\{ icon: 'gear'/.test(html),
       'the board size sits behind a gear, which the daily game does not show');

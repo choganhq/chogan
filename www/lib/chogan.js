@@ -178,6 +178,38 @@
   var appStore = Chogan.storage(APP);
   Chogan.store = appStore;
 
+  /* ============================================ نسخه‌ی قالب ذخیره‌سازی */
+
+  // 1.0.0 promises that an update never loses a player's progress, and the saved shapes
+  // are plain JSON with nothing to say which release wrote them. SCHEMA numbers the shape
+  // of everything under `chogan.`. Shape 0 is every release up to 0.35.0 (no key at all);
+  // shape 1 is the same data with the number stamped. A change that renames or reshapes a
+  // key adds MIGRATIONS[n], which turns shape n into n+1 and must tolerate data it does
+  // not recognise, never rename a key without it, and never delete what it cannot convert.
+  // A save from a newer app than this one (a downgrade, an older F-Droid build) is left
+  // alone and not stamped over.
+  var SCHEMA = 1;
+  var SCHEMA_KEY = NS + '.' + APP + '.schema';
+  var MIGRATIONS = [];
+  function migrateSaves(io, target, steps) {
+    var cur = parseInt(io.get(SCHEMA_KEY), 10);
+    if (!(cur >= 0)) cur = 0;
+    if (cur > target) return { from: cur, to: cur, status: 'newer' };
+    var from = cur;
+    while (cur < target) {
+      // a step that throws stops here and the stamp stays, so the next launch retries it
+      // on data that earlier steps already converted
+      try { if (steps[cur]) steps[cur](io); } catch (e) { return { from: from, to: cur, status: 'failed' }; }
+      cur++;
+      io.set(SCHEMA_KEY, String(cur));
+    }
+    return { from: from, to: cur, status: cur === from ? 'current' : 'migrated' };
+  }
+  var schemaResult = migrateSaves({
+    get: rawGet, set: rawSet, del: rawDel, keys: lsKeys
+  }, SCHEMA, MIGRATIONS);
+  Chogan.schema = { version: SCHEMA, result: schemaResult, steps: MIGRATIONS };
+
   /* ========================================================= وضعیت اپ */
 
   // زبان پیش‌فرض از خود دستگاه. فارسی زبان اول پروژه است ولی روی گوشی
@@ -209,7 +241,8 @@
     cardBack: 'carpet',  // carpet | termeh, shared by every card game (#181)
     cardSpeed: 'normal', // slow | normal | fast: the pace of every card game (#425)
     pinned: [],          // game ids pinned to the top of the menu, in pin order (#193)
-    colors: 'default'    // one of COLOR_THEMES, the app's colour theme (#875)
+    colors: 'default',   // one of COLOR_THEMES, the app's colour theme (#875)
+    pattern: 'dots'      // one of MENU_PATTERNS, the faint pattern behind the menu (#883)
   };
   // the ids of the [data-colors] palettes in chogan.css; the first is the default
   var COLOR_THEMES = ['default', 'paper', 'slate', 'forest', 'rose', 'contrast'];
@@ -332,6 +365,7 @@
       unlockedAt: 'باز شد', totalPlays: 'بازی', playTime: 'زمان بازی', thisWeek: 'این هفته', lastWeek: 'هفته‌ی قبل', weekMinutes: 'زمان بازی (دقیقه)', weekWins: 'برد', weekDays: 'روز بازی', weekGames: 'بازی‌های مختلف',
       language: 'زبان', theme: 'تم', themeAuto: 'خودکار', themeLight: 'روشن', themeDark: 'تاریک', motion: 'انیمیشن', motionAuto: 'خودکار', motionOn: 'روشن', motionOff: 'خاموش',
       colors: 'رنگ‌بندی', colorsDefault: 'پیش‌فرض', colorsPaper: 'کاغذ کاهی', colorsSlate: 'خاکستری سرد', colorsForest: 'جنگل', colorsRose: 'گلبهی', colorsContrast: 'کنتراست بالا',
+      pattern: 'پس‌زمینه‌ی منو', patternNone: 'ساده', patternDots: 'نقطه‌ها', patternStripes: 'راه‌راه', patternLattice: 'شبکه‌ی مورب', patternGrid: 'شطرنجی', patternWaves: 'موج', patternRings: 'حلقه‌ها',
       sfx: 'افکت صوتی', music: 'موسیقی', haptics: 'لرزش',
       resetGame: 'بازنشانی داده‌ی بازی', resetAsk: 'داده‌ی این بازی کامل پاک شود؟',
       resetWarn: 'این کار برگشت ندارد.', resetDone: 'پاک شد',
@@ -380,6 +414,7 @@
       unlockedAt: 'Unlocked', totalPlays: 'Games', playTime: 'Play time', thisWeek: 'This week', lastWeek: 'Last week', weekMinutes: 'Play time (min)', weekWins: 'Wins', weekDays: 'Days played', weekGames: 'Different games',
       language: 'Language', theme: 'Theme', themeAuto: 'Auto', themeLight: 'Light', themeDark: 'Dark', motion: 'Animations', motionAuto: 'Auto', motionOn: 'On', motionOff: 'Off',
       colors: 'Colours', colorsDefault: 'Default', colorsPaper: 'Warm paper', colorsSlate: 'Cool slate', colorsForest: 'Forest', colorsRose: 'Rose', colorsContrast: 'High contrast',
+      pattern: 'Menu background', patternNone: 'Plain', patternDots: 'Dots', patternStripes: 'Stripes', patternLattice: 'Lattice', patternGrid: 'Grid', patternWaves: 'Waves', patternRings: 'Rings',
       sfx: 'Sound effects', music: 'Music', haptics: 'Vibration',
       resetGame: 'Reset game data', resetAsk: 'Erase all data for this game?',
       resetWarn: 'This cannot be undone.', resetDone: 'Erased',
@@ -428,6 +463,7 @@
       unlockedAt: 'Odblokowano', totalPlays: 'Rozegrane gry', playTime: 'Czas gry', thisWeek: 'Ten tydzień', lastWeek: 'Poprzedni tydzień', weekMinutes: 'Czas gry (min)', weekWins: 'Wygrane', weekDays: 'Dni gry', weekGames: 'Różne gry',
       language: 'Język', theme: 'Motyw', themeAuto: 'Automatyczny', themeLight: 'Jasny', themeDark: 'Ciemny', motion: 'Animacje', motionAuto: 'Auto', motionOn: 'Włączone', motionOff: 'Wyłączone',
       colors: 'Kolorystyka', colorsDefault: 'Domyślny', colorsPaper: 'Ciepły papier', colorsSlate: 'Chłodny łupek', colorsForest: 'Las', colorsRose: 'Róż', colorsContrast: 'Wysoki kontrast',
+      pattern: 'Tło menu', patternNone: 'Gładkie', patternDots: 'Kropki', patternStripes: 'Paski', patternLattice: 'Kratka ukośna', patternGrid: 'Siatka', patternWaves: 'Fale', patternRings: 'Kółka',
       sfx: 'Efekty dźwiękowe', music: 'Muzyka', haptics: 'Wibracje',
       resetGame: 'Resetuj dane gry', resetAsk: 'Usunąć wszystkie dane tej gry?',
       resetWarn: 'Tej operacji nie można cofnąć.', resetDone: 'Usunięto',
@@ -476,6 +512,7 @@
       unlockedAt: 'Débloqué', totalPlays: 'Parties', playTime: 'Temps de jeu', thisWeek: 'Cette semaine', lastWeek: 'Semaine dernière', weekMinutes: 'Temps de jeu (min)', weekWins: 'Victoires', weekDays: 'Jours joués', weekGames: 'Jeux différents',
       language: 'Langue', theme: 'Thème', themeAuto: 'Auto', themeLight: 'Clair', themeDark: 'Sombre', motion: 'Animations', motionAuto: 'Auto', motionOn: 'Activées', motionOff: 'Désactivées',
       colors: 'Couleurs', colorsDefault: 'Par défaut', colorsPaper: 'Papier chaud', colorsSlate: 'Ardoise', colorsForest: 'Forêt', colorsRose: 'Rose', colorsContrast: 'Contraste élevé',
+      pattern: 'Fond du menu', patternNone: 'Uni', patternDots: 'Points', patternStripes: 'Rayures', patternLattice: 'Treillis', patternGrid: 'Quadrillage', patternWaves: 'Vagues', patternRings: 'Anneaux',
       sfx: 'Effets sonores', music: 'Musique', haptics: 'Vibrations',
       resetGame: 'Effacer les données du jeu', resetAsk: 'Effacer toutes les données de ce jeu ?',
       resetWarn: 'Impossible de revenir en arrière.', resetDone: 'Effacé',
@@ -524,6 +561,7 @@
       unlockedAt: 'فُتح', totalPlays: 'الألعاب', playTime: 'وقت اللعب', thisWeek: 'هذا الأسبوع', lastWeek: 'الأسبوع الماضي', weekMinutes: 'وقت اللعب (دقيقة)', weekWins: 'الانتصارات', weekDays: 'أيام اللعب', weekGames: 'ألعاب مختلفة',
       language: 'اللغة', theme: 'المظهر', themeAuto: 'تلقائي', themeLight: 'فاتح', themeDark: 'داكن', motion: 'الحركة', motionAuto: 'تلقائي', motionOn: 'تشغيل', motionOff: 'إيقاف',
       colors: 'الألوان', colorsDefault: 'افتراضي', colorsPaper: 'ورق دافئ', colorsSlate: 'أردوازي بارد', colorsForest: 'غابة', colorsRose: 'وردي', colorsContrast: 'تباين عالٍ',
+      pattern: 'خلفية القائمة', patternNone: 'سادة', patternDots: 'نقاط', patternStripes: 'خطوط', patternLattice: 'شبكة مائلة', patternGrid: 'مربعات', patternWaves: 'أمواج', patternRings: 'حلقات',
       sfx: 'المؤثرات الصوتية', music: 'الموسيقى', haptics: 'الاهتزاز',
       resetGame: 'مسح بيانات اللعبة', resetAsk: 'أتمسح كل بيانات هذه اللعبة؟',
       resetWarn: 'لا يمكن التراجع عن هذا.', resetDone: 'مُسحت',
@@ -572,6 +610,7 @@
       unlockedAt: 'खुला', totalPlays: 'खेल', playTime: 'खेलने का समय', thisWeek: 'इस हफ़्ते', lastWeek: 'पिछले हफ़्ते', weekMinutes: 'खेलने का समय (मिनट)', weekWins: 'जीत', weekDays: 'खेले गए दिन', weekGames: 'अलग-अलग खेल',
       language: 'भाषा', theme: 'थीम', themeAuto: 'अपने-आप', themeLight: 'हल्की', themeDark: 'गहरी', motion: 'एनिमेशन', motionAuto: 'अपने-आप', motionOn: 'चालू', motionOff: 'बंद',
       colors: 'रंग-योजना', colorsDefault: 'सामान्य', colorsPaper: 'गर्म काग़ज़', colorsSlate: 'ठंडा स्लेटी', colorsForest: 'जंगल', colorsRose: 'गुलाबी', colorsContrast: 'उच्च कंट्रास्ट',
+      pattern: 'मेनू की पृष्ठभूमि', patternNone: 'सादा', patternDots: 'बिंदु', patternStripes: 'धारियाँ', patternLattice: 'तिरछी जाली', patternGrid: 'चौखाना', patternWaves: 'लहरें', patternRings: 'छल्ले',
       sfx: 'ध्वनि प्रभाव', music: 'संगीत', haptics: 'कंपन',
       resetGame: 'खेल का डेटा मिटाएँ', resetAsk: 'इस खेल का सारा डेटा मिटा दें?',
       resetWarn: 'यह वापस नहीं हो सकता।', resetDone: 'मिटा दिया',
@@ -620,6 +659,7 @@
       unlockedAt: '解锁于', totalPlays: '局数', playTime: '游戏时长', thisWeek: '本周', lastWeek: '上周', weekMinutes: '游戏时长（分钟）', weekWins: '胜局', weekDays: '游戏天数', weekGames: '玩过的游戏',
       language: '语言', theme: '主题', themeAuto: '自动', themeLight: '浅色', themeDark: '深色', motion: '动画', motionAuto: '自动', motionOn: '开', motionOff: '关',
       colors: '配色', colorsDefault: '默认', colorsPaper: '暖纸', colorsSlate: '冷石板', colorsForest: '森林', colorsRose: '玫瑰', colorsContrast: '高对比度',
+      pattern: '菜单背景', patternNone: '纯色', patternDots: '圆点', patternStripes: '条纹', patternLattice: '斜格', patternGrid: '方格', patternWaves: '波浪', patternRings: '圆环',
       sfx: '音效', music: '音乐', haptics: '振动',
       resetGame: '重置游戏数据', resetAsk: '确定清除这个游戏的全部数据？',
       resetWarn: '此操作无法撤销。', resetDone: '已清除',
@@ -668,6 +708,7 @@
       unlockedAt: 'Freigeschaltet', totalPlays: 'Spiele', playTime: 'Spielzeit', thisWeek: 'Diese Woche', lastWeek: 'Letzte Woche', weekMinutes: 'Spielzeit (Min.)', weekWins: 'Siege', weekDays: 'Spieltage', weekGames: 'Verschiedene Spiele',
       language: 'Sprache', theme: 'Design', themeAuto: 'Auto', themeLight: 'Hell', themeDark: 'Dunkel', motion: 'Animationen', motionAuto: 'Auto', motionOn: 'An', motionOff: 'Aus',
       colors: 'Farbschema', colorsDefault: 'Standard', colorsPaper: 'Warmes Papier', colorsSlate: 'Kühler Schiefer', colorsForest: 'Wald', colorsRose: 'Rosé', colorsContrast: 'Hoher Kontrast',
+      pattern: 'Menühintergrund', patternNone: 'Schlicht', patternDots: 'Punkte', patternStripes: 'Streifen', patternLattice: 'Gitter schräg', patternGrid: 'Karo', patternWaves: 'Wellen', patternRings: 'Ringe',
       sfx: 'Soundeffekte', music: 'Musik', haptics: 'Vibration',
       resetGame: 'Spieldaten zurücksetzen', resetAsk: 'Alle Daten dieses Spiels löschen?',
       resetWarn: 'Das lässt sich nicht rückgängig machen.', resetDone: 'Gelöscht',
@@ -716,6 +757,7 @@
       unlockedAt: 'Desbloqueado', totalPlays: 'Partidas', playTime: 'Tiempo de juego', thisWeek: 'Esta semana', lastWeek: 'Semana pasada', weekMinutes: 'Tiempo de juego (min)', weekWins: 'Victorias', weekDays: 'Días jugados', weekGames: 'Juegos distintos',
       language: 'Idioma', theme: 'Tema', themeAuto: 'Auto', themeLight: 'Claro', themeDark: 'Oscuro', motion: 'Animaciones', motionAuto: 'Auto', motionOn: 'Activadas', motionOff: 'Desactivadas',
       colors: 'Colores', colorsDefault: 'Predeterminado', colorsPaper: 'Papel cálido', colorsSlate: 'Pizarra fría', colorsForest: 'Bosque', colorsRose: 'Rosa', colorsContrast: 'Alto contraste',
+      pattern: 'Fondo del menú', patternNone: 'Liso', patternDots: 'Puntos', patternStripes: 'Rayas', patternLattice: 'Celosía', patternGrid: 'Cuadrícula', patternWaves: 'Ondas', patternRings: 'Anillos',
       sfx: 'Efectos de sonido', music: 'Música', haptics: 'Vibración',
       resetGame: 'Borrar datos del juego', resetAsk: '¿Borrar todos los datos de este juego?',
       resetWarn: 'No se puede deshacer.', resetDone: 'Borrado',
@@ -888,6 +930,19 @@
     var known = typeof c === 'string' && COLOR_THEMES.indexOf(c) > 0;
     if (known) document.documentElement.setAttribute('data-colors', c);
     else document.documentElement.removeAttribute('data-colors');
+  };
+  // the faint pattern behind the menu only; the first id is the default and needs no attribute
+  var MENU_PATTERNS = ['dots', 'none', 'stripes', 'lattice', 'grid', 'waves', 'rings'];
+  Chogan.MENU_PATTERNS = MENU_PATTERNS;
+  Chogan.applyPattern = function () {
+    var p = state.settings.pattern;
+    if (MENU_PATTERNS.indexOf(p) > 0) document.documentElement.setAttribute('data-pattern', p);
+    else document.documentElement.removeAttribute('data-pattern');
+  };
+  Chogan.setPattern = function (p) {
+    state.settings.pattern = p;
+    saveSettings();
+    Chogan.applyPattern();
   };
   Chogan.setColors = function (c) {
     state.settings.colors = c;
@@ -1167,6 +1222,18 @@
     // is held, so a burn is heard for as long as it lasts without a looping node to stop
     jet: function () {
       noise({ freq: 900, to: 380, dur: 0.16, gain: 0.07, filter: 'bandpass' });
+    },
+    // Pegfall's ball on a peg (#949): a short glassy ping, quiet and very short, because a
+    // ball can touch a dozen pegs in a second and a louder one turned into a buzz
+    peg: function () {
+      var b = now();
+      tone({ freq: 1560, to: 1320, dur: 0.045, gain: 0.05, type: 'triangle', at: b });
+      tone({ freq: 3120, dur: 0.02, gain: 0.015, type: 'sine', at: b });
+    },
+    // Grabber's claw going down: a short motor whirr falling in pitch (#949)
+    claw: function () {
+      tone({ freq: 240, to: 150, dur: 0.32, gain: 0.07, type: 'sawtooth' });
+      noise({ freq: 700, to: 420, dur: 0.22, gain: 0.04, filter: 'bandpass' });
     },
     // Ball Rain (#949): a steel ball ringing off a brass pin, high and short, since
     // a cascade plays it many times a second
@@ -1609,6 +1676,18 @@
     { id: 'sg-win',      icon: 'medal',    fa: 'برد شوگی',            en: 'Shogi victory',     dfa: 'یک دست شطرنج ژاپنی را مقابل رایانه بردی', den: 'Win a game of Japanese chess against the computer', zh: '将棋首胜', dzh: '在日本将棋中战胜电脑', de: 'Shogi-Sieg', dde: 'Gewinne eine Partie Shogi gegen den Computer', es: 'Victoria en shogi', des: 'Gana una partida de shogi contra el ordenador', pl: 'Zwycięstwo w shogi', dpl: 'Wygraj partię shogi z komputerem', fr: 'Victoire au shogi', dfr: 'Gagne une partie de shogi contre l’ordinateur', ar: 'نصر ياباني', dar: 'فُز بلعبة الشطرنج الياباني ضد الحاسوب', hi: 'शोगी विजय', dhi: 'कंप्यूटर के ख़िलाफ़ शोगी का एक खेल जीतें' },
     { id: 'sg-hard',     icon: 'crown',    fa: 'استاد شوگی',          en: 'Shogi master',      dfa: 'در شطرنج ژاپنی رایانهٔ سخت را شکست دادی', den: 'Beat the hard computer at Japanese chess', zh: '将棋名人', dzh: '在日本将棋中击败困难电脑', de: 'Shogi-Meister', dde: 'Besiege im Shogi den schweren Computer', es: 'Maestro de shogi', des: 'Vence al ordenador difícil en shogi', pl: 'Mistrz shogi', dpl: 'Pokonaj trudny komputer w shogi', fr: 'Maître du shogi', dfr: 'Bats l’ordinateur difficile au shogi', ar: 'سيد الشوغي', dar: 'اهزم الحاسوب الصعب في الشطرنج الياباني', hi: 'शोगी उस्ताद', dhi: 'शोगी में कठिन कंप्यूटर को हराएँ' },
     { id: 'sg-drop',     icon: 'star',     fa: 'مات از آسمان',        en: 'Mate from the hand', dfa: 'در شطرنج ژاپنی با گذاشتن مهره رایانه را مات کردی', den: 'Checkmate the computer with a drop in Japanese chess', zh: '打入将死', dzh: '在日本将棋中用打入将死电脑', de: 'Matt aus der Hand', dde: 'Setze im Shogi den Computer mit einer eingesetzten Figur matt', es: 'Mate desde la mano', des: 'Da mate al ordenador en shogi soltando una pieza', pl: 'Mat z ręki', dpl: 'Zamatuj komputer w shogi zrzuconą bierką', fr: 'Mat parachuté', dfr: 'Mate l’ordinateur au shogi avec une pièce parachutée', ar: 'كش من اليد', dar: 'أمِت الحاسوب في الشطرنج الياباني بإسقاط قطعة', hi: 'हाथ से मात', dhi: 'शोगी में रखे गए मोहरे से कंप्यूटर को मात दें' },
+    { id: 'pf-win',      icon: 'medal',    fa: 'باران توپ',           en: 'Ball shower',       dfa: 'در توپ‌ریز روی یک تخته دست‌کم یک ستاره گرفتی', den: 'Earn a star on a Pegfall board', zh: '弹珠雨', dzh: '在弹珠落中的一块板上获得一颗星', de: 'Kugelregen', dde: 'Hol dir auf einem Brett von Kugelfall einen Stern', es: 'Lluvia de bolas', des: 'Consigue una estrella en un tablero de Bola en caída', pl: 'Deszcz kulek', dpl: 'Zdobądź gwiazdkę na planszy Spadających kulek', fr: 'Pluie de billes', dfr: 'Gagne une étoile sur un plateau de Chute de billes', ar: 'مطر الكرات', dar: 'احصل على نجمة في لوح من «سقوط الكرة»', hi: 'गेंदों की बारिश', dhi: 'गिरती गेंद के किसी बोर्ड पर एक तारा पाएँ' },
+    { id: 'pf-three',    icon: 'star',     fa: 'میخ‌به‌میخ',            en: 'Pin-sharp',         dfa: 'در توپ‌ریز روی یک تخته سه ستاره گرفتی', den: 'Earn three stars on a Pegfall board', zh: '分毫不差', dzh: '在弹珠落中的一块板上获得三颗星', de: 'Punktgenau', dde: 'Hol dir auf einem Brett von Kugelfall drei Sterne', es: 'Al milímetro', des: 'Consigue tres estrellas en un tablero de Bola en caída', pl: 'Co do milimetra', dpl: 'Zdobądź trzy gwiazdki na planszy Spadających kulek', fr: 'Au millimètre', dfr: 'Gagne trois étoiles sur un plateau de Chute de billes', ar: 'بدقة الدبوس', dar: 'احصل على ثلاث نجوم في لوح من «سقوط الكرة»', hi: 'बिल्कुल सटीक', dhi: 'गिरती गेंद के किसी बोर्ड पर तीन तारे पाएँ' },
+    { id: 'pf-catch',    icon: 'sparkle',  fa: 'شکارچی ستاره',        en: 'Star catcher',      dfa: 'در توپ‌ریز سه توپ پشت هم در خانه‌ی ستاره انداختی', den: 'Drop three balls in a row into the star slot in Pegfall', zh: '摘星手', dzh: '在弹珠落中连续三颗球落入星星槽', de: 'Sternenfänger', dde: 'Lass in Kugelfall drei Kugeln hintereinander ins Sternfach fallen', es: 'Cazaestrellas', des: 'Mete tres bolas seguidas en la casilla estrella de Bola en caída', pl: 'Łowca gwiazd', dpl: 'Wrzuć trzy kulki z rzędu do gwiezdnej przegródki w Spadających kulkach', fr: 'Attrape-étoiles', dfr: 'Fais tomber trois billes d’affilée dans la case étoile de Chute de billes', ar: 'صائد النجوم', dar: 'أسقط ثلاث كرات متتالية في خانة النجمة في «سقوط الكرة»', hi: 'तारा पकड़', dhi: 'गिरती गेंद में लगातार तीन गेंदें तारे वाले खाने में गिराएँ' },
+    { id: 'pf-daily',    icon: 'calendar', fa: 'توپ روزانه',          en: 'Daily drop',        dfa: 'در تخته‌ی روزانه‌ی توپ‌ریز ستاره گرفتی', den: 'Earn a star on the daily Pegfall board', zh: '每日弹珠', dzh: '在每日弹珠落板上获得一颗星', de: 'Tageskugel', dde: 'Hol dir auf dem Tagesbrett von Kugelfall einen Stern', es: 'Bola del día', des: 'Consigue una estrella en el tablero diario de Bola en caída', pl: 'Kulka dnia', dpl: 'Zdobądź gwiazdkę na dziennej planszy Spadających kulek', fr: 'Bille du jour', dfr: 'Gagne une étoile sur le plateau du jour de Chute de billes', ar: 'كرة اليوم', dar: 'احصل على نجمة في لوح «سقوط الكرة» اليومي', hi: 'आज की गेंद', dhi: 'गिरती गेंद के रोज़ के बोर्ड पर एक तारा पाएँ' },
+    { id: 'ld-win',      icon: 'medal',    fa: 'آخرین تاس',           en: 'Last cup standing', dfa: 'در تاس دروغگو آخرین کسی بودی که تاس داشت', den: 'Win a game of Liar’s Dice', zh: '笑到最后', dzh: '在吹牛骰中赢下一局', de: 'Letzter Becher', dde: 'Gewinne ein Spiel Lügenwürfel', es: 'Último cubilete', des: 'Gana una partida de Dados del Mentiroso', pl: 'Ostatni kubek', dpl: 'Wygraj grę w Kości Kłamcy', fr: 'Dernier gobelet', dfr: 'Gagne une partie de Dés du Menteur', ar: 'آخر كوب', dar: 'فُز بلعبة من نرد الكذّاب', hi: 'आख़िरी प्याला', dhi: 'झूठे पासे का एक खेल जीतें' },
+    { id: 'ld-hard',     icon: 'crown',    fa: 'دروغ‌سنج',            en: 'Lie detector',      dfa: 'در تاس دروغگو دست‌کم سه ربات سخت را بردی', den: 'Beat three or more hard bots at Liar’s Dice', zh: '测谎仪', dzh: '在吹牛骰中战胜至少三个困难机器人', de: 'Lügendetektor', dde: 'Besiege bei Lügenwürfel drei oder mehr schwere Bots', es: 'Detector de mentiras', des: 'Vence a tres o más bots difíciles en Dados del Mentiroso', pl: 'Wykrywacz kłamstw', dpl: 'Pokonaj co najmniej trzy trudne boty w Kościach Kłamcy', fr: 'Détecteur de mensonges', dfr: 'Bats au moins trois bots difficiles aux Dés du Menteur', ar: 'كاشف الكذب', dar: 'اهزم ثلاثة روبوتات صعبة أو أكثر في نرد الكذّاب', hi: 'झूठ पकड़ने वाला', dhi: 'झूठे पासे में तीन या ज़्यादा कठिन बॉट को हराएँ' },
+    { id: 'ld-edge',     icon: 'star',     fa: 'لبه‌ی تیغ',           en: 'Razor’s edge',      dfa: 'در تاس دروغگو به پیشنهادت گفتند دروغه و تعدادش دقیقاً درست بود', den: 'Have a bid called Liar! in Liar’s Dice when the count was exactly right', zh: '分毫不差', dzh: '在吹牛骰中你的叫数被喊开，而数量刚好', de: 'Auf Messers Schneide', dde: 'Dein Gebot wird bei Lügenwürfel als Lüge angezweifelt und stimmt genau', es: 'Al filo', des: 'Que te digan ¡Mentira! en Dados del Mentiroso con la cantidad justa', pl: 'Na ostrzu', dpl: 'Usłysz Kłamiesz! w Kościach Kłamcy, gdy liczba była dokładna', fr: 'Sur le fil', dfr: 'Fais crier Menteur ! aux Dés du Menteur sur une annonce pile juste', ar: 'على حد السكين', dar: 'قيل لرهانك «كاذب!» في نرد الكذّاب وكان العدد صحيحًا تمامًا', hi: 'धार पर', dhi: 'झूठे पासे में आपकी बोली को झूठ कहा गया और गिनती बिल्कुल सही थी' },
+    { id: 'ld-daily',    icon: 'calendar', fa: 'دروغ روزانه',         en: 'Daily bluff',       dfa: 'تاس دروغگوی روزانه را تا آخر بازی کردی', den: 'Finish the daily Liar’s Dice', zh: '每日吹牛', dzh: '完成每日吹牛骰', de: 'Bluff des Tages', dde: 'Spiel Lügenwürfel des Tages zu Ende', es: 'Farol del día', des: 'Termina los Dados del Mentiroso del día', pl: 'Blef dnia', dpl: 'Dokończ codzienne Kości Kłamcy', fr: 'Bluff du jour', dfr: 'Termine les Dés du Menteur du jour', ar: 'خدعة اليوم', dar: 'أكمل نرد الكذّاب اليومي', hi: 'आज का झांसा', dhi: 'रोज़ाना झूठे पासे पूरे करें' },
+    { id: 'cw-win',      icon: 'medal',    fa: 'اولین شکار',          en: 'First catch',       dfa: 'در چنگک دستگاهی را با دست‌کم یک ستاره تمام کردی', den: 'Finish a Grabber machine with at least one star', zh: '首次抓中', dzh: '在抓娃娃中以至少一颗星完成一台机器', de: 'Erster Fang', dde: 'Schließe im Greifer einen Automaten mit mindestens einem Stern ab', es: 'Primera captura', des: 'Termina una máquina de Gancho con al menos una estrella', pl: 'Pierwszy połów', dpl: 'Ukończ automat w Chwytaku z co najmniej jedną gwiazdką', fr: 'Première prise', dfr: 'Termine une machine du Grappin avec au moins une étoile', ar: 'أول صيد', dar: 'أنهِ آلة في المخلب بنجمة واحدة على الأقل', hi: 'पहली पकड़', dhi: 'पंजा में कम से कम एक तारे के साथ एक मशीन पूरी करें' },
+    { id: 'cw-three',    icon: 'crown',    fa: 'استاد چنگک',          en: 'Claw master',       dfa: 'در چنگک دستگاهی را با سه ستاره تمام کردی', den: 'Finish a Grabber machine with three stars', zh: '抓娃娃大师', dzh: '在抓娃娃中以三颗星完成一台机器', de: 'Greifmeister', dde: 'Schließe im Greifer einen Automaten mit drei Sternen ab', es: 'Maestro del gancho', des: 'Termina una máquina de Gancho con tres estrellas', pl: 'Mistrz chwytaka', dpl: 'Ukończ automat w Chwytaku z trzema gwiazdkami', fr: 'Maître de la pince', dfr: 'Termine une machine du Grappin avec trois étoiles', ar: 'سيد المخلب', dar: 'أنهِ آلة في المخلب بثلاث نجوم', hi: 'पंजा उस्ताद', dhi: 'पंजा में तीन तारों के साथ एक मशीन पूरी करें' },
+    { id: 'cw-daily',    icon: 'calendar', fa: 'شکار روزانه',         en: 'Daily catch',       dfa: 'دستگاه روزانه‌ی چنگک را با دست‌کم یک ستاره تمام کردی', den: 'Finish the daily Grabber machine with at least one star', zh: '每日一抓', dzh: '以至少一颗星完成每日抓娃娃机', de: 'Tagesfang', dde: 'Schließe den Tagesautomaten im Greifer mit mindestens einem Stern ab', es: 'Captura del día', des: 'Termina la máquina diaria de Gancho con al menos una estrella', pl: 'Połów dnia', dpl: 'Ukończ automat dnia w Chwytaku z co najmniej jedną gwiazdką', fr: 'Prise du jour', dfr: 'Termine la machine du jour du Grappin avec au moins une étoile', ar: 'صيد اليوم', dar: 'أنهِ آلة اليوم في المخلب بنجمة واحدة على الأقل', hi: 'आज की पकड़', dhi: 'पंजा की आज की मशीन कम से कम एक तारे के साथ पूरी करें' },
+    { id: 'cw-star',     icon: 'star',     fa: 'ستاره‌گیر',           en: 'Star grab',         dfa: 'در چنگک عروسک ستاره را به دریچه رساندی', den: 'Deliver the star toy to the chute in Grabber', zh: '摘星', dzh: '在抓娃娃中把星星玩偶送进出口', de: 'Sternengriff', dde: 'Bringe im Greifer das Sternchen-Plüschtier in den Schacht', es: 'Estrella atrapada', des: 'Lleva el peluche estrella a la rampa en Gancho', pl: 'Złapana gwiazdka', dpl: 'Dostarcz gwiazdkę do zsypu w Chwytaku', fr: 'Étoile attrapée', dfr: 'Amène la peluche étoile à la trappe du Grappin', ar: 'خطف النجمة', dar: 'أوصِل دمية النجمة إلى الفتحة في المخلب', hi: 'तारा पकड़ा', dhi: 'पंजा में तारे वाले खिलौने को ढलान तक पहुँचाएँ' },
     { id: 'pc-win',      icon: 'medal',    fa: 'توپ به جیب',          en: 'In the pocket',     dfa: 'در بارون توپ یک تخته را با دست‌کم یک ستاره تمام کردی', den: 'Finish a Ball Rain board with at least one star', zh: '球入袋中', dzh: '在钢珠雨中以至少一颗星完成一板', de: 'Eingelocht', dde: 'Schaff ein Kugelflut-Brett mit mindestens einem Stern', es: 'Al bolsillo', des: 'Termina un tablero de Cascada de bolas con al menos una estrella', pl: 'Do kieszeni', dpl: 'Ukończ planszę w Ulewie kulek z co najmniej jedną gwiazdką', fr: 'Dans la poche', dfr: 'Termine un plateau d’Averse de billes avec au moins une étoile', ar: 'في الجيب', dar: 'أنهِ لوحًا في وابل الكرات بنجمة واحدة على الأقل', hi: 'जेब में', dhi: 'गेंदों की झड़ी का एक बोर्ड कम से कम एक तारे के साथ पूरा करें' },
     { id: 'pc-three',    icon: 'star',     fa: 'دست برنجی',           en: 'Brass touch',       dfa: 'در بارون توپ یک تخته را با سه ستاره تمام کردی', den: 'Finish a Ball Rain board with three stars', zh: '黄铜手感', dzh: '在钢珠雨中以三颗星完成一板', de: 'Messinghand', dde: 'Schaff ein Kugelflut-Brett mit drei Sternen', es: 'Toque de latón', des: 'Termina un tablero de Cascada de bolas con tres estrellas', pl: 'Mosiężna ręka', dpl: 'Ukończ planszę w Ulewie kulek z trzema gwiazdkami', fr: 'Main de laiton', dfr: 'Termine un plateau d’Averse de billes avec trois étoiles', ar: 'لمسة نحاسية', dar: 'أنهِ لوحًا في وابل الكرات بثلاث نجوم', hi: 'पीतल का हाथ', dhi: 'गेंदों की झड़ी का एक बोर्ड तीन तारों के साथ पूरा करें' },
     { id: 'pc-tulip',    icon: 'sparkle',  fa: 'لاله‌ی پربار',        en: 'Full bloom',        dfa: 'در بارون توپ دو توپ را در یک بار باز شدن لاله انداختی', den: 'Land two balls in the tulip while it is open once in Ball Rain', zh: '盛放', dzh: '在钢珠雨中郁金香一次张开时打进两个球', de: 'Volle Blüte', dde: 'Triff in Kugelflut zwei Kugeln in die Tulpe, während sie einmal offen ist', es: 'En plena flor', des: 'Mete dos bolas en el tulipán mientras está abierto una vez en Cascada de bolas', pl: 'Pełny rozkwit', dpl: 'Traf dwiema kulkami do tulipana podczas jednego otwarcia w Ulewie kulek', fr: 'Pleine floraison', dfr: 'Mets deux billes dans la tulipe pendant une seule ouverture dans Averse de billes', ar: 'تفتّح كامل', dar: 'أدخل كرتين في زهرة التوليب خلال فتحة واحدة في وابل الكرات', hi: 'पूरा खिला', dhi: 'गेंदों की झड़ी में ट्यूलिप के एक बार खुलने पर दो गेंदें डालें' },
@@ -1684,7 +1763,7 @@
     tw: 'towerup', dom: 'dominoes', ws: 'watersort', fb: 'football', wg: 'wrigglers', tri: 'trio',
     fr: 'fourrow', pk: 'peak', tr: 'territories', pw: 'pipes', db: 'doubles', sk: 'storekeeper',
     sr: 'starraid', cx: 'crossing', cm: 'carrom', nd: 'numberdrop', ci: 'circuit',
-    hr: 'hillrider', fl: 'flood', mo: 'motorush', mu: 'muncher', ft: 'fitten', fd: 'fivedice', hx: 'hex', ln: 'lander', gs: 'goose', dl: 'dicelands', cn: 'corners', fo: 'fourfold', snt: 'senet', pet: 'petgame', hc: 'honeycomb', nj: 'nainjaune', hm: 'hamlet', po: 'pushout', sg: 'shogi', pc: 'pachinko',
+    hr: 'hillrider', fl: 'flood', mo: 'motorush', mu: 'muncher', ft: 'fitten', fd: 'fivedice', hx: 'hex', ln: 'lander', gs: 'goose', dl: 'dicelands', cn: 'corners', fo: 'fourfold', snt: 'senet', pet: 'petgame', hc: 'honeycomb', nj: 'nainjaune', hm: 'hamlet', po: 'pushout', sg: 'shogi', pf: 'pegfall', ld: 'liarsdice', cw: 'claw', pc: 'pachinko',
   };
   // Darts kept Dots' prefix for this one award when #464 renamed the others
   var ACH_GAME_ID = { 'dt-180': 'darts' };
@@ -3960,6 +4039,7 @@
     // صفحه‌ی منو. صفحه‌ی بازی خودش در Chogan.game عنوان دقیق‌ترش را می‌گذارد.
     if (!Chogan.pageTitle) Chogan.pageTitle = function () { return Chogan.t('appName'); };
     Chogan.applyLang();
+    Chogan.applyPattern();
     Chogan.applyColors(); // before applyTheme, which reads the palette's background for the bar
     Chogan.applyTheme();
     Chogan.applyMotion();
@@ -4193,6 +4273,10 @@
           if (k.indexOf(NS + '.') === 0 && typeof d.keys[k] === 'string') { io.set(k, d.keys[k]); n++; }
         }
         if (!n) return 'empty';
+        // A copy from before the schema stamp has no such key, and this fresh install already
+        // stamped itself current; without this the old shapes would skip their migrations.
+        var sk = NS + '.app.schema';
+        if (!Object.prototype.hasOwnProperty.call(d.keys, sk)) io.set(sk, '0');
         io.reload();
         return 'restored';
       });

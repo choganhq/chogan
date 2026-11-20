@@ -22,6 +22,26 @@
   .dt-player__dot { width: 14px; height: 14px; border-radius: 50%; background: var(--pc); flex: 0 0 14px; }
   .dt-player__name { flex: 1; min-width: 0; font-weight: 700; font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dt-player__score { font-weight: 800; font-size: var(--fs-lg); font-variant-numeric: tabular-nums; color: var(--pc); }
+  /* three or four chips share one row on a phone (#987) */
+  .dt-players--many { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; }
+  /* name over score: side by side, four names were cut to three letters on a 390px phone */
+  .dt-players--many .dt-player { display: grid; grid-template-columns: 12px minmax(0, 1fr); column-gap: 6px; row-gap: 0; padding: 6px 8px; }
+  .dt-players--many .dt-player__dot { width: 12px; height: 12px; }
+  .dt-players--many .dt-player__name { font-size: var(--fs-xs); }
+  .dt-players--many .dt-player__score { grid-column: 2; line-height: 1.15; }
+  /* beside the board the side column is narrower than a phone, and one row of four cut "Player 1" to "Player…" */
+  @container game (min-aspect-ratio: 5 / 4) {
+    .dt-players--many { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .ch-nocq .ch-gamemain.ch-wide .dt-players--many { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dt-top .ch-seg button:disabled { opacity: .35; cursor: not-allowed; }
+  .dt-seats { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+  .dt-seat {
+    display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px;
+    border: 2px solid var(--pc); border-radius: 999px; background: var(--c-surface);
+    color: var(--c-text); font: inherit; font-size: var(--fs-sm); font-weight: 700; cursor: pointer;
+  }
+  .dt-seat[aria-pressed="true"] { border-style: dashed; color: var(--c-text-dim); }
   .dt-boardbox { aspect-ratio: 1; } /* fills the room it has (#359); it stopped at a fixed size before */
   .dt-svg { width: 100%; height: auto; display: block; touch-action: manipulation; }
   .dt-hit { stroke: transparent; cursor: pointer; }
@@ -112,11 +132,72 @@ function DotsEngineFactory() {
       S.turnBoxes += got;
     } else {
       S.turnBoxes = 0;
-      S.turn = S.turn === 1 ? 2 : 1;
+      S.turn = nextTurn(S, S.turn);
     }
     return got;
   }
 
+  /* Seats (#987). A two-seat game keeps its old shape, mode 'ai' or '2p' and
+     no seat list, so every save from before three and four players still
+     restores as it was. A game of three or four is mode 'multi' with a list
+     of 'h' (a person on this phone) or 'b' (the medium bot), player 1 first. */
+  var MAX_SEATS = 4;
+  function seatsOf(S) {
+    if (S.mode === 'multi' && S.seats && S.seats.length >= 2) return S.seats;
+    return S.mode === 'ai' ? ['h', 'b'] : ['h', 'h'];
+  }
+  function isBot(S, p) { return seatsOf(S)[p - 1] === 'b'; }
+  function nextTurn(S, p) { return p % seatsOf(S).length + 1; }
+  // Four players on nine boxes left most of them a box or two and a lot of
+  // waiting, so the smallest board needs at least four boxes a side for four.
+  function sizeOk(size, players) { return players < 4 || size >= 4; }
+
+  // A fresh game. Null when the board is too small for that many players, so
+  // no caller can start one by mistake.
+  function newState(size, mode, seats) {
+    var n = mode === 'multi' ? (seats || []).length : 2;
+    if (n < 2 || n > MAX_SEATS || !sizeOk(size, n)) return null;
+    var bd = makeBoard(size, size), sc = [];
+    for (var i = 0; i <= n; i++) sc.push(0);
+    var S = {
+      size: size, mode: mode,
+      edges: new Array(bd.E).fill(0), owner: new Array(bd.boxes).fill(0), edgeOwner: {},
+      turn: 1, scores: sc, history: [], turnBoxes: 0
+    };
+    if (mode === 'multi') S.seats = seats.map(function (kind) { return kind === 'b' ? 'b' : 'h'; });
+    return S;
+  }
+
+  // A saved game back into play. Old saves have no seat list and a three-slot
+  // score list; only a well-formed multi save keeps its seats, anything else
+  // falls back to the two-seat game it was.
+  function restore(v) {
+    var multi = v.mode === 'multi' && Array.isArray(v.seats) && v.seats.length >= 3 && v.seats.length <= MAX_SEATS;
+    var S = {
+      size: v.size, mode: multi ? 'multi' : (v.mode === '2p' ? '2p' : 'ai'), level: v.level, daily: v.daily || null,
+      edges: v.edges, owner: v.owner, edgeOwner: v.edgeOwner || {},
+      turn: v.turn, scores: v.scores, history: v.history || [], turnBoxes: v.turnBoxes || 0
+    };
+    if (multi) S.seats = v.seats.slice();
+    var n = seatsOf(S).length;
+    while (S.scores.length < n + 1) S.scores.push(0);
+    if (!(S.turn >= 1 && S.turn <= n)) S.turn = 1;
+    return S;
+  }
+
+  // Everyone on the top score, in seat order: one name is a win, two or more
+  // a shared lead, all of them a draw.
+  function leaders(S) {
+    var n = seatsOf(S).length, best = -1, out = [];
+    for (var p = 1; p <= n; p++) {
+      if (S.scores[p] > best) { best = S.scores[p]; out = [p]; }
+      else if (S.scores[p] === best) out.push(p);
+    }
+    return out;
+  }
+
+  // Back to the last turn a person had: past every bot move, one line when a
+  // person drew it (#987 made this per seat, for three and four players).
   // با حریف کامپیوتری تا نوبت بعدی بازیکن عقب می‌رود. دونفره فقط یک خط،
   // چون دو نفر روی یک گوشی‌اند و اشتباه یک ضربه است؛ پیش‌تر دونفره اصلاً
   // برگرداندن نداشت و یک خط اشتباه کل دست را خراب می‌کرد (#69).
@@ -134,7 +215,7 @@ function DotsEngineFactory() {
       var bs = bd.edgeBoxes[h.e];
       for (var i = 0; i < bs.length; i++) if (sides(bd, S.edges, bs[i]) < 4) S.owner[bs[i]] = 0;
       n++;
-    } while (S.mode === 'ai' && S.turn !== 1 && n < 200);
+    } while (isBot(S, S.turn) && n < 200);
     return n;
   }
 
@@ -385,7 +466,9 @@ function DotsEngineFactory() {
     makeBoard: makeBoard, sides: sides, legalMoves: legalMoves, play: play,
     freeBoxes: freeBoxes, freeEdgeOf: freeEdgeOf, safeMoves: safeMoves,
     openGroups: openGroups, isLoop: isLoop, captureCascade: captureCascade,
-    aiMove: aiMove, endgame: endgame, applyEdge: applyEdge, takeBack: takeBack
+    aiMove: aiMove, endgame: endgame, applyEdge: applyEdge, takeBack: takeBack,
+    seatsOf: seatsOf, isBot: isBot, nextTurn: nextTurn, sizeOk: sizeOk,
+    newState: newState, restore: restore, leaders: leaders, MAX_SEATS: MAX_SEATS
   };
   if (typeof self !== 'undefined') self.DotsEngine = api;
   return api;
@@ -408,6 +491,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
     mood: 'dots',
     strings: {
       fa: {
+        nPlayers: '{n} نفره', seatHuman: 'آدم', seatBot: 'ربات', botN: 'ربات {n}', playerN: 'بازیکن {n}', tiedN: 'مساوی: {n}', listSep: '، ', listAnd: ' و ',
         twoPlayers: 'دو نفره', vsAi: 'با حریف', size: 'اندازه',
         you: 'تو', rival: 'حریف', player1: 'بازیکن یک', player2: 'بازیکن دو', renameP2: 'نام بازیکن دو',
         thinking: 'فکر می‌کند…', yourTurn: 'نوبت توست', draw: 'مساوی', playerWon: '{n} برد', move: 'جابه‌جایی',
@@ -419,6 +503,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
         tutTitle3: 'زنجیره', tutText3: 'گاهی بهتر است دو مربع آخر را به حریف بدهی تا او مجبور شود زنجیره‌ی بعدی را باز کند.'
       },
       en: {
+        nPlayers: '{n} players', seatHuman: 'Human', seatBot: 'Bot', botN: 'Bot {n}', playerN: 'Player {n}', tiedN: 'Tie: {n}', listSep: ', ', listAnd: ' and ',
         twoPlayers: 'Two players', vsAi: 'Versus AI', size: 'Size',
         you: 'You', rival: 'Rival', player1: 'Player 1', player2: 'Player 2', renameP2: 'Player 2 name',
         thinking: 'Thinking…', yourTurn: 'Your turn', draw: 'Draw', playerWon: '{n} wins', move: 'Move',
@@ -430,6 +515,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
         tutTitle3: 'Chains', tutText3: 'Sometimes it pays to leave the last two boxes so your rival has to open the next chain.'
       },
       pl: {
+        nPlayers: '{n} gracze', seatHuman: 'Człowiek', seatBot: 'Bot', botN: 'Bot {n}', playerN: 'Gracz {n}', tiedN: 'Remis: {n}', listSep: ', ', listAnd: ' i ',
         twoPlayers: 'Dwóch graczy', vsAi: 'Przeciwko SI', size: 'Rozmiar',
         you: 'Ty', rival: 'Rywal', player1: 'Gracz 1', player2: 'Gracz 2', renameP2: 'Nazwa Gracza 2',
         thinking: 'Myślenie…', yourTurn: 'Twoja kolej', draw: 'Remis', playerWon: '{n} wygrywa', move: 'Ruch',
@@ -441,6 +527,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
         tutTitle3: 'Łańcuchy', tutText3: 'Czasami opłaca się zostawić dwa ostatnie kwadraty, aby zmusić rywala do otwarcia kolejnego łańcucha ruchów.'
       },
       fr: {
+        nPlayers: '{n} joueurs', seatHuman: 'Humain', seatBot: 'Robot', botN: 'Robot {n}', playerN: 'Joueur {n}', tiedN: 'Égalité : {n}', listSep: ', ', listAnd: ' et ',
         twoPlayers: 'Deux joueurs', vsAi: 'Contre l’IA', size: 'Taille',
         you: 'Toi', rival: 'Rival', player1: 'Joueur 1', player2: 'Joueur 2', renameP2: 'Nom du joueur 2',
         thinking: 'Réflexion…', yourTurn: 'À toi', draw: 'Égalité', playerWon: '{n} gagne', move: 'Coup',
@@ -452,6 +539,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
         tutTitle3: 'Chaînes', tutText3: 'Parfois, mieux vaut laisser les deux dernières cases pour que ton rival ouvre la chaîne suivante.'
       },
       ar: {
+        nPlayers: '{n} لاعبين', seatHuman: 'إنسان', seatBot: 'روبوت', botN: 'الروبوت {n}', playerN: 'اللاعب {n}', tiedN: 'تعادل: {n}', listSep: '، ', listAnd: ' و',
         twoPlayers: 'لاعبان', vsAi: 'ضد الروبوت', size: 'الحجم',
         you: 'أنت', rival: 'المنافس', player1: 'اللاعب 1', player2: 'اللاعب 2', renameP2: 'اسم اللاعب 2',
         thinking: 'يفكر…', yourTurn: 'دورك', draw: 'تعادل', playerWon: '{n} يفوز', move: 'حركة',
@@ -463,6 +551,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
         tutTitle3: 'السلاسل', tutText3: 'أحيانًا يفيدك أن تترك آخر مربعين ليضطر منافسك إلى فتح السلسلة التالية.'
       },
       hi: {
+        nPlayers: '{n} खिलाड़ी', seatHuman: 'इंसान', seatBot: 'बॉट', botN: 'बॉट {n}', playerN: 'खिलाड़ी {n}', tiedN: 'बराबरी: {n}', listSep: ', ', listAnd: ' और ',
         twoPlayers: 'दो खिलाड़ी', vsAi: 'कंप्यूटर से', size: 'आकार',
         you: 'आप', rival: 'विरोधी', player1: 'खिलाड़ी 1', player2: 'खिलाड़ी 2', renameP2: 'खिलाड़ी 2 का नाम',
         thinking: 'सोच रहा है…', yourTurn: 'आपकी बारी', draw: 'बराबरी', playerWon: '{n} जीत गए', move: 'चलना',
@@ -474,6 +563,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
         tutTitle3: 'कड़ियाँ', tutText3: 'कभी-कभी आख़िरी दो खाने छोड़ देना फ़ायदेमंद है, ताकि अगली कड़ी विरोधी को खोलनी पड़े।'
       },
       zh: {
+        nPlayers: '{n}人', seatHuman: '真人', seatBot: '电脑', botN: '电脑{n}', playerN: '玩家{n}', tiedN: '平局：{n}', listSep: '、', listAnd: '和',
         twoPlayers: '双人', vsAi: '对战电脑', size: '尺寸',
         you: '你', rival: '对手', player1: '玩家一', player2: '玩家二', renameP2: '玩家二的名字',
         thinking: '思考中…', yourTurn: '轮到你了', draw: '平局', playerWon: '{n} 获胜', move: '移动',
@@ -485,6 +575,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
         tutTitle3: '连锁', tutText3: '有时故意留下最后两个格子，逼对手先打开下一条连锁。'
       },
       de: {
+        nPlayers: '{n} Spieler', seatHuman: 'Mensch', seatBot: 'Bot', botN: 'Bot {n}', playerN: 'Spieler {n}', tiedN: 'Gleichstand: {n}', listSep: ', ', listAnd: ' und ',
         twoPlayers: 'Zwei Spieler', vsAi: 'Gegen KI', size: 'Größe',
         you: 'Du', rival: 'Gegner', player1: 'Spieler 1', player2: 'Spieler 2', renameP2: 'Name Spieler 2',
         thinking: 'Denkt nach…', yourTurn: 'Du bist dran', draw: 'Unentschieden', playerWon: 'Sieg: {n}', move: 'Bewegen',
@@ -496,6 +587,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
         tutTitle3: 'Ketten', tutText3: 'Manchmal lohnt es sich, die letzten zwei Kästchen liegen zu lassen, damit dein Gegner die nächste Kette öffnen muss.'
       },
       es: {
+        nPlayers: '{n} jugadores', seatHuman: 'Persona', seatBot: 'Bot', botN: 'Bot {n}', playerN: 'Jugador {n}', tiedN: 'Empate: {n}', listSep: ', ', listAnd: ' y ',
         twoPlayers: 'Dos jugadores', vsAi: 'Contra la IA', size: 'Tamaño',
         you: 'Tú', rival: 'Rival', player1: 'Jugador 1', player2: 'Jugador 2', renameP2: 'Nombre del jugador 2',
         thinking: 'Pensando…', yourTurn: 'Tu turno', draw: 'Empate', playerWon: 'Gana: {n}', move: 'Mover',
@@ -512,8 +604,20 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
   var params = new URLSearchParams(location.search);
   var dailyDate = params.get('daily');
   var prefs = ctx.store.get('prefs', { size: 5, mode: 'ai', level: 'medium', p2name: '' });
+  // #987: prefs from before three and four players (also inside old saves) have
+  // no players, seats or mode2, and the count must agree with the mode
+  function normPrefs() {
+    if (prefs.mode === 'multi') { if (!(prefs.players >= 3 && prefs.players <= E.MAX_SEATS)) prefs.players = 3; }
+    else { prefs.players = 2; if (prefs.mode !== '2p') prefs.mode = 'ai'; prefs.mode2 = prefs.mode; }
+    if (prefs.mode2 !== '2p') prefs.mode2 = 'ai';
+    if (!Array.isArray(prefs.seats) || prefs.seats.length !== E.MAX_SEATS) prefs.seats = ['h', 'b', 'b', 'b'];
+    prefs.seats[0] = 'h';
+  }
+  normPrefs();
 
-  var P = [null, { c: '#5C9A6B', key: 'you' }, { c: '#E07A5F', key: 'rival' }];
+  // Players 3 and 4 (#987): blue and violet, mid-tone like the first two so each
+  // reads both as a line on the light board and as score text on the dark one.
+  var P = [null, { c: '#5C9A6B', key: 'you' }, { c: '#E07A5F', key: 'rival' }, { c: '#3F7FD0' }, { c: '#A66BC8' }];
   var S = null, bd = null, aiTimer = null;
 
   var svg = document.createElementNS(NS, 'svg');
@@ -531,17 +635,20 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
 
   /* ------------------------------------------------------------ ساخت */
 
+  // Three or four seats come from prefs (players, seats); the daily is always
+  // the two-seat game against the hard bot.
   function newGame(size, mode, level, daily, seedRng) {
     stopAi();
+    if (daily) mode = 'ai';
+    var seats = mode === 'multi' ? prefs.seats.slice(0, prefs.players) : null;
+    var fresh = E.newState(size, mode, seats);
+    // only a board too small for four can refuse; the next size up fits
+    if (!fresh) { size = 4; fresh = E.newState(size, mode, seats); }
     bd = E.makeBoard(size, size);
-    S = {
-      size: size, mode: mode, level: level, daily: daily || null,
-      edges: new Array(bd.E).fill(0),
-      owner: new Array(bd.boxes).fill(0),
-      turn: 1, scores: [0, 0, 0], history: [], turnBoxes: 0,
-      done: false, startedAt: Date.now(), elapsed: 0,
-      lastEdge: -1, newBoxes: []
-    };
+    S = fresh;
+    S.level = level; S.daily = daily || null;
+    S.done = false; S.startedAt = Date.now(); S.elapsed = 0;
+    S.lastEdge = -1; S.newBoxes = [];
     if (seedRng) S.turn = seedRng() < 0.5 ? 1 : 2;
     cur = { v: 0, r: 0, c: 0 };
     drawAll();
@@ -731,7 +838,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
     }
   }
 
-  function busy() { return S.mode === 'ai' && S.turn === 2 && !S.done; }
+  function busy() { return E.isBot(S, S.turn) && !S.done; }
+  function seatN() { return E.seatsOf(S).length; }
 
   function render() {
     top.innerHTML = '';
@@ -750,20 +858,61 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
         }
         go();
       };
-      top.appendChild(C.ui.segmented([
-        { value: 'ai', label: C.t('vsAi') }, { value: '2p', label: C.t('twoPlayers') }
-      ], S.mode, function (v) {
-        guard(v === S.mode, function () {
-          prefs.mode = v; ctx.store.set('prefs', prefs);
-          newGame(S.size, v, S.level);
-        });
-      }));
-      top.appendChild(C.ui.segmented([3, 4, 5, 6, 8].map(function (n) {
+      // Size first, so mode and the level that depends on it sit together (#986)
+      var sizeSeg = C.ui.segmented([3, 4, 5, 6, 8].map(function (n) {
         return { value: n, label: C.num(n) };
       }), S.size, function (v) {
         guard(v === S.size, function () {
           prefs.size = v; ctx.store.set('prefs', prefs);
           newGame(v, S.mode, S.level);
+        });
+      });
+      // 3×3 is greyed out for four players (#987), not hidden, so the row keeps its shape
+      var sizeBtns = sizeSeg.querySelectorAll('button');
+      [3, 4, 5, 6, 8].forEach(function (n, i) {
+        if (!E.sizeOk(n, seatN())) { sizeBtns[i].disabled = true; sizeBtns[i].setAttribute('aria-disabled', 'true'); }
+      });
+      top.appendChild(sizeSeg);
+      top.appendChild(C.ui.segmented([2, 3, 4].map(function (n) {
+        return { value: n, label: C.t('nPlayers', { n: C.num(n) }) };
+      }), seatN(), function (v) {
+        guard(v === seatN(), function () {
+          prefs.players = v;
+          // two seats go back to the vs-bot or two-player choice they had
+          prefs.mode = v === 2 ? (prefs.mode2 || 'ai') : 'multi';
+          if (!E.sizeOk(S.size, v)) prefs.size = 4;
+          ctx.store.set('prefs', prefs);
+          newGame(prefs.size, prefs.mode, S.level);
+        });
+      }));
+      if (S.mode === 'multi') {
+        // Player 1 holds the phone; every other seat is a person or the medium bot
+        var seatRow = el('div', { class: 'dt-seats' });
+        for (var sp = 2; sp <= seatN(); sp++) {
+          (function (p) {
+            var bot = E.isBot(S, p), kind = bot ? C.t('seatBot') : C.t('seatHuman');
+            var b = el('button', {
+              type: 'button', class: 'dt-seat ch-tap', 'aria-pressed': bot ? 'true' : 'false',
+              'aria-label': C.t('playerN', { n: C.num(p) }) + ': ' + kind,
+              style: { '--pc': P[p].c }
+            }, [el('span', { class: 'dt-player__dot' }), C.icon(bot ? 'brain' : 'user', 16), el('span', { text: kind })]);
+            b.addEventListener('click', function () {
+              guard(false, function () {
+                prefs.seats[p - 1] = bot ? 'h' : 'b';
+                ctx.store.set('prefs', prefs);
+                newGame(S.size, 'multi', S.level);
+              });
+            });
+            seatRow.appendChild(b);
+          })(sp);
+        }
+        top.appendChild(seatRow);
+      } else top.appendChild(C.ui.segmented([
+        { value: 'ai', label: C.t('vsAi') }, { value: '2p', label: C.t('twoPlayers') }
+      ], S.mode, function (v) {
+        guard(v === S.mode, function () {
+          prefs.mode = v; prefs.mode2 = v; ctx.store.set('prefs', prefs);
+          newGame(S.size, v, S.level);
         });
       }));
       if (S.mode === 'ai') {
@@ -782,15 +931,29 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
   }
 
   function pname(i) {
+    if (S.mode === 'multi') {
+      var people = S.seats.filter(function (kind) { return kind === 'h'; }).length;
+      if (S.seats[i - 1] === 'b') return C.t('botN', { n: C.num(i) });
+      // "You" only while you are the one person at the table
+      if (i === 1) return C.state.profile.name || (people > 1 ? C.t('playerN', { n: C.num(1) }) : C.t('you'));
+      return C.t('playerN', { n: C.num(i) });
+    }
     // دونفره روی یک گوشی «تو» ندارد؛ نتیجه می‌شد «You wins» (#90)
     if (i === 1) return C.state.profile.name || C.t(S.mode === '2p' ? 'player1' : 'you');
     if (S.mode === 'ai') return C.t('rival') + ' · ' + C.t(S.level);
     return prefs.p2name || C.t('player2');
   }
 
+  // "A, B and C", for a lead shared by several players
+  function nameList(ps) {
+    var names = ps.map(pname), last = names.pop();
+    return names.length ? names.join(C.t('listSep')) + C.t('listAnd') + last : last;
+  }
+
   function drawPlayers() {
     playersRow.innerHTML = '';
-    for (var i = 1; i <= 2; i++) {
+    playersRow.classList.toggle('dt-players--many', seatN() > 2);
+    for (var i = 1; i <= seatN(); i++) {
       (function (p) {
         var box = el('div', {
           class: 'dt-player' + (S.turn === p && !S.done ? ' dt-player--on' : ''),
@@ -804,7 +967,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
           box.classList.add('ch-tap');
           box.addEventListener('click', renameP2);
         }
-        if (S.turn === p && busy() && p === 2) box.classList.add('dt-thinking');
+        if (S.turn === p && busy()) box.classList.add('dt-thinking');
         playersRow.appendChild(box);
       })(i);
     }
@@ -826,7 +989,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
     if (got > 0) {
       C.audio.sfx(S.turnBoxes >= 3 ? 'chain' : 'pop');
       C.haptic('success');
-      if (S.turnBoxes >= 5 && S.turn === 1) C.achievements.unlock('dt-chain');
+      // awards stay two-player (#987)
+      if (S.turnBoxes >= 5 && S.turn === 1 && S.mode !== 'multi') C.achievements.unlock('dt-chain');
     } else {
       C.audio.sfx('place');
       if (byHuman) C.haptic('tap');
@@ -840,13 +1004,14 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
 
   function maybeAi() {
     stopAi();
-    if (S.done || S.mode !== 'ai' || S.turn !== 2) return;
+    if (S.done || !E.isBot(S, S.turn)) return;
     repaint(false);
     drawPlayers();
     aiTimer = setTimeout(function () {
-      if (!S || S.done || S.turn !== 2) return;
+      if (!S || S.done || !E.isBot(S, S.turn)) return;
       var rnd = S.daily ? C.daily('dots', S.daily + '|' + S.history.length).rng : Math.random;
-      var m = E.aiMove(bd, S.edges, S.owner, S.level, rnd);
+      // the seats of a three- or four-player game are always the medium bot (#987)
+      var m = E.aiMove(bd, S.edges, S.owner, S.mode === 'multi' ? 'medium' : S.level, rnd);
       if (m < 0) { finish(); return; }
       doMove(m, false);
     }, 380);
@@ -874,6 +1039,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
     stopAi();
     repaint(true);
     drawPlayers();
+    if (S.mode === 'multi') { finishMulti(); return; }
     var s1 = S.scores[1], s2 = S.scores[2];
     var won = s1 > s2;
     var tie = s1 === s2;
@@ -918,13 +1084,37 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
     });
   }
 
+  // Three or four players (#987): no awards, no best margin and no daily, which
+  // all stay two-player; a lead shared by some but not all reads as a tie of those.
+  function finishMulti() {
+    var n = seatN(), lead = E.leaders(S);
+    var won = lead.length === 1 && lead[0] === 1;
+    var sizeK = S.size / 5;
+    var coins = Math.max(2, Math.round((won ? 8 : 8 * 0.35) * sizeK));
+    var points = Math.max(3, Math.round((won ? 32 : 8 * 1.2) * sizeK));
+    var lines = [];
+    for (var p = 1; p <= n; p++) lines.push({ label: pname(p), value: C.num(S.scores[p]) });
+    lines.push({ label: C.t('size'), value: C.num(S.size) + '×' + C.num(S.size) });
+    ctx.clearSave();
+    ctx.finish({
+      won: won,
+      title: lead.length === n ? C.t('draw')
+        : (lead.length === 1 ? C.t('playerWon', { n: pname(lead[0]) }) : C.t('tiedN', { n: nameList(lead) })),
+      timeMs: S.elapsed, coins: coins, points: points, lines: lines,
+      shareText: 'چوگان · نقطه‌بازی ' + C.num(S.size) + '×' + C.num(S.size) +
+        '\n' + S.scores.slice(1).map(function (x) { return C.num(x); }).join(' - '),
+      paint: cardPaint(),
+      onAgain: function () { newGame(S.size, S.mode, S.level); }
+    });
+  }
+
   /* --------------------------------------------------------- ذخیره */
 
   ctx.autosave(function () {
     if (!S || S.done || !S.history.length) return { inProgress: false };
     return {
       s: {
-        size: S.size, mode: S.mode, level: S.level, daily: S.daily,
+        size: S.size, mode: S.mode, level: S.level, daily: S.daily, seats: S.seats || null,
         edges: S.edges, owner: S.owner, edgeOwner: S.edgeOwner || {},
         turn: S.turn, scores: S.scores, history: S.history,
         turnBoxes: S.turnBoxes, elapsed: Date.now() - S.startedAt
@@ -1089,15 +1279,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = DotsEngine
   }
 
   function restoreSaved(saved) {
-    if (saved.prefs && !saved.s.daily) prefs = saved.prefs;
+    if (saved.prefs && !saved.s.daily) { prefs = saved.prefs; normPrefs(); }
     var v = saved.s;
     bd = E.makeBoard(v.size, v.size);
-    S = {
-      size: v.size, mode: v.mode, level: v.level, daily: v.daily,
-      edges: v.edges, owner: v.owner, edgeOwner: v.edgeOwner,
-      turn: v.turn, scores: v.scores, history: v.history, turnBoxes: v.turnBoxes,
-      done: false, startedAt: Date.now() - (v.elapsed || 0), elapsed: 0, lastEdge: -1, newBoxes: []
-    };
+    // E.restore gives a save from before #987 (no seats) its two-seat game back
+    S = E.restore(v);
+    S.done = false; S.startedAt = Date.now() - (v.elapsed || 0); S.elapsed = 0; S.lastEdge = -1; S.newBoxes = [];
     drawAll();
     render();
     maybeAi();

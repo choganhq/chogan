@@ -22,7 +22,7 @@ let checks = 0;
 // is no longer raised in each pull request, where it made every new-game PR conflict
 // with the last (#493); it is raised at release time. Lowering it means checks were
 // removed on purpose and must be said in the PR.
-const MIN_CHECKS = 11601;
+const MIN_CHECKS = 12228;
 
 function ok(cond, msg) {
   checks++;
@@ -10190,7 +10190,7 @@ function testSpider() {
   ok(!E.validState(Object.assign(E.clone(D), { suits: 3 })) && !E.validState(Object.assign(E.clone(D), { stock: D.stock.slice(1) })), 'a damaged save is refused');
 
   // Page: cards from the shared deck, the deal through the shared fly helper, options behind a gear
-  ok(/C\.cards\.el\(E\.face\(S, c\)\), C\.cards\.back\(\)/.test(html) && /C\.ui\.fly\(nodes\[c\], from, \{ ms: 200, delay: n\+\+ \* 18, flip: row === S\.down\[col\] \}\)/.test(html), 'the cards are Chogan.cards and the deal uses Chogan.ui.fly');
+  ok(/var fc = E\.face\(S, c\), face = C\.cards\.el\(fc\);/.test(html) && /\[face, C\.cards\.back\(\)\]/.test(html) && /C\.ui\.fly\(nodes\[c\], from, \{ ms: 200, delay: n\+\+ \* 18, flip: row === S\.down\[col\] \}\)/.test(html), 'the cards are Chogan.cards and the deal uses Chogan.ui.fly');
   ok(/class: 'ch-iconbtn sp-gear', type: 'button', 'aria-label': C\.t\('settings'\)/.test(html) && /function showSettings\(\)/.test(html) && !/suitsRule[^\n]*showHelp/.test(html), 'the number of suits is chosen behind a gear, not in help');
   ok(/if \(C\.ui\.reduceMotion\(\) \|\| !L\) \{ done\(\); return; \}/.test(html) && /if \(C\.ui\.reduceMotion\(\) \|\| !L\) return;/.test(html), 'no deal animation and no win cascade with reduced motion');
   ok(/\.sp-board \{ direction: ltr;/.test(html), 'the table is not mirrored in Persian');
@@ -10201,7 +10201,7 @@ function testSpider() {
   // #472: on a phone on its side the row above the table left the cards 30 px wide; a short,
   // wide window now puts the badges, the stock and the finished runs beside the columns,
   // and the corner rank is larger on Spider's narrow cards
-  ok(/function sideWanted\(\) \{ return wrap\.clientWidth > wrap\.clientHeight \* 1\.9; \}/.test(html) && /function tabX\(col\) \{ return colX\(col \+ L\.off\); \}/.test(html) && /cy: side \? gap : gap \* 3 \+ ch/.test(html) && /\.sp-wrap--side \{ flex-direction: row;/.test(html) && /\.sp-card \.ch-pcard__r \{ font-size: calc\(var\(--pw\) \* \.4\); \}/.test(html), 'a short, wide window puts the stock, the runs and the badges beside the columns, and the corner rank is larger');
+  ok(/function sideWanted\(\) \{ return wrap\.clientWidth > wrap\.clientHeight \* 1\.9; \}/.test(html) && /function tabX\(col\) \{ return colX\(col \+ L\.off\); \}/.test(html) && /cy: side \? gap : gap \* 3 \+ ch/.test(html) && /\.sp-wrap--side \{ flex-direction: row;/.test(html) && /\.sp-card \.ch-pcard__r \{ font-size: calc\(var\(--pw\) \* \.4\);/.test(html), 'a short, wide window puts the stock, the runs and the badges beside the columns, and the corner rank is larger');
   // #504: beside the table the stock and the runs stood at the top and read as two more
   // columns; they now sit at the bottom, as in Windows. Run the page's own placing code.
   {

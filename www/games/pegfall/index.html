@@ -1,0 +1,980 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>توپ‌ریز — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  /* the board is taller than wide in every window; a wide one puts the side rows beside it */
+  .pf-wrap > .ch-fit { --fit-ar: calc(2 / 3); }
+  .ch-fit > .pf-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+  /* the board is drawn left to right in every language, so the launcher follows the finger */
+  .pf-canvas { display: block; touch-action: none; direction: ltr; user-select: none; -webkit-user-select: none; max-width: 100%; max-height: 100%; }
+  .pf-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .pf-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 999px; background: var(--c-surface-2); font-weight: 700; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+  .pf-goals { display: flex; justify-content: center; gap: var(--s-2); flex-wrap: wrap; }
+  .pf-goal { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--c-line); font-size: var(--fs-sm); color: var(--c-text-dim); font-variant-numeric: tabular-nums; }
+  .pf-goal svg { opacity: .45; }
+  .pf-goal--on { border-color: var(--c-gold); color: var(--c-text); }
+  .pf-goal--on svg { opacity: 1; fill: currentColor; color: var(--c-gold); }
+  .pf-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+  .pf-levels { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--s-2); }
+  .pf-lv {
+    min-height: 56px; border: 2px solid transparent; border-radius: var(--r-md);
+    background: var(--c-surface-2); color: var(--c-text); font: inherit; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    touch-action: manipulation;
+  }
+  .pf-lv b { font-size: var(--fs-lg); font-variant-numeric: tabular-nums; }
+  .pf-lv--on { border-color: var(--game); }
+  .pf-lv--done { background: var(--game-soft); }
+  .pf-lv[disabled] { opacity: .45; cursor: default; }
+  .pf-lv__stars { display: flex; gap: 1px; color: var(--c-gold); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function PegfallEngineFactory() {
+  'use strict';
+
+  // Board units, y down: 100 across and 150 tall. One fixed step of 1/120 s and no
+  // trigonometry or randomness in the simulation, so the same drop at the same moment
+  // gives the same path on every device, and a player can learn a board (#949).
+  var W = 100, H = 150, R = 2.2, PR = 1.3, DT = 1 / 120, G = 150, VMAX = 150;
+  var E_PEG = 0.42, E_WALL = 0.4, E_BUMP = 0.85, FRICT = 0.04, DROP_Y = 7;
+  var SLOT_H = 14, NSLOT = 9, SW = W / NSLOT, XQ = 0.5;
+  // where the narrow rows' outermost pegs sit, in from each wall (#949)
+  var EDGE = 6.5;
+  // a ball that has not landed after 40 s of board time is put in the slot under it
+  var CAP = 40 * 120;
+  var BALLS = 10, LEVELS = 15, PERIOD = 240, PHASES = 8;
+  // shares of a steady player's score (aimScore) for one, two and three stars
+  var STAR_K = [0.5, 0.75, 0.95], AIM = 1.5;
+
+  function rng(seed) {
+    var s = seed >>> 0;
+    return function () {
+      s = (s + 0x6D2B79F5) >>> 0;
+      var t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function quant(x) { return clamp(Math.round(x / XQ) * XQ, R + 0.5, W - R - 0.5); }
+
+  var PATTERNS = [
+    [10, 20, 30, 50, 100, 50, 30, 20, 10],
+    [100, 30, 20, 10, 5, 10, 20, 30, 100],
+    [20, 50, 10, 30, 80, 30, 10, 50, 20],
+    [50, 10, 100, 10, 20, 10, 100, 10, 50],
+    [5, 40, 10, 60, 10, 60, 10, 40, 5]
+  ];
+
+  // Board parameters by level: more rows and holes, then angled rails from 4 and moving
+  // bumpers from 6 (two from 11). Level 0 is the daily board's mix.
+  function params(level) {
+    var k = clamp(level | 0, 1, LEVELS) - 1;
+    return { rows: Math.min(11, 7 + Math.floor(k / 3)), holes: Math.min(0.22, 0.03 * k), rails: k >= 3 ? 1 + (k >= 8 ? 1 : 0) : 0, bumpers: k >= 10 ? 2 : k >= 5 ? 1 : 0 };
+  }
+
+  /* One board from a seed and a level: pegs on a staggered grid (the wide rows reach the
+     walls with half pegs, so a ball can never wedge between a wall and a peg), a few
+     holes, rails, moving bumpers, the nine slot values and where the star slot goes. */
+  function make(seed, level) {
+    seed = seed >>> 0;
+    var r = rng(seed), P = params(level), pegs = [], segs = [], bumpers = [], i, j;
+    var top = 26, dy = Math.min(10, (118 - top) / (P.rows - 1));
+    for (i = 0; i < P.rows; i++) {
+      var y = top + i * dy, odd = i % 2 === 1;
+      for (j = odd ? 15 : 0; j <= (odd ? 85 : 100); j += 10) {
+        // the first two rows stay full, so every drop meets a peg early
+        if (i >= 2 && j > 0 && j < 100 && r() < P.holes) continue;
+        pegs.push({ x: j, y: y, r: PR });
+      }
+      // #949: with nothing between a wall and 15, a ball dropped by a wall fell straight to
+      // the corner slot on every narrow row. These pegs close that lane and are never holes;
+      // the gap to the wall (5.2) is wider than a ball (4.4), so nothing can wedge there.
+      if (odd) { pegs.push({ x: EDGE, y: y, r: PR }); pegs.push({ x: W - EDGE, y: y, r: PR }); }
+    }
+    for (i = 0; i < P.rails; i++) {
+      var left = r() < 0.5, ry = top + dy * (2 + Math.floor(r() * (P.rows - 4)));
+      var len = 12 + r() * 8;
+      // short rails sloping down off the walls, which turn a ball back to the middle
+      segs.push(left ? { ax: 0, ay: ry, bx: len, by: ry + len * 0.5, r: 0.9 } : { ax: W, ay: ry, bx: W - len, by: ry + len * 0.5, r: 0.9 });
+    }
+    for (i = 0; i < P.bumpers; i++) {
+      var by = top + dy * (P.bumpers === 2 ? (i ? P.rows - 3 : 2.5) : Math.floor(P.rows / 2) + 0.5);
+      bumpers.push({ x0: 50, y: by, r: 4.2, amp: 22 + r() * 12, ph: Math.floor(r() * PERIOD), dir: i ? -1 : 1 });
+    }
+    // pegs in a bumper's lane or on a rail go, so nothing can pin a ball
+    pegs = pegs.filter(function (p) {
+      for (var b = 0; b < bumpers.length; b++) {
+        var B = bumpers[b];
+        if (Math.abs(p.y - B.y) < B.r + PR + 2 * R + 1 && Math.abs(p.x - B.x0) < B.amp + B.r + PR + 2 * R + 1 && p.x > 0 && p.x < W) return false;
+      }
+      for (var s = 0; s < segs.length; s++) if (segDist(segs[s], p.x, p.y).d < segs[s].r + PR + 2 * R + 1) return false;
+      return true;
+    });
+    var pat = PATTERNS[Math.floor(r() * PATTERNS.length)].slice();
+    if (r() < 0.5) pat.reverse();
+    // one value swapped with a neighbour, so two boards of one pattern differ
+    var sw = 1 + Math.floor(r() * 7), t = pat[sw]; pat[sw] = pat[sw + 1]; pat[sw + 1] = t;
+    var star = [];
+    for (i = 0; i < 4; i++) star.push(Math.floor(r() * NSLOT));
+    // #971: a star slot that stayed put let one good aim score double twice in a row, so
+    // each place differs from the one before it, the wrap from the fourth to the first too;
+    // shifted without drawing again, so every other part of the board stays the same
+    for (i = 1; i < 4; i++) while (star[i] === star[i - 1] || (i === 3 && star[3] === star[0])) star[i] = (star[i] + 1) % NSLOT;
+    var B0 = { seed: seed, level: level | 0, pegs: pegs, segs: segs, bumpers: bumpers, slots: pat, star: star, balls: BALLS };
+    for (i = 1; i < NSLOT; i++) B0.segs.push({ ax: i * SW, ay: H - SLOT_H, bx: i * SW, by: H, r: 0.8, wall: true });
+    index(B0);
+    return B0;
+  }
+
+  // pegs bucketed by 10-unit cells, so a step looks at a handful, not all of them
+  function index(B) {
+    var cells = {};
+    B.pegs.forEach(function (p, n) {
+      var cx = Math.floor(p.x / 10), cy = Math.floor(p.y / 10), k = cx + ',' + cy;
+      (cells[k] = cells[k] || []).push(n);
+    });
+    B.cells = cells;
+  }
+
+  function segDist(s, x, y) {
+    var dx = s.bx - s.ax, dy = s.by - s.ay, l2 = dx * dx + dy * dy;
+    var t = l2 ? clamp(((x - s.ax) * dx + (y - s.ay) * dy) / l2, 0, 1) : 0;
+    var px = s.ax + dx * t, py = s.ay + dy * t, ex = x - px, ey = y - py;
+    return { d: Math.sqrt(ex * ex + ey * ey), ex: ex, ey: ey };
+  }
+
+  // triangle wave in [-1, 1], from the integer board clock only
+  function tri(c) { var u = ((c % PERIOD) + PERIOD) % PERIOD / PERIOD; return 4 * Math.abs(u - 0.5) - 1; }
+  function bumperX(b, clock) { return b.x0 + b.dir * b.amp * tri(clock + b.ph); }
+
+  function starAt(B, k) { return B.star[k % B.star.length]; }
+  function value(B, slot, k) { return B.slots[slot] * (slot === starAt(B, k) ? 2 : 1); }
+
+  function ball(B, x, clock) { return { x: quant(x), y: DROP_Y, vx: 0, vy: 0, clock: clock | 0, n: 0, still: 0, done: false, slot: -1, capped: false }; }
+
+  // bounce off a surface with outward normal (nx, ny) moving at (ux, uy)
+  function bounce(b, nx, ny, pen, e, ux, uy) {
+    b.x += nx * pen; b.y += ny * pen;
+    var rvx = b.vx - ux, rvy = b.vy - uy, vn = rvx * nx + rvy * ny;
+    if (vn >= 0) return false;
+    var tx = rvx - vn * nx, ty = rvy - vn * ny;
+    b.vx = ux + tx * (1 - FRICT) - e * vn * nx;
+    b.vy = uy + ty * (1 - FRICT) - e * vn * ny;
+    return -vn;
+  }
+
+  /* One step of the ball and the board clock. Returns the events: ['peg', index],
+     ['bump'], ['land', slot]. */
+  function step(B, b) {
+    var ev = [];
+    if (b.done) return ev;
+    b.vy += G * DT;
+    var sp = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+    if (sp > VMAX) { b.vx *= VMAX / sp; b.vy *= VMAX / sp; }
+    b.x += b.vx * DT; b.y += b.vy * DT;
+    b.clock++; b.n++;
+    var touch = false, i, d, hit;
+    var cx = Math.floor(b.x / 10), cy = Math.floor(b.y / 10);
+    for (var gx = cx - 1; gx <= cx + 1; gx++) {
+      for (var gy = cy - 1; gy <= cy + 1; gy++) {
+        var cell = B.cells[gx + ',' + gy];
+        if (!cell) continue;
+        for (i = 0; i < cell.length; i++) {
+          var p = B.pegs[cell[i]], ex = b.x - p.x, ey = b.y - p.y, m = R + p.r;
+          if (ex * ex + ey * ey >= m * m) continue;
+          d = Math.sqrt(ex * ex + ey * ey) || 1e-9;
+          hit = bounce(b, ex / d, ey / d, m - d, E_PEG, 0, 0);
+          touch = true;
+          if (hit > 12) ev.push(['peg', cell[i]]);
+        }
+      }
+    }
+    for (i = 0; i < B.segs.length; i++) {
+      var s = B.segs[i], q = segDist(s, b.x, b.y), ms = R + s.r;
+      if (q.d >= ms) continue;
+      d = q.d || 1e-9;
+      bounce(b, q.ex / d, q.ey / d, ms - d, E_WALL, 0, 0);
+      touch = true;
+    }
+    for (i = 0; i < B.bumpers.length; i++) {
+      var bu = B.bumpers[i], bx = bumperX(bu, b.clock), ux = (bumperX(bu, b.clock + 1) - bx) / DT;
+      var fx = b.x - bx, fy = b.y - bu.y, mb = R + bu.r;
+      if (fx * fx + fy * fy >= mb * mb) continue;
+      d = Math.sqrt(fx * fx + fy * fy) || 1e-9;
+      if (bounce(b, fx / d, fy / d, mb - d, E_BUMP, ux, 0) > 8) ev.push(['bump', i]);
+      touch = true;
+    }
+    if (b.x < R) { b.x = R; if (b.vx < 0) b.vx = -b.vx * E_WALL; touch = true; }
+    if (b.x > W - R) { b.x = W - R; if (b.vx > 0) b.vx = -b.vx * E_WALL; touch = true; }
+    // a ball balanced on top of something is nudged toward the middle, always the same way
+    if (touch && Math.abs(b.vx) + Math.abs(b.vy) < 3) b.still++; else b.still = 0;
+    if (b.still > 24) { b.vx += b.x < W / 2 ? 6 : -6; b.still = 0; }
+    if (b.y >= H - R || b.n >= CAP) {
+      b.capped = b.y < H - R;
+      b.y = Math.min(b.y, H - R);
+      b.slot = clamp(Math.floor(b.x / SW), 0, NSLOT - 1);
+      b.done = true;
+      ev.push(['land', b.slot]);
+    }
+    return ev;
+  }
+
+  function run(B, x, clock) {
+    var b = ball(B, x, clock);
+    while (!b.done) step(B, b);
+    return b;
+  }
+
+  // every drop position a player can pick, left to right
+  function positions() {
+    var out = [];
+    for (var x = quant(0); x <= W - R - 0.5 + 1e-9; x += XQ) out.push(Math.round(x * 2) / 2);
+    return out;
+  }
+
+  /* Every drop position (and, with bumpers, eight moments of their swing) and the slot
+     it lands in. The board is fixed apart from the bumpers, so this is the whole map.
+     reachMore does it a slice at a time, so the page can map a daily board between
+     frames instead of freezing a slow phone for seconds. */
+  function reachMore(B, count) {
+    if (B.reach) return true;
+    var xs = positions(), phases = B.bumpers.length ? PHASES : 1, all = xs.length * phases;
+    var q = B._rq || (B._rq = []);
+    while (q.length < all && count-- > 0) {
+      var i = q.length % xs.length, c0 = Math.floor(q.length / xs.length) * PERIOD / PHASES;
+      q.push({ x: xs[i], clock: c0, slot: run(B, xs[i], c0).slot });
+    }
+    if (q.length < all) return false;
+    B.reach = q; delete B._rq;
+    return true;
+  }
+  function reach(B) { reachMore(B, Infinity); return B.reach; }
+  function slotsReached(B) {
+    var s = {};
+    reach(B).forEach(function (o) { s[o.slot] = 1; });
+    return Object.keys(s).map(Number).sort(function (a, b) { return a - b; });
+  }
+  // the most a round can score: every ball in the best slot any drop reaches
+  function topScore(B) {
+    var ok = slotsReached(B), tot = 0;
+    for (var k = 0; k < B.balls; k++) {
+      var best = 0;
+      ok.forEach(function (s) { best = Math.max(best, value(B, s, k)); });
+      tot += best;
+    }
+    return tot;
+  }
+  /* A player who knows the board but whose finger lands up to AIM units off: for each
+     ball, the drop with the best average over that spread. Stars are shares of it, so
+     three stars ask for a good read of the board and a steady hand, never luck alone
+     (the perfect score sits well above them; #949). */
+  function aimScore(B) {
+    var re = reach(B), n = positions().length, phases = re.length / n, w = AIM / XQ, tot = 0;
+    for (var k = 0; k < B.balls; k++) {
+      var best = 0;
+      for (var p = 0; p < phases; p++) {
+        for (var i = w; i < n - w; i++) {
+          var sum = 0;
+          for (var d = -w; d <= w; d++) sum += value(B, re[p * n + i + d].slot, k);
+          best = Math.max(best, sum / (2 * w + 1));
+        }
+      }
+      tot += best;
+    }
+    return tot;
+  }
+  function thresholds(B) {
+    if (B.th) return B.th;
+    var aim = aimScore(B);
+    B.th = STAR_K.map(function (f) { return Math.max(10, Math.round(aim * f / 10) * 10); });
+    B.aim = aim;
+    return B.th;
+  }
+  function stars(B, score) { var t = thresholds(B); return score >= t[2] ? 3 : score >= t[1] ? 2 : score >= t[0] ? 1 : 0; }
+
+  // the campaign's boards are fixed seeds; the daily board is level 8's mix from the day's seed
+  // measured once with thresholds() and kept, so opening a board costs nothing. The test
+  // recomputes boards 1, 4 and 6 (all fifteen take 9 s); after a physics change, rebuild
+  // every row from thresholds(level(n, true))
+  var TH = [[670, 1000, 1270], [260, 390, 500], [380, 570, 720], [500, 740, 940], [310, 470, 590],
+    [640, 960, 1210], [460, 690, 880], [310, 470, 600], [440, 650, 830], [420, 620, 790],
+    [800, 1200, 1520], [450, 670, 850], [390, 580, 730], [330, 500, 640], [490, 740, 940]];
+  function level(n, fresh) { var B = make((9490 + n * 7919) >>> 0, n); if (!fresh) B.th = TH[n - 1]; return B; }
+  function daily(seed) { return make(seed >>> 0, 8); }
+
+  // a round: the board, the balls dropped and their slots, the board clock
+  function round(B) { return { B: B, k: 0, score: 0, hits: [], clock: 0 }; }
+  function land(Rd, slot) {
+    var v = value(Rd.B, slot, Rd.k);
+    Rd.hits.push(slot); Rd.score += v; Rd.k++;
+    return v;
+  }
+  function over(Rd) { return Rd.k >= Rd.B.balls; }
+
+  // a ball in flight is saved as where and when it left, and replayed on restore
+  function snapshot(Rd, fly) {
+    var o = { seed: Rd.B.seed, level: Rd.B.level, hits: Rd.hits.slice(), clock: Rd.clock };
+    if (fly) o.fly = { x: fly.x, clock: fly.clock };
+    return o;
+  }
+  function restore(o) {
+    if (!o || typeof o !== 'object' || !Array.isArray(o.hits)) return null;
+    if (o.seed !== (o.seed >>> 0) || o.level !== (o.level | 0) || o.level < 1 || o.level > LEVELS) return null;
+    if (o.clock !== (o.clock | 0) || o.clock < 0 || o.hits.length > BALLS) return null;
+    if (!o.hits.every(function (s) { return s === (s | 0) && s >= 0 && s < NSLOT; })) return null;
+    var f = o.fly;
+    if (f != null && (typeof f !== 'object' || typeof f.x !== 'number' || !(f.x >= 0 && f.x <= W) || f.clock !== (f.clock | 0) || f.clock < 0 || o.hits.length >= BALLS)) return null;
+    var B = make(o.seed, o.level), Rd = round(B);
+    o.hits.forEach(function (s) { land(Rd, s); });
+    Rd.clock = o.clock;
+    if (f) { var b = run(B, f.x, f.clock); land(Rd, b.slot); Rd.clock = b.clock; }
+    return Rd;
+  }
+
+  var api = {
+    W: W, H: H, R: R, PR: PR, DT: DT, G: G, SLOT_H: SLOT_H, NSLOT: NSLOT, SW: SW, XQ: XQ, CAP: CAP, BALLS: BALLS, LEVELS: LEVELS, PERIOD: PERIOD, DROP_Y: DROP_Y, STAR_K: STAR_K, AIM: AIM,
+    TH: TH, rng: rng, quant: quant, params: params, make: make, level: level, daily: daily, bumperX: bumperX, starAt: starAt, value: value,
+    ball: ball, step: step, run: run, positions: positions, reach: reach, reachMore: reachMore, slotsReached: slotsReached, topScore: topScore, aimScore: aimScore, thresholds: thresholds, stars: stars,
+    round: round, land: land, over: over, snapshot: snapshot, restore: restore
+  };
+  if (typeof self !== 'undefined') self.PegfallEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = PegfallEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = PegfallEngineFactory();
+  // a bright violet, apart from every other game's colour; white text on it passes 4.5:1 (#949)
+  var ACCENT = '#AE36EA';
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'pegfall',
+    name: { fa: 'توپ‌ریز', en: 'Pegfall', zh: '弹珠落', de: 'Kugelfall', es: 'Bola en caída', pl: 'Spadające kulki', fr: 'Chute de billes', ar: 'سقوط الكرة', hi: 'गिरती गेंद' },
+    accent: ACCENT,
+    mood: 'dots',
+    strings: {
+      fa: {
+        pfScene: 'تخته‌ی میخ‌دار با خانه‌های امتیاز', pfBoardN: 'تخته‌ی {n}', pfDaily: 'تخته‌ی روزانه', pfBallsN: 'توپ: {n}', pfScoreN: 'امتیاز: {n}',
+        pfHint: 'بالای تخته بکش و رها کن تا توپ بیفتد.', pfStarHint: 'خانه‌ی ★ دو برابر می‌دهد و بعد از هر توپ جا عوض می‌کند.', pfBumpHint: 'ضربه‌گیرها حرکت می‌کنند؛ لحظه‌ی رها کردن مهم است.', pfLast: 'توپ آخر!',
+        pfCleared: 'تخته را بردی!', pfNoStar: 'این بار ستاره‌ای نشد', pfNext: 'تخته‌ی بعدی', pfRetry: 'دوباره همین تخته',
+        pfBalls: 'توپ‌ها', pfScore: 'امتیاز', pfBest: 'بهترین', pfStarsAt: 'ستاره‌ها از', pfNewBest: 'رکورد تازه: {n}', pfUnlocked: 'تخته‌ی {n} باز شد',
+        pfChoose: 'انتخاب تخته', pfLocked: 'قفل', pfPath: 'نشان دادن مسیر توپ قبلی',
+        pfRules: 'ده توپ داری. انگشتت را بالای تخته بکش تا پرتابگر جابه‌جا شود و رها کن تا توپ بیفتد. توپ از لای میخ‌ها پایین می‌رود، در یکی از خانه‌های پایین می‌نشیند و امتیاز آن خانه را می‌گیری. خانه‌ی ستاره‌دار دو برابر می‌دهد و بعد از هر توپ جایش عوض می‌شود. مسیر توپ شانسی نیست: از یک نقطه و در یک لحظه، توپ همیشه همان راه را می‌رود. تخته‌های بالاتر ضربه‌گیر متحرک دارند. با رسیدن به امتیاز ستاره‌ها یک، دو یا سه ستاره می‌گیری و با یک ستاره تخته‌ی بعدی باز می‌شود.',
+        pfKAim: 'جابه‌جا کردن پرتابگر', pfKFar: 'جابه‌جایی بلندتر', pfKDrop: 'انداختن توپ', pfKAgain: 'شروع دوباره‌ی تخته',
+        pfTut1: 'بکش و رها کن', pfTutText1: 'انگشتت را بالای تخته بکش تا پرتابگر جابه‌جا شود، بعد رها کن تا توپ بیفتد.',
+        pfTut2: 'خانه‌ها و ستاره', pfTutText2: 'هر خانه‌ی پایین امتیاز خودش را دارد. خانه‌ی ستاره‌دار دو برابر می‌دهد و بعد از هر توپ جا عوض می‌کند.',
+        pfTut3: 'راه را یاد بگیر', pfTutText3: 'از یک نقطه، توپ همیشه همان راه را می‌رود. مسیر توپ قبلی کم‌رنگ می‌ماند تا دوباره پیدایش کنی. ضربه‌گیرهای متحرک زمان‌بندی می‌خواهند.'
+      },
+      en: {
+        pfScene: 'Peg board with point slots', pfBoardN: 'Board {n}', pfDaily: 'Daily board', pfBallsN: 'Balls: {n}', pfScoreN: 'Score: {n}',
+        pfHint: 'Drag along the top, then let go to drop.', pfStarHint: 'The ★ slot pays double and moves after every ball.', pfBumpHint: 'The bumpers move: pick your moment.', pfLast: 'Last ball!',
+        pfCleared: 'Board cleared!', pfNoStar: 'No star this time', pfNext: 'Next board', pfRetry: 'Try this board again',
+        pfBalls: 'Balls', pfScore: 'Score', pfBest: 'Best', pfStarsAt: 'Stars at', pfNewBest: 'New best: {n}', pfUnlocked: 'Board {n} is open',
+        pfChoose: 'Choose a board', pfLocked: 'locked', pfPath: 'Show the last ball’s path',
+        pfRules: 'You have ten balls. Drag along the top of the board to move the launcher and let go to drop a ball. It falls through the pegs into one of the slots at the bottom and scores that slot’s points. The star slot pays double and moves after every ball. Nothing is left to chance: from the same spot at the same moment, a ball always takes the same path. Later boards have moving bumpers. Reach the targets for one, two or three stars; one star opens the next board.',
+        pfKAim: 'Move the launcher', pfKFar: 'Move it further', pfKDrop: 'Drop the ball', pfKAgain: 'Start the board over',
+        pfTut1: 'Drag and let go', pfTutText1: 'Drag along the top of the board to move the launcher, then let go to drop the ball.',
+        pfTut2: 'Slots and the star', pfTutText2: 'Every slot at the bottom has its own points. The star slot pays double and moves after every ball.',
+        pfTut3: 'Learn the board', pfTutText3: 'From the same spot, a ball always takes the same path. The last ball’s path stays faintly on the board so you can find it again. Moving bumpers need good timing.'
+      },
+      zh: {
+        pfScene: '带得分槽的钉板', pfBoardN: '第 {n} 板', pfDaily: '每日钉板', pfBallsN: '球：{n}', pfScoreN: '得分：{n}',
+        pfHint: '沿顶部拖动，松手让球落下。', pfStarHint: '★ 槽得分翻倍，每落一球换一个位置。', pfBumpHint: '弹板会移动：把握时机。', pfLast: '最后一球！',
+        pfCleared: '过关！', pfNoStar: '这次没有星星', pfNext: '下一板', pfRetry: '再玩这一板',
+        pfBalls: '球数', pfScore: '得分', pfBest: '最佳', pfStarsAt: '星星目标', pfNewBest: '新纪录：{n}', pfUnlocked: '第 {n} 板已解锁',
+        pfChoose: '选择钉板', pfLocked: '未解锁', pfPath: '显示上一球的路线',
+        pfRules: '你有十个球。沿钉板顶部拖动来移动发射器，松手让球落下。球穿过钉子落入底部的一个槽，得到该槽的分数。星星槽得分翻倍，每落一球换一个位置。这里没有运气：同一位置、同一时刻落下的球总是走同一条路。后面的钉板有移动的弹板。达到目标分可得一、二或三颗星，一颗星即可解锁下一板。',
+        pfKAim: '移动发射器', pfKFar: '移动更远', pfKDrop: '放球', pfKAgain: '重新开始本板',
+        pfTut1: '拖动并松手', pfTutText1: '沿钉板顶部拖动来移动发射器，然后松手让球落下。',
+        pfTut2: '得分槽和星星', pfTutText2: '底部每个槽都有自己的分数。星星槽得分翻倍，每落一球换一个位置。',
+        pfTut3: '熟悉钉板', pfTutText3: '同一位置落下的球总是走同一条路。上一球的路线会淡淡地留在板上，方便你再次找到。移动的弹板需要掌握时机。'
+      },
+      de: {
+        pfScene: 'Nagelbrett mit Punktefächern', pfBoardN: 'Brett {n}', pfDaily: 'Tagesbrett', pfBallsN: 'Kugeln: {n}', pfScoreN: 'Punkte: {n}',
+        pfHint: 'Oben ziehen, dann loslassen.', pfStarHint: 'Das ★-Fach zählt doppelt und wandert nach jeder Kugel.', pfBumpHint: 'Die Puffer bewegen sich: Wähle den Moment.', pfLast: 'Letzte Kugel!',
+        pfCleared: 'Brett geschafft!', pfNoStar: 'Diesmal kein Stern', pfNext: 'Nächstes Brett', pfRetry: 'Dieses Brett nochmal',
+        pfBalls: 'Kugeln', pfScore: 'Punkte', pfBest: 'Rekord', pfStarsAt: 'Sterne ab', pfNewBest: 'Neuer Rekord: {n}', pfUnlocked: 'Brett {n} freigeschaltet',
+        pfChoose: 'Brett wählen', pfLocked: 'gesperrt', pfPath: 'Weg der letzten Kugel zeigen',
+        pfRules: 'Du hast zehn Kugeln. Zieh oben über das Brett, um den Werfer zu bewegen, und lass los, um eine Kugel fallen zu lassen. Sie fällt durch die Nägel in eines der Fächer unten und bringt dessen Punkte. Das Sternfach zählt doppelt und wandert nach jeder Kugel. Nichts ist Zufall: Von derselben Stelle im selben Moment nimmt eine Kugel immer denselben Weg. Spätere Bretter haben bewegliche Puffer. Erreiche die Ziele für einen, zwei oder drei Sterne; ein Stern öffnet das nächste Brett.',
+        pfKAim: 'Werfer bewegen', pfKFar: 'Weiter bewegen', pfKDrop: 'Kugel fallen lassen', pfKAgain: 'Brett neu beginnen',
+        pfTut1: 'Ziehen und loslassen', pfTutText1: 'Zieh oben über das Brett, um den Werfer zu bewegen, und lass los, damit die Kugel fällt.',
+        pfTut2: 'Fächer und Stern', pfTutText2: 'Jedes Fach unten hat eigene Punkte. Das Sternfach zählt doppelt und wandert nach jeder Kugel.',
+        pfTut3: 'Lerne das Brett', pfTutText3: 'Von derselben Stelle nimmt eine Kugel immer denselben Weg. Der Weg der letzten Kugel bleibt blass sichtbar, damit du ihn wiederfindest. Bewegliche Puffer brauchen gutes Timing.'
+      },
+      es: {
+        pfScene: 'Tablero de clavos con casillas de puntos', pfBoardN: 'Tablero {n}', pfDaily: 'Tablero del día', pfBallsN: 'Bolas: {n}', pfScoreN: 'Puntos: {n}',
+        pfHint: 'Arrastra por arriba y suelta para dejar caer.', pfStarHint: 'La casilla ★ vale el doble y cambia tras cada bola.', pfBumpHint: 'Los topes se mueven: elige el momento.', pfLast: '¡Última bola!',
+        pfCleared: '¡Tablero superado!', pfNoStar: 'Esta vez sin estrella', pfNext: 'Siguiente tablero', pfRetry: 'Repetir este tablero',
+        pfBalls: 'Bolas', pfScore: 'Puntos', pfBest: 'Récord', pfStarsAt: 'Estrellas desde', pfNewBest: 'Nuevo récord: {n}', pfUnlocked: 'Tablero {n} abierto',
+        pfChoose: 'Elegir tablero', pfLocked: 'bloqueado', pfPath: 'Mostrar el recorrido de la última bola',
+        pfRules: 'Tienes diez bolas. Arrastra por la parte de arriba del tablero para mover el lanzador y suelta para dejar caer una bola. Cae entre los clavos hasta una de las casillas de abajo y suma sus puntos. La casilla estrella vale el doble y cambia de sitio tras cada bola. Nada es azar: desde el mismo punto y en el mismo momento, una bola sigue siempre el mismo camino. Los tableros avanzados tienen topes móviles. Alcanza las metas para una, dos o tres estrellas; con una se abre el siguiente tablero.',
+        pfKAim: 'Mover el lanzador', pfKFar: 'Moverlo más lejos', pfKDrop: 'Soltar la bola', pfKAgain: 'Empezar el tablero de nuevo',
+        pfTut1: 'Arrastra y suelta', pfTutText1: 'Arrastra por arriba del tablero para mover el lanzador y suelta para que caiga la bola.',
+        pfTut2: 'Casillas y estrella', pfTutText2: 'Cada casilla de abajo tiene sus puntos. La casilla estrella vale el doble y cambia de sitio tras cada bola.',
+        pfTut3: 'Aprende el tablero', pfTutText3: 'Desde el mismo punto, una bola sigue siempre el mismo camino. El recorrido de la última bola queda tenue en el tablero para que lo encuentres. Los topes móviles piden buen momento.'
+      },
+      pl: {
+        pfScene: 'Plansza z kołkami i przegródkami punktów', pfBoardN: 'Plansza {n}', pfDaily: 'Plansza dnia', pfBallsN: 'Kulki: {n}', pfScoreN: 'Punkty: {n}',
+        pfHint: 'Przeciągnij u góry i puść, by upuścić kulkę.', pfStarHint: 'Przegródka ★ liczy się podwójnie i przesuwa po każdej kulce.', pfBumpHint: 'Odbijacze się ruszają: wybierz moment.', pfLast: 'Ostatnia kulka!',
+        pfCleared: 'Plansza zaliczona!', pfNoStar: 'Tym razem bez gwiazdki', pfNext: 'Następna plansza', pfRetry: 'Jeszcze raz tę planszę',
+        pfBalls: 'Kulki', pfScore: 'Punkty', pfBest: 'Rekord', pfStarsAt: 'Gwiazdki od', pfNewBest: 'Nowy rekord: {n}', pfUnlocked: 'Plansza {n} otwarta',
+        pfChoose: 'Wybierz planszę', pfLocked: 'zablokowana', pfPath: 'Pokazuj drogę ostatniej kulki',
+        pfRules: 'Masz dziesięć kulek. Przeciągnij palcem u góry planszy, by przesunąć wyrzutnię, i puść, by upuścić kulkę. Spada między kołkami do jednej z przegródek na dole i daje jej punkty. Przegródka z gwiazdką liczy się podwójnie i przesuwa się po każdej kulce. Nic tu nie jest losowe: z tego samego miejsca w tej samej chwili kulka zawsze leci tą samą drogą. Dalsze plansze mają ruchome odbijacze. Osiągnij progi na jedną, dwie lub trzy gwiazdki; jedna otwiera następną planszę.',
+        pfKAim: 'Przesuń wyrzutnię', pfKFar: 'Przesuń dalej', pfKDrop: 'Upuść kulkę', pfKAgain: 'Zacznij planszę od nowa',
+        pfTut1: 'Przeciągnij i puść', pfTutText1: 'Przeciągnij u góry planszy, by przesunąć wyrzutnię, a potem puść, by kulka spadła.',
+        pfTut2: 'Przegródki i gwiazdka', pfTutText2: 'Każda przegródka na dole ma swoje punkty. Ta z gwiazdką liczy się podwójnie i przesuwa się po każdej kulce.',
+        pfTut3: 'Poznaj planszę', pfTutText3: 'Z tego samego miejsca kulka zawsze leci tą samą drogą. Droga ostatniej kulki zostaje blado na planszy, by łatwo ją powtórzyć. Ruchome odbijacze wymagają wyczucia chwili.'
+      },
+      fr: {
+        pfScene: 'Plateau à clous avec cases de points', pfBoardN: 'Plateau {n}', pfDaily: 'Plateau du jour', pfBallsN: 'Billes : {n}', pfScoreN: 'Points : {n}',
+        pfHint: 'Glisse en haut, puis lâche pour faire tomber.', pfStarHint: 'La case ★ compte double et change après chaque bille.', pfBumpHint: 'Les butoirs bougent : choisis ton moment.', pfLast: 'Dernière bille !',
+        pfCleared: 'Plateau réussi !', pfNoStar: 'Pas d’étoile cette fois', pfNext: 'Plateau suivant', pfRetry: 'Rejouer ce plateau',
+        pfBalls: 'Billes', pfScore: 'Points', pfBest: 'Record', pfStarsAt: 'Étoiles à', pfNewBest: 'Nouveau record : {n}', pfUnlocked: 'Plateau {n} ouvert',
+        pfChoose: 'Choisir un plateau', pfLocked: 'verrouillé', pfPath: 'Montrer le trajet de la dernière bille',
+        pfRules: 'Tu as dix billes. Glisse le doigt en haut du plateau pour déplacer le lanceur et lâche pour faire tomber une bille. Elle descend entre les clous jusqu’à l’une des cases du bas et rapporte ses points. La case étoile compte double et change de place après chaque bille. Rien n’est laissé au hasard : du même endroit au même moment, une bille prend toujours le même chemin. Les plateaux suivants ont des butoirs mobiles. Atteins les seuils pour une, deux ou trois étoiles ; une étoile ouvre le plateau suivant.',
+        pfKAim: 'Déplacer le lanceur', pfKFar: 'Le déplacer plus loin', pfKDrop: 'Lâcher la bille', pfKAgain: 'Recommencer le plateau',
+        pfTut1: 'Glisse et lâche', pfTutText1: 'Glisse en haut du plateau pour déplacer le lanceur, puis lâche pour faire tomber la bille.',
+        pfTut2: 'Cases et étoile', pfTutText2: 'Chaque case du bas a ses points. La case étoile compte double et change de place après chaque bille.',
+        pfTut3: 'Apprends le plateau', pfTutText3: 'Du même endroit, une bille prend toujours le même chemin. Le trajet de la dernière bille reste pâle sur le plateau pour le retrouver. Les butoirs mobiles demandent du timing.'
+      },
+      ar: {
+        pfScene: 'لوح مسامير بخانات نقاط', pfBoardN: 'اللوح {n}', pfDaily: 'لوح اليوم', pfBallsN: 'الكرات: {n}', pfScoreN: 'النقاط: {n}',
+        pfHint: 'اسحب في الأعلى ثم اترك لتسقط الكرة.', pfStarHint: 'خانة ★ تعطي الضعف وتتبدّل بعد كل كرة.', pfBumpHint: 'المصدّات تتحرك: اختر اللحظة.', pfLast: 'الكرة الأخيرة!',
+        pfCleared: 'أنهيت اللوح!', pfNoStar: 'لا نجمة هذه المرة', pfNext: 'اللوح التالي', pfRetry: 'أعد هذا اللوح',
+        pfBalls: 'الكرات', pfScore: 'النقاط', pfBest: 'الأفضل', pfStarsAt: 'النجوم عند', pfNewBest: 'رقم جديد: {n}', pfUnlocked: 'فُتح اللوح {n}',
+        pfChoose: 'اختر لوحًا', pfLocked: 'مقفل', pfPath: 'أظهر مسار الكرة السابقة',
+        pfRules: 'معك عشر كرات. اسحب إصبعك في أعلى اللوح لتحريك القاذف واتركه لتسقط كرة. تنزل بين المسامير إلى إحدى الخانات في الأسفل وتأخذ نقاطها. خانة النجمة تعطي الضعف وتغيّر مكانها بعد كل كرة. لا شيء بالحظ: من النقطة نفسها وفي اللحظة نفسها تسلك الكرة الطريق نفسه دائمًا. في الألواح المتقدمة مصدّات متحركة. بلوغ الأهداف يعطيك نجمة أو اثنتين أو ثلاثًا، ونجمة واحدة تفتح اللوح التالي.',
+        pfKAim: 'حرّك القاذف', pfKFar: 'حرّكه أبعد', pfKDrop: 'أسقط الكرة', pfKAgain: 'ابدأ اللوح من جديد',
+        pfTut1: 'اسحب واترك', pfTutText1: 'اسحب في أعلى اللوح لتحريك القاذف، ثم اترك لتسقط الكرة.',
+        pfTut2: 'الخانات والنجمة', pfTutText2: 'لكل خانة في الأسفل نقاطها. خانة النجمة تعطي الضعف وتغيّر مكانها بعد كل كرة.',
+        pfTut3: 'تعلّم اللوح', pfTutText3: 'من النقطة نفسها تسلك الكرة الطريق نفسه دائمًا. يبقى مسار الكرة السابقة باهتًا على اللوح لتجده مرة أخرى. المصدّات المتحركة تحتاج توقيتًا جيدًا.'
+      },
+      hi: {
+        pfScene: 'अंक वाले खानों के साथ कीलों का बोर्ड', pfBoardN: 'बोर्ड {n}', pfDaily: 'आज का बोर्ड', pfBallsN: 'गेंदें: {n}', pfScoreN: 'अंक: {n}',
+        pfHint: 'ऊपर खींचें, फिर छोड़कर गेंद गिराएँ।', pfStarHint: '★ वाला खाना दोगुने अंक देता है और हर गेंद के बाद जगह बदलता है।', pfBumpHint: 'बम्पर चलते हैं: सही पल चुनें।', pfLast: 'आख़िरी गेंद!',
+        pfCleared: 'बोर्ड पूरा!', pfNoStar: 'इस बार कोई तारा नहीं', pfNext: 'अगला बोर्ड', pfRetry: 'यही बोर्ड फिर से',
+        pfBalls: 'गेंदें', pfScore: 'अंक', pfBest: 'सर्वश्रेष्ठ', pfStarsAt: 'तारे', pfNewBest: 'नया रिकॉर्ड: {n}', pfUnlocked: 'बोर्ड {n} खुल गया',
+        pfChoose: 'बोर्ड चुनें', pfLocked: 'बंद', pfPath: 'पिछली गेंद का रास्ता दिखाएँ',
+        pfRules: 'आपके पास दस गेंदें हैं। लॉन्चर हिलाने के लिए बोर्ड के ऊपर उँगली खींचें और गेंद गिराने के लिए छोड़ दें। गेंद कीलों के बीच से नीचे किसी खाने में गिरती है और उस खाने के अंक मिलते हैं। तारे वाला खाना दोगुने अंक देता है और हर गेंद के बाद जगह बदलता है। कुछ भी किस्मत पर नहीं: एक ही जगह और एक ही पल से गिरी गेंद हमेशा एक ही रास्ता लेती है। आगे के बोर्ड पर चलते बम्पर हैं। लक्ष्य पाकर एक, दो या तीन तारे पाएँ; एक तारे से अगला बोर्ड खुलता है।',
+        pfKAim: 'लॉन्चर हिलाएँ', pfKFar: 'ज़्यादा दूर हिलाएँ', pfKDrop: 'गेंद गिराएँ', pfKAgain: 'बोर्ड फिर से शुरू करें',
+        pfTut1: 'खींचें और छोड़ें', pfTutText1: 'लॉन्चर हिलाने के लिए बोर्ड के ऊपर खींचें, फिर गेंद गिराने के लिए छोड़ दें।',
+        pfTut2: 'खाने और तारा', pfTutText2: 'नीचे हर खाने के अपने अंक हैं। तारे वाला खाना दोगुने अंक देता है और हर गेंद के बाद जगह बदलता है।',
+        pfTut3: 'बोर्ड सीखें', pfTutText3: 'एक ही जगह से गिरी गेंद हमेशा एक ही रास्ता लेती है। पिछली गेंद का रास्ता हल्का दिखता रहता है ताकि आप उसे फिर पा सकें। चलते बम्पर सही समय माँगते हैं।'
+      }
+    }
+  });
+
+  // the last path stays on the board unless the player turns it off behind the gear
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || typeof prefs !== 'object') prefs = {};
+  prefs.path = prefs.path !== false;
+
+  // campaign progress: the best score and stars per board, and how many boards are open
+  function loadProg() {
+    var p = ctx.store.get('prog', null), out = { best: [], unlocked: 1, cur: 1 };
+    for (var i = 0; i < E.LEVELS; i++) {
+      var b = p && Array.isArray(p.best) ? p.best[i] : null;
+      out.best.push(b && b.score >= 0 && b.stars >= 0 && b.stars <= 3 ? { score: b.score | 0, stars: b.stars | 0 } : null);
+    }
+    if (p && p.unlocked >= 1) out.unlocked = Math.min(E.LEVELS, p.unlocked | 0);
+    if (p && p.cur >= 1 && p.cur <= out.unlocked) out.cur = p.cur | 0;
+    return out;
+  }
+  var prog = loadProg();
+  function saveProg() { ctx.store.set('prog', prog); }
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  // the day's board, the same for everyone: one seed from the day's own generator
+  var dailySeed = dailyDate ? Math.floor(C.daily('pegfall', dailyDate).rng() * 4294967296) >>> 0 : 0;
+
+  // the round, the ball in flight with where it left, the launcher, and what is drawn
+  var Rd = null, ball = null, fly = null, aim = 50, lastX = null, ended = false, startedAt = 0;
+  var path = [], lastPath = [], lit = {}, pops = [], streak = 0, bestStreak = 0, tries = 0;
+  var raf = 0, last = 0, acc = 0, paused = false, dragging = false, lastPeg = 0, mapping = false;
+
+  var cv = el('canvas', { class: 'pf-canvas', role: 'img', 'aria-label': C.t('pfScene') });
+  var box = el('div', { class: 'pf-box' }, [cv]);
+  var top = el('div', { class: 'pf-top ch-above' });
+  var goals = el('div', { class: 'pf-goals' });
+  var status = el('div', { class: 'pf-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'pf-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, goals, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  if (!dailyDate) ctx.button({ icon: 'grid', label: C.t('pfChoose'), onClick: showLevels });
+  ctx.button({ icon: 'gear', label: C.t('settings'), onClick: showSettings });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- rounds */
+
+  function boardFor(n) { return dailyDate ? E.daily(dailySeed) : E.level(n); }
+
+  function startRound(n) {
+    if (!dailyDate) { prog.cur = n; saveProg(); }
+    Rd = E.round(boardFor(n));
+    begin();
+    tries++;
+    startedAt = Date.now();
+  }
+  function begin() {
+    ball = null; fly = null; ended = false; path = []; lastPath = []; lit = {}; pops = []; streak = 0; bestStreak = 0; lastX = null;
+    aim = 50;
+    mapDaily();
+    renderSide(); draw(); kick();
+  }
+  // a daily board's star targets are worked out between frames, so a slow phone never
+  // freezes on the way in; the targets show as soon as they are known
+  function mapDaily() {
+    if (!Rd || Rd.B.th || mapping) return;
+    mapping = true;
+    var B = Rd.B;
+    (function slice() {
+      if (!Rd || Rd.B !== B) { mapping = false; return; }
+      if (E.reachMore(B, 24)) { E.thresholds(B); mapping = false; renderSide(); return; }
+      setTimeout(slice, 0);
+    })();
+  }
+
+  function drop() {
+    if (!Rd || ball || ended || E.over(Rd) || paused) return;
+    var x = E.quant(aim);
+    ball = E.ball(Rd.B, x, Rd.clock);
+    fly = { x: ball.x, clock: Rd.clock };
+    lastX = ball.x; path = [[ball.x, ball.y]];
+    C.feedback('tap');
+    ctx.save();
+    renderSide(); kick();
+  }
+
+  function landed(slot) {
+    var k = Rd.k, star = slot === E.starAt(Rd.B, k), v = E.land(Rd, slot);
+    lastPath = path; path = []; ball = null; fly = null;
+    streak = star ? streak + 1 : 0;
+    bestStreak = Math.max(bestStreak, streak);
+    if (streak >= 3) C.achievements.unlock('pf-catch');
+    var V = view(), cx = V.ox + (slot + 0.5) * E.SW * V.k, cy = V.oy + (E.H - E.SLOT_H / 2) * V.k;
+    pops.push({ x: (slot + 0.5) * E.SW, y: E.H - E.SLOT_H - 3, text: '+' + C.num(v), t: 0, star: star });
+    C.feedback(star ? 'good' : 'thud');
+    var r = cv.getBoundingClientRect();
+    if (r.width) C.ui.burst({ x: r.left + cx, y: r.top + cy }, { colors: star ? ['#F5B82E', '#FFE08A', ACCENT] : [ACCENT, '#D9A7F5', '#FFFFFF'], count: star ? 22 : 12, speed: star ? 1.1 : 0.8 });
+    ctx.save();
+    renderSide();
+    if (E.over(Rd)) setTimeout(finish, 650);
+  }
+
+  /* --------------------------------------------------------------- loop */
+
+  function kick() { if (!raf) { last = 0; raf = requestAnimationFrame(frame); } }
+  function frame(t) {
+    raf = 0;
+    if (paused || !Rd) return;
+    var dt = last ? Math.min(0.1, (t - last) / 1000) : 0;
+    last = t;
+    acc += dt;
+    var n = 0;
+    while (acc >= E.DT && n < 24) {
+      acc -= E.DT; n++;
+      if (ball) {
+        var ev = E.step(Rd.B, ball);
+        Rd.clock = ball.clock;
+        if (ball.n % 3 === 0) path.push([ball.x, ball.y]);
+        for (var i = 0; i < ev.length; i++) {
+          if (ev[i][0] === 'peg') { lit[ev[i][1]] = t; if (t - lastPeg > 45) { lastPeg = t; C.audio.sfx('peg'); } }
+          else if (ev[i][0] === 'bump') C.audio.sfx('pin');
+          else if (ev[i][0] === 'land') { path.push([ball.x, ball.y]); landed(ev[i][1]); break; }
+        }
+      } else if (!ended && !E.over(Rd)) Rd.clock++;
+    }
+    if (n === 24) acc = 0;
+    pops = pops.filter(function (p) { p.t += dt; return p.t < 1; });
+    draw(t);
+    // the board only needs frames while something moves
+    if (ball || pops.length || (Rd.B.bumpers.length && !ended && !E.over(Rd)) || anyLit(t)) raf = requestAnimationFrame(frame);
+  }
+  function anyLit(t) { for (var k in lit) if (t - lit[k] < 260) return true; return false; }
+
+  /* ------------------------------------------------------------- finish */
+
+  function finish() {
+    if (ended || !Rd || !E.over(Rd)) return;
+    ended = true;
+    ctx.clearSave();
+    if (!Rd.B.th) { E.thresholds(Rd.B); }
+    var score = Rd.score, st = E.stars(Rd.B, score), note = null, won = st >= 1, L = Rd.B.level;
+    var coins = 2 + st * 2, points = 6 + st * 6, next = 0;
+    if (won) C.achievements.unlock('pf-win');
+    if (st === 3) C.achievements.unlock('pf-three');
+    if (dailyDate) {
+      coins += 8; points += 25;
+      if (won) C.achievements.unlock('pf-daily');
+      if (!C.stats.daily('pegfall', dailyDate, { label: C.num(score), win: won, stars: st, tries: tries })) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    } else {
+      var b = prog.best[L - 1];
+      if (b && score > b.score) note = C.t('pfNewBest', { n: C.num(score) });
+      prog.best[L - 1] = { score: Math.max(score, b ? b.score : 0), stars: Math.max(st, b ? b.stars : 0) };
+      if (won && L < E.LEVELS && prog.unlocked < L + 1) { prog.unlocked = L + 1; note = C.t('pfUnlocked', { n: C.num(L + 1) }); }
+      if (won && L < E.LEVELS) next = L + 1;
+      saveProg();
+      C.stats.best('pegfall', 'stars', prog.best.reduce(function (s, x) { return s + (x ? x.stars : 0); }, 0));
+    }
+    renderSide(); draw();
+    var best = dailyDate ? null : prog.best[L - 1];
+    ctx.finish({
+      won: won, stars: st,
+      title: won ? C.t('pfCleared') : C.t('pfNoStar'),
+      note: note, timeMs: Date.now() - startedAt, coins: coins, points: points,
+      lines: [
+        { label: C.t('pfScore'), value: C.num(score) },
+        { label: C.t('pfStarsAt'), value: Rd.B.th.map(function (x) { return C.num(x); }).join(' · ') },
+        best ? { label: C.t('pfBest'), value: C.num(best.score) } : { label: C.t('pfBalls'), value: C.num(Rd.B.balls) }
+      ],
+      shareText: 'چوگان · توپ‌ریز' + (dailyDate ? ('\nروزانه ' + dailyDate) : ('\nتخته‌ی ' + L)) + '\n' + score + ' امتیاز · ' + '★'.repeat(st) + '☆'.repeat(3 - st),
+      againLabel: next ? C.t('pfNext') : C.t('pfRetry'),
+      onAgain: dailyDate && won ? null : function () { startRound(next || L); }
+    });
+  }
+
+  /* ----------------------------------------------------------- side rows */
+
+  function chip(text, icon) { return el('span', { class: 'pf-chip' }, icon ? [C.icon(icon, 14), el('span', { text: text })] : [el('span', { text: text })]); }
+  function renderSide() {
+    if (!Rd) return;
+    top.textContent = '';
+    top.appendChild(chip(dailyDate ? C.t('pfDaily') : C.t('pfBoardN', { n: C.num(Rd.B.level) }), dailyDate ? 'calendar' : null));
+    top.appendChild(chip(C.t('pfBallsN', { n: C.num(Rd.B.balls - Rd.k - (ball ? 1 : 0)) })));
+    top.appendChild(chip(C.t('pfScoreN', { n: C.num(Rd.score) })));
+    goals.textContent = '';
+    for (var i = 0; i < 3; i++) {
+      var th = Rd.B.th ? Rd.B.th[i] : null, on = th != null && Rd.score >= th, g = el('span', { class: 'pf-goal' + (on ? ' pf-goal--on' : '') });
+      for (var s = 0; s <= i; s++) g.appendChild(C.icon('star', 12));
+      g.appendChild(el('span', { text: th == null ? '…' : C.num(th) }));
+      goals.appendChild(g);
+    }
+    var left = Rd.B.balls - Rd.k;
+    status.textContent = ended || E.over(Rd) ? '' : left === 1 && !ball ? C.t('pfLast')
+      : Rd.k === 0 && !ball ? C.t('pfHint') : Rd.B.bumpers.length && Rd.k < 3 ? C.t('pfBumpHint') : C.t('pfStarHint');
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  function palette() {
+    return dark()
+      ? { bg0: '#211830', bg1: '#140F1D', frame: '#3A2C4E', peg: '#CDB8E2', pegLit: '#F2D9FF', rail: '#8E78A8', slot: 'rgba(174,54,234,', slotLine: '#55436B', text: '#F3ECFA', dim: '#A796BC', ball0: '#FFFFFF', ball1: '#B9B4C4', ballEdge: '#5A5466', star: '#F5B82E', starText: '#2A1E06', bump: '#C770F2', bumpRing: '#F2D9FF', path: 'rgba(214,160,245,0.35)', launcher: '#CDB8E2', guide: 'rgba(214,160,245,0.25)' }
+      : { bg0: '#FCF8FF', bg1: '#F1E6FB', frame: '#E2D2F0', peg: '#6E4E8A', pegLit: ACCENT, rail: '#8B6AA8', slot: 'rgba(174,54,234,', slotLine: '#CDB6E2', text: '#2B1F38', dim: '#7A6A8C', ball0: '#FFFFFF', ball1: '#9C97A8', ballEdge: '#4A4458', star: '#F2A900', starText: '#2A1E06', bump: ACCENT, bumpRing: '#5B1F7A', path: 'rgba(174,54,234,0.28)', launcher: '#6E4E8A', guide: 'rgba(174,54,234,0.22)' };
+  }
+  function size() {
+    var r = box.getBoundingClientRect();
+    return { w: Math.max(120, Math.floor(r.width) || 0), h: Math.max(180, Math.floor(r.height) || 0) };
+  }
+  var fontFam = '';
+  function font(px, weight) {
+    if (!fontFam) fontFam = getComputedStyle(document.body).fontFamily || 'sans-serif';
+    return (weight || 700) + ' ' + Math.round(px) + 'px ' + fontFam;
+  }
+  // the view last drawn: a touch is read against what the player saw (#bowling lesson)
+  var drawn = { w: 0, h: 0, k: 1, ox: 0, oy: 0 };
+  function view() { return drawn.k ? drawn : layout(size()); }
+  function layout(Z) {
+    var k = Math.min(Z.w / E.W, Z.h / E.H);
+    return { w: Z.w, h: Z.h, k: k, ox: (Z.w - E.W * k) / 2, oy: (Z.h - E.H * k) / 2 };
+  }
+  function starPath(g, x, y, r) {
+    g.beginPath();
+    for (var i = 0; i < 10; i++) {
+      var a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.45 : r;
+      g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    }
+    g.closePath();
+  }
+
+  function draw(t) {
+    if (!Rd) return;
+    t = t || performance.now();
+    var Z = size(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
+    cv.style.width = Z.w + 'px'; cv.style.height = Z.h + 'px';
+    var V = layout(Z), k = V.k, B = Rd.B, P = palette(), still = C.ui.reduceMotion();
+    drawn = V;
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, Z.w, Z.h);
+    g.save();
+    g.translate(V.ox, V.oy);
+    function X(x) { return x * k; }
+
+    // the board
+    var bg = g.createLinearGradient(0, 0, 0, E.H * k);
+    bg.addColorStop(0, P.bg0); bg.addColorStop(1, P.bg1);
+    g.fillStyle = bg;
+    C.rrect(g, 0, 0, E.W * k, E.H * k, Math.max(6, 3 * k)); g.fill();
+    g.strokeStyle = P.frame; g.lineWidth = Math.max(1, 0.5 * k); g.stroke();
+    g.save();
+    C.rrect(g, 0, 0, E.W * k, E.H * k, Math.max(6, 3 * k)); g.clip();
+
+    // the slots: stronger colour for more points, the star slot in gold
+    var maxV = Math.max.apply(null, B.slots), starSlot = E.over(Rd) ? -1 : E.starAt(B, Rd.k);
+    for (var s = 0; s < E.NSLOT; s++) {
+      var sx0 = X(s * E.SW), sy0 = X(E.H - E.SLOT_H);
+      if (s === starSlot) {
+        var pulse = still ? 0.85 : 0.75 + 0.2 * Math.sin(t / 220);
+        g.fillStyle = P.star; g.globalAlpha = pulse; g.fillRect(sx0, sy0, X(E.SW), X(E.SLOT_H)); g.globalAlpha = 1;
+      } else {
+        g.fillStyle = P.slot + (0.08 + 0.32 * B.slots[s] / maxV).toFixed(3) + ')';
+        g.fillRect(sx0, sy0, X(E.SW), X(E.SLOT_H));
+      }
+      var fs = Math.max(9, Math.min(X(3.6), X(E.SW) * 0.42));
+      g.fillStyle = s === starSlot ? P.starText : P.text;
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.font = font(fs, 800);
+      g.fillText(C.num(E.value(B, s, Rd.k)), sx0 + X(E.SW) / 2, X(E.H - 4.2));
+      if (s === starSlot) { starPath(g, sx0 + X(E.SW) / 2, X(E.H - E.SLOT_H + 4.2), X(2.2)); g.fillStyle = P.starText; g.fill(); }
+    }
+
+    // the last ball's path, faint, so a good drop can be found again
+    if (prefs.path && lastPath.length > 1) {
+      g.strokeStyle = P.path; g.lineWidth = Math.max(1, X(0.6)); g.lineJoin = 'round'; g.setLineDash([X(1.2), X(1.2)]);
+      g.beginPath(); lastPath.forEach(function (p, i) { if (i) g.lineTo(X(p[0]), X(p[1])); else g.moveTo(X(p[0]), X(p[1])); }); g.stroke();
+      g.setLineDash([]);
+    }
+
+    // rails and slot walls
+    g.lineCap = 'round';
+    B.segs.forEach(function (sg) {
+      g.strokeStyle = sg.wall ? P.slotLine : P.rail; g.lineWidth = X(sg.r * 2);
+      g.beginPath(); g.moveTo(X(sg.ax), X(sg.ay)); g.lineTo(X(sg.bx), X(sg.by)); g.stroke();
+    });
+
+    // pegs, lit for a moment when a ball strikes them
+    B.pegs.forEach(function (p, i) {
+      var on = lit[i] && t - lit[i] < 260;
+      if (on && !still) { g.fillStyle = P.slot + '0.25)'; g.beginPath(); g.arc(X(p.x), X(p.y), X(p.r * 2.4), 0, Math.PI * 2); g.fill(); }
+      g.fillStyle = on ? P.pegLit : P.peg;
+      g.beginPath(); g.arc(X(p.x), X(p.y), Math.max(1.5, X(p.r)), 0, Math.PI * 2); g.fill();
+    });
+
+    // moving bumpers, where the board clock has them
+    B.bumpers.forEach(function (bu) {
+      var bx = E.bumperX(bu, Rd.clock);
+      g.strokeStyle = P.guide; g.lineWidth = Math.max(1, X(0.5));
+      g.beginPath(); g.moveTo(X(bu.x0 - bu.amp), X(bu.y)); g.lineTo(X(bu.x0 + bu.amp), X(bu.y)); g.stroke();
+      g.fillStyle = P.bump; g.beginPath(); g.arc(X(bx), X(bu.y), X(bu.r), 0, Math.PI * 2); g.fill();
+      g.strokeStyle = P.bumpRing; g.lineWidth = Math.max(1.5, X(0.7)); g.stroke();
+      g.fillStyle = 'rgba(255,255,255,0.55)'; g.beginPath(); g.arc(X(bx - bu.r * 0.3), X(bu.y - bu.r * 0.3), X(bu.r * 0.3), 0, Math.PI * 2); g.fill();
+    });
+
+    // the launcher rail along the top, the launcher, and the ball waiting in it
+    var ax = E.quant(aim), ready = !ball && !ended && !E.over(Rd);
+    g.strokeStyle = P.guide; g.lineWidth = Math.max(1, X(0.6));
+    g.beginPath(); g.moveTo(X(2), X(E.DROP_Y - 3.6)); g.lineTo(X(E.W - 2), X(E.DROP_Y - 3.6)); g.stroke();
+    if (ready) {
+      g.setLineDash([X(1), X(2)]); g.beginPath(); g.moveTo(X(ax), X(E.DROP_Y + 3)); g.lineTo(X(ax), X(20)); g.stroke(); g.setLineDash([]);
+      if (lastX != null) { g.fillStyle = P.dim; g.beginPath(); g.moveTo(X(lastX), X(E.DROP_Y - 2.2)); g.lineTo(X(lastX - 1), X(E.DROP_Y - 4.6)); g.lineTo(X(lastX + 1), X(E.DROP_Y - 4.6)); g.closePath(); g.fill(); }
+    }
+    g.fillStyle = P.launcher;
+    C.rrect(g, X(ax - 3.4), X(E.DROP_Y - 4.4), X(6.8), X(2.2), X(1)); g.fill();
+    if (ready) drawBall(g, X(ax), X(E.DROP_Y), X(E.R), P);
+    if (ball) drawBall(g, X(ball.x), X(ball.y), X(E.R), P);
+
+    // points rising from the slot a ball fell into
+    pops.forEach(function (p) {
+      var a = 1 - p.t;
+      g.globalAlpha = Math.max(0, a);
+      g.font = font(Math.max(12, X(4.4)), 800); g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillStyle = p.star ? P.star : P.text;
+      g.fillText(p.text, X(p.x), X(p.y - (still ? 0 : p.t * 10)));
+      g.globalAlpha = 1;
+    });
+    g.restore();
+    g.restore();
+  }
+  function drawBall(g, x, y, r, P) {
+    var gr = g.createRadialGradient(x - r * 0.35, y - r * 0.35, r * 0.1, x, y, r);
+    gr.addColorStop(0, P.ball0); gr.addColorStop(1, P.ball1);
+    g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = P.ballEdge; g.lineWidth = Math.max(1, r * 0.18); g.stroke();
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  // the launcher follows the finger anywhere on the board; a drop within one unit of the
+  // last one snaps to it exactly, so a good drop can be repeated
+  function aimAt(e) {
+    var r = cv.getBoundingClientRect(), V = view();
+    var x = (e.clientX - r.left - V.ox) / V.k;
+    if (lastX != null && Math.abs(x - lastX) <= 1) x = lastX;
+    aim = E.quant(x);
+    draw();
+  }
+  cv.addEventListener('pointerdown', function (e) {
+    if (!Rd || ball || ended || E.over(Rd)) return;
+    dragging = true;
+    try { cv.setPointerCapture(e.pointerId); } catch (er) { /* an old WebView */ }
+    aimAt(e);
+    e.preventDefault();
+  });
+  cv.addEventListener('pointermove', function (e) { if (dragging) aimAt(e); });
+  cv.addEventListener('pointerup', function (e) { if (!dragging) return; dragging = false; aimAt(e); drop(); });
+  cv.addEventListener('pointercancel', function () { dragging = false; });
+
+  window.addEventListener('keydown', function (e) {
+    if (!Rd || e.target && e.target.closest && e.target.closest('.ch-modal')) return;
+    var k = e.key, step = e.shiftKey ? 5 : E.XQ;
+    if (k === 'ArrowLeft' || C.keyIs(e, 'a')) { e.preventDefault(); aim = E.quant(aim - step); draw(); }
+    else if (k === 'ArrowRight' || C.keyIs(e, 'd')) { e.preventDefault(); aim = E.quant(aim + step); draw(); }
+    else if (k === ' ' || k === 'Enter' || k === 'ArrowDown') { if (!e.repeat) { e.preventDefault(); drop(); } }
+    else if (C.keyIs(e, 'r') && !dailyDate) { e.preventDefault(); restartAsk(); }
+    else if (C.keyIs(e, 'l') && !dailyDate) { e.preventDefault(); showLevels(); }
+  });
+
+  C.onPause(function () { paused = true; dragging = false; ctx.save(); });
+  C.onResume(function () { paused = false; last = 0; kick(); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { last = 0; kick(); } });
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { fontFam = ''; draw(); });
+  if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { draw(); }); } catch (er) { /* old WebViews */ } }
+
+  /* ------------------------------------------------------- boards, gear */
+
+  function restartAsk() {
+    if (!Rd) return;
+    if (Rd.k > 0 && !ended) C.ui.confirm({ title: C.t('restart'), body: C.t('resetWarn'), onOk: function () { ctx.clearSave(); startRound(Rd.B.level); } });
+    else startRound(Rd.B.level);
+  }
+  function showLevels() {
+    if (dailyDate) return;
+    var grid = el('div', { class: 'pf-levels' }), m = null;
+    for (var i = 0; i < E.LEVELS; i++) {
+      (function (n) {
+        var locked = n > prog.unlocked, best = prog.best[n - 1], kids = [el('b', { text: C.num(n) })];
+        if (locked) kids.push(C.icon('lock', 14));
+        else if (best) {
+          var sr = el('span', { class: 'pf-lv__stars' });
+          for (var s = 1; s <= 3; s++) { var ic = C.icon('star', 11); if (s <= best.stars) ic.setAttribute('fill', 'currentColor'); else ic.style.opacity = '.4'; sr.appendChild(ic); }
+          kids.push(sr);
+        }
+        var b = el('button', {
+          class: 'pf-lv' + (Rd && n === Rd.B.level ? ' pf-lv--on' : '') + (best ? ' pf-lv--done' : ''),
+          type: 'button', disabled: locked,
+          'aria-label': C.t('pfBoardN', { n: C.num(n) }) + (locked ? ' — ' + C.t('pfLocked') : '')
+        }, kids);
+        b.addEventListener('click', function () {
+          if (m) m.close();
+          if (Rd && Rd.k > 0 && !ended) C.ui.confirm({ title: C.t('restart'), body: C.t('resetWarn'), onOk: function () { ctx.clearSave(); startRound(n); } });
+          else startRound(n);
+        });
+        grid.appendChild(b);
+      })(i + 1);
+    }
+    m = C.ui.modal({ title: C.t('pfChoose'), body: [grid], actions: [{ label: C.t('cancel') }] });
+  }
+  function showSettings() {
+    var sw = C.ui.switch(prefs.path, function (v) { prefs.path = !!v; ctx.store.set('prefs', prefs); draw(); });
+    C.ui.modal({
+      title: C.t('settings'), closeButton: true,
+      body: [el('div', { class: 'ch-list' }, [el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('pfPath') }), sw])])],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    var keys = [kb('← → / A D', C.t('pfKAim')), kb('Shift + ← →', C.t('pfKFar')), kb('Space / Enter / ↓', C.t('pfKDrop'))];
+    if (!dailyDate) keys.push(kb('L', C.t('pfChoose')), kb('R', C.t('pfKAgain')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('pfRules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, keys)
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 110" width="100%" direction="ltr"><rect width="200" height="110" rx="10" fill="#F1E6FB"/>', x, y;
+    for (y = 0; y < 4; y++) for (x = 0; x < 9; x++) s += '<circle cx="' + (24 + x * 19 + (y % 2) * 9.5) + '" cy="' + (30 + y * 14) + '" r="2.6" fill="#6E4E8A"/>';
+    var vals = [10, 30, 50, 100, 50, 30, 10];
+    for (x = 0; x < 7; x++) {
+      var star = kind === 2 && x === 5;
+      s += '<rect x="' + (14 + x * 25) + '" y="88" width="23" height="18" rx="3" fill="' + (star ? '#F2A900' : 'rgba(174,54,234,' + (0.12 + vals[x] / 300) + ')') + '"/>' +
+        '<text x="' + (25.5 + x * 25) + '" y="101" font-size="9" font-weight="700" text-anchor="middle" font-family="sans-serif" fill="#2B1F38">' + (star ? 60 : vals[x]) + '</text>';
+    }
+    s += '<rect x="20" y="9" width="160" height="2" rx="1" fill="rgba(174,54,234,.3)"/>';
+    if (kind === 1) s += '<rect x="112" y="7" width="16" height="5" rx="2" fill="#6E4E8A"/><circle cx="120" cy="18" r="5" fill="#fff" stroke="#4A4458" stroke-width="1.2"/>' +
+      '<path d="M70 20 H104 M104 20 L98 15 M104 20 L98 25" stroke="' + ACCENT + '" stroke-width="2.5" stroke-linecap="round" fill="none"/>';
+    if (kind === 2) s += '<path d="M150 70 l3 6 6 1 -4.5 4 1 6 -5.5 -3 -5.5 3 1 -6 -4.5 -4 6 -1z" fill="#F2A900"/><circle cx="139" cy="80" r="5" fill="#fff" stroke="#4A4458" stroke-width="1.2"/>';
+    if (kind === 3) s += '<path d="M90 16 L92 30 L84 44 L95 58 L88 72 L90 86" stroke="' + ACCENT + '" stroke-opacity=".5" stroke-width="2" stroke-dasharray="3 3" fill="none"/>' +
+      '<circle cx="150" cy="51" r="8" fill="' + ACCENT + '"/><path d="M128 51 H172" stroke="rgba(174,54,234,.3)" stroke-width="1.5"/><path d="M162 42 l6 0 M164 39 l4 3 -4 3" stroke="#5B1F7A" stroke-width="1.5" fill="none"/>';
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('pfTut1'), text: C.t('pfTutText1'), art: tArt(1) },
+    { title: C.t('pfTut2'), text: C.t('pfTutText2'), art: tArt(2) },
+    { title: C.t('pfTut3'), text: C.t('pfTutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // saved after every ball and at every drop: a ball in flight comes back as where and
+  // when it left, and lands at once, exactly where it would have
+  ctx.autosave(function () {
+    if (!Rd || ended || E.over(Rd) || (Rd.k === 0 && !fly)) return { inProgress: false };
+    return { r: E.snapshot(Rd, fly), daily: dailyDate || null, tries: tries, last: lastX, elapsed: Date.now() - startedAt };
+  });
+  function resume(sv) {
+    if (!sv || typeof sv !== 'object' || (sv.daily || null) !== (dailyDate || null)) return false;
+    var R = E.restore(sv.r);
+    if (!R) return false;
+    // a save must be on the board it claims: the day's board, or an open campaign board
+    if (dailyDate ? R.B.seed !== dailySeed || R.B.level !== 8 : R.B.seed !== E.level(R.B.level).seed || R.B.level > prog.unlocked) return false;
+    Rd = dailyDate ? R : (function () { var x = E.round(E.level(R.B.level)); R.hits.forEach(function (s) { E.land(x, s); }); x.clock = R.clock; return x; })();
+    tries = sv.tries >= 1 ? sv.tries | 0 : 1;
+    startedAt = Date.now() - (sv.elapsed > 0 ? sv.elapsed : 0);
+    begin();
+    lastX = typeof sv.last === 'number' && sv.last >= 0 && sv.last <= E.W ? E.quant(sv.last) : null;
+    if (lastX != null) aim = lastX;
+    if (!dailyDate) { prog.cur = Rd.B.level; saveProg(); }
+    renderSide(); draw();
+    if (E.over(Rd)) setTimeout(finish, 300);
+    return true;
+  }
+  var saved = ctx.loadSave();
+  if (!(saved && resume(saved))) startRound(dailyDate ? 8 : prog.cur);
+  if (dailyDate && C.stats.dailyDone('pegfall', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).pegfall;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
