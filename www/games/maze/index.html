@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>هزارتو — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  .mz-wrap > .ch-fit { --fit-ar: 1; }
+  .ch-fit > .mz-box { width: 100%; height: 100%; position: relative; }
+  /* a canvas is a replaced element: without its own width and height it keeps the
+     backing-store size times the pixel ratio (#919) */
+  .mz-box canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block;
+    touch-action: none; direction: ltr; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .mz-box canvas:focus-visible { outline: 3px solid var(--game, var(--c-accent)); outline-offset: 2px; border-radius: var(--r-md); }
+  .mz-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .mz-side { align-items: center; }
+  .mz-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); font-variant-numeric: tabular-nums;
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 0 var(--s-4); }
+  .mz-status > span { white-space: nowrap; }
+  .mz-stars { display: flex; gap: 2px; justify-content: center; color: var(--game, var(--c-accent)); font-size: 1.35rem; line-height: 1; }
+  .mz-stars .mz-lost { opacity: .25; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .mz-stars { color: var(--game-text-dark, var(--game, var(--c-accent))); } }
+  :root[data-theme="dark"] .mz-stars { color: var(--game-text-dark, var(--game, var(--c-accent))); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function MazeEngineFactory() {
+  'use strict';
+
+  var SIZES = [8, 12, 16], DAILY_N = 12;
+  // a cell is a bit mask of the sides it is open to
+  var N = 1, E = 2, S = 4, W = 8, DIRS = [N, E, S, W];
+
+  function opp(d) { return d === N ? S : d === E ? W : d === S ? N : E; }
+  function nb(n, i, d) {
+    var r = Math.floor(i / n) + (d === N ? -1 : d === S ? 1 : 0), c = i % n + (d === W ? -1 : d === E ? 1 : 0);
+    return r < 0 || c < 0 || r >= n || c >= n ? -1 : r * n + c;
+  }
+
+  // A growing tree from the start corner: a spanning tree, so every cell is reachable
+  // by exactly one path and the maze can never be sealed. Extending the newest cell
+  // most of the time gives long winding corridors; a random one now and then gives the
+  // side branches that make it a maze rather than one long snake.
+  function carve(n, rnd) {
+    var NN = n * n, m = new Array(NN).fill(0), seen = new Array(NN).fill(false), active = [0];
+    seen[0] = true;
+    while (active.length) {
+      var k = rnd() < 0.75 ? active.length - 1 : Math.floor(rnd() * active.length), c = active[k], opts = [];
+      for (var q = 0; q < 4; q++) { var j = nb(n, c, DIRS[q]); if (j >= 0 && !seen[j]) opts.push(DIRS[q]); }
+      if (!opts.length) { active.splice(k, 1); continue; }
+      var d = opts[Math.floor(rnd() * opts.length)], t = nb(n, c, d);
+      m[c] |= d; m[t] |= opp(d); seen[t] = true; active.push(t);
+    }
+    return m;
+  }
+
+  function dists(n, m, from) {
+    var NN = n * n, dist = new Array(NN).fill(-1), prev = new Array(NN).fill(-1), q = [from], h = 0;
+    dist[from] = 0;
+    while (h < q.length) {
+      var i = q[h++];
+      for (var k = 0; k < 4; k++) {
+        if (!(m[i] & DIRS[k])) continue;
+        var j = nb(n, i, DIRS[k]);
+        if (j >= 0 && dist[j] < 0) { dist[j] = dist[i] + 1; prev[j] = i; q.push(j); }
+      }
+    }
+    return { dist: dist, prev: prev };
+  }
+
+  // The exit is the cell on the far edges (last row or last column) that is farthest
+  // to walk to, so the way out always crosses the board instead of sitting beside the
+  // start. `par` is that walk, the fewest steps there are.
+  function generate(n, rnd) {
+    var m = carve(n, rnd), D = dists(n, m, 0), exit = -1;
+    for (var i = 0; i < n * n; i++) {
+      if ((Math.floor(i / n) === n - 1 || i % n === n - 1) && (exit < 0 || D.dist[i] > D.dist[exit])) exit = i;
+    }
+    return { n: n, m: m, start: 0, exit: exit, par: D.dist[exit] };
+  }
+  // the side the exit's doorway is cut in: the right wall if it is in the last column
+  function exitSide(M) { return M.exit % M.n === M.n - 1 ? E : S; }
+
+  function open(M, i, d) { return !!(M.m[i] & d); }
+  function step(M, i, d) { return open(M, i, d) ? nb(M.n, i, d) : -1; }
+
+  // A key or a swipe runs the corridor: on in one direction until a wall, a side
+  // opening or the exit, so a long passage is one press rather than twelve.
+  function slide(M, i, d) {
+    var path = [], c = i;
+    while (open(M, c, d)) {
+      c = nb(M.n, c, d); path.push(c);
+      if (c === M.exit || M.m[c] !== (d | opp(d))) break;
+    }
+    return path;
+  }
+  // Toward a cell (the finger): one step at a time through open sides only, the longer
+  // axis first, and only steps that bring the ball closer. It stops at a corner the
+  // finger has not turned yet, so a drag can never cut through a wall.
+  function toward(M, i, t) {
+    var path = [], c = i, n = M.n;
+    for (var guard = 0; guard < 2 * n && c !== t; guard++) {
+      var dr = Math.floor(t / n) - Math.floor(c / n), dc = t % n - c % n;
+      var v = dr < 0 ? N : S, h = dc < 0 ? W : E, order = Math.abs(dr) >= Math.abs(dc) ? [v, h] : [h, v], moved = false;
+      for (var k = 0; k < 2; k++) {
+        var d = order[k];
+        if ((d === v && !dr) || (d === h && !dc) || !open(M, c, d)) continue;
+        c = nb(n, c, d); path.push(c); moved = true; break;
+      }
+      if (!moved || c === M.exit) break;
+    }
+    return path;
+  }
+
+  // the way out from the start, cell by cell, start and exit included
+  function solve(M) {
+    var D = dists(M.n, M.m, M.start), out = [], c = M.exit;
+    if (D.dist[c] < 0) return null;
+    while (c >= 0) { out.unshift(c); c = D.prev[c]; }
+    return out;
+  }
+
+  // three stars close to the fewest steps, two within twice as many, one after that:
+  // never a loss
+  function stars(steps, par) { return steps <= Math.ceil(par * 1.2) ? 3 : steps <= par * 2 ? 2 : 1; }
+
+  // The walked path kept on screen: stepping back onto the cell before takes the last
+  // cell off, so in a tree it is always the one path from the start to the ball.
+  function walk(trail, j) {
+    if (trail.length > 1 && trail[trail.length - 2] === j) trail.pop(); else trail.push(j);
+    return trail;
+  }
+
+  function valid(o, M) {
+    if (!o || SIZES.indexOf(o.n) < 0 || typeof o.seed !== 'number' || o.seed < 1 || o.seed > 4294967295 || Math.floor(o.seed) !== o.seed) return false;
+    if (!Array.isArray(o.trail) || !o.trail.length || o.trail[0] !== 0 || typeof o.steps !== 'number' || o.steps < o.trail.length - 1) return false;
+    if (o.daily != null && typeof o.daily !== 'string') return false;
+    if (!M) return true;
+    for (var i = 0; i < o.trail.length; i++) {
+      var c = o.trail[i];
+      if (typeof c !== 'number' || c < 0 || c >= o.n * o.n || Math.floor(c) !== c) return false;
+      if (i && !DIRS.some(function (d) { return step(M, o.trail[i - 1], d) === c; })) return false;
+    }
+    return o.trail[o.trail.length - 1] !== M.exit;
+  }
+
+  return {
+    SIZES: SIZES, DAILY_N: DAILY_N, N: N, E: E, S: S, W: W, DIRS: DIRS,
+    opp: opp, nb: nb, carve: carve, dists: dists, generate: generate, exitSide: exitSide,
+    open: open, step: step, slide: slide, toward: toward, solve: solve, stars: stars, walk: walk, valid: valid
+  };
+}
+if (typeof module !== 'undefined') module.exports = MazeEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = MazeEngineFactory();
+  var ACCENT = '#A848D8';
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'maze',
+    name: { fa: 'هزارتو', en: 'Maze', zh: '迷宫', de: 'Labyrinth', es: 'Laberinto', pl: 'Labirynt', fr: 'Labyrinthe', ar: 'المتاهة', hi: 'भूलभुलैया' },
+    accent: ACCENT,
+    mood: 'menu',
+    strings: {
+      fa: {
+        board: 'هزارتو', ballAt: 'توپ در ردیف {r} ستون {c}', sizeN: '{n}×{n}', dailyMz: 'هزارتوی روزانه',
+        stepsN: 'قدم: {s}', parN: 'هدف: {p}', solvedMz: 'از هزارتو بیرون آمدی!', straightMz: 'تقریباً از کوتاه‌ترین راه!',
+        stepsL: 'قدم‌ها', parL: 'کوتاه‌ترین راه', mzNew: 'هزارتوی تازه', bestStepsN: 'رکورد تازه: {n} قدم', bestTimeN: 'رکورد زمان: {t}', starsN: '{s} ستاره از ۳',
+        kSlide: 'غلتاندن تا پیچ بعدی', kNew: 'هزارتوی تازه',
+        rules: 'توپ را از شروع در گوشه‌ی بالا و چپ به پرچم لبه‌ی دور برسان. توپ را با انگشت بکش تا از راهروها دنبالت بیاید؛ کشیدن تند انگشت در هر جای صفحه یا کلید جهت، توپ را تا پیچ یا دوراهی بعدی می‌غلتاند. هر هزارتو تازه ساخته می‌شود و همیشه راه خروج دارد. ستاره‌ها با قدم‌ها حساب می‌شوند: نزدیک کوتاه‌ترین راه سه ستاره. بهترین قدم و زمان هر اندازه نگه داشته می‌شود. هیچ‌وقت نمی‌بازی؛ ساعت از اولین حرکت راه می‌افتد و فقط برای رکورد است. هزارتوی روزانه ۱۲×۱۲ و برای همه یکی است.',
+        tutTitle1: 'بکش', tutText1: 'توپ را با انگشت بکش؛ از راهروها دنبالت می‌آید و از دیوار رد نمی‌شود.',
+        tutTitle2: 'بغلتان', tutText2: 'کشیدن تند انگشت در هر جای صفحه یا کلید جهت، توپ را تا پیچ بعدی می‌برد.',
+        tutTitle3: 'به پرچم برس', tutText3: 'هر هزارتو راه خروج دارد. هرچه کمتر قدم برداری ستاره‌ی بیشتری می‌گیری.'
+      },
+      en: {
+        board: 'The maze', ballAt: 'Ball at row {r} column {c}', sizeN: '{n}×{n}', dailyMz: 'Daily Maze',
+        stepsN: 'Steps: {s}', parN: 'Target: {p}', solvedMz: 'You found the way out!', straightMz: 'Almost the shortest way!',
+        stepsL: 'Steps', parL: 'Shortest way', mzNew: 'New maze', bestStepsN: 'New best: {n} steps', bestTimeN: 'Best time: {t}', starsN: '{s} of 3 stars',
+        kSlide: 'Roll to the next turn', kNew: 'New maze',
+        rules: 'Lead the ball from the start in the top left corner to the flag on the far edge. Drag the ball with your finger and it follows you through the passages; a quick swipe anywhere, or an arrow key, rolls it along the corridor to the next turn or crossing. Every maze is freshly made and always has a way out. Stars count your steps: three close to the shortest way. Your best steps and time are kept for each size. You never lose; the clock only starts at your first move and is just for your record. The daily maze is 12×12 and the same for everyone.',
+        tutTitle1: 'Drag', tutText1: 'Drag the ball with your finger. It follows you through the passages and never through a wall.',
+        tutTitle2: 'Roll', tutText2: 'A quick swipe anywhere, or an arrow key, rolls the ball to the next turn.',
+        tutTitle3: 'Reach the flag', tutText3: 'Every maze has a way out. The fewer steps you take, the more stars you get.'
+      },
+      pl: {
+        board: 'Labirynt', ballAt: 'Kulka w rzędzie {r}, kolumnie {c}', sizeN: '{n}×{n}', dailyMz: 'Labirynt dnia',
+        stepsN: 'Kroki: {s}', parN: 'Cel: {p}', solvedMz: 'Znalazłeś wyjście!', straightMz: 'Prawie najkrótszą drogą!',
+        stepsL: 'Kroki', parL: 'Najkrótsza droga', mzNew: 'Nowy labirynt', bestStepsN: 'Nowy rekord: {n} kroków', bestTimeN: 'Najlepszy czas: {t}', starsN: '{s} z 3 gwiazdek',
+        kSlide: 'Tocz do następnego zakrętu', kNew: 'Nowy labirynt',
+        rules: 'Doprowadź kulkę ze startu w lewym górnym rogu do flagi na drugim krańcu. Przeciągnij kulkę palcem, a pójdzie za tobą korytarzami; szybkie przesunięcie w dowolnym miejscu albo strzałka toczy ją korytarzem do następnego zakrętu lub skrzyżowania. Każdy labirynt jest nowy i zawsze ma wyjście. Gwiazdki liczą kroki: trzy blisko najkrótszej drogi. Najlepsze kroki i czas są zapisywane dla każdego rozmiaru. Nigdy nie przegrywasz; zegar rusza dopiero przy pierwszym ruchu i służy tylko do rekordu. Labirynt dnia ma 12×12 i jest taki sam dla wszystkich.',
+        tutTitle1: 'Przeciągaj', tutText1: 'Przeciągnij kulkę palcem. Idzie za tobą korytarzami i nigdy przez ścianę.',
+        tutTitle2: 'Tocz', tutText2: 'Szybkie przesunięcie w dowolnym miejscu albo strzałka toczy kulkę do następnego zakrętu.',
+        tutTitle3: 'Dotrzyj do flagi', tutText3: 'Każdy labirynt ma wyjście. Im mniej kroków, tym więcej gwiazdek.'
+      },
+      fr: {
+        board: 'Le labyrinthe', ballAt: 'Bille ligne {r} colonne {c}', sizeN: '{n}×{n}', dailyMz: 'Labyrinthe du jour',
+        stepsN: 'Pas : {s}', parN: 'Objectif : {p}', solvedMz: 'Tu as trouvé la sortie !', straightMz: 'Presque le plus court chemin !',
+        stepsL: 'Pas', parL: 'Plus court chemin', mzNew: 'Nouveau labyrinthe', bestStepsN: 'Nouveau record : {n} pas', bestTimeN: 'Meilleur temps : {t}', starsN: '{s} étoiles sur 3',
+        kSlide: 'Rouler jusqu’au prochain virage', kNew: 'Nouveau labyrinthe',
+        rules: 'Mène la bille du départ, dans le coin en haut à gauche, jusqu’au drapeau sur le bord opposé. Fais glisser la bille du doigt et elle te suit dans les couloirs ; un geste rapide n’importe où, ou une flèche, la fait rouler le long du couloir jusqu’au prochain virage ou carrefour. Chaque labyrinthe est neuf et a toujours une sortie. Les étoiles comptent tes pas : trois près du plus court chemin. Tes meilleurs pas et temps sont gardés pour chaque taille. Tu ne perds jamais ; le chrono ne part qu’au premier mouvement et sert seulement à ton record. Le labyrinthe du jour fait 12×12 et est le même pour tous.',
+        tutTitle1: 'Glisse', tutText1: 'Fais glisser la bille du doigt. Elle te suit dans les couloirs, jamais à travers un mur.',
+        tutTitle2: 'Roule', tutText2: 'Un geste rapide n’importe où, ou une flèche, fait rouler la bille jusqu’au prochain virage.',
+        tutTitle3: 'Atteins le drapeau', tutText3: 'Chaque labyrinthe a une sortie. Moins tu fais de pas, plus tu gagnes d’étoiles.'
+      },
+      ar: {
+        board: 'المتاهة', ballAt: 'الكرة في الصف {r} العمود {c}', sizeN: '{n}×{n}', dailyMz: 'متاهة اليوم',
+        stepsN: 'الخطوات: {s}', parN: 'الهدف: {p}', solvedMz: 'وجدت طريق الخروج!', straightMz: 'تقريبًا من أقصر طريق!',
+        stepsL: 'الخطوات', parL: 'أقصر طريق', mzNew: 'متاهة جديدة', bestStepsN: 'رقم قياسي جديد: {n} خطوة', bestTimeN: 'أفضل وقت: {t}', starsN: '{s} من 3 نجوم',
+        kSlide: 'دحرجة حتى المنعطف التالي', kNew: 'متاهة جديدة',
+        rules: 'أوصِل الكرة من البداية في الزاوية العليا اليسرى إلى الراية على الحافة البعيدة. اسحب الكرة بإصبعك فتتبعك في الممرات؛ وسحبة سريعة في أي مكان أو مفتاح سهم يدحرجها على طول الممر حتى المنعطف أو التقاطع التالي. كل متاهة جديدة ولها دائمًا مخرج. النجوم تحسب خطواتك: ثلاث قرب أقصر طريق. تُحفظ أفضل خطواتك وأفضل وقت لكل حجم. لا تخسر أبدًا؛ تبدأ الساعة مع أول حركة وهي لرقمك القياسي فقط. متاهة اليوم 12×12 وهي نفسها للجميع.',
+        tutTitle1: 'اسحب', tutText1: 'اسحب الكرة بإصبعك. تتبعك في الممرات ولا تعبر جدارًا أبدًا.',
+        tutTitle2: 'دحرج', tutText2: 'سحبة سريعة في أي مكان أو مفتاح سهم تدحرج الكرة حتى المنعطف التالي.',
+        tutTitle3: 'اصل إلى الراية', tutText3: 'لكل متاهة مخرج. كلما قلّت خطواتك زادت نجومك.'
+      },
+      hi: {
+        board: 'भूलभुलैया', ballAt: 'गेंद पंक्ति {r} स्तंभ {c} में', sizeN: '{n}×{n}', dailyMz: 'रोज़ की भूलभुलैया',
+        stepsN: 'कदम: {s}', parN: 'लक्ष्य: {p}', solvedMz: 'आपने बाहर का रास्ता ढूँढ लिया!', straightMz: 'लगभग सबसे छोटे रास्ते से!',
+        stepsL: 'कदम', parL: 'सबसे छोटा रास्ता', mzNew: 'नई भूलभुलैया', bestStepsN: 'नया रिकॉर्ड: {n} कदम', bestTimeN: 'सबसे अच्छा समय: {t}', starsN: '3 में से {s} सितारे',
+        kSlide: 'अगले मोड़ तक लुढ़काएँ', kNew: 'नई भूलभुलैया',
+        rules: 'गेंद को ऊपर बाएँ कोने की शुरुआत से दूर वाले किनारे के झंडे तक ले जाएँ। गेंद को उँगली से खींचें, वह गलियारों में आपके पीछे चलेगी; कहीं भी तेज़ी से उँगली फिराने या तीर वाली कुंजी से वह गलियारे में अगले मोड़ या चौराहे तक लुढ़कती है। हर भूलभुलैया नई बनती है और उसमें हमेशा बाहर का रास्ता होता है। सितारे आपके कदम गिनते हैं: सबसे छोटे रास्ते के पास तीन सितारे। हर आकार के सबसे अच्छे कदम और समय सहेजे जाते हैं। आप कभी नहीं हारते; घड़ी पहली चाल से चलती है और सिर्फ़ रिकॉर्ड के लिए है। रोज़ की भूलभुलैया 12×12 की है और सबके लिए एक जैसी है।',
+        tutTitle1: 'खींचें', tutText1: 'गेंद को उँगली से खींचें। वह गलियारों में आपके पीछे चलती है, दीवार के आर-पार कभी नहीं।',
+        tutTitle2: 'लुढ़काएँ', tutText2: 'कहीं भी तेज़ी से उँगली फिराएँ या तीर वाली कुंजी दबाएँ, गेंद अगले मोड़ तक लुढ़केगी।',
+        tutTitle3: 'झंडे तक पहुँचें', tutText3: 'हर भूलभुलैया में बाहर का रास्ता है। जितने कम कदम, उतने ज़्यादा सितारे।'
+      },
+      zh: {
+        board: '迷宫', ballAt: '小球在第 {r} 行第 {c} 列', sizeN: '{n}×{n}', dailyMz: '每日迷宫',
+        stepsN: '步数：{s}', parN: '目标：{p}', solvedMz: '你找到了出口！', straightMz: '几乎走了最短的路！',
+        stepsL: '步数', parL: '最短路线', mzNew: '新迷宫', bestStepsN: '新纪录：{n} 步', bestTimeN: '最快用时：{t}', starsN: '{s} / 3 星',
+        kSlide: '滚到下一个拐角', kNew: '新迷宫',
+        rules: '把小球从左上角的起点带到远处边上的旗子。用手指拖动小球，它会跟着你穿过通道；在任何地方快速一划，或按方向键，小球会沿着通道滚到下一个拐角或岔路口。每个迷宫都是新生成的，一定有出口。星星按步数计算：接近最短路线得三星。每种大小都会记录你的最少步数和最快用时。永远不会输；计时从第一步开始，只用于记录。每日迷宫是 12×12，对所有人相同。',
+        tutTitle1: '拖动', tutText1: '用手指拖动小球。它会跟着你穿过通道，绝不会穿墙。',
+        tutTitle2: '滚动', tutText2: '在任何地方快速一划，或按方向键，小球会滚到下一个拐角。',
+        tutTitle3: '到达旗子', tutText3: '每个迷宫都有出口。步数越少，星星越多。'
+      },
+      de: {
+        board: 'Das Labyrinth', ballAt: 'Kugel in Reihe {r}, Spalte {c}', sizeN: '{n}×{n}', dailyMz: 'Labyrinth des Tages',
+        stepsN: 'Schritte: {s}', parN: 'Ziel: {p}', solvedMz: 'Du hast den Ausgang gefunden!', straightMz: 'Fast der kürzeste Weg!',
+        stepsL: 'Schritte', parL: 'Kürzester Weg', mzNew: 'Neues Labyrinth', bestStepsN: 'Neuer Bestwert: {n} Schritte', bestTimeN: 'Bestzeit: {t}', starsN: '{s} von 3 Sternen',
+        kSlide: 'Bis zur nächsten Biegung rollen', kNew: 'Neues Labyrinth',
+        rules: 'Bring die Kugel vom Start oben links zur Fahne am anderen Rand. Zieh die Kugel mit dem Finger, dann folgt sie dir durch die Gänge; ein schnelles Wischen irgendwo oder eine Pfeiltaste rollt sie den Gang entlang bis zur nächsten Biegung oder Kreuzung. Jedes Labyrinth ist neu erzeugt und hat immer einen Ausgang. Die Sterne zählen deine Schritte: drei nahe am kürzesten Weg. Deine besten Schritte und Zeiten werden je Größe gespeichert. Du verlierst nie; die Uhr startet erst beim ersten Zug und zählt nur für deinen Bestwert. Das Tageslabyrinth ist 12×12 und für alle gleich.',
+        tutTitle1: 'Ziehen', tutText1: 'Zieh die Kugel mit dem Finger. Sie folgt dir durch die Gänge, nie durch eine Wand.',
+        tutTitle2: 'Rollen', tutText2: 'Ein schnelles Wischen irgendwo oder eine Pfeiltaste rollt die Kugel bis zur nächsten Biegung.',
+        tutTitle3: 'Zur Fahne', tutText3: 'Jedes Labyrinth hat einen Ausgang. Je weniger Schritte, desto mehr Sterne.'
+      },
+      es: {
+        board: 'El laberinto', ballAt: 'Bola en la fila {r}, columna {c}', sizeN: '{n}×{n}', dailyMz: 'Laberinto del día',
+        stepsN: 'Pasos: {s}', parN: 'Objetivo: {p}', solvedMz: '¡Encontraste la salida!', straightMz: '¡Casi por el camino más corto!',
+        stepsL: 'Pasos', parL: 'Camino más corto', mzNew: 'Laberinto nuevo', bestStepsN: 'Nuevo récord: {n} pasos', bestTimeN: 'Mejor tiempo: {t}', starsN: '{s} de 3 estrellas',
+        kSlide: 'Rodar hasta la siguiente curva', kNew: 'Laberinto nuevo',
+        rules: 'Lleva la bola desde la salida, en la esquina de arriba a la izquierda, hasta la bandera del borde opuesto. Arrastra la bola con el dedo y te seguirá por los pasillos; un deslizamiento rápido en cualquier sitio, o una flecha, la hace rodar por el pasillo hasta la siguiente curva o cruce. Cada laberinto es nuevo y siempre tiene salida. Las estrellas cuentan tus pasos: tres cerca del camino más corto. Se guardan tus mejores pasos y tiempo para cada tamaño. Nunca pierdes; el reloj empieza con tu primer movimiento y solo sirve para tu récord. El laberinto del día es de 12×12 e igual para todos.',
+        tutTitle1: 'Arrastra', tutText1: 'Arrastra la bola con el dedo. Te sigue por los pasillos y nunca atraviesa una pared.',
+        tutTitle2: 'Rueda', tutText2: 'Un deslizamiento rápido en cualquier sitio, o una flecha, hace rodar la bola hasta la siguiente curva.',
+        tutTitle3: 'Llega a la bandera', tutText3: 'Todo laberinto tiene salida. Cuantos menos pasos, más estrellas.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var SWIPE_PX = 18, STEP_MS = 55;
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || E.SIZES.indexOf(prefs.n) < 0) prefs = { n: 8 };
+
+  // S is the saved game; M the maze rebuilt from its seed, never stored
+  var S = null, M = null, ended = false, startedAt = 0, ticker = null;
+
+  var cv = el('canvas', { tabindex: '0', role: 'img', 'aria-label': C.t('board') });
+  var box = el('div', { class: 'mz-box' }, [cv]);
+  var top = el('div', { class: 'mz-top ch-above' });
+  var stars = el('div', { class: 'mz-stars', role: 'img' });
+  var status = el('div', { class: 'mz-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'mz-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side mz-side' }, [top, stars, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  if (!dailyDate) ctx.button({ icon: 'refresh', label: C.t('mzNew'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- game */
+
+  function build() {
+    M = E.generate(S.n, C.rng(S.seed));
+    var p = cellXY(S.trail[S.trail.length - 1]);
+    ball = { x: p.x, y: p.y }; queue = [];
+  }
+  function newMaze(n) {
+    // the daily maze comes from the day's seed, so it is the same for everyone
+    var seed = dailyDate ? C.daily('maze', dailyDate).seed : 1 + Math.floor(Math.random() * 4294967294);
+    S = { n: n, seed: seed >>> 0 || 1, trail: [0], steps: 0, daily: dailyDate || null, elapsed: 0 };
+    ended = false; startedAt = 0;
+    build(); render(); save();
+  }
+  function pos() { return S.trail[S.trail.length - 1]; }
+  function elapsed() { return startedAt ? Date.now() - startedAt : S.elapsed || 0; }
+  function askNew() {
+    if (S && S.steps > 0 && !ended) C.ui.confirm({ title: C.t('mzNew'), body: C.t('resetWarn'), onOk: function () { newMaze(prefs.n); } });
+    else newMaze(prefs.n);
+  }
+  function setSize(n) {
+    if (n === S.n) return;
+    var go = function () { prefs.n = n; ctx.store.set('prefs', prefs); newMaze(n); };
+    if (S.steps > 0 && !ended) C.ui.confirm({ title: C.t('mzNew'), body: C.t('resetWarn'), onOk: go, onCancel: render });
+    else go();
+  }
+
+  // Every cell moved is one step, back as well as forward; the clock starts with the
+  // first one, so reading the maze before moving costs nothing.
+  function go(path) {
+    if (!S || ended || !path.length) return;
+    if (!startedAt) startedAt = Date.now() - (S.elapsed || 0);
+    for (var i = 0; i < path.length; i++) {
+      E.walk(S.trail, path[i]); S.steps++;
+      queue.push(cellXY(path[i]));
+      if (path[i] === M.exit) break;
+    }
+    C.feedback('tap');
+    if (pos() === M.exit) { win(); return; }
+    render(); save(); kick();
+  }
+
+  function win() {
+    ended = true;
+    var ms = elapsed(), st = E.stars(S.steps, M.par), note = st === 3 ? C.t('straightMz') : null;
+    var base = { 8: [2, 8], 12: [4, 16], 16: [7, 28] }[S.n], k = st === 3 ? 1 : st === 2 ? 0.7 : 0.4;
+    var coins = Math.max(1, Math.round(base[0] * k)), points = Math.max(1, Math.round(base[1] * k));
+    C.achievements.unlock('mz-win');
+    if (S.n === 16) C.achievements.unlock('mz-big');
+    if (st === 3 && S.n >= 12) C.achievements.unlock('mz-clean');
+    if (S.daily) {
+      if (!C.stats.daily('maze', S.daily, { label: C.t('stepsN', { s: C.num(S.steps) }), win: true, stars: st, steps: S.steps, timeMs: ms })) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+      C.achievements.unlock('mz-daily');
+    } else {
+      var bs = C.stats.best('maze', 'steps' + S.n, S.steps, true), bt = C.stats.best('maze', 'time' + S.n, ms, true);
+      if (bs && st < 3) note = C.t('bestStepsN', { n: C.num(S.steps) });
+      else if (bt && !note) note = C.t('bestTimeN', { t: C.time(ms) });
+    }
+    ctx.clearSave();
+    C.feedback('good');
+    render(); kick();
+    var fin = S;
+    setTimeout(function () {
+      ctx.finish({
+        won: true, title: C.t('solvedMz'), note: note, stars: st, timeMs: ms, coins: coins, points: points,
+        lines: (fin.daily ? [{ label: C.t('daily'), value: C.num(fin.daily) }] : []).concat([
+          { label: C.t('stepsL'), value: C.num(fin.steps) },
+          { label: C.t('parL'), value: C.num(M.par) },
+          { label: C.t('time'), value: C.time(ms) }
+        ]),
+        shareText: 'چوگان · هزارتو' + (fin.daily ? ('\nروزانه ' + fin.daily) : ('\n' + fin.n + '×' + fin.n)) + '\n' + '★'.repeat(st),
+        againLabel: fin.daily ? null : C.t('mzNew'),
+        onAgain: fin.daily ? null : function () { newMaze(prefs.n); }
+      });
+    }, C.ui.reduceMotion() ? 200 : 450 + queue.length * STEP_MS);
+  }
+
+  /* --------------------------------------------------------------- view */
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  // violet walls on a pale floor; the exit is the one green, so it reads at a glance
+  function palette() {
+    return dark()
+      ? { floor: '#1F1727', frame: '#2C2136', wall: '#D9C4EA', trail: 'rgba(205,150,240,0.38)', ball: '#C27BEA', exit: '#4CC38A', exitBg: 'rgba(76,195,138,0.18)', startBg: 'rgba(194,123,234,0.16)' }
+      : { floor: '#FCF8FE', frame: '#EEE2F5', wall: '#3C2350', trail: 'rgba(168,72,216,0.30)', ball: ACCENT, exit: '#23875A', exitBg: 'rgba(35,135,90,0.14)', startBg: 'rgba(168,72,216,0.10)' };
+  }
+
+  // the view last drawn: a touch is read against what the player saw (Bowling lesson)
+  var drawn = { k: 0, ox: 0, oy: 0, w: 0, h: 0 }, ball = { x: 0.5, y: 0.5 }, queue = [], raf = 0, lastT = 0;
+  function cellXY(i) { return { x: i % S.n + 0.5, y: Math.floor(i / S.n) + 0.5 }; }
+  function size() {
+    var r = box.getBoundingClientRect();
+    return { w: Math.max(80, Math.floor(r.width) || 0), h: Math.max(80, Math.floor(r.height) || 0) };
+  }
+
+  function draw() {
+    if (!M) return;
+    var Z = size(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
+    var n = M.n, side = Math.min(Z.w, Z.h), pad = Math.max(6, side * 0.025), k = (side - 2 * pad) / n;
+    var ox = (Z.w - k * n) / 2, oy = (Z.h - k * n) / 2, P = palette();
+    drawn = { k: k, ox: ox, oy: oy, w: Z.w, h: Z.h };
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, Z.w, Z.h);
+    var fr = Math.max(6, pad * 1.4), fx0 = ox - pad, fy0 = oy - pad, fw = k * n + 2 * pad;
+    g.fillStyle = P.frame; g.beginPath();
+    g.moveTo(fx0 + fr, fy0); g.arcTo(fx0 + fw, fy0, fx0 + fw, fy0 + fw, fr); g.arcTo(fx0 + fw, fy0 + fw, fx0, fy0 + fw, fr);
+    g.arcTo(fx0, fy0 + fw, fx0, fy0, fr); g.arcTo(fx0, fy0, fx0 + fw, fy0, fr); g.closePath(); g.fill();
+    g.fillStyle = P.floor; g.fillRect(ox, oy, k * n, k * n);
+    var X = function (c) { return ox + c * k; }, Y = function (r) { return oy + r * k; };
+    g.fillStyle = P.startBg; g.fillRect(X(0), Y(0), k, k);
+    var er = Math.floor(M.exit / n), ec = M.exit % n;
+    g.fillStyle = P.exitBg; g.fillRect(X(ec), Y(er), k, k);
+
+    // the walked path, so a dead end already tried shows as gone back from
+    g.strokeStyle = P.trail; g.lineWidth = Math.max(3, k * 0.3); g.lineCap = 'round'; g.lineJoin = 'round';
+    g.beginPath();
+    for (var t = 0; t < S.trail.length; t++) {
+      var tc = S.trail[t], tx = X(tc % n + 0.5), ty = Y(Math.floor(tc / n) + 0.5);
+      if (t) g.lineTo(tx, ty); else g.moveTo(tx, ty);
+    }
+    if (S.trail.length > 1) g.stroke();
+
+    // walls: each cell draws its top and left side, the last row and column their outer
+    // side too, except the exit's doorway
+    g.strokeStyle = P.wall; g.lineWidth = Math.max(2, k * 0.13); g.lineCap = 'round';
+    g.beginPath();
+    var side2 = E.exitSide(M);
+    for (var i = 0; i < n * n; i++) {
+      var r = Math.floor(i / n), c = i % n, m = M.m[i];
+      if (!(m & E.N)) { g.moveTo(X(c), Y(r)); g.lineTo(X(c + 1), Y(r)); }
+      if (!(m & E.W)) { g.moveTo(X(c), Y(r)); g.lineTo(X(c), Y(r + 1)); }
+      if (c === n - 1 && !(i === M.exit && side2 === E.E)) { g.moveTo(X(n), Y(r)); g.lineTo(X(n), Y(r + 1)); }
+      if (r === n - 1 && !(i === M.exit && side2 === E.S)) { g.moveTo(X(c), Y(n)); g.lineTo(X(c + 1), Y(n)); }
+    }
+    g.stroke();
+
+    // a small flag on the exit cell
+    var fx = X(ec + 0.5), fy = Y(er + 0.5), fs = k * 0.34;
+    g.strokeStyle = P.exit; g.lineWidth = Math.max(1.5, k * 0.07);
+    g.beginPath(); g.moveTo(fx - fs * 0.55, fy + fs); g.lineTo(fx - fs * 0.55, fy - fs); g.stroke();
+    g.fillStyle = P.exit; g.beginPath(); g.moveTo(fx - fs * 0.5, fy - fs); g.lineTo(fx + fs * 0.85, fy - fs * 0.5); g.lineTo(fx - fs * 0.5, fy); g.closePath(); g.fill();
+
+    // the ball, with a highlight so it reads as round on both floors
+    var bx = X(ball.x), by = Y(ball.y), br = k * 0.32;
+    g.fillStyle = P.ball; g.beginPath(); g.arc(bx, by, br, 0, Math.PI * 2); g.fill();
+    g.fillStyle = 'rgba(255,255,255,0.55)'; g.beginPath(); g.arc(bx - br * 0.32, by - br * 0.32, br * 0.32, 0, Math.PI * 2); g.fill();
+  }
+
+  // The ball rolls cell by cell along the cells queued by a move, so a bend in a drag
+  // is drawn as a bend and never as a cut through a wall.
+  function frame(t) {
+    raf = 0;
+    var dt = lastT ? Math.min(64, t - lastT) : 16; lastT = t;
+    var still = C.ui.reduceMotion(), budget = still ? Infinity : dt / STEP_MS;
+    while (queue.length && budget > 0) {
+      var q = queue[0], dx = q.x - ball.x, dy = q.y - ball.y, d = Math.abs(dx) + Math.abs(dy);
+      if (d <= budget) { ball.x = q.x; ball.y = q.y; budget -= d; queue.shift(); }
+      else { ball.x += dx / d * budget; ball.y += dy / d * budget; budget = 0; }
+    }
+    draw();
+    if (queue.length) raf = requestAnimationFrame(frame); else lastT = 0;
+  }
+  function kick() { if (!raf) raf = requestAnimationFrame(frame); }
+
+  function render() {
+    if (!S) return;
+    top.innerHTML = '';
+    if (S.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyMz') + ' — ' + C.num(S.daily) })]));
+    else top.appendChild(C.ui.segmented(E.SIZES.map(function (n) { return { value: n, label: C.t('sizeN', { n: C.num(n) }) }; }), S.n, setSize));
+    var st = E.stars(S.steps, M.par);
+    stars.innerHTML = '';
+    for (var s = 0; s < 3; s++) stars.appendChild(el('span', { class: s < st ? '' : 'mz-lost', text: '★' }));
+    stars.setAttribute('aria-label', C.t('starsN', { s: C.num(st) }));
+    renderStatus();
+    var p = pos();
+    cv.setAttribute('aria-label', C.t('board') + ' · ' + C.t('ballAt', { r: C.num(Math.floor(p / S.n) + 1), c: C.num(p % S.n + 1) }));
+    draw();
+  }
+  function renderStatus() {
+    // separate parts with a gap, not a middle dot: beside Persian digits a dot reads as ٠
+    status.innerHTML = '';
+    [C.t('stepsN', { s: C.num(S.steps) }), C.t('parN', { p: C.num(M.par) }), C.time(elapsed())]
+      .forEach(function (t) { status.appendChild(el('span', { text: t })); });
+  }
+  ticker = setInterval(function () { if (S && startedAt && !ended) renderStatus(); }, 1000);
+
+  /* -------------------------------------------------------------- input */
+
+  function at(e) {
+    var r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    return { x: x, y: y, c: Math.floor((x - drawn.ox) / drawn.k), r: Math.floor((y - drawn.oy) / drawn.k) };
+  }
+  function cellAt(p) { return p.c < 0 || p.r < 0 || p.c >= S.n || p.r >= S.n ? -1 : p.r * S.n + p.c; }
+
+  // A press on the ball (or next to it) traces: the ball follows the finger through
+  // the passages. A press anywhere else is a swipe that rolls the ball down the
+  // corridor, or a tap that walks it toward the tapped cell.
+  var drag = null;
+  cv.addEventListener('pointerdown', function (e) {
+    if (!S || ended || !drawn.k) return;
+    e.preventDefault();
+    try { cv.setPointerCapture(e.pointerId); } catch (er) { /* old WebViews */ }
+    var p = at(e), b = cellXY(pos()), dx = p.x - (drawn.ox + b.x * drawn.k), dy = p.y - (drawn.oy + b.y * drawn.k);
+    drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, trace: Math.hypot(dx, dy) <= drawn.k * 1.1 };
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (!drag || drag.id !== e.pointerId || !drag.trace || ended) return;
+    var c = cellAt(at(e));
+    if (c >= 0 && c !== pos()) go(E.toward(M, pos(), c));
+  });
+  function release(e) {
+    if (!drag || drag.id !== e.pointerId) return;
+    var d = drag; drag = null;
+    if (d.trace || ended || e.type === 'pointercancel') return;
+    var dx = e.clientX - d.x0, dy = e.clientY - d.y0;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) >= SWIPE_PX) {
+      // the canvas is drawn left to right in every language, so a swipe is geometric
+      go(E.slide(M, pos(), Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? E.E : E.W) : (dy > 0 ? E.S : E.N)));
+    } else {
+      var c = cellAt(at(e));
+      if (c >= 0) go(E.toward(M, pos(), c));
+    }
+  }
+  cv.addEventListener('pointerup', release);
+  cv.addEventListener('pointercancel', release);
+  cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || !S) return;
+    if (C.keyIs(e, 'n') && !dailyDate) { askNew(); e.preventDefault(); return; }
+    var d = { ArrowUp: E.N, ArrowDown: E.S, ArrowLeft: E.W, ArrowRight: E.E }[e.key];
+    if (!d) return;
+    // a focused size button keeps its own arrows; anywhere else they roll the ball
+    if (top.contains(document.activeElement)) return;
+    e.preventDefault();
+    go(E.slide(M, pos(), d));
+  });
+
+  /* ------------------------------------------------------------ dialogs */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    var keys = [kb('← ↑ → ↓', C.t('kSlide'))];
+    if (!dailyDate) keys.push(kb('N', C.t('kNew')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, keys)
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // A fixed 4×4 maze for the tutorial, in the light theme's literal colours. The open
+  // sides of each cell as a mask, the same N=1 E=2 S=4 W=8 as the engine.
+  var TM = [6, 10, 10, 12, 7, 10, 8, 5, 7, 14, 8, 1, 1, 3, 10, 8];
+  function tArt(trail, ballAt, arrow) {
+    var k = 24, ox = 52, oy = 7, s = '<svg viewBox="0 0 200 110" width="100%"><rect x="' + (ox - 4) + '" y="' + (oy - 4) + '" width="' + (k * 4 + 8) + '" height="' + (k * 4 + 8) + '" rx="7" fill="#EEE2F5"/>' +
+      '<rect x="' + ox + '" y="' + oy + '" width="' + (k * 4) + '" height="' + (k * 4) + '" fill="#FCF8FE"/>' +
+      '<rect x="' + (ox + 3 * k) + '" y="' + (oy + 3 * k) + '" width="' + k + '" height="' + k + '" fill="rgba(35,135,90,0.14)"/>';
+    var cx = function (i) { return ox + (i % 4) * k + k / 2; }, cy = function (i) { return oy + Math.floor(i / 4) * k + k / 2; };
+    if (trail.length > 1) s += '<polyline points="' + trail.map(function (i) { return cx(i) + ',' + cy(i); }).join(' ') + '" fill="none" stroke="rgba(168,72,216,0.30)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>';
+    var d = '';
+    for (var i = 0; i < 16; i++) {
+      var x = ox + (i % 4) * k, y = oy + Math.floor(i / 4) * k;
+      if (!(TM[i] & 1)) d += 'M' + x + ' ' + y + 'h' + k;
+      if (!(TM[i] & 8)) d += 'M' + x + ' ' + y + 'v' + k;
+      if (i % 4 === 3 && i !== 15) d += 'M' + (x + k) + ' ' + y + 'v' + k;
+      if (i >= 12) d += 'M' + x + ' ' + (y + k) + 'h' + k;
+    }
+    s += '<path d="' + d + '" stroke="#3C2350" stroke-width="3" stroke-linecap="round" fill="none"/>';
+    s += '<path d="M' + (cx(15) - 4) + ' ' + (cy(15) + 8) + 'v-16l12 4-12 5" fill="#23875A" stroke="#23875A" stroke-width="1.5" stroke-linejoin="round"/>';
+    s += '<circle cx="' + cx(ballAt) + '" cy="' + cy(ballAt) + '" r="8" fill="' + ACCENT + '"/><circle cx="' + (cx(ballAt) - 2.5) + '" cy="' + (cy(ballAt) - 2.5) + '" r="2.5" fill="#fff" opacity=".55"/>';
+    if (arrow) s += '<path d="' + arrow + '" fill="none" stroke="' + ACCENT + '" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="4 4"/>';
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt([0, 4, 5], 5, 'M98 43h16') },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt([0, 1, 2, 3], 3,'M20 ' + (7 + 60) + 'h22M36 ' + (7 + 54) + 'l6 6-6 6') },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt([0, 4, 8, 9, 13, 14, 15], 15, null) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // the walk is saved after every move; the daily maze has its own slot
+  ctx.autosave(function () {
+    if (!S || ended) return { inProgress: false };
+    return { n: S.n, seed: S.seed, trail: S.trail, steps: S.steps, daily: S.daily, elapsed: elapsed() };
+  });
+  function save() { ctx.save(); }
+  C.onPause(function () { if (S && !ended) { S.elapsed = elapsed(); startedAt = 0; ctx.save(); } });
+  var saved = ctx.loadSave();
+  if (saved && E.valid(saved) && (saved.daily || null) === (dailyDate || null) &&
+      E.valid(saved, E.generate(saved.n, C.rng(saved.seed)))) {
+    S = { n: saved.n, seed: saved.seed, trail: saved.trail.slice(), steps: saved.steps, daily: saved.daily || null, elapsed: +saved.elapsed || 0 };
+    build(); render();
+  } else newMaze(dailyDate ? E.DAILY_N : prefs.n);
+  if (dailyDate && C.stats.dailyDone('maze', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).maze;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  // the board is redrawn whenever its box changes (rotation, side rows) and once the
+  // web font has arrived and moved the layout (Bowling lesson)
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { draw(); });
+  if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { draw(); }); } catch (er) { /* old WebViews */ } }
+  new MutationObserver(function () { draw(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
