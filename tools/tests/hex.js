@@ -103,6 +103,10 @@ module.exports = function (T) {
     const H = E.newGame(false), HR = rng(7);
     for (let k = 0; k < 1; k++) { const t = Date.now(), m = E.think(H, 'hard', HR); slow = Math.max(slow, Date.now() - t); E.play(H, m); }
     ok(H.plies === 1 && E.valid(H), 'hard opens a game with a legal move');
+    // #984: the empty-board search cost ~430 ms and failed the limit below at random; the
+    // opening is now the cell that search always chose (row 0, column 9), played at once.
+    { const t = Date.now(), m = E.think(E.newGame(true), 'hard', rng(3)), took = Date.now() - t;
+      ok(took < 50 && E.rc(m)[0] === 0 && E.rc(m)[1] === 9, 'hard opens on the searched cell without searching (' + took + ' ms, cell ' + m + ')'); }
     ok(slow < 400, 'no bot move takes more than 400 ms here (slowest ' + slow + ' ms), so a phone stays under its 1.5 s');
 
     // the daily opening is the same for everyone and fair
