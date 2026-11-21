@@ -108,6 +108,14 @@ module.exports = function (T) {
     ok(!missing.length, 'the new strings are in all ' + LOCALE_CODES.length + ' languages' + (missing.length ? ' (missing ' + missing.slice(0, 12).join(', ') + ')' : ''));
     for (const k of keys) ok(new RegExp("C\\.t\\('" + k + "'").test(html), 'C.t(\'' + k + '\') is used with a literal key');
 
+    // #1007: the menu's "3–4 players" filter reads people from games.json, and
+    // Dots still said 2 there after #987, so the four-seat game never showed up.
+    const cat = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8'));
+    const entry = (cat.games || cat).filter((g) => g.id === 'dots');
+    const seatMax = +((html.match(/var MAX_SEATS = (\d+);/) || [])[1] || 0);
+    ok(entry.length === 1 && seatMax >= 3, 'games.json lists dots once and the page names its seat limit (' + seatMax + ')');
+    ok(entry.length === 1 && entry[0].people === seatMax, 'games.json gives dots people ' + seatMax + ', as many as the page seats (' + (entry[0] && entry[0].people) + ')');
+
     const ms = Date.now() - t0;
     ok(ms < 3000, 'the group runs in under 3 s (' + ms + ' ms)');
   }
