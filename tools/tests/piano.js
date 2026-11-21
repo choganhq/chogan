@@ -51,14 +51,21 @@ module.exports = function (T) {
     let allRight = true;
     for (const t of E.TUNES) {
       const P = E.practice(t.id), n = E.tune(t.id);
-      const res = n.map((x) => E.press(P, x.m));
+      const res = n.map((x) => (E.press(P, x.m) === 'hold' ? E.advance(P) : 'miss'));
       if (!(res.slice(0, -1).every((r) => r === 'hit') && res[res.length - 1] === 'done')) allRight = false;
     }
     ok(allRight, 'playing each tune\'s notes in order moves on note by note and ends it');
     const P = E.practice('mary');
-    ok(E.expected(P) === 64 && E.press(P, 60) === 'miss' && P.i === 0 && E.press(P, 64) === 'hit' && E.expected(P) === 62, 'a wrong key changes nothing; the right one moves on');
-    E.tune('mary').slice(1).forEach((x) => E.press(P, x.m));
-    ok(E.expected(P) === -1 && E.press(P, 64) === 'hit' && P.i === 1 && E.press(null, 60) === 'free' && E.practice('nope') === null, 'after the end the next key starts the tune again; free play has no tune');
+    ok(E.expected(P) === 64 && E.press(P, 60) === 'miss' && P.i === 0 && E.press(P, 64) === 'hold' && P.i === 0 && E.advance(P) === 'hit' && E.expected(P) === 62, 'a wrong key changes nothing; the right key only starts a hold, and the note counts when it has been held long enough');
+    {
+      const Q = E.practice('london');   // opens with a 1.5-beat note, then a half beat, then whole beats
+      const need = [];
+      for (let k = 0; k < 4; k++) { need.push(E.need(Q)); E.press(Q, Q.notes[Q.i].m); E.advance(Q); }
+      ok(need[0] === Math.round(1.5 * E.BEAT_MS * E.HOLD) && need[1] === Math.round(0.5 * E.BEAT_MS * E.HOLD) && need[2] === Math.round(E.BEAT_MS * E.HOLD) && need[0] > need[2] && need[2] > need[1] && E.HOLD > 0.5 && E.HOLD < 1, 'a longer note has to be held longer (1.5 beats > 1 beat > half a beat), at most its own length: ' + need.join(', ') + ' ms');
+      ok(E.need(null) === 0 && E.need(E.practice('mary')) === Math.round(E.BEAT_MS * E.HOLD), 'free play needs no hold; a one-beat note needs ' + Math.round(E.BEAT_MS * E.HOLD) + ' ms');
+    }
+    E.tune('mary').slice(1).forEach((x) => { E.press(P, x.m); E.advance(P); });
+    ok(E.expected(P) === -1 && E.press(P, 64) === 'hold' && P.i === 0 && E.press(null, 60) === 'free' && E.practice('nope') === null, 'after the end the next key starts the tune again; free play has no tune');
 
     // the sound: the core's piano voice, run against a fake AudioContext
     const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
