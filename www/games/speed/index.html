@@ -1,0 +1,757 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>سرعت — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  :root { --ch-pface: var(--c-surface); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ch-pface: var(--c-surface-3); } }
+  :root[data-theme="dark"] { --ch-pface: var(--c-surface-3); }
+  /* cards grow with the game area (#359): six cards wide, about four tall */
+  .sp-wrap { --cw: clamp(40px, min((100cqw - 56px) / 6.1, (100cqh - 190px) / 3.9), 104px); margin-block: auto; width: 100%; max-width: max(520px, calc(var(--cw) * 7)); display: flex; flex-direction: column; align-items: center; gap: var(--s-3); }
+  .sp-top { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; align-items: center; }
+  /* the table is a physical thing, laid out the same way in every language */
+  .sp-row, .sp-table { direction: ltr; display: flex; align-items: flex-end; justify-content: center; gap: 10px; width: 100%; }
+  .sp-table { align-items: flex-start; gap: var(--s-3); }
+  .sp-pile { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: var(--fs-xs, 12px); font-weight: 700; color: var(--c-text-dim); font-variant-numeric: tabular-nums; }
+  .sp-pile .ch-pback { width: calc(var(--cw) * .8); box-shadow: 2px 2px 0 -1px #FBF5E6, 3px 3px 0 -1px var(--c-line); }
+  .sp-row--bot .ch-pback { width: calc(var(--cw) * .55); }
+  .sp-gone { width: calc(var(--cw) * .8); aspect-ratio: 5 / 7; border-radius: 6px; border: 2px dashed var(--c-line); box-sizing: border-box; }
+  .sp-row--bot .sp-gone { width: calc(var(--cw) * .55); }
+  .sp-bothand { display: flex; gap: 4px; min-height: calc(var(--cw) * .77); align-items: flex-end; }
+  .sp-hand { display: flex; gap: 6px; padding-top: 14px; }
+  .sp-slot { width: var(--cw); aspect-ratio: 5 / 7; }
+  .sp-slot .ch-pcard { --pw: var(--cw); touch-action: none; }
+  /* a press must land on the card itself, never on a part of it (#750) */
+  .sp-slot .ch-pcard *, .sp-centre > * { pointer-events: none; }
+  .sp-sel { transform: translateY(-12px); box-shadow: var(--sh-2), 0 0 0 3px var(--game); }
+  /* a dragged card gets its own layer, or every move repaints it (#532) */
+  .sp-drag { transition: none; z-index: 5; will-change: transform; box-shadow: var(--sh-2); }
+  .sp-side { display: flex; flex-direction: column; align-items: center; gap: 3px; padding-top: calc(var(--cw) * .2); font-size: var(--fs-xs, 12px); font-weight: 700; color: var(--c-text-dim); font-variant-numeric: tabular-nums; }
+  .sp-side .ch-pback, .sp-side .sp-gone { width: calc(var(--cw) * .6); }
+  .sp-centre { position: relative; width: var(--cw); aspect-ratio: 5 / 7; border-radius: 9px; cursor: pointer; }
+  .sp-centre .ch-pcard { --pw: var(--cw); position: absolute; top: 0; left: 0; }
+  .sp-centre--on { outline: 3px solid var(--game); outline-offset: 3px; }
+  .sp-status { min-height: 1.5em; font-weight: 700; font-size: var(--fs-sm); color: var(--c-text-dim); text-align: center; }
+  .sp-status--go { color: var(--game); }
+  /* text in the accent on a dark surface takes the lightened accent (#396) */
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .sp-status--go { color: var(--game-text-dark, var(--game)); } }
+  :root[data-theme="dark"] .sp-status--go { color: var(--game-text-dark, var(--game)); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function SpeedEngineFactory() {
+  'use strict';
+
+  // A card is rank * 4 + suit, as in Chogan.cards: ranks A..K are 0..12
+  var HAND = 5, PILE = 15, SIDE = 5;
+  // Bot reaction in ms per level, before the player's Slow/Normal/Fast pace. The level is
+  // nothing but this delay: every bot sees the same cards, so a slower one simply loses
+  // the race more often (measured in tools/tests/speed.js).
+  var DELAY = { easy: 3400, medium: 2500, hard: 1700 };
+  // how long both players see "nobody can play" before new centre cards are turned
+  var FLIP_MS = 1100;
+
+  function rank(c) { return c >> 2; }
+  function suit(c) { return c & 3; }
+  function shuffled(rnd) {
+    var d = [];
+    for (var i = 0; i < 52; i++) d.push(i);
+    for (var j = 51; j > 0; j--) { var k = Math.floor(rnd() * (j + 1)), t = d[j]; d[j] = d[k]; d[k] = t; }
+    return d;
+  }
+  // one rank apart; the ace sits between the king and the two
+  function adj(a, b) { var d = Math.abs(rank(a) - rank(b)); return d === 1 || d === 12; }
+
+  // Five in each hand, fifteen in each draw pile, five in each flip pile beside the
+  // centre, and one card turned up on each centre pile: 52.
+  function newDeal(rnd) {
+    var d = shuffled(rnd);
+    var R = { hands: [d.splice(0, HAND), d.splice(0, HAND)], piles: [d.splice(0, PILE), d.splice(0, PILE)],
+      side: [d.splice(0, SIDE), d.splice(0, SIDE)], centre: [], winner: -1, flips: 0 };
+    R.centre = [[d.pop()], [d.pop()]];
+    return R;
+  }
+  function top(R, i) { var c = R.centre[i]; return c[c.length - 1]; }
+  function canPlay(R, c, i) { return R.winner < 0 && (i === 0 || i === 1) && adj(c, top(R, i)); }
+  function playable(R, p) {
+    var out = [];
+    R.hands[p].forEach(function (c) { for (var i = 0; i < 2; i++) if (canPlay(R, c, i)) out.push({ c: c, i: i }); });
+    return out;
+  }
+  // Plays a card and refills the hand from the draw pile. The new card takes the slot of
+  // the one played, so the other cards never jump under a finger that is about to tap
+  // them. Returns the card drawn (-1 when the pile was empty), or null for a refused move.
+  function play(R, p, c, i) {
+    var h = R.hands[p], k = h.indexOf(c);
+    if (k < 0 || !canPlay(R, c, i)) return null;
+    R.centre[i].push(c);
+    var drawn = -1;
+    if (R.piles[p].length) { drawn = R.piles[p].pop(); h[k] = drawn; } else h.splice(k, 1);
+    if (!h.length && !R.piles[p].length) R.winner = p;
+    return drawn;
+  }
+  function stuck(R) { return R.winner < 0 && !playable(R, 0).length && !playable(R, 1).length; }
+  // When nobody can play: turn the top card of each flip pile onto the centre (taking
+  // both from the other flip pile when one is empty). With the flip piles gone, each
+  // player turns their own draw pile's top card onto their centre pile. With those gone
+  // too, the centre piles are shuffled into two new flip piles. Each step changes a top
+  // card, and with only the hands (at most ten cards) left outside the centre some hand
+  // card always has a neighbour rank in the centre (ten cards cannot hold all 13 ranks),
+  // so turning through the centre always ends the deadlock.
+  function flip(R, rnd) {
+    if (!stuck(R)) return '';
+    R.flips++;
+    var mode;
+    if (R.side[0].length || R.side[1].length) {
+      mode = 'side';
+      for (var i = 0; i < 2; i++) {
+        var src = R.side[i].length ? R.side[i] : R.side[1 - i];
+        if (src.length) R.centre[i].push(src.pop());
+      }
+    } else if (R.piles[0].length || R.piles[1].length) {
+      mode = 'own';
+      for (var p = 0; p < 2; p++) if (R.piles[p].length) R.centre[p].push(R.piles[p].pop());
+    } else {
+      mode = 'reshuffle';
+      var all = R.centre[0].concat(R.centre[1]);
+      for (var j = all.length - 1; j > 0; j--) { var k = Math.floor(rnd() * (j + 1)), t = all[j]; all[j] = all[k]; all[k] = t; }
+      var half = all.length >> 1;
+      R.side = [all.slice(0, half), all.slice(half)];
+      R.centre = [[R.side[0].pop()], [R.side[1].pop()]];
+    }
+    return mode;
+  }
+  function cardsLeft(R, p) { return R.hands[p].length + R.piles[p].length; }
+
+  // Which card a bot plays when its reaction time comes. Easy takes any card that fits,
+  // medium the first, hard the one that leaves the other player the fewest moves.
+  function botMove(R, p, level, rnd) {
+    var ms = playable(R, p);
+    if (!ms.length) return null;
+    if (level === 'easy') return ms[Math.floor(rnd() * ms.length)];
+    if (level !== 'hard') return ms[0];
+    var o = R.hands[1 - p], best = null, bs = 1e9;
+    ms.forEach(function (m) {
+      var tops = [top(R, 0), top(R, 1)];
+      tops[m.i] = m.c;
+      var s = 0;
+      o.forEach(function (c) { if (adj(c, tops[0]) || adj(c, tops[1])) s++; });
+      if (s < bs) { bs = s; best = m; }
+    });
+    return best;
+  }
+
+  // A whole round between two bots on one timeline: each acts when its own delay comes
+  // round, and a deadlock turns new centre cards after FLIP_MS. `delays` are ms per
+  // player. Returns the winner (-1 if it never ended), the time taken and the flips.
+  function simulate(rnd, levels, delays, cap) {
+    var R = newDeal(rnd), t = 0, next = [], flipAt = -1, steps = 0;
+    var d = function (p) { return delays[p] * (0.8 + 0.4 * rnd()); };
+    next[0] = d(0); next[1] = d(1);
+    cap = cap || 20000;
+    while (R.winner < 0 && steps++ < cap) {
+      if (stuck(R)) { if (flipAt < 0) flipAt = t + FLIP_MS; } else flipAt = -1;
+      if (flipAt >= 0 && flipAt <= Math.min(next[0], next[1])) { t = flipAt; flip(R, rnd); flipAt = -1; continue; }
+      var p = next[0] <= next[1] ? 0 : 1;
+      t = next[p];
+      var m = botMove(R, p, levels[p], rnd);
+      if (m) play(R, p, m.c, m.i);
+      next[p] = t + d(p);
+    }
+    return { winner: R.winner, ms: t, flips: R.flips, steps: steps, R: R };
+  }
+
+  // a restored save: two players' cards, the centre and the flip piles hold 52 distinct cards
+  function validRound(R) {
+    if (!R || typeof R !== 'object') return false;
+    var lists = ['hands', 'piles', 'side', 'centre'];
+    for (var a = 0; a < lists.length; a++) if (!Array.isArray(R[lists[a]]) || R[lists[a]].length !== 2) return false;
+    if (!R.centre[0].length || !R.centre[1].length || R.hands[0].length > HAND || R.hands[1].length > HAND) return false;
+    if ([-1, 0, 1].indexOf(R.winner) < 0) return false;
+    var seen = {}, n = 0;
+    for (var b = 0; b < lists.length; b++) for (var q = 0; q < 2; q++) {
+      var arr = R[lists[b]][q];
+      if (!Array.isArray(arr)) return false;
+      for (var i = 0; i < arr.length; i++) {
+        var c = arr[i];
+        if (typeof c !== 'number' || c < 0 || c > 51 || c !== Math.floor(c) || seen[c]) return false;
+        seen[c] = 1; n++;
+      }
+    }
+    // a hand short of five only once its draw pile is empty
+    for (var p = 0; p < 2; p++) if (R.hands[p].length < HAND && R.piles[p].length) return false;
+    return n === 52;
+  }
+
+  var api = { HAND: HAND, PILE: PILE, SIDE: SIDE, DELAY: DELAY, FLIP_MS: FLIP_MS, rank: rank, suit: suit, adj: adj, shuffled: shuffled,
+    newDeal: newDeal, top: top, canPlay: canPlay, playable: playable, play: play, stuck: stuck, flip: flip, cardsLeft: cardsLeft,
+    botMove: botMove, simulate: simulate, validRound: validRound };
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = SpeedEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = SpeedEngineFactory();
+  var LEVELS = ['easy', 'medium', 'hard'];
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'speed',
+    name: { fa: 'سرعت', en: 'Speed', zh: '快手接龙', de: 'Speed', es: 'Speed', pl: 'Szybkość', fr: 'Speed', ar: 'السرعة', hi: 'स्पीड' },
+    accent: '#50329B',
+    mood: 'menu',
+    cardSpeed: true,
+    scroll: true,
+    strings: {
+      fa: {
+        player: 'تو', bot: 'ربات', dailySp: 'سرعت روزانه', levelN: 'ربات: {l}', ready: 'آماده…', go: 'برو!',
+        pickPile: 'حالا روی یکی از دسته‌های وسط بزن', noFit: 'کارتی بزن که یکی بالاتر یا پایین‌تر از کارت وسط باشد', stuckNow: 'هیچ‌کس کارت ندارد؛ کارت تازه رو می‌شود…',
+        flipSide: 'کارت‌های تازه‌ی وسط', flipOwn: 'هر کس یک کارت از دسته‌ی خودش رو کرد', reshuffled: 'کارت‌های وسط بُر خوردند و دسته‌ی تازه شدند', playing: 'یکی بالاتر یا یکی پایین‌تر، هر چه سریع‌تر',
+        youFaster: 'تو سریع‌تر بودی!', botFaster: 'ربات سریع‌تر بود', level: 'سطح ربات', optNote: 'از دست بعد اعمال می‌شود.', cardsYou: 'کارت‌های مانده‌ی تو', cardsBot: 'کارت‌های مانده‌ی ربات',
+        dailyWon: 'بردی؛ ربات {n} کارت داشت', dailyLost: 'با {n} کارت باختی', flipsN: 'رو کردن‌ها', newRound: 'دست تازه',
+        rules: 'تو و ربات هم‌زمان بازی می‌کنید و کسی منتظر نوبت نمی‌ماند. هر کدام پنج کارت در دست و یک دسته‌ی کارت دارید. کارتی که یکی بالاتر یا یکی پایین‌تر از کارت روی هر کدام از دو دسته‌ی وسط باشد رویش می‌نشیند؛ آس بین شاه و دو است. دستت از دسته‌ی خودت پر می‌شود. وقتی هیچ‌کدام نتوانید بازی کنید، کارت تازه روی دسته‌های وسط رو می‌شود. هر کس زودتر همه‌ی کارت‌هایش را بازی کند می‌برد.',
+        kbPick: 'انتخاب کارت', kbLeft: 'بازی روی دسته‌ی چپ', kbRight: 'بازی روی دسته‌ی راست', kbFirst: 'بازی هر جا که بنشیند',
+        tutTitle1: 'یکی بالا یا پایین', tutText1: 'یک کارت را بزن، بعد یکی از دسته‌های وسط را، یا کارت را تا آنجا بکش. یکی بالاتر یا پایین‌تر می‌نشیند؛ آس بین شاه و دو است.',
+        tutTitle2: 'نوبت در کار نیست', tutText2: 'ربات هم‌زمان با تو بازی می‌کند. تند باش؛ دستت از دسته‌ی خودت پر می‌شود.',
+        tutTitle3: 'گیر کردید؟', tutText3: 'وقتی هیچ‌کدام کارت نداشتید، کارت تازه وسط رو می‌شود. هر کس زودتر کارت‌هایش تمام شود می‌برد.'
+      },
+      en: {
+        player: 'You', bot: 'Bot', dailySp: 'Daily Speed', levelN: 'Bot: {l}', ready: 'Ready…', go: 'Go!',
+        pickPile: 'Now tap a centre pile', noFit: 'Play one rank above or below a centre card', stuckNow: 'Nobody can play: turning new centre cards…',
+        flipSide: 'New centre cards', flipOwn: 'Each player turns over a card from their own pile', reshuffled: 'The centre was shuffled into new flip piles', playing: 'One above or one below, as fast as you can',
+        youFaster: 'You were faster!', botFaster: 'The bot was faster', level: 'Bot level', optNote: 'Applies from the next round.', cardsYou: 'Your cards left', cardsBot: 'Bot\'s cards left',
+        dailyWon: 'Won; the bot had {n} cards left', dailyLost: 'Lost with {n} cards left', flipsN: 'Flips', newRound: 'New round',
+        rules: 'You and the bot play at the same time; nobody waits for a turn. Each of you has five cards in hand and a draw pile. A card goes on either centre pile if it is one rank above or below the top card; the ace sits between the king and the two. Your hand refills from your draw pile. When neither of you can play, new cards are turned onto the centre piles. The first to play all their cards wins.',
+        kbPick: 'Pick a card', kbLeft: 'Play on the left pile', kbRight: 'Play on the right pile', kbFirst: 'Play where it fits',
+        tutTitle1: 'One up or down', tutText1: 'Tap a card, then a centre pile, or drag the card there. It goes on if it is one rank above or below; the ace sits between the king and the two.',
+        tutTitle2: 'No turns', tutText2: 'The bot plays at the same time. Be quick: your hand refills from your pile.',
+        tutTitle3: 'Stuck?', tutText3: 'When neither of you can play, new cards are turned onto the centre. Play all your cards first to win.'
+      },
+      pl: {
+        player: 'Ty', bot: 'Bot', dailySp: 'Szybkość dnia', levelN: 'Bot: {l}', ready: 'Gotowi…', go: 'Start!',
+        pickPile: 'Teraz dotknij stosu na środku', noFit: 'Zagraj kartę o jeden wyżej lub niżej od karty na środku', stuckNow: 'Nikt nie może zagrać: odkrywamy nowe karty…',
+        flipSide: 'Nowe karty na środku', flipOwn: 'Każdy odkrywa kartę ze swojego stosu', reshuffled: 'Karty ze środka potasowano w nowe stosy', playing: 'O jeden wyżej lub niżej, jak najszybciej',
+        youFaster: 'Byłeś szybszy!', botFaster: 'Bot był szybszy', level: 'Poziom bota', optNote: 'Obowiązuje od następnej rundy.', cardsYou: 'Twoje pozostałe karty', cardsBot: 'Pozostałe karty bota',
+        dailyWon: 'Wygrana; bot miał {n} kart', dailyLost: 'Przegrana z {n} kartami', flipsN: 'Odkrycia', newRound: 'Nowa runda',
+        rules: 'Ty i bot gracie jednocześnie; nikt nie czeka na swoją kolej. Każdy ma pięć kart w ręce i stos do dobierania. Kartę można położyć na dowolny stos na środku, jeśli jest o jeden wyżej lub niżej od wierzchniej; as leży między królem a dwójką. Ręka uzupełnia się z twojego stosu. Gdy nikt nie może zagrać, na środek trafiają nowe karty. Wygrywa ten, kto pierwszy zagra wszystkie karty.',
+        kbPick: 'Wybierz kartę', kbLeft: 'Zagraj na lewy stos', kbRight: 'Zagraj na prawy stos', kbFirst: 'Zagraj tam, gdzie pasuje',
+        tutTitle1: 'O jeden w górę lub w dół', tutText1: 'Dotknij karty, a potem stosu na środku, albo przeciągnij ją tam. Pasuje karta o jeden wyżej lub niżej; as leży między królem a dwójką.',
+        tutTitle2: 'Bez kolejek', tutText2: 'Bot gra w tym samym czasie. Bądź szybki: ręka uzupełnia się z twojego stosu.',
+        tutTitle3: 'Zablokowani?', tutText3: 'Gdy nikt nie może zagrać, na środek trafiają nowe karty. Zagraj wszystkie karty pierwszy, by wygrać.'
+      },
+      fr: {
+        player: 'Toi', bot: 'Robot', dailySp: 'Speed du jour', levelN: 'Robot : {l}', ready: 'Prêt…', go: 'Partez !',
+        pickPile: 'Touche maintenant une pile du centre', noFit: 'Joue une carte juste au-dessus ou au-dessous d\'une carte du centre', stuckNow: 'Personne ne peut jouer : nouvelles cartes au centre…',
+        flipSide: 'Nouvelles cartes au centre', flipOwn: 'Chacun retourne une carte de sa propre pioche', reshuffled: 'Le centre a été mélangé en nouvelles piles', playing: 'Une au-dessus ou une au-dessous, le plus vite possible',
+        youFaster: 'Tu as été plus rapide !', botFaster: 'Le robot a été plus rapide', level: 'Niveau du robot', optNote: 'S\'applique à la prochaine manche.', cardsYou: 'Tes cartes restantes', cardsBot: 'Cartes restantes du robot',
+        dailyWon: 'Gagné ; il restait {n} cartes au robot', dailyLost: 'Perdu avec {n} cartes restantes', flipsN: 'Retournements', newRound: 'Nouvelle manche',
+        rules: 'Toi et le robot jouez en même temps ; personne n\'attend son tour. Chacun a cinq cartes en main et une pioche. Une carte va sur l\'une des deux piles du centre si elle est juste au-dessus ou au-dessous de la carte du dessus ; l\'as se place entre le roi et le deux. Ta main se complète depuis ta pioche. Quand aucun de vous ne peut jouer, de nouvelles cartes sont retournées au centre. Le premier à jouer toutes ses cartes gagne.',
+        kbPick: 'Choisir une carte', kbLeft: 'Jouer sur la pile de gauche', kbRight: 'Jouer sur la pile de droite', kbFirst: 'Jouer là où elle va',
+        tutTitle1: 'Une de plus ou de moins', tutText1: 'Touche une carte, puis une pile du centre, ou fais-la glisser. Elle va si elle est juste au-dessus ou au-dessous ; l\'as est entre le roi et le deux.',
+        tutTitle2: 'Pas de tour', tutText2: 'Le robot joue en même temps. Sois rapide : ta main se complète depuis ta pioche.',
+        tutTitle3: 'Bloqués ?', tutText3: 'Quand personne ne peut jouer, de nouvelles cartes sont retournées au centre. Joue toutes tes cartes en premier pour gagner.'
+      },
+      ar: {
+        player: 'أنت', bot: 'الروبوت', dailySp: 'السرعة اليومية', levelN: 'الروبوت: {l}', ready: 'استعد…', go: 'انطلق!',
+        pickPile: 'الآن المس إحدى كومتي الوسط', noFit: 'العب ورقة أعلى أو أدنى بدرجة واحدة من ورقة الوسط', stuckNow: 'لا أحد يستطيع اللعب: تُقلب أوراق جديدة في الوسط…',
+        flipSide: 'أوراق جديدة في الوسط', flipOwn: 'كل لاعب يقلب ورقة من كومته', reshuffled: 'خُلطت أوراق الوسط في كومتين جديدتين', playing: 'أعلى بواحدة أو أدنى بواحدة، بأسرع ما يمكن',
+        youFaster: 'كنت أسرع!', botFaster: 'كان الروبوت أسرع', level: 'مستوى الروبوت', optNote: 'يُطبَّق من الجولة التالية.', cardsYou: 'أوراقك المتبقية', cardsBot: 'أوراق الروبوت المتبقية',
+        dailyWon: 'فزت؛ بقيت مع الروبوت {n} أوراق', dailyLost: 'خسرت وبقيت معك {n} أوراق', flipsN: 'مرات القلب', newRound: 'جولة جديدة',
+        rules: 'تلعب أنت والروبوت في الوقت نفسه؛ لا أحد ينتظر دوره. لكل منكما خمس أوراق في اليد وكومة سحب. توضع الورقة على أي من كومتي الوسط إذا كانت أعلى أو أدنى بدرجة واحدة من الورقة العليا؛ الآس يقع بين الملك والاثنين. تمتلئ يدك من كومتك. عندما لا يستطيع أي منكما اللعب تُقلب أوراق جديدة على كومتي الوسط. أول من يلعب كل أوراقه يفوز.',
+        kbPick: 'اختر ورقة', kbLeft: 'العب على الكومة اليسرى', kbRight: 'العب على الكومة اليمنى', kbFirst: 'العب حيث تناسب',
+        tutTitle1: 'أعلى أو أدنى بواحدة', tutText1: 'المس ورقة ثم كومة في الوسط، أو اسحبها إليها. تُقبل إن كانت أعلى أو أدنى بدرجة؛ الآس بين الملك والاثنين.',
+        tutTitle2: 'بلا أدوار', tutText2: 'الروبوت يلعب في الوقت نفسه. كن سريعًا: يدك تمتلئ من كومتك.',
+        tutTitle3: 'عالقان؟', tutText3: 'عندما لا يستطيع أحد اللعب تُقلب أوراق جديدة في الوسط. العب كل أوراقك أولًا لتفوز.'
+      },
+      hi: {
+        player: 'आप', bot: 'बॉट', dailySp: 'आज का स्पीड', levelN: 'बॉट: {l}', ready: 'तैयार…', go: 'चलो!',
+        pickPile: 'अब बीच की किसी ढेरी को छुएँ', noFit: 'बीच के पत्ते से एक ऊपर या एक नीचे का पत्ता खेलें', stuckNow: 'कोई नहीं खेल सकता: बीच में नए पत्ते खुल रहे हैं…',
+        flipSide: 'बीच में नए पत्ते', flipOwn: 'हर खिलाड़ी ने अपनी ढेरी से एक पत्ता खोला', reshuffled: 'बीच के पत्ते फेंटकर नई ढेरियाँ बनाई गईं', playing: 'एक ऊपर या एक नीचे, जितनी जल्दी हो सके',
+        youFaster: 'आप तेज़ निकले!', botFaster: 'बॉट तेज़ निकला', level: 'बॉट का स्तर', optNote: 'अगले राउंड से लागू होगा.', cardsYou: 'आपके बचे पत्ते', cardsBot: 'बॉट के बचे पत्ते',
+        dailyWon: 'जीते; बॉट के पास {n} पत्ते बचे थे', dailyLost: '{n} पत्ते बचे रहते हारे', flipsN: 'पत्ते खुले', newRound: 'नया राउंड',
+        rules: 'आप और बॉट एक साथ खेलते हैं; कोई अपनी बारी का इंतज़ार नहीं करता. दोनों के हाथ में पाँच पत्ते और एक ढेरी है. कोई पत्ता बीच की किसी भी ढेरी पर जा सकता है अगर वह ऊपर वाले पत्ते से एक ऊपर या एक नीचे हो; इक्का बादशाह और दुक्की के बीच आता है. आपका हाथ आपकी ढेरी से भरता है. जब कोई नहीं खेल सकता तो बीच की ढेरियों पर नए पत्ते खोले जाते हैं. जो पहले अपने सारे पत्ते खेल दे, वह जीतता है.',
+        kbPick: 'पत्ता चुनें', kbLeft: 'बाईं ढेरी पर खेलें', kbRight: 'दाईं ढेरी पर खेलें', kbFirst: 'जहाँ बैठे वहाँ खेलें',
+        tutTitle1: 'एक ऊपर या नीचे', tutText1: 'एक पत्ता छुएँ, फिर बीच की ढेरी, या उसे वहाँ खींचें. एक ऊपर या नीचे का पत्ता बैठता है; इक्का बादशाह और दुक्की के बीच है.',
+        tutTitle2: 'कोई बारी नहीं', tutText2: 'बॉट उसी समय खेलता है. जल्दी करें: आपका हाथ आपकी ढेरी से भरता है.',
+        tutTitle3: 'अटक गए?', tutText3: 'जब कोई नहीं खेल सकता तो बीच में नए पत्ते खुलते हैं. सबसे पहले सारे पत्ते खेलकर जीतें.'
+      },
+      zh: {
+        player: '你', bot: '机器人', dailySp: '每日快手接龙', levelN: '机器人：{l}', ready: '预备…', go: '开始！',
+        pickPile: '现在点中间的一叠', noFit: '要出比中间牌大一或小一的牌', stuckNow: '谁都出不了牌：翻开新的中间牌…',
+        flipSide: '中间翻开了新牌', flipOwn: '双方各从自己的牌堆翻一张', reshuffled: '中间的牌已洗成新的翻牌堆', playing: '大一或小一，越快越好',
+        youFaster: '你更快！', botFaster: '机器人更快', level: '机器人难度', optNote: '从下一局开始生效。', cardsYou: '你剩下的牌', cardsBot: '机器人剩下的牌',
+        dailyWon: '赢了，机器人还剩 {n} 张', dailyLost: '输了，你还剩 {n} 张', flipsN: '翻牌次数', newRound: '新一局',
+        rules: '你和机器人同时出牌，没有轮次。各自手里五张牌，还有一叠摸牌堆。只要比中间任一叠的顶牌大一或小一，就能放上去；A 介于 K 和 2 之间。手牌会从你的牌堆补满。双方都出不了牌时，中间会翻开新牌。先出完所有牌的一方获胜。',
+        kbPick: '选牌', kbLeft: '出到左边一叠', kbRight: '出到右边一叠', kbFirst: '出到能放的地方',
+        tutTitle1: '大一或小一', tutText1: '点一张牌，再点中间的一叠，或直接拖过去。大一或小一就能放；A 介于 K 和 2 之间。',
+        tutTitle2: '没有轮次', tutText2: '机器人和你同时出牌。要快：手牌会从你的牌堆补满。',
+        tutTitle3: '卡住了？', tutText3: '双方都出不了牌时，中间会翻开新牌。先出完所有牌就赢。'
+      },
+      de: {
+        player: 'Du', bot: 'Bot', dailySp: 'Speed des Tages', levelN: 'Bot: {l}', ready: 'Achtung…', go: 'Los!',
+        pickPile: 'Tippe jetzt auf einen Stapel in der Mitte', noFit: 'Spiel eine Karte, die eins höher oder tiefer als eine Mittelkarte ist', stuckNow: 'Niemand kann spielen: neue Karten in die Mitte…',
+        flipSide: 'Neue Karten in der Mitte', flipOwn: 'Jeder deckt eine Karte vom eigenen Stapel auf', reshuffled: 'Die Mitte wurde zu neuen Stapeln gemischt', playing: 'Eins höher oder tiefer, so schnell du kannst',
+        youFaster: 'Du warst schneller!', botFaster: 'Der Bot war schneller', level: 'Bot-Stufe', optNote: 'Gilt ab der nächsten Runde.', cardsYou: 'Deine restlichen Karten', cardsBot: 'Restliche Karten des Bots',
+        dailyWon: 'Gewonnen; der Bot hatte noch {n} Karten', dailyLost: 'Verloren mit {n} Karten übrig', flipsN: 'Aufgedeckt', newRound: 'Neue Runde',
+        rules: 'Du und der Bot spielt gleichzeitig; niemand wartet, bis er dran ist. Jeder hat fünf Karten auf der Hand und einen Nachziehstapel. Eine Karte darf auf einen der beiden Mittelstapel, wenn sie eins höher oder tiefer als die oberste Karte ist; das Ass liegt zwischen König und Zwei. Deine Hand füllt sich aus deinem Stapel auf. Kann keiner spielen, werden neue Karten in die Mitte gelegt. Wer zuerst alle Karten gespielt hat, gewinnt.',
+        kbPick: 'Karte wählen', kbLeft: 'Auf den linken Stapel spielen', kbRight: 'Auf den rechten Stapel spielen', kbFirst: 'Spielen, wo sie passt',
+        tutTitle1: 'Eins hoch oder runter', tutText1: 'Tippe eine Karte und dann einen Mittelstapel an, oder zieh sie hin. Sie passt, wenn sie eins höher oder tiefer ist; das Ass liegt zwischen König und Zwei.',
+        tutTitle2: 'Kein Warten', tutText2: 'Der Bot spielt gleichzeitig. Sei schnell: deine Hand füllt sich aus deinem Stapel.',
+        tutTitle3: 'Festgefahren?', tutText3: 'Kann keiner spielen, kommen neue Karten in die Mitte. Spiel als Erster alle Karten, um zu gewinnen.'
+      },
+      es: {
+        player: 'Tú', bot: 'Bot', dailySp: 'Speed del día', levelN: 'Bot: {l}', ready: 'Preparados…', go: '¡Ya!',
+        pickPile: 'Ahora toca un montón del centro', noFit: 'Juega una carta una más o una menos que la del centro', stuckNow: 'Nadie puede jugar: nuevas cartas al centro…',
+        flipSide: 'Nuevas cartas en el centro', flipOwn: 'Cada uno destapa una carta de su propio montón', reshuffled: 'El centro se barajó en nuevos montones', playing: 'Una más o una menos, lo más rápido que puedas',
+        youFaster: '¡Fuiste más rápido!', botFaster: 'El bot fue más rápido', level: 'Nivel del bot', optNote: 'Se aplica desde la próxima ronda.', cardsYou: 'Tus cartas restantes', cardsBot: 'Cartas restantes del bot',
+        dailyWon: 'Ganaste; al bot le quedaban {n} cartas', dailyLost: 'Perdiste con {n} cartas', flipsN: 'Destapes', newRound: 'Nueva ronda',
+        rules: 'Tú y el bot jugáis a la vez; nadie espera su turno. Cada uno tiene cinco cartas en la mano y un montón para robar. Una carta va sobre cualquiera de los dos montones del centro si es una más o una menos que la de arriba; el as va entre el rey y el dos. Tu mano se rellena desde tu montón. Cuando ninguno puede jugar, se destapan cartas nuevas en el centro. Gana quien juegue primero todas sus cartas.',
+        kbPick: 'Elegir carta', kbLeft: 'Jugar en el montón izquierdo', kbRight: 'Jugar en el montón derecho', kbFirst: 'Jugar donde encaje',
+        tutTitle1: 'Una más o una menos', tutText1: 'Toca una carta y luego un montón del centro, o arrástrala. Encaja si es una más o una menos; el as va entre el rey y el dos.',
+        tutTitle2: 'Sin turnos', tutText2: 'El bot juega a la vez. Sé rápido: tu mano se rellena desde tu montón.',
+        tutTitle3: '¿Atascados?', tutText3: 'Cuando nadie puede jugar, se destapan cartas nuevas en el centro. Juega todas tus cartas primero para ganar.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', { level: 'medium' });
+  if (LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+
+  var M = null, sel = -1, drag = null, msg = '', msgTimer = null, botTimer = null, flipTimer = null, readyTimer = null, pausedAt = 0, botRnd = Math.random;
+
+  var top = el('div', { class: 'sp-top' });
+  var botPile = el('div', { class: 'sp-pile' });
+  var botHand = el('div', { class: 'sp-bothand', 'aria-hidden': 'true' });
+  var botRow = el('div', { class: 'sp-row sp-row--bot' }, [botPile, botHand]);
+  var sides = [el('div', { class: 'sp-side' }), el('div', { class: 'sp-side' })];
+  var cps = [el('div', { class: 'sp-centre', role: 'button', 'aria-label': C.t('kbLeft') }), el('div', { class: 'sp-centre', role: 'button', 'aria-label': C.t('kbRight') })];
+  var table = el('div', { class: 'sp-table' }, [sides[0], cps[0], cps[1], sides[1]]);
+  var status = el('div', { class: 'sp-status', role: 'status', 'aria-live': 'polite' });
+  var myPile = el('div', { class: 'sp-pile' });
+  var slots = [];
+  for (var s = 0; s < E.HAND; s++) slots.push(el('div', { class: 'sp-slot' }));
+  var hand = el('div', { class: 'sp-hand' }, slots);
+  var meRow = el('div', { class: 'sp-row' }, [myPile, hand]);
+  var wrap = el('div', { class: 'sp-wrap' }, [top, botRow, table, status, meRow]);
+  cps.forEach(function (cp, i) { cp.addEventListener('click', function () { if (sel >= 0) tryPlay(sel, i, null); }); });
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newRound'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  function dialog() { return !!document.querySelector('.ch-scrim'); }
+  function canAct() { return M && M.live && M.R.winner < 0 && !dialog(); }
+
+  /* ------------------------------------------------------------ start */
+
+  function newRound(daily) {
+    stopAll();
+    var rnd = daily ? C.daily('speed', daily).rng : Math.random;
+    botRnd = daily ? C.daily('speed', daily + '|bot').rng : Math.random;
+    // the daily deal is played against the medium bot, so it is the same race for everyone
+    M = { R: E.newDeal(rnd), level: daily ? 'medium' : prefs.level, daily: daily || null, startedAt: Date.now(), live: false };
+    sel = -1; msg = '';
+    renderAll();
+    dealIn();
+    save();
+    readyGo();
+  }
+  function resume(v) {
+    stopAll();
+    M = { R: v.R, level: LEVELS.indexOf(v.level) >= 0 ? v.level : 'medium', daily: v.daily || null, startedAt: Date.now() - (v.elapsed || 0), live: false };
+    botRnd = M.daily ? C.daily('speed', M.daily + '|bot|' + M.R.flips + '|' + M.R.piles[1].length).rng : Math.random;
+    sel = -1; msg = '';
+    renderAll();
+    readyGo();
+  }
+  // A short "Ready… Go!" before the bot moves, at the start and after every return to
+  // the game: in a race, a bot that plays while the player is still looking is unfair.
+  // It waits for any open window (the tutorial on a first visit) to close.
+  function readyGo() {
+    clearTimeout(readyTimer);
+    M.live = false;
+    var R = M.R;
+    setMsg(C.t('ready'), 0);
+    var wait = function () {
+      if (!M || M.R !== R) return;
+      if (dialog()) { readyTimer = setTimeout(wait, 300); return; }
+      readyTimer = setTimeout(function () {
+        if (!M || M.R !== R || dialog()) { readyTimer = setTimeout(wait, 300); return; }
+        M.live = true;
+        setMsg(C.t('go'), 900, true);
+        C.audio.sfx('flip');
+        scheduleBot();
+        checkStuck();
+      }, C.cards.pace(1000));
+    };
+    wait();
+  }
+
+  /* ------------------------------------------------------------- draw */
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (M.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailySp') + ' — ' + C.num(M.daily) })]));
+    else top.appendChild(el('span', { class: 'ch-badge', text: C.t('levelN', { l: C.t(M.level) }) }));
+    top.appendChild(C.cards.backPicker());
+    // options behind a gear in the top row, never in «?» (#409)
+    var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', showSettings);
+    top.appendChild(gear);
+  }
+  function pileView(box, n, label) {
+    box.innerHTML = '';
+    box.appendChild(n ? C.cards.back() : el('div', { class: 'sp-gone' }));
+    box.appendChild(el('span', { text: label }));
+  }
+  function renderBot() {
+    var R = M.R;
+    pileView(botPile, R.piles[1].length, C.t('bot') + ': ' + C.num(E.cardsLeft(R, 1)));
+    while (botHand.children.length > R.hands[1].length) botHand.removeChild(botHand.lastChild);
+    while (botHand.children.length < R.hands[1].length) botHand.appendChild(C.cards.back());
+  }
+  function renderCentre() {
+    var R = M.R;
+    for (var i = 0; i < 2; i++) {
+      var c = E.top(R, i);
+      if (cps[i]._c !== c) {
+        cps[i].innerHTML = '';
+        var n = C.cards.el(c);
+        n.disabled = true;
+        n.tabIndex = -1;
+        cps[i].appendChild(n);
+        cps[i]._c = c;
+      }
+      cps[i].classList.toggle('sp-centre--on', sel >= 0);
+      pileView(sides[i], R.side[i].length, C.num(R.side[i].length));
+    }
+  }
+  // Only the slots whose card changed are rebuilt: a card the player is pressing must
+  // never be replaced under the finger, or the press is lost (#750). The bot's moves
+  // touch the centre and the bot's row, never these slots.
+  function renderHand() {
+    var R = M.R, h = R.hands[0];
+    for (var k = 0; k < E.HAND; k++) {
+      var slot = slots[k], c = k < h.length ? h[k] : -1;
+      if (slot._c !== c) {
+        slot.innerHTML = '';
+        slot._c = c;
+        if (c >= 0) slot.appendChild(cardNode(c, k));
+      }
+      if (slot.firstChild) slot.firstChild.classList.toggle('sp-sel', sel === k);
+    }
+    pileView(myPile, R.piles[0].length, // a middle dot beside Persian digits reads as a zero (ربات ۲۰۰), so a colon separates them
+      C.t('player') + ': ' + C.num(E.cardsLeft(R, 0)));
+  }
+  function renderStatus() {
+    var st = msg;
+    if (!st && M.R.winner < 0) st = E.stuck(M.R) ? C.t('stuckNow') : sel >= 0 ? C.t('pickPile') : C.t('playing');
+    status.textContent = st;
+  }
+  function renderAll() { renderTop(); renderBot(); renderCentre(); renderHand(); renderStatus(); }
+  function render() { renderBot(); renderCentre(); renderHand(); renderStatus(); }
+  function setMsg(text, ms, go) {
+    clearTimeout(msgTimer);
+    msg = text;
+    status.classList.toggle('sp-status--go', !!go);
+    if (M) renderStatus();
+    if (ms) msgTimer = setTimeout(function () { msg = ''; status.classList.remove('sp-status--go'); if (M) renderStatus(); }, ms);
+  }
+
+  // the first hand flies in from the player's pile, turning over (#398)
+  function dealIn() {
+    if (C.ui.reduceMotion()) return;
+    var from = myPile.firstChild ? myPile.firstChild.getBoundingClientRect() : null;
+    slots.forEach(function (sl, i) { if (sl.firstChild && from) C.ui.fly(sl.firstChild, from, { ms: 220, delay: i * 50, flip: true }); });
+    var bf = botPile.firstChild ? botPile.firstChild.getBoundingClientRect() : null;
+    for (var j = 0; j < botHand.children.length; j++) if (bf) C.ui.fly(botHand.children[j], bf, { ms: 220, delay: j * 50 });
+  }
+
+  /* ------------------------------------------------------------ input */
+
+  function cardNode(c, k) {
+    var b = C.cards.el(c);
+    b.addEventListener('pointerdown', function (e) { down(e, k, b); });
+    b.addEventListener('pointermove', move);
+    b.addEventListener('pointerup', up);
+    b.addEventListener('pointercancel', cancel);
+    // Enter or Space on a focused card (a click with no pointer behind it)
+    b.addEventListener('click', function (e) { if (e.detail === 0) tapCard(k); });
+    return b;
+  }
+  function down(e, k, b) {
+    if (e.button > 0 || !canAct()) return;
+    drag = { k: k, b: b, x: e.clientX, y: e.clientY, id: e.pointerId, moved: false };
+    if (b.setPointerCapture) try { b.setPointerCapture(e.pointerId); } catch (err) { /* a synthetic pointer has nothing to capture */ }
+  }
+  function pileAt(x, y) {
+    for (var i = 0; i < 2; i++) {
+      var r = cps[i].getBoundingClientRect(), pad = 14;
+      if (x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad) return i;
+    }
+    return -1;
+  }
+  function move(e) {
+    if (!drag || e.pointerId !== drag.id) return;
+    var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 8) return;
+    if (!drag.moved) { drag.moved = true; drag.b.classList.add('sp-drag'); sel = drag.k; renderCentre(); renderStatus(); }
+    drag.b.style.transform = 'translate(' + dx.toFixed(1) + 'px,' + dy.toFixed(1) + 'px)';
+    var over = pileAt(e.clientX, e.clientY);
+    cps.forEach(function (cp, i) { cp.style.transform = over === i ? 'scale(1.06)' : ''; });
+    e.preventDefault();
+  }
+  function endDrag(d) {
+    d.b.classList.remove('sp-drag');
+    d.b.style.transform = '';
+    cps.forEach(function (cp) { cp.style.transform = ''; });
+  }
+  function up(e) {
+    if (!drag || e.pointerId !== drag.id) return;
+    var d = drag;
+    drag = null;
+    if (!d.moved) { tapCard(d.k); return; }
+    var from = d.b.getBoundingClientRect(), i = pileAt(e.clientX, e.clientY);
+    endDrag(d);
+    if (i >= 0) tryPlay(d.k, i, from);
+    else { sel = -1; render(); }
+  }
+  function cancel() { if (drag) { endDrag(drag); drag = null; sel = -1; render(); } }
+
+  // A tap picks a card; a second tap on it plays it on the first centre pile it fits
+  function tapCard(k) {
+    if (!canAct() || k >= M.R.hands[0].length) return;
+    if (sel === k) { var c = M.R.hands[0][k]; tryPlay(k, E.canPlay(M.R, c, 0) ? 0 : 1, null); return; }
+    sel = k;
+    C.haptic('tap');
+    render();
+  }
+  function tryPlay(k, i, fromRect) {
+    if (!canAct()) return;
+    var R = M.R, c = R.hands[0][k], node = slots[k].firstChild;
+    if (c === undefined) return;
+    if (!E.canPlay(R, c, i)) {
+      C.feedback('bad');
+      C.ui.shake(node);
+      setMsg(C.t('noFit'), 1600);
+      return;
+    }
+    var from = fromRect || (node ? node.getBoundingClientRect() : null);
+    var drawn = E.play(R, 0, c, i);
+    sel = -1;
+    C.audio.sfx('place'); C.haptic('tap');
+    render();
+    if (from) C.ui.fly(cps[i].firstChild, from, { ms: 200 });
+    if (drawn >= 0 && slots[k].firstChild && myPile.firstChild) C.ui.fly(slots[k].firstChild, myPile.firstChild.getBoundingClientRect(), { ms: 220, delay: 60, flip: true });
+    save();
+    if (R.winner >= 0) { endRound(); return; }
+    checkStuck();
+  }
+
+  /* -------------------------------------------------------------- bot */
+
+  function scheduleBot() {
+    clearTimeout(botTimer);
+    if (!M || !M.live || M.R.winner >= 0) return;
+    // the level is the bot's reaction time; the player's card pace scales it too
+    var ms = C.cards.pace(E.DELAY[M.level] || E.DELAY.medium) * (0.8 + 0.4 * botRnd());
+    botTimer = setTimeout(botTick, Math.round(ms));
+  }
+  function botTick() {
+    botTimer = null;
+    if (!M || !M.live || M.R.winner >= 0) return;
+    // a window open (help, settings) holds the bot like it holds the player
+    if (dialog()) { scheduleBot(); return; }
+    var R = M.R, m = E.botMove(R, 1, M.level, botRnd);
+    if (m) {
+      var k = R.hands[1].indexOf(m.c), src = botHand.children[k] || botHand;
+      var from = src.getBoundingClientRect();
+      E.play(R, 1, m.c, m.i);
+      C.audio.sfx('place');
+      render();
+      C.ui.fly(cps[m.i].firstChild, from, { ms: 220, flip: true });
+      save();
+      if (R.winner >= 0) { endRound(); return; }
+      checkStuck();
+    }
+    scheduleBot();
+  }
+
+  // When neither side can play, new centre cards are turned after a moment, so both
+  // players see that they are stuck before the table changes
+  function checkStuck() {
+    if (!M || !M.live || M.R.winner >= 0 || flipTimer || !E.stuck(M.R)) return;
+    var R = M.R;
+    renderStatus();
+    flipTimer = setTimeout(function () {
+      flipTimer = null;
+      if (!M || M.R !== R || !M.live) return;
+      if (dialog()) { checkStuck(); return; }
+      var froms = [sides[0].firstChild, sides[1].firstChild].map(function (n) { return n ? n.getBoundingClientRect() : null; });
+      var piles = [myPile.firstChild, botPile.firstChild].map(function (n) { return n ? n.getBoundingClientRect() : null; });
+      var mode = E.flip(R, botRnd);
+      if (!mode) return;
+      if (sel >= 0) sel = -1;
+      C.audio.sfx('flip');
+      render();
+      for (var i = 0; i < 2; i++) {
+        // in the "own" step the player's card goes on the left pile, the bot's on the right
+        var f = mode === 'own' ? piles[i] : froms[i] || froms[1 - i];
+        if (f && cps[i].firstChild) C.ui.fly(cps[i].firstChild, f, { ms: 260, delay: i * 80, flip: true });
+      }
+      setMsg(mode === 'side' ? C.t('flipSide') : mode === 'own' ? C.t('flipOwn') : C.t('reshuffled'), 1500);
+      save();
+      checkStuck();
+    }, C.cards.pace(E.FLIP_MS));
+  }
+
+  function stopAll() {
+    clearTimeout(botTimer); clearTimeout(flipTimer); clearTimeout(readyTimer); clearTimeout(msgTimer);
+    botTimer = flipTimer = readyTimer = msgTimer = null;
+    if (drag) { endDrag(drag); drag = null; }
+  }
+
+  /* ------------------------------------------------------------ end */
+
+  function endRound() {
+    stopAll();
+    M.live = false;
+    var won = M.R.winner === 0;
+    setMsg(won ? C.t('youFaster') : C.t('botFaster'), 0);
+    render();
+    if (won && cps[0].firstChild) C.ui.burst(cps[0].firstChild, { count: 22, speed: 240, ring: 30, colors: ['#8F78D6', '#50329B', '#E6DEFA'] });
+    ctx.clearSave();
+    setTimeout(finish, C.cards.pace(900));
+  }
+  function finish() {
+    var R = M.R, ms = Date.now() - M.startedAt, won = R.winner === 0;
+    var left0 = E.cardsLeft(R, 0), left1 = E.cardsLeft(R, 1);
+    var base = { easy: 6, medium: 12, hard: 20 }[M.level] || 12;
+    var coins = won ? base + (M.daily ? 8 : 0) : Math.max(2, Math.round(base * 0.3));
+    var points = won ? base * 4 + (M.daily ? 25 : 0) : Math.round(base * 1.2);
+    if (won) {
+      C.achievements.unlock('spd-win');
+      if (M.level === 'hard' && !M.daily) C.achievements.unlock('spd-hard');
+      if (M.daily) C.achievements.unlock('spd-daily');
+    }
+    if (M.daily) {
+      var first = C.stats.daily('speed', M.daily, { label: won ? C.t('dailyWon', { n: C.num(left1) }) : C.t('dailyLost', { n: C.num(left0) }), win: won });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.finish({
+      won: won,
+      title: won ? C.t('youFaster') : C.t('botFaster'),
+      timeMs: ms, coins: coins, points: points,
+      lines: [{ label: C.t('cardsYou'), value: C.num(left0) }, { label: C.t('cardsBot'), value: C.num(left1) }, { label: C.t('flipsN'), value: C.num(R.flips) }],
+      shareText: 'چوگان · سرعت' + (M.daily ? ('\nروزانه ' + M.daily) : '') + '\n' + C.num(left0) + ' - ' + C.num(left1),
+      onAgain: M.daily ? null : function () { newRound(null); }
+    });
+  }
+
+  /* ----------------------------------------------------------- dialogs */
+
+  function showSettings() {
+    var seg = C.ui.segmented(LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), prefs.level, function (v) { prefs.level = v; ctx.store.set('prefs', prefs); });
+    C.ui.modal({
+      title: C.t('settings'),
+      body: [el('div', { class: 'ch-list' }, [
+        el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('level') }), seg]),
+        C.cards.speedRow()
+      ]), el('p', { class: 'ch-dim', text: C.t('optNote') })],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  function askNew() {
+    if (dialog()) return;
+    var dd = M ? M.daily : null;
+    var started = M && M.R.winner < 0 && (M.R.flips > 0 || M.R.centre[0].length + M.R.centre[1].length > 2);
+    if (!started) { newRound(dd); return; }
+    C.ui.confirm({ title: C.t('newRound'), body: C.t('resetWarn'), onOk: function () { newRound(dd); } });
+  }
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('1–5', C.t('kbPick')), kb('←', C.t('kbLeft')), kb('→', C.t('kbRight')), kb('Enter', C.t('kbFirst'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+
+  // Digits pick a card by its place in the hand; the arrows play it on the left or right
+  // centre pile. No right-to-left flip: the table is laid out left to right everywhere.
+  window.addEventListener('keydown', function (e) {
+    if (!canAct()) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter'))) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var m = /^(?:Digit|Numpad)([1-5])$/.exec(e.code || '');
+    if (m) { var k = +m[1] - 1; if (k < M.R.hands[0].length) { sel = sel === k ? -1 : k; render(); } e.preventDefault(); return; }
+    if (sel < 0) return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { tryPlay(sel, e.key === 'ArrowLeft' ? 0 : 1, null); e.preventDefault(); return; }
+    if (e.key === 'Enter') { tryPlay(sel, E.canPlay(M.R, M.R.hands[0][sel], 0) ? 0 : 1, null); e.preventDefault(); }
+  });
+
+  function svgCard(x, y, label, red) {
+    return '<rect x="' + x + '" y="' + y + '" width="34" height="48" rx="5" fill="var(--c-surface)" stroke="var(--c-line)"/>' +
+      '<text x="' + (x + 4) + '" y="' + (y + 15) + '" font-size="13" font-weight="800" fill="' + (red ? 'var(--c-bad)' : 'var(--c-text)') + '">' + label + '</text>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr">' + svgCard(30, 34, '6♣︎', false) + svgCard(83, 30, '7♥︎', true) + svgCard(136, 34, '8♠︎', false) +
+      '<path d="M70 60 h8 M125 60 h8" stroke="var(--game)" stroke-width="4" stroke-linecap="round"/></svg>' },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr">' + svgCard(60, 30, 'K♦︎', true) + svgCard(106, 30, 'A♣︎', false) +
+      '<path d="M30 20 l10 14 M170 20 l-10 14 M30 96 l10 -14 M170 96 l-10 -14" stroke="var(--game)" stroke-width="4" stroke-linecap="round"/></svg>' },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: '<svg viewBox="0 0 200 110" width="100%" direction="ltr"><rect x="30" y="34" width="26" height="36" rx="4" fill="#1F3A93" stroke="#FBF5E6" stroke-width="2"/>' +
+      '<rect x="144" y="34" width="26" height="36" rx="4" fill="#1F3A93" stroke="#FBF5E6" stroke-width="2"/>' + svgCard(66, 28, '3♠︎', false) + svgCard(102, 28, '10♥︎', true) + '</svg>' }
+  ];
+
+  /* ------------------------------------------------------------ save */
+
+  ctx.autosave(function () {
+    if (!M || !M.R || M.R.winner >= 0) return { inProgress: false };
+    return { m: { R: JSON.parse(JSON.stringify(M.R)), level: M.level, daily: M.daily, elapsed: (pausedAt || Date.now()) - M.startedAt } };
+  });
+  function save() { ctx.save(); }
+  C.onPause(function () { if (!M) return; stopAll(); M.live = false; sel = -1; if (!pausedAt) pausedAt = Date.now(); save(); });
+  C.onResume(function () { if (pausedAt && M) M.startedAt += Date.now() - pausedAt; pausedAt = 0; if (M && M.R.winner < 0) { render(); readyGo(); } });
+
+  /* ------------------------------------------------------------ start */
+
+  var saved = ctx.loadSave();
+  var sv = saved && saved.m && E.validRound(saved.m.R) && saved.m.R.winner < 0 ? saved.m : null;
+  if (dailyDate) {
+    if (sv && sv.daily === dailyDate) resume(sv);
+    else newRound(dailyDate);
+    if (C.stats.dailyDone('speed', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).speed;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (sv && !sv.daily) resume(sv);
+  else newRound(null);
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
