@@ -1369,6 +1369,63 @@
   };
   Chogan.audio = audioApi;
 
+  /* ==== PIANO VOICE START ==== */
+  // Piano (#972). An SFX entry is fire-and-forget, but a piano key sounds for as long as
+  // it is held and stops when it is lifted, so this voice hands back a handle whose
+  // stop() starts the release. It is a function of its own rather than an SFX entry for
+  // that reason; every other sound keeps going through sfx().
+  audioApi.piano = function (freq) {
+    if (!state.settings.sfx || !(freq > 0)) return null;
+    // The first key is pressed before the document's unlock listener has run (the canvas
+    // sees the pointerdown first), so that note was silent. Every call comes from a key
+    // press, which is a user gesture, so the context may be made right here.
+    if (!AC) ensureAudio();
+    if (!AC) return null;
+    if (AC.state === 'suspended') AC.resume();
+    var t0 = now();
+    // a struck string: loud at once, then fading even while held; high notes fade sooner
+    var life = Math.max(1.2, Math.min(4.5, 4.5 - Math.log(freq / 130) * 1.4));
+    var peak = 0.2;
+    var env = AC.createGain(), rel = AC.createGain(), lp = AC.createBiquadFilter();
+    env.gain.setValueAtTime(0.0001, t0);
+    env.gain.exponentialRampToValueAtTime(peak, t0 + 0.006);
+    env.gain.exponentialRampToValueAtTime(peak * 0.35, t0 + 0.25);
+    env.gain.exponentialRampToValueAtTime(0.0001, t0 + life);
+    // the release lives on its own gain so lifting a key never has to read back where the
+    // decay had got to, which an AudioParam cannot report reliably
+    rel.gain.setValueAtTime(1, t0);
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(Math.min(9000, freq * 7), t0);
+    var parts = [[1, 'triangle', 1], [2, 'sine', 0.35], [3, 'sine', 0.12]];
+    var oscs = parts.map(function (p) {
+      var o = AC.createOscillator(), g = AC.createGain();
+      o.type = p[1];
+      o.frequency.setValueAtTime(freq * p[0], t0);
+      g.gain.setValueAtTime(p[2], t0);
+      o.connect(g); g.connect(lp);
+      o.start(t0);
+      o.stop(t0 + life + 0.05);
+      return o;
+    });
+    lp.connect(env); env.connect(rel); rel.connect(sfxBus);
+    var done = false;
+    return {
+      freq: freq,
+      stop: function () {
+        if (done) return;
+        done = true;
+        var t = now();
+        try {
+          rel.gain.cancelScheduledValues(t);
+          rel.gain.setValueAtTime(1, t);
+          rel.gain.setTargetAtTime(0.0001, t, 0.07);
+          oscs.forEach(function (o) { o.stop(t + 0.5); });
+        } catch (e) { /* a note that already ended has nothing to release */ }
+      }
+    };
+  };
+  /* ==== PIANO VOICE END ==== */
+
   /* =========================================================== لرزش */
 
   var HAPTICS = {
@@ -1699,6 +1756,8 @@
     { id: 'pc-three',    icon: 'star',     fa: 'دست برنجی',           en: 'Brass touch',       dfa: 'در بارون توپ یک تخته را با سه ستاره تمام کردی', den: 'Finish a Ball Rain board with three stars', zh: '黄铜手感', dzh: '在钢珠雨中以三颗星完成一板', de: 'Messinghand', dde: 'Schaff ein Kugelflut-Brett mit drei Sternen', es: 'Toque de latón', des: 'Termina un tablero de Cascada de bolas con tres estrellas', pl: 'Mosiężna ręka', dpl: 'Ukończ planszę w Ulewie kulek z trzema gwiazdkami', fr: 'Main de laiton', dfr: 'Termine un plateau d’Averse de billes avec trois étoiles', ar: 'لمسة نحاسية', dar: 'أنهِ لوحًا في وابل الكرات بثلاث نجوم', hi: 'पीतल का हाथ', dhi: 'गेंदों की झड़ी का एक बोर्ड तीन तारों के साथ पूरा करें' },
     { id: 'pc-tulip',    icon: 'sparkle',  fa: 'لاله‌ی پربار',        en: 'Full bloom',        dfa: 'در بارون توپ دو توپ را در یک بار باز شدن لاله انداختی', den: 'Land two balls in the tulip while it is open once in Ball Rain', zh: '盛放', dzh: '在钢珠雨中郁金香一次张开时打进两个球', de: 'Volle Blüte', dde: 'Triff in Kugelflut zwei Kugeln in die Tulpe, während sie einmal offen ist', es: 'En plena flor', des: 'Mete dos bolas en el tulipán mientras está abierto una vez en Cascada de bolas', pl: 'Pełny rozkwit', dpl: 'Traf dwiema kulkami do tulipana podczas jednego otwarcia w Ulewie kulek', fr: 'Pleine floraison', dfr: 'Mets deux billes dans la tulipe pendant une seule ouverture dans Averse de billes', ar: 'تفتّح كامل', dar: 'أدخل كرتين في زهرة التوليب خلال فتحة واحدة في وابل الكرات', hi: 'पूरा खिला', dhi: 'गेंदों की झड़ी में ट्यूलिप के एक बार खुलने पर दो गेंदें डालें' },
     { id: 'pc-daily',    icon: 'calendar', fa: 'بارون روزانه',        en: 'Daily downpour',    dfa: 'تخته‌ی روزانه‌ی بارون توپ را با دست‌کم یک ستاره تمام کردی', den: 'Finish the daily Ball Rain board with at least one star', zh: '今日钢珠雨', dzh: '以至少一颗星完成每日钢珠雨', de: 'Tagesguss', dde: 'Schaff das Kugelflut-Tagesbrett mit mindestens einem Stern', es: 'Lluvia del día', des: 'Termina el tablero del día de Cascada de bolas con al menos una estrella', pl: 'Ulewa dnia', dpl: 'Ukończ planszę dnia w Ulewie kulek z co najmniej jedną gwiazdką', fr: 'Averse du jour', dfr: 'Termine le plateau du jour d’Averse de billes avec au moins une étoile', ar: 'وابل اليوم', dar: 'أنهِ لوح اليوم في وابل الكرات بنجمة واحدة على الأقل', hi: 'आज की झड़ी', dhi: 'गेंदों की झड़ी का आज का बोर्ड कम से कम एक तारे के साथ पूरा करें' },
+    { id: 'pn-tune',     icon: 'music',    fa: 'اولین آهنگ',          en: 'First tune',        dfa: 'در پیانو یک آهنگ تمرینی را تا آخر زدی', den: 'Play a practice tune to the end in Piano', zh: '第一首曲子', dzh: '在钢琴中把一首练习曲弹到最后', de: 'Erste Melodie', dde: 'Spiele im Klavier ein Übungsstück bis zum Ende', es: 'Primera melodía', des: 'Toca una melodía de práctica hasta el final en Piano', pl: 'Pierwsza melodia', dpl: 'Zagraj ćwiczebną melodię do końca w Pianinie', fr: 'Premier air', dfr: 'Joue un air d’entraînement jusqu’au bout dans Piano', ar: 'أول لحن', dar: 'اعزف لحن تدريب حتى نهايته في البيانو', hi: 'पहली धुन', dhi: 'पियानो में अभ्यास की एक धुन अंत तक बजाएँ' },
+    { id: 'pn-all',      icon: 'crown',    fa: 'دفتر آهنگ کامل',      en: 'Whole songbook',    dfa: 'در پیانو همه‌ی آهنگ‌های تمرینی را زدی', den: 'Play every practice tune in Piano', zh: '全部曲目', dzh: '在钢琴中弹完所有练习曲', de: 'Ganzes Liederbuch', dde: 'Spiele im Klavier jedes Übungsstück', es: 'Cancionero completo', des: 'Toca todas las melodías de práctica en Piano', pl: 'Cały śpiewnik', dpl: 'Zagraj każdą ćwiczebną melodię w Pianinie', fr: 'Recueil complet', dfr: 'Joue tous les airs d’entraînement dans Piano', ar: 'كتاب الألحان كاملًا', dar: 'اعزف كل ألحان التدريب في البيانو', hi: 'पूरी गीत-पुस्तिका', dhi: 'पियानो में अभ्यास की हर धुन बजाएँ' },
     { id: 'snt-dry',     icon: 'shield',   fa: 'پای خشک',             en: 'Dry feet',          dfa: 'در سنت ربات متوسط یا سخت را بردی، بی‌آنکه مهره‌ای در آب بیفتد', den: 'Beat the medium or hard bot at Senet without a piece falling into the water', zh: '滴水不沾', dzh: '在塞尼特中战胜中等或困难电脑，且没有棋子落水', de: 'Trockene Füße', dde: 'Besiege den mittleren oder schweren Bot in Senet, ohne dass ein Stein ins Wasser fällt', es: 'Pies secos', des: 'Vence al bot medio o difícil en Senet sin que ninguna pieza caiga al agua', pl: 'Suche stopy', dpl: 'Pokonaj bota średniego lub trudnego w Senet, nie wpadając ani razu do wody', fr: 'Pieds au sec', dfr: 'Bats le robot moyen ou difficile au Senet sans qu’aucun pion tombe à l’eau', ar: 'أقدام جافة', dar: 'اهزم الروبوت المتوسط أو الصعب في سينيت دون أن يسقط حجر في الماء', hi: 'सूखे पाँव', dhi: 'सेनेट में मध्यम या कठिन बॉट को हराएँ, बिना कोई गोटी पानी में गिरे' },
     { id: 'go-win',      icon: 'medal',   fa: 'زمین‌گیر',          en: 'Territory',         dfa: 'یک دست گو را مقابل ربات بردی',        den: 'Win a game of go against the AI', zh: '围地', dzh: '对战电脑赢下一局围棋', de: 'Gebietsherr', dde: 'Gewinne eine Partie Go gegen den Computer', es: 'Territorio', des: 'Gana una partida de Go contra la IA', ar: 'الأرض', dar: 'فُز بلعبة غو ضد الروبوت', hi: 'इलाक़ा', dhi: 'गो में कंप्यूटर को हराएँ' },
     { id: 'go-hard',     icon: 'brain',   fa: 'دو چشم',            en: 'Two eyes',          dfa: 'در گو ربات سخت را شکست دادی',         den: 'Beat the hard AI at go', zh: '两只眼', dzh: '在围棋中击败困难电脑', de: 'Zwei Augen', dde: 'Schlag die schwere Go-KI', es: 'Dos ojos', des: 'Vence a la IA difícil en Go', ar: 'عينان', dar: 'اهزم الروبوت الصعب في غو', hi: 'दो आँखें', dhi: 'गो में कठिन कंप्यूटर को हराएँ' },
@@ -1770,7 +1829,7 @@
     tw: 'towerup', dom: 'dominoes', ws: 'watersort', fb: 'football', wg: 'wrigglers', tri: 'trio',
     fr: 'fourrow', pk: 'peak', tr: 'territories', pw: 'pipes', db: 'doubles', sk: 'storekeeper',
     sr: 'starraid', cx: 'crossing', cm: 'carrom', nd: 'numberdrop', ci: 'circuit',
-    hr: 'hillrider', fl: 'flood', mo: 'motorush', mu: 'muncher', ft: 'fitten', fd: 'fivedice', hx: 'hex', ln: 'lander', gs: 'goose', dl: 'dicelands', cn: 'corners', fo: 'fourfold', snt: 'senet', pet: 'petgame', hc: 'honeycomb', nj: 'nainjaune', hm: 'hamlet', po: 'pushout', sg: 'shogi', pf: 'pegfall', ld: 'liarsdice', cw: 'claw', mz: 'maze', spd: 'speed', pc: 'pachinko',
+    hr: 'hillrider', fl: 'flood', mo: 'motorush', mu: 'muncher', ft: 'fitten', fd: 'fivedice', hx: 'hex', ln: 'lander', gs: 'goose', dl: 'dicelands', cn: 'corners', fo: 'fourfold', snt: 'senet', pet: 'petgame', hc: 'honeycomb', nj: 'nainjaune', hm: 'hamlet', po: 'pushout', sg: 'shogi', pf: 'pegfall', ld: 'liarsdice', cw: 'claw', mz: 'maze', spd: 'speed', pc: 'pachinko', pn: 'piano',
   };
   // Darts kept Dots' prefix for this one award when #464 renamed the others
   var ACH_GAME_ID = { 'dt-180': 'darts' };
