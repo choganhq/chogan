@@ -1,0 +1,741 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>پیانو — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  /* A column, not .ch-split: in a wide window .ch-split puts its rows in a side column,
+     and on a phone held sideways that column took a third of the width a keyboard needs. */
+  .pn-wrap { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--s-3); }
+  .pn-wrap > .ch-fit { width: 100%; }
+  .pn-board { position: relative; aspect-ratio: var(--fit-ar, 2); }
+  /* A canvas given only offsets keeps its backing-store size and is drawn at that many
+     CSS pixels, so on a phone with a pixel ratio above 1 it would run off the screen
+     (Goose Race, 2026-11-15). Both sizes come from CSS. */
+  .pn-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; touch-action: none;
+    direction: ltr; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .pn-bar { display: flex; align-items: center; justify-content: center; gap: var(--s-2); flex-wrap: wrap; width: 100%; max-width: 560px; }
+  /* low notes are on the left of every piano, so the octave arrows stay left to right in Persian too */
+  .pn-oct { display: flex; align-items: center; gap: var(--s-1); direction: ltr; }
+  .pn-oct b { min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; }
+  .pn-len { display: flex; gap: 3px; justify-content: center; align-items: center; height: 14px; min-height: 14px; direction: ltr; }
+  .pn-len i { display: block; height: 10px; border-radius: 5px; background: var(--game); opacity: .55; }
+  .pn-status { width: 100%; max-width: 560px; min-height: 3em; line-height: 1.5; text-align: center; margin: 0; font-size: var(--fs-sm); }
+  .pn-tunes { display: grid; gap: var(--s-2); }
+  .pn-tune { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); width: 100%; text-align: start; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function PianoEngineFactory() {
+  'use strict';
+
+  var LOW = 48, HIGH = 84;          // C3 to C6: three octaves and the top C
+  var BASES = [3, 4, 5];            // the octave the lower letter row starts on
+  var KEY_MIN = 44;                 // the narrowest white key a finger can hit
+  var MIN_WHITES = 8;               // one octave and its top C, even on the smallest phone
+  var TALL = 5.2;                   // a white key is at most this many times as tall as wide
+  var STEPS = [0, 2, 4, 5, 7, 9, 11];
+  var LETTERS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+
+  // Built by stepping one equal-tempered semitone at a time out from A4 = 440 Hz, so the
+  // test can check it against the closed formula instead of against itself.
+  var FREQ = {};
+  (function () {
+    var r = Math.pow(2, 1 / 12), f = 440, m;
+    for (m = 69; m <= HIGH; m++) { FREQ[m] = f; f *= r; }
+    for (f = 440, m = 68; m >= LOW; m--) { f /= r; FREQ[m] = f; }
+  })();
+  function freq(m) { return FREQ[m] || 0; }
+  function pc(m) { return ((m % 12) + 12) % 12; }
+  function isBlack(m) { return STEPS.indexOf(pc(m)) < 0; }
+  function octave(m) { return Math.floor(m / 12) - 1; }
+  // the white step 0-6 a key sits on; a black key gives the white below it
+  function step(m) { var s = STEPS.indexOf(pc(m)); return s >= 0 ? s : STEPS.indexOf(pc(m) - 1); }
+  function name(m) { return LETTERS[step(m)] + (isBlack(m) ? '#' : '') + octave(m); }
+  function parse(s) {
+    var x = /^([A-G])(#?)(\d)$/.exec(s);
+    if (!x) return -1;
+    var m = (+x[3] + 1) * 12 + STEPS[LETTERS.indexOf(x[1])] + (x[2] ? 1 : 0);
+    return m >= LOW && m <= HIGH ? m : -1;
+  }
+  var WHITES = [];
+  for (var w = LOW; w <= HIGH; w++) if (!isBlack(w)) WHITES.push(w);
+
+  /* -------------------------------------------------------- layout */
+
+  function whitesFor(width) { return Math.max(MIN_WHITES, Math.min(WHITES.length, Math.floor(width / KEY_MIN))); }
+  // The window starts on the C of the chosen octave when it can, and slides left near the
+  // top so it never shows past C6.
+  function windowStart(count, base) { return Math.max(0, Math.min(7 * (base - 3), WHITES.length - count)); }
+  function layout(W, H, base) {
+    var count = whitesFor(W), start = windowStart(count, base), ww = W / count;
+    var bw = ww * 0.6, bh = H * 0.62, whites = [], blacks = [];
+    for (var i = 0; i < count; i++) {
+      var m = WHITES[start + i];
+      whites.push({ m: m, x: i * ww, w: ww });
+      if (i < count - 1 && isBlack(m + 1)) blacks.push({ m: m + 1, x: (i + 1) * ww - bw / 2, w: bw, h: bh });
+    }
+    return { W: W, H: H, base: base, ww: ww, bh: bh, whites: whites, blacks: blacks, lo: whites[0].m, hi: whites[count - 1].m };
+  }
+  // black keys lie on top, so they are tried first
+  function hit(L, x, y) {
+    if (!L || x < 0 || y < 0 || x >= L.W || y >= L.H) return -1;
+    for (var i = 0; i < L.blacks.length; i++) { var b = L.blacks[i]; if (y < b.h && x >= b.x && x < b.x + b.w) return b.m; }
+    var k = L.whites[Math.min(L.whites.length - 1, Math.floor(x / L.ww))];
+    return k ? k.m : -1;
+  }
+  function shown(L, m) { return !!L && m >= L.lo && m <= L.hi; }
+
+  /* -------------------------------------------- the computer keyboard */
+
+  // Two rows laid out like a piano: the letters are the white keys and the row above them
+  // the black ones, Z for the C of the chosen octave and Q for the C above it. Letters are
+  // matched with Chogan.keyIs (the Persian layout types other characters on these keys);
+  // the digits have no letter, so the page matches them by their physical code.
+  var KEYS = [['z', 0], ['s', 1], ['x', 2], ['d', 3], ['c', 4], ['v', 5], ['g', 6], ['b', 7], ['h', 8], ['n', 9], ['j', 10], ['m', 11],
+    ['q', 12], ['2', 13], ['w', 14], ['3', 15], ['e', 16], ['r', 17], ['5', 18], ['t', 19], ['6', 20], ['y', 21], ['7', 22], ['u', 23], ['i', 24]];
+  function keyNote(k, base) {
+    for (var i = 0; i < KEYS.length; i++) if (KEYS[i][0] === k) { var m = (base + 1) * 12 + KEYS[i][1]; return m >= LOW && m <= HIGH ? m : -1; }
+    return -1;
+  }
+  function keyFor(m, base) {
+    var off = m - (base + 1) * 12;
+    for (var i = 0; i < KEYS.length; i++) if (KEYS[i][1] === off) return KEYS[i][0];
+    return '';
+  }
+  function shift(base, d) { var b = base + d; return b < BASES[0] ? BASES[0] : (b > BASES[BASES.length - 1] ? BASES[BASES.length - 1] : b); }
+
+  /* ------------------------------------------------- practice tunes */
+
+  // Public-domain melodies, every note between C4 and C5 so the whole tune fits the
+  // eight keys a phone held upright shows. A number after the colon is the length in beats.
+  var TUNES = [
+    { id: 'twinkle', notes: 'C4 C4 G4 G4 A4 A4 G4:2 F4 F4 E4 E4 D4 D4 C4:2 G4 G4 F4 F4 E4 E4 D4:2 G4 G4 F4 F4 E4 E4 D4:2 C4 C4 G4 G4 A4 A4 G4:2 F4 F4 E4 E4 D4 D4 C4:2' },
+    { id: 'mary', notes: 'E4 D4 C4 D4 E4 E4 E4:2 D4 D4 D4:2 E4 G4 G4:2 E4 D4 C4 D4 E4 E4 E4 E4 D4 D4 E4 D4 C4:4' },
+    { id: 'clair', notes: 'C4 C4 C4 D4 E4:2 D4:2 C4 E4 D4 D4 C4:4 C4 C4 C4 D4 E4:2 D4:2 C4 E4 D4 D4 C4:4' },
+    { id: 'london', notes: 'G4:1.5 A4:0.5 G4 F4 E4 F4 G4:2 D4 E4 F4:2 E4 F4 G4:2 G4:1.5 A4:0.5 G4 F4 E4 F4 G4:2 D4:2 G4 E4 C4:2' },
+    { id: 'ode', notes: 'E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 E4:1.5 D4:0.5 D4:2 E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 D4:1.5 C4:0.5 C4:2' },
+    { id: 'jingle', notes: 'E4 E4 E4:2 E4 E4 E4:2 E4 G4 C4:1.5 D4:0.5 E4:4 F4 F4 F4:1.5 F4:0.5 F4 E4 E4 E4:0.5 E4:0.5 E4 D4 D4 E4 D4:2 G4:2' },
+    { id: 'frere', notes: 'C4 D4 E4 C4 C4 D4 E4 C4 E4 F4 G4:2 E4 F4 G4:2 G4:0.5 A4:0.5 G4:0.5 F4:0.5 E4 C4 G4:0.5 A4:0.5 G4:0.5 F4:0.5 E4 C4 C4 G4 C4:2 C4 G4 C4:2' },
+    { id: 'row', notes: 'C4 C4 C4:0.75 D4:0.25 E4 E4:0.75 D4:0.25 E4:0.75 F4:0.25 G4:2 C5:0.5 C5:0.5 C5:0.5 G4:0.5 G4:0.5 G4:0.5 E4:0.5 E4:0.5 E4:0.5 C4:0.5 C4:0.5 C4:0.5 G4:0.75 F4:0.25 E4:0.75 D4:0.25 C4:2' },
+    { id: 'macdonald', notes: 'C4 C4 C4 G4 A4 A4 G4:2 E4 E4 D4 D4 C4:2 G4 C4 C4 C4 G4 A4 A4 G4:2 E4 E4 D4 D4 C4:2' },
+    { id: 'buns', notes: 'E4 D4 C4:2 E4 D4 C4:2 C4:0.5 C4:0.5 C4:0.5 C4:0.5 D4:0.5 D4:0.5 D4:0.5 D4:0.5 E4 D4 C4:2 E4 D4 C4:2 E4 D4 C4:2 C4:0.5 C4:0.5 C4:0.5 C4:0.5 D4:0.5 D4:0.5 D4:0.5 D4:0.5 E4 D4 C4:2' },
+    { id: 'saints', notes: 'C4 E4 F4 G4:2 C4 E4 F4 G4:2 C4 E4 F4 G4 E4 C4 E4 D4:2 E4 E4 D4 D4 C4:2 C4 E4 F4 G4:2 C4 E4 F4 G4:2 C4 E4 F4 G4 E4 C4 D4 C4:2' },
+    { id: 'susanna', notes: 'C4:0.5 D4:0.5 E4 G4 G4:1.5 A4:0.5 G4 E4 C4:0.5 D4:0.5 E4 E4 D4 C4 D4:2 C4:0.5 D4:0.5 E4 G4 G4:1.5 A4:0.5 G4 E4 C4:0.5 D4:0.5 E4 E4 D4 D4 C4:2' },
+    { id: 'lightly', notes: 'G4 E4 E4:2 F4 D4 D4:2 C4 D4 E4 F4 G4 G4 G4:2 G4 E4 E4:2 F4 D4 D4:2 C4 E4 G4 G4 C4:2' },
+    { id: 'deck', notes: 'C5:1.5 B4:0.5 A4 G4 F4 G4 A4 F4 G4:0.5 A4:0.5 B4:0.5 G4:0.5 A4:1.5 G4:0.5 F4 E4 D4 E4 C4:2 G4:0.5 A4:0.5 B4:0.5 G4:0.5 A4:1.5 G4:0.5 F4 E4 D4 E4 C4:2' },
+    { id: 'cucaracha', notes: 'C4:0.5 C4:0.5 C4:0.5 F4:1.5 A4:2 F4:0.5 F4:0.5 E4:0.5 E4:0.5 D4:0.5 D4:0.5 C4:2 C4:0.5 C4:0.5 C4:0.5 F4:1.5 A4:2 F4:0.5 F4:0.5 E4:0.5 E4:0.5 D4:0.5 D4:0.5 C4:2' },
+    { id: 'itsy', notes: 'G4 C4 C4 C4:0.75 D4:0.25 E4:2 E4 E4:0.75 E4:0.25 D4 C4 D4 E4 C4:2 E4:2 E4 F4 G4:2 G4 F4 E4 F4 G4 E4:2' },
+    { id: 'canon', notes: 'C5:2 G4:2 A4:2 E4:2 F4:2 C4:2 F4:2 G4:2 C5:2 G4:2 A4:2 E4:2 F4:2 C4:2 F4:2 G4:2 C5:2 G4:2 A4:2 E4:2 F4:2 C4:2 F4:2 G4:2' }
+  ];
+  function tune(id) {
+    for (var i = 0; i < TUNES.length; i++) {
+      if (TUNES[i].id !== id) continue;
+      return TUNES[i].notes.split(' ').map(function (t) { var p = t.split(':'); return { m: parse(p[0]), beats: p[1] ? +p[1] : 1 }; });
+    }
+    return null;
+  }
+  function practice(id) { var n = tune(id); return n ? { id: id, notes: n, i: 0 } : null; }
+  function expected(P) { return P && P.i < P.notes.length ? P.notes[P.i].m : -1; }
+  // A wrong key only sounds: there is nothing to lose in a toy. A key after the end
+  // starts the tune again from the top. A right key does not move the tune on by itself:
+  // it begins a hold, and the note counts once it has been held for HOLD of its beats
+  // (#1012; before that the key alone counted, so a half note and a quarter note felt the same).
+  function press(P, m) {
+    if (!P) return 'free';
+    if (P.i >= P.notes.length) P.i = 0;
+    if (m !== P.notes[P.i].m) return 'miss';
+    return 'hold';
+  }
+  function need(P) { return P && P.i < P.notes.length ? Math.max(120, Math.round(P.notes[P.i].beats * BEAT_MS * HOLD)) : 0; }
+  // the held note was long enough: move on
+  function advance(P) {
+    P.i++;
+    return P.i === P.notes.length ? 'done' : 'hit';
+  }
+  var BEAT_MS = 520;
+  var HOLD = 0.8;
+
+  return {
+    LOW: LOW, HIGH: HIGH, BASES: BASES, KEY_MIN: KEY_MIN, MIN_WHITES: MIN_WHITES, TALL: TALL, WHITES: WHITES, KEYS: KEYS, TUNES: TUNES, BEAT_MS: BEAT_MS,
+    freq: freq, isBlack: isBlack, octave: octave, step: step, name: name, parse: parse,
+    whitesFor: whitesFor, windowStart: windowStart, layout: layout, hit: hit, shown: shown,
+    keyNote: keyNote, keyFor: keyFor, shift: shift,
+    tune: tune, practice: practice, expected: expected, press: press, need: need, advance: advance, HOLD: HOLD
+  };
+}
+if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = PianoEngineFactory();
+  var ACCENT = '#73002D';
+
+  C.boot({});
+  // no mood: background music under a piano would play over every note the player makes
+  var ctx = C.game({
+    id: 'piano',
+    name: { fa: 'پیانو', en: 'Piano', pl: 'Pianino', fr: 'Piano', ar: 'البيانو', hi: 'पियानो', zh: '钢琴', de: 'Klavier', es: 'Piano' },
+    accent: ACCENT,
+    strings: {
+      fa: {
+        pnKeys: 'کلیدهای پیانو', pnLower: 'اکتاو پایین‌تر', pnHigher: 'اکتاو بالاتر', pnTunes: 'آهنگ‌ها', pnFree: 'نواختن آزاد',
+        pnPick: 'یک آهنگ برای تمرین انتخاب کن. کلیدی که باید بزنی روشن می‌شود. آن را به اندازه‌ی طول نت نگه دار.', pnPlayed: '{n} از {total} آهنگ را زده‌ای',
+        pnListen: 'گوش بده', pnStop: 'توقف', pnFreeHint: 'هر چه دوست داری بزن. چند کلید را با هم نگه دار تا آکورد بشود.',
+        pnLonger: 'کلید را کمی بیشتر نگه دار.', pnHold: 'طول نت‌ها', pnHoldOn: 'نگه‌داشتن هر نت', pnHoldOff: 'فقط زدن', pnBeats: 'ضرب', pnProgress: '{name}: {n} از {total}', pnWell: 'آفرین! دوباره بزن یا آهنگ دیگری انتخاب کن.',
+        pnMuted: 'افکت صوتی خاموش است. برای شنیدن پیانو از تنظیمات روشنش کن.',
+        pnLabels: 'روی کلیدها', pnLabNames: 'نام نت‌ها', pnLabKeys: 'حروف صفحه‌کلید', pnLabNone: 'هیچ', pnNames: 'دو ر می فا سل لا سی',
+        pnRules: 'پیانوی آزاد است: امتیاز و برد و باختی در کار نیست. کلیدها را بزن؛ هر کلید تا وقتی نگهش داری صدا می‌دهد، چند انگشت با هم آکورد می‌سازد و با کشیدن انگشت روی کلیدها پشت سر هم می‌نوازی. با پیکان‌های کنار نام اکتاو، پیانو را بالا و پایین ببر. در «آهنگ‌ها» یک آهنگ قدیمی انتخاب کن: کلید بعدی روشن می‌شود و با هر کلید درست یکی جلو می‌روی. کلید اشتباه فقط صدا می‌دهد و چیزی را خراب نمی‌کند.',
+        pnKLowWhat: 'ردیف پایین: یک اکتاو (S D G H J کلیدهای سیاه)', pnKHighWhat: 'ردیف بالا: اکتاو بعدی (2 3 5 6 7 کلیدهای سیاه)', pnKArrowsWhat: 'اکتاو پایین‌تر و بالاتر',
+        pnTutTitle1: 'بزن و نگه دار', pnTutText1: 'هر کلید تا وقتی نگهش داری صدا می‌دهد. چند کلید با هم آکورد می‌سازد.',
+        pnTutTitle2: 'آهنگ تمرینی', pnTutText2: 'از «آهنگ‌ها» یک آهنگ انتخاب کن و کلیدهای روشن را به ترتیب بزن.',
+        pnTwinkle: 'چشمک بزن ستاره‌ی کوچک', pnOde: 'سرود شادی', pnMary: 'بره‌ی کوچولوی مری', pnLondon: 'پل لندن', pnJingle: 'جینگل بلز', pnClair: 'در مهتاب', pnFrere: 'برادر ژاک', pnRow: 'قایقت را آرام برران', pnMacdonald: 'مزرعه‌ی مک‌دانلد', pnBuns: 'نان داغ', pnSaints: 'وقتی مقدسین می‌آیند', pnSusanna: 'ای سوزانا', pnLightly: 'قایق سبک', pnDeck: 'تالار را بیارایید', pnCucaracha: 'سوسک کوچولو', pnItsy: 'عنکبوت کوچولو', pnCanon: 'کانن پاخلبل'
+      },
+      en: {
+        pnKeys: 'Piano keys', pnLower: 'Lower octave', pnHigher: 'Higher octave', pnTunes: 'Tunes', pnFree: 'Free play',
+        pnPick: 'Pick a tune to practise. The key to play next lights up. Hold it for as long as the note lasts.', pnPlayed: '{n} of {total} tunes played',
+        pnListen: 'Listen', pnStop: 'Stop', pnFreeHint: 'Play anything you like. Hold several keys at once for a chord.',
+        pnLonger: 'Hold the key a little longer.', pnHold: 'Note length', pnHoldOn: 'Hold each note', pnHoldOff: 'Just press', pnBeats: 'beats', pnProgress: '{name}: {n} of {total}', pnWell: 'Well played! Play it again or pick another tune.',
+        pnMuted: 'Sound effects are off. Turn them on in Settings to hear the piano.',
+        pnLabels: 'On the keys', pnLabNames: 'Note names', pnLabKeys: 'Keyboard letters', pnLabNone: 'Nothing', pnNames: 'C D E F G A B',
+        pnRules: 'A free piano: there is no score, no winning and no losing. Press the keys; each one sounds for as long as you hold it, several fingers make a chord, and sliding a finger across the keys plays them in turn. The arrows beside the octave name move the keyboard up and down. In Tunes, pick an old melody: the next key lights up and each right key moves you on. A wrong key only makes a sound and spoils nothing.',
+        pnKLowWhat: 'Lower row: one octave (S D G H J are the black keys)', pnKHighWhat: 'Upper row: the next octave (2 3 5 6 7 are the black keys)', pnKArrowsWhat: 'Octave down and up',
+        pnTutTitle1: 'Press and hold', pnTutText1: 'Each key sounds for as long as you hold it. Several keys together make a chord.',
+        pnTutTitle2: 'Practice tunes', pnTutText2: 'Pick a tune in Tunes and play the keys that light up, in order.',
+        pnTwinkle: 'Twinkle, Twinkle, Little Star', pnOde: 'Ode to Joy', pnMary: 'Mary Had a Little Lamb', pnLondon: 'London Bridge', pnJingle: 'Jingle Bells', pnClair: 'Au clair de la lune', pnFrere: 'Frère Jacques', pnRow: 'Row, Row, Row Your Boat', pnMacdonald: 'Old MacDonald Had a Farm', pnBuns: 'Hot Cross Buns', pnSaints: 'When the Saints Go Marching In', pnSusanna: 'Oh! Susanna', pnLightly: 'Lightly Row', pnDeck: 'Deck the Halls', pnCucaracha: 'La Cucaracha', pnItsy: 'Itsy Bitsy Spider', pnCanon: 'Pachelbel\'s Canon'
+      },
+      pl: {
+        pnKeys: 'Klawisze pianina', pnLower: 'Oktawa niżej', pnHigher: 'Oktawa wyżej', pnTunes: 'Melodie', pnFree: 'Swobodna gra',
+        pnPick: 'Wybierz melodię do ćwiczenia. Następny klawisz się podświetla. Przytrzymaj go tak długo, jak trwa nuta.', pnPlayed: 'Zagrane melodie: {n} z {total}',
+        pnListen: 'Posłuchaj', pnStop: 'Stop', pnFreeHint: 'Graj, co chcesz. Przytrzymaj kilka klawiszy naraz, by zagrać akord.',
+        pnLonger: 'Przytrzymaj klawisz trochę dłużej.', pnHold: 'Długość dźwięków', pnHoldOn: 'Przytrzymuj każdy dźwięk', pnHoldOff: 'Samo naciśnięcie', pnBeats: 'uderzenia', pnProgress: '{name}: {n} z {total}', pnWell: 'Brawo! Zagraj jeszcze raz albo wybierz inną melodię.',
+        pnMuted: 'Efekty dźwiękowe są wyłączone. Włącz je w Ustawieniach, by słyszeć pianino.',
+        pnLabels: 'Na klawiszach', pnLabNames: 'Nazwy dźwięków', pnLabKeys: 'Litery klawiatury', pnLabNone: 'Nic', pnNames: 'C D E F G A H',
+        pnRules: 'Swobodne pianino: nie ma punktów, wygranych ani przegranych. Naciskaj klawisze; każdy brzmi, dopóki go trzymasz, kilka palców daje akord, a przesuwanie palca po klawiszach gra je po kolei. Strzałki przy nazwie oktawy przesuwają klawiaturę w górę i w dół. W Melodiach wybierz starą melodię: następny klawisz się podświetla, a każdy właściwy przesuwa cię dalej. Zły klawisz tylko brzmi i niczego nie psuje.',
+        pnKLowWhat: 'Dolny rząd: jedna oktawa (S D G H J to czarne klawisze)', pnKHighWhat: 'Górny rząd: następna oktawa (2 3 5 6 7 to czarne klawisze)', pnKArrowsWhat: 'Oktawa niżej i wyżej',
+        pnTutTitle1: 'Naciśnij i trzymaj', pnTutText1: 'Każdy klawisz brzmi, dopóki go trzymasz. Kilka klawiszy razem daje akord.',
+        pnTutTitle2: 'Melodie do ćwiczeń', pnTutText2: 'Wybierz melodię w Melodiach i graj podświetlane klawisze po kolei.',
+        pnTwinkle: 'Migocz, migocz, gwiazdko', pnOde: 'Oda do radości', pnMary: 'Mała Mary miała jagniątko', pnLondon: 'Most londyński', pnJingle: 'Dzwonki sań', pnClair: 'Au clair de la lune', pnFrere: 'Panie Janie', pnRow: 'Wiosłuj, wiosłuj łódką', pnMacdonald: 'Stary MacDonald farmę miał', pnBuns: 'Gorące bułeczki', pnSaints: 'Gdy święci maszerują', pnSusanna: 'Oh! Susanna', pnLightly: 'Lekko wiosłuj', pnDeck: 'Przystrójcie sale', pnCucaracha: 'La Cucaracha', pnItsy: 'Malutki pajączek', pnCanon: 'Kanon Pachelbela'
+      },
+      fr: {
+        pnKeys: 'Touches du piano', pnLower: 'Octave plus grave', pnHigher: 'Octave plus aiguë', pnTunes: 'Airs', pnFree: 'Jeu libre',
+        pnPick: 'Choisis un air à travailler. La touche suivante s’allume. Tiens-la aussi longtemps que dure la note.', pnPlayed: '{n} airs joués sur {total}',
+        pnListen: 'Écouter', pnStop: 'Arrêter', pnFreeHint: 'Joue ce que tu veux. Garde plusieurs touches enfoncées pour un accord.',
+        pnLonger: 'Tiens la touche un peu plus longtemps.', pnHold: 'Durée des notes', pnHoldOn: 'Tenir chaque note', pnHoldOff: 'Simple appui', pnBeats: 'temps', pnProgress: '{name} : {n} sur {total}', pnWell: 'Bravo ! Rejoue-le ou choisis un autre air.',
+        pnMuted: 'Les effets sonores sont coupés. Active-les dans les Réglages pour entendre le piano.',
+        pnLabels: 'Sur les touches', pnLabNames: 'Noms des notes', pnLabKeys: 'Lettres du clavier', pnLabNone: 'Rien', pnNames: 'Do Ré Mi Fa Sol La Si',
+        pnRules: 'Un piano libre : ni score, ni victoire, ni défaite. Appuie sur les touches ; chacune sonne tant que tu la tiens, plusieurs doigts font un accord, et glisser le doigt sur les touches les joue l’une après l’autre. Les flèches à côté du nom de l’octave déplacent le clavier vers le grave ou l’aigu. Dans Airs, choisis une vieille mélodie : la touche suivante s’allume et chaque bonne touche te fait avancer. Une fausse touche fait juste un son et ne gâche rien.',
+        pnKLowWhat: 'Rangée du bas : une octave (S D G H J sont les touches noires)', pnKHighWhat: 'Rangée du haut : l’octave suivante (2 3 5 6 7 sont les touches noires)', pnKArrowsWhat: 'Octave plus grave et plus aiguë',
+        pnTutTitle1: 'Appuie et tiens', pnTutText1: 'Chaque touche sonne tant que tu la tiens. Plusieurs touches ensemble font un accord.',
+        pnTutTitle2: 'Airs à travailler', pnTutText2: 'Choisis un air dans Airs et joue les touches qui s’allument, dans l’ordre.',
+        pnTwinkle: 'Ah ! vous dirai-je, maman', pnOde: 'Hymne à la joie', pnMary: 'Mary avait un petit agneau', pnLondon: 'Le pont de Londres', pnJingle: 'Vive le vent', pnClair: 'Au clair de la lune', pnFrere: 'Frère Jacques', pnRow: 'Ramez, ramez votre bateau', pnMacdonald: 'Le vieux MacDonald', pnBuns: 'Petits pains chauds', pnSaints: 'Quand les saints', pnSusanna: 'Oh! Susanna', pnLightly: 'Rame doucement', pnDeck: 'Parons la salle', pnCucaracha: 'La Cucaracha', pnItsy: 'La petite araignée', pnCanon: 'Canon de Pachelbel'
+      },
+      ar: {
+        pnKeys: 'مفاتيح البيانو', pnLower: 'أوكتاف أخفض', pnHigher: 'أوكتاف أعلى', pnTunes: 'الألحان', pnFree: 'عزف حر',
+        pnPick: 'اختر لحنًا للتدريب. يضيء المفتاح التالي الذي تعزفه. أبقه مضغوطًا بقدر مدة النغمة.', pnPlayed: 'عزفت {n} من {total} ألحان',
+        pnListen: 'استمع', pnStop: 'إيقاف', pnFreeHint: 'اعزف ما تحب. اضغط عدة مفاتيح معًا لتصنع تآلفًا.',
+        pnLonger: 'أبقِ المفتاح مضغوطًا قليلًا.', pnHold: 'مدة النغمة', pnHoldOn: 'إبقاء كل نغمة مضغوطة', pnHoldOff: 'ضغطة فقط', pnBeats: 'نبضات', pnProgress: '{name}: {n} من {total}', pnWell: 'أحسنت! اعزفه مرة أخرى أو اختر لحنًا آخر.',
+        pnMuted: 'المؤثرات الصوتية متوقفة. شغّلها من الإعدادات لتسمع البيانو.',
+        pnLabels: 'على المفاتيح', pnLabNames: 'أسماء النغمات', pnLabKeys: 'حروف لوحة المفاتيح', pnLabNone: 'لا شيء', pnNames: 'دو ري مي فا صول لا سي',
+        pnRules: 'بيانو حر: لا نقاط ولا فوز ولا خسارة. اضغط المفاتيح؛ كل مفتاح يرن ما دمت تضغطه، وعدة أصابع معًا تصنع تآلفًا، وتمرير الإصبع على المفاتيح يعزفها بالتتابع. السهمان بجانب اسم الأوكتاف يحركان لوحة المفاتيح إلى الأخفض والأعلى. في الألحان اختر لحنًا قديمًا: يضيء المفتاح التالي وكل مفتاح صحيح يتقدم بك. المفتاح الخطأ يصدر صوتًا فقط ولا يفسد شيئًا.',
+        pnKLowWhat: 'الصف السفلي: أوكتاف واحد (S D G H J هي المفاتيح السوداء)', pnKHighWhat: 'الصف العلوي: الأوكتاف التالي (2 3 5 6 7 هي المفاتيح السوداء)', pnKArrowsWhat: 'أوكتاف أخفض وأعلى',
+        pnTutTitle1: 'اضغط واستمر', pnTutText1: 'كل مفتاح يرن ما دمت تضغطه. عدة مفاتيح معًا تصنع تآلفًا.',
+        pnTutTitle2: 'ألحان للتدريب', pnTutText2: 'اختر لحنًا من الألحان واعزف المفاتيح التي تضيء بالترتيب.',
+        pnTwinkle: 'تلألئي يا نجمة صغيرة', pnOde: 'نشيد الفرح', pnMary: 'ماري وحملها الصغير', pnLondon: 'جسر لندن', pnJingle: 'جنغل بلز', pnClair: 'في ضوء القمر', pnFrere: 'الأخ جاك', pnRow: 'جدّف بقاربك', pnMacdonald: 'مزرعة ماكدونالد', pnBuns: 'الكعك الساخن', pnSaints: 'عندما يسير القديسون', pnSusanna: 'يا سوزانا', pnLightly: 'جدّف بخفة', pnDeck: 'زيّنوا القاعات', pnCucaracha: 'الصرصور', pnItsy: 'العنكبوت الصغير', pnCanon: 'كانون باخلبل'
+      },
+      hi: {
+        pnKeys: 'पियानो की कुंजियाँ', pnLower: 'नीचा सप्तक', pnHigher: 'ऊँचा सप्तक', pnTunes: 'धुनें', pnFree: 'खुला वादन',
+        pnPick: 'अभ्यास के लिए एक धुन चुनें। अगली बजाने वाली कुंजी चमकती है। उसे नोट की लंबाई जितना दबाए रखें।', pnPlayed: '{total} में से {n} धुनें बजाईं',
+        pnListen: 'सुनें', pnStop: 'रोकें', pnFreeHint: 'जो मन हो बजाएँ। कॉर्ड के लिए कई कुंजियाँ एक साथ दबाए रखें।',
+        pnLonger: 'कुंजी को थोड़ी देर और दबाए रखें।', pnHold: 'स्वर की अवधि', pnHoldOn: 'हर स्वर को दबाए रखें', pnHoldOff: 'बस दबाएँ', pnBeats: 'ताल', pnProgress: '{name}: {total} में से {n}', pnWell: 'शाबाश! फिर से बजाएँ या कोई और धुन चुनें।',
+        pnMuted: 'ध्वनि प्रभाव बंद हैं। पियानो सुनने के लिए सेटिंग्स में चालू करें।',
+        pnLabels: 'कुंजियों पर', pnLabNames: 'स्वरों के नाम', pnLabKeys: 'कीबोर्ड के अक्षर', pnLabNone: 'कुछ नहीं', pnNames: 'सा रे ग म प ध नि',
+        pnRules: 'खुला पियानो: न अंक, न जीत, न हार। कुंजियाँ दबाएँ; हर कुंजी तब तक बजती है जब तक आप उसे दबाए रखें, कई उँगलियाँ मिलकर कॉर्ड बनाती हैं, और कुंजियों पर उँगली फिसलाने से वे बारी-बारी बजती हैं। सप्तक के नाम के पास के तीर कीबोर्ड को नीचे-ऊपर ले जाते हैं। धुनें में कोई पुरानी धुन चुनें: अगली कुंजी चमकती है और हर सही कुंजी आपको आगे ले जाती है। ग़लत कुंजी सिर्फ़ आवाज़ करती है, कुछ नहीं बिगाड़ती।',
+        pnKLowWhat: 'निचली पंक्ति: एक सप्तक (S D G H J काली कुंजियाँ हैं)', pnKHighWhat: 'ऊपरी पंक्ति: अगला सप्तक (2 3 5 6 7 काली कुंजियाँ हैं)', pnKArrowsWhat: 'सप्तक नीचे और ऊपर',
+        pnTutTitle1: 'दबाएँ और थामें', pnTutText1: 'हर कुंजी तब तक बजती है जब तक आप उसे दबाए रखें। कई कुंजियाँ मिलकर कॉर्ड बनाती हैं।',
+        pnTutTitle2: 'अभ्यास की धुनें', pnTutText2: 'धुनें में एक धुन चुनें और चमकती कुंजियाँ क्रम से बजाएँ।',
+        pnTwinkle: 'टिमटिम करते तारे', pnOde: 'आनंद का गीत', pnMary: 'मैरी का नन्हा मेमना', pnLondon: 'लंदन ब्रिज', pnJingle: 'जिंगल बेल्स', pnClair: 'चाँदनी में', pnFrere: 'ब्रदर जॉन', pnRow: 'नाव खेते चलो', pnMacdonald: 'ओल्ड मैकडोनाल्ड का खेत', pnBuns: 'गरम बन', pnSaints: 'जब संत चलते हैं', pnSusanna: 'ओह सुज़ाना', pnLightly: 'हल्के खेना', pnDeck: 'हॉल सजाओ', pnCucaracha: 'ला कुकाराचा', pnItsy: 'नन्ही मकड़ी', pnCanon: 'पाखेलबेल कैनन'
+      },
+      zh: {
+        pnKeys: '钢琴琴键', pnLower: '低八度', pnHigher: '高八度', pnTunes: '曲子', pnFree: '自由弹奏',
+        pnPick: '选一首曲子练习。下一个要弹的键会亮起。 按住它，直到音符的时长。', pnPlayed: '已弹完 {n}/{total} 首',
+        pnListen: '试听', pnStop: '停止', pnFreeHint: '想弹什么就弹什么。同时按住几个键就是和弦。',
+        pnLonger: '把琴键再按住久一点。', pnHold: '音符时长', pnHoldOn: '按住每个音符', pnHoldOff: '只需按下', pnBeats: '拍', pnProgress: '{name}：{n}/{total}', pnWell: '弹得好！再弹一遍，或换一首曲子。',
+        pnMuted: '音效已关闭。在设置里打开才能听到钢琴。',
+        pnLabels: '琴键上显示', pnLabNames: '音名', pnLabKeys: '键盘字母', pnLabNone: '不显示', pnNames: '1 2 3 4 5 6 7',
+        pnRules: '自由弹奏的钢琴：没有分数，没有输赢。按下琴键，按住多久就响多久；几根手指一起按是和弦；手指在琴键上滑过会依次弹响。八度名称旁的箭头把键盘往低处或高处移。在“曲子”里选一首老歌：下一个键会亮起，每弹对一个就前进一步。弹错只是发出声音，不会弄坏什么。',
+        pnKLowWhat: '下排：一个八度（S D G H J 是黑键）', pnKHighWhat: '上排：再高一个八度（2 3 5 6 7 是黑键）', pnKArrowsWhat: '降低和升高八度',
+        pnTutTitle1: '按住', pnTutText1: '琴键按住多久就响多久。几个键一起按是和弦。',
+        pnTutTitle2: '练习曲', pnTutText2: '在“曲子”里选一首，按顺序弹亮起的键。',
+        pnTwinkle: '小星星', pnOde: '欢乐颂', pnMary: '玛丽有只小羊羔', pnLondon: '伦敦桥', pnJingle: '铃儿响叮当', pnClair: '月光下', pnFrere: '两只老虎', pnRow: '划船歌', pnMacdonald: '麦克唐纳有个农场', pnBuns: '热十字面包', pnSaints: '圣者进行曲', pnSusanna: '噢！苏珊娜', pnLightly: '轻轻划桨', pnDeck: '装饰大厅', pnCucaracha: '蟑螂', pnItsy: '小小蜘蛛', pnCanon: '帕赫贝尔卡农'
+      },
+      de: {
+        pnKeys: 'Klaviertasten', pnLower: 'Eine Oktave tiefer', pnHigher: 'Eine Oktave höher', pnTunes: 'Melodien', pnFree: 'Frei spielen',
+        pnPick: 'Wähle eine Melodie zum Üben. Die nächste Taste leuchtet auf. Halte sie so lange, wie die Note dauert.', pnPlayed: '{n} von {total} Melodien gespielt',
+        pnListen: 'Anhören', pnStop: 'Stopp', pnFreeHint: 'Spiel, was du magst. Halte mehrere Tasten zugleich für einen Akkord.',
+        pnLonger: 'Halte die Taste etwas länger.', pnHold: 'Notenlänge', pnHoldOn: 'Jede Note halten', pnHoldOff: 'Nur drücken', pnBeats: 'Schläge', pnProgress: '{name}: {n} von {total}', pnWell: 'Schön gespielt! Spiel sie noch einmal oder wähle eine andere Melodie.',
+        pnMuted: 'Die Soundeffekte sind aus. Schalte sie in den Einstellungen ein, um das Klavier zu hören.',
+        pnLabels: 'Auf den Tasten', pnLabNames: 'Notennamen', pnLabKeys: 'Tastaturbuchstaben', pnLabNone: 'Nichts', pnNames: 'C D E F G A H',
+        pnRules: 'Ein freies Klavier: keine Punkte, kein Gewinnen und kein Verlieren. Drück die Tasten; jede klingt, solange du sie hältst, mehrere Finger ergeben einen Akkord, und ein Finger, der über die Tasten gleitet, spielt sie nacheinander. Die Pfeile neben dem Oktavnamen schieben die Tastatur tiefer und höher. Unter Melodien wählst du eine alte Melodie: Die nächste Taste leuchtet auf, und jede richtige bringt dich weiter. Eine falsche Taste klingt nur und verdirbt nichts.',
+        pnKLowWhat: 'Untere Reihe: eine Oktave (S D G H J sind die schwarzen Tasten)', pnKHighWhat: 'Obere Reihe: die nächste Oktave (2 3 5 6 7 sind die schwarzen Tasten)', pnKArrowsWhat: 'Oktave tiefer und höher',
+        pnTutTitle1: 'Drücken und halten', pnTutText1: 'Jede Taste klingt, solange du sie hältst. Mehrere Tasten zusammen ergeben einen Akkord.',
+        pnTutTitle2: 'Übungsmelodien', pnTutText2: 'Wähle unter Melodien ein Stück und spiele die leuchtenden Tasten der Reihe nach.',
+        pnTwinkle: 'Funkel, funkel, kleiner Stern', pnOde: 'Ode an die Freude', pnMary: 'Mary hat ein kleines Lamm', pnLondon: 'London Bridge', pnJingle: 'Jingle Bells', pnClair: 'Au clair de la lune', pnFrere: 'Bruder Jakob', pnRow: 'Rudere dein Boot', pnMacdonald: 'Old MacDonald hat eine Farm', pnBuns: 'Heiße Kreuzbrötchen', pnSaints: 'Oh When the Saints', pnSusanna: 'Oh! Susanna', pnLightly: 'Leise rudern', pnDeck: 'Schmückt die Hallen', pnCucaracha: 'La Cucaracha', pnItsy: 'Die kleine Spinne', pnCanon: 'Pachelbels Kanon'
+      },
+      es: {
+        pnKeys: 'Teclas del piano', pnLower: 'Octava más grave', pnHigher: 'Octava más aguda', pnTunes: 'Melodías', pnFree: 'Toque libre',
+        pnPick: 'Elige una melodía para practicar. La siguiente tecla se ilumina. Mantenla tanto como dure la nota.', pnPlayed: '{n} de {total} melodías tocadas',
+        pnListen: 'Escuchar', pnStop: 'Parar', pnFreeHint: 'Toca lo que quieras. Mantén varias teclas a la vez para un acorde.',
+        pnLonger: 'Mantén la tecla un poco más.', pnHold: 'Duración de las notas', pnHoldOn: 'Mantener cada nota', pnHoldOff: 'Solo pulsar', pnBeats: 'tiempos', pnProgress: '{name}: {n} de {total}', pnWell: '¡Muy bien! Tócala otra vez o elige otra melodía.',
+        pnMuted: 'Los efectos de sonido están apagados. Actívalos en Ajustes para oír el piano.',
+        pnLabels: 'En las teclas', pnLabNames: 'Nombres de las notas', pnLabKeys: 'Letras del teclado', pnLabNone: 'Nada', pnNames: 'Do Re Mi Fa Sol La Si',
+        pnRules: 'Un piano libre: sin puntos, sin ganar ni perder. Pulsa las teclas; cada una suena mientras la mantienes, varios dedos forman un acorde y deslizar un dedo por las teclas las toca una tras otra. Las flechas junto al nombre de la octava mueven el teclado hacia lo grave o lo agudo. En Melodías elige una melodía antigua: la siguiente tecla se ilumina y cada tecla correcta te hace avanzar. Una tecla equivocada solo suena y no estropea nada.',
+        pnKLowWhat: 'Fila de abajo: una octava (S D G H J son las teclas negras)', pnKHighWhat: 'Fila de arriba: la octava siguiente (2 3 5 6 7 son las teclas negras)', pnKArrowsWhat: 'Octava más grave y más aguda',
+        pnTutTitle1: 'Pulsa y mantén', pnTutText1: 'Cada tecla suena mientras la mantienes. Varias teclas juntas forman un acorde.',
+        pnTutTitle2: 'Melodías para practicar', pnTutText2: 'Elige una melodía en Melodías y toca en orden las teclas que se iluminan.',
+        pnTwinkle: 'Estrellita, ¿dónde estás?', pnOde: 'Himno de la alegría', pnMary: 'María tenía un corderito', pnLondon: 'El puente de Londres', pnJingle: 'Cascabel', pnClair: 'Au clair de la lune', pnFrere: 'Fray Santiago', pnRow: 'Rema tu bote', pnMacdonald: 'El viejo MacDonald', pnBuns: 'Panecillos calientes', pnSaints: 'Cuando los santos', pnSusanna: '¡Oh, Susana!', pnLightly: 'Rema suave', pnDeck: 'Adornad los salones', pnCucaracha: 'La Cucaracha', pnItsy: 'La araña pequeñita', pnCanon: 'Canon de Pachelbel'
+      }
+    }
+  });
+
+  // literal keys, so the string check in tools/test.js can see every one
+  var TUNE_NAMES = { twinkle: C.t('pnTwinkle'), ode: C.t('pnOde'), mary: C.t('pnMary'), london: C.t('pnLondon'), jingle: C.t('pnJingle'), clair: C.t('pnClair'), frere: C.t('pnFrere'), row: C.t('pnRow'), macdonald: C.t('pnMacdonald'), buns: C.t('pnBuns'), saints: C.t('pnSaints'), susanna: C.t('pnSusanna'), lightly: C.t('pnLightly'), deck: C.t('pnDeck'), cucaracha: C.t('pnCucaracha'), itsy: C.t('pnItsy'), canon: C.t('pnCanon') };
+  // No daily and nothing to resume: a toy keeps only its settings and the tunes played.
+  // The call keeps the core's daily-resume guard satisfied and ignores any stray save.
+  ctx.loadSave();
+  var prefs = ctx.store.get('prefs', null) || {};
+  if (E.BASES.indexOf(prefs.base) < 0) prefs.base = 4;
+  if (['names', 'keys', 'none'].indexOf(prefs.labels) < 0) prefs.labels = 'names';
+  if (['on', 'off'].indexOf(prefs.hold) < 0) prefs.hold = 'on';
+  var played = ctx.store.get('played', null);
+  if (!Array.isArray(played)) played = [];
+  function savePrefs() { ctx.store.set('prefs', prefs); }
+
+  /* ------------------------------------------------------------ page */
+
+  var cv = el('canvas', { class: 'pn-canvas', role: 'img', 'aria-label': C.t('pnKeys') });
+  var board = el('div', { class: 'pn-board' }, [cv]);
+  var fit = el('div', { class: 'ch-fit' }, [board]);
+  var lowBtn = el('button', { class: 'ch-btn ch-btn--soft ch-btn--icon', type: 'button', 'aria-label': C.t('pnLower') }, [C.icon('back', 22)]);
+  var highBtn = el('button', { class: 'ch-btn ch-btn--soft ch-btn--icon', type: 'button', 'aria-label': C.t('pnHigher') }, [C.icon('forward', 22)]);
+  var octLabel = el('b', { 'aria-live': 'polite' });
+  var tunesBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button' }, [C.icon('music', 18), el('span', { text: C.t('pnTunes') })]);
+  var listenBtn = el('button', { class: 'ch-btn ch-btn--primary', type: 'button', hidden: true });
+  var bar = el('div', { class: 'pn-bar' }, [el('div', { class: 'pn-oct' }, [lowBtn, octLabel, highBtn]), tunesBtn, listenBtn]);
+  var status = el('p', { class: 'pn-status ch-dim', 'aria-live': 'polite' });
+  // the length of the note to play, as one cell per beat (a short last cell for a half): it shows
+  // how long a note lasts without forcing the hold, so a player who knows the tune can switch the hold off
+  var lenRow = el('div', { class: 'pn-len', 'aria-hidden': 'true' });
+  var wrap = el('div', { class: 'pn-wrap' }, [bar, status, lenRow, fit]);
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'gear', label: C.t('settings'), onClick: showSettings });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  var prac = null, demo = null, msg = '', paused = false;
+  var drawn = null;                 // the layout last painted: touches are read against it
+  var fingers = {};                 // pointerId -> { m, h }
+  var keysDown = {};                // physical key code -> { m, h }
+  var demoLit = -1;
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return !!(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+  }
+  function soundOff() { return !(C.state && C.state.settings && C.state.settings.sfx); }
+
+  /* ----------------------------------------------------------- sizing */
+
+  // The slot is first made as tall as it may grow, then given the shape of the keyboard
+  // that fits it: as wide as the window, and never taller than TALL key widths, so a
+  // phone held upright gets real keys rather than strips most of a screen high.
+  function shape() {
+    fit.style.setProperty('--fit-ar', '0.25');
+    var r = fit.getBoundingClientRect();
+    if (r.width < 40 || r.height < 40) return;
+    var ar = Math.max(r.width / r.height, E.whitesFor(r.width) / E.TALL);
+    fit.style.setProperty('--fit-ar', ar.toFixed(4));
+  }
+  function size() { return { w: Math.max(40, cv.clientWidth), h: Math.max(40, cv.clientHeight) }; }
+
+  /* ---------------------------------------------------------- drawing */
+
+  function litSet() {
+    var s = {};
+    var k;
+    for (k in fingers) s[fingers[k].m] = 1;
+    for (k in keysDown) s[keysDown[k].m] = 1;
+    if (demoLit >= 0) s[demoLit] = 1;
+    return s;
+  }
+  function label(m) {
+    if (prefs.labels === 'keys') return E.keyFor(m, prefs.base).toUpperCase();
+    if (prefs.labels === 'names' && !E.isBlack(m)) return C.t('pnNames').split(' ')[E.step(m)] || '';
+    return '';
+  }
+  function rr(g, x, y, w, h, r) {
+    g.beginPath();
+    g.moveTo(x, y); g.lineTo(x + w, y); g.lineTo(x + w, y + h - r);
+    g.quadraticCurveTo(x + w, y + h, x + w - r, y + h); g.lineTo(x + r, y + h);
+    g.quadraticCurveTo(x, y + h, x, y + h - r); g.closePath();
+  }
+  function draw() {
+    var Z = size(), dpr = Math.min(3, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
+    var felt = Math.max(5, Math.round(Z.h * 0.05));
+    var L = E.layout(Z.w, Z.h - felt, prefs.base);
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, Z.w, Z.h);
+    var dk = dark(), lit = litSet(), next = demo ? -1 : E.expected(prac);   // while a tune plays itself, the key to press next is not hinted: it sat pink beside the sounding key
+    var prog = holding ? Math.min(1, (Date.now() - holding.t0) / holding.need) : 0;
+    var font = getComputedStyle(document.body).fontFamily;
+    // the felt strip a real keyboard's keys disappear under
+    g.fillStyle = ACCENT; g.fillRect(0, 0, Z.w, felt);
+    g.save(); g.translate(0, felt);
+    var ivory = dk ? '#DCD6CB' : '#FFFDF7', edge = dk ? '#2A2329' : '#C9BFB3', ebony = dk ? '#0E0B10' : '#1F1A22';
+    var press = dk ? '#C996A8' : '#F3C9D6', hint = 'rgba(115,0,45,' + (dk ? '.55' : '.35') + ')';
+    var fs = Math.max(11, Math.min(18, L.ww * 0.32));
+    L.whites.forEach(function (k) {
+      rr(g, k.x + 0.5, 0, k.w - 1, L.H - 1, Math.min(8, k.w * 0.14));
+      g.fillStyle = lit[k.m] ? press : ivory; g.fill();
+      if (k.m === next && !lit[k.m]) { g.fillStyle = hint; g.fill(); }
+      if (k.m === next && lit[k.m] && holding) { g.fillStyle = ACCENT; g.globalAlpha = 0.4; g.fillRect(k.x + 1, L.H - 1 - (L.H - 1) * prog, k.w - 2, (L.H - 1) * prog); g.globalAlpha = 1; }
+      g.strokeStyle = edge; g.lineWidth = 1; g.stroke();
+      var t = label(k.m);
+      if (t) {
+        g.fillStyle = k.m === next ? (dk ? '#FFFFFF' : ACCENT) : (dk ? '#4A4148' : '#8A7F86');
+        g.font = '600 ' + fs + 'px ' + font; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+        g.fillText(t, k.x + k.w / 2, L.H - Math.max(10, L.ww * 0.25));
+      }
+      // a small ring under the C of every octave helps find one's place
+      if (E.step(k.m) === 0 && !E.isBlack(k.m)) {
+        g.strokeStyle = dk ? '#7E737B' : '#B9AEB4'; g.lineWidth = 1.5; g.beginPath();
+        g.arc(k.x + k.w / 2, L.H - Math.max(26, L.ww * 0.25 + fs + 8), 3, 0, Math.PI * 2); g.stroke();
+      }
+    });
+    L.blacks.forEach(function (k) {
+      rr(g, k.x, 0, k.w, k.h, Math.min(5, k.w * 0.15));
+      g.fillStyle = lit[k.m] ? ACCENT : ebony; g.fill();
+      if (k.m === next && !lit[k.m]) { g.fillStyle = 'rgba(222,112,152,.85)'; g.fill(); }
+      if (k.m === next && lit[k.m] && holding) { g.fillStyle = '#F3C9D6'; g.globalAlpha = 0.6; g.fillRect(k.x, k.h - k.h * prog, k.w, k.h * prog); g.globalAlpha = 1; }
+      if (!lit[k.m]) { g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(k.x + k.w * 0.18, k.h * 0.06, k.w * 0.64, k.h * 0.78); }
+      var t = label(k.m);
+      if (t) {
+        g.fillStyle = '#FFFFFF'; g.font = '600 ' + Math.max(10, fs * 0.8) + 'px ' + font; g.textAlign = 'center';
+        g.fillText(t, k.x + k.w / 2, k.h - Math.max(8, k.w * 0.25));
+      }
+    });
+    g.restore();
+    L.top = felt;
+    drawn = L;
+    octLabel.textContent = 'C' + C.num(prefs.base);
+    lowBtn.disabled = prefs.base === E.BASES[0];
+    highBtn.disabled = prefs.base === E.BASES[E.BASES.length - 1];
+  }
+
+  /* ----------------------------------------------------------- status */
+
+  function showLength() {
+    lenRow.textContent = '';
+    if (!prac || prac.i >= prac.notes.length) return;
+    var b = prac.notes[prac.i].beats;
+    lenRow.setAttribute('title', C.num(b) + ' ' + C.t('pnBeats'));
+    for (var k = 0; k < Math.ceil(b); k++) lenRow.appendChild(el('i', { style: { width: (Math.min(1, b - k) * 28) + 'px' } }));
+  }
+  function showStatus() {
+    var t;
+    if (msg) t = msg;
+    else if (prac) t = C.t('pnProgress', { name: TUNE_NAMES[prac.id], n: C.num(prac.i), total: C.num(prac.notes.length) });
+    else t = C.t('pnFreeHint');
+    // only free play gives way to the muted note: a tune is still followed by its lit keys,
+    // and hiding its progress and "well done" behind the note left a silent player blind
+    if (soundOff() && !prac) t = C.t('pnMuted');
+    status.textContent = t;
+    listenBtn.hidden = !prac;
+    showLength();
+    listenBtn.textContent = demo ? C.t('pnStop') : C.t('pnListen');
+  }
+
+  /* ------------------------------------------------------------ notes */
+
+  function sound(m) { return C.audio.piano ? C.audio.piano(E.freq(m)) : null; }
+  // A key is struck and later released through one handle. For a tune, the handle also owns
+  // the hold: the note counts after need() ms while the key is still down, and a release
+  // before that says to hold longer and changes nothing.
+  var holding = null;               // { i, t0, need, timer } for the note being held now
+  function endHold() { if (holding) { clearTimeout(holding.timer); holding = null; } }
+  function strike(m) {
+    if (demo) stopDemo();
+    var h = sound(m), mine = null;
+    if (prac) {
+      var was = msg;
+      msg = '';
+      endHold();
+      var r = E.press(prac, m);
+      if (r === 'hold' && prefs.hold === 'off') {
+        if (E.advance(prac) === 'done') finishTune();
+      } else if (r === 'hold') {
+        mine = holding = { i: prac.i, t0: Date.now(), need: E.need(prac), timer: 0 };
+        mine.timer = setTimeout(function () { completeHold(mine); }, mine.need);
+        pulse();
+      } else if (was && r === 'miss') msg = was;
+    }
+    showStatus();
+    return { stop: function () {
+      if (h) h.stop();
+      if (mine && holding === mine) { endHold(); msg = C.t('pnLonger'); showStatus(); draw(); }
+    } };
+  }
+  function completeHold(mine) {
+    if (holding !== mine || !prac || prac.i !== mine.i) return;
+    holding = null;
+    var r = E.advance(prac);
+    msg = '';
+    if (r === 'done') finishTune();
+    showStatus(); draw();
+  }
+  // the key being held fills like a bar while the hold runs
+  var pulsing = 0;
+  function pulse() {
+    if (pulsing) return;
+    pulsing = requestAnimationFrame(function tick() {
+      pulsing = 0;
+      draw();
+      if (holding) pulsing = requestAnimationFrame(tick);
+    });
+  }
+  function release(h) { if (h) h.stop(); }
+  function finishTune() {
+    msg = C.t('pnWell');
+    if (played.indexOf(prac.id) < 0) { played.push(prac.id); ctx.store.set('played', played); }
+    C.haptic('success');
+    var r = cv.getBoundingClientRect();
+    if (r.width) C.ui.burst({ x: r.left + r.width / 2, y: r.top + r.height * 0.35 }, { colors: [ACCENT, '#F3C9D6', '#FFFFFF'], count: 18, speed: 0.9 });
+    C.achievements.unlock('pn-tune');
+    if (E.TUNES.every(function (t) { return played.indexOf(t.id) >= 0; })) C.achievements.unlock('pn-all');
+  }
+
+  /* ---------------------------------------------------------- touches */
+
+  function local(e) { var r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+  function keyAt(e) {
+    var L = drawn;
+    if (!L) return -1;
+    var p = local(e);
+    return E.hit(L, p.x, Math.max(0, p.y - L.top));
+  }
+  cv.addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    try { cv.setPointerCapture(e.pointerId); } catch (x) { /* a synthetic pointer has nothing to capture */ }
+    var m = keyAt(e);
+    if (m < 0) return;
+    fingers[e.pointerId] = { m: m, h: strike(m) };
+    draw();
+  });
+  // a finger slid onto another key lets the first go and strikes the next, as on a real keyboard
+  cv.addEventListener('pointermove', function (e) {
+    var f = fingers[e.pointerId];
+    if (!f) return;
+    var m = keyAt(e);
+    if (m < 0 || m === f.m) return;
+    release(f.h);
+    fingers[e.pointerId] = { m: m, h: strike(m) };
+    draw();
+  });
+  function lift(e) {
+    var f = fingers[e.pointerId];
+    if (!f) return;
+    release(f.h);
+    delete fingers[e.pointerId];
+    draw();
+  }
+  cv.addEventListener('pointerup', lift);
+  cv.addEventListener('pointercancel', lift);
+  cv.addEventListener('lostpointercapture', lift);
+  cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  /* -------------------------------------------------------- keyboard */
+
+  function letterOf(e) {
+    if (/^Digit[23567]$/.test(e.code)) return e.code.slice(5);
+    for (var i = 0; i < E.KEYS.length; i++) { var k = E.KEYS[i][0]; if (/[a-z]/.test(k) && C.keyIs(e, k)) return k; }
+    return '';
+  }
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); if (!e.repeat) setBase(E.shift(prefs.base, e.key === 'ArrowLeft' ? -1 : 1)); return; }
+    var k = letterOf(e);
+    if (!k) return;
+    e.preventDefault();
+    if (e.repeat || keysDown[e.code]) return;
+    var m = E.keyNote(k, prefs.base);
+    if (m < 0) return;
+    keysDown[e.code] = { m: m, h: strike(m) };
+    draw();
+  });
+  window.addEventListener('keyup', function (e) {
+    var d = keysDown[e.code];
+    if (!d) return;
+    release(d.h);
+    delete keysDown[e.code];
+    draw();
+  });
+  // a key held while the window loses focus never sends its keyup, and would ring on
+  window.addEventListener('blur', function () { allOff(); draw(); });
+
+  function allOff() {
+    var k;
+    for (k in fingers) release(fingers[k].h);
+    for (k in keysDown) release(keysDown[k].h);
+    fingers = {}; keysDown = {};
+  }
+  function setBase(b) {
+    if (b === prefs.base) return;
+    // the keys under the fingers change note, so the old notes stop rather than hang
+    allOff();
+    prefs.base = b; savePrefs();
+    draw();
+  }
+  lowBtn.addEventListener('click', function () { setBase(E.shift(prefs.base, -1)); });
+  highBtn.addEventListener('click', function () { setBase(E.shift(prefs.base, 1)); });
+
+  /* --------------------------------------------------------- practice */
+
+  function startTune(id) {
+    stopDemo();
+    prac = E.practice(id);
+    msg = '';
+    // every tune lies between C4 and C5, the window the middle octave shows on any screen
+    if (prac && prefs.base !== 4) setBase(4);
+    showStatus(); draw();
+  }
+  function stopDemo() {
+    if (!demo) return;
+    clearTimeout(demo.timer);
+    release(demo.h);
+    demo = null; demoLit = -1;
+    showStatus(); draw();
+  }
+  function playDemo() {
+    if (!prac) return;
+    allOff();
+    var notes = prac.notes, i = 0;
+    demo = { timer: 0, h: null };
+    prac.i = 0; msg = '';
+    function next() {
+      if (!demo) return;
+      release(demo.h); demo.h = null;
+      if (i >= notes.length) { demo = null; demoLit = -1; showStatus(); draw(); return; }
+      var n = notes[i++];
+      demoLit = n.m; demo.h = sound(n.m);
+      draw();
+      var len = n.beats * E.BEAT_MS;
+      // a short gap before the next note, so two of the same note are heard as two
+      demo.timer = setTimeout(function () { if (!demo) return; release(demo.h); demo.h = null; demoLit = -1; draw(); demo.timer = setTimeout(next, 70); }, len - 70);
+    }
+    showStatus();
+    next();
+  }
+  listenBtn.addEventListener('click', function () { if (demo) stopDemo(); else playDemo(); });
+
+  function showTunes() {
+    var m = null, list = el('div', { class: 'pn-tunes' });
+    function item(text, on, done, fn) {
+      var b = el('button', { class: 'ch-btn pn-tune ' + (on ? 'ch-btn--primary' : 'ch-btn--soft'), type: 'button' }, [el('span', { text: text }), done ? C.icon('check', 18) : el('span')]);
+      b.addEventListener('click', function () { if (m) m.close(); fn(); });
+      list.appendChild(b);
+    }
+    item(C.t('pnFree'), !prac, false, function () { stopDemo(); prac = null; msg = ''; showStatus(); draw(); });
+    E.TUNES.forEach(function (t) { item(TUNE_NAMES[t.id], !!prac && prac.id === t.id, played.indexOf(t.id) >= 0, function () { startTune(t.id); }); });
+    m = C.ui.modal({
+      title: C.t('pnTunes'), closeButton: true,
+      body: [el('p', { class: 'ch-dim', text: C.t('pnPick') }), list, el('p', { class: 'ch-dim', text: C.t('pnPlayed', { n: C.num(played.length), total: C.num(E.TUNES.length) }) })],
+      actions: [{ label: C.t('cancel') }]
+    });
+  }
+  tunesBtn.addEventListener('click', showTunes);
+
+  /* -------------------------------------------------------- settings */
+
+  function showSettings() {
+    var seg = C.ui.segmented([{ value: 'names', label: C.t('pnLabNames') }, { value: 'keys', label: C.t('pnLabKeys') }, { value: 'none', label: C.t('pnLabNone') }], prefs.labels, function (v) {
+      prefs.labels = v; savePrefs(); draw();
+    });
+    // three choices do not fit one row at 390px in German or Polish, so they wrap
+    seg.classList.add('ch-seg--wrap');
+    var hseg = C.ui.segmented([{ value: 'on', label: C.t('pnHoldOn') }, { value: 'off', label: C.t('pnHoldOff') }], prefs.hold, function (v) {
+      prefs.hold = v; savePrefs(); endHold(); showStatus(); draw();
+    });
+    hseg.classList.add('ch-seg--wrap');
+    C.ui.modal({
+      title: C.t('settings'), closeButton: true,
+      body: [el('div', { class: 'ch-list' }, [el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('pnLabels') }), seg]), el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('pnHold') }), hseg])])],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  /* ------------------------------------------------------------ help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('pnRules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('Z X C V B N M', C.t('pnKLowWhat')), kb('Q W E R T Y U I', C.t('pnKHighWhat')), kb('← →', C.t('pnKArrowsWhat'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 110" width="100%" direction="ltr"><rect width="200" height="110" rx="10" fill="#F7E4EA"/><rect x="16" y="14" width="168" height="6" fill="' + ACCENT + '"/>';
+    for (var i = 0; i < 8; i++) {
+      var on = kind === 1 ? (i === 0 || i === 2 || i === 4) : i === 3;
+      s += '<rect x="' + (16 + i * 21) + '" y="20" width="20" height="76" rx="3" fill="' + (on ? (kind === 1 ? '#F3C9D6' : '#DE98AE') : '#FFFDF7') + '" stroke="#C9BFB3"/>';
+    }
+    [1, 2, 4, 5, 6].forEach(function (i) { s += '<rect x="' + (16 + i * 21 - 6) + '" y="20" width="12" height="46" rx="2" fill="#1F1A22"/>'; });
+    if (kind === 1) [0, 2, 4].forEach(function (i) { s += '<circle cx="' + (26 + i * 21) + '" cy="82" r="7" fill="' + ACCENT + '" fill-opacity=".8"/>'; });
+    else s += '<path d="M89 104 l0 -10 M84 99 l5 -5 l5 5" stroke="' + ACCENT + '" stroke-width="2.5" fill="none" stroke-linecap="round"/>';
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('pnTutTitle1'), text: C.t('pnTutText1'), art: tArt(1) },
+    { title: C.t('pnTutTitle2'), text: C.t('pnTutText2'), art: tArt(2) }
+  ];
+
+  /* ----------------------------------------------------------- start */
+
+  C.onPause(function () { paused = true; stopDemo(); allOff(); draw(); });
+  C.onResume(function () { paused = false; showStatus(); });
+  window.addEventListener('pageshow', function (e) { if (e.persisted) { allOff(); shape(); draw(); showStatus(); } });
+  function relayout() { shape(); draw(); }
+  if (window.ResizeObserver) new ResizeObserver(relayout).observe(wrap);
+  else window.addEventListener('resize', relayout);
+  // the web font arriving changes the bar's height above the keyboard, and the labels
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(relayout);
+
+  relayout();
+  showStatus();
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
