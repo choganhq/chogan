@@ -53,7 +53,7 @@ function PachinkoEngineFactory() {
   // trigonometry or randomness in the simulation, so the same launch strength at the
   // same moment takes the same path on every device, and a board can be learnt (#949).
   var W = 100, H = 150, R = 1.5, PR = 0.7, DT = 1 / 120, G = 220;
-  var E_PIN = 0.5, E_WALL = 0.35, FRICT = 0.03, RAIL_DRAG = 0.0012;
+  var E_PIN = 0.5, E_WALL = 0.35, E_RAIL = 0.1, FRICT = 0.03, RAIL_DRAG = 0.0012;
   // the launch lane on the left: a guide wall at GX, then a guide arc of radius ARC_R
   // round the dome's centre (CX, CY); the dome itself has radius DOME
   var GX = 6, GW = 0.5, CX = 50, CY = 50, DOME = 50, ARC_R = 44, ARC_T = 0.65;
@@ -62,9 +62,6 @@ function PachinkoEngineFactory() {
   // strongest rides the dome all the way over to the right wall
   var VMIN = 252, VMAX = 283;
   var BALLS = 25, FOUL_MAX = 25, GAP = 300, TUL = 720, CAP = 30 * 120, LEVELS = 10;
-  // windmills turn a quarter (they are crosses, so a quarter looks the same) every
-  // MILL_P steps; the skilled player is modelled at PH moments of that turn
-  var MILL_P = 120, PH = 4, SLOT = MILL_P / PH;
   var STAR_K = [0.35, 0.65, 0.9], AIM = 1, START_BONUS = 30;
 
   function rng(seed) {
@@ -78,25 +75,6 @@ function PachinkoEngineFactory() {
     };
   }
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
-
-  // a quarter turn as MILL_P unit vectors, by repeated small rotations (a short series
-  // for the step's cosine and sine, renormalised each time), so no Math.sin is needed
-  var TURN = (function () {
-    var x = Math.PI / 2 / MILL_P, c = 1 - x * x / 2 + x * x * x * x / 24, s = x - x * x * x / 6 + x * x * x * x * x / 120;
-    var out = [], ux = 1, uy = 0;
-    for (var i = 0; i < MILL_P; i++) {
-      out.push([ux, uy]);
-      var nx = ux * c - uy * s, ny = ux * s + uy * c, l = sqrt(nx * nx + ny * ny);
-      ux = nx / l; uy = ny / l;
-    }
-    return out;
-  })();
-  // a blade's angular speed in radians a second, before its direction
-  var MILL_W = (Math.PI / 2 / MILL_P) * 120;
-  function millDir(m, clock) {
-    var k = ((clock * m.dir + m.ph) % MILL_P + MILL_P) % MILL_P;
-    return TURN[k];
-  }
 
   // distance from (x, y) to a segment; the answer goes into one reused object, since a
   // step asks this thousands of times
@@ -127,44 +105,71 @@ function PachinkoEngineFactory() {
   // of riding the dome all the way down the right wall
   var STOP = { ax: 88.3, ay: 17.9, bx: 83.7, by: 21.8, r: 0.9, k: 'stop' }, E_STOP = 0.55;
 
-  // Board parameters by level: denser pins, then windmills from board 3 (two from 6),
-  // rails from 4 and more fixed pockets. Level 0 is the daily board's mix.
+  /* Two rows of catchers, each a V of two rails. The softer launches peel off the dome
+     and come down on the right, into the high row; the hardest strike the stop and are
+     thrown back to the left, into the low row. So one band of launch strength ends in one
+     catcher, and the dial is the whole game. The first draft had a field of ~300 pins:
+     every way in scattered alike, holding one power filled the tulip on every board, and
+     the dial did not matter (#949). */
+  var HI_Y = 62, LO_Y = 95, OW = 2.2, TUL_DROP = 14;
+  var HI_LIPS = [55, 69, 77, 85, 92, W], LO_LIPS = [24, 40, 52];
+  // a fixed pocket holds this many balls; more still fall in but score nothing, so no
+  // single power can carry a board
+  var FULL = 3;
+
+  /* Board parameters by level: more fixed pockets, lips moved further off their marks and
+     smaller pockets later on. Level 0 is the daily board's mix. There are no windmills:
+     a turning blade sent the same launch to a different catcher by the moment it got
+     there, and holding one power then opened the tulip and used it too (#949). */
   function params(level) {
     var k = (level | 0) === 0 ? 5 : clamp(level | 0, 1, LEVELS) - 1;
-    return { holes: max(0.06, 0.26 - 0.022 * k), mills: k >= 5 ? 2 : k >= 2 ? 1 : 0, rails: k >= 3 ? (k >= 7 ? 2 : 1) : 0, pockets: k >= 4 ? 4 : 3 };
+    return { fixed: k >= 3 ? 4 : 3, cap: k >= 6 ? 2 : FULL, jog: k >= 6 ? 2.5 : k >= 2 ? 1.5 : 0 };
   }
 
-  function pocket(x, y, v, kind) { return { x: x, y: y, v: v, kind: kind, w: kind === 'start' ? 2.3 : kind === 'tulip' ? 2.6 : 2.4 }; }
+  function pocket(x, y, v, kind, cap) { return { x: x, y: y, v: v, kind: kind, cap: cap | 0, w: kind === 'tulip' ? 2.6 : OW }; }
 
-  /* One board from a seed and a level: the tulip in the middle, the start pocket off to
-     one side above it, fixed pockets, windmills and rails, and brass pins on a staggered
-     grid with seeded holes. Pins too close to anything else go, so no ball can wedge. */
+  // the catchers of one row between its lips, each lip moved a little by the board's seed
+  function row(lips, ly, r, jog) {
+    var xs = lips.map(function (x, i) { return i === 0 || i === lips.length - 1 || !jog ? x : x + Math.round((r() * 2 - 1) * jog * 10) / 10; });
+    var out = [];
+    for (var i = 0; i + 1 < xs.length; i++) {
+      var x0 = xs[i], x1 = xs[i + 1], cx = (x0 + x1) / 2;
+      out.push({ x0: x0, x1: x1, cx: cx, ly: ly, oy: ly + max(4, ((x1 - x0) / 2 - OW) * 1.1) });
+    }
+    return out;
+  }
+
+  /* One board from a seed and a level: which catcher holds the tulip, the start pocket,
+     the fixed pockets and which only drain is the board's own shuffle. A few brass pins
+     sit only where drained balls fall, for the sound and the look. */
   function make(seed, level) {
     seed = seed >>> 0;
-    var r = rng(seed), P = params(level), pins = [], segs = GUIDE.slice(), mills = [], pockets = [], i;
-    var side = r() < 0.5 ? -1 : 1;
-    pockets.push(pocket(50, 118 + floor(r() * 4), 40, 'tulip'));
-    pockets.push(pocket(50 + side * (16 + floor(r() * 10)), 80 + floor(r() * 10), 10, 'start'));
-    var spots = [[22, 58], [78, 58], [18, 128], [82, 128], [36, 98], [64, 98]];
-    // a fixed shuffle of the spots by the board's own generator
-    for (i = spots.length - 1; i > 0; i--) { var j = floor(r() * (i + 1)), t = spots[i]; spots[i] = spots[j]; spots[j] = t; }
+    var r = rng(seed), P = params(level), pins = [], segs = GUIDE.slice(), pockets = [], i;
+    var cs = row(HI_LIPS, HI_Y, r, P.jog).concat(row(LO_LIPS, LO_Y, r, P.jog));
+    // the start pocket always in the high row: a ball rolling off a shut tulip in the high
+    // row falls on to the low row, and one power then opened the tulip and used it (#949)
+    var hi = [0, 1, 2, 3, 4], lo = [5, 6], tulipLow = r() < 0.6;
+    function take(list) { return list.splice(floor(r() * list.length), 1)[0]; }
+    // never the tulip in the catcher by the right wall: a ball rolling off its shut roof
+    // wedged against the wall and never ended
+    var tIdx = tulipLow ? take(lo) : hi.splice(floor(r() * 4), 1)[0], sIdx = take(hi);
+    var rest = hi.concat(lo), kinds = [];
+    kinds[tIdx] = 'tulip'; kinds[sIdx] = 'start';
     var vals = [30, 20, 20, 10];
-    for (i = 0; i < P.pockets - 1; i++) {
-      var sp = spots[i], px = sp[0] + floor(r() * 5) - 2, py = sp[1] + floor(r() * 5) - 2;
-      // keep clear of the start pocket
-      var st = pockets[1];
-      if (abs(px - st.x) < 12 && abs(py - st.y) < 12) px += px < st.x ? -10 : 10;
-      pockets.push(pocket(clamp(px, 16, 90), py, vals[i], 'fix'));
-    }
-    for (i = 0; i < P.mills; i++) {
-      var mx = P.mills === 2 ? (i ? 70 : 30) : 50 - side * 22, my = P.mills === 2 ? 40 + floor(r() * 6) : 44 + floor(r() * 8);
-      mills.push({ x: mx, y: my, L: 4.6, dir: i ? -1 : 1, ph: floor(r() * MILL_P) });
-    }
-    for (i = 0; i < P.rails; i++) {
-      var left = i ? side > 0 : side < 0, ry = 64 + floor(r() * 30), len = 10 + floor(r() * 6);
-      // short rails sloping down off a wall, turning balls back toward the middle
-      segs.push(left ? { ax: GX + GW, ay: ry, bx: GX + GW + len, by: ry + len * 0.45, r: 0.6, k: 'rail' } : { ax: W, ay: ry, bx: W - len, by: ry + len * 0.45, r: 0.6, k: 'rail' });
-    }
+    for (i = 0; i < P.fixed && rest.length; i++) kinds[take(rest)] = vals[i];
+    rest.forEach(function (n) { kinds[n] = 'out'; });
+    cs.forEach(function (c, n) {
+      var kd = kinds[n];
+      segs.push({ ax: c.x0, ay: c.ly, bx: c.cx - OW, by: c.oy, r: 0.6, k: 'rail' });
+      segs.push({ ax: c.x1, ay: c.ly, bx: c.cx + OW, by: c.oy, r: 0.6, k: 'rail' });
+      c.kind = kd;
+    });
+    // the tulip hangs a little off the catcher's middle, so a ball dropping onto the shut
+    // tulip always rolls off the same side, to the right where nothing scores
+    var tc = cs[tIdx];
+    pockets.push(pocket(tc.cx + 1.2, tc.oy + TUL_DROP, 50, 'tulip', 0));
+    pockets.push(pocket(cs[sIdx].cx, cs[sIdx].oy, 5, 'start', 0));
+    cs.forEach(function (c) { if (typeof c.kind === 'number') pockets.push(pocket(c.cx, c.oy, c.kind, 'fix', P.cap)); });
     pockets.forEach(function (p) {
       var w = p.w;
       // the cup under each pocket's rim, so a ball only goes in from above
@@ -172,41 +177,27 @@ function PachinkoEngineFactory() {
       segs.push({ ax: p.x + w, ay: p.y, bx: p.x + w, by: p.y + 3.2, r: 0.5, k: 'cup' });
       segs.push({ ax: p.x - w, ay: p.y + 3.2, bx: p.x + w, by: p.y + 3.2, r: 0.5, k: 'cup' });
     });
-    // the field: a staggered grid inside the guide arc and the walls
-    for (var row = 0; row * 5 + 20 <= 141; row++) {
-      var y = 20 + row * 5, odd = row % 2 === 1;
-      for (var x = odd ? 12 : 9; x <= 96; x += 6) {
-        var dx = x - CX, dy = y - CY;
-        if (y < CY && dx * dx + dy * dy > 38.5 * 38.5) continue;
-        if (x < GX + GW + PR + 2 * R + 0.6) continue;
-        if (row >= 2 && r() < P.holes) continue;
-        pins.push({ x: x, y: y, r: PR });
-      }
-      // half pins on the right wall and on the lane's guide, so no ball can slide down a wall
-      if (y >= CY - 2 && !odd) pins.push({ x: W, y: y, r: PR });
-      if (y > CY + 2 && odd) pins.push({ x: GX + GW, y: y, r: PR });
+    // pins only in the low corners where drained balls fall
+    var tu = pockets[0];
+    for (var y = 112; y <= 142; y += 6) {
+      var odd = ((y - 112) / 6) % 2 === 1;
+      for (var x = odd ? 63 : 60; x <= 96; x += 7) pins.push({ x: x, y: y, r: PR });
+      for (x = odd ? 13 : 10; x <= 22; x += 7) pins.push({ x: x, y: y, r: PR });
     }
     var clear = 2 * R + PR + 0.6;
     pins = pins.filter(function (p) {
-      for (var a = 0; a < pockets.length; a++) {
-        var q = pockets[a], reach = q.kind === 'tulip' ? 8.5 : q.w + 0.6;
-        if (abs(p.x - q.x) < reach + clear && p.y > q.y - (q.kind === 'tulip' ? 6.5 : 0.8) - clear && p.y < q.y + 3.7 + clear) return false;
-      }
-      for (var m = 0; m < mills.length; m++) {
-        var ex = p.x - mills[m].x, ey = p.y - mills[m].y, rr = mills[m].L + 0.5 + clear;
-        if (ex * ex + ey * ey < rr * rr) return false;
-      }
+      if (abs(p.x - tu.x) < 10 + clear && p.y > tu.y - 7 - clear && p.y < tu.y + 3.7 + clear) return false;
       for (var s = GUIDE.length; s < segs.length; s++) if (segDist(segs[s], p.x, p.y).d < segs[s].r + PR + 2 * R + 0.6) return false;
       return true;
     });
-    // the pocket rims are pins of their own, and so are the windmill hubs
+    // the pocket rims are pins of their own
     pockets.forEach(function (p) { pins.push({ x: p.x - p.w, y: p.y, r: 0.6, rim: true }); pins.push({ x: p.x + p.w, y: p.y, r: 0.6, rim: true }); });
-    var tu = pockets[0];
     var B = {
-      seed: seed, level: level | 0, pins: pins, segs: segs, mills: mills, pockets: pockets, side: side,
+      seed: seed, level: level | 0, pins: pins, segs: segs, pockets: pockets, catchers: cs,
       wings: {
-        shut: [{ ax: tu.x - tu.w, ay: tu.y, bx: tu.x - tu.w, by: tu.y - 4.5, r: 0.6, k: 'wing' }, { ax: tu.x + tu.w, ay: tu.y, bx: tu.x + tu.w, by: tu.y - 4.5, r: 0.6, k: 'wing' }],
-        open: [{ ax: tu.x - tu.w, ay: tu.y, bx: tu.x - 7.6, by: tu.y - 5.4, r: 0.6, k: 'wing' }, { ax: tu.x + tu.w, ay: tu.y, bx: tu.x + 7.6, by: tu.y - 5.4, r: 0.6, k: 'wing' }]
+        // shut, the petals meet in a roof over the cup; open, they spread wide
+        shut: [{ ax: tu.x - tu.w - 0.4, ay: tu.y, bx: tu.x, by: tu.y - 3.4, r: 0.6, k: 'wing' }, { ax: tu.x + tu.w + 0.4, ay: tu.y, bx: tu.x, by: tu.y - 3.4, r: 0.6, k: 'wing' }],
+        open: [{ ax: tu.x - tu.w, ay: tu.y, bx: tu.x - 4.4, by: tu.y - 5, r: 0.6, k: 'wing' }, { ax: tu.x + tu.w, ay: tu.y, bx: tu.x + 4.4, by: tu.y - 5, r: 0.6, k: 'wing' }]
       }
     };
     index(B);
@@ -241,7 +232,7 @@ function PachinkoEngineFactory() {
   function ball(s, clock) { return { x: START_X, y: START_Y, vx: 0, vy: -strengthSpeed(s), s: s | 0, c0: clock | 0, n: 0, still: 0, done: false, res: null, top: false }; }
 
   /* One step of one ball at board time `clock`, with the tulip open or shut. Events go
-     into ev: ['pin', index], ['mill', index]; when the ball ends, b.res is a pocket
+     into ev: ['pin', index]; when the ball ends, b.res is a pocket
      index, -1 for out at the bottom, or -2 for a foul (fell back down the lane). */
   function step(B, b, clock, open, ev) {
     if (b.done) return;
@@ -291,22 +282,8 @@ function PachinkoEngineFactory() {
         var ms = R + sg.r;
         if (q.d >= ms) continue;
         d = q.d || 1e-9;
-        bounce(b, q.ex / d, q.ey / d, ms - d, E_WALL, 0, 0, FRICT);
+        bounce(b, q.ex / d, q.ey / d, ms - d, sg.k === 'rail' ? E_RAIL : E_WALL, 0, 0, FRICT);
         touch = true;
-      }
-      for (i = 0; i < B.mills.length; i++) {
-        var mi = B.mills[i], u = millDir(mi, clock), w = MILL_W * mi.dir;
-        for (var arm = 0; arm < 2; arm++) {
-          var ux = arm ? -u[1] : u[0], uy = arm ? u[0] : u[1];
-          q = segTo(mi.x - ux * mi.L, mi.y - uy * mi.L, mi.x + ux * mi.L, mi.y + uy * mi.L, b.x, b.y);
-          var mm = R + 0.5;
-          if (q.d >= mm) continue;
-          d = q.d || 1e-9;
-          // the blade's own speed where the ball touches it
-          var rx = q.px - mi.x, ry = q.py - mi.y;
-          if (bounce(b, q.ex / d, q.ey / d, mm - d, E_PIN, -w * ry, w * rx, FRICT) > 10 && ev) ev.push(['mill', i]);
-          touch = true;
-        }
       }
       // in a pocket: below its rim and between its walls
       for (i = 0; i < B.pockets.length; i++) {
@@ -323,7 +300,12 @@ function PachinkoEngineFactory() {
     if (b.n >= CAP) { b.res = -1; b.done = true; }
   }
 
-  function value(B, res) { return res >= 0 ? B.pockets[res].v : 0; }
+  // a fixed pocket pays only while it has room; fill counts the balls already in each
+  function value(B, res, fill) {
+    if (res < 0) return 0;
+    var p = B.pockets[res];
+    return p.cap && fill && (fill[res] | 0) >= p.cap ? 0 : p.v;
+  }
 
   // one ball alone from its launch to its end, with the tulip held open or shut
   function run(B, s, clock, open) {
@@ -334,7 +316,7 @@ function PachinkoEngineFactory() {
 
   /* ------------------------------------------------------------ rounds */
 
-  function round(B) { return { B: B, clock: 0, tray: BALLS, fly: [], shots: [], score: 0, fouls: 0, tulipUntil: 0, hits: [], last: -1 }; }
+  function round(B) { return { B: B, clock: 0, tray: BALLS, fly: [], shots: [], score: 0, fouls: 0, tulipUntil: 0, hits: [], fill: B.pockets.map(function () { return 0; }), last: -1 }; }
   function canFire(Rd) { return Rd.tray > 0 && Rd.shots.length < BALLS + FOUL_MAX && (Rd.last < 0 || Rd.clock - Rd.last >= GAP); }
   function fire(Rd, s) {
     if (!canFire(Rd) || s !== (s | 0) || s < 0 || s > 100) return null;
@@ -352,7 +334,7 @@ function PachinkoEngineFactory() {
       var b = Rd.fly[i];
       step(Rd.B, b, Rd.clock, open, ev);
       if (!b.done) { keep.push(b); continue; }
-      var v = value(Rd.B, b.res);
+      var v = value(Rd.B, b.res, Rd.fill);
       if (b.res === -2) {
         // a ball that falls back down the lane comes back to the tray, up to a limit
         Rd.fouls++;
@@ -360,6 +342,7 @@ function PachinkoEngineFactory() {
       } else {
         Rd.score += v;
         Rd.hits.push(b.res);
+        if (b.res >= 0) Rd.fill[b.res]++;
         if (b.res >= 0 && Rd.B.pockets[b.res].kind === 'start') Rd.tulipUntil = max(Rd.tulipUntil, Rd.clock + TUL);
       }
       ev.push(['end', b, b.res, v]);
@@ -398,53 +381,42 @@ function PachinkoEngineFactory() {
 
   /* ------------------------------------------------------ stars, bots */
 
-  /* Where every strength goes, at PH moments of the windmills' turn, with the tulip shut
-     and open: [open][phase][s] = [result, steps]. Balls never meet, so this is the whole
+  /* Where every strength goes with the tulip shut and open: [open][s] = [result, steps]. Balls never meet, so this is the whole
      board for one ball. mapMore does it a slice at a time, so the page can map a daily
      board between frames instead of freezing a slow phone. */
   function mapMore(B, count) {
     if (B.map) return true;
-    var phases = B.mills.length ? PH : 1, all = 2 * phases * 101, q = B._mq || (B._mq = []);
-    while (q.length < all && count-- > 0) {
-      var n = q.length, o = floor(n / (phases * 101)), ph = floor(n / 101) % phases, s = n % 101;
-      var b = run(B, s, ph * SLOT, !!o);
+    var q = B._mq || (B._mq = []);
+    while (q.length < 202 && count-- > 0) {
+      var b = run(B, q.length % 101, 0, q.length >= 101);
       q.push([b.res, b.n]);
     }
-    if (q.length < all) return false;
-    var map = [[], []];
-    for (var n2 = 0; n2 < all; n2++) {
-      var o2 = floor(n2 / (phases * 101)), ph2 = floor(n2 / 101) % phases;
-      (map[o2][ph2] = map[o2][ph2] || []).push(q[n2]);
-    }
-    B.map = map; delete B._mq;
+    if (q.length < 202) return false;
+    B.map = [q.slice(0, 101), q.slice(101)]; delete B._mq;
     return true;
   }
   function map(B) { mapMore(B, Infinity); return B.map; }
 
   // what a strength is worth to a player who knows the board: the pocket's points, and a
   // start pocket counts extra while the tulip is shut, since it opens it
-  function worth(B, res, open) {
+  function worth(B, res, open, fill) {
     if (res < 0) return res === -2 ? -1 : 0;
     var p = B.pockets[res];
-    return p.v + (p.kind === 'start' && !open ? START_BONUS : 0);
+    return value(B, res, fill) + (p.kind === 'start' && !open ? START_BONUS : 0);
   }
-  /* A player who knows the board but whose strength lands up to AIM off: for each moment
-     the best strength by its average over that spread, and when to launch it. */
-  function choose(B, clock, until, r) {
-    var M = map(B), phases = M[0].length, best = -1e9, pick = null, val = [];
-    for (var j = 0; j < phases; j++) {
-      // the next launch moment at this point of the windmills' turn
-      var c = phases === 1 ? clock : clock + ((j * SLOT - clock) % MILL_P + MILL_P) % MILL_P;
-      for (var s = 0; s <= 100; s++) {
-        // the tulip counts as open if it is still open when this ball gets there
-        var o = M[1][j][s], op = c + o[1] < until;
-        val[s] = worth(B, op ? o[0] : M[0][j][s][0], op);
-      }
-      for (s = AIM; s <= 100 - AIM; s++) {
-        var sum = 0;
-        for (var d = -AIM; d <= AIM; d++) sum += val[s + d];
-        if (sum > best + 1e-9) { best = sum; pick = { s: s, at: c }; }
-      }
+  /* A player who knows the board but whose strength lands up to AIM off: the best strength
+     by its average over that spread, launched at once. */
+  function choose(B, clock, until, r, fill) {
+    var M = map(B), best = -1e9, pick = null, val = [];
+    for (var s = 0; s <= 100; s++) {
+      // the tulip counts as open if it is still open when this ball gets there
+      var o = M[1][s], op = clock + o[1] < until;
+      val[s] = worth(B, op ? o[0] : M[0][s][0], op, fill);
+    }
+    for (s = AIM; s <= 100 - AIM; s++) {
+      var sum = 0;
+      for (var d = -AIM; d <= AIM; d++) sum += val[s + d];
+      if (sum > best + 1e-9) { best = sum; pick = { s: s, at: clock }; }
     }
     pick.s = clamp(pick.s + floor(r() * (2 * AIM + 1)) - AIM, 0, 100);
     return pick;
@@ -455,7 +427,7 @@ function PachinkoEngineFactory() {
     while (!over(Rd) && Rd.clock < 3600 * 120) {
       if (canFire(Rd)) {
         if (!plan) {
-          if (skilled) plan = choose(B, Rd.clock, Rd.tulipUntil, r);
+          if (skilled) plan = choose(B, Rd.clock, Rd.tulipUntil, r, Rd.fill);
           else plan = { s: floor(r() * 101), at: Rd.clock + floor(r() * 120) };
         }
         if (Rd.clock >= plan.at) { fire(Rd, plan.s); plan = null; }
@@ -483,15 +455,15 @@ function PachinkoEngineFactory() {
 
   // measured once with thresholds(level(n, true)) and kept, so opening a board costs
   // nothing; the test recomputes two of them. After a physics change, rebuild every row
-  var TH = [[90, 170, 230], [190, 360, 500], [120, 220, 300], [170, 320, 450], [280, 520, 720], [170, 310, 430], [250, 470, 650], [150, 290, 400], [320, 590, 820], [240, 440, 620]];
+  var TH = [[300, 550, 760], [300, 550, 760], [300, 550, 760], [300, 550, 760], [300, 550, 760], [300, 550, 760], [300, 550, 760], [300, 550, 760], [300, 550, 760], [300, 550, 760]];
   function level(n, fresh) { var B = make((94900 + n * 7919) >>> 0, n); if (!fresh && TH) B.th = TH[n - 1]; return B; }
   // the daily board is level 0: a mid-campaign mix from the day's seed
   function daily(seed) { return make(seed >>> 0, 0); }
 
   var api = {
-    W: W, H: H, R: R, PR: PR, DT: DT, G: G, GX: GX, GW: GW, CX: CX, CY: CY, DOME: DOME, ARC_R: ARC_R, ARC_END: ARC_END, START_X: START_X, START_Y: START_Y,
-    VMIN: VMIN, VMAX: VMAX, BALLS: BALLS, FOUL_MAX: FOUL_MAX, GAP: GAP, TUL: TUL, CAP: CAP, LEVELS: LEVELS, MILL_P: MILL_P, PH: PH, SLOT: SLOT, STAR_K: STAR_K, AIM: AIM,
-    TH: TH, GUIDE: GUIDE, STOP: STOP, rng: rng, params: params, make: make, level: level, daily: daily, millDir: millDir, value: value, strengthSpeed: strengthSpeed,
+    HI_Y: HI_Y, LO_Y: LO_Y, OW: OW, FULL: FULL, W: W, H: H, R: R, PR: PR, DT: DT, G: G, GX: GX, GW: GW, CX: CX, CY: CY, DOME: DOME, ARC_R: ARC_R, ARC_END: ARC_END, START_X: START_X, START_Y: START_Y,
+    VMIN: VMIN, VMAX: VMAX, BALLS: BALLS, FOUL_MAX: FOUL_MAX, GAP: GAP, TUL: TUL, CAP: CAP, LEVELS: LEVELS, STAR_K: STAR_K, AIM: AIM,
+    TH: TH, GUIDE: GUIDE, STOP: STOP, rng: rng, params: params, make: make, level: level, daily: daily, value: value, strengthSpeed: strengthSpeed,
     ball: ball, step: step, run: run, round: round, canFire: canFire, fire: fire, tick: tick, tulipOpen: tulipOpen, over: over,
     snapshot: snapshot, restore: restore, replay: replay, map: map, mapMore: mapMore, choose: choose, botRound: botRound, aimScore: aimScore, thresholds: thresholds, stars: stars
   };
@@ -520,121 +492,121 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PachinkoEn
     mood: 'dots',
     strings: {
       fa: {
-        pcScene: 'تخته‌ی عمودی با میخ‌های برنجی، فرفره‌ها، جیب‌ها و یک لاله در وسط', pcBoardN: 'تخته‌ی {n}', pcDaily: 'تخته‌ی روزانه', pcBallsN: 'توپ: {n}', pcScoreN: 'امتیاز: {n}', pcPowerN: 'قدرت {n}',
+        pcScene: 'تخته‌ی عمودی با ردیف‌های قیف، جیب‌ها و یک لاله', pcBoardN: 'تخته‌ی {n}', pcDaily: 'تخته‌ی روزانه', pcBallsN: 'توپ: {n}', pcScoreN: 'امتیاز: {n}', pcPowerN: 'قدرت {n}',
         pcHint: 'روی تخته نگه دار تا توپ پرتاب شود. با نوار پایین یا کشیدن انگشت به چپ و راست قدرت را عوض کن.',
         pcTulipHint: 'توپ را در جیب سبز بینداز تا لاله‌ی وسط چند ثانیه باز شود.', pcOpen: 'لاله باز است!', pcFoul: 'خیلی آرام بود؛ توپ برگشت.', pcLast: 'توپ آخر!',
         pcCleared: 'تخته را بردی!', pcNoStar: 'این بار ستاره‌ای نشد', pcNext: 'تخته‌ی بعدی', pcRetry: 'دوباره همین تخته',
         pcBalls: 'توپ‌ها', pcScore: 'امتیاز', pcBest: 'بهترین', pcStarsAt: 'ستاره‌ها از', pcNewBest: 'رکورد تازه: {n}', pcUnlocked: 'تخته‌ی {n} باز شد',
         pcChoose: 'انتخاب تخته', pcLocked: 'قفل', pcShowNum: 'نشان دادن عدد قدرت', pcShowMark: 'علامت قدرت توپ قبلی روی نوار',
-        pcRules: 'بیست‌وپنج توپ داری. تا وقتی انگشتت روی تخته است، هر چند لحظه یک توپ از راهروی چپ بالا می‌رود، از روی قوس بالا رد می‌شود و از لای میخ‌های برنجی پایین می‌آید. قدرت پرتاب جای ورود توپ را تعیین می‌کند: آرام از چپ، محکم‌تر از راست. قدرت را با نوار پایین تخته یا کشیدن انگشت به چپ و راست عوض کن. هر جیب امتیاز خودش را دارد. جیب سبز امتیاز کمی دارد ولی لاله‌ی وسط را چند ثانیه باز می‌کند و لاله‌ی باز توپ بیشتری می‌گیرد. فرفره‌ها می‌چرخند، پس لحظه‌ی پرتاب هم مهم است. مسیر توپ شانسی نیست: یک قدرت در یک لحظه، همیشه همان راه. توپی که برگردد پایین راهرو دوباره در سینی می‌آید. با امتیاز کافی یک، دو یا سه ستاره می‌گیری و با یک ستاره تخته‌ی بعدی باز می‌شود.',
+        pcRules: 'بیست‌وپنج توپ داری. تا وقتی انگشتت روی تخته است، هر چند لحظه یک توپ از راهروی چپ بالا می‌رود و از روی قوس بالای تخته رد می‌شود. قدرت پرتاب تعیین می‌کند کجا فرود بیاید: توپ آرام‌تر نزدیک وسط پایین می‌آید، محکم‌تر سمت راست‌تر، و محکم‌ترین‌ها به ضربه‌گیر بالا می‌خورند و به پایین چپ برمی‌گردند. هر قیف یک بازه‌ی قدرت را به یک جا می‌برد. قدرت را با نوار زیر تخته تنظیم کن یا انگشتت را چپ و راست بکش. هر جیب امتیاز خودش را دارد، ولی جیب شماره‌دار فقط برای چند توپ اولش امتیاز می‌دهد (نقطه‌های زیرش). جیب سبز امتیاز کمی دارد، ولی لاله را چند ثانیه باز می‌کند و فقط لاله‌ی باز توپ می‌گیرد؛ بیشترین امتیاز مال اوست. هیچ چیز شانسی نیست: یک قدرت همیشه همان راه را می‌رود. توپی که از راهرو پایین بیفتد به سینی برمی‌گردد. برای یک، دو یا سه ستاره امتیاز بگیر؛ یک ستاره تخته‌ی بعد را باز می‌کند.',
         pcKPower: 'کم و زیاد کردن قدرت', pcKFar: 'پله‌ی بزرگ‌تر', pcKFire: 'نگه دار تا پرتاب شود', pcKAgain: 'شروع دوباره‌ی تخته',
         pcTut1: 'نگه دار و پرتاب کن', pcTutText1: 'تا وقتی انگشتت روی تخته است، توپ‌ها یکی‌یکی از راهروی چپ بالا می‌روند و از روی قوس وارد تخته می‌شوند.',
-        pcTut2: 'قدرت، جای ورود', pcTutText2: 'با نوار پایین قدرت را تنظیم کن: آرام از چپ وارد می‌شود، محکم از راست. یک قدرت همیشه همان راه را می‌رود.',
-        pcTut3: 'لاله را باز کن', pcTutText3: 'توپ در جیب سبز، لاله‌ی وسط را چند ثانیه باز می‌کند. لاله‌ی باز بیشترین امتیاز را دارد.'
+        pcTut2: 'قدرت، جای ورود', pcTutText2: 'با نوار پایین قدرت را تنظیم کن: آرام‌تر نزدیک وسط فرود می‌آید، محکم‌تر سمت راست‌تر، و محکم‌ترین به پایین چپ برمی‌گردد. یک قدرت همیشه همان راه را می‌رود.',
+        pcTut3: 'لاله را باز کن', pcTutText3: 'توپ در جیب سبز، لاله را چند ثانیه باز می‌کند. فقط لاله‌ی باز توپ می‌گیرد و بیشترین امتیاز را دارد.'
       },
       en: {
-        pcScene: 'Upright board with brass pins, windmills, pockets and a tulip in the middle', pcBoardN: 'Board {n}', pcDaily: 'Daily board', pcBallsN: 'Balls: {n}', pcScoreN: 'Score: {n}', pcPowerN: 'Power {n}',
+        pcScene: 'Upright board with rows of catchers, pockets and a tulip', pcBoardN: 'Board {n}', pcDaily: 'Daily board', pcBallsN: 'Balls: {n}', pcScoreN: 'Score: {n}', pcPowerN: 'Power {n}',
         pcHint: 'Hold on the board to launch. Set the power with the bar below, or slide left and right.',
         pcTulipHint: 'Land a ball in the green pocket to open the tulip for a few seconds.', pcOpen: 'The tulip is open!', pcFoul: 'Too soft: the ball came back.', pcLast: 'Last ball!',
         pcCleared: 'Board cleared!', pcNoStar: 'No star this time', pcNext: 'Next board', pcRetry: 'Try this board again',
         pcBalls: 'Balls', pcScore: 'Score', pcBest: 'Best', pcStarsAt: 'Stars at', pcNewBest: 'New best: {n}', pcUnlocked: 'Board {n} is open',
         pcChoose: 'Choose a board', pcLocked: 'locked', pcShowNum: 'Show the power number', pcShowMark: 'Mark the last ball’s power on the bar',
-        pcRules: 'You have 25 balls. While your finger is on the board, a ball shoots up the lane on the left every few moments, over the arc at the top, and down through the brass pins. The launch power decides where it comes in: soft on the left, harder on the right. Set the power with the bar under the board, or slide your finger left and right. Every pocket has its own points. The green pocket scores little, but it opens the tulip in the middle for a few seconds, and an open tulip catches far more balls. The windmills turn, so the moment matters too. Nothing is left to chance: the same power at the same moment always takes the same path. A ball that falls back down the lane returns to the tray. Score enough for one, two or three stars; one star opens the next board.',
+        pcRules: 'You have 25 balls. While your finger is on the board, a ball shoots up the lane on the left every few moments and over the arc at the top. The launch power decides where it lands: a softer ball comes down nearer the middle, a harder one further right, and the hardest strike the stop at the top and are thrown back to the lower left. Each catcher leads one band of power to one place. Set the power with the bar under the board, or slide your finger left and right. Every pocket has its own points, but a numbered pocket pays only for its first few balls (the dots under it). The green pocket scores little, but it opens the tulip for a few seconds, and only an open tulip catches balls; it pays the most. Nothing is left to chance: the same power always takes the same path. A ball that falls back down the lane returns to the tray. Score enough for one, two or three stars; one star opens the next board.',
         pcKPower: 'Less or more power', pcKFar: 'Bigger steps', pcKFire: 'Hold to launch', pcKAgain: 'Start the board over',
         pcTut1: 'Hold to launch', pcTutText1: 'While your finger is on the board, balls shoot up the lane on the left one by one and come in over the arc.',
-        pcTut2: 'Power picks the way in', pcTutText2: 'Set the power with the bar below: soft comes in on the left, hard on the right. The same power always takes the same path.',
-        pcTut3: 'Open the tulip', pcTutText3: 'A ball in the green pocket opens the tulip in the middle for a few seconds. The open tulip scores the most.'
+        pcTut2: 'Power picks the way in', pcTutText2: 'Set the power with the bar below: softer lands nearer the middle, harder further right, and the hardest bounces back to the lower left. The same power always takes the same path.',
+        pcTut3: 'Open the tulip', pcTutText3: 'A ball in the green pocket opens the tulip for a few seconds. Only an open tulip catches balls, and it scores the most.'
       },
       zh: {
-        pcScene: '立式钉板，有黄铜钉、风车、球袋和中间的郁金香', pcBoardN: '第 {n} 板', pcDaily: '每日钉板', pcBallsN: '球：{n}', pcScoreN: '得分：{n}', pcPowerN: '力度 {n}',
+        pcScene: '立式钉板，有几排漏斗、球袋和一朵郁金香', pcBoardN: '第 {n} 板', pcDaily: '每日钉板', pcBallsN: '球：{n}', pcScoreN: '得分：{n}', pcPowerN: '力度 {n}',
         pcHint: '按住钉板发射。用下方的条或左右滑动调整力度。',
         pcTulipHint: '把球打进绿色球袋，中间的郁金香会张开几秒。', pcOpen: '郁金香张开了！', pcFoul: '太轻了：球退回来了。', pcLast: '最后一球！',
         pcCleared: '过关！', pcNoStar: '这次没有星星', pcNext: '下一板', pcRetry: '再玩这一板',
         pcBalls: '球数', pcScore: '得分', pcBest: '最佳', pcStarsAt: '星星目标', pcNewBest: '新纪录：{n}', pcUnlocked: '第 {n} 板已解锁',
         pcChoose: '选择钉板', pcLocked: '未解锁', pcShowNum: '显示力度数字', pcShowMark: '在力度条上标出上一球的力度',
-        pcRules: '你有 25 个球。手指按在钉板上时，每隔一会儿就有一个球沿左侧通道射上去，越过顶部的弧线，再穿过黄铜钉落下。发射力度决定球从哪里进场：轻的从左边，重的从右边。用钉板下方的条调整力度，或者左右滑动手指。每个球袋都有自己的分数。绿色球袋分数不高，但会让中间的郁金香张开几秒，张开的郁金香能接住多得多的球。风车会转动，所以发射的时机也很重要。这里没有运气：同一力度、同一时刻，球总是走同一条路。从通道退回的球会回到球盘。得分够了就能拿一、二或三颗星，一颗星即可解锁下一板。',
+        pcRules: '你有 25 个球。手指按在钉板上时，每隔一会儿就有一个球沿左侧通道射上去，越过顶部的弧线。发射力度决定球落在哪里：轻一点落在靠中间的地方，重一点落得更靠右，最重的球撞上顶部的挡块，被弹回左下方。每个漏斗把一段力度引到同一个地方。用钉板下方的条调整力度，或者左右滑动手指。每个球袋都有自己的分数，但带数字的球袋只为前几个球计分（看下面的圆点）。绿色球袋分数不高，但会让郁金香张开几秒，只有张开的郁金香才能接住球，它的分数最高。这里没有运气：同一力度的球总是走同一条路。从通道退回的球会回到球盘。得分够了就能拿一、二或三颗星，一颗星即可解锁下一板。',
         pcKPower: '减小或增大力度', pcKFar: '更大步长', pcKFire: '按住发射', pcKAgain: '重新开始本板',
         pcTut1: '按住发射', pcTutText1: '手指按在钉板上时，球一个接一个沿左侧通道射上去，越过弧线进场。',
-        pcTut2: '力度决定入口', pcTutText2: '用下方的条调整力度：轻的从左边进，重的从右边进。同一力度总是走同一条路。',
-        pcTut3: '打开郁金香', pcTutText3: '球进绿色球袋，中间的郁金香就张开几秒。张开的郁金香得分最高。'
+        pcTut2: '力度决定入口', pcTutText2: '用下方的条调整力度：轻的落在靠中间，重的更靠右，最重的弹回左下方。同一力度总是走同一条路。',
+        pcTut3: '打开郁金香', pcTutText3: '球进入绿色球袋，郁金香会张开几秒。只有张开的郁金香能接住球，分数最高。'
       },
       de: {
-        pcScene: 'Senkrechtes Brett mit Messingstiften, Windrädern, Taschen und einer Tulpe in der Mitte', pcBoardN: 'Brett {n}', pcDaily: 'Tagesbrett', pcBallsN: 'Kugeln: {n}', pcScoreN: 'Punkte: {n}', pcPowerN: 'Stärke {n}',
+        pcScene: 'Senkrechtes Brett mit Reihen von Trichtern, Taschen und einer Tulpe', pcBoardN: 'Brett {n}', pcDaily: 'Tagesbrett', pcBallsN: 'Kugeln: {n}', pcScoreN: 'Punkte: {n}', pcPowerN: 'Stärke {n}',
         pcHint: 'Halte das Brett gedrückt, um zu schießen. Stärke mit dem Balken unten oder durch Wischen nach links und rechts.',
         pcTulipHint: 'Triff die grüne Tasche, dann öffnet sich die Tulpe für ein paar Sekunden.', pcOpen: 'Die Tulpe ist offen!', pcFoul: 'Zu schwach: Die Kugel kam zurück.', pcLast: 'Letzte Kugel!',
         pcCleared: 'Brett geschafft!', pcNoStar: 'Diesmal kein Stern', pcNext: 'Nächstes Brett', pcRetry: 'Dieses Brett nochmal',
         pcBalls: 'Kugeln', pcScore: 'Punkte', pcBest: 'Rekord', pcStarsAt: 'Sterne ab', pcNewBest: 'Neuer Rekord: {n}', pcUnlocked: 'Brett {n} freigeschaltet',
         pcChoose: 'Brett wählen', pcLocked: 'gesperrt', pcShowNum: 'Stärke als Zahl zeigen', pcShowMark: 'Stärke der letzten Kugel am Balken markieren',
-        pcRules: 'Du hast 25 Kugeln. Solange dein Finger auf dem Brett liegt, schießt alle paar Augenblicke eine Kugel die Bahn links hinauf, über den Bogen oben und durch die Messingstifte nach unten. Die Stärke bestimmt, wo sie hereinkommt: sanft links, kräftiger rechts. Stell die Stärke mit dem Balken unter dem Brett ein oder wische nach links und rechts. Jede Tasche hat eigene Punkte. Die grüne bringt wenig, öffnet aber die Tulpe in der Mitte für ein paar Sekunden, und eine offene Tulpe fängt viel mehr Kugeln. Die Windräder drehen sich, also zählt auch der Moment. Nichts ist Zufall: dieselbe Stärke im selben Moment nimmt immer denselben Weg. Eine Kugel, die die Bahn zurückrollt, kommt in die Schale zurück. Genug Punkte bringen einen, zwei oder drei Sterne; ein Stern öffnet das nächste Brett.',
+        pcRules: 'Du hast 25 Kugeln. Solange dein Finger auf dem Brett liegt, schießt alle paar Augenblicke eine Kugel die Bahn links hinauf und über den Bogen oben. Die Stärke bestimmt, wo sie landet: eine sanftere Kugel kommt näher der Mitte herunter, eine stärkere weiter rechts, und die stärksten treffen oben den Anschlag und werden nach links unten zurückgeworfen. Jeder Trichter führt einen Stärkebereich an eine Stelle. Stell die Stärke mit dem Balken unter dem Brett ein oder wische nach links und rechts. Jede Tasche hat eigene Punkte, aber eine Tasche mit Zahl zahlt nur für ihre ersten Kugeln (die Punkte darunter). Die grüne bringt wenig, öffnet aber die Tulpe für ein paar Sekunden, und nur eine offene Tulpe fängt Kugeln; sie bringt am meisten. Nichts ist Zufall: dieselbe Stärke nimmt immer denselben Weg. Eine Kugel, die die Bahn zurückrollt, kommt in die Schale zurück. Genug Punkte bringen einen, zwei oder drei Sterne; ein Stern öffnet das nächste Brett.',
         pcKPower: 'Weniger oder mehr Stärke', pcKFar: 'Größere Schritte', pcKFire: 'Halten zum Schießen', pcKAgain: 'Brett neu beginnen',
         pcTut1: 'Halten zum Schießen', pcTutText1: 'Solange dein Finger auf dem Brett liegt, schießen Kugeln nacheinander die Bahn links hinauf und kommen über den Bogen herein.',
-        pcTut2: 'Stärke wählt den Weg', pcTutText2: 'Stell die Stärke mit dem Balken unten ein: sanft kommt links herein, kräftig rechts. Dieselbe Stärke nimmt immer denselben Weg.',
-        pcTut3: 'Öffne die Tulpe', pcTutText3: 'Eine Kugel in der grünen Tasche öffnet die Tulpe in der Mitte für ein paar Sekunden. Die offene Tulpe bringt am meisten.'
+        pcTut2: 'Stärke wählt den Weg', pcTutText2: 'Stell die Stärke mit dem Balken unten ein: sanfter landet näher der Mitte, stärker weiter rechts, und am stärksten springt nach links unten zurück. Dieselbe Stärke nimmt immer denselben Weg.',
+        pcTut3: 'Öffne die Tulpe', pcTutText3: 'Eine Kugel in der grünen Tasche öffnet die Tulpe für ein paar Sekunden. Nur eine offene Tulpe fängt Kugeln, und sie bringt am meisten.'
       },
       es: {
-        pcScene: 'Tablero vertical con clavos de latón, molinillos, bolsillos y un tulipán en el centro', pcBoardN: 'Tablero {n}', pcDaily: 'Tablero del día', pcBallsN: 'Bolas: {n}', pcScoreN: 'Puntos: {n}', pcPowerN: 'Fuerza {n}',
+        pcScene: 'Tablero vertical con filas de embudos, bolsillos y un tulipán', pcBoardN: 'Tablero {n}', pcDaily: 'Tablero del día', pcBallsN: 'Bolas: {n}', pcScoreN: 'Puntos: {n}', pcPowerN: 'Fuerza {n}',
         pcHint: 'Mantén pulsado el tablero para lanzar. Ajusta la fuerza con la barra de abajo o deslizando a izquierda y derecha.',
         pcTulipHint: 'Mete una bola en el bolsillo verde y el tulipán se abre unos segundos.', pcOpen: '¡El tulipán está abierto!', pcFoul: 'Muy suave: la bola volvió.', pcLast: '¡Última bola!',
         pcCleared: '¡Tablero superado!', pcNoStar: 'Esta vez sin estrella', pcNext: 'Siguiente tablero', pcRetry: 'Repetir este tablero',
         pcBalls: 'Bolas', pcScore: 'Puntos', pcBest: 'Récord', pcStarsAt: 'Estrellas desde', pcNewBest: 'Nuevo récord: {n}', pcUnlocked: 'Tablero {n} abierto',
         pcChoose: 'Elegir tablero', pcLocked: 'bloqueado', pcShowNum: 'Mostrar el número de fuerza', pcShowMark: 'Marcar en la barra la fuerza de la última bola',
-        pcRules: 'Tienes 25 bolas. Mientras tu dedo está en el tablero, cada pocos instantes una bola sube por el carril de la izquierda, pasa sobre el arco de arriba y baja entre los clavos de latón. La fuerza decide por dónde entra: suave por la izquierda, más fuerte por la derecha. Ajusta la fuerza con la barra bajo el tablero o desliza el dedo a izquierda y derecha. Cada bolsillo da sus puntos. El verde da pocos, pero abre el tulipán del centro unos segundos, y un tulipán abierto atrapa muchas más bolas. Los molinillos giran, así que el momento también cuenta. Nada es azar: la misma fuerza en el mismo momento sigue siempre el mismo camino. Una bola que cae de vuelta por el carril vuelve a la bandeja. Con puntos suficientes logras una, dos o tres estrellas; con una se abre el siguiente tablero.',
+        pcRules: 'Tienes 25 bolas. Mientras tu dedo está en el tablero, cada pocos instantes una bola sube por el carril de la izquierda y pasa sobre el arco de arriba. La fuerza decide dónde cae: una bola más suave baja más cerca del centro, una más fuerte más a la derecha, y las más fuertes chocan con el tope de arriba y vuelven abajo a la izquierda. Cada embudo lleva una franja de fuerza a un solo sitio. Ajusta la fuerza con la barra bajo el tablero o desliza el dedo a izquierda y derecha. Cada bolsillo da sus puntos, pero un bolsillo con número solo paga sus primeras bolas (los puntos de debajo). El verde da pocos, pero abre el tulipán unos segundos, y solo un tulipán abierto atrapa bolas; es el que más da. Nada es azar: la misma fuerza sigue siempre el mismo camino. Una bola que cae de vuelta por el carril vuelve a la bandeja. Con puntos suficientes logras una, dos o tres estrellas; con una se abre el siguiente tablero.',
         pcKPower: 'Menos o más fuerza', pcKFar: 'Pasos más grandes', pcKFire: 'Mantén para lanzar', pcKAgain: 'Empezar el tablero de nuevo',
         pcTut1: 'Mantén para lanzar', pcTutText1: 'Mientras tu dedo está en el tablero, las bolas suben una a una por el carril de la izquierda y entran por el arco.',
-        pcTut2: 'La fuerza elige la entrada', pcTutText2: 'Ajusta la fuerza con la barra de abajo: suave entra por la izquierda, fuerte por la derecha. La misma fuerza sigue siempre el mismo camino.',
-        pcTut3: 'Abre el tulipán', pcTutText3: 'Una bola en el bolsillo verde abre el tulipán del centro unos segundos. El tulipán abierto es lo que más puntúa.'
+        pcTut2: 'La fuerza elige la entrada', pcTutText2: 'Ajusta la fuerza con la barra de abajo: más suave cae cerca del centro, más fuerte más a la derecha, y la más fuerte rebota abajo a la izquierda. La misma fuerza sigue siempre el mismo camino.',
+        pcTut3: 'Abre el tulipán', pcTutText3: 'Una bola en el bolsillo verde abre el tulipán unos segundos. Solo un tulipán abierto atrapa bolas, y es el que más puntos da.'
       },
       pl: {
-        pcScene: 'Pionowa plansza z mosiężnymi kołkami, wiatraczkami, kieszeniami i tulipanem pośrodku', pcBoardN: 'Plansza {n}', pcDaily: 'Plansza dnia', pcBallsN: 'Kulki: {n}', pcScoreN: 'Punkty: {n}', pcPowerN: 'Siła {n}',
+        pcScene: 'Pionowa plansza z rzędami lejków, kieszeniami i tulipanem', pcBoardN: 'Plansza {n}', pcDaily: 'Plansza dnia', pcBallsN: 'Kulki: {n}', pcScoreN: 'Punkty: {n}', pcPowerN: 'Siła {n}',
         pcHint: 'Przytrzymaj planszę, by strzelać. Siłę ustaw paskiem na dole albo przesuwając palec w lewo i w prawo.',
         pcTulipHint: 'Traf kulką do zielonej kieszeni, a tulipan otworzy się na kilka sekund.', pcOpen: 'Tulipan jest otwarty!', pcFoul: 'Za słabo: kulka wróciła.', pcLast: 'Ostatnia kulka!',
         pcCleared: 'Plansza zaliczona!', pcNoStar: 'Tym razem bez gwiazdki', pcNext: 'Następna plansza', pcRetry: 'Jeszcze raz tę planszę',
         pcBalls: 'Kulki', pcScore: 'Punkty', pcBest: 'Rekord', pcStarsAt: 'Gwiazdki od', pcNewBest: 'Nowy rekord: {n}', pcUnlocked: 'Plansza {n} otwarta',
         pcChoose: 'Wybierz planszę', pcLocked: 'zablokowana', pcShowNum: 'Pokazuj siłę jako liczbę', pcShowMark: 'Zaznaczaj na pasku siłę ostatniej kulki',
-        pcRules: 'Masz 25 kulek. Dopóki palec jest na planszy, co kilka chwil kulka wylatuje torem po lewej, przelatuje nad łukiem u góry i spada między mosiężnymi kołkami. Siła strzału decyduje, gdzie wpada: słabo po lewej, mocniej po prawej. Siłę ustawisz paskiem pod planszą albo przesuwając palec w lewo i w prawo. Każda kieszeń ma swoje punkty. Zielona daje mało, ale otwiera tulipan pośrodku na kilka sekund, a otwarty tulipan łapie dużo więcej kulek. Wiatraczki się kręcą, więc liczy się też chwila. Nic tu nie jest losowe: ta sama siła w tej samej chwili zawsze leci tą samą drogą. Kulka, która spadnie z powrotem torem, wraca na tackę. Za dość punktów dostajesz jedną, dwie lub trzy gwiazdki; jedna otwiera następną planszę.',
+        pcRules: 'Masz 25 kulek. Dopóki palec jest na planszy, co kilka chwil kulka wylatuje torem po lewej i przelatuje nad łukiem u góry. Siła strzału decyduje, gdzie spadnie: słabsza kulka spada bliżej środka, mocniejsza dalej w prawo, a najmocniejsze uderzają w odbojnik u góry i wracają w lewy dół. Każdy lejek prowadzi jeden zakres siły w jedno miejsce. Siłę ustawisz paskiem pod planszą albo przesuwając palec w lewo i w prawo. Każda kieszeń ma swoje punkty, ale kieszeń z liczbą płaci tylko za kilka pierwszych kulek (kropki pod nią). Zielona daje mało, ale otwiera tulipan na kilka sekund, a tylko otwarty tulipan łapie kulki; daje najwięcej. Nic tu nie jest losowe: ta sama siła zawsze leci tą samą drogą. Kulka, która spadnie z powrotem torem, wraca na tackę. Za dość punktów dostajesz jedną, dwie lub trzy gwiazdki; jedna otwiera następną planszę.',
         pcKPower: 'Mniej lub więcej siły', pcKFar: 'Większe kroki', pcKFire: 'Przytrzymaj, by strzelać', pcKAgain: 'Zacznij planszę od nowa',
         pcTut1: 'Przytrzymaj, by strzelać', pcTutText1: 'Dopóki palec jest na planszy, kulki po kolei wylatują torem po lewej i wpadają nad łukiem.',
-        pcTut2: 'Siła wybiera wejście', pcTutText2: 'Ustaw siłę paskiem na dole: słabo wpada po lewej, mocno po prawej. Ta sama siła zawsze leci tą samą drogą.',
-        pcTut3: 'Otwórz tulipan', pcTutText3: 'Kulka w zielonej kieszeni otwiera tulipan pośrodku na kilka sekund. Otwarty tulipan daje najwięcej.'
+        pcTut2: 'Siła wybiera wejście', pcTutText2: 'Ustaw siłę paskiem na dole: słabsza spada bliżej środka, mocniejsza dalej w prawo, a najmocniejsza odbija się w lewy dół. Ta sama siła zawsze leci tą samą drogą.',
+        pcTut3: 'Otwórz tulipan', pcTutText3: 'Kulka w zielonej kieszeni otwiera tulipan na kilka sekund. Tylko otwarty tulipan łapie kulki i daje najwięcej.'
       },
       fr: {
-        pcScene: 'Plateau vertical avec clous de laiton, moulinets, poches et une tulipe au centre', pcBoardN: 'Plateau {n}', pcDaily: 'Plateau du jour', pcBallsN: 'Billes : {n}', pcScoreN: 'Points : {n}', pcPowerN: 'Force {n}',
+        pcScene: 'Plateau vertical avec des rangées d’entonnoirs, des poches et une tulipe', pcBoardN: 'Plateau {n}', pcDaily: 'Plateau du jour', pcBallsN: 'Billes : {n}', pcScoreN: 'Points : {n}', pcPowerN: 'Force {n}',
         pcHint: 'Garde le doigt sur le plateau pour lancer. Règle la force avec la barre du bas ou en glissant à gauche et à droite.',
         pcTulipHint: 'Mets une bille dans la poche verte : la tulipe s’ouvre quelques secondes.', pcOpen: 'La tulipe est ouverte !', pcFoul: 'Trop doux : la bille est revenue.', pcLast: 'Dernière bille !',
         pcCleared: 'Plateau réussi !', pcNoStar: 'Pas d’étoile cette fois', pcNext: 'Plateau suivant', pcRetry: 'Rejouer ce plateau',
         pcBalls: 'Billes', pcScore: 'Points', pcBest: 'Record', pcStarsAt: 'Étoiles à', pcNewBest: 'Nouveau record : {n}', pcUnlocked: 'Plateau {n} ouvert',
         pcChoose: 'Choisir un plateau', pcLocked: 'verrouillé', pcShowNum: 'Afficher la force en chiffre', pcShowMark: 'Marquer sur la barre la force de la dernière bille',
-        pcRules: 'Tu as 25 billes. Tant que ton doigt est sur le plateau, une bille monte toutes les quelques secondes par le couloir de gauche, passe l’arc du haut et descend entre les clous de laiton. La force décide où elle entre : doux à gauche, plus fort à droite. Règle la force avec la barre sous le plateau ou glisse le doigt à gauche et à droite. Chaque poche a ses points. La verte rapporte peu, mais elle ouvre la tulipe du centre quelques secondes, et une tulipe ouverte attrape bien plus de billes. Les moulinets tournent : le moment compte aussi. Rien n’est laissé au hasard : la même force au même moment prend toujours le même chemin. Une bille qui redescend le couloir revient dans le bac. Assez de points donnent une, deux ou trois étoiles ; une étoile ouvre le plateau suivant.',
+        pcRules: 'Tu as 25 billes. Tant que ton doigt est sur le plateau, une bille monte toutes les quelques secondes par le couloir de gauche et passe l’arc du haut. La force décide où elle tombe : une bille plus douce descend près du milieu, une plus forte plus à droite, et les plus fortes frappent la butée du haut et repartent en bas à gauche. Chaque entonnoir mène une plage de force à un seul endroit. Règle la force avec la barre sous le plateau ou glisse le doigt à gauche et à droite. Chaque poche a ses points, mais une poche numérotée ne paie que ses premières billes (les points dessous). La verte rapporte peu, mais elle ouvre la tulipe quelques secondes, et seule une tulipe ouverte attrape les billes ; c’est elle qui rapporte le plus. Rien n’est laissé au hasard : la même force prend toujours le même chemin. Une bille qui redescend le couloir revient dans le bac. Assez de points donnent une, deux ou trois étoiles ; une étoile ouvre le plateau suivant.',
         pcKPower: 'Moins ou plus de force', pcKFar: 'Pas plus grands', pcKFire: 'Maintenir pour lancer', pcKAgain: 'Recommencer le plateau',
         pcTut1: 'Maintiens pour lancer', pcTutText1: 'Tant que ton doigt est sur le plateau, les billes montent une à une par le couloir de gauche et entrent par l’arc.',
-        pcTut2: 'La force choisit l’entrée', pcTutText2: 'Règle la force avec la barre du bas : doux entre à gauche, fort à droite. La même force prend toujours le même chemin.',
-        pcTut3: 'Ouvre la tulipe', pcTutText3: 'Une bille dans la poche verte ouvre la tulipe du centre quelques secondes. La tulipe ouverte rapporte le plus.'
+        pcTut2: 'La force choisit l’entrée', pcTutText2: 'Règle la force avec la barre du bas : plus doux tombe près du milieu, plus fort plus à droite, et le plus fort rebondit en bas à gauche. La même force prend toujours le même chemin.',
+        pcTut3: 'Ouvre la tulipe', pcTutText3: 'Une bille dans la poche verte ouvre la tulipe quelques secondes. Seule une tulipe ouverte attrape les billes, et elle rapporte le plus.'
       },
       ar: {
-        pcScene: 'لوح قائم بمسامير نحاسية ومراوح وجيوب وزهرة توليب في الوسط', pcBoardN: 'اللوح {n}', pcDaily: 'لوح اليوم', pcBallsN: 'الكرات: {n}', pcScoreN: 'النقاط: {n}', pcPowerN: 'القوة {n}',
+        pcScene: 'لوح قائم فيه صفوف من الأقماع وجيوب وزهرة توليب', pcBoardN: 'اللوح {n}', pcDaily: 'لوح اليوم', pcBallsN: 'الكرات: {n}', pcScoreN: 'النقاط: {n}', pcPowerN: 'القوة {n}',
         pcHint: 'اضغط مطوّلًا على اللوح لتطلق الكرات. غيّر القوة بالشريط في الأسفل أو بسحب إصبعك يمينًا ويسارًا.',
         pcTulipHint: 'أدخل كرة في الجيب الأخضر لتتفتح زهرة التوليب بضع ثوانٍ.', pcOpen: 'زهرة التوليب مفتوحة!', pcFoul: 'ضعيفة جدًا: عادت الكرة.', pcLast: 'الكرة الأخيرة!',
         pcCleared: 'أنهيت اللوح!', pcNoStar: 'لا نجمة هذه المرة', pcNext: 'اللوح التالي', pcRetry: 'أعد هذا اللوح',
         pcBalls: 'الكرات', pcScore: 'النقاط', pcBest: 'الأفضل', pcStarsAt: 'النجوم عند', pcNewBest: 'رقم جديد: {n}', pcUnlocked: 'فُتح اللوح {n}',
         pcChoose: 'اختر لوحًا', pcLocked: 'مقفل', pcShowNum: 'أظهر رقم القوة', pcShowMark: 'علّم قوة الكرة السابقة على الشريط',
-        pcRules: 'معك 25 كرة. ما دام إصبعك على اللوح، تنطلق كرة كل بضع لحظات في الممر الأيسر، وتعبر القوس في الأعلى، ثم تنزل بين المسامير النحاسية. قوة الإطلاق تحدد من أين تدخل: الخفيفة من اليسار والأقوى من اليمين. غيّر القوة بالشريط تحت اللوح أو اسحب إصبعك يمينًا ويسارًا. لكل جيب نقاطه. الجيب الأخضر نقاطه قليلة، لكنه يفتح زهرة التوليب في الوسط بضع ثوانٍ، والزهرة المفتوحة تلتقط كرات أكثر بكثير. المراوح تدور، فاللحظة مهمة أيضًا. لا شيء بالحظ: القوة نفسها في اللحظة نفسها تسلك الطريق نفسه دائمًا. الكرة التي تعود نازلة في الممر ترجع إلى الصينية. النقاط الكافية تعطيك نجمة أو اثنتين أو ثلاثًا، ونجمة واحدة تفتح اللوح التالي.',
+        pcRules: 'معك 25 كرة. ما دام إصبعك على اللوح، تنطلق كرة كل بضع لحظات في الممر الأيسر وتعبر القوس في الأعلى. قوة الإطلاق تحدد أين تنزل: الأخف تنزل قرب الوسط، والأقوى أبعد إلى اليمين، والأقوى من الكل تصطدم بالمصدّ في الأعلى وترتد إلى أسفل اليسار. كل قمع يقود مدى واحدًا من القوة إلى مكان واحد. غيّر القوة بالشريط تحت اللوح أو اسحب إصبعك يمينًا ويسارًا. لكل جيب نقاطه، لكن الجيب المرقّم يعطي نقاطًا لأول بضع كرات فقط (النقاط تحته). الجيب الأخضر نقاطه قليلة، لكنه يفتح زهرة التوليب بضع ثوانٍ، ولا تلتقط الكرات إلا الزهرة المفتوحة، وهي تعطي أكثر النقاط. لا شيء بالحظ: القوة نفسها تسلك الطريق نفسه دائمًا. الكرة التي تعود نازلة في الممر ترجع إلى الصينية. النقاط الكافية تعطيك نجمة أو اثنتين أو ثلاثًا، ونجمة واحدة تفتح اللوح التالي.',
         pcKPower: 'قوة أقل أو أكثر', pcKFar: 'خطوات أكبر', pcKFire: 'اضغط مطوّلًا للإطلاق', pcKAgain: 'ابدأ اللوح من جديد',
         pcTut1: 'اضغط مطوّلًا للإطلاق', pcTutText1: 'ما دام إصبعك على اللوح، تنطلق الكرات واحدة تلو الأخرى في الممر الأيسر وتدخل من فوق القوس.',
-        pcTut2: 'القوة تختار المدخل', pcTutText2: 'اضبط القوة بالشريط في الأسفل: الخفيفة تدخل من اليسار والقوية من اليمين. القوة نفسها تسلك الطريق نفسه دائمًا.',
-        pcTut3: 'افتح زهرة التوليب', pcTutText3: 'الكرة في الجيب الأخضر تفتح زهرة التوليب في الوسط بضع ثوانٍ. الزهرة المفتوحة تعطي أكثر النقاط.'
+        pcTut2: 'القوة تختار المدخل', pcTutText2: 'اضبط القوة بالشريط في الأسفل: الأخف تنزل قرب الوسط، والأقوى أبعد إلى اليمين، والأقوى من الكل ترتد إلى أسفل اليسار. القوة نفسها تسلك الطريق نفسه دائمًا.',
+        pcTut3: 'افتح زهرة التوليب', pcTutText3: 'الكرة في الجيب الأخضر تفتح زهرة التوليب بضع ثوانٍ. لا تلتقط الكرات إلا الزهرة المفتوحة، وهي تعطي أكثر النقاط.'
       },
       hi: {
-        pcScene: 'पीतल की कीलों, फिरकियों, जेबों और बीच में ट्यूलिप वाला खड़ा बोर्ड', pcBoardN: 'बोर्ड {n}', pcDaily: 'आज का बोर्ड', pcBallsN: 'गेंदें: {n}', pcScoreN: 'अंक: {n}', pcPowerN: 'ताक़त {n}',
+        pcScene: 'खड़ा बोर्ड, जिसमें कीपों की कतारें, जेबें और एक ट्यूलिप है', pcBoardN: 'बोर्ड {n}', pcDaily: 'आज का बोर्ड', pcBallsN: 'गेंदें: {n}', pcScoreN: 'अंक: {n}', pcPowerN: 'ताक़त {n}',
         pcHint: 'गेंद छोड़ने के लिए बोर्ड को दबाए रखें। ताक़त नीचे की पट्टी से या उँगली दाएँ-बाएँ सरकाकर बदलें।',
         pcTulipHint: 'हरी जेब में गेंद डालें, तो बीच का ट्यूलिप कुछ सेकंड के लिए खुल जाता है।', pcOpen: 'ट्यूलिप खुला है!', pcFoul: 'बहुत धीमी: गेंद लौट आई।', pcLast: 'आख़िरी गेंद!',
         pcCleared: 'बोर्ड पूरा!', pcNoStar: 'इस बार कोई तारा नहीं', pcNext: 'अगला बोर्ड', pcRetry: 'यही बोर्ड फिर से',
         pcBalls: 'गेंदें', pcScore: 'अंक', pcBest: 'सर्वश्रेष्ठ', pcStarsAt: 'तारे', pcNewBest: 'नया रिकॉर्ड: {n}', pcUnlocked: 'बोर्ड {n} खुल गया',
         pcChoose: 'बोर्ड चुनें', pcLocked: 'बंद', pcShowNum: 'ताक़त की संख्या दिखाएँ', pcShowMark: 'पिछली गेंद की ताक़त पट्टी पर दिखाएँ',
-        pcRules: 'आपके पास 25 गेंदें हैं। जब तक उँगली बोर्ड पर है, हर कुछ पल में एक गेंद बाईं गली से ऊपर जाती है, ऊपर के घेरे से होकर पीतल की कीलों के बीच नीचे आती है। छोड़ने की ताक़त तय करती है कि गेंद कहाँ से अंदर आए: धीमी बाईं ओर से, तेज़ दाईं ओर से। ताक़त बोर्ड के नीचे की पट्टी से या उँगली दाएँ-बाएँ सरकाकर बदलें। हर जेब के अपने अंक हैं। हरी जेब कम अंक देती है, पर बीच का ट्यूलिप कुछ सेकंड के लिए खोल देती है, और खुला ट्यूलिप कहीं ज़्यादा गेंदें पकड़ता है। फिरकियाँ घूमती हैं, इसलिए पल भी मायने रखता है। कुछ भी किस्मत पर नहीं: एक ही ताक़त एक ही पल में हमेशा एक ही रास्ता लेती है। जो गेंद गली में वापस लुढ़क आए, वह ट्रे में लौट आती है। काफ़ी अंक पाकर एक, दो या तीन तारे पाएँ; एक तारे से अगला बोर्ड खुलता है।',
+        pcRules: 'आपके पास 25 गेंदें हैं। जब तक उँगली बोर्ड पर है, हर कुछ पल में एक गेंद बाईं गली से ऊपर जाती है और ऊपर के घेरे से होकर निकलती है। छोड़ने की ताक़त तय करती है कि गेंद कहाँ गिरे: धीमी गेंद बीच के पास, तेज़ गेंद और दाईं ओर, और सबसे तेज़ गेंदें ऊपर की रोक से टकराकर बाईं ओर नीचे लौट आती हैं। हर कीप ताक़त के एक दायरे को एक ही जगह ले जाती है। ताक़त बोर्ड के नीचे की पट्टी से या उँगली दाएँ-बाएँ सरकाकर बदलें। हर जेब के अपने अंक हैं, पर अंक वाली जेब सिर्फ़ अपनी पहली कुछ गेंदों के अंक देती है (नीचे के बिंदु)। हरी जेब कम अंक देती है, पर ट्यूलिप को कुछ सेकंड के लिए खोल देती है, और सिर्फ़ खुला ट्यूलिप गेंदें पकड़ता है; वही सबसे ज़्यादा अंक देता है। कुछ भी किस्मत पर नहीं: एक ही ताक़त हमेशा एक ही रास्ता लेती है। जो गेंद गली में वापस लुढ़क आए, वह ट्रे में लौट आती है। काफ़ी अंक पाकर एक, दो या तीन तारे पाएँ; एक तारे से अगला बोर्ड खुलता है।',
         pcKPower: 'कम या ज़्यादा ताक़त', pcKFar: 'बड़े क़दम', pcKFire: 'छोड़ने के लिए दबाए रखें', pcKAgain: 'बोर्ड फिर से शुरू करें',
         pcTut1: 'दबाए रखें और छोड़ें', pcTutText1: 'जब तक उँगली बोर्ड पर है, गेंदें एक-एक कर बाईं गली से ऊपर जाती हैं और घेरे के ऊपर से अंदर आती हैं।',
-        pcTut2: 'ताक़त से रास्ता', pcTutText2: 'नीचे की पट्टी से ताक़त चुनें: धीमी बाईं ओर से आती है, तेज़ दाईं ओर से। एक ही ताक़त हमेशा एक ही रास्ता लेती है।',
-        pcTut3: 'ट्यूलिप खोलें', pcTutText3: 'हरी जेब में गेंद बीच का ट्यूलिप कुछ सेकंड के लिए खोल देती है। खुला ट्यूलिप सबसे ज़्यादा अंक देता है।'
+        pcTut2: 'ताक़त से रास्ता', pcTutText2: 'नीचे की पट्टी से ताक़त चुनें: धीमी बीच के पास गिरती है, तेज़ और दाईं ओर, और सबसे तेज़ बाईं ओर नीचे लौटती है। एक ही ताक़त हमेशा एक ही रास्ता लेती है।',
+        pcTut3: 'ट्यूलिप खोलें', pcTutText3: 'हरी जेब में गेंद ट्यूलिप को कुछ सेकंड के लिए खोल देती है। सिर्फ़ खुला ट्यूलिप गेंदें पकड़ता है, और वही सबसे ज़्यादा अंक देता है।'
       }
     }
   });
@@ -668,7 +640,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PachinkoEn
 
   var Rd = null, ended = false, finishing = false, startedAt = 0, tries = 0, lastPow = null, note = '', noteAt = 0;
   var lit = {}, pops = [], tulipCatch = 0, mapping = false;
-  var raf = 0, last = 0, acc = 0, paused = false, holding = false, keyHold = false, drag = null, lastPin = 0, lastMill = 0;
+  var raf = 0, last = 0, acc = 0, paused = false, holding = false, keyHold = false, drag = null, lastPin = 0;
 
   var cv = el('canvas', { class: 'pc-canvas', role: 'img', 'aria-label': C.t('pcScene') });
   var box = el('div', { class: 'pc-box' }, [cv]);
@@ -740,7 +712,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PachinkoEn
 
   /* --------------------------------------------------------------- loop */
 
-  function running() { return Rd && !ended && !E.over(Rd) && (Rd.fly.length || holding || Rd.B.mills.length || E.tulipOpen(Rd) || !E.canFire(Rd)); }
+  function running() { return Rd && !ended && !E.over(Rd) && (Rd.fly.length || holding || E.tulipOpen(Rd) || !E.canFire(Rd)); }
   function kick() { if (!raf) { last = 0; raf = requestAnimationFrame(frame); } }
   function frame(t) {
     raf = 0;
@@ -759,7 +731,6 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PachinkoEn
       for (var i = 0; i < ev.length; i++) {
         var e = ev[i];
         if (e[0] === 'pin') { lit[e[1]] = t; if (t - lastPin > 40) { lastPin = t; C.audio.sfx('brass'); } }
-        else if (e[0] === 'mill') { if (t - lastMill > 90) { lastMill = t; C.audio.sfx('clack'); } }
         else if (e[0] === 'end') ended1(e[2], e[3]);
       }
       if (!was && E.tulipOpen(Rd)) { tulipCatch = 0; C.audio.sfx('bloom'); setNote(C.t('pcOpen')); }
@@ -848,8 +819,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PachinkoEn
   }
   function palette() {
     return dark()
-      ? { bg0: '#231A3A', bg1: '#120D20', frame: '#3B2E5C', lane: '#0C0816', rail: '#C9A04A', pin: '#D9A441', pinHi: '#FFE7A3', pinLit: '#FFF4C8', glow: 'rgba(255,214,120,0.35)', cup: '#C9A04A', cupIn: 'rgba(150,110,255,0.22)', start: '#43C06A', startIn: 'rgba(67,192,106,0.25)', petal: '#F06292', petalOpen: '#FF8AB3', text: '#F1ECFA', dim: '#A99CC6', ball0: '#FFFFFF', ball1: '#9EA3B0', ballEdge: '#4A4D58', mill: '#9C7BFF', hub: '#FFE7A3', stop: '#5B4C7A', dialBg: '#2B2342', dial0: '#3B2E5C', dial1: '#9C7BFF', knob: '#FFFFFF', knobText: '#1E1433', knobEdge: '#9C7BFF', mark: '#FFD54F' }
-      : { bg0: '#FBF8FF', bg1: '#ECE4FB', frame: '#D7CBF0', lane: '#DCD2F2', rail: '#A87A22', pin: '#B8862B', pinHi: '#F6DA8C', pinLit: ACCENT, glow: 'rgba(78,0,210,0.18)', cup: '#8E6A1E', cupIn: 'rgba(78,0,210,0.12)', start: '#2E9E4F', startIn: 'rgba(46,158,79,0.18)', petal: '#D81B60', petalOpen: '#EC407A', text: '#251A3D', dim: '#6E6290', ball0: '#FFFFFF', ball1: '#8F94A3', ballEdge: '#3E414C', mill: ACCENT, hub: '#F6DA8C', stop: '#7C6BA6', dialBg: '#F1ECFB', dial0: '#E2D8F6', dial1: ACCENT, knob: '#FFFFFF', knobText: '#251A3D', knobEdge: ACCENT, mark: '#E0A100' };
+      ? { bg0: '#231A3A', bg1: '#120D20', frame: '#3B2E5C', lane: '#0C0816', rail: '#C9A04A', pin: '#D9A441', pinHi: '#FFE7A3', pinLit: '#FFF4C8', glow: 'rgba(255,214,120,0.35)', cup: '#C9A04A', cupIn: 'rgba(150,110,255,0.22)', start: '#43C06A', startIn: 'rgba(67,192,106,0.25)', petal: '#F06292', petalOpen: '#FF8AB3', text: '#F1ECFA', dim: '#A99CC6', ball0: '#FFFFFF', ball1: '#9EA3B0', ballEdge: '#4A4D58', stop: '#5B4C7A', dialBg: '#2B2342', dial0: '#3B2E5C', dial1: '#9C7BFF', knob: '#FFFFFF', knobText: '#1E1433', knobEdge: '#9C7BFF', mark: '#FFD54F', full: 'rgba(18,13,32,0.6)' }
+      : { bg0: '#FBF8FF', bg1: '#ECE4FB', frame: '#D7CBF0', lane: '#DCD2F2', rail: '#A87A22', pin: '#B8862B', pinHi: '#F6DA8C', pinLit: ACCENT, glow: 'rgba(78,0,210,0.18)', cup: '#8E6A1E', cupIn: 'rgba(78,0,210,0.12)', start: '#2E9E4F', startIn: 'rgba(46,158,79,0.18)', petal: '#D81B60', petalOpen: '#EC407A', text: '#251A3D', dim: '#6E6290', ball0: '#FFFFFF', ball1: '#8F94A3', ballEdge: '#3E414C', stop: '#7C6BA6', dialBg: '#F1ECFB', dial0: '#E2D8F6', dial1: ACCENT, knob: '#FFFFFF', knobText: '#251A3D', knobEdge: ACCENT, mark: '#E0A100', full: 'rgba(236,228,251,0.7)' };
   }
   function size() {
     var r = box.getBoundingClientRect();
@@ -983,15 +954,17 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PachinkoEn
       g.beginPath(); g.moveTo(cx - s * 1.4, cy - s); g.lineTo(cx - s * 0.7, cy + s); g.lineTo(cx + s * 0.7, cy + s); g.lineTo(cx + s * 1.4, cy - s); g.lineTo(cx + s * 0.5, cy - s * 0.2); g.lineTo(cx, cy - s * 1.2); g.lineTo(cx - s * 0.5, cy - s * 0.2); g.closePath(); g.fill();
     });
 
-    // windmills, where the board clock has them
-    B.mills.forEach(function (m) {
-      var u = E.millDir(m, Rd.clock);
-      g.strokeStyle = P.mill; g.lineWidth = Math.max(2, X(1));
-      for (var arm = 0; arm < 2; arm++) {
-        var ux = arm ? -u[1] : u[0], uy = arm ? u[0] : u[1];
-        g.beginPath(); g.moveTo(X(m.x - ux * m.L), X(m.y - uy * m.L)); g.lineTo(X(m.x + ux * m.L), X(m.y + uy * m.L)); g.stroke();
+    // a fixed pocket's room: one dot a ball, filled as it fills, and the cup greyed once
+    // full, since a full pocket still takes balls but pays nothing
+    B.pockets.forEach(function (q, i) {
+      if (!q.cap) return;
+      var used = Math.min(q.cap, Rd.fill[i] || 0), d = Math.max(1.6, X(0.7)), gap = d * 2.8;
+      for (var n = 0; n < q.cap; n++) {
+        var cx = X(q.x) + (n - (q.cap - 1) / 2) * gap, cy = X(q.y + 9.6);
+        g.beginPath(); g.arc(cx, cy, d, 0, Math.PI * 2);
+        if (n < used) { g.fillStyle = P.cup; g.fill(); } else { g.strokeStyle = P.cup; g.lineWidth = 1; g.stroke(); }
       }
-      g.fillStyle = P.hub; g.beginPath(); g.arc(X(m.x), X(m.y), Math.max(2, X(1)), 0, Math.PI * 2); g.fill();
+      if (used >= q.cap) { g.fillStyle = P.full; g.fillRect(X(q.x - q.w - 0.6), X(q.y - 0.6), X(q.w * 2 + 1.2), X(11.5)); }
     });
 
     // a ball waiting at the foot of the lane, and every ball in flight
@@ -1160,7 +1133,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PachinkoEn
     var s = '<svg viewBox="0 0 200 120" width="100%" direction="ltr"><rect width="200" height="120" rx="10" fill="#ECE4FB"/>', x, y;
     s += '<path d="M60 112 V52 A40 40 0 0 1 140 52 V112" fill="#FBF8FF" stroke="#D7CBF0" stroke-width="2"/>';
     s += '<path d="M66 112 V54 A34 34 0 0 1 128 36" fill="none" stroke="#A87A22" stroke-width="2"/>';
-    for (y = 0; y < 5; y++) for (x = 0; x < 6; x++) { var px = 74 + x * 11 + (y % 2) * 5.5, py = 50 + y * 11; if (px < 136) s += '<circle cx="' + px + '" cy="' + py + '" r="1.8" fill="#B8862B"/>'; }
+    // two rows of catchers, as on the board: each V gathers one band of power
+    var vs = [[104, 115, 62], [115, 122, 62], [122, 128, 62], [128, 134, 62], [134, 140, 62], [79, 92, 84], [92, 102, 84]];
+    for (x = 0; x < vs.length; x++) { var a = vs[x][0], b = vs[x][1], vy = vs[x][2]; s += '<path d="M' + a + ' ' + vy + ' L' + ((a + b) / 2 - 1) + ' ' + (vy + 7) + ' M' + b + ' ' + vy + ' L' + ((a + b) / 2 + 1) + ' ' + (vy + 7) + '" stroke="#8E7BB8" stroke-width="1.6" stroke-linecap="round"/>'; }
     if (kind === 1) s += '<circle cx="63" cy="80" r="3.2" fill="#fff" stroke="#3E414C"/><path d="M63 72 V60" stroke="' + ACCENT + '" stroke-width="2.5" stroke-linecap="round"/><path d="M58 64 L63 58 L68 64" stroke="' + ACCENT + '" stroke-width="2.5" fill="none" stroke-linecap="round"/><circle cx="160" cy="70" r="14" fill="' + ACCENT + '" fill-opacity=".18"/><circle cx="160" cy="70" r="6" fill="' + ACCENT + '"/>';
     if (kind === 2) s += '<rect x="30" y="100" width="140" height="6" rx="3" fill="#E2D8F6"/><rect x="30" y="100" width="88" height="6" rx="3" fill="' + ACCENT + '"/><circle cx="118" cy="103" r="7" fill="#fff" stroke="' + ACCENT + '" stroke-width="2"/>' +
       '<path d="M100 18 Q120 24 112 44" stroke="' + ACCENT + '" stroke-width="2" stroke-dasharray="3 3" fill="none"/><circle cx="112" cy="46" r="3.2" fill="#fff" stroke="#3E414C"/>';
