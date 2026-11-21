@@ -1374,6 +1374,21 @@
   // it is held and stops when it is lifted, so this voice hands back a handle whose
   // stop() starts the release. It is a function of its own rather than an SFX entry for
   // that reason; every other sound keeps going through sfx().
+  // #1019: one compressor shared by every key. The voice is now loud enough for a phone
+  // speaker, and a chord of several such notes would clip without it.
+  var pianoBus = null, pianoBusOf = null;
+  function pianoOut() {
+    if (pianoBus && pianoBusOf === AC) return pianoBus;
+    pianoBus = AC.createDynamicsCompressor();
+    pianoBus.threshold.setValueAtTime(0, 0);
+    pianoBus.knee.setValueAtTime(0, 0);
+    pianoBus.ratio.setValueAtTime(12, 0);
+    pianoBus.attack.setValueAtTime(0.003, 0);
+    pianoBus.release.setValueAtTime(0.25, 0);
+    pianoBus.connect(sfxBus);
+    pianoBusOf = AC;
+    return pianoBus;
+  }
   audioApi.piano = function (freq) {
     if (!state.settings.sfx || !(freq > 0)) return null;
     // The first key is pressed before the document's unlock listener has run (the canvas
@@ -1385,18 +1400,23 @@
     var t0 = now();
     // a struck string: loud at once, then fading even while held; high notes fade sooner
     var life = Math.max(1.2, Math.min(4.5, 4.5 - Math.log(freq / 130) * 1.4));
-    var peak = 0.2;
+    // #1019: the first voice struck at 0.2 and sank to a whisper by the time a held key was
+    // a second old, so a Nokia X20 needed full volume to hear it. It now strikes harder and
+    // fades to a fifth of the strike over the note's life, and only then to silence.
+    var peak = 0.5;
     var env = AC.createGain(), rel = AC.createGain(), lp = AC.createBiquadFilter();
     env.gain.setValueAtTime(0.0001, t0);
     env.gain.exponentialRampToValueAtTime(peak, t0 + 0.006);
-    env.gain.exponentialRampToValueAtTime(peak * 0.35, t0 + 0.25);
-    env.gain.exponentialRampToValueAtTime(0.0001, t0 + life);
+    env.gain.exponentialRampToValueAtTime(peak * 0.6, t0 + 0.3);
+    env.gain.exponentialRampToValueAtTime(peak * 0.2, t0 + life);
+    env.gain.exponentialRampToValueAtTime(0.0001, t0 + life + 0.3);
     // the release lives on its own gain so lifting a key never has to read back where the
     // decay had got to, which an AudioParam cannot report reliably
     rel.gain.setValueAtTime(1, t0);
     lp.type = 'lowpass';
     lp.frequency.setValueAtTime(Math.min(9000, freq * 7), t0);
-    var parts = [[1, 'triangle', 1], [2, 'sine', 0.35], [3, 'sine', 0.12]];
+    // stronger upper partials: a phone speaker hardly plays the fundamental of the low keys
+    var parts = [[1, 'triangle', 1], [2, 'sine', 0.6], [3, 'sine', 0.3]];
     var oscs = parts.map(function (p) {
       var o = AC.createOscillator(), g = AC.createGain();
       o.type = p[1];
@@ -1404,10 +1424,10 @@
       g.gain.setValueAtTime(p[2], t0);
       o.connect(g); g.connect(lp);
       o.start(t0);
-      o.stop(t0 + life + 0.05);
+      o.stop(t0 + life + 0.35);
       return o;
     });
-    lp.connect(env); env.connect(rel); rel.connect(sfxBus);
+    lp.connect(env); env.connect(rel); rel.connect(pianoOut());
     var done = false;
     return {
       freq: freq,
