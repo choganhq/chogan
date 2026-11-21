@@ -80,6 +80,7 @@ module.exports = function (T) {
       createOscillator() { const o = node('osc'); o.frequency = param('f'); o.start = (t) => { o.started = t; }; o.stop = (t) => { o.stops = (o.stops || []).concat(t); }; return o; },
       createGain() { const g = node('gain'); g.gain = param('g'); return g; },
       createBiquadFilter() { const f = node('filter'); f.frequency = param('f'); return f; },
+      createDynamicsCompressor() { const c = node('comp'); ['threshold', 'knee', 'ratio', 'attack', 'release'].forEach((k) => { c[k] = param(k); }); return c; },
       resume() { this.resumed = true; }
     };
     const sb = { state: { settings: { sfx: true } }, AC, sfxBus: { kind: 'bus' }, audioApi: {}, ensureAudio() {}, now() { return AC.currentTime; }, Math };
@@ -89,7 +90,8 @@ module.exports = function (T) {
     const oscs = log.filter((n) => n.kind === 'osc');
     const fs0 = oscs.map((o) => o.frequency.sets[0][1]);
     ok(!!h && oscs.length === 3 && Math.abs(fs0[0] - 220) < 1e-9 && Math.abs(fs0[1] - 440) < 1e-9 && Math.abs(fs0[2] - 660) < 1e-9 && oscs.every((o) => o.started === 3), 'A3 sounds at 220 Hz with partials at 440 and 660, started at once');
-    const rel = log.filter((n) => n.kind === 'gain' && n.out.includes(sb.sfxBus));
+    const toBus = (n) => n.out.includes(sb.sfxBus) || n.out.some((x) => x.kind === 'comp' && x.out.includes(sb.sfxBus));
+    const rel = log.filter((n) => n.kind === 'gain' && toBus(n));
     ok(rel.length === 1, 'the note goes out through the sound-effects bus, so the sound setting governs it');
     AC.currentTime = 3.4;
     h.stop(); h.stop();
@@ -98,6 +100,34 @@ module.exports = function (T) {
     sb.state.settings.sfx = false;
     const n0 = log.length;
     ok(sb.audioApi.piano(440) === null && log.length === n0 && (sb.state.settings.sfx = true) && sb.audioApi.piano(0) === null && sb.audioApi.piano(NaN) === null, 'with sound effects off, or no pitch, no note is made');
+
+    // #1019: on a Nokia X20 the piano was audible only at full phone volume. The old voice
+    // struck at 0.29 (partials summed) and fell to 0.07 within a quarter second, so a held
+    // key was about a third as loud as a one-off tap sound. Read the level the voice
+    // schedules: the envelope at a moment times the sum of the partials' gains.
+    const level = (freq, at) => {
+      const start = log.length;
+      AC.currentTime = 10;
+      sb.audioApi.piano(freq);
+      const mine = log.slice(start);
+      const lp = mine.find((n) => n.kind === 'filter'), env = lp && lp.out[0];
+      const sum = mine.filter((n) => n.kind === 'osc').reduce((s, o) => s + o.out[0].gain.sets[0][1], 0);
+      if (!env || !env.gain) return 0;
+      const pts = env.gain.sets.filter((s) => s[0] === 'set' || s[0] === 'exp');
+      const t = 10 + at;
+      let v = pts[0][1];
+      for (let i = 1; i < pts.length; i++) {
+        const [, v1, t1] = pts[i], [, v0, t0] = pts[i - 1];
+        if (t >= t1) { v = v1; continue; }
+        v = t <= t0 ? v0 : v0 * Math.pow(v1 / v0, (t - t0) / (t1 - t0));
+        break;
+      }
+      return v * sum;
+    };
+    const lv = { strike: level(220, 0.006), a3: level(220, 1), c6: level(1046.5, 0.6) };
+    ok(lv.strike >= 0.8 && lv.a3 >= 0.3 && lv.c6 >= 0.2, 'a key strikes loud and stays audible while held (strike ' + lv.strike.toFixed(2) + ' ≥ 0.8, A3 after 1 s ' + lv.a3.toFixed(2) + ' ≥ 0.3, C6 after 0.6 s ' + lv.c6.toFixed(2) + ' ≥ 0.2)');
+    const comp = log.filter((n) => n.kind === 'comp');
+    ok(comp.length === 1 && comp[0].out.includes(sb.sfxBus) && log.filter((n) => n.kind === 'gain' && n.out.includes(comp[0])).length >= 3, 'every note goes through one shared compressor, so a loud chord does not clip');
     ok(/C\.audio\.piano\(E\.freq\(m\)\)/.test(html) && !/\.(mp3|ogg|wav)\b/.test(html) && !/^\s*mood:/m.test(html), 'the page plays the synthesized voice, no audio files and no background music');
 
     // the page and its listing
