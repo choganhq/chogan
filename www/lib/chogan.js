@@ -1234,6 +1234,24 @@
     claw: function () {
       tone({ freq: 240, to: 150, dur: 0.32, gain: 0.07, type: 'sawtooth' });
       noise({ freq: 700, to: 420, dur: 0.22, gain: 0.04, filter: 'bandpass' });
+    },
+    // Ball Rain (#949): a steel ball ringing off a brass pin, high and short, since
+    // a cascade plays it many times a second
+    brass: function () {
+      var b = now();
+      tone({ freq: 2350, to: 2200, dur: 0.06, gain: 0.05, type: 'triangle', attack: 0.001, at: b });
+      tone({ freq: 3520, to: 3400, dur: 0.04, gain: 0.025, type: 'sine', attack: 0.001, at: b });
+    },
+    // the spring under the lane letting a ball go: a dull knock and a short metal rise
+    launch: function () {
+      var b = now();
+      noise({ freq: 1400, to: 500, dur: 0.05, gain: 0.16, filter: 'bandpass', at: b });
+      tone({ freq: 300, to: 900, dur: 0.12, gain: 0.08, type: 'triangle', attack: 0.004, at: b });
+    },
+    // the tulip opening: three quick rising notes
+    bloom: function () {
+      var b = now();
+      [523, 659, 784].forEach(function (f, i) { tone({ freq: f, dur: 0.14, gain: 0.09, type: 'triangle', at: b + i * 0.07 }); });
     }
   };
 
@@ -1677,6 +1695,10 @@
     { id: 'spd-win',     icon: 'trophy',   fa: 'انگشت‌های فرز',       en: 'Nimble fingers',    dfa: 'در سرعت از ربات زودتر کارت‌هایت را تمام کردی', den: 'Beat the bot at Speed', zh: '指尖飞快', dzh: '在快手接龙中战胜机器人', de: 'Fixe Finger', dde: 'Besiege den Bot in Speed', es: 'Dedos ágiles', des: 'Vence al bot en Speed', pl: 'Zwinne palce', dpl: 'Pokonaj bota w Szybkości', fr: 'Doigts agiles', dfr: 'Bats le robot au Speed', ar: 'أصابع خفيفة', dar: 'اهزم الروبوت في السرعة', hi: 'फुर्तीली उँगलियाँ', dhi: 'स्पीड में बॉट को हराएँ' },
     { id: 'spd-hard',    icon: 'bolt',     fa: 'دست برق‌آسا',          en: 'Lightning hands',   dfa: 'در سرعت ربات سخت را بردی', den: 'Beat the hard bot at Speed', zh: '闪电之手', dzh: '在快手接龙中战胜困难机器人', de: 'Blitzhände', dde: 'Besiege den schweren Bot in Speed', es: 'Manos de rayo', des: 'Vence al bot difícil en Speed', pl: 'Błyskawiczne dłonie', dpl: 'Pokonaj trudnego bota w Szybkości', fr: 'Mains éclair', dfr: 'Bats le robot difficile au Speed', ar: 'يدان كالبرق', dar: 'اهزم الروبوت الصعب في السرعة', hi: 'बिजली जैसे हाथ', dhi: 'स्पीड में कठिन बॉट को हराएँ' },
     { id: 'spd-daily',   icon: 'calendar', fa: 'دوی روزانه',          en: 'Daily dash',        dfa: 'دست روزانه‌ی سرعت را بردی', den: 'Win the daily Speed deal', zh: '每日冲刺', dzh: '赢下每日快手接龙牌局', de: 'Tagessprint', dde: 'Gewinne das Tagesspiel in Speed', es: 'Sprint del día', des: 'Gana el reparto diario de Speed', pl: 'Sprint dnia', dpl: 'Wygraj rozdanie dnia w Szybkości', fr: 'Sprint du jour', dfr: 'Gagne la donne du jour au Speed', ar: 'عدوة اليوم', dar: 'افز بتوزيعة اليوم في السرعة', hi: 'आज की दौड़', dhi: 'स्पीड का आज का बँटवारा जीतें' },
+    { id: 'pc-win',      icon: 'medal',    fa: 'توپ به جیب',          en: 'In the pocket',     dfa: 'در بارون توپ یک تخته را با دست‌کم یک ستاره تمام کردی', den: 'Finish a Ball Rain board with at least one star', zh: '球入袋中', dzh: '在钢珠雨中以至少一颗星完成一板', de: 'Eingelocht', dde: 'Schaff ein Kugelflut-Brett mit mindestens einem Stern', es: 'Al bolsillo', des: 'Termina un tablero de Cascada de bolas con al menos una estrella', pl: 'Do kieszeni', dpl: 'Ukończ planszę w Ulewie kulek z co najmniej jedną gwiazdką', fr: 'Dans la poche', dfr: 'Termine un plateau d’Averse de billes avec au moins une étoile', ar: 'في الجيب', dar: 'أنهِ لوحًا في وابل الكرات بنجمة واحدة على الأقل', hi: 'जेब में', dhi: 'गेंदों की झड़ी का एक बोर्ड कम से कम एक तारे के साथ पूरा करें' },
+    { id: 'pc-three',    icon: 'star',     fa: 'دست برنجی',           en: 'Brass touch',       dfa: 'در بارون توپ یک تخته را با سه ستاره تمام کردی', den: 'Finish a Ball Rain board with three stars', zh: '黄铜手感', dzh: '在钢珠雨中以三颗星完成一板', de: 'Messinghand', dde: 'Schaff ein Kugelflut-Brett mit drei Sternen', es: 'Toque de latón', des: 'Termina un tablero de Cascada de bolas con tres estrellas', pl: 'Mosiężna ręka', dpl: 'Ukończ planszę w Ulewie kulek z trzema gwiazdkami', fr: 'Main de laiton', dfr: 'Termine un plateau d’Averse de billes avec trois étoiles', ar: 'لمسة نحاسية', dar: 'أنهِ لوحًا في وابل الكرات بثلاث نجوم', hi: 'पीतल का हाथ', dhi: 'गेंदों की झड़ी का एक बोर्ड तीन तारों के साथ पूरा करें' },
+    { id: 'pc-tulip',    icon: 'sparkle',  fa: 'لاله‌ی پربار',        en: 'Full bloom',        dfa: 'در بارون توپ دو توپ را در یک بار باز شدن لاله انداختی', den: 'Land two balls in the tulip while it is open once in Ball Rain', zh: '盛放', dzh: '在钢珠雨中郁金香一次张开时打进两个球', de: 'Volle Blüte', dde: 'Triff in Kugelflut zwei Kugeln in die Tulpe, während sie einmal offen ist', es: 'En plena flor', des: 'Mete dos bolas en el tulipán mientras está abierto una vez en Cascada de bolas', pl: 'Pełny rozkwit', dpl: 'Traf dwiema kulkami do tulipana podczas jednego otwarcia w Ulewie kulek', fr: 'Pleine floraison', dfr: 'Mets deux billes dans la tulipe pendant une seule ouverture dans Averse de billes', ar: 'تفتّح كامل', dar: 'أدخل كرتين في زهرة التوليب خلال فتحة واحدة في وابل الكرات', hi: 'पूरा खिला', dhi: 'गेंदों की झड़ी में ट्यूलिप के एक बार खुलने पर दो गेंदें डालें' },
+    { id: 'pc-daily',    icon: 'calendar', fa: 'بارون روزانه',        en: 'Daily downpour',    dfa: 'تخته‌ی روزانه‌ی بارون توپ را با دست‌کم یک ستاره تمام کردی', den: 'Finish the daily Ball Rain board with at least one star', zh: '今日钢珠雨', dzh: '以至少一颗星完成每日钢珠雨', de: 'Tagesguss', dde: 'Schaff das Kugelflut-Tagesbrett mit mindestens einem Stern', es: 'Lluvia del día', des: 'Termina el tablero del día de Cascada de bolas con al menos una estrella', pl: 'Ulewa dnia', dpl: 'Ukończ planszę dnia w Ulewie kulek z co najmniej jedną gwiazdką', fr: 'Averse du jour', dfr: 'Termine le plateau du jour d’Averse de billes avec au moins une étoile', ar: 'وابل اليوم', dar: 'أنهِ لوح اليوم في وابل الكرات بنجمة واحدة على الأقل', hi: 'आज की झड़ी', dhi: 'गेंदों की झड़ी का आज का बोर्ड कम से कम एक तारे के साथ पूरा करें' },
     { id: 'snt-dry',     icon: 'shield',   fa: 'پای خشک',             en: 'Dry feet',          dfa: 'در سنت ربات متوسط یا سخت را بردی، بی‌آنکه مهره‌ای در آب بیفتد', den: 'Beat the medium or hard bot at Senet without a piece falling into the water', zh: '滴水不沾', dzh: '在塞尼特中战胜中等或困难电脑，且没有棋子落水', de: 'Trockene Füße', dde: 'Besiege den mittleren oder schweren Bot in Senet, ohne dass ein Stein ins Wasser fällt', es: 'Pies secos', des: 'Vence al bot medio o difícil en Senet sin que ninguna pieza caiga al agua', pl: 'Suche stopy', dpl: 'Pokonaj bota średniego lub trudnego w Senet, nie wpadając ani razu do wody', fr: 'Pieds au sec', dfr: 'Bats le robot moyen ou difficile au Senet sans qu’aucun pion tombe à l’eau', ar: 'أقدام جافة', dar: 'اهزم الروبوت المتوسط أو الصعب في سينيت دون أن يسقط حجر في الماء', hi: 'सूखे पाँव', dhi: 'सेनेट में मध्यम या कठिन बॉट को हराएँ, बिना कोई गोटी पानी में गिरे' },
     { id: 'go-win',      icon: 'medal',   fa: 'زمین‌گیر',          en: 'Territory',         dfa: 'یک دست گو را مقابل ربات بردی',        den: 'Win a game of go against the AI', zh: '围地', dzh: '对战电脑赢下一局围棋', de: 'Gebietsherr', dde: 'Gewinne eine Partie Go gegen den Computer', es: 'Territorio', des: 'Gana una partida de Go contra la IA', ar: 'الأرض', dar: 'فُز بلعبة غو ضد الروبوت', hi: 'इलाक़ा', dhi: 'गो में कंप्यूटर को हराएँ' },
     { id: 'go-hard',     icon: 'brain',   fa: 'دو چشم',            en: 'Two eyes',          dfa: 'در گو ربات سخت را شکست دادی',         den: 'Beat the hard AI at go', zh: '两只眼', dzh: '在围棋中击败困难电脑', de: 'Zwei Augen', dde: 'Schlag die schwere Go-KI', es: 'Dos ojos', des: 'Vence a la IA difícil en Go', ar: 'عينان', dar: 'اهزم الروبوت الصعب في غو', hi: 'दो आँखें', dhi: 'गो में कठिन कंप्यूटर को हराएँ' },
@@ -1748,7 +1770,7 @@
     tw: 'towerup', dom: 'dominoes', ws: 'watersort', fb: 'football', wg: 'wrigglers', tri: 'trio',
     fr: 'fourrow', pk: 'peak', tr: 'territories', pw: 'pipes', db: 'doubles', sk: 'storekeeper',
     sr: 'starraid', cx: 'crossing', cm: 'carrom', nd: 'numberdrop', ci: 'circuit',
-    hr: 'hillrider', fl: 'flood', mo: 'motorush', mu: 'muncher', ft: 'fitten', fd: 'fivedice', hx: 'hex', ln: 'lander', gs: 'goose', dl: 'dicelands', cn: 'corners', fo: 'fourfold', snt: 'senet', pet: 'petgame', hc: 'honeycomb', nj: 'nainjaune', hm: 'hamlet', po: 'pushout', sg: 'shogi', pf: 'pegfall', ld: 'liarsdice', cw: 'claw', mz: 'maze', spd: 'speed',
+    hr: 'hillrider', fl: 'flood', mo: 'motorush', mu: 'muncher', ft: 'fitten', fd: 'fivedice', hx: 'hex', ln: 'lander', gs: 'goose', dl: 'dicelands', cn: 'corners', fo: 'fourfold', snt: 'senet', pet: 'petgame', hc: 'honeycomb', nj: 'nainjaune', hm: 'hamlet', po: 'pushout', sg: 'shogi', pf: 'pegfall', ld: 'liarsdice', cw: 'claw', mz: 'maze', spd: 'speed', pc: 'pachinko',
   };
   // Darts kept Dots' prefix for this one award when #464 renamed the others
   var ACH_GAME_ID = { 'dt-180': 'darts' };
