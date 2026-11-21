@@ -44,8 +44,9 @@ module.exports = function (T) {
     ok(!/dir === 'rtl'|isRtl|C\.rtl/.test(html) && /\.pn-canvas \{[^}]*direction: ltr/.test(html) && /\.pn-oct \{[^}]*direction: ltr/.test(html), 'low notes stay on the left in every language');
 
     // practice tunes: the right keys in order, all inside the middle octave
-    ok(E.TUNES.length === 6, 'six practice tunes');
-    const firsts = { twinkle: [60, 60, 67, 67, 69, 69, 67], mary: [64, 62, 60, 62, 64, 64, 64], clair: [60, 60, 60, 62, 64, 62], london: [67, 69, 67, 65, 64, 65, 67], ode: [64, 64, 65, 67, 67, 65, 64, 62], jingle: [64, 64, 64, 64, 64, 64, 64, 67, 60, 62, 64] };
+    ok(E.TUNES.length === 17, 'seventeen practice tunes');
+    const firsts = { twinkle: [60, 60, 67, 67, 69, 69, 67], mary: [64, 62, 60, 62, 64, 64, 64], clair: [60, 60, 60, 62, 64, 62], london: [67, 69, 67, 65, 64, 65, 67], ode: [64, 64, 65, 67, 67, 65, 64, 62], jingle: [64, 64, 64, 64, 64, 64, 64, 67, 60, 62, 64],
+      frere: [60, 62, 64, 60, 60, 62, 64, 60], row: [60, 60, 60, 62, 64], macdonald: [60, 60, 60, 67, 69, 69, 67], buns: [64, 62, 60], saints: [60, 64, 65, 67], susanna: [60, 62, 64, 67, 67, 69, 67], lightly: [67, 64, 64, 65, 62, 62], deck: [72, 71, 69, 67, 65, 67, 69, 65], cucaracha: [60, 60, 60, 65, 69], itsy: [67, 60, 60, 60, 62, 64], canon: [72, 67, 69, 64, 65, 60, 65, 67] };
     ok(E.TUNES.every((t) => same(E.tune(t.id).slice(0, firsts[t.id].length).map((n) => n.m), firsts[t.id])), 'each tune opens with its known notes (' + Object.keys(firsts).join(', ') + ')');
     ok(E.TUNES.every((t) => { const n = E.tune(t.id); return n.length >= 20 && n.every((x) => x.m >= 60 && x.m <= 72 && !E.isBlack(x.m) && x.beats > 0); }), 'every note of every tune is a white key between C4 and C5, so all of it fits the 8 keys of an upright phone');
     let allRight = true;
@@ -134,6 +135,7 @@ module.exports = function (T) {
     const titles = ids.map(titleOf);
     ok(titles.every((t) => t && core.split("en: '" + t + "'").length === 2), 'the award titles are unique in the core (' + titles.join(', ') + ')');
     ok(/\.pn-canvas \{[^}]*width: 100%; height: 100%/.test(html) && /cv\.width !== Math\.round\(Z\.w \* dpr\) \|\| cv\.height !== Math\.round\(Z\.h \* dpr\)/.test(html) && /drawn = L/.test(html) && /document\.fonts\.ready/.test(html) && /class: 'ch-fit'/.test(html), 'the canvas is sized in CSS (#919), resized on both sides, read against the layout last drawn, redrawn when fonts arrive, in the core\'s board slot');
+    ok(/prefs\.hold === 'off'\) \{\s*if \(E\.advance\(prac\) === 'done'\) finishTune\(\);/.test(html) && /if \(\['on', 'off'\]\.indexOf\(prefs\.hold\) < 0\) prefs\.hold = 'on'/.test(html) && /pnHold, pnHoldOn|pnHoldOn: /.test(html) && /function showLength\(\)/.test(html) && /Math\.ceil\(b\)/.test(html), 'the hold can be switched off in the gear (default on, #1014) and the note length shows as beat cells above the keys');
     ok(/fingers\[e\.pointerId\]/.test(html) && /setPointerCapture/.test(html) && /addEventListener\('pointercancel', lift\)/.test(html) && /C\.onPause\(function \(\) \{[^}]*allOff\(\)/.test(html), 'each finger holds its own note (chords), and leaving the app lets every note go');
     ok(/ctx\.button\(\{ icon: 'gear', label: C\.t\('settings'\)/.test(html) && !/pnLabels/.test(html.slice(html.indexOf('function showHelp'), html.indexOf('function tArt'))), 'the key labels option sits behind a gear, not in help');
     // the first draft let the muted note replace a tune's progress and "well done" (seen in Playwright)
