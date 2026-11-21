@@ -133,23 +133,34 @@ function PianoEngineFactory() {
   }
   function practice(id) { var n = tune(id); return n ? { id: id, notes: n, i: 0 } : null; }
   function expected(P) { return P && P.i < P.notes.length ? P.notes[P.i].m : -1; }
-  // A wrong key only sounds: there is nothing to lose in a toy. A key after the end
-  // starts the tune again from the top.
+  var BEAT_MS = 520;
+  // Share of a note's length a key must be held before the tune moves on (#1012): with
+  // a tap enough, a quarter and a half note felt the same. Not all of it, because a
+  // player lifts a little early to reach the next key in time.
+  var HOLD = 0.8;
+  function need(P) { return P && P.i < P.notes.length ? Math.round(P.notes[P.i].beats * BEAT_MS * HOLD) : 0; }
+  // A wrong key only sounds: there is nothing to lose in a toy. The right key only
+  // starts a hold; hold() moves the tune on. A key after the end starts the tune again.
   function press(P, m) {
     if (!P) return 'free';
     if (P.i >= P.notes.length) P.i = 0;
-    if (m !== P.notes[P.i].m) return 'miss';
+    return m === P.notes[P.i].m ? 'start' : 'miss';
+  }
+  // idx is P.i when the key went down. A finger still on C after the first C of
+  // "C C G G" must not also play the second: each note needs its own press.
+  function hold(P, idx, ms) {
+    if (!P || idx !== P.i || P.i >= P.notes.length) return 'none';
+    if (ms < need(P)) return 'wait';
     P.i++;
     return P.i === P.notes.length ? 'done' : 'hit';
   }
-  var BEAT_MS = 520;
 
   return {
-    LOW: LOW, HIGH: HIGH, BASES: BASES, KEY_MIN: KEY_MIN, MIN_WHITES: MIN_WHITES, TALL: TALL, WHITES: WHITES, KEYS: KEYS, TUNES: TUNES, BEAT_MS: BEAT_MS,
+    LOW: LOW, HIGH: HIGH, BASES: BASES, KEY_MIN: KEY_MIN, MIN_WHITES: MIN_WHITES, TALL: TALL, WHITES: WHITES, KEYS: KEYS, TUNES: TUNES, BEAT_MS: BEAT_MS, HOLD: HOLD,
     freq: freq, isBlack: isBlack, octave: octave, step: step, name: name, parse: parse,
     whitesFor: whitesFor, windowStart: windowStart, layout: layout, hit: hit, shown: shown,
     keyNote: keyNote, keyFor: keyFor, shift: shift,
-    tune: tune, practice: practice, expected: expected, press: press
+    tune: tune, practice: practice, expected: expected, press: press, need: need, hold: hold
   };
 }
 if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
@@ -173,10 +184,10 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
         pnKeys: 'کلیدهای پیانو', pnLower: 'اکتاو پایین‌تر', pnHigher: 'اکتاو بالاتر', pnTunes: 'آهنگ‌ها', pnFree: 'نواختن آزاد',
         pnPick: 'یک آهنگ برای تمرین انتخاب کن. کلیدی که باید بزنی روشن می‌شود.', pnPlayed: '{n} از {total} آهنگ را زده‌ای',
         pnListen: 'گوش بده', pnStop: 'توقف', pnFreeHint: 'هر چه دوست داری بزن. چند کلید را با هم نگه دار تا آکورد بشود.',
-        pnProgress: '{name}: {n} از {total}', pnWell: 'آفرین! دوباره بزن یا آهنگ دیگری انتخاب کن.',
+        pnProgress: '{name}: {n} از {total}', pnWell: 'آفرین! دوباره بزن یا آهنگ دیگری انتخاب کن.', pnHold: 'کمی بیشتر نگه دار.',
         pnMuted: 'افکت صوتی خاموش است. برای شنیدن پیانو از تنظیمات روشنش کن.',
         pnLabels: 'روی کلیدها', pnLabNames: 'نام نت‌ها', pnLabKeys: 'حروف صفحه‌کلید', pnLabNone: 'هیچ', pnNames: 'دو ر می فا سل لا سی',
-        pnRules: 'پیانوی آزاد است: امتیاز و برد و باختی در کار نیست. کلیدها را بزن؛ هر کلید تا وقتی نگهش داری صدا می‌دهد، چند انگشت با هم آکورد می‌سازد و با کشیدن انگشت روی کلیدها پشت سر هم می‌نوازی. با پیکان‌های کنار نام اکتاو، پیانو را بالا و پایین ببر. در «آهنگ‌ها» یک آهنگ قدیمی انتخاب کن: کلید بعدی روشن می‌شود و با هر کلید درست یکی جلو می‌روی. کلید اشتباه فقط صدا می‌دهد و چیزی را خراب نمی‌کند.',
+        pnRules: 'پیانوی آزاد است: امتیاز و برد و باختی در کار نیست. کلیدها را بزن؛ هر کلید تا وقتی نگهش داری صدا می‌دهد، چند انگشت با هم آکورد می‌سازد و با کشیدن انگشت روی کلیدها پشت سر هم می‌نوازی. با پیکان‌های کنار نام اکتاو، پیانو را بالا و پایین ببر. در «آهنگ‌ها» یک آهنگ قدیمی انتخاب کن: کلید بعدی روشن می‌شود؛ آن را به اندازه‌ی نُتش نگه دار تا پر شود و کلید بعدی روشن شود. کلید اشتباه یا ضربه‌ی کوتاه فقط صدا می‌دهد و چیزی را خراب نمی‌کند.',
         pnKLowWhat: 'ردیف پایین: یک اکتاو (S D G H J کلیدهای سیاه)', pnKHighWhat: 'ردیف بالا: اکتاو بعدی (2 3 5 6 7 کلیدهای سیاه)', pnKArrowsWhat: 'اکتاو پایین‌تر و بالاتر',
         pnTutTitle1: 'بزن و نگه دار', pnTutText1: 'هر کلید تا وقتی نگهش داری صدا می‌دهد. چند کلید با هم آکورد می‌سازد.',
         pnTutTitle2: 'آهنگ تمرینی', pnTutText2: 'از «آهنگ‌ها» یک آهنگ انتخاب کن و کلیدهای روشن را به ترتیب بزن.',
@@ -186,10 +197,10 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
         pnKeys: 'Piano keys', pnLower: 'Lower octave', pnHigher: 'Higher octave', pnTunes: 'Tunes', pnFree: 'Free play',
         pnPick: 'Pick a tune to practise. The key to play next lights up.', pnPlayed: '{n} of {total} tunes played',
         pnListen: 'Listen', pnStop: 'Stop', pnFreeHint: 'Play anything you like. Hold several keys at once for a chord.',
-        pnProgress: '{name}: {n} of {total}', pnWell: 'Well played! Play it again or pick another tune.',
+        pnProgress: '{name}: {n} of {total}', pnWell: 'Well played! Play it again or pick another tune.', pnHold: 'Hold it a little longer.',
         pnMuted: 'Sound effects are off. Turn them on in Settings to hear the piano.',
         pnLabels: 'On the keys', pnLabNames: 'Note names', pnLabKeys: 'Keyboard letters', pnLabNone: 'Nothing', pnNames: 'C D E F G A B',
-        pnRules: 'A free piano: there is no score, no winning and no losing. Press the keys; each one sounds for as long as you hold it, several fingers make a chord, and sliding a finger across the keys plays them in turn. The arrows beside the octave name move the keyboard up and down. In Tunes, pick an old melody: the next key lights up and each right key moves you on. A wrong key only makes a sound and spoils nothing.',
+        pnRules: 'A free piano: there is no score, no winning and no losing. Press the keys; each one sounds for as long as you hold it, several fingers make a chord, and sliding a finger across the keys plays them in turn. The arrows beside the octave name move the keyboard up and down. In Tunes, pick an old melody: the next key lights up; hold it for the length of its note, it fills as you hold, and then the next one lights. A wrong key or a short tap only makes a sound and spoils nothing.',
         pnKLowWhat: 'Lower row: one octave (S D G H J are the black keys)', pnKHighWhat: 'Upper row: the next octave (2 3 5 6 7 are the black keys)', pnKArrowsWhat: 'Octave down and up',
         pnTutTitle1: 'Press and hold', pnTutText1: 'Each key sounds for as long as you hold it. Several keys together make a chord.',
         pnTutTitle2: 'Practice tunes', pnTutText2: 'Pick a tune in Tunes and play the keys that light up, in order.',
@@ -199,10 +210,10 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
         pnKeys: 'Klawisze pianina', pnLower: 'Oktawa niżej', pnHigher: 'Oktawa wyżej', pnTunes: 'Melodie', pnFree: 'Swobodna gra',
         pnPick: 'Wybierz melodię do ćwiczenia. Następny klawisz się podświetla.', pnPlayed: 'Zagrane melodie: {n} z {total}',
         pnListen: 'Posłuchaj', pnStop: 'Stop', pnFreeHint: 'Graj, co chcesz. Przytrzymaj kilka klawiszy naraz, by zagrać akord.',
-        pnProgress: '{name}: {n} z {total}', pnWell: 'Brawo! Zagraj jeszcze raz albo wybierz inną melodię.',
+        pnProgress: '{name}: {n} z {total}', pnWell: 'Brawo! Zagraj jeszcze raz albo wybierz inną melodię.', pnHold: 'Przytrzymaj trochę dłużej.',
         pnMuted: 'Efekty dźwiękowe są wyłączone. Włącz je w Ustawieniach, by słyszeć pianino.',
         pnLabels: 'Na klawiszach', pnLabNames: 'Nazwy dźwięków', pnLabKeys: 'Litery klawiatury', pnLabNone: 'Nic', pnNames: 'C D E F G A H',
-        pnRules: 'Swobodne pianino: nie ma punktów, wygranych ani przegranych. Naciskaj klawisze; każdy brzmi, dopóki go trzymasz, kilka palców daje akord, a przesuwanie palca po klawiszach gra je po kolei. Strzałki przy nazwie oktawy przesuwają klawiaturę w górę i w dół. W Melodiach wybierz starą melodię: następny klawisz się podświetla, a każdy właściwy przesuwa cię dalej. Zły klawisz tylko brzmi i niczego nie psuje.',
+        pnRules: 'Swobodne pianino: nie ma punktów, wygranych ani przegranych. Naciskaj klawisze; każdy brzmi, dopóki go trzymasz, kilka palców daje akord, a przesuwanie palca po klawiszach gra je po kolei. Strzałki przy nazwie oktawy przesuwają klawiaturę w górę i w dół. W Melodiach wybierz starą melodię: następny klawisz się podświetla; przytrzymaj go tak długo, jak trwa nuta, a wypełni się i zapali się następny. Zły klawisz albo krótkie stuknięcie tylko brzmi i niczego nie psuje.',
         pnKLowWhat: 'Dolny rząd: jedna oktawa (S D G H J to czarne klawisze)', pnKHighWhat: 'Górny rząd: następna oktawa (2 3 5 6 7 to czarne klawisze)', pnKArrowsWhat: 'Oktawa niżej i wyżej',
         pnTutTitle1: 'Naciśnij i trzymaj', pnTutText1: 'Każdy klawisz brzmi, dopóki go trzymasz. Kilka klawiszy razem daje akord.',
         pnTutTitle2: 'Melodie do ćwiczeń', pnTutText2: 'Wybierz melodię w Melodiach i graj podświetlane klawisze po kolei.',
@@ -212,10 +223,10 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
         pnKeys: 'Touches du piano', pnLower: 'Octave plus grave', pnHigher: 'Octave plus aiguë', pnTunes: 'Airs', pnFree: 'Jeu libre',
         pnPick: 'Choisis un air à travailler. La touche suivante s’allume.', pnPlayed: '{n} airs joués sur {total}',
         pnListen: 'Écouter', pnStop: 'Arrêter', pnFreeHint: 'Joue ce que tu veux. Garde plusieurs touches enfoncées pour un accord.',
-        pnProgress: '{name} : {n} sur {total}', pnWell: 'Bravo ! Rejoue-le ou choisis un autre air.',
+        pnProgress: '{name} : {n} sur {total}', pnWell: 'Bravo ! Rejoue-le ou choisis un autre air.', pnHold: 'Tiens-la un peu plus longtemps.',
         pnMuted: 'Les effets sonores sont coupés. Active-les dans les Réglages pour entendre le piano.',
         pnLabels: 'Sur les touches', pnLabNames: 'Noms des notes', pnLabKeys: 'Lettres du clavier', pnLabNone: 'Rien', pnNames: 'Do Ré Mi Fa Sol La Si',
-        pnRules: 'Un piano libre : ni score, ni victoire, ni défaite. Appuie sur les touches ; chacune sonne tant que tu la tiens, plusieurs doigts font un accord, et glisser le doigt sur les touches les joue l’une après l’autre. Les flèches à côté du nom de l’octave déplacent le clavier vers le grave ou l’aigu. Dans Airs, choisis une vieille mélodie : la touche suivante s’allume et chaque bonne touche te fait avancer. Une fausse touche fait juste un son et ne gâche rien.',
+        pnRules: 'Un piano libre : ni score, ni victoire, ni défaite. Appuie sur les touches ; chacune sonne tant que tu la tiens, plusieurs doigts font un accord, et glisser le doigt sur les touches les joue l’une après l’autre. Les flèches à côté du nom de l’octave déplacent le clavier vers le grave ou l’aigu. Dans Airs, choisis une vieille mélodie : la touche suivante s’allume ; tiens-la le temps de sa note, elle se remplit pendant que tu la tiens, puis la suivante s’allume. Une fausse touche ou un appui trop bref fait juste un son et ne gâche rien.',
         pnKLowWhat: 'Rangée du bas : une octave (S D G H J sont les touches noires)', pnKHighWhat: 'Rangée du haut : l’octave suivante (2 3 5 6 7 sont les touches noires)', pnKArrowsWhat: 'Octave plus grave et plus aiguë',
         pnTutTitle1: 'Appuie et tiens', pnTutText1: 'Chaque touche sonne tant que tu la tiens. Plusieurs touches ensemble font un accord.',
         pnTutTitle2: 'Airs à travailler', pnTutText2: 'Choisis un air dans Airs et joue les touches qui s’allument, dans l’ordre.',
@@ -225,10 +236,10 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
         pnKeys: 'مفاتيح البيانو', pnLower: 'أوكتاف أخفض', pnHigher: 'أوكتاف أعلى', pnTunes: 'الألحان', pnFree: 'عزف حر',
         pnPick: 'اختر لحنًا للتدريب. يضيء المفتاح التالي الذي تعزفه.', pnPlayed: 'عزفت {n} من {total} ألحان',
         pnListen: 'استمع', pnStop: 'إيقاف', pnFreeHint: 'اعزف ما تحب. اضغط عدة مفاتيح معًا لتصنع تآلفًا.',
-        pnProgress: '{name}: {n} من {total}', pnWell: 'أحسنت! اعزفه مرة أخرى أو اختر لحنًا آخر.',
+        pnProgress: '{name}: {n} من {total}', pnWell: 'أحسنت! اعزفه مرة أخرى أو اختر لحنًا آخر.', pnHold: 'أبقِ إصبعك أطول قليلًا.',
         pnMuted: 'المؤثرات الصوتية متوقفة. شغّلها من الإعدادات لتسمع البيانو.',
         pnLabels: 'على المفاتيح', pnLabNames: 'أسماء النغمات', pnLabKeys: 'حروف لوحة المفاتيح', pnLabNone: 'لا شيء', pnNames: 'دو ري مي فا صول لا سي',
-        pnRules: 'بيانو حر: لا نقاط ولا فوز ولا خسارة. اضغط المفاتيح؛ كل مفتاح يرن ما دمت تضغطه، وعدة أصابع معًا تصنع تآلفًا، وتمرير الإصبع على المفاتيح يعزفها بالتتابع. السهمان بجانب اسم الأوكتاف يحركان لوحة المفاتيح إلى الأخفض والأعلى. في الألحان اختر لحنًا قديمًا: يضيء المفتاح التالي وكل مفتاح صحيح يتقدم بك. المفتاح الخطأ يصدر صوتًا فقط ولا يفسد شيئًا.',
+        pnRules: 'بيانو حر: لا نقاط ولا فوز ولا خسارة. اضغط المفاتيح؛ كل مفتاح يرن ما دمت تضغطه، وعدة أصابع معًا تصنع تآلفًا، وتمرير الإصبع على المفاتيح يعزفها بالتتابع. السهمان بجانب اسم الأوكتاف يحركان لوحة المفاتيح إلى الأخفض والأعلى. في الألحان اختر لحنًا قديمًا: يضيء المفتاح التالي؛ أبقِ إصبعك عليه بطول نغمته، فيمتلئ وأنت تضغطه ثم يضيء التالي. المفتاح الخطأ أو اللمسة القصيرة يصدر صوتًا فقط ولا يفسد شيئًا.',
         pnKLowWhat: 'الصف السفلي: أوكتاف واحد (S D G H J هي المفاتيح السوداء)', pnKHighWhat: 'الصف العلوي: الأوكتاف التالي (2 3 5 6 7 هي المفاتيح السوداء)', pnKArrowsWhat: 'أوكتاف أخفض وأعلى',
         pnTutTitle1: 'اضغط واستمر', pnTutText1: 'كل مفتاح يرن ما دمت تضغطه. عدة مفاتيح معًا تصنع تآلفًا.',
         pnTutTitle2: 'ألحان للتدريب', pnTutText2: 'اختر لحنًا من الألحان واعزف المفاتيح التي تضيء بالترتيب.',
@@ -238,10 +249,10 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
         pnKeys: 'पियानो की कुंजियाँ', pnLower: 'नीचा सप्तक', pnHigher: 'ऊँचा सप्तक', pnTunes: 'धुनें', pnFree: 'खुला वादन',
         pnPick: 'अभ्यास के लिए एक धुन चुनें। अगली बजाने वाली कुंजी चमकती है।', pnPlayed: '{total} में से {n} धुनें बजाईं',
         pnListen: 'सुनें', pnStop: 'रोकें', pnFreeHint: 'जो मन हो बजाएँ। कॉर्ड के लिए कई कुंजियाँ एक साथ दबाए रखें।',
-        pnProgress: '{name}: {total} में से {n}', pnWell: 'शाबाश! फिर से बजाएँ या कोई और धुन चुनें।',
+        pnProgress: '{name}: {total} में से {n}', pnWell: 'शाबाश! फिर से बजाएँ या कोई और धुन चुनें।', pnHold: 'थोड़ा और देर दबाए रखें।',
         pnMuted: 'ध्वनि प्रभाव बंद हैं। पियानो सुनने के लिए सेटिंग्स में चालू करें।',
         pnLabels: 'कुंजियों पर', pnLabNames: 'स्वरों के नाम', pnLabKeys: 'कीबोर्ड के अक्षर', pnLabNone: 'कुछ नहीं', pnNames: 'सा रे ग म प ध नि',
-        pnRules: 'खुला पियानो: न अंक, न जीत, न हार। कुंजियाँ दबाएँ; हर कुंजी तब तक बजती है जब तक आप उसे दबाए रखें, कई उँगलियाँ मिलकर कॉर्ड बनाती हैं, और कुंजियों पर उँगली फिसलाने से वे बारी-बारी बजती हैं। सप्तक के नाम के पास के तीर कीबोर्ड को नीचे-ऊपर ले जाते हैं। धुनें में कोई पुरानी धुन चुनें: अगली कुंजी चमकती है और हर सही कुंजी आपको आगे ले जाती है। ग़लत कुंजी सिर्फ़ आवाज़ करती है, कुछ नहीं बिगाड़ती।',
+        pnRules: 'खुला पियानो: न अंक, न जीत, न हार। कुंजियाँ दबाएँ; हर कुंजी तब तक बजती है जब तक आप उसे दबाए रखें, कई उँगलियाँ मिलकर कॉर्ड बनाती हैं, और कुंजियों पर उँगली फिसलाने से वे बारी-बारी बजती हैं। सप्तक के नाम के पास के तीर कीबोर्ड को नीचे-ऊपर ले जाते हैं। धुनें में कोई पुरानी धुन चुनें: अगली कुंजी चमकती है; उसे उसके सुर की लंबाई तक दबाए रखें, दबाते समय वह भरती जाती है और फिर अगली चमकती है। ग़लत कुंजी या छोटा-सा स्पर्श सिर्फ़ आवाज़ करता है, कुछ नहीं बिगाड़ता।',
         pnKLowWhat: 'निचली पंक्ति: एक सप्तक (S D G H J काली कुंजियाँ हैं)', pnKHighWhat: 'ऊपरी पंक्ति: अगला सप्तक (2 3 5 6 7 काली कुंजियाँ हैं)', pnKArrowsWhat: 'सप्तक नीचे और ऊपर',
         pnTutTitle1: 'दबाएँ और थामें', pnTutText1: 'हर कुंजी तब तक बजती है जब तक आप उसे दबाए रखें। कई कुंजियाँ मिलकर कॉर्ड बनाती हैं।',
         pnTutTitle2: 'अभ्यास की धुनें', pnTutText2: 'धुनें में एक धुन चुनें और चमकती कुंजियाँ क्रम से बजाएँ।',
@@ -251,10 +262,10 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
         pnKeys: '钢琴琴键', pnLower: '低八度', pnHigher: '高八度', pnTunes: '曲子', pnFree: '自由弹奏',
         pnPick: '选一首曲子练习。下一个要弹的键会亮起。', pnPlayed: '已弹完 {n}/{total} 首',
         pnListen: '试听', pnStop: '停止', pnFreeHint: '想弹什么就弹什么。同时按住几个键就是和弦。',
-        pnProgress: '{name}：{n}/{total}', pnWell: '弹得好！再弹一遍，或换一首曲子。',
+        pnProgress: '{name}：{n}/{total}', pnWell: '弹得好！再弹一遍，或换一首曲子。', pnHold: '再按久一点。',
         pnMuted: '音效已关闭。在设置里打开才能听到钢琴。',
         pnLabels: '琴键上显示', pnLabNames: '音名', pnLabKeys: '键盘字母', pnLabNone: '不显示', pnNames: '1 2 3 4 5 6 7',
-        pnRules: '自由弹奏的钢琴：没有分数，没有输赢。按下琴键，按住多久就响多久；几根手指一起按是和弦；手指在琴键上滑过会依次弹响。八度名称旁的箭头把键盘往低处或高处移。在“曲子”里选一首老歌：下一个键会亮起，每弹对一个就前进一步。弹错只是发出声音，不会弄坏什么。',
+        pnRules: '自由弹奏的钢琴：没有分数，没有输赢。按下琴键，按住多久就响多久；几根手指一起按是和弦；手指在琴键上滑过会依次弹响。八度名称旁的箭头把键盘往低处或高处移。在“曲子”里选一首老歌：下一个键会亮起；按住它直到这个音的时值，按住时键会慢慢填满，然后下一个键亮起。弹错或按得太短只是发出声音，不会弄坏什么。',
         pnKLowWhat: '下排：一个八度（S D G H J 是黑键）', pnKHighWhat: '上排：再高一个八度（2 3 5 6 7 是黑键）', pnKArrowsWhat: '降低和升高八度',
         pnTutTitle1: '按住', pnTutText1: '琴键按住多久就响多久。几个键一起按是和弦。',
         pnTutTitle2: '练习曲', pnTutText2: '在“曲子”里选一首，按顺序弹亮起的键。',
@@ -264,10 +275,10 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
         pnKeys: 'Klaviertasten', pnLower: 'Eine Oktave tiefer', pnHigher: 'Eine Oktave höher', pnTunes: 'Melodien', pnFree: 'Frei spielen',
         pnPick: 'Wähle eine Melodie zum Üben. Die nächste Taste leuchtet auf.', pnPlayed: '{n} von {total} Melodien gespielt',
         pnListen: 'Anhören', pnStop: 'Stopp', pnFreeHint: 'Spiel, was du magst. Halte mehrere Tasten zugleich für einen Akkord.',
-        pnProgress: '{name}: {n} von {total}', pnWell: 'Schön gespielt! Spiel sie noch einmal oder wähle eine andere Melodie.',
+        pnProgress: '{name}: {n} von {total}', pnWell: 'Schön gespielt! Spiel sie noch einmal oder wähle eine andere Melodie.', pnHold: 'Halte sie etwas länger.',
         pnMuted: 'Die Soundeffekte sind aus. Schalte sie in den Einstellungen ein, um das Klavier zu hören.',
         pnLabels: 'Auf den Tasten', pnLabNames: 'Notennamen', pnLabKeys: 'Tastaturbuchstaben', pnLabNone: 'Nichts', pnNames: 'C D E F G A H',
-        pnRules: 'Ein freies Klavier: keine Punkte, kein Gewinnen und kein Verlieren. Drück die Tasten; jede klingt, solange du sie hältst, mehrere Finger ergeben einen Akkord, und ein Finger, der über die Tasten gleitet, spielt sie nacheinander. Die Pfeile neben dem Oktavnamen schieben die Tastatur tiefer und höher. Unter Melodien wählst du eine alte Melodie: Die nächste Taste leuchtet auf, und jede richtige bringt dich weiter. Eine falsche Taste klingt nur und verdirbt nichts.',
+        pnRules: 'Ein freies Klavier: keine Punkte, kein Gewinnen und kein Verlieren. Drück die Tasten; jede klingt, solange du sie hältst, mehrere Finger ergeben einen Akkord, und ein Finger, der über die Tasten gleitet, spielt sie nacheinander. Die Pfeile neben dem Oktavnamen schieben die Tastatur tiefer und höher. Unter Melodien wählst du eine alte Melodie: Die nächste Taste leuchtet auf; halte sie so lange, wie ihre Note dauert, sie füllt sich dabei, und dann leuchtet die nächste. Eine falsche Taste oder ein zu kurzer Tipp klingt nur und verdirbt nichts.',
         pnKLowWhat: 'Untere Reihe: eine Oktave (S D G H J sind die schwarzen Tasten)', pnKHighWhat: 'Obere Reihe: die nächste Oktave (2 3 5 6 7 sind die schwarzen Tasten)', pnKArrowsWhat: 'Oktave tiefer und höher',
         pnTutTitle1: 'Drücken und halten', pnTutText1: 'Jede Taste klingt, solange du sie hältst. Mehrere Tasten zusammen ergeben einen Akkord.',
         pnTutTitle2: 'Übungsmelodien', pnTutText2: 'Wähle unter Melodien ein Stück und spiele die leuchtenden Tasten der Reihe nach.',
@@ -277,10 +288,10 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
         pnKeys: 'Teclas del piano', pnLower: 'Octava más grave', pnHigher: 'Octava más aguda', pnTunes: 'Melodías', pnFree: 'Toque libre',
         pnPick: 'Elige una melodía para practicar. La siguiente tecla se ilumina.', pnPlayed: '{n} de {total} melodías tocadas',
         pnListen: 'Escuchar', pnStop: 'Parar', pnFreeHint: 'Toca lo que quieras. Mantén varias teclas a la vez para un acorde.',
-        pnProgress: '{name}: {n} de {total}', pnWell: '¡Muy bien! Tócala otra vez o elige otra melodía.',
+        pnProgress: '{name}: {n} de {total}', pnWell: '¡Muy bien! Tócala otra vez o elige otra melodía.', pnHold: 'Mantenla un poco más.',
         pnMuted: 'Los efectos de sonido están apagados. Actívalos en Ajustes para oír el piano.',
         pnLabels: 'En las teclas', pnLabNames: 'Nombres de las notas', pnLabKeys: 'Letras del teclado', pnLabNone: 'Nada', pnNames: 'Do Re Mi Fa Sol La Si',
-        pnRules: 'Un piano libre: sin puntos, sin ganar ni perder. Pulsa las teclas; cada una suena mientras la mantienes, varios dedos forman un acorde y deslizar un dedo por las teclas las toca una tras otra. Las flechas junto al nombre de la octava mueven el teclado hacia lo grave o lo agudo. En Melodías elige una melodía antigua: la siguiente tecla se ilumina y cada tecla correcta te hace avanzar. Una tecla equivocada solo suena y no estropea nada.',
+        pnRules: 'Un piano libre: sin puntos, sin ganar ni perder. Pulsa las teclas; cada una suena mientras la mantienes, varios dedos forman un acorde y deslizar un dedo por las teclas las toca una tras otra. Las flechas junto al nombre de la octava mueven el teclado hacia lo grave o lo agudo. En Melodías elige una melodía antigua: la siguiente tecla se ilumina; mantenla lo que dura su nota, se va llenando mientras la sostienes y luego se ilumina la siguiente. Una tecla equivocada o un toque corto solo suena y no estropea nada.',
         pnKLowWhat: 'Fila de abajo: una octava (S D G H J son las teclas negras)', pnKHighWhat: 'Fila de arriba: la octava siguiente (2 3 5 6 7 son las teclas negras)', pnKArrowsWhat: 'Octava más grave y más aguda',
         pnTutTitle1: 'Pulsa y mantén', pnTutText1: 'Cada tecla suena mientras la mantienes. Varias teclas juntas forman un acorde.',
         pnTutTitle2: 'Melodías para practicar', pnTutText2: 'Elige una melodía en Melodías y toca en orden las teclas que se iluminan.',
@@ -377,7 +388,7 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
     var g = cv.getContext('2d');
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, Z.w, Z.h);
-    var dk = dark(), lit = litSet(), next = E.expected(prac);
+    var dk = dark(), lit = litSet(), next = E.expected(prac), prog = progress();
     var font = getComputedStyle(document.body).fontFamily;
     // the felt strip a real keyboard's keys disappear under
     g.fillStyle = ACCENT; g.fillRect(0, 0, Z.w, felt);
@@ -389,6 +400,8 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
       rr(g, k.x + 0.5, 0, k.w - 1, L.H - 1, Math.min(8, k.w * 0.14));
       g.fillStyle = lit[k.m] ? press : ivory; g.fill();
       if (k.m === next && !lit[k.m]) { g.fillStyle = hint; g.fill(); }
+      // the hold fills the key from the bottom up, so its length can be seen (#1012)
+      if (k.m === next && prog > 0) { g.save(); g.clip(); g.fillStyle = hint; g.fillRect(k.x, (L.H - 1) * (1 - prog), k.w, (L.H - 1) * prog); g.restore(); }
       g.strokeStyle = edge; g.lineWidth = 1; g.stroke();
       var t = label(k.m);
       if (t) {
@@ -406,6 +419,7 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
       rr(g, k.x, 0, k.w, k.h, Math.min(5, k.w * 0.15));
       g.fillStyle = lit[k.m] ? ACCENT : ebony; g.fill();
       if (k.m === next && !lit[k.m]) { g.fillStyle = 'rgba(222,112,152,.85)'; g.fill(); }
+      if (k.m === next && prog > 0) { g.save(); g.clip(); g.fillStyle = 'rgba(255,255,255,.4)'; g.fillRect(k.x, k.h * (1 - prog), k.w, k.h * prog); g.restore(); }
       if (!lit[k.m]) { g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(k.x + k.w * 0.18, k.h * 0.06, k.w * 0.64, k.h * 0.78); }
       var t = label(k.m);
       if (t) {
@@ -439,20 +453,56 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
   /* ------------------------------------------------------------ notes */
 
   function sound(m) { return C.audio.piano ? C.audio.piano(E.freq(m)) : null; }
+  function now() { return window.performance && performance.now ? performance.now() : Date.now(); }
+  // A key down is { m, h, at, t0 }: at is the tune note it is holding for (-1 for none),
+  // so the tune moves on only once that key has been held long enough (#1012).
   function strike(m) {
     if (demo) stopDemo();
-    var h = sound(m);
+    var o = { m: m, h: sound(m), at: -1, t0: now() };
     if (prac) {
       var was = msg;
       msg = '';
       var r = E.press(prac, m);
-      if (r === 'done') finishTune();
+      if (r === 'start') { o.at = prac.i; tick(); }
       else if (was && r === 'miss') msg = was;
     }
     showStatus();
-    return h;
+    return o;
   }
+  // up: the key is being let go, so a hold still short of its length says so
+  function settle(o, up) {
+    if (!o || o.at < 0 || !prac) return;
+    var r = E.hold(prac, o.at, now() - o.t0);
+    if (r === 'hit' || r === 'done') { o.at = -1; if (r === 'done') finishTune(); showStatus(); }
+    else if (r === 'none') o.at = -1;
+    else if (up) { o.at = -1; msg = C.t('pnHold'); showStatus(); }
+  }
+  function letGo(o) { settle(o, true); release(o.h); }
   function release(h) { if (h) h.stop(); }
+  function holders() {
+    var a = [], k;
+    for (k in fingers) a.push(fingers[k]);
+    for (k in keysDown) a.push(keysDown[k]);
+    return a;
+  }
+  // share of the lit key's hold already done, for the fill drawn on it
+  function progress() {
+    var p = 0;
+    if (!prac) return 0;
+    holders().forEach(function (o) { if (o.at === prac.i) p = Math.max(p, Math.min(1, (now() - o.t0) / Math.max(1, E.need(prac)))); });
+    return p;
+  }
+  var ticking = 0;
+  // runs only while a tune key is held: moves the tune on mid-hold and paints the fill
+  function tick() {
+    if (ticking) return;
+    ticking = requestAnimationFrame(function step() {
+      var live = false;
+      holders().forEach(function (o) { settle(o, false); if (o.at >= 0) live = true; });
+      draw();
+      ticking = live ? requestAnimationFrame(step) : 0;
+    });
+  }
   function finishTune() {
     msg = C.t('pnWell');
     if (played.indexOf(prac.id) < 0) { played.push(prac.id); ctx.store.set('played', played); }
@@ -477,7 +527,7 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
     try { cv.setPointerCapture(e.pointerId); } catch (x) { /* a synthetic pointer has nothing to capture */ }
     var m = keyAt(e);
     if (m < 0) return;
-    fingers[e.pointerId] = { m: m, h: strike(m) };
+    fingers[e.pointerId] = strike(m);
     draw();
   });
   // a finger slid onto another key lets the first go and strikes the next, as on a real keyboard
@@ -486,14 +536,14 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
     if (!f) return;
     var m = keyAt(e);
     if (m < 0 || m === f.m) return;
-    release(f.h);
-    fingers[e.pointerId] = { m: m, h: strike(m) };
+    letGo(f);
+    fingers[e.pointerId] = strike(m);
     draw();
   });
   function lift(e) {
     var f = fingers[e.pointerId];
     if (!f) return;
-    release(f.h);
+    letGo(f);
     delete fingers[e.pointerId];
     draw();
   }
@@ -519,13 +569,13 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
     if (e.repeat || keysDown[e.code]) return;
     var m = E.keyNote(k, prefs.base);
     if (m < 0) return;
-    keysDown[e.code] = { m: m, h: strike(m) };
+    keysDown[e.code] = strike(m);
     draw();
   });
   window.addEventListener('keyup', function (e) {
     var d = keysDown[e.code];
     if (!d) return;
-    release(d.h);
+    letGo(d);
     delete keysDown[e.code];
     draw();
   });

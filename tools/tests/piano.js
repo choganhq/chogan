@@ -48,17 +48,33 @@ module.exports = function (T) {
     const firsts = { twinkle: [60, 60, 67, 67, 69, 69, 67], mary: [64, 62, 60, 62, 64, 64, 64], clair: [60, 60, 60, 62, 64, 62], london: [67, 69, 67, 65, 64, 65, 67], ode: [64, 64, 65, 67, 67, 65, 64, 62], jingle: [64, 64, 64, 64, 64, 64, 64, 67, 60, 62, 64] };
     ok(E.TUNES.every((t) => same(E.tune(t.id).slice(0, firsts[t.id].length).map((n) => n.m), firsts[t.id])), 'each tune opens with its known notes (' + Object.keys(firsts).join(', ') + ')');
     ok(E.TUNES.every((t) => { const n = E.tune(t.id); return n.length >= 20 && n.every((x) => x.m >= 60 && x.m <= 72 && !E.isBlack(x.m) && x.beats > 0); }), 'every note of every tune is a white key between C4 and C5, so all of it fits the 8 keys of an upright phone');
+    // #1012: a key moves the tune on only once it is held for about 80% of its note
+    const play = (P, m, ms) => { const r = E.press(P, m); return r === 'start' ? E.hold(P, P.i, ms) : r; };
     let allRight = true;
     for (const t of E.TUNES) {
       const P = E.practice(t.id), n = E.tune(t.id);
-      const res = n.map((x) => E.press(P, x.m));
+      const res = n.map((x) => play(P, x.m, x.beats * E.BEAT_MS));
       if (!(res.slice(0, -1).every((r) => r === 'hit') && res[res.length - 1] === 'done')) allRight = false;
     }
-    ok(allRight, 'playing each tune\'s notes in order moves on note by note and ends it');
+    ok(allRight, 'playing each tune\'s notes in order, each held for its length, moves on note by note and ends it');
     const P = E.practice('mary');
-    ok(E.expected(P) === 64 && E.press(P, 60) === 'miss' && P.i === 0 && E.press(P, 64) === 'hit' && E.expected(P) === 62, 'a wrong key changes nothing; the right one moves on');
-    E.tune('mary').slice(1).forEach((x) => E.press(P, x.m));
-    ok(E.expected(P) === -1 && E.press(P, 64) === 'hit' && P.i === 1 && E.press(null, 60) === 'free' && E.practice('nope') === null, 'after the end the next key starts the tune again; free play has no tune');
+    ok(E.expected(P) === 64 && E.press(P, 60) === 'miss' && P.i === 0 && play(P, 64, 600) === 'hit' && E.expected(P) === 62, 'a wrong key changes nothing; the right one held long enough moves on');
+    E.tune('mary').slice(1).forEach((x) => play(P, x.m, 5000));
+    ok(E.expected(P) === -1 && play(P, 64, 600) === 'hit' && P.i === 1 && E.press(null, 60) === 'free' && E.practice('nope') === null, 'after the end the next key starts the tune again; free play has no tune');
+    ok(E.HOLD >= 0.7 && E.HOLD <= 0.9, 'a key must be held for about 80% of its note (HOLD ' + E.HOLD + ')');
+    // mary: E D C D E E E:2 — notes 0 and 6 are one and two beats long
+    const Q = E.practice('mary');
+    const quarter = E.need(Q);
+    ok(quarter === Math.round(E.BEAT_MS * E.HOLD) && E.press(Q, 64) === 'start' && E.hold(Q, 0, 60) === 'wait' && Q.i === 0 && E.expected(Q) === 64, 'a short tap on the right key does not move on (needs ' + quarter + ' ms, got 60)');
+    ok(E.hold(Q, 0, quarter - 1) === 'wait' && E.hold(Q, 0, quarter) === 'hit' && Q.i === 1, 'the hold moves on exactly at its length, while the key is still down');
+    ok(E.hold(Q, 0, 5000) === 'none' && Q.i === 1, 'a key still held after its note moves on cannot also play the next one (C C needs two presses)');
+    Q.i = 6;
+    ok(E.need(Q) === 2 * quarter, 'a half note needs twice the hold of a quarter note (' + E.need(Q) + ' vs ' + quarter + ' ms)');
+    E.press(Q, 64);
+    ok(E.hold(Q, 6, quarter + 10) === 'wait' && Q.i === 6, 'holding a half note for a quarter note\'s length is not enough');
+    ok(E.hold(Q, 6, 2 * quarter) === 'hit' && Q.i === 7, 'holding it for its own length is');
+    // the page: a short release says so, the lit key fills while held, and the fill runs on a frame loop only while a tune key is down
+    ok(/msg = C\.t\('pnHold'\)/.test(html) && /function letGo\(o\) \{ settle\(o, true\)/.test(html) && /requestAnimationFrame\(step\)/.test(html) && /prog = progress\(\)/.test(html), 'the page says to hold longer on a short tap and fills the lit key while it is held');
 
     // the sound: the core's piano voice, run against a fake AudioContext
     const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
