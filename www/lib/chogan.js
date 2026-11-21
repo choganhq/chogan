@@ -1351,6 +1351,63 @@
   };
   Chogan.audio = audioApi;
 
+  /* ==== PIANO VOICE START ==== */
+  // Piano (#972). An SFX entry is fire-and-forget, but a piano key sounds for as long as
+  // it is held and stops when it is lifted, so this voice hands back a handle whose
+  // stop() starts the release. It is a function of its own rather than an SFX entry for
+  // that reason; every other sound keeps going through sfx().
+  audioApi.piano = function (freq) {
+    if (!state.settings.sfx || !(freq > 0)) return null;
+    // The first key is pressed before the document's unlock listener has run (the canvas
+    // sees the pointerdown first), so that note was silent. Every call comes from a key
+    // press, which is a user gesture, so the context may be made right here.
+    if (!AC) ensureAudio();
+    if (!AC) return null;
+    if (AC.state === 'suspended') AC.resume();
+    var t0 = now();
+    // a struck string: loud at once, then fading even while held; high notes fade sooner
+    var life = Math.max(1.2, Math.min(4.5, 4.5 - Math.log(freq / 130) * 1.4));
+    var peak = 0.2;
+    var env = AC.createGain(), rel = AC.createGain(), lp = AC.createBiquadFilter();
+    env.gain.setValueAtTime(0.0001, t0);
+    env.gain.exponentialRampToValueAtTime(peak, t0 + 0.006);
+    env.gain.exponentialRampToValueAtTime(peak * 0.35, t0 + 0.25);
+    env.gain.exponentialRampToValueAtTime(0.0001, t0 + life);
+    // the release lives on its own gain so lifting a key never has to read back where the
+    // decay had got to, which an AudioParam cannot report reliably
+    rel.gain.setValueAtTime(1, t0);
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(Math.min(9000, freq * 7), t0);
+    var parts = [[1, 'triangle', 1], [2, 'sine', 0.35], [3, 'sine', 0.12]];
+    var oscs = parts.map(function (p) {
+      var o = AC.createOscillator(), g = AC.createGain();
+      o.type = p[1];
+      o.frequency.setValueAtTime(freq * p[0], t0);
+      g.gain.setValueAtTime(p[2], t0);
+      o.connect(g); g.connect(lp);
+      o.start(t0);
+      o.stop(t0 + life + 0.05);
+      return o;
+    });
+    lp.connect(env); env.connect(rel); rel.connect(sfxBus);
+    var done = false;
+    return {
+      freq: freq,
+      stop: function () {
+        if (done) return;
+        done = true;
+        var t = now();
+        try {
+          rel.gain.cancelScheduledValues(t);
+          rel.gain.setValueAtTime(1, t);
+          rel.gain.setTargetAtTime(0.0001, t, 0.07);
+          oscs.forEach(function (o) { o.stop(t + 0.5); });
+        } catch (e) { /* a note that already ended has nothing to release */ }
+      }
+    };
+  };
+  /* ==== PIANO VOICE END ==== */
+
   /* =========================================================== لرزش */
 
   var HAPTICS = {
@@ -1670,6 +1727,8 @@
     { id: 'cw-three',    icon: 'crown',    fa: 'استاد چنگک',          en: 'Claw master',       dfa: 'در چنگک دستگاهی را با سه ستاره تمام کردی', den: 'Finish a Grabber machine with three stars', zh: '抓娃娃大师', dzh: '在抓娃娃中以三颗星完成一台机器', de: 'Greifmeister', dde: 'Schließe im Greifer einen Automaten mit drei Sternen ab', es: 'Maestro del gancho', des: 'Termina una máquina de Gancho con tres estrellas', pl: 'Mistrz chwytaka', dpl: 'Ukończ automat w Chwytaku z trzema gwiazdkami', fr: 'Maître de la pince', dfr: 'Termine une machine du Grappin avec trois étoiles', ar: 'سيد المخلب', dar: 'أنهِ آلة في المخلب بثلاث نجوم', hi: 'पंजा उस्ताद', dhi: 'पंजा में तीन तारों के साथ एक मशीन पूरी करें' },
     { id: 'cw-daily',    icon: 'calendar', fa: 'شکار روزانه',         en: 'Daily catch',       dfa: 'دستگاه روزانه‌ی چنگک را با دست‌کم یک ستاره تمام کردی', den: 'Finish the daily Grabber machine with at least one star', zh: '每日一抓', dzh: '以至少一颗星完成每日抓娃娃机', de: 'Tagesfang', dde: 'Schließe den Tagesautomaten im Greifer mit mindestens einem Stern ab', es: 'Captura del día', des: 'Termina la máquina diaria de Gancho con al menos una estrella', pl: 'Połów dnia', dpl: 'Ukończ automat dnia w Chwytaku z co najmniej jedną gwiazdką', fr: 'Prise du jour', dfr: 'Termine la machine du jour du Grappin avec au moins une étoile', ar: 'صيد اليوم', dar: 'أنهِ آلة اليوم في المخلب بنجمة واحدة على الأقل', hi: 'आज की पकड़', dhi: 'पंजा की आज की मशीन कम से कम एक तारे के साथ पूरी करें' },
     { id: 'cw-star',     icon: 'star',     fa: 'ستاره‌گیر',           en: 'Star grab',         dfa: 'در چنگک عروسک ستاره را به دریچه رساندی', den: 'Deliver the star toy to the chute in Grabber', zh: '摘星', dzh: '在抓娃娃中把星星玩偶送进出口', de: 'Sternengriff', dde: 'Bringe im Greifer das Sternchen-Plüschtier in den Schacht', es: 'Estrella atrapada', des: 'Lleva el peluche estrella a la rampa en Gancho', pl: 'Złapana gwiazdka', dpl: 'Dostarcz gwiazdkę do zsypu w Chwytaku', fr: 'Étoile attrapée', dfr: 'Amène la peluche étoile à la trappe du Grappin', ar: 'خطف النجمة', dar: 'أوصِل دمية النجمة إلى الفتحة في المخلب', hi: 'तारा पकड़ा', dhi: 'पंजा में तारे वाले खिलौने को ढलान तक पहुँचाएँ' },
+    { id: 'pn-tune',     icon: 'music',    fa: 'اولین آهنگ',          en: 'First tune',        dfa: 'در پیانو یک آهنگ تمرینی را تا آخر زدی', den: 'Play a practice tune to the end in Piano', zh: '第一首曲子', dzh: '在钢琴中把一首练习曲弹到最后', de: 'Erste Melodie', dde: 'Spiele im Klavier ein Übungsstück bis zum Ende', es: 'Primera melodía', des: 'Toca una melodía de práctica hasta el final en Piano', pl: 'Pierwsza melodia', dpl: 'Zagraj ćwiczebną melodię do końca w Pianinie', fr: 'Premier air', dfr: 'Joue un air d’entraînement jusqu’au bout dans Piano', ar: 'أول لحن', dar: 'اعزف لحن تدريب حتى نهايته في البيانو', hi: 'पहली धुन', dhi: 'पियानो में अभ्यास की एक धुन अंत तक बजाएँ' },
+    { id: 'pn-all',      icon: 'crown',    fa: 'دفتر آهنگ کامل',      en: 'Whole songbook',    dfa: 'در پیانو همه‌ی آهنگ‌های تمرینی را زدی', den: 'Play every practice tune in Piano', zh: '全部曲目', dzh: '在钢琴中弹完所有练习曲', de: 'Ganzes Liederbuch', dde: 'Spiele im Klavier jedes Übungsstück', es: 'Cancionero completo', des: 'Toca todas las melodías de práctica en Piano', pl: 'Cały śpiewnik', dpl: 'Zagraj każdą ćwiczebną melodię w Pianinie', fr: 'Recueil complet', dfr: 'Joue tous les airs d’entraînement dans Piano', ar: 'كتاب الألحان كاملًا', dar: 'اعزف كل ألحان التدريب في البيانو', hi: 'पूरी गीत-पुस्तिका', dhi: 'पियानो में अभ्यास की हर धुन बजाएँ' },
     { id: 'snt-dry',     icon: 'shield',   fa: 'پای خشک',             en: 'Dry feet',          dfa: 'در سنت ربات متوسط یا سخت را بردی، بی‌آنکه مهره‌ای در آب بیفتد', den: 'Beat the medium or hard bot at Senet without a piece falling into the water', zh: '滴水不沾', dzh: '在塞尼特中战胜中等或困难电脑，且没有棋子落水', de: 'Trockene Füße', dde: 'Besiege den mittleren oder schweren Bot in Senet, ohne dass ein Stein ins Wasser fällt', es: 'Pies secos', des: 'Vence al bot medio o difícil en Senet sin que ninguna pieza caiga al agua', pl: 'Suche stopy', dpl: 'Pokonaj bota średniego lub trudnego w Senet, nie wpadając ani razu do wody', fr: 'Pieds au sec', dfr: 'Bats le robot moyen ou difficile au Senet sans qu’aucun pion tombe à l’eau', ar: 'أقدام جافة', dar: 'اهزم الروبوت المتوسط أو الصعب في سينيت دون أن يسقط حجر في الماء', hi: 'सूखे पाँव', dhi: 'सेनेट में मध्यम या कठिन बॉट को हराएँ, बिना कोई गोटी पानी में गिरे' },
     { id: 'go-win',      icon: 'medal',   fa: 'زمین‌گیر',          en: 'Territory',         dfa: 'یک دست گو را مقابل ربات بردی',        den: 'Win a game of go against the AI', zh: '围地', dzh: '对战电脑赢下一局围棋', de: 'Gebietsherr', dde: 'Gewinne eine Partie Go gegen den Computer', es: 'Territorio', des: 'Gana una partida de Go contra la IA', ar: 'الأرض', dar: 'فُز بلعبة غو ضد الروبوت', hi: 'इलाक़ा', dhi: 'गो में कंप्यूटर को हराएँ' },
     { id: 'go-hard',     icon: 'brain',   fa: 'دو چشم',            en: 'Two eyes',          dfa: 'در گو ربات سخت را شکست دادی',         den: 'Beat the hard AI at go', zh: '两只眼', dzh: '在围棋中击败困难电脑', de: 'Zwei Augen', dde: 'Schlag die schwere Go-KI', es: 'Dos ojos', des: 'Vence a la IA difícil en Go', ar: 'عينان', dar: 'اهزم الروبوت الصعب في غو', hi: 'दो आँखें', dhi: 'गो में कठिन कंप्यूटर को हराएँ' },
@@ -1741,7 +1800,7 @@
     tw: 'towerup', dom: 'dominoes', ws: 'watersort', fb: 'football', wg: 'wrigglers', tri: 'trio',
     fr: 'fourrow', pk: 'peak', tr: 'territories', pw: 'pipes', db: 'doubles', sk: 'storekeeper',
     sr: 'starraid', cx: 'crossing', cm: 'carrom', nd: 'numberdrop', ci: 'circuit',
-    hr: 'hillrider', fl: 'flood', mo: 'motorush', mu: 'muncher', ft: 'fitten', fd: 'fivedice', hx: 'hex', ln: 'lander', gs: 'goose', dl: 'dicelands', cn: 'corners', fo: 'fourfold', snt: 'senet', pet: 'petgame', hc: 'honeycomb', nj: 'nainjaune', hm: 'hamlet', po: 'pushout', sg: 'shogi', pf: 'pegfall', ld: 'liarsdice', cw: 'claw',
+    hr: 'hillrider', fl: 'flood', mo: 'motorush', mu: 'muncher', ft: 'fitten', fd: 'fivedice', hx: 'hex', ln: 'lander', gs: 'goose', dl: 'dicelands', cn: 'corners', fo: 'fourfold', snt: 'senet', pet: 'petgame', hc: 'honeycomb', nj: 'nainjaune', hm: 'hamlet', po: 'pushout', sg: 'shogi', pf: 'pegfall', ld: 'liarsdice', cw: 'claw', pn: 'piano',
   };
   // Darts kept Dots' prefix for this one award when #464 renamed the others
   var ACH_GAME_ID = { 'dt-180': 'darts' };
