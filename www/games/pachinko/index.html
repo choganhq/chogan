@@ -1,0 +1,1186 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>بارون توپ — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  /* the board (100 × 150) with the power dial under it (16 more), in every window */
+  .pc-wrap > .ch-fit { --fit-ar: calc(100 / 166); }
+  .ch-fit > .pc-box { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+  /* drawn left to right in every language; the launch lane is on the left in all of them */
+  .pc-canvas { display: block; width: 100%; height: 100%; touch-action: none; direction: ltr; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .pc-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .pc-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 999px; background: var(--c-surface-2); font-weight: 700; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+  .pc-chip--open { background: var(--c-accent); color: var(--c-accent-ink); }
+  .pc-goals { display: flex; justify-content: center; gap: var(--s-2); flex-wrap: wrap; }
+  .pc-goal { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--c-line); font-size: var(--fs-sm); color: var(--c-text-dim); font-variant-numeric: tabular-nums; }
+  .pc-goal svg { opacity: .45; }
+  .pc-goal--on { border-color: var(--c-gold); color: var(--c-text); }
+  .pc-goal--on svg { opacity: 1; fill: currentColor; color: var(--c-gold); }
+  /* two lines of room, so a longer hint never moves the board under a finger */
+  .pc-status { min-height: 2.8em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+  .pc-levels { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--s-2); }
+  .pc-lv {
+    min-height: 56px; border: 2px solid transparent; border-radius: var(--r-md);
+    background: var(--c-surface-2); color: var(--c-text); font: inherit; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    touch-action: manipulation;
+  }
+  .pc-lv b { font-size: var(--fs-lg); font-variant-numeric: tabular-nums; }
+  .pc-lv--on { border-color: var(--game); }
+  .pc-lv--done { background: var(--game-soft); }
+  .pc-lv[disabled] { opacity: .45; cursor: default; }
+  .pc-lv__stars { display: flex; gap: 1px; color: var(--c-gold); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function PachinkoEngineFactory() {
+  'use strict';
+  // every global lookup is several times slower inside the test sandbox, so the hot
+  // maths are local names (the group took 36 s with Math.* in the step loop)
+  var sqrt = Math.sqrt, floor = Math.floor, ceil = Math.ceil, abs = Math.abs, max = Math.max, imul = Math.imul;
+
+  // Board units, y down: 100 across and 150 tall. One fixed step of 1/120 s and no
+  // trigonometry or randomness in the simulation, so the same launch strength at the
+  // same moment takes the same path on every device, and a board can be learnt (#949).
+  var W = 100, H = 150, R = 1.5, PR = 0.7, DT = 1 / 120, G = 220;
+  var E_PIN = 0.5, E_WALL = 0.35, E_RAIL = 0.1, FRICT = 0.03, RAIL_DRAG = 0.0012;
+  // the launch lane on the left: a guide wall at GX, then a guide arc of radius ARC_R
+  // round the dome's centre (CX, CY); the dome itself has radius DOME
+  var GX = 6, GW = 0.5, CX = 50, CY = 50, DOME = 50, ARC_R = 44, ARC_T = 0.65;
+  var START_X = 2.75, START_Y = 147;
+  // launch speed for strength 0 and 100: the weakest falls back down the lane, the
+  // strongest rides the dome all the way over to the right wall
+  var VMIN = 252, VMAX = 283;
+  var BALLS = 25, FOUL_MAX = 25, GAP = 300, TUL = 720, CAP = 30 * 120, LEVELS = 10;
+  var STAR_K = [0.35, 0.65, 0.9], AIM = 1, START_BONUS = 30;
+
+  function rng(seed) {
+    var s = seed >>> 0;
+    return function () {
+      s = (s + 0x6D2B79F5) >>> 0;
+      var t = s;
+      t = imul(t ^ (t >>> 15), t | 1);
+      t ^= t + imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+
+  // distance from (x, y) to a segment; the answer goes into one reused object, since a
+  // step asks this thousands of times
+  var SQ = { d: 0, ex: 0, ey: 0, px: 0, py: 0 };
+  function segTo(ax, ay, bx, by, x, y) {
+    var dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+    var t = l2 ? clamp(((x - ax) * dx + (y - ay) * dy) / l2, 0, 1) : 0;
+    var px = ax + dx * t, py = ay + dy * t, ex = x - px, ey = y - py;
+    SQ.d = sqrt(ex * ex + ey * ey); SQ.ex = ex; SQ.ey = ey; SQ.px = px; SQ.py = py;
+    return SQ;
+  }
+  function segDist(s, x, y) { return segTo(s.ax, s.ay, s.bx, s.by, x, y); }
+
+  // the guide arc, a polyline on the circle from the rational parametrisation
+  function guide() {
+    var segs = [{ ax: GX, ay: H, bx: GX, by: CY, r: GW, k: 'guide' }], N = 22, px = GX, py = CY;
+    for (var i = 1; i <= N; i++) {
+      var t = ARC_T * i / N, c = (1 - t * t) / (1 + t * t), s = 2 * t / (1 + t * t);
+      var x = CX - ARC_R * c, y = CY - ARC_R * s;
+      segs.push({ ax: px, ay: py, bx: x, by: y, r: GW, k: 'guide' });
+      px = x; py = y;
+    }
+    return segs;
+  }
+  var GUIDE = guide(), ARC_END = [GUIDE[GUIDE.length - 1].bx, GUIDE[GUIDE.length - 1].by];
+  // the stop on the dome's right shoulder: a ball strong enough to ride over the top
+  // strikes it and is thrown back into the field, the harder the further left, instead
+  // of riding the dome all the way down the right wall
+  var STOP = { ax: 88.3, ay: 17.9, bx: 83.7, by: 21.8, r: 0.9, k: 'stop' }, E_STOP = 0.55;
+
+  /* Two rows of catchers, each a V of two rails. The softer launches peel off the dome
+     and come down on the right, into the high row; the hardest strike the stop and are
+     thrown back to the left, into the low row. So one band of launch strength ends in one
+     catcher, and the dial is the whole game. The first draft had a field of ~300 pins:
+     every way in scattered alike, holding one power filled the tulip on every board, and
+     the dial did not matter (#949). */
+  var HI_Y = 62, LO_Y = 95, OW = 2.2, TUL_DROP = 14;
+  var HI_LIPS = [55, 69, 77, 85, 92, W], LO_LIPS = [24, 40, 52];
+  // a fixed pocket holds this many balls; more still fall in but score nothing, so no
+  // single power can carry a board
+  var FULL = 3;
+
+  /* Board parameters by level: more fixed pockets, lips moved further off their marks and
+     smaller pockets later on. Level 0 is the daily board's mix. There are no windmills:
+     a turning blade sent the same launch to a different catcher by the moment it got
+     there, and holding one power then opened the tulip and used it too (#949). */
+  function params(level) {
+    var k = (level | 0) === 0 ? 5 : clamp(level | 0, 1, LEVELS) - 1;
+    return { fixed: k >= 3 ? 4 : 3, cap: k >= 6 ? 2 : FULL, jog: k >= 6 ? 2.5 : k >= 2 ? 1.5 : 0 };
+  }
+
+  function pocket(x, y, v, kind, cap) { return { x: x, y: y, v: v, kind: kind, cap: cap | 0, w: kind === 'tulip' ? 2.6 : OW }; }
+
+  // the catchers of one row between its lips, each lip moved a little by the board's seed
+  function row(lips, ly, r, jog) {
+    var xs = lips.map(function (x, i) { return i === 0 || i === lips.length - 1 || !jog ? x : x + Math.round((r() * 2 - 1) * jog * 10) / 10; });
+    var out = [];
+    for (var i = 0; i + 1 < xs.length; i++) {
+      var x0 = xs[i], x1 = xs[i + 1], cx = (x0 + x1) / 2;
+      out.push({ x0: x0, x1: x1, cx: cx, ly: ly, oy: ly + max(4, ((x1 - x0) / 2 - OW) * 1.1) });
+    }
+    return out;
+  }
+
+  /* One board from a seed and a level: which catcher holds the tulip, the start pocket,
+     the fixed pockets and which only drain is the board's own shuffle. A few brass pins
+     sit only where drained balls fall, for the sound and the look. */
+  function make(seed, level) {
+    seed = seed >>> 0;
+    var r = rng(seed), P = params(level), pins = [], segs = GUIDE.slice(), pockets = [], i;
+    var cs = row(HI_LIPS, HI_Y, r, P.jog).concat(row(LO_LIPS, LO_Y, r, P.jog));
+    // the start pocket always in the high row: a ball rolling off a shut tulip in the high
+    // row falls on to the low row, and one power then opened the tulip and used it (#949)
+    var hi = [0, 1, 2, 3, 4], lo = [5, 6], tulipLow = r() < 0.6;
+    function take(list) { return list.splice(floor(r() * list.length), 1)[0]; }
+    // never the tulip in the catcher by the right wall: a ball rolling off its shut roof
+    // wedged against the wall and never ended
+    var tIdx = tulipLow ? take(lo) : hi.splice(floor(r() * 4), 1)[0], sIdx = take(hi);
+    var rest = hi.concat(lo), kinds = [];
+    kinds[tIdx] = 'tulip'; kinds[sIdx] = 'start';
+    var vals = [30, 20, 20, 10];
+    for (i = 0; i < P.fixed && rest.length; i++) kinds[take(rest)] = vals[i];
+    rest.forEach(function (n) { kinds[n] = 'out'; });
+    cs.forEach(function (c, n) {
+      var kd = kinds[n];
+      segs.push({ ax: c.x0, ay: c.ly, bx: c.cx - OW, by: c.oy, r: 0.6, k: 'rail' });
+      segs.push({ ax: c.x1, ay: c.ly, bx: c.cx + OW, by: c.oy, r: 0.6, k: 'rail' });
+      c.kind = kd;
+    });
+    // the tulip hangs a little off the catcher's middle, so a ball dropping onto the shut
+    // tulip always rolls off the same side, to the right where nothing scores
+    var tc = cs[tIdx];
+    pockets.push(pocket(tc.cx + 1.2, tc.oy + TUL_DROP, 50, 'tulip', 0));
+    pockets.push(pocket(cs[sIdx].cx, cs[sIdx].oy, 5, 'start', 0));
+    cs.forEach(function (c) { if (typeof c.kind === 'number') pockets.push(pocket(c.cx, c.oy, c.kind, 'fix', P.cap)); });
+    pockets.forEach(function (p) {
+      var w = p.w;
+      // the cup under each pocket's rim, so a ball only goes in from above
+      segs.push({ ax: p.x - w, ay: p.y, bx: p.x - w, by: p.y + 3.2, r: 0.5, k: 'cup' });
+      segs.push({ ax: p.x + w, ay: p.y, bx: p.x + w, by: p.y + 3.2, r: 0.5, k: 'cup' });
+      segs.push({ ax: p.x - w, ay: p.y + 3.2, bx: p.x + w, by: p.y + 3.2, r: 0.5, k: 'cup' });
+    });
+    // pins only in the low corners where drained balls fall
+    var tu = pockets[0];
+    for (var y = 112; y <= 142; y += 6) {
+      var odd = ((y - 112) / 6) % 2 === 1;
+      for (var x = odd ? 63 : 60; x <= 96; x += 7) pins.push({ x: x, y: y, r: PR });
+      for (x = odd ? 13 : 10; x <= 22; x += 7) pins.push({ x: x, y: y, r: PR });
+    }
+    var clear = 2 * R + PR + 0.6;
+    pins = pins.filter(function (p) {
+      if (abs(p.x - tu.x) < 10 + clear && p.y > tu.y - 7 - clear && p.y < tu.y + 3.7 + clear) return false;
+      for (var s = GUIDE.length; s < segs.length; s++) if (segDist(segs[s], p.x, p.y).d < segs[s].r + PR + 2 * R + 0.6) return false;
+      return true;
+    });
+    // the pocket rims are pins of their own
+    pockets.forEach(function (p) { pins.push({ x: p.x - p.w, y: p.y, r: 0.6, rim: true }); pins.push({ x: p.x + p.w, y: p.y, r: 0.6, rim: true }); });
+    var B = {
+      seed: seed, level: level | 0, pins: pins, segs: segs, pockets: pockets, catchers: cs,
+      wings: {
+        // shut, the petals meet in a roof over the cup; open, they spread wide
+        shut: [{ ax: tu.x - tu.w - 0.4, ay: tu.y, bx: tu.x, by: tu.y - 3.4, r: 0.6, k: 'wing' }, { ax: tu.x + tu.w + 0.4, ay: tu.y, bx: tu.x, by: tu.y - 3.4, r: 0.6, k: 'wing' }],
+        open: [{ ax: tu.x - tu.w, ay: tu.y, bx: tu.x - 4.4, by: tu.y - 5, r: 0.6, k: 'wing' }, { ax: tu.x + tu.w, ay: tu.y, bx: tu.x + 4.4, by: tu.y - 5, r: 0.6, k: 'wing' }]
+      }
+    };
+    index(B);
+    return B;
+  }
+
+  function cellKey(gx, gy) { return (gx + 2) * 40 + gy + 2; }
+  // pins bucketed by 6-unit cells, so a step looks at a handful, not hundreds
+  function index(B) {
+    var cells = [];
+    B.pins.forEach(function (p, n) {
+      var k = cellKey(floor(p.x / 6), floor(p.y / 6));
+      (cells[k] = cells[k] || []).push(n);
+    });
+    B.cells = cells;
+    // the long guide is tested only near the lane; the rest of the segments always
+    B.near = B.segs.slice(GUIDE.length);
+  }
+
+  // bounce off a surface with outward normal (nx, ny) moving at (ux, uy)
+  function bounce(b, nx, ny, pen, e, ux, uy, fr) {
+    b.x += nx * pen; b.y += ny * pen;
+    var rvx = b.vx - ux, rvy = b.vy - uy, vn = rvx * nx + rvy * ny;
+    if (vn >= 0) return 0;
+    var tx = rvx - vn * nx, ty = rvy - vn * ny;
+    b.vx = ux + tx * (1 - fr) - e * vn * nx;
+    b.vy = uy + ty * (1 - fr) - e * vn * ny;
+    return -vn;
+  }
+
+  function strengthSpeed(s) { return VMIN + clamp(s | 0, 0, 100) * (VMAX - VMIN) / 100; }
+  function ball(s, clock) { return { x: START_X, y: START_Y, vx: 0, vy: -strengthSpeed(s), s: s | 0, c0: clock | 0, n: 0, still: 0, done: false, res: null, top: false }; }
+
+  /* One step of one ball at board time `clock`, with the tulip open or shut. Events go
+     into ev: ['pin', index]; when the ball ends, b.res is a pocket
+     index, -1 for out at the bottom, or -2 for a foul (fell back down the lane). */
+  function step(B, b, clock, open, ev) {
+    if (b.done) return;
+    var sp = sqrt(b.vx * b.vx + b.vy * b.vy), n = max(1, ceil(sp * DT / 0.6)), h = DT / n, touch = false;
+    for (var sub = 0; sub < n; sub++) {
+      b.vy += G * h;
+      b.x += b.vx * h; b.y += b.vy * h;
+      var i, d, q;
+      // the dome above CY and the walls below it: a ball rides them, losing almost nothing
+      if (b.y < CY) {
+        var ox = b.x - CX, oy = b.y - CY, od = sqrt(ox * ox + oy * oy);
+        if (od > DOME - R) { bounce(b, -ox / od, -oy / od, od - (DOME - R), 0, 0, 0, RAIL_DRAG); touch = true; }
+      }
+      if (b.x < R) { b.x = R; if (b.vx < 0) b.vx = -b.vx * E_WALL; }
+      if (b.x > W - R) { b.x = W - R; if (b.vx > 0) b.vx = -b.vx * E_WALL; touch = true; }
+      // the lane's guide, only near it
+      if (b.x < GX + 3 || b.y < CY + 2) {
+        for (i = 0; i < GUIDE.length; i++) {
+          q = segDist(GUIDE[i], b.x, b.y);
+          var mg = R + GW;
+          if (q.d >= mg) continue;
+          d = q.d || 1e-9;
+          bounce(b, q.ex / d, q.ey / d, mg - d, b.x < GX ? 0 : E_WALL, 0, 0, b.x < GX ? RAIL_DRAG : FRICT);
+          touch = true;
+        }
+      }
+      var cx = floor(b.x / 6), cy = floor(b.y / 6);
+      for (var gx = cx - 1; gx <= cx + 1; gx++) {
+        for (var gy = cy - 1; gy <= cy + 1; gy++) {
+          var cell = B.cells[cellKey(gx, gy)];
+          if (!cell) continue;
+          for (i = 0; i < cell.length; i++) {
+            var p = B.pins[cell[i]], ex = b.x - p.x, ey = b.y - p.y, m = R + p.r;
+            if (ex * ex + ey * ey >= m * m) continue;
+            d = sqrt(ex * ex + ey * ey) || 1e-9;
+            if (bounce(b, ex / d, ey / d, m - d, E_PIN, 0, 0, FRICT) > 14 && ev) ev.push(['pin', cell[i]]);
+            touch = true;
+          }
+        }
+      }
+      q = segDist(STOP, b.x, b.y);
+      if (q.d < R + STOP.r) { d = q.d || 1e-9; bounce(b, q.ex / d, q.ey / d, R + STOP.r - d, E_STOP, 0, 0, FRICT); touch = true; }
+      var segs = B.near, wings = open ? B.wings.open : B.wings.shut;
+      for (i = 0; i < segs.length + 2; i++) {
+        var sg = i < segs.length ? segs[i] : wings[i - segs.length];
+        q = segDist(sg, b.x, b.y);
+        var ms = R + sg.r;
+        if (q.d >= ms) continue;
+        d = q.d || 1e-9;
+        bounce(b, q.ex / d, q.ey / d, ms - d, sg.k === 'rail' ? E_RAIL : E_WALL, 0, 0, FRICT);
+        touch = true;
+      }
+      // in a pocket: below its rim and between its walls
+      for (i = 0; i < B.pockets.length; i++) {
+        var pk = B.pockets[i];
+        if (b.y > pk.y + 0.3 && b.y < pk.y + 3.2 && abs(b.x - pk.x) < pk.w) { b.res = i; b.done = true; return; }
+      }
+      if (b.y > H - R && b.x > GX) { b.res = -1; b.done = true; return; }
+      if (b.x < GX && b.y > START_Y - 6 && b.vy > 0) { b.res = -2; b.done = true; return; }
+    }
+    b.n++;
+    // a ball balanced on something is nudged toward the middle, always the same way
+    if (touch && b.x > GX && abs(b.vx) + abs(b.vy) < 3) b.still++; else b.still = 0;
+    if (b.still > 24) { b.vx += b.x < CX ? 6 : -6; b.still = 0; }
+    if (b.n >= CAP) { b.res = -1; b.done = true; }
+  }
+
+  // a fixed pocket pays only while it has room; fill counts the balls already in each
+  function value(B, res, fill) {
+    if (res < 0) return 0;
+    var p = B.pockets[res];
+    return p.cap && fill && (fill[res] | 0) >= p.cap ? 0 : p.v;
+  }
+
+  // one ball alone from its launch to its end, with the tulip held open or shut
+  function run(B, s, clock, open) {
+    var b = ball(s, clock), c = clock | 0;
+    while (!b.done) { step(B, b, c, open, null); c++; }
+    return b;
+  }
+
+  /* ------------------------------------------------------------ rounds */
+
+  function round(B) { return { B: B, clock: 0, tray: BALLS, fly: [], shots: [], score: 0, fouls: 0, tulipUntil: 0, hits: [], fill: B.pockets.map(function () { return 0; }), last: -1 }; }
+  function canFire(Rd) { return Rd.tray > 0 && Rd.shots.length < BALLS + FOUL_MAX && (Rd.last < 0 || Rd.clock - Rd.last >= GAP); }
+  function fire(Rd, s) {
+    if (!canFire(Rd) || s !== (s | 0) || s < 0 || s > 100) return null;
+    var b = ball(s, Rd.clock);
+    Rd.shots.push([s, Rd.clock]); Rd.tray--; Rd.last = Rd.clock;
+    Rd.fly.push(b);
+    return b;
+  }
+  function tulipOpen(Rd) { return Rd.clock < Rd.tulipUntil; }
+  /* One step of the board: every ball in flight in launch order, then the clock. Returns
+     the events, with ['end', ball, result, points] for each ball that finished. */
+  function tick(Rd) {
+    var ev = [], open = tulipOpen(Rd), keep = [];
+    for (var i = 0; i < Rd.fly.length; i++) {
+      var b = Rd.fly[i];
+      step(Rd.B, b, Rd.clock, open, ev);
+      if (!b.done) { keep.push(b); continue; }
+      var v = value(Rd.B, b.res, Rd.fill);
+      if (b.res === -2) {
+        // a ball that falls back down the lane comes back to the tray, up to a limit
+        Rd.fouls++;
+        if (Rd.fouls <= FOUL_MAX) Rd.tray++;
+      } else {
+        Rd.score += v;
+        Rd.hits.push(b.res);
+        if (b.res >= 0) Rd.fill[b.res]++;
+        if (b.res >= 0 && Rd.B.pockets[b.res].kind === 'start') Rd.tulipUntil = max(Rd.tulipUntil, Rd.clock + TUL);
+      }
+      ev.push(['end', b, b.res, v]);
+    }
+    Rd.fly = keep;
+    Rd.clock++;
+    return ev;
+  }
+  function over(Rd) { return Rd.tray === 0 && Rd.fly.length === 0; }
+
+  // a round is saved as its shots (strength and moment) and its clock, and restored by
+  // playing them again, so a save can never claim a score the board did not give
+  function snapshot(Rd) { return { seed: Rd.B.seed, level: Rd.B.level, shots: Rd.shots.map(function (x) { return [x[0], x[1]]; }), clock: Rd.clock }; }
+  function replay(B, shots, clock) {
+    var Rd = round(B), k = 0;
+    while (Rd.clock < clock) {
+      while (k < shots.length && shots[k][1] === Rd.clock) { if (!fire(Rd, shots[k][0])) return null; k++; }
+      if (k < shots.length && shots[k][1] < Rd.clock) return null;
+      tick(Rd);
+    }
+    // a save taken right after a launch holds a shot at the saved moment itself
+    while (k < shots.length && shots[k][1] === Rd.clock) { if (!fire(Rd, shots[k][0])) return null; k++; }
+    return k === shots.length ? Rd : null;
+  }
+  function restore(o) {
+    if (!o || typeof o !== 'object' || !Array.isArray(o.shots)) return null;
+    if (o.seed !== (o.seed >>> 0) || o.level !== (o.level | 0) || o.level < 0 || o.level > LEVELS) return null;
+    if (o.clock !== (o.clock | 0) || o.clock < 0 || o.clock > 3600 * 120 || o.shots.length > BALLS + FOUL_MAX) return null;
+    for (var i = 0; i < o.shots.length; i++) {
+      var x = o.shots[i];
+      if (!Array.isArray(x) || x.length !== 2 || x[0] !== (x[0] | 0) || x[0] < 0 || x[0] > 100 || x[1] !== (x[1] | 0) || x[1] < 0 || x[1] > o.clock) return null;
+      if (i && x[1] - o.shots[i - 1][1] < GAP) return null;
+    }
+    return replay(make(o.seed, o.level), o.shots, o.clock);
+  }
+
+  /* ------------------------------------------------------ stars, bots */
+
+  /* Where every strength goes with the tulip shut and open: [open][s] = [result, steps]. Balls never meet, so this is the whole
+     board for one ball. mapMore does it a slice at a time, so the page can map a daily
+     board between frames instead of freezing a slow phone. */
+  function mapMore(B, count) {
+    if (B.map) return true;
+    var q = B._mq || (B._mq = []);
+    while (q.length < 202 && count-- > 0) {
+      var b = run(B, q.length % 101, 0, q.length >= 101);
+      q.push([b.res, b.n]);
+    }
+    if (q.length < 202) return false;
+    B.map = [q.slice(0, 101), q.slice(101)]; delete B._mq;
+    return true;
+  }
+  function map(B) { mapMore(B, Infinity); return B.map; }
+
+  // what a strength is worth to a player who knows the board: the pocket's points, and a
+  // start pocket counts extra while the tulip is shut, since it opens it
+  function worth(B, res, open, fill) {
+    if (res < 0) return res === -2 ? -1 : 0;
+    var p = B.pockets[res];
+    return value(B, res, fill) + (p.kind === 'start' && !open ? START_BONUS : 0);
+  }
+  /* A player who knows the board but whose strength lands up to AIM off: the best strength
+     by its average over that spread, launched at once. */
+  function choose(B, clock, until, r, fill) {
+    var M = map(B), best = -1e9, pick = null, val = [];
+    for (var s = 0; s <= 100; s++) {
+      // the tulip counts as open if it is still open when this ball gets there
+      var o = M[1][s], op = clock + o[1] < until;
+      val[s] = worth(B, op ? o[0] : M[0][s][0], op, fill);
+    }
+    for (s = AIM; s <= 100 - AIM; s++) {
+      var sum = 0;
+      for (var d = -AIM; d <= AIM; d++) sum += val[s + d];
+      if (sum > best + 1e-9) { best = sum; pick = { s: s, at: clock }; }
+    }
+    pick.s = clamp(pick.s + floor(r() * (2 * AIM + 1)) - AIM, 0, 100);
+    return pick;
+  }
+  // a whole round by a skilled player (seeded aim errors) or a random one
+  function botRound(B, seed, skilled) {
+    var Rd = round(B), r = rng(seed), plan = null;
+    while (!over(Rd) && Rd.clock < 3600 * 120) {
+      if (canFire(Rd)) {
+        if (!plan) {
+          if (skilled) plan = choose(B, Rd.clock, Rd.tulipUntil, r, Rd.fill);
+          else plan = { s: floor(r() * 101), at: Rd.clock + floor(r() * 120) };
+        }
+        if (Rd.clock >= plan.at) { fire(Rd, plan.s); plan = null; }
+      }
+      // a skilled player looks again once a ball lands, since the tulip may have opened
+      var ev = tick(Rd);
+      if (plan && skilled) for (var i = 0; i < ev.length; i++) if (ev[i][0] === 'end') { plan = null; break; }
+    }
+    return Rd;
+  }
+  var BOT_ROUNDS = 6;
+  function aimScore(B) {
+    var tot = 0;
+    for (var i = 0; i < BOT_ROUNDS; i++) tot += botRound(B, (B.seed ^ (0x9E3779B9 * (i + 1))) >>> 0, true).score;
+    return tot / BOT_ROUNDS;
+  }
+  function thresholds(B) {
+    if (B.th) return B.th;
+    var aim = aimScore(B);
+    B.aim = aim;
+    B.th = STAR_K.map(function (f) { return max(10, Math.round(aim * f / 10) * 10); });
+    return B.th;
+  }
+  function stars(B, score) { var t = thresholds(B); return score >= t[2] ? 3 : score >= t[1] ? 2 : score >= t[0] ? 1 : 0; }
+
+  // measured once with thresholds(level(n, true)) and kept, so opening a board costs
+  // nothing; the test recomputes two of them. After a physics change, rebuild every row
+  var TH = [[300, 550, 760], [300, 550, 760], [300, 550, 760], [300, 550, 760], [300, 550, 760], [300, 550, 760], [300, 550, 760], [300, 550, 760], [300, 550, 760], [300, 550, 760]];
+  function level(n, fresh) { var B = make((94900 + n * 7919) >>> 0, n); if (!fresh && TH) B.th = TH[n - 1]; return B; }
+  // the daily board is level 0: a mid-campaign mix from the day's seed
+  function daily(seed) { return make(seed >>> 0, 0); }
+
+  var api = {
+    HI_Y: HI_Y, LO_Y: LO_Y, OW: OW, FULL: FULL, W: W, H: H, R: R, PR: PR, DT: DT, G: G, GX: GX, GW: GW, CX: CX, CY: CY, DOME: DOME, ARC_R: ARC_R, ARC_END: ARC_END, START_X: START_X, START_Y: START_Y,
+    VMIN: VMIN, VMAX: VMAX, BALLS: BALLS, FOUL_MAX: FOUL_MAX, GAP: GAP, TUL: TUL, CAP: CAP, LEVELS: LEVELS, STAR_K: STAR_K, AIM: AIM,
+    TH: TH, GUIDE: GUIDE, STOP: STOP, rng: rng, params: params, make: make, level: level, daily: daily, value: value, strengthSpeed: strengthSpeed,
+    ball: ball, step: step, run: run, round: round, canFire: canFire, fire: fire, tick: tick, tulipOpen: tulipOpen, over: over,
+    snapshot: snapshot, restore: restore, replay: replay, map: map, mapMore: mapMore, choose: choose, botRound: botRound, aimScore: aimScore, thresholds: thresholds, stars: stars
+  };
+  if (typeof self !== 'undefined') self.PachinkoEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = PachinkoEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = PachinkoEngineFactory();
+  // a deep violet, apart from every other game's colour; white text on it passes 4.5:1 (#949)
+  var ACCENT = '#4E00D2';
+  // the dial under the board, in board units
+  var DIAL = 16, TH0 = E.H + DIAL, TRACK0 = 14, TRACK1 = 92;
+  var CLOCK_MAX = 3500 * 120;
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'pachinko',
+    name: { fa: 'بارون توپ', en: 'Ball Rain', zh: '钢珠雨', de: 'Kugelflut', es: 'Cascada de bolas', pl: 'Ulewa kulek', fr: 'Averse de billes', ar: 'وابل الكرات', hi: 'गेंदों की झड़ी' },
+    accent: ACCENT,
+    mood: 'dots',
+    strings: {
+      fa: {
+        pcScene: 'تخته‌ی عمودی با ردیف‌های قیف، جیب‌ها و یک لاله', pcBoardN: 'تخته‌ی {n}', pcDaily: 'تخته‌ی روزانه', pcBallsN: 'توپ: {n}', pcScoreN: 'امتیاز: {n}', pcPowerN: 'قدرت {n}',
+        pcHint: 'روی تخته نگه دار تا توپ پرتاب شود. با نوار پایین یا کشیدن انگشت به چپ و راست قدرت را عوض کن.',
+        pcTulipHint: 'توپ را در جیب سبز بینداز تا لاله‌ی وسط چند ثانیه باز شود.', pcOpen: 'لاله باز است!', pcFoul: 'خیلی آرام بود؛ توپ برگشت.', pcLast: 'توپ آخر!',
+        pcCleared: 'تخته را بردی!', pcNoStar: 'این بار ستاره‌ای نشد', pcNext: 'تخته‌ی بعدی', pcRetry: 'دوباره همین تخته',
+        pcBalls: 'توپ‌ها', pcScore: 'امتیاز', pcBest: 'بهترین', pcStarsAt: 'ستاره‌ها از', pcNewBest: 'رکورد تازه: {n}', pcUnlocked: 'تخته‌ی {n} باز شد',
+        pcChoose: 'انتخاب تخته', pcLocked: 'قفل', pcShowNum: 'نشان دادن عدد قدرت', pcShowMark: 'علامت قدرت توپ قبلی روی نوار',
+        pcRules: 'بیست‌وپنج توپ داری. تا وقتی انگشتت روی تخته است، هر چند لحظه یک توپ از راهروی چپ بالا می‌رود و از روی قوس بالای تخته رد می‌شود. قدرت پرتاب تعیین می‌کند کجا فرود بیاید: توپ آرام‌تر نزدیک وسط پایین می‌آید، محکم‌تر سمت راست‌تر، و محکم‌ترین‌ها به ضربه‌گیر بالا می‌خورند و به پایین چپ برمی‌گردند. هر قیف یک بازه‌ی قدرت را به یک جا می‌برد. قدرت را با نوار زیر تخته تنظیم کن یا انگشتت را چپ و راست بکش. هر جیب امتیاز خودش را دارد، ولی جیب شماره‌دار فقط برای چند توپ اولش امتیاز می‌دهد (نقطه‌های زیرش). جیب سبز امتیاز کمی دارد، ولی لاله را چند ثانیه باز می‌کند و فقط لاله‌ی باز توپ می‌گیرد؛ بیشترین امتیاز مال اوست. هیچ چیز شانسی نیست: یک قدرت همیشه همان راه را می‌رود. توپی که از راهرو پایین بیفتد به سینی برمی‌گردد. برای یک، دو یا سه ستاره امتیاز بگیر؛ یک ستاره تخته‌ی بعد را باز می‌کند.',
+        pcKPower: 'کم و زیاد کردن قدرت', pcKFar: 'پله‌ی بزرگ‌تر', pcKFire: 'نگه دار تا پرتاب شود', pcKAgain: 'شروع دوباره‌ی تخته',
+        pcTut1: 'نگه دار و پرتاب کن', pcTutText1: 'تا وقتی انگشتت روی تخته است، توپ‌ها یکی‌یکی از راهروی چپ بالا می‌روند و از روی قوس وارد تخته می‌شوند.',
+        pcTut2: 'قدرت، جای ورود', pcTutText2: 'با نوار پایین قدرت را تنظیم کن: آرام‌تر نزدیک وسط فرود می‌آید، محکم‌تر سمت راست‌تر، و محکم‌ترین به پایین چپ برمی‌گردد. یک قدرت همیشه همان راه را می‌رود.',
+        pcTut3: 'لاله را باز کن', pcTutText3: 'توپ در جیب سبز، لاله را چند ثانیه باز می‌کند. فقط لاله‌ی باز توپ می‌گیرد و بیشترین امتیاز را دارد.'
+      },
+      en: {
+        pcScene: 'Upright board with rows of catchers, pockets and a tulip', pcBoardN: 'Board {n}', pcDaily: 'Daily board', pcBallsN: 'Balls: {n}', pcScoreN: 'Score: {n}', pcPowerN: 'Power {n}',
+        pcHint: 'Hold on the board to launch. Set the power with the bar below, or slide left and right.',
+        pcTulipHint: 'Land a ball in the green pocket to open the tulip for a few seconds.', pcOpen: 'The tulip is open!', pcFoul: 'Too soft: the ball came back.', pcLast: 'Last ball!',
+        pcCleared: 'Board cleared!', pcNoStar: 'No star this time', pcNext: 'Next board', pcRetry: 'Try this board again',
+        pcBalls: 'Balls', pcScore: 'Score', pcBest: 'Best', pcStarsAt: 'Stars at', pcNewBest: 'New best: {n}', pcUnlocked: 'Board {n} is open',
+        pcChoose: 'Choose a board', pcLocked: 'locked', pcShowNum: 'Show the power number', pcShowMark: 'Mark the last ball’s power on the bar',
+        pcRules: 'You have 25 balls. While your finger is on the board, a ball shoots up the lane on the left every few moments and over the arc at the top. The launch power decides where it lands: a softer ball comes down nearer the middle, a harder one further right, and the hardest strike the stop at the top and are thrown back to the lower left. Each catcher leads one band of power to one place. Set the power with the bar under the board, or slide your finger left and right. Every pocket has its own points, but a numbered pocket pays only for its first few balls (the dots under it). The green pocket scores little, but it opens the tulip for a few seconds, and only an open tulip catches balls; it pays the most. Nothing is left to chance: the same power always takes the same path. A ball that falls back down the lane returns to the tray. Score enough for one, two or three stars; one star opens the next board.',
+        pcKPower: 'Less or more power', pcKFar: 'Bigger steps', pcKFire: 'Hold to launch', pcKAgain: 'Start the board over',
+        pcTut1: 'Hold to launch', pcTutText1: 'While your finger is on the board, balls shoot up the lane on the left one by one and come in over the arc.',
+        pcTut2: 'Power picks the way in', pcTutText2: 'Set the power with the bar below: softer lands nearer the middle, harder further right, and the hardest bounces back to the lower left. The same power always takes the same path.',
+        pcTut3: 'Open the tulip', pcTutText3: 'A ball in the green pocket opens the tulip for a few seconds. Only an open tulip catches balls, and it scores the most.'
+      },
+      zh: {
+        pcScene: '立式钉板，有几排漏斗、球袋和一朵郁金香', pcBoardN: '第 {n} 板', pcDaily: '每日钉板', pcBallsN: '球：{n}', pcScoreN: '得分：{n}', pcPowerN: '力度 {n}',
+        pcHint: '按住钉板发射。用下方的条或左右滑动调整力度。',
+        pcTulipHint: '把球打进绿色球袋，中间的郁金香会张开几秒。', pcOpen: '郁金香张开了！', pcFoul: '太轻了：球退回来了。', pcLast: '最后一球！',
+        pcCleared: '过关！', pcNoStar: '这次没有星星', pcNext: '下一板', pcRetry: '再玩这一板',
+        pcBalls: '球数', pcScore: '得分', pcBest: '最佳', pcStarsAt: '星星目标', pcNewBest: '新纪录：{n}', pcUnlocked: '第 {n} 板已解锁',
+        pcChoose: '选择钉板', pcLocked: '未解锁', pcShowNum: '显示力度数字', pcShowMark: '在力度条上标出上一球的力度',
+        pcRules: '你有 25 个球。手指按在钉板上时，每隔一会儿就有一个球沿左侧通道射上去，越过顶部的弧线。发射力度决定球落在哪里：轻一点落在靠中间的地方，重一点落得更靠右，最重的球撞上顶部的挡块，被弹回左下方。每个漏斗把一段力度引到同一个地方。用钉板下方的条调整力度，或者左右滑动手指。每个球袋都有自己的分数，但带数字的球袋只为前几个球计分（看下面的圆点）。绿色球袋分数不高，但会让郁金香张开几秒，只有张开的郁金香才能接住球，它的分数最高。这里没有运气：同一力度的球总是走同一条路。从通道退回的球会回到球盘。得分够了就能拿一、二或三颗星，一颗星即可解锁下一板。',
+        pcKPower: '减小或增大力度', pcKFar: '更大步长', pcKFire: '按住发射', pcKAgain: '重新开始本板',
+        pcTut1: '按住发射', pcTutText1: '手指按在钉板上时，球一个接一个沿左侧通道射上去，越过弧线进场。',
+        pcTut2: '力度决定入口', pcTutText2: '用下方的条调整力度：轻的落在靠中间，重的更靠右，最重的弹回左下方。同一力度总是走同一条路。',
+        pcTut3: '打开郁金香', pcTutText3: '球进入绿色球袋，郁金香会张开几秒。只有张开的郁金香能接住球，分数最高。'
+      },
+      de: {
+        pcScene: 'Senkrechtes Brett mit Reihen von Trichtern, Taschen und einer Tulpe', pcBoardN: 'Brett {n}', pcDaily: 'Tagesbrett', pcBallsN: 'Kugeln: {n}', pcScoreN: 'Punkte: {n}', pcPowerN: 'Stärke {n}',
+        pcHint: 'Halte das Brett gedrückt, um zu schießen. Stärke mit dem Balken unten oder durch Wischen nach links und rechts.',
+        pcTulipHint: 'Triff die grüne Tasche, dann öffnet sich die Tulpe für ein paar Sekunden.', pcOpen: 'Die Tulpe ist offen!', pcFoul: 'Zu schwach: Die Kugel kam zurück.', pcLast: 'Letzte Kugel!',
+        pcCleared: 'Brett geschafft!', pcNoStar: 'Diesmal kein Stern', pcNext: 'Nächstes Brett', pcRetry: 'Dieses Brett nochmal',
+        pcBalls: 'Kugeln', pcScore: 'Punkte', pcBest: 'Rekord', pcStarsAt: 'Sterne ab', pcNewBest: 'Neuer Rekord: {n}', pcUnlocked: 'Brett {n} freigeschaltet',
+        pcChoose: 'Brett wählen', pcLocked: 'gesperrt', pcShowNum: 'Stärke als Zahl zeigen', pcShowMark: 'Stärke der letzten Kugel am Balken markieren',
+        pcRules: 'Du hast 25 Kugeln. Solange dein Finger auf dem Brett liegt, schießt alle paar Augenblicke eine Kugel die Bahn links hinauf und über den Bogen oben. Die Stärke bestimmt, wo sie landet: eine sanftere Kugel kommt näher der Mitte herunter, eine stärkere weiter rechts, und die stärksten treffen oben den Anschlag und werden nach links unten zurückgeworfen. Jeder Trichter führt einen Stärkebereich an eine Stelle. Stell die Stärke mit dem Balken unter dem Brett ein oder wische nach links und rechts. Jede Tasche hat eigene Punkte, aber eine Tasche mit Zahl zahlt nur für ihre ersten Kugeln (die Punkte darunter). Die grüne bringt wenig, öffnet aber die Tulpe für ein paar Sekunden, und nur eine offene Tulpe fängt Kugeln; sie bringt am meisten. Nichts ist Zufall: dieselbe Stärke nimmt immer denselben Weg. Eine Kugel, die die Bahn zurückrollt, kommt in die Schale zurück. Genug Punkte bringen einen, zwei oder drei Sterne; ein Stern öffnet das nächste Brett.',
+        pcKPower: 'Weniger oder mehr Stärke', pcKFar: 'Größere Schritte', pcKFire: 'Halten zum Schießen', pcKAgain: 'Brett neu beginnen',
+        pcTut1: 'Halten zum Schießen', pcTutText1: 'Solange dein Finger auf dem Brett liegt, schießen Kugeln nacheinander die Bahn links hinauf und kommen über den Bogen herein.',
+        pcTut2: 'Stärke wählt den Weg', pcTutText2: 'Stell die Stärke mit dem Balken unten ein: sanfter landet näher der Mitte, stärker weiter rechts, und am stärksten springt nach links unten zurück. Dieselbe Stärke nimmt immer denselben Weg.',
+        pcTut3: 'Öffne die Tulpe', pcTutText3: 'Eine Kugel in der grünen Tasche öffnet die Tulpe für ein paar Sekunden. Nur eine offene Tulpe fängt Kugeln, und sie bringt am meisten.'
+      },
+      es: {
+        pcScene: 'Tablero vertical con filas de embudos, bolsillos y un tulipán', pcBoardN: 'Tablero {n}', pcDaily: 'Tablero del día', pcBallsN: 'Bolas: {n}', pcScoreN: 'Puntos: {n}', pcPowerN: 'Fuerza {n}',
+        pcHint: 'Mantén pulsado el tablero para lanzar. Ajusta la fuerza con la barra de abajo o deslizando a izquierda y derecha.',
+        pcTulipHint: 'Mete una bola en el bolsillo verde y el tulipán se abre unos segundos.', pcOpen: '¡El tulipán está abierto!', pcFoul: 'Muy suave: la bola volvió.', pcLast: '¡Última bola!',
+        pcCleared: '¡Tablero superado!', pcNoStar: 'Esta vez sin estrella', pcNext: 'Siguiente tablero', pcRetry: 'Repetir este tablero',
+        pcBalls: 'Bolas', pcScore: 'Puntos', pcBest: 'Récord', pcStarsAt: 'Estrellas desde', pcNewBest: 'Nuevo récord: {n}', pcUnlocked: 'Tablero {n} abierto',
+        pcChoose: 'Elegir tablero', pcLocked: 'bloqueado', pcShowNum: 'Mostrar el número de fuerza', pcShowMark: 'Marcar en la barra la fuerza de la última bola',
+        pcRules: 'Tienes 25 bolas. Mientras tu dedo está en el tablero, cada pocos instantes una bola sube por el carril de la izquierda y pasa sobre el arco de arriba. La fuerza decide dónde cae: una bola más suave baja más cerca del centro, una más fuerte más a la derecha, y las más fuertes chocan con el tope de arriba y vuelven abajo a la izquierda. Cada embudo lleva una franja de fuerza a un solo sitio. Ajusta la fuerza con la barra bajo el tablero o desliza el dedo a izquierda y derecha. Cada bolsillo da sus puntos, pero un bolsillo con número solo paga sus primeras bolas (los puntos de debajo). El verde da pocos, pero abre el tulipán unos segundos, y solo un tulipán abierto atrapa bolas; es el que más da. Nada es azar: la misma fuerza sigue siempre el mismo camino. Una bola que cae de vuelta por el carril vuelve a la bandeja. Con puntos suficientes logras una, dos o tres estrellas; con una se abre el siguiente tablero.',
+        pcKPower: 'Menos o más fuerza', pcKFar: 'Pasos más grandes', pcKFire: 'Mantén para lanzar', pcKAgain: 'Empezar el tablero de nuevo',
+        pcTut1: 'Mantén para lanzar', pcTutText1: 'Mientras tu dedo está en el tablero, las bolas suben una a una por el carril de la izquierda y entran por el arco.',
+        pcTut2: 'La fuerza elige la entrada', pcTutText2: 'Ajusta la fuerza con la barra de abajo: más suave cae cerca del centro, más fuerte más a la derecha, y la más fuerte rebota abajo a la izquierda. La misma fuerza sigue siempre el mismo camino.',
+        pcTut3: 'Abre el tulipán', pcTutText3: 'Una bola en el bolsillo verde abre el tulipán unos segundos. Solo un tulipán abierto atrapa bolas, y es el que más puntos da.'
+      },
+      pl: {
+        pcScene: 'Pionowa plansza z rzędami lejków, kieszeniami i tulipanem', pcBoardN: 'Plansza {n}', pcDaily: 'Plansza dnia', pcBallsN: 'Kulki: {n}', pcScoreN: 'Punkty: {n}', pcPowerN: 'Siła {n}',
+        pcHint: 'Przytrzymaj planszę, by strzelać. Siłę ustaw paskiem na dole albo przesuwając palec w lewo i w prawo.',
+        pcTulipHint: 'Traf kulką do zielonej kieszeni, a tulipan otworzy się na kilka sekund.', pcOpen: 'Tulipan jest otwarty!', pcFoul: 'Za słabo: kulka wróciła.', pcLast: 'Ostatnia kulka!',
+        pcCleared: 'Plansza zaliczona!', pcNoStar: 'Tym razem bez gwiazdki', pcNext: 'Następna plansza', pcRetry: 'Jeszcze raz tę planszę',
+        pcBalls: 'Kulki', pcScore: 'Punkty', pcBest: 'Rekord', pcStarsAt: 'Gwiazdki od', pcNewBest: 'Nowy rekord: {n}', pcUnlocked: 'Plansza {n} otwarta',
+        pcChoose: 'Wybierz planszę', pcLocked: 'zablokowana', pcShowNum: 'Pokazuj siłę jako liczbę', pcShowMark: 'Zaznaczaj na pasku siłę ostatniej kulki',
+        pcRules: 'Masz 25 kulek. Dopóki palec jest na planszy, co kilka chwil kulka wylatuje torem po lewej i przelatuje nad łukiem u góry. Siła strzału decyduje, gdzie spadnie: słabsza kulka spada bliżej środka, mocniejsza dalej w prawo, a najmocniejsze uderzają w odbojnik u góry i wracają w lewy dół. Każdy lejek prowadzi jeden zakres siły w jedno miejsce. Siłę ustawisz paskiem pod planszą albo przesuwając palec w lewo i w prawo. Każda kieszeń ma swoje punkty, ale kieszeń z liczbą płaci tylko za kilka pierwszych kulek (kropki pod nią). Zielona daje mało, ale otwiera tulipan na kilka sekund, a tylko otwarty tulipan łapie kulki; daje najwięcej. Nic tu nie jest losowe: ta sama siła zawsze leci tą samą drogą. Kulka, która spadnie z powrotem torem, wraca na tackę. Za dość punktów dostajesz jedną, dwie lub trzy gwiazdki; jedna otwiera następną planszę.',
+        pcKPower: 'Mniej lub więcej siły', pcKFar: 'Większe kroki', pcKFire: 'Przytrzymaj, by strzelać', pcKAgain: 'Zacznij planszę od nowa',
+        pcTut1: 'Przytrzymaj, by strzelać', pcTutText1: 'Dopóki palec jest na planszy, kulki po kolei wylatują torem po lewej i wpadają nad łukiem.',
+        pcTut2: 'Siła wybiera wejście', pcTutText2: 'Ustaw siłę paskiem na dole: słabsza spada bliżej środka, mocniejsza dalej w prawo, a najmocniejsza odbija się w lewy dół. Ta sama siła zawsze leci tą samą drogą.',
+        pcTut3: 'Otwórz tulipan', pcTutText3: 'Kulka w zielonej kieszeni otwiera tulipan na kilka sekund. Tylko otwarty tulipan łapie kulki i daje najwięcej.'
+      },
+      fr: {
+        pcScene: 'Plateau vertical avec des rangées d’entonnoirs, des poches et une tulipe', pcBoardN: 'Plateau {n}', pcDaily: 'Plateau du jour', pcBallsN: 'Billes : {n}', pcScoreN: 'Points : {n}', pcPowerN: 'Force {n}',
+        pcHint: 'Garde le doigt sur le plateau pour lancer. Règle la force avec la barre du bas ou en glissant à gauche et à droite.',
+        pcTulipHint: 'Mets une bille dans la poche verte : la tulipe s’ouvre quelques secondes.', pcOpen: 'La tulipe est ouverte !', pcFoul: 'Trop doux : la bille est revenue.', pcLast: 'Dernière bille !',
+        pcCleared: 'Plateau réussi !', pcNoStar: 'Pas d’étoile cette fois', pcNext: 'Plateau suivant', pcRetry: 'Rejouer ce plateau',
+        pcBalls: 'Billes', pcScore: 'Points', pcBest: 'Record', pcStarsAt: 'Étoiles à', pcNewBest: 'Nouveau record : {n}', pcUnlocked: 'Plateau {n} ouvert',
+        pcChoose: 'Choisir un plateau', pcLocked: 'verrouillé', pcShowNum: 'Afficher la force en chiffre', pcShowMark: 'Marquer sur la barre la force de la dernière bille',
+        pcRules: 'Tu as 25 billes. Tant que ton doigt est sur le plateau, une bille monte toutes les quelques secondes par le couloir de gauche et passe l’arc du haut. La force décide où elle tombe : une bille plus douce descend près du milieu, une plus forte plus à droite, et les plus fortes frappent la butée du haut et repartent en bas à gauche. Chaque entonnoir mène une plage de force à un seul endroit. Règle la force avec la barre sous le plateau ou glisse le doigt à gauche et à droite. Chaque poche a ses points, mais une poche numérotée ne paie que ses premières billes (les points dessous). La verte rapporte peu, mais elle ouvre la tulipe quelques secondes, et seule une tulipe ouverte attrape les billes ; c’est elle qui rapporte le plus. Rien n’est laissé au hasard : la même force prend toujours le même chemin. Une bille qui redescend le couloir revient dans le bac. Assez de points donnent une, deux ou trois étoiles ; une étoile ouvre le plateau suivant.',
+        pcKPower: 'Moins ou plus de force', pcKFar: 'Pas plus grands', pcKFire: 'Maintenir pour lancer', pcKAgain: 'Recommencer le plateau',
+        pcTut1: 'Maintiens pour lancer', pcTutText1: 'Tant que ton doigt est sur le plateau, les billes montent une à une par le couloir de gauche et entrent par l’arc.',
+        pcTut2: 'La force choisit l’entrée', pcTutText2: 'Règle la force avec la barre du bas : plus doux tombe près du milieu, plus fort plus à droite, et le plus fort rebondit en bas à gauche. La même force prend toujours le même chemin.',
+        pcTut3: 'Ouvre la tulipe', pcTutText3: 'Une bille dans la poche verte ouvre la tulipe quelques secondes. Seule une tulipe ouverte attrape les billes, et elle rapporte le plus.'
+      },
+      ar: {
+        pcScene: 'لوح قائم فيه صفوف من الأقماع وجيوب وزهرة توليب', pcBoardN: 'اللوح {n}', pcDaily: 'لوح اليوم', pcBallsN: 'الكرات: {n}', pcScoreN: 'النقاط: {n}', pcPowerN: 'القوة {n}',
+        pcHint: 'اضغط مطوّلًا على اللوح لتطلق الكرات. غيّر القوة بالشريط في الأسفل أو بسحب إصبعك يمينًا ويسارًا.',
+        pcTulipHint: 'أدخل كرة في الجيب الأخضر لتتفتح زهرة التوليب بضع ثوانٍ.', pcOpen: 'زهرة التوليب مفتوحة!', pcFoul: 'ضعيفة جدًا: عادت الكرة.', pcLast: 'الكرة الأخيرة!',
+        pcCleared: 'أنهيت اللوح!', pcNoStar: 'لا نجمة هذه المرة', pcNext: 'اللوح التالي', pcRetry: 'أعد هذا اللوح',
+        pcBalls: 'الكرات', pcScore: 'النقاط', pcBest: 'الأفضل', pcStarsAt: 'النجوم عند', pcNewBest: 'رقم جديد: {n}', pcUnlocked: 'فُتح اللوح {n}',
+        pcChoose: 'اختر لوحًا', pcLocked: 'مقفل', pcShowNum: 'أظهر رقم القوة', pcShowMark: 'علّم قوة الكرة السابقة على الشريط',
+        pcRules: 'معك 25 كرة. ما دام إصبعك على اللوح، تنطلق كرة كل بضع لحظات في الممر الأيسر وتعبر القوس في الأعلى. قوة الإطلاق تحدد أين تنزل: الأخف تنزل قرب الوسط، والأقوى أبعد إلى اليمين، والأقوى من الكل تصطدم بالمصدّ في الأعلى وترتد إلى أسفل اليسار. كل قمع يقود مدى واحدًا من القوة إلى مكان واحد. غيّر القوة بالشريط تحت اللوح أو اسحب إصبعك يمينًا ويسارًا. لكل جيب نقاطه، لكن الجيب المرقّم يعطي نقاطًا لأول بضع كرات فقط (النقاط تحته). الجيب الأخضر نقاطه قليلة، لكنه يفتح زهرة التوليب بضع ثوانٍ، ولا تلتقط الكرات إلا الزهرة المفتوحة، وهي تعطي أكثر النقاط. لا شيء بالحظ: القوة نفسها تسلك الطريق نفسه دائمًا. الكرة التي تعود نازلة في الممر ترجع إلى الصينية. النقاط الكافية تعطيك نجمة أو اثنتين أو ثلاثًا، ونجمة واحدة تفتح اللوح التالي.',
+        pcKPower: 'قوة أقل أو أكثر', pcKFar: 'خطوات أكبر', pcKFire: 'اضغط مطوّلًا للإطلاق', pcKAgain: 'ابدأ اللوح من جديد',
+        pcTut1: 'اضغط مطوّلًا للإطلاق', pcTutText1: 'ما دام إصبعك على اللوح، تنطلق الكرات واحدة تلو الأخرى في الممر الأيسر وتدخل من فوق القوس.',
+        pcTut2: 'القوة تختار المدخل', pcTutText2: 'اضبط القوة بالشريط في الأسفل: الأخف تنزل قرب الوسط، والأقوى أبعد إلى اليمين، والأقوى من الكل ترتد إلى أسفل اليسار. القوة نفسها تسلك الطريق نفسه دائمًا.',
+        pcTut3: 'افتح زهرة التوليب', pcTutText3: 'الكرة في الجيب الأخضر تفتح زهرة التوليب بضع ثوانٍ. لا تلتقط الكرات إلا الزهرة المفتوحة، وهي تعطي أكثر النقاط.'
+      },
+      hi: {
+        pcScene: 'खड़ा बोर्ड, जिसमें कीपों की कतारें, जेबें और एक ट्यूलिप है', pcBoardN: 'बोर्ड {n}', pcDaily: 'आज का बोर्ड', pcBallsN: 'गेंदें: {n}', pcScoreN: 'अंक: {n}', pcPowerN: 'ताक़त {n}',
+        pcHint: 'गेंद छोड़ने के लिए बोर्ड को दबाए रखें। ताक़त नीचे की पट्टी से या उँगली दाएँ-बाएँ सरकाकर बदलें।',
+        pcTulipHint: 'हरी जेब में गेंद डालें, तो बीच का ट्यूलिप कुछ सेकंड के लिए खुल जाता है।', pcOpen: 'ट्यूलिप खुला है!', pcFoul: 'बहुत धीमी: गेंद लौट आई।', pcLast: 'आख़िरी गेंद!',
+        pcCleared: 'बोर्ड पूरा!', pcNoStar: 'इस बार कोई तारा नहीं', pcNext: 'अगला बोर्ड', pcRetry: 'यही बोर्ड फिर से',
+        pcBalls: 'गेंदें', pcScore: 'अंक', pcBest: 'सर्वश्रेष्ठ', pcStarsAt: 'तारे', pcNewBest: 'नया रिकॉर्ड: {n}', pcUnlocked: 'बोर्ड {n} खुल गया',
+        pcChoose: 'बोर्ड चुनें', pcLocked: 'बंद', pcShowNum: 'ताक़त की संख्या दिखाएँ', pcShowMark: 'पिछली गेंद की ताक़त पट्टी पर दिखाएँ',
+        pcRules: 'आपके पास 25 गेंदें हैं। जब तक उँगली बोर्ड पर है, हर कुछ पल में एक गेंद बाईं गली से ऊपर जाती है और ऊपर के घेरे से होकर निकलती है। छोड़ने की ताक़त तय करती है कि गेंद कहाँ गिरे: धीमी गेंद बीच के पास, तेज़ गेंद और दाईं ओर, और सबसे तेज़ गेंदें ऊपर की रोक से टकराकर बाईं ओर नीचे लौट आती हैं। हर कीप ताक़त के एक दायरे को एक ही जगह ले जाती है। ताक़त बोर्ड के नीचे की पट्टी से या उँगली दाएँ-बाएँ सरकाकर बदलें। हर जेब के अपने अंक हैं, पर अंक वाली जेब सिर्फ़ अपनी पहली कुछ गेंदों के अंक देती है (नीचे के बिंदु)। हरी जेब कम अंक देती है, पर ट्यूलिप को कुछ सेकंड के लिए खोल देती है, और सिर्फ़ खुला ट्यूलिप गेंदें पकड़ता है; वही सबसे ज़्यादा अंक देता है। कुछ भी किस्मत पर नहीं: एक ही ताक़त हमेशा एक ही रास्ता लेती है। जो गेंद गली में वापस लुढ़क आए, वह ट्रे में लौट आती है। काफ़ी अंक पाकर एक, दो या तीन तारे पाएँ; एक तारे से अगला बोर्ड खुलता है।',
+        pcKPower: 'कम या ज़्यादा ताक़त', pcKFar: 'बड़े क़दम', pcKFire: 'छोड़ने के लिए दबाए रखें', pcKAgain: 'बोर्ड फिर से शुरू करें',
+        pcTut1: 'दबाए रखें और छोड़ें', pcTutText1: 'जब तक उँगली बोर्ड पर है, गेंदें एक-एक कर बाईं गली से ऊपर जाती हैं और घेरे के ऊपर से अंदर आती हैं।',
+        pcTut2: 'ताक़त से रास्ता', pcTutText2: 'नीचे की पट्टी से ताक़त चुनें: धीमी बीच के पास गिरती है, तेज़ और दाईं ओर, और सबसे तेज़ बाईं ओर नीचे लौटती है। एक ही ताक़त हमेशा एक ही रास्ता लेती है।',
+        pcTut3: 'ट्यूलिप खोलें', pcTutText3: 'हरी जेब में गेंद ट्यूलिप को कुछ सेकंड के लिए खोल देती है। सिर्फ़ खुला ट्यूलिप गेंदें पकड़ता है, और वही सबसे ज़्यादा अंक देता है।'
+      }
+    }
+  });
+
+  // the power stays where the player left it; the gear holds two display choices
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || typeof prefs !== 'object') prefs = {};
+  prefs.num = prefs.num !== false;
+  prefs.mark = prefs.mark !== false;
+  var pow = prefs.pow >= 0 && prefs.pow <= 100 ? prefs.pow | 0 : 40;
+  function savePrefs() { prefs.pow = pow; ctx.store.set('prefs', prefs); }
+
+  // campaign progress: the best score and stars per board, and how many boards are open
+  function loadProg() {
+    var p = ctx.store.get('prog', null), out = { best: [], unlocked: 1, cur: 1 };
+    for (var i = 0; i < E.LEVELS; i++) {
+      var b = p && Array.isArray(p.best) ? p.best[i] : null;
+      out.best.push(b && b.score >= 0 && b.stars >= 0 && b.stars <= 3 ? { score: b.score | 0, stars: b.stars | 0 } : null);
+    }
+    if (p && p.unlocked >= 1) out.unlocked = Math.min(E.LEVELS, p.unlocked | 0);
+    if (p && p.cur >= 1 && p.cur <= out.unlocked) out.cur = p.cur | 0;
+    return out;
+  }
+  var prog = loadProg();
+  function saveProg() { ctx.store.set('prog', prog); }
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  // the day's board, the same for everyone: one seed from the day's own generator
+  var dailySeed = dailyDate ? Math.floor(C.daily('pachinko', dailyDate).rng() * 4294967296) >>> 0 : 0;
+
+  var Rd = null, ended = false, finishing = false, startedAt = 0, tries = 0, lastPow = null, note = '', noteAt = 0;
+  var lit = {}, pops = [], tulipCatch = 0, mapping = false;
+  var raf = 0, last = 0, acc = 0, paused = false, holding = false, keyHold = false, drag = null, lastPin = 0;
+
+  var cv = el('canvas', { class: 'pc-canvas', role: 'img', 'aria-label': C.t('pcScene') });
+  var box = el('div', { class: 'pc-box' }, [cv]);
+  var top = el('div', { class: 'pc-top ch-above' });
+  var goals = el('div', { class: 'pc-goals' });
+  var status = el('div', { class: 'pc-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'pc-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, goals, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  if (!dailyDate) ctx.button({ icon: 'grid', label: C.t('pcChoose'), onClick: showLevels });
+  ctx.button({ icon: 'gear', label: C.t('settings'), onClick: showSettings });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- rounds */
+
+  function boardFor(n) { return dailyDate ? E.daily(dailySeed) : E.level(n); }
+
+  function startRound(n) {
+    if (!dailyDate) { prog.cur = n; saveProg(); }
+    Rd = E.round(boardFor(n));
+    begin();
+    tries++;
+    startedAt = Date.now();
+  }
+  function begin() {
+    ended = false; finishing = false; lit = {}; pops = []; tulipCatch = 0; note = ''; lastPow = null;
+    staticKey = '';
+    mapDaily();
+    renderSide(); draw(); kick();
+  }
+  // a daily board's star targets are worked out between frames, so a slow phone never
+  // freezes on the way in; the targets show as soon as they are known
+  function mapDaily() {
+    if (!Rd || Rd.B.th || mapping) return;
+    mapping = true;
+    var B = Rd.B;
+    (function slice() {
+      if (!Rd || Rd.B !== B) { mapping = false; return; }
+      if (E.mapMore(B, 12)) { E.thresholds(B); mapping = false; renderSide(); if (E.over(Rd) && !ended) finish(); return; }
+      setTimeout(slice, 0);
+    })();
+  }
+
+  function setNote(text) { note = text; noteAt = performance.now(); renderSide(); }
+
+  function launch() {
+    var b = E.fire(Rd, pow);
+    if (!b) return;
+    lastPow = pow;
+    C.audio.sfx('launch');
+    renderSide();
+    ctx.save();
+  }
+
+  // one ball has ended: points pop up from its pocket, the tulip may open
+  function ended1(res, v) {
+    if (res === -2) { C.feedback('bad'); setNote(C.t('pcFoul')); return; }
+    if (res < 0) { C.audio.sfx('thud'); renderSide(); return; }
+    var p = Rd.B.pockets[res], open = p.kind === 'tulip';
+    pops.push({ x: p.x, y: p.y - 2, text: '+' + C.num(v), t: 0, big: open });
+    if (p.kind === 'tulip' && E.tulipOpen(Rd)) { tulipCatch++; if (tulipCatch >= 2) C.achievements.unlock('pc-tulip'); }
+    C.feedback(open ? 'good' : 'tap');
+    C.audio.sfx('pop');
+    var r = cv.getBoundingClientRect(), V = view();
+    if (r.width) C.ui.burst({ x: r.left + V.ox + p.x * V.k, y: r.top + V.oy + (p.y + 1.5) * V.k }, { colors: open ? ['#F06292', '#FFD54F', ACCENT] : p.kind === 'start' ? ['#2E9E4F', '#A5E5B5', '#FFFFFF'] : [ACCENT, '#B9A2F0', '#FFFFFF'], count: open ? 20 : 10, speed: open ? 1 : 0.7 });
+    renderSide();
+  }
+
+  /* --------------------------------------------------------------- loop */
+
+  function running() { return Rd && !ended && !E.over(Rd) && (Rd.fly.length || holding || E.tulipOpen(Rd) || !E.canFire(Rd)); }
+  function kick() { if (!raf) { last = 0; raf = requestAnimationFrame(frame); } }
+  function frame(t) {
+    raf = 0;
+    if (paused || !Rd) return;
+    var dt = last ? Math.min(0.1, (t - last) / 1000) : 0;
+    last = t;
+    acc += dt;
+    var n = 0;
+    while (acc >= E.DT && n < 24) {
+      acc -= E.DT; n++;
+      if (ended || E.over(Rd)) break;
+      if (holding && E.canFire(Rd)) launch();
+      // an hour left idle stops the board's clock, so a save always replays in time
+      if (Rd.clock >= CLOCK_MAX && !Rd.fly.length) break;
+      var was = E.tulipOpen(Rd), ev = E.tick(Rd);
+      for (var i = 0; i < ev.length; i++) {
+        var e = ev[i];
+        if (e[0] === 'pin') { lit[e[1]] = t; if (t - lastPin > 40) { lastPin = t; C.audio.sfx('brass'); } }
+        else if (e[0] === 'end') ended1(e[2], e[3]);
+      }
+      if (!was && E.tulipOpen(Rd)) { tulipCatch = 0; C.audio.sfx('bloom'); setNote(C.t('pcOpen')); }
+      else if (was && !E.tulipOpen(Rd)) renderSide();
+    }
+    if (n === 24) acc = 0;
+    pops = pops.filter(function (p) { p.t += dt; return p.t < 1; });
+    draw(t);
+    if (E.over(Rd) && !ended && !finishing) { finishing = true; setTimeout(finish, 700); }
+    // the board only needs frames while something moves
+    if (running() || pops.length || anyLit(t)) raf = requestAnimationFrame(frame);
+  }
+  function anyLit(t) { for (var k in lit) if (t - lit[k] < 220) return true; return false; }
+
+  /* ------------------------------------------------------------- finish */
+
+  function finish() {
+    if (ended || !Rd || !E.over(Rd)) return;
+    // the daily board's targets may still be on their way
+    if (!Rd.B.th) { finishing = false; mapDaily(); return; }
+    ended = true; holding = false;
+    ctx.clearSave();
+    var score = Rd.score, st = E.stars(Rd.B, score), msg = null, won = st >= 1, L = Rd.B.level;
+    var coins = 2 + st * 2, points = 6 + st * 6, next = 0;
+    if (won) C.achievements.unlock('pc-win');
+    if (st === 3) C.achievements.unlock('pc-three');
+    if (dailyDate) {
+      coins += 8; points += 25;
+      if (won) C.achievements.unlock('pc-daily');
+      if (!C.stats.daily('pachinko', dailyDate, { label: C.num(score), win: won, stars: st, tries: tries })) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    } else {
+      var b = prog.best[L - 1];
+      if (b && score > b.score) msg = C.t('pcNewBest', { n: C.num(score) });
+      prog.best[L - 1] = { score: Math.max(score, b ? b.score : 0), stars: Math.max(st, b ? b.stars : 0) };
+      if (won && L < E.LEVELS && prog.unlocked < L + 1) { prog.unlocked = L + 1; msg = C.t('pcUnlocked', { n: C.num(L + 1) }); }
+      if (won && L < E.LEVELS) next = L + 1;
+      saveProg();
+      C.stats.best('pachinko', 'stars', prog.best.reduce(function (s, x) { return s + (x ? x.stars : 0); }, 0));
+    }
+    renderSide(); draw();
+    var best = dailyDate ? null : prog.best[L - 1];
+    ctx.finish({
+      won: won, stars: st,
+      title: won ? C.t('pcCleared') : C.t('pcNoStar'),
+      note: msg, timeMs: Date.now() - startedAt, coins: coins, points: points,
+      lines: [
+        { label: C.t('pcScore'), value: C.num(score) },
+        { label: C.t('pcStarsAt'), value: Rd.B.th.map(function (x) { return C.num(x); }).join(' · ') },
+        best ? { label: C.t('pcBest'), value: C.num(best.score) } : { label: C.t('pcBalls'), value: C.num(E.BALLS) }
+      ],
+      shareText: 'چوگان · بارون توپ' + (dailyDate ? ('\nروزانه ' + dailyDate) : ('\nتخته‌ی ' + L)) + '\n' + score + ' امتیاز · ' + '★'.repeat(st) + '☆'.repeat(3 - st),
+      againLabel: next ? C.t('pcNext') : C.t('pcRetry'),
+      onAgain: dailyDate && won ? null : function () { startRound(next || L); }
+    });
+  }
+
+  /* ----------------------------------------------------------- side rows */
+
+  function chip(text, icon, cls) { return el('span', { class: 'pc-chip' + (cls ? ' ' + cls : '') }, icon ? [C.icon(icon, 14), el('span', { text: text })] : [el('span', { text: text })]); }
+  function renderSide() {
+    if (!Rd) return;
+    top.textContent = '';
+    top.appendChild(chip(dailyDate ? C.t('pcDaily') : C.t('pcBoardN', { n: C.num(Rd.B.level) }), dailyDate ? 'calendar' : null));
+    top.appendChild(chip(C.t('pcBallsN', { n: C.num(Rd.tray) })));
+    top.appendChild(chip(C.t('pcScoreN', { n: C.num(Rd.score) }), null, E.tulipOpen(Rd) ? 'pc-chip--open' : ''));
+    goals.textContent = '';
+    for (var i = 0; i < 3; i++) {
+      var th = Rd.B.th ? Rd.B.th[i] : null, on = th != null && Rd.score >= th, g = el('span', { class: 'pc-goal' + (on ? ' pc-goal--on' : '') });
+      for (var s = 0; s <= i; s++) g.appendChild(C.icon('star', 12));
+      g.appendChild(el('span', { text: th == null ? '…' : C.num(th) }));
+      goals.appendChild(g);
+    }
+    var fresh = note && performance.now() - noteAt < 2500;
+    status.textContent = ended || E.over(Rd) ? '' : fresh ? note : E.tulipOpen(Rd) ? C.t('pcOpen')
+      : Rd.tray === 1 && !Rd.fly.length ? C.t('pcLast') : Rd.shots.length < 2 ? C.t('pcHint') : C.t('pcTulipHint');
+    if (fresh) setTimeout(function () { if (performance.now() - noteAt >= 2500) renderSide(); }, 2600);
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  function palette() {
+    return dark()
+      ? { bg0: '#231A3A', bg1: '#120D20', frame: '#3B2E5C', lane: '#0C0816', rail: '#C9A04A', pin: '#D9A441', pinHi: '#FFE7A3', pinLit: '#FFF4C8', glow: 'rgba(255,214,120,0.35)', cup: '#C9A04A', cupIn: 'rgba(150,110,255,0.22)', start: '#43C06A', startIn: 'rgba(67,192,106,0.25)', petal: '#F06292', petalOpen: '#FF8AB3', text: '#F1ECFA', dim: '#A99CC6', ball0: '#FFFFFF', ball1: '#9EA3B0', ballEdge: '#4A4D58', stop: '#5B4C7A', dialBg: '#2B2342', dial0: '#3B2E5C', dial1: '#9C7BFF', knob: '#FFFFFF', knobText: '#1E1433', knobEdge: '#9C7BFF', mark: '#FFD54F', full: 'rgba(18,13,32,0.6)' }
+      : { bg0: '#FBF8FF', bg1: '#ECE4FB', frame: '#D7CBF0', lane: '#DCD2F2', rail: '#A87A22', pin: '#B8862B', pinHi: '#F6DA8C', pinLit: ACCENT, glow: 'rgba(78,0,210,0.18)', cup: '#8E6A1E', cupIn: 'rgba(78,0,210,0.12)', start: '#2E9E4F', startIn: 'rgba(46,158,79,0.18)', petal: '#D81B60', petalOpen: '#EC407A', text: '#251A3D', dim: '#6E6290', ball0: '#FFFFFF', ball1: '#8F94A3', ballEdge: '#3E414C', stop: '#7C6BA6', dialBg: '#F1ECFB', dial0: '#E2D8F6', dial1: ACCENT, knob: '#FFFFFF', knobText: '#251A3D', knobEdge: ACCENT, mark: '#E0A100', full: 'rgba(236,228,251,0.7)' };
+  }
+  function size() {
+    var r = box.getBoundingClientRect();
+    return { w: Math.max(120, Math.floor(r.width) || 0), h: Math.max(180, Math.floor(r.height) || 0) };
+  }
+  var fontFam = '';
+  function font(px, weight) {
+    if (!fontFam) fontFam = getComputedStyle(document.body).fontFamily || 'sans-serif';
+    return (weight || 700) + ' ' + Math.round(px) + 'px ' + fontFam;
+  }
+  // the view last drawn: a touch is read against what the player saw (the bowling lesson)
+  var drawn = { w: 0, h: 0, k: 0, ox: 0, oy: 0 };
+  function view() { return drawn.k ? drawn : layout(size()); }
+  function layout(Z) {
+    var k = Math.min(Z.w / E.W, Z.h / TH0);
+    return { w: Z.w, h: Z.h, k: k, ox: (Z.w - E.W * k) / 2, oy: (Z.h - TH0 * k) / 2 };
+  }
+  // the dome-topped board outline
+  function boardPath(g, k) {
+    g.beginPath();
+    g.moveTo(0, E.H * k);
+    g.lineTo(0, E.CY * k);
+    g.arc(E.CX * k, E.CY * k, E.DOME * k, Math.PI, Math.PI * 2);
+    g.lineTo(E.W * k, E.H * k);
+    g.closePath();
+  }
+
+  // everything that never moves is drawn once into its own layer for each size and theme
+  var layer = document.createElement('canvas'), staticKey = '';
+  function drawStatic(Z, dpr, V, P) {
+    var key = Z.w + 'x' + Z.h + '@' + dpr + (dark() ? 'd' : 'l') + ':' + Rd.B.seed + '/' + Rd.B.level + fontFam;
+    if (key === staticKey) return;
+    staticKey = key;
+    layer.width = cv.width; layer.height = cv.height;
+    var g = layer.getContext('2d'), k = V.k, B = Rd.B;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, Z.w, Z.h);
+    g.translate(V.ox, V.oy);
+    function X(x) { return x * k; }
+    var bg = g.createLinearGradient(0, 0, 0, E.H * k);
+    bg.addColorStop(0, P.bg0); bg.addColorStop(1, P.bg1);
+    g.fillStyle = bg; boardPath(g, k); g.fill();
+    g.save(); boardPath(g, k); g.clip();
+    // the launch lane: a channel up the left side and round the arc
+    var a1 = Math.atan2(E.ARC_END[1] - E.CY, E.ARC_END[0] - E.CX) + Math.PI * 2;
+    g.fillStyle = P.lane;
+    g.beginPath();
+    g.moveTo(0, X(E.H)); g.lineTo(0, X(E.CY));
+    g.arc(X(E.CX), X(E.CY), X(E.DOME), Math.PI, a1);
+    g.arc(X(E.CX), X(E.CY), X(E.ARC_R), a1, Math.PI, true);
+    g.lineTo(X(E.GX), X(E.H)); g.closePath(); g.fill();
+    g.restore();
+    g.strokeStyle = P.frame; g.lineWidth = Math.max(1.5, X(0.8)); boardPath(g, k); g.stroke();
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    // the guide rail and the stop
+    g.strokeStyle = P.rail; g.lineWidth = Math.max(1.5, X(E.GW * 2));
+    g.beginPath(); g.moveTo(X(E.GUIDE[0].ax), X(E.GUIDE[0].ay));
+    E.GUIDE.forEach(function (s) { g.lineTo(X(s.bx), X(s.by)); }); g.stroke();
+    g.strokeStyle = P.stop; g.lineWidth = Math.max(2, X(E.STOP.r * 2));
+    g.beginPath(); g.moveTo(X(E.STOP.ax), X(E.STOP.ay)); g.lineTo(X(E.STOP.bx), X(E.STOP.by)); g.stroke();
+    // rails and pocket cups
+    B.segs.forEach(function (s) {
+      if (s.k === 'rail') { g.strokeStyle = P.rail; g.lineWidth = Math.max(1.5, X(s.r * 2)); g.beginPath(); g.moveTo(X(s.ax), X(s.ay)); g.lineTo(X(s.bx), X(s.by)); g.stroke(); }
+    });
+    B.pockets.forEach(function (p) {
+      var st = p.kind === 'start';
+      g.fillStyle = st ? P.startIn : P.cupIn;
+      g.fillRect(X(p.x - p.w), X(p.y), X(p.w * 2), X(3.2));
+      g.strokeStyle = st ? P.start : P.cup; g.lineWidth = Math.max(1.5, X(1));
+      g.beginPath(); g.moveTo(X(p.x - p.w), X(p.y)); g.lineTo(X(p.x - p.w), X(p.y + 3.2)); g.lineTo(X(p.x + p.w), X(p.y + 3.2)); g.lineTo(X(p.x + p.w), X(p.y)); g.stroke();
+      if (p.kind === 'tulip') return;
+      g.fillStyle = st ? P.start : P.text;
+      g.font = font(Math.max(9, X(3.3)), 800); g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(C.num(p.v), X(p.x), X(p.y + 6));
+    });
+    // the brass pins, each with a small highlight
+    var pr = Math.max(1.4, X(E.PR));
+    B.pins.forEach(function (p) {
+      var r = p.x <= E.GX + E.GW + 0.01 || p.x >= E.W - 0.01 ? pr * 0.8 : pr;
+      g.fillStyle = P.pin; g.beginPath(); g.arc(X(p.x), X(p.y), r, 0, Math.PI * 2); g.fill();
+      if (r > 2) { g.fillStyle = P.pinHi; g.beginPath(); g.arc(X(p.x) - r * 0.3, X(p.y) - r * 0.3, r * 0.38, 0, Math.PI * 2); g.fill(); }
+    });
+  }
+
+  function draw(t) {
+    if (!Rd) return;
+    t = t || performance.now();
+    var Z = size(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); staticKey = ''; }
+    var V = layout(Z), k = V.k, B = Rd.B, P = palette(), still = C.ui.reduceMotion();
+    drawn = V;
+    drawStatic(Z, dpr, V, P);
+    var g = cv.getContext('2d');
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, cv.width, cv.height);
+    g.drawImage(layer, 0, 0);
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.save();
+    g.translate(V.ox, V.oy);
+    function X(x) { return x * k; }
+    g.lineCap = 'round'; g.lineJoin = 'round';
+
+    // pins lit for a moment when a ball strikes them
+    var pr = Math.max(1.4, X(E.PR));
+    for (var key in lit) {
+      if (t - lit[key] >= 220) { delete lit[key]; continue; }
+      var p = B.pins[key];
+      if (!p) continue;
+      if (!still) { g.fillStyle = P.glow; g.beginPath(); g.arc(X(p.x), X(p.y), pr * 2.6, 0, Math.PI * 2); g.fill(); }
+      g.fillStyle = P.pinLit; g.beginPath(); g.arc(X(p.x), X(p.y), pr, 0, Math.PI * 2); g.fill();
+    }
+
+    // the tulip: two petals, upright when shut and spread wide when open, and its timer
+    var open = E.tulipOpen(Rd), tu = B.pockets[0], wings = open ? B.wings.open : B.wings.shut;
+    g.strokeStyle = open ? P.petalOpen : P.petal; g.lineWidth = Math.max(2.5, X(1.6));
+    wings.forEach(function (w) { g.beginPath(); g.moveTo(X(w.ax), X(w.ay)); g.lineTo(X(w.bx), X(w.by)); g.stroke(); });
+    g.fillStyle = open ? P.petalOpen : P.petal;
+    g.font = font(Math.max(9, X(3.3)), 800); g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(C.num(tu.v), X(tu.x), X(tu.y + 6));
+    if (open) {
+      var left = (Rd.tulipUntil - Rd.clock) / E.TUL;
+      g.strokeStyle = P.petalOpen; g.lineWidth = Math.max(1.5, X(0.6));
+      g.beginPath(); g.arc(X(tu.x), X(tu.y + 6), X(3.6), -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0, Math.min(1, left))); g.stroke();
+    }
+    // a small tulip over the start pocket says what it does
+    B.pockets.forEach(function (q) {
+      if (q.kind !== 'start') return;
+      var cx = X(q.x), cy = X(q.y - 2.2), s = X(1.1);
+      g.fillStyle = open ? P.petalOpen : P.petal;
+      g.beginPath(); g.moveTo(cx - s * 1.4, cy - s); g.lineTo(cx - s * 0.7, cy + s); g.lineTo(cx + s * 0.7, cy + s); g.lineTo(cx + s * 1.4, cy - s); g.lineTo(cx + s * 0.5, cy - s * 0.2); g.lineTo(cx, cy - s * 1.2); g.lineTo(cx - s * 0.5, cy - s * 0.2); g.closePath(); g.fill();
+    });
+
+    // a fixed pocket's room: one dot a ball, filled as it fills, and the cup greyed once
+    // full, since a full pocket still takes balls but pays nothing
+    B.pockets.forEach(function (q, i) {
+      if (!q.cap) return;
+      var used = Math.min(q.cap, Rd.fill[i] || 0), d = Math.max(1.6, X(0.7)), gap = d * 2.8;
+      for (var n = 0; n < q.cap; n++) {
+        var cx = X(q.x) + (n - (q.cap - 1) / 2) * gap, cy = X(q.y + 9.6);
+        g.beginPath(); g.arc(cx, cy, d, 0, Math.PI * 2);
+        if (n < used) { g.fillStyle = P.cup; g.fill(); } else { g.strokeStyle = P.cup; g.lineWidth = 1; g.stroke(); }
+      }
+      if (used >= q.cap) { g.fillStyle = P.full; g.fillRect(X(q.x - q.w - 0.6), X(q.y - 0.6), X(q.w * 2 + 1.2), X(11.5)); }
+    });
+
+    // a ball waiting at the foot of the lane, and every ball in flight
+    if (Rd.tray > 0 && E.canFire(Rd) && !ended) drawBall(g, X(E.START_X), X(E.START_Y), X(E.R), P, holding ? 1 : 0.75);
+    Rd.fly.forEach(function (b) { drawBall(g, X(b.x), X(b.y), X(E.R), P, 1); });
+
+    // points rising from the pocket a ball fell into
+    pops.forEach(function (q) {
+      g.globalAlpha = Math.max(0, 1 - q.t);
+      g.font = font(Math.max(12, X(q.big ? 5 : 4)), 800); g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillStyle = q.big ? P.petalOpen : P.text;
+      g.fillText(q.text, X(q.x), X(q.y - (still ? 0 : q.t * 8)));
+      g.globalAlpha = 1;
+    });
+
+    // the power dial under the board
+    var dy = E.H + DIAL / 2, x0 = X(TRACK0), x1 = X(TRACK1), kx = x0 + (x1 - x0) * pow / 100;
+    g.fillStyle = P.dialBg; C.rrect(g, X(1), X(E.H + 1.5), X(E.W - 2), X(DIAL - 2.5), X(3)); g.fill();
+    var tg = g.createLinearGradient(x0, 0, x1, 0);
+    tg.addColorStop(0, P.dial0); tg.addColorStop(1, P.dial1);
+    g.fillStyle = tg; C.rrect(g, x0, X(dy - 1.4), x1 - x0, X(2.8), X(1.4)); g.fill();
+    // a spring at the dial's left end: the launcher
+    g.strokeStyle = P.dim; g.lineWidth = Math.max(1, X(0.5));
+    g.beginPath(); for (var z = 0; z <= 6; z++) g.lineTo(X(4 + z * 1.2), X(dy + (z % 2 ? -2 : 2) * (0.5 + pow / 200))); g.stroke();
+    if (prefs.mark && lastPow != null && lastPow !== pow) {
+      var mx = x0 + (x1 - x0) * lastPow / 100;
+      g.fillStyle = P.mark; g.beginPath(); g.moveTo(mx, X(dy + 2)); g.lineTo(mx - X(1.4), X(dy + 4.6)); g.lineTo(mx + X(1.4), X(dy + 4.6)); g.closePath(); g.fill();
+    }
+    g.fillStyle = P.knob; g.strokeStyle = P.knobEdge; g.lineWidth = Math.max(2, X(0.8));
+    g.beginPath(); g.arc(kx, X(dy), X(3.4), 0, Math.PI * 2); g.fill(); g.stroke();
+    if (prefs.num) {
+      // the knob is white in both themes, so the dark theme's light text vanished on it
+      g.fillStyle = P.knobText; g.font = font(Math.max(9, X(3.2)), 800); g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(C.num(pow), kx, X(dy) + 0.5);
+    }
+    g.restore();
+  }
+  function drawBall(g, x, y, r, P, a) {
+    g.globalAlpha = a;
+    var gr = g.createRadialGradient(x - r * 0.35, y - r * 0.35, r * 0.1, x, y, r);
+    gr.addColorStop(0, P.ball0); gr.addColorStop(1, P.ball1);
+    g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = P.ballEdge; g.lineWidth = Math.max(1, r * 0.16); g.stroke();
+    g.globalAlpha = 1;
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  function setPow(v) {
+    v = Math.max(0, Math.min(100, Math.round(v)));
+    if (v === pow) return;
+    pow = v; savePrefs(); draw();
+  }
+  function unitAt(e) {
+    var r = cv.getBoundingClientRect(), V = view();
+    return { x: (e.clientX - r.left - V.ox) / V.k, y: (e.clientY - r.top - V.oy) / V.k };
+  }
+  // the dial sets the power where it is touched; a finger on the board launches while it
+  // stays down, and sliding it sideways fine-tunes the power, half a board for the range
+  cv.addEventListener('pointerdown', function (e) {
+    if (!Rd || ended || E.over(Rd)) return;
+    var u = unitAt(e);
+    try { cv.setPointerCapture(e.pointerId); } catch (er) { /* an old WebView */ }
+    e.preventDefault();
+    if (u.y > E.H) { drag = { dial: true }; setPow((u.x - TRACK0) / (TRACK1 - TRACK0) * 100); return; }
+    drag = { dial: false, x: u.x, pow: pow };
+    holding = true; kick();
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (!drag) return;
+    var u = unitAt(e);
+    if (drag.dial) setPow((u.x - TRACK0) / (TRACK1 - TRACK0) * 100);
+    else setPow(drag.pow + (u.x - drag.x) * 2);
+  });
+  function release() { drag = null; holding = keyHold; }
+  cv.addEventListener('pointerup', release);
+  cv.addEventListener('pointercancel', release);
+
+  window.addEventListener('keydown', function (e) {
+    if (!Rd || e.target && e.target.closest && e.target.closest('.ch-modal')) return;
+    var k = e.key, step = e.shiftKey ? 5 : 1;
+    if (k === 'ArrowLeft' || k === 'ArrowDown' || C.keyIs(e, 'a')) { e.preventDefault(); setPow(pow - step); }
+    else if (k === 'ArrowRight' || k === 'ArrowUp' || C.keyIs(e, 'd')) { e.preventDefault(); setPow(pow + step); }
+    else if (k === ' ' || k === 'Enter') { e.preventDefault(); if (!ended && !E.over(Rd)) { keyHold = true; holding = true; kick(); } }
+    else if (C.keyIs(e, 'r') && !dailyDate) { e.preventDefault(); restartAsk(); }
+    else if (C.keyIs(e, 'l') && !dailyDate) { e.preventDefault(); showLevels(); }
+  });
+  window.addEventListener('keyup', function (e) {
+    if (e.key === ' ' || e.key === 'Enter') { keyHold = false; if (!drag || drag.dial) holding = false; }
+  });
+  window.addEventListener('blur', function () { keyHold = false; holding = false; drag = null; });
+
+  C.onPause(function () { paused = true; holding = false; keyHold = false; drag = null; ctx.save(); });
+  C.onResume(function () { paused = false; last = 0; kick(); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { last = 0; kick(); } });
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { fontFam = ''; staticKey = ''; draw(); });
+  if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { staticKey = ''; draw(); }); } catch (er) { /* old WebViews */ } }
+
+  /* ------------------------------------------------------- boards, gear */
+
+  function restartAsk() {
+    if (!Rd) return;
+    if (Rd.shots.length > 0 && !ended) C.ui.confirm({ title: C.t('restart'), body: C.t('resetWarn'), onOk: function () { ctx.clearSave(); startRound(Rd.B.level); } });
+    else startRound(Rd.B.level);
+  }
+  function showLevels() {
+    if (dailyDate) return;
+    holding = false; drag = null;
+    var grid = el('div', { class: 'pc-levels' }), m = null;
+    for (var i = 0; i < E.LEVELS; i++) {
+      (function (n) {
+        var locked = n > prog.unlocked, best = prog.best[n - 1], kids = [el('b', { text: C.num(n) })];
+        if (locked) kids.push(C.icon('lock', 14));
+        else if (best) {
+          var sr = el('span', { class: 'pc-lv__stars' });
+          for (var s = 1; s <= 3; s++) { var ic = C.icon('star', 11); if (s <= best.stars) ic.setAttribute('fill', 'currentColor'); else ic.style.opacity = '.4'; sr.appendChild(ic); }
+          kids.push(sr);
+        }
+        var b = el('button', {
+          class: 'pc-lv' + (Rd && n === Rd.B.level ? ' pc-lv--on' : '') + (best ? ' pc-lv--done' : ''),
+          type: 'button', disabled: locked,
+          'aria-label': C.t('pcBoardN', { n: C.num(n) }) + (locked ? ' — ' + C.t('pcLocked') : '')
+        }, kids);
+        b.addEventListener('click', function () {
+          if (m) m.close();
+          if (Rd && Rd.shots.length > 0 && !ended) C.ui.confirm({ title: C.t('restart'), body: C.t('resetWarn'), onOk: function () { ctx.clearSave(); startRound(n); } });
+          else startRound(n);
+        });
+        grid.appendChild(b);
+      })(i + 1);
+    }
+    m = C.ui.modal({ title: C.t('pcChoose'), body: [grid], actions: [{ label: C.t('cancel') }] });
+  }
+  function showSettings() {
+    holding = false; drag = null;
+    function row(label, on, set) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: label }), C.ui.switch(on, function (v) { set(!!v); savePrefs(); draw(); })]); }
+    C.ui.modal({
+      title: C.t('settings'), closeButton: true,
+      body: [el('div', { class: 'ch-list' }, [
+        row(C.t('pcShowNum'), prefs.num, function (v) { prefs.num = v; }),
+        row(C.t('pcShowMark'), prefs.mark, function (v) { prefs.mark = v; })
+      ])],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    holding = false; drag = null;
+    var keys = [kb('← → / A D', C.t('pcKPower')), kb('Shift + ← →', C.t('pcKFar')), kb('Space / Enter', C.t('pcKFire'))];
+    if (!dailyDate) keys.push(kb('L', C.t('pcChoose')), kb('R', C.t('pcKAgain')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('pcRules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, keys)
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 120" width="100%" direction="ltr"><rect width="200" height="120" rx="10" fill="#ECE4FB"/>', x, y;
+    s += '<path d="M60 112 V52 A40 40 0 0 1 140 52 V112" fill="#FBF8FF" stroke="#D7CBF0" stroke-width="2"/>';
+    s += '<path d="M66 112 V54 A34 34 0 0 1 128 36" fill="none" stroke="#A87A22" stroke-width="2"/>';
+    // two rows of catchers, as on the board: each V gathers one band of power
+    var vs = [[104, 115, 62], [115, 122, 62], [122, 128, 62], [128, 134, 62], [134, 140, 62], [79, 92, 84], [92, 102, 84]];
+    for (x = 0; x < vs.length; x++) { var a = vs[x][0], b = vs[x][1], vy = vs[x][2]; s += '<path d="M' + a + ' ' + vy + ' L' + ((a + b) / 2 - 1) + ' ' + (vy + 7) + ' M' + b + ' ' + vy + ' L' + ((a + b) / 2 + 1) + ' ' + (vy + 7) + '" stroke="#8E7BB8" stroke-width="1.6" stroke-linecap="round"/>'; }
+    if (kind === 1) s += '<circle cx="63" cy="80" r="3.2" fill="#fff" stroke="#3E414C"/><path d="M63 72 V60" stroke="' + ACCENT + '" stroke-width="2.5" stroke-linecap="round"/><path d="M58 64 L63 58 L68 64" stroke="' + ACCENT + '" stroke-width="2.5" fill="none" stroke-linecap="round"/><circle cx="160" cy="70" r="14" fill="' + ACCENT + '" fill-opacity=".18"/><circle cx="160" cy="70" r="6" fill="' + ACCENT + '"/>';
+    if (kind === 2) s += '<rect x="30" y="100" width="140" height="6" rx="3" fill="#E2D8F6"/><rect x="30" y="100" width="88" height="6" rx="3" fill="' + ACCENT + '"/><circle cx="118" cy="103" r="7" fill="#fff" stroke="' + ACCENT + '" stroke-width="2"/>' +
+      '<path d="M100 18 Q120 24 112 44" stroke="' + ACCENT + '" stroke-width="2" stroke-dasharray="3 3" fill="none"/><circle cx="112" cy="46" r="3.2" fill="#fff" stroke="#3E414C"/>';
+    if (kind === 3) s += '<path d="M93 96 L86 86 M107 96 L114 86" stroke="#EC407A" stroke-width="3" stroke-linecap="round"/><path d="M93 96 V102 H107 V96" stroke="#8E6A1E" stroke-width="2" fill="none"/>' +
+      '<path d="M128 80 V86 H140 V80" stroke="#2E9E4F" stroke-width="2" fill="none"/><circle cx="134" cy="82" r="3" fill="#fff" stroke="#3E414C"/><path d="M126 76 Q112 74 108 88" stroke="#2E9E4F" stroke-width="1.5" stroke-dasharray="2 3" fill="none"/>';
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('pcTut1'), text: C.t('pcTutText1'), art: tArt(1) },
+    { title: C.t('pcTut2'), text: C.t('pcTutText2'), art: tArt(2) },
+    { title: C.t('pcTut3'), text: C.t('pcTutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // saved at every launch and on pause: the shots and the board clock, replayed on return,
+  // so balls in flight come back exactly where they were
+  ctx.autosave(function () {
+    if (!Rd || ended || E.over(Rd) || Rd.shots.length === 0) return { inProgress: false };
+    return { r: E.snapshot(Rd), daily: dailyDate || null, tries: tries, last: lastPow, elapsed: Date.now() - startedAt };
+  });
+  function resume(sv) {
+    if (!sv || typeof sv !== 'object' || (sv.daily || null) !== (dailyDate || null)) return false;
+    var R = E.restore(sv.r);
+    if (!R) return false;
+    // a save must be on the board it claims: the day's board, or an open campaign board
+    if (dailyDate ? R.B.seed !== dailySeed || R.B.level !== 0 : R.B.level < 1 || R.B.seed !== E.level(R.B.level).seed || R.B.level > prog.unlocked) return false;
+    if (!dailyDate) R.B.th = E.level(R.B.level).th;
+    Rd = R;
+    tries = sv.tries >= 1 ? sv.tries | 0 : 1;
+    startedAt = Date.now() - (sv.elapsed > 0 ? sv.elapsed : 0);
+    begin();
+    lastPow = sv.last === (sv.last | 0) && sv.last >= 0 && sv.last <= 100 ? sv.last : null;
+    if (!dailyDate) { prog.cur = Rd.B.level; saveProg(); }
+    renderSide(); draw();
+    return true;
+  }
+  var saved = ctx.loadSave();
+  if (!(saved && resume(saved))) startRound(dailyDate ? 0 : prog.cur);
+  if (dailyDate && C.stats.dailyDone('pachinko', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).pachinko;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
