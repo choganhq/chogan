@@ -80,7 +80,7 @@ export function ldJson(l) {
         sameAs: ['https://github.com/choganhq/chogan', 'https://play.google.com/store/apps/details?id=io.github.choganhq.chogan',
           'https://f-droid.org/packages/io.github.choganhq.chogan/', 'https://t.me/chogan_games'] },
       { '@type': 'Organization', '@id': ORIGIN + '/#org', name: 'Chogan', url: ORIGIN + '/', logo: ORIGIN + '/icon.png',
-        email: 'choganhq@gmail.com', sameAs: ['https://github.com/choganhq', 'https://t.me/chogan_games'] },
+        email: 'choganhq@gmail.com', sameAs: ['https://github.com/choganhq', 'https://t.me/chogan_games', 'https://x.com/choganhq'] },
       { '@type': 'WebSite', '@id': ORIGIN + '/#site', name: 'Chogan', url: ORIGIN + '/', inLanguage: CODES },
     ],
   }).replace(/</g, '\\u003c');

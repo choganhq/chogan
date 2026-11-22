@@ -15,7 +15,7 @@ Ways to play:
 - **Web:** [playchogan.com](https://playchogan.com) (it opens [choganhq.github.io/chogan](https://choganhq.github.io/chogan/)), installable as an app from the browser.
 - **Android:** [Google Play](https://play.google.com/store/apps/details?id=io.github.choganhq.chogan), [F-Droid](https://f-droid.org/packages/io.github.choganhq.chogan/), or the APK on the [Releases page](https://github.com/choganhq/chogan/releases).
 - **Telegram:** [@chogangamebot](https://t.me/chogangamebot) opens the web version inside Telegram.
-- **News:** every release is announced in the Telegram channel [@chogan_games](https://t.me/chogan_games).
+- **News:** every release is announced in the Telegram channel [@chogan_games](https://t.me/chogan_games) and on X, [@choganhq](https://x.com/choganhq).
 
 <p>
 <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/1.png" width="23%" alt="The menu">
@@ -91,7 +91,7 @@ MIT, see [LICENSE](LICENSE). The Vazirmatn font, the Latin subset of Nunito and 
 - **وب:** [playchogan.com](https://playchogan.com) (که [choganhq.github.io/chogan](https://choganhq.github.io/chogan/) را باز می‌کند)، و از مرورگر مثل یک اپ نصب می‌شود.
 - **اندروید:** از [گوگل پلی](https://play.google.com/store/apps/details?id=io.github.choganhq.chogan)، [اف‌دروید](https://f-droid.org/packages/io.github.choganhq.chogan/)، یا فایل APK از بخش [Releases](https://github.com/choganhq/chogan/releases).
 - **تلگرام:** [@chogangamebot](https://t.me/chogangamebot) نسخه‌ی وب را داخل تلگرام باز می‌کند.
-- **خبرها:** هر نسخه‌ی تازه در کانال تلگرام [@chogan_games](https://t.me/chogan_games) (به انگلیسی) اعلام می‌شود.
+- **خبرها:** هر نسخه‌ی تازه در کانال تلگرام [@chogan_games](https://t.me/chogan_games) (به انگلیسی) اعلام می‌شود؛ در ایکس (توییتر) هم [@choganhq](https://x.com/choganhq).
 
 <p>
 <img src="fastlane/metadata/android/fa/images/phoneScreenshots/1.png" width="23%" alt="منو">
