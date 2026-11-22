@@ -348,6 +348,7 @@
       saveImage: 'ذخیره‌ی عکس', copyText: 'کپی متن',
       updateReady: 'نسخه‌ی تازه آماده است', updateNow: 'به‌روزرسانی',
       updRow: 'به‌روزرسانی‌ها', updCheck: 'بررسی به‌روزرسانی', updChecking: 'در حال بررسی…', updLatest: 'آخرین نسخه را داری.', updNew: 'نسخه‌ی تازه‌ای آمده است.', updFailed: 'بررسی به‌روزرسانی نشد. دوباره امتحان کن.', updDownloading: 'نسخه‌ی تازه هنوز در حال دانلود است. کمی بعد دوباره امتحان کن.',
+      updStore: 'صفحه‌ی فروشگاه', updStoreNote: 'نسخه‌ی نصب‌شده‌ی شما این است. برای دیدن نسخه‌ی تازه‌تر صفحه‌ی برنامه را باز کنید.',
       installReady: 'چوگان را مثل یک اپ نصب کن', installNow: 'نصب',
       confirm: 'تأیید', done: 'باشه', next: 'بعدی', skip: 'رد کردن',
       start: 'شروع', pause: 'مکث', resumeGame: 'ادامه‌ی بازی', restart: 'شروع دوباره',
@@ -397,6 +398,7 @@
       saveImage: 'Save image', copyText: 'Copy text',
       updateReady: 'A new version is ready', updateNow: 'Update',
       updRow: 'Updates', updCheck: 'Check for updates', updChecking: 'Checking…', updLatest: 'You are using the latest version.', updNew: 'A new version is available.', updFailed: 'Could not check for updates. Try again.', updDownloading: 'The new version is still downloading. Try again in a minute.',
+      updStore: 'Open the store page', updStoreNote: 'This is the version you have installed. Open the app\'s page to see whether a newer one exists.',
       installReady: 'Install Chogan as an app', installNow: 'Install',
       confirm: 'Confirm', done: 'OK', next: 'Next', skip: 'Skip',
       start: 'Start', pause: 'Pause', resumeGame: 'Resume', restart: 'Restart',
@@ -446,6 +448,7 @@
       saveImage: 'Zapisz obraz', copyText: 'Kopiuj tekst',
       updateReady: 'Nowa wersja jest gotowa', updateNow: 'Aktualizuj',
       updRow: 'Aktualizacje', updCheck: 'Sprawdź aktualizacje', updChecking: 'Sprawdzanie…', updLatest: 'Masz najnowszą wersję.', updNew: 'Jest nowa wersja.', updFailed: 'Nie udało się sprawdzić aktualizacji. Spróbuj ponownie.', updDownloading: 'Nowa wersja nadal się pobiera. Spróbuj za minutę.',
+      updStore: 'Otwórz stronę w sklepie', updStoreNote: 'To jest zainstalowana wersja. Otwórz stronę aplikacji, aby sprawdzić, czy jest nowsza.',
       installReady: 'Zainstaluj Chogan jako aplikację', installNow: 'Zainstaluj',
       confirm: 'Potwierdź', done: 'Gotowe', next: 'Dalej', skip: 'Pomiń',
       start: 'Start', pause: 'Pauza', resumeGame: 'Wznów', restart: 'Zrestartuj',
@@ -495,6 +498,7 @@
       saveImage: 'Enregistrer l’image', copyText: 'Copier le texte',
       updateReady: 'Une nouvelle version est prête', updateNow: 'Mettre à jour',
       updRow: 'Mises à jour', updCheck: 'Chercher des mises à jour', updChecking: 'Vérification…', updLatest: 'Tu as la dernière version.', updNew: 'Une nouvelle version est disponible.', updFailed: 'Impossible de vérifier les mises à jour. Réessaie.', updDownloading: 'La nouvelle version se télécharge encore. Réessaie dans une minute.',
+      updStore: 'Ouvrir la page de la boutique', updStoreNote: 'Voici la version installée. Ouvre la page de l’appli pour voir s’il en existe une plus récente.',
       installReady: 'Installer Chogan comme une appli', installNow: 'Installer',
       confirm: 'Confirmer', done: 'OK', next: 'Suivant', skip: 'Passer',
       start: 'Démarrer', pause: 'Pause', resumeGame: 'Reprendre', restart: 'Recommencer',
@@ -544,6 +548,7 @@
       saveImage: 'حفظ الصورة', copyText: 'نسخ النص',
       updateReady: 'إصدار جديد جاهز', updateNow: 'تحديث',
       updRow: 'التحديثات', updCheck: 'البحث عن تحديثات', updChecking: 'جارٍ البحث…', updLatest: 'لديك أحدث إصدار.', updNew: 'يتوفر إصدار جديد.', updFailed: 'تعذّر البحث عن تحديثات. حاول مرة أخرى.', updDownloading: 'ما زال الإصدار الجديد يُنزَّل. حاول بعد دقيقة.',
+      updStore: 'افتح صفحة المتجر', updStoreNote: 'هذا هو الإصدار المثبّت لديك. افتح صفحة التطبيق لترى إن كان هناك إصدار أحدث.',
       installReady: 'ثبّت Chogan كتطبيق', installNow: 'تثبيت',
       confirm: 'تأكيد', done: 'حسنًا', next: 'التالي', skip: 'تخطٍّ',
       start: 'ابدأ', pause: 'إيقاف مؤقت', resumeGame: 'تابع', restart: 'إعادة البدء',
@@ -593,6 +598,7 @@
       saveImage: 'तस्वीर सहेजें', copyText: 'टेक्स्ट कॉपी करें',
       updateReady: 'नया संस्करण तैयार है', updateNow: 'अपडेट करें',
       updRow: 'अपडेट', updCheck: 'अपडेट जाँचें', updChecking: 'जाँच हो रही है…', updLatest: 'आपके पास सबसे नया संस्करण है।', updNew: 'नया संस्करण उपलब्ध है।', updFailed: 'अपडेट जाँच नहीं सके। फिर कोशिश करें।', updDownloading: 'नया संस्करण अभी डाउनलोड हो रहा है। एक मिनट बाद फिर कोशिश करें।',
+      updStore: 'स्टोर पेज खोलें', updStoreNote: 'यह आपका इंस्टॉल किया हुआ संस्करण है। नया संस्करण है या नहीं, यह देखने के लिए ऐप का पेज खोलें।',
       installReady: 'Chogan को ऐप की तरह इंस्टॉल करें', installNow: 'इंस्टॉल करें',
       confirm: 'पक्का करें', done: 'ठीक है', next: 'आगे', skip: 'छोड़ें',
       start: 'शुरू करें', pause: 'रोकें', resumeGame: 'जारी रखें', restart: 'फिर से शुरू',
@@ -642,6 +648,7 @@
       saveImage: 'Сохранить картинку', copyText: 'Копировать текст',
       updateReady: 'Новая версия готова', updateNow: 'Обновить',
       updRow: 'Обновления', updCheck: 'Проверить обновления', updChecking: 'Проверка…', updLatest: 'У вас последняя версия.', updNew: 'Доступна новая версия.', updFailed: 'Не удалось проверить обновления. Попробуйте ещё раз.', updDownloading: 'Новая версия ещё загружается. Попробуйте через минуту.',
+      updStore: 'Открыть страницу в магазине', updStoreNote: 'Это установленная у вас версия. Откройте страницу приложения, чтобы узнать, есть ли новая.',
       installReady: 'Установить Chogan как приложение', installNow: 'Установить',
       confirm: 'Подтвердить', done: 'ОК', next: 'Далее', skip: 'Пропустить',
       start: 'Начать', pause: 'Пауза', resumeGame: 'Продолжить', restart: 'Заново',
@@ -691,6 +698,7 @@
       saveImage: '保存图片', copyText: '复制文字',
       updateReady: '新版本已就绪', updateNow: '更新',
       updRow: '更新', updCheck: '检查更新', updChecking: '正在检查…', updLatest: '你使用的是最新版本。', updNew: '有新版本可用。', updFailed: '无法检查更新，请重试。', updDownloading: '新版本仍在下载，请稍后再试。',
+      updStore: '打开商店页面', updStoreNote: '这是你已安装的版本。打开应用页面，看看有没有更新的版本。',
       installReady: '将 Chogan 安装为应用', installNow: '安装',
       confirm: '确定', done: '好', next: '下一步', skip: '跳过',
       start: '开始', pause: '暂停', resumeGame: '继续游戏', restart: '重新开始',
@@ -740,6 +748,7 @@
       saveImage: 'Bild speichern', copyText: 'Text kopieren',
       updateReady: 'Eine neue Version ist da', updateNow: 'Aktualisieren',
       updRow: 'Updates', updCheck: 'Nach Updates suchen', updChecking: 'Wird geprüft…', updLatest: 'Du hast die neueste Version.', updNew: 'Eine neue Version ist verfügbar.', updFailed: 'Die Suche nach Updates hat nicht geklappt. Versuch es noch einmal.', updDownloading: 'Die neue Version wird noch geladen. Versuche es gleich noch einmal.',
+      updStore: 'Store-Seite öffnen', updStoreNote: 'Das ist die installierte Version. Öffne die Seite der App, um zu sehen, ob es eine neuere gibt.',
       installReady: 'Chogan als App installieren', installNow: 'Installieren',
       confirm: 'Bestätigen', done: 'OK', next: 'Weiter', skip: 'Überspringen',
       start: 'Start', pause: 'Pause', resumeGame: 'Weiter', restart: 'Neu starten',
@@ -789,6 +798,7 @@
       saveImage: 'Guardar imagen', copyText: 'Copiar texto',
       updateReady: 'Hay una versión nueva', updateNow: 'Actualizar',
       updRow: 'Actualizaciones', updCheck: 'Buscar actualizaciones', updChecking: 'Comprobando…', updLatest: 'Tienes la versión más reciente.', updNew: 'Hay una versión nueva.', updFailed: 'No se pudo comprobar si hay actualizaciones. Vuelve a intentarlo.', updDownloading: 'La nueva versión aún se está descargando. Vuelve a intentarlo en un minuto.',
+      updStore: 'Abrir la página de la tienda', updStoreNote: 'Esta es la versión que tienes instalada. Abre la página de la app para ver si hay una más reciente.',
       installReady: 'Instala Chogan como app', installNow: 'Instalar',
       confirm: 'Confirmar', done: 'OK', next: 'Siguiente', skip: 'Saltar',
       start: 'Empezar', pause: 'Pausa', resumeGame: 'Seguir', restart: 'Reiniciar',
@@ -4548,6 +4558,22 @@
   };
 
   Chogan.version = (global.APP_VERSION || '0.0.0');
+  // The Android app's own build and store page (#1023). APP_VERSION is the bundled games'
+  // version, which in Chogan Plus is not the app's, and the web's update check needs a
+  // service worker the WebView does not have. Null on the web and in older APKs.
+  Chogan.appInfo = function (raw) {
+    var o;
+    try { o = JSON.parse(raw); } catch (e) { return null; }
+    if (!o || !/^\d+\.\d+\.\d+/.test(o.version || '') || !/^[\w.]+$/.test(o.pkg || '')) return null;
+    var inst = String(o.installer || '');
+    var play = 'https://play.google.com/store/apps/details?id=' + o.pkg;
+    o.store = /fdroid/i.test(inst) ? 'https://f-droid.org/packages/' + o.pkg + '/'
+      : inst === 'com.android.vending' || /\.choganplus$/.test(o.pkg) ? play
+      : 'https://github.com/choganhq/chogan/releases/latest';
+    return o;
+  };
+  Chogan.app = null;
+  try { if (global.ChoganApp && typeof global.ChoganApp.info === 'function') Chogan.app = Chogan.appInfo(global.ChoganApp.info()); } catch (e) { /* no build info: the row stays as on the web */ }
   // Bug fixes reach the web without a new version, so a screenshot of the
   // profile could not tell whether a fix was in it (#370, #387). The commit is
   // stamped only on the published build; elsewhere this stays empty.

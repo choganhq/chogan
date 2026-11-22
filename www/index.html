@@ -1203,6 +1203,13 @@
   // has a service worker; the Android app updates through its store and shows no row.
   function updateRow() {
     var U = C.updates;
+    // The Android app has no service worker: show the installed build and a way to its store page (#1023)
+    if (C.app && !(U && U.supported)) {
+      return el('div', { class: 'ch-item ch-upd' }, [
+        el('div', { class: 'ch-item__label' }, [el('div', { text: C.t('updRow') }), el('div', { class: 'ch-upd__note ch-sm ch-dim', text: C.t('updStoreNote') })]),
+        el('div', { class: 'ch-row ch-upd__btns' }, [el('a', { class: 'ch-btn ch-btn--soft ch-btn--sm', href: C.app.store, target: '_blank', rel: 'noopener', text: C.t('updStore') })])
+      ]);
+    }
     if (!U || !U.supported) return null;
     var note = el('div', { class: 'ch-upd__note ch-sm ch-dim', role: 'status', 'aria-live': 'polite' });
     var go = el('button', { class: 'ch-btn ch-btn--primary ch-btn--sm', type: 'button', text: C.t('updateNow') });
@@ -1393,7 +1400,10 @@
         el('div', { class: 'ch-version' }, [
           // Both lead to GitHub, so a reporter can see what is in the build (#399):
           // the version to its release notes, the commit to its change.
-          /^\d+\.\d+\.\d+$/.test(C.version)
+          // In the Android app the badge is the app's own version, not the bundled games' (#1023)
+          C.app && C.app.version !== C.version
+            ? el('span', { class: 'ch-badge', text: C.num(C.app.version) })
+            : /^\d+\.\d+\.\d+$/.test(C.version)
             ? el('a', { class: 'ch-badge ch-version__link', href: 'https://github.com/choganhq/chogan/releases/tag/v' + C.version, target: '_blank', rel: 'noopener', text: C.num(C.version) })
             : el('span', { class: 'ch-badge', text: C.num(C.version) }),
           // The word says what the code is; the hash itself is Latin hex in every
