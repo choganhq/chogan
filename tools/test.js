@@ -12715,6 +12715,9 @@ function testTelegramPost() {
   fs.unlinkSync(bad);
   const relYml = fs.readFileSync(path.join(ROOT, '.github/workflows/release.yml'), 'utf8');
   ok(/python3 tools\/release-notes\.py --md "fastlane\/metadata\/android\/en-US\/changelogs\/\$\{VERSION_CODE\}\.txt"/.test(relYml), 'release.yml writes the GitHub notes through the formatter');
+  const xPost = spawnSync('python3', [path.join(ROOT, 'tools/release-notes.py'), '--x', path.join(clDir, '24.txt')], { encoding: 'utf8' });
+  ok(xPost.status === 0 && /^[A-Z][^\n]*:\n- /m.test(xPost.stdout) && !/[<>]|&amp;/.test(xPost.stdout), 'release-notes.py --x writes sectioned plain text with no markup (#1054)');
+  ok(/Post for X/.test(relYml) && /release-notes\.py --x /.test(relYml) && relYml.indexOf('Post for X') < relYml.indexOf('Post to the channel'), 'release.yml writes the X post into the run summary before the Telegram post (#1054)');
   const script = path.join(ROOT, 'tools/telegram-post.sh');
   ok(fs.existsSync(script) && fs.existsSync(path.join(ROOT, 'tools/game-shots.sh')), 'tools/telegram-post.sh and tools/game-shots.sh exist');
   if (!fs.existsSync(script)) return;

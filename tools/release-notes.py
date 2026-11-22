@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Formats an en-US changelog for GitHub (--md) or Telegram (--html) (#265).
+"""Formats an en-US changelog for GitHub (--md), Telegram (--html) (#265) or X (--x, plain text for
+the owner to paste by hand: X has no free posting API, #1054).
 
 A changelog is sections in this order, each a heading line and "- " bullets:
     New games:
@@ -15,7 +16,7 @@ the profile (owner's wish, #533: the credit belongs on the change, not in a line
 of its own at the end). The address, not "@login": F-Droid and Google Play show
 the file as plain text, where a bare handle leads nowhere (#644), so --check
 refuses an @login.
-Usage: tools/release-notes.py --md|--html|--check <changelog.txt>
+Usage: tools/release-notes.py --md|--html|--x|--check <changelog.txt>
 """
 import html
 import re
@@ -63,7 +64,7 @@ def linked(text, fmt):
 
 
 def main():
-    if len(sys.argv) != 3 or sys.argv[1] not in ('--md', '--html', '--check'):
+    if len(sys.argv) != 3 or sys.argv[1] not in ('--md', '--html', '--x', '--check'):
         print(__doc__.strip().splitlines()[-1], file=sys.stderr)
         return 2
     try:
@@ -85,7 +86,11 @@ def main():
         return 0
     out = []
     for name, items in sections:
-        if sys.argv[1] == '--md':
+        if sys.argv[1] == '--x':
+            out.append('%s:' % name)
+            out.extend('- %s' % i for i in items)
+            out.append('')
+        elif sys.argv[1] == '--md':
             out.append('- **%s**' % name)
             out.extend('  - %s' % linked(i, '--md') for i in items)
         else:
