@@ -2220,6 +2220,15 @@
 
   /* ==================================================== اشتراک‌گذاری */
 
+  // A shared record is only a challenge if the friend can open the game and try to beat it
+  // (#1069). The canonical address, not the page's own origin: a copy of the app on
+  // staging or inside the Android WebView has no address a friend could open.
+  Chogan.shareWithLink = function (text, gameId) {
+    var url = 'https://choganhq.github.io/chogan/' + (gameId && /^[a-z0-9-]+$/.test(gameId) ? 'games/' + gameId + '/' : '');
+    text = String(text || '');
+    return text.indexOf(url) >= 0 ? text : (text ? text + '\n' : '') + url;
+  };
+
   Chogan.share = function (text) {
     if (global.navigator && global.navigator.share) {
       global.navigator.share({ text: text }).catch(function () { copyText(text); });
@@ -4052,7 +4061,7 @@
                 stars: (o.stars === undefined ? null : o.stars),
                 lines: cardLines,
                 paint: o.paint || null,
-                text: o.shareText
+                text: Chogan.shareWithLink(o.shareText, cfg.id)
               });
             }
           });
