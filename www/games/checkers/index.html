@@ -111,9 +111,15 @@ function CheckersEngineFactory() {
     var hv = rules === 'huevo';
     var r = (i / N) | 0, c = i % N, p = owner(v), any = false, ds = dirs(v);
     var fly = hv ? (isKing(v) && !path.length) || isEmpress(v) : flying(rules, v);
+    // An Empress flies over the squares of pieces she took earlier in this move. They stay
+    // on the board until the move ends, and blocked her, so a chain that crossed its own
+    // path lost every piece beyond the crossing (HuevosKicker, #391). She still never
+    // lands on one, and no other piece gets this.
+    var emp = hv && isEmpress(v);
+    var clear = function (q) { return b[q] === 0 || (emp && caps.indexOf(q) >= 0); };
     for (var k = 0; k < ds.length; k++) {
       var dr = ds[k][0], dc = ds[k][1], r1 = r + dr, c1 = c + dc;
-      if (fly) while (r1 >= 0 && r1 < N && c1 >= 0 && c1 < N && b[r1 * N + c1] === 0) { r1 += dr; c1 += dc; }
+      if (fly) while (r1 >= 0 && r1 < N && c1 >= 0 && c1 < N && clear(r1 * N + c1)) { r1 += dr; c1 += dc; }
       if (r1 < 0 || r1 >= N || c1 < 0 || c1 >= N) continue;
       var over = r1 * N + c1;
       if (owner(b[over]) !== 3 - p || caps.indexOf(over) >= 0) continue;
