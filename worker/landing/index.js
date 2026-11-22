@@ -3,7 +3,7 @@
 // so links people already shared (a game's address) do not break.
 const APP = 'https://choganhq.github.io/chogan';
 const FILES = new Set([
-  '/icon.png', '/favicon.svg',
+  '/icon.png', '/favicon.svg', '/i18n.js',
   '/vazirmatn-variable.woff2', '/nunito-latin.woff2',
   '/OFL-Vazirmatn.txt', '/OFL-Nunito.txt', '/robots.txt', '/sitemap.xml',
   '/shots/fa-1.png', '/shots/fa-2.png', '/shots/fa-3.png', '/shots/fa-4.png', '/shots/fa-5.png', '/shots/fa-6.png',

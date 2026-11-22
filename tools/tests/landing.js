@@ -30,7 +30,7 @@ module.exports = function (T) {
 
     const pub = path.join(dir, 'public');
     const html = fs.readFileSync(path.join(pub, 'index.html'), 'utf8');
-    const FILES = [...fs.readFileSync(path.join(dir, 'index.js'), 'utf8').matchAll(/'(\/[^']+\.(?:png|svg|woff2|txt|xml))'/g)].map((m) => m[1]);
+    const FILES = [...fs.readFileSync(path.join(dir, 'index.js'), 'utf8').matchAll(/'(\/[^']+\.(?:png|svg|woff2|txt|xml|js))'/g)].map((m) => m[1]);
     ok(FILES.length >= 10 && FILES.every((f) => fs.existsSync(path.join(pub, f))), 'every file the Worker lists exists in public/ (' + FILES.length + ')');
     const refs = [...html.matchAll(/(?:src|href)="(\/[^"]+)"/g)].map((m) => m[1]);
     ok(refs.length > 0 && refs.every((f) => FILES.includes(f)), 'every local file the page uses is one the Worker serves');
@@ -50,6 +50,19 @@ module.exports = function (T) {
       'the page shows six screenshots in each language');
     ok(/class="badge" href="https:\/\/t\.me\/chogangamebot"/.test(html), 'the top buttons include the Telegram Mini App');
     ok(/data-l="fa">مینی‌اپ تلگرام</.test(html) && /data-l="fa">گیت‌هاب</.test(html), 'the Persian link labels are written in Persian');
+    // #1031: the page speaks every language the app has; the English spans are keys into /i18n.js
+    const appLangs = (T.fs.readFileSync(T.path.join(T.ROOT, 'www/lib/chogan.js'), 'utf8').match(/\{ code: '([a-z]{2})', label/g) || []).map(x => x.slice(9, 11));
+    const pageLangs = (/var LOC = \[(.*?)\];/s.exec(html) || ['', ''])[1].match(/\['([a-z]{2})'/g) || [];
+    ok(appLangs.length >= 9 && JSON.stringify(pageLangs.map(x => x.slice(2, 4))) === JSON.stringify(appLangs), 'the page offers exactly the app languages: ' + appLangs.join(','));
+    const i18n = {};
+    new Function('window', T.fs.readFileSync(T.path.join(T.ROOT, 'worker/landing/public/i18n.js'), 'utf8'))(i18n);
+    const keys = [...html.matchAll(/data-l="en">([^<]+)</g)].map(m => m[1]).filter(k => !['Chogan', 'Google Play', 'F-Droid', 'GitHub'].includes(k));
+    ok(keys.length >= 20, 'the page has English source texts to translate');
+    for (const l of appLangs.filter(x => x !== 'fa' && x !== 'en')) {
+      const d = (i18n.I18N || {})[l] || {};
+      const missing = [...keys, 'title', 'Light', 'Dark'].filter(k => !d[k]);
+      ok(missing.length === 0, 'i18n.js covers every text in ' + l + (missing.length ? ', missing: ' + missing.slice(0, 3).join(' | ') : ''));
+    }
     const cfg = fs.readFileSync(path.join(dir, 'wrangler.jsonc'), 'utf8');
     ok(/"name":\s*"playchogan-redirect"/.test(cfg) && !/"routes"/.test(cfg.replace(/\/\/.*$/gm, '')), 'the Worker keeps its name, so its existing routes stay bound');
   }
