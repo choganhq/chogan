@@ -1,0 +1,972 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>رنگارنگ — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  /* cards grow with the game area (#359) */
+  .hu-wrap { --cw: clamp(44px, min(14cqw, (100cqh - 330px) / 2.6), 104px); margin-block: auto; width: 100%; max-width: max(560px, calc(var(--cw) * 8)); display: flex; flex-direction: column; align-items: center; gap: var(--s-3); }
+  /* a phone on its side left the hand below the fold (844x390): the table goes left, the hand right */
+  @container game (min-aspect-ratio: 4 / 3) and (max-height: 560px) {
+    .hu-wrap { --cw: clamp(44px, min(8.5cqw, (100cqh - 200px) / 1.5), 96px); max-width: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+      grid-template-areas: 'top hand' 'bots hand' 'table hand' 'status hand' 'acts hand'; align-items: center; justify-items: center; column-gap: var(--s-4); row-gap: var(--s-2); }
+    .hu-top { grid-area: top; } .hu-bots { grid-area: bots; } .hu-table { grid-area: table; margin-bottom: 20px; } .hu-status { grid-area: status; }
+    .hu-actions { grid-area: acts; } .hu-hand { grid-area: hand; align-self: center; }
+  }
+  .hu-probe { position: absolute; width: var(--cw); height: 0; visibility: hidden; pointer-events: none; }
+  .hu-top { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; align-items: center; }
+  .hu-bots { width: 100%; display: flex; gap: var(--s-2); justify-content: center; }
+  .hu-bot { flex: 1; max-width: 200px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 8px;
+    background: var(--c-surface); border-radius: var(--r-md); box-shadow: var(--sh-1); border: 2px solid transparent; font-size: var(--fs-sm); font-weight: 700; color: var(--c-text-dim); }
+  .hu-bot--on { border-color: var(--game); }
+  .hu-fan { direction: ltr; display: flex; height: 26px; align-items: center; }
+  .hu-fan .ch-pback { width: 16px; border-width: 1px; border-radius: 3px; margin-inline-start: -10px; box-shadow: none; }
+  .hu-fan .ch-pback:first-child { margin-inline-start: 0; }
+  .hu-count { font-size: var(--fs-xs, 12px); }
+  .hu-last { font-size: var(--fs-xs, 12px); }
+  /* the table is a physical thing: the deck on the left, the discard on the right */
+  .hu-table { direction: ltr; display: flex; align-items: center; justify-content: center; gap: var(--s-4); margin-bottom: 14px; }
+  .hu-stock { position: relative; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 8px; }
+  .hu-stock .ch-pback { width: var(--cw); box-shadow: 2px 2px 0 -1px #FBF5E6, 3px 3px 0 -1px var(--c-line), 4px 4px 0 -1px #FBF5E6; }
+  .hu-stock:disabled { cursor: default; }
+  .hu-stock--hint .ch-pback { outline: 3px solid var(--game); outline-offset: 3px; }
+  .hu-left { position: absolute; bottom: -20px; left: 0; right: 0; text-align: center; font-size: var(--fs-xs, 12px); font-weight: 700; color: var(--c-text-dim); }
+  .hu-pile { position: relative; width: var(--cw); aspect-ratio: 5 / 7; }
+  .hu-pile .hu-card { position: absolute; top: 0; left: 0; cursor: default; }
+  .hu-now { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 56px; font-size: var(--fs-xs, 12px); font-weight: 700; color: var(--c-text-dim); }
+  .hu-now svg { width: calc(var(--cw) * .55); height: calc(var(--cw) * .55); }
+  .hu-now--new svg { animation: hu-pop 360ms var(--ease-back); }
+  .hu-dir { width: 22px; height: 22px; color: var(--c-text-dim); }
+  .hu-dir--back { transform: scaleX(-1); }
+  @keyframes hu-pop { from { transform: scale(.4); opacity: 0; } }
+  .hu-status { min-height: 1.5em; font-weight: 700; font-size: var(--fs-sm); color: var(--c-text-dim); text-align: center; }
+  /* a card is drawn by the game, not by the core's French deck: its own colours, each with a shape */
+  .hu-card { --pw: var(--cw); position: relative; display: block; flex: 0 0 auto; width: var(--pw); aspect-ratio: 5 / 7; padding: 0; border: 0; background: none;
+    border-radius: calc(var(--pw) * .12); box-shadow: var(--sh-1); cursor: pointer; touch-action: manipulation; }
+  .hu-card svg { display: block; width: 100%; height: 100%; pointer-events: none; }
+  /* a big hand wraps into overlapping rows, so every card keeps a strip wide enough for a finger */
+  .hu-hand { direction: ltr; width: 100%; display: flex; flex-direction: column; align-items: center; min-height: calc(var(--cw) * 1.4 + 12px); padding-top: 12px; }
+  .hu-row { display: flex; justify-content: center; }
+  /* a covered row keeps about 44px a card even under a raised playable card (was 36px at -0.7) */
+  .hu-row + .hu-row { margin-top: calc(var(--cw) * -0.35); }
+  .hu-hand .hu-card { transition: transform var(--t-fast) var(--ease); }
+  .hu-hand .hu-ok { transform: translateY(-10px); box-shadow: var(--sh-2), 0 0 0 2px var(--game); }
+  /* a dim veil, not opacity: a see-through card would show the row under it */
+  .hu-hand .hu-no { cursor: default; }
+  .hu-hand .hu-no::after { content: ''; position: absolute; top: 0; right: 0; bottom: 0; left: 0; border-radius: inherit; background: rgba(20, 16, 28, .34); pointer-events: none; }
+  .hu-hand .hu-kf { outline: 3px solid var(--game); outline-offset: 2px; }
+  .hu-actions { display: flex; gap: var(--s-2); justify-content: center; min-height: 44px; }
+  .hu-pick { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--s-2); }
+  .hu-pick button { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 64px; border: 0; border-radius: var(--r-md); font: inherit; font-weight: 800; font-size: var(--fs-md, 17px); cursor: pointer; }
+  .hu-pick svg { width: 26px; height: 26px; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function HuesEngineFactory() {
+  'use strict';
+
+  // 108 cards, each a number 0..107 so a save can be checked card by card. Colour k
+  // (0..3) owns ids k*25 .. k*25+24: one 0, two of each 1..9, two skips, two reverses
+  // and two draw-twos. 100..103 are wilds, 104..107 wild draw-fours.
+  var SKIP = 10, REV = 11, TWO = 12, WILD = 13, FOUR = 14, SIZE = 108, PER = 7, TARGET = 200;
+  function colour(c) { return c < 100 ? Math.floor(c / 25) : -1; }
+  function value(c) {
+    if (c >= 104) return FOUR;
+    if (c >= 100) return WILD;
+    var i = c % 25;
+    if (i === 0) return 0;
+    if (i <= 18) return 1 + ((i - 1) >> 1);
+    return i <= 20 ? SKIP : i <= 22 ? REV : TWO;
+  }
+  function isWild(c) { return c >= 100; }
+  function isAction(c) { return value(c) >= SKIP; }
+
+  function shuffle(a, rnd) {
+    for (var j = a.length - 1; j > 0; j--) { var k = Math.floor(rnd() * (j + 1)), t = a[j]; a[j] = a[k]; a[k] = t; }
+    return a;
+  }
+
+  // Seven cards each. The starter is a number card: an action or wild turned up goes
+  // back into the middle of the deck, so nobody is hit before anyone has played.
+  function newRound(rnd, n, first) {
+    var d = [];
+    for (var i = 0; i < SIZE; i++) d.push(i);
+    shuffle(d, rnd);
+    var R = { n: n, hands: [], stock: [], discard: [], colour: 0, turn: first || 0, dir: 1, drawn: -1, passes: 0, winner: -1, blocked: false, fx: null };
+    for (var p = 0; p < n; p++) R.hands.push(d.splice(0, PER));
+    var guard = 0;
+    while (isAction(d[d.length - 1]) && guard++ < 200) d.splice(Math.floor(d.length / 2), 0, d.pop());
+    if (isAction(d[d.length - 1])) {
+      for (var q = d.length - 1; q >= 0; q--) if (!isAction(d[q])) { var t = d[q]; d[q] = d[d.length - 1]; d[d.length - 1] = t; break; }
+    }
+    R.discard.push(d.pop());
+    R.colour = colour(R.discard[0]);
+    R.stock = d;
+    return R;
+  }
+
+  function top(R) { return R.discard[R.discard.length - 1]; }
+  // a wild goes on anything; otherwise match the colour in play or the top card's symbol
+  function canPlay(R, c) { return isWild(c) || colour(c) === R.colour || value(c) === value(top(R)); }
+  function legal(R, p) {
+    var out = [], h = R.hands[p];
+    for (var i = 0; i < h.length; i++) if (canPlay(R, h[i])) out.push(h[i]);
+    // after drawing, only the drawn card may be played
+    if (R.drawn >= 0) out = out.indexOf(R.drawn) >= 0 ? [R.drawn] : [];
+    return out;
+  }
+
+  function next(R) { R.turn = (R.turn + R.dir + R.n) % R.n; R.drawn = -1; }
+
+  // An empty deck is made again from the discards under the top card
+  function drawOne(R, rnd) {
+    if (!R.stock.length && R.discard.length > 1) {
+      var keep = R.discard.pop();
+      R.stock = shuffle(R.discard, rnd || Math.random);
+      R.discard = [keep];
+    }
+    return R.stock.length ? R.stock.pop() : -1;
+  }
+
+  // Play card c; a wild names `chosen` (0..3). The effect lands at once: a skip passes
+  // over the next player, a reverse turns the table (with two players it is a skip), a
+  // draw-two or wild draw-four hands the next player cards and passes over them.
+  // R.fx says what happened, for the page's message. Returns false if not allowed.
+  function play(R, c, chosen, rnd) {
+    if (R.winner >= 0) return false;
+    var p = R.turn, h = R.hands[p], i = h.indexOf(c);
+    if (i < 0 || legal(R, p).indexOf(c) < 0) return false;
+    h.splice(i, 1);
+    R.discard.push(c);
+    R.colour = isWild(c) ? (chosen >= 0 && chosen < 4 ? chosen : 0) : colour(c);
+    R.passes = 0;
+    R.fx = null;
+    var v = value(c), out = !h.length;
+    if (v === SKIP || (v === REV && R.n === 2)) { next(R); R.fx = { skip: R.turn }; next(R); }
+    else if (v === REV) { R.dir = -R.dir; R.fx = { rev: true }; next(R); }
+    else if (v === TWO || v === FOUR) {
+      next(R);
+      // the last card still hands out its cards: they count in the round's score
+      var got = [];
+      for (var k = 0; k < (v === TWO ? 2 : 4); k++) { var d = drawOne(R, rnd); if (d < 0) break; R.hands[R.turn].push(d); got.push(d); }
+      R.fx = { hit: R.turn, got: got };
+      next(R);
+    } else next(R);
+    if (out) { R.winner = p; R.turn = p; }
+    return true;
+  }
+
+  // One draw a turn, and only when nothing in the hand fits. Returns the card or -1.
+  function draw(R, rnd) {
+    if (R.winner >= 0 || R.drawn >= 0 || legal(R, R.turn).length) return -1;
+    var c = drawOne(R, rnd);
+    if (c < 0) return -1;
+    R.hands[R.turn].push(c);
+    R.drawn = c;
+    R.fx = null;
+    return c;
+  }
+
+  // Passing is allowed after a draw that can't be played, or with nothing to draw and
+  // nothing to play. When everyone passes with nothing to draw the round is blocked,
+  // and the lowest hand wins it.
+  function canPass(R) {
+    if (R.winner >= 0) return false;
+    if (R.drawn >= 0) return true;
+    return !legal(R, R.turn).length && !R.stock.length && R.discard.length <= 1;
+  }
+  function pass(R) {
+    if (!canPass(R)) return false;
+    if (R.drawn >= 0) R.passes = 0; else R.passes++;
+    R.fx = null;
+    if (R.passes >= R.n) {
+      R.blocked = true;
+      var best = 0;
+      for (var p = 1; p < R.n; p++) if (handPoints(R.hands[p]) < handPoints(R.hands[best])) best = p;
+      R.winner = best;
+      return true;
+    }
+    next(R);
+    return true;
+  }
+
+  // Points left in a hand: a number its value, skip/reverse/draw-two 20, a wild 50
+  function cardPoints(c) { var v = value(c); return v >= WILD ? 50 : v >= SKIP ? 20 : v; }
+  function handPoints(h) { var s = 0; for (var i = 0; i < h.length; i++) s += cardPoints(h[i]); return s; }
+  function roundPoints(R) {
+    var s = 0;
+    for (var p = 0; p < R.n; p++) if (p !== R.winner) s += handPoints(R.hands[p]);
+    return s;
+  }
+
+  // The colour to name with a wild: the one held most, wilds not counted
+  function bestColour(h) {
+    var n = [0, 0, 0, 0];
+    for (var i = 0; i < h.length; i++) if (!isWild(h[i])) n[colour(h[i])]++;
+    var b = 0;
+    for (var s = 1; s < 4; s++) if (n[s] > n[b]) b = s;
+    return b;
+  }
+
+  // What a draw tells the table: the player could not follow the colour in play
+  function noteShort(R, p, s) { if (!R.short) R.short = []; R.short[p] = s; }
+
+  // Bots. Easy plays any legal card at random and names a random colour. Medium keeps
+  // its wilds for when nothing else goes, plays the card worth most in the colour it
+  // holds most, and names its own best colour. Hard does the same and, when the next
+  // player is down to one or two cards, hits them: a skip, draw-two or reverse first,
+  // a wild draw-four if that is all, and a colour that player could not follow.
+  function botMove(R, level, rnd) {
+    rnd = rnd || Math.random;
+    var p = R.turn, h = R.hands[p], L = legal(R, p);
+    if (!L.length) return R.drawn >= 0 || canPass(R) ? { pass: true } : { draw: true };
+    if (level === 'easy') {
+      var c0 = L[Math.floor(rnd() * L.length)];
+      return { play: c0, colour: isWild(c0) ? Math.floor(rnd() * 4) : -1 };
+    }
+    var cnt = [0, 0, 0, 0];
+    h.forEach(function (c) { if (!isWild(c)) cnt[colour(c)]++; });
+    var nx = (p + R.dir + R.n) % R.n, danger = level === 'hard' && R.hands[nx].length <= 2;
+    var miss = R.short && R.short[nx] >= 0 ? R.short[nx] : -1;
+    var plain = L.filter(function (c) { return !isWild(c); });
+    var score = function (c) {
+      var v = value(c), s = cardPoints(c) + cnt[colour(c)] * 3;
+      if (danger && (v === SKIP || v === TWO || v === REV)) s += 60;
+      if (danger && miss === colour(c)) s += 30;
+      return s;
+    };
+    plain.sort(function (a, b) { return score(b) - score(a) || a - b; });
+    var four = L.filter(function (c) { return value(c) === FOUR; });
+    var wild = L.filter(function (c) { return value(c) === WILD; });
+    var hit = plain.length && danger && score(plain[0]) >= 60;
+    var pick;
+    if (danger && !hit && four.length) pick = four[0];
+    else if (plain.length) return { play: plain[0], colour: -1 };
+    else pick = wild.length ? wild[0] : four[0];
+    var rest = h.filter(function (c) { return c !== pick; }), s = bestColour(rest);
+    if (danger && miss >= 0 && cnt[miss] > 0) s = miss;
+    return { play: pick, colour: s };
+  }
+
+  function validRound(v) {
+    if (!v || !(v.n >= 2 && v.n <= 4) || !Array.isArray(v.hands) || v.hands.length !== v.n || !Array.isArray(v.stock) || !Array.isArray(v.discard) || !v.discard.length) return false;
+    var seen = {}, n = 0, ok = true;
+    var add = function (c) { if (typeof c !== 'number' || c < 0 || c >= SIZE || c !== Math.floor(c) || seen[c]) ok = false; seen[c] = 1; n++; };
+    v.hands.forEach(function (h) { if (!Array.isArray(h)) ok = false; else h.forEach(add); });
+    v.stock.forEach(add); v.discard.forEach(add);
+    if (!ok || n !== SIZE || !(v.turn >= 0 && v.turn < v.n) || !(v.colour >= 0 && v.colour < 4) || (v.dir !== 1 && v.dir !== -1)) return false;
+    return v.drawn === -1 || (v.hands[v.turn] && v.hands[v.turn].indexOf(v.drawn) >= 0);
+  }
+
+  return {
+    SKIP: SKIP, REV: REV, TWO: TWO, WILD: WILD, FOUR: FOUR, SIZE: SIZE, PER: PER, TARGET: TARGET,
+    colour: colour, value: value, isWild: isWild, isAction: isAction,
+    newRound: newRound, top: top, canPlay: canPlay, legal: legal, play: play, draw: draw,
+    canPass: canPass, pass: pass, cardPoints: cardPoints, handPoints: handPoints, roundPoints: roundPoints,
+    bestColour: bestColour, noteShort: noteShort, botMove: botMove, validRound: validRound
+  };
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = HuesEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = HuesEngineFactory();
+  var LEVELS = ['easy', 'medium', 'hard'];
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'hues',
+    name: { fa: 'رنگارنگ', en: 'Hues', zh: '彩色牌', de: 'Farbenspiel', es: 'Matices', pl: 'Barwy', fr: 'Nuances', ar: 'ألوان', hi: 'रंगारंग', ru: 'Оттенки' },
+    accent: '#9F0CFF',
+    mood: 'menu',
+    cardSpeed: true,
+    scroll: true,
+    strings: {
+      fa: {
+        youName: 'تو', rivalN: 'حریف {n}', cardsN: '{n} کارت', roundN: 'دست {n}', toN: 'تا {n} امتیاز', dailyHu: 'رنگارنگ روزانه',
+        yourTurn: 'نوبت تو: هم‌رنگ یا هم‌نشان بازی کن، یا همه‌رنگ', mustDraw: 'کارتی نداری؛ از دسته بردار', playDrawn: 'کارت تازه می‌نشیند؛ بازی‌اش کن یا رد کن',
+        canPlayFirst: 'کارتی داری که می‌نشیند', pickColour: 'رنگ بعدی را انتخاب کن', colourNow: 'رنگ', passTurn: 'رد کردن', thinking: '{n} فکر می‌کند…',
+        drewN: '{n} یک کارت برداشت', passedN: '{n} رد کرد', changedN: '{n} رنگ را {s} کرد', skippedN: 'نوبت {n} سوخت', reversed: 'جهت بازی برعکس شد',
+        hitN: '{n} {k} کارت برداشت', youHit: '{k} کارت برداشتی', lastOne: 'تک‌کارت!', roundWon: '{n} این دست را برد', youWonRound: 'این دست را بردی!',
+        plusPts: '+{n} امتیاز', blocked: 'دسته تمام شد و کسی نتوانست بازی کند؛ کمترین دست برد', nextRound: 'دست بعد', matchWon: 'مسابقه را بردی!', matchLost: '{n} مسابقه را برد',
+        newMatch: 'مسابقه‌ی تازه', rivals: 'حریف‌ها', level: 'سطح', optNote: 'از مسابقه‌ی بعد اعمال می‌شود.', rounds: 'دست‌ها',
+        colRed: 'قرمز', colYellow: 'زرد', colGreen: 'سبز', colBlue: 'آبی',
+        cSkip: 'بسوزان', cRev: 'برگردان', cTwo: 'دوتا بردار', cWild: 'همه‌رنگ', cFour: 'همه‌رنگ، چهارتا بردار',
+        kbCards: 'رفتن بین کارت‌ها', kbPlay: 'بازی کردن کارت', kbDraw: 'برداشتن از دسته', kbPass: 'رد کردن',
+        rules: 'کارتی بازی کن که رنگ یا نشانش با کارت روی زمین یکی باشد. هر رنگ شکل خودش را دارد (قرمز دایره، زرد مثلث، سبز مربع، آبی لوزی)، پس بی‌دیدن رنگ هم می‌شود از هم جدایشان کرد. بسوزان: نوبت نفر بعد می‌سوزد. برگردان: جهت بازی برعکس می‌شود؛ در بازی دونفره مثل بسوزان است. دوتا بردار: نفر بعد دو کارت برمی‌دارد و نوبتش می‌سوزد. همه‌رنگ روی هر کارتی می‌نشیند و رنگ بعدی را تو انتخاب می‌کنی؛ همه‌رنگِ چهارتا نفر بعد را چهار کارت هم جریمه می‌کند و نوبتش را می‌سوزاند. اگر کارتی نداشتی یکی از دسته بردار؛ اگر نشست بازی‌اش کن، وگرنه نوبت رد می‌شود. هر کس زودتر دستش خالی شود امتیاز کارت‌های بقیه را می‌گیرد: عددها همان عددشان، بسوزان و برگردان و دوتا ۲۰، همه‌رنگ‌ها ۵۰. اولین کسی که به ۲۰۰ برسد مسابقه را می‌برد.',
+        tutTitle1: 'جور کن', tutText1: 'کارتی بازی کن که رنگ یا نشانش با کارت روی زمین یکی باشد. هر رنگ شکل خودش را دارد.',
+        tutTitle2: 'کارت‌های ویژه', tutText2: 'بسوزان نوبت نفر بعد را می‌سوزاند، برگردان جهت را عوض می‌کند و دوتا بردار نفر بعد را جریمه می‌کند.',
+        tutTitle3: 'همه‌رنگ', tutText3: 'همه‌رنگ روی هر کارتی می‌نشیند و رنگ بعدی را تو انتخاب می‌کنی. هر کس زودتر دستش خالی شود امتیاز کارت‌های بقیه را می‌گیرد.'
+      },
+      en: {
+        youName: 'You', rivalN: 'Rival {n}', cardsN: '{n} cards', roundN: 'Round {n}', toN: 'To {n} points', dailyHu: 'Daily Hues',
+        yourTurn: 'Your turn: match the colour or the symbol, or play a wild', mustDraw: 'Nothing fits; draw from the deck', playDrawn: 'The new card fits; play it or pass',
+        canPlayFirst: 'You have a card that fits', pickColour: 'Choose the next colour', colourNow: 'Colour', passTurn: 'Pass', thinking: '{n} is thinking…',
+        drewN: '{n} drew a card', passedN: '{n} passed', changedN: '{n} chose {s}', skippedN: 'Skipped: {n}', reversed: 'The direction is reversed',
+        hitN: '{n} drew {k} cards', youHit: 'You drew {k} cards', lastOne: 'Last card!', roundWon: '{n} won the round', youWonRound: 'You won the round!',
+        plusPts: '+{n} points', blocked: 'The deck ran out and nobody could play; the lowest hand won', nextRound: 'Next round', matchWon: 'You won the match!', matchLost: '{n} won the match',
+        newMatch: 'New match', rivals: 'Rivals', level: 'Level', optNote: 'Applies from the next match.', rounds: 'Rounds',
+        colRed: 'Red', colYellow: 'Yellow', colGreen: 'Green', colBlue: 'Blue',
+        cSkip: 'Skip', cRev: 'Reverse', cTwo: 'Draw two', cWild: 'Wild', cFour: 'Wild draw four',
+        kbCards: 'Move between cards', kbPlay: 'Play the card', kbDraw: 'Draw from the deck', kbPass: 'Pass',
+        rules: 'Play a card that matches the top card by colour or by symbol. Each colour has its own shape (red circle, yellow triangle, green square, blue diamond), so you can tell them apart without the colour. Skip: the next player misses a turn. Reverse: the direction changes; with two players it works like a skip. Draw two: the next player draws two cards and misses a turn. A wild goes on anything and you choose the next colour; a wild draw four also makes the next player draw four and miss a turn. If nothing fits, draw one card; play it if it fits, otherwise your turn passes. The first to empty their hand scores the cards left in the others\' hands: numbers their value, skips, reverses and draw twos 20, wilds 50. The first to 200 wins the match.',
+        tutTitle1: 'Match', tutText1: 'Play a card that matches the top card by colour or by symbol. Each colour has its own shape.',
+        tutTitle2: 'Action cards', tutText2: 'Skip passes over the next player, reverse turns the table around, and draw two hands the next player two cards.',
+        tutTitle3: 'Wilds', tutText3: 'A wild goes on anything and you choose the next colour. The first to empty their hand scores the cards the others still hold.'
+      },
+      pl: {
+        youName: 'Ty', rivalN: 'Rywal {n}', cardsN: 'Karty: {n}', roundN: 'Runda {n}', toN: 'Do {n} punktów', dailyHu: 'Barwy dnia',
+        yourTurn: 'Twój ruch: dopasuj kolor lub znak albo zagraj dziką kartę', mustDraw: 'Nic nie pasuje; dobierz z talii', playDrawn: 'Nowa karta pasuje; zagraj ją lub pasuj',
+        canPlayFirst: 'Masz kartę, która pasuje', pickColour: 'Wybierz następny kolor', colourNow: 'Kolor', passTurn: 'Pas', thinking: '{n} myśli…',
+        drewN: '{n} dobiera kartę', passedN: '{n} pasuje', changedN: '{n} wybiera: {s}', skippedN: 'Traci kolejkę: {n}', reversed: 'Kierunek gry się zmienia',
+        hitN: '{n} dobiera karty: {k}', youHit: 'Dobierasz karty: {k}', lastOne: 'Ostatnia karta!', roundWon: 'Rundę wygrywa: {n}', youWonRound: 'Wygrywasz rundę!',
+        plusPts: '+{n} pkt', blocked: 'Talia się skończyła i nikt nie mógł zagrać; wygrywa najmniejsza ręka', nextRound: 'Następna runda', matchWon: 'Wygrywasz mecz!', matchLost: 'Mecz wygrywa: {n}',
+        newMatch: 'Nowy mecz', rivals: 'Rywale', level: 'Poziom', optNote: 'Obowiązuje od następnego meczu.', rounds: 'Rundy',
+        colRed: 'Czerwony', colYellow: 'Żółty', colGreen: 'Zielony', colBlue: 'Niebieski',
+        cSkip: 'Stop', cRev: 'Zmiana kierunku', cTwo: 'Weź dwie', cWild: 'Dzika karta', cFour: 'Dzika, weź cztery',
+        kbCards: 'Przechodzenie między kartami', kbPlay: 'Zagranie karty', kbDraw: 'Dobranie z talii', kbPass: 'Pas',
+        rules: 'Zagraj kartę w tym samym kolorze lub z tym samym znakiem co karta na wierzchu. Każdy kolor ma swój kształt (czerwony koło, żółty trójkąt, zielony kwadrat, niebieski romb), więc rozróżnisz je i bez koloru. Stop: następny gracz traci kolejkę. Zmiana kierunku: gra idzie w drugą stronę; przy dwóch graczach działa jak stop. Weź dwie: następny gracz dobiera dwie karty i traci kolejkę. Dzika karta pasuje do wszystkiego i wybierasz następny kolor; dzika „weź cztery” każe też następnemu dobrać cztery i traci on kolejkę. Gdy nic nie pasuje, dobierz jedną kartę; zagraj ją, jeśli pasuje, inaczej kolejka przechodzi dalej. Kto pierwszy pozbędzie się kart, dostaje punkty za karty pozostałe u innych: liczby swoją wartość, stop, zmiana kierunku i weź dwie 20, dzikie 50. Kto pierwszy dojdzie do 200, wygrywa mecz.',
+        tutTitle1: 'Dopasuj', tutText1: 'Zagraj kartę w tym samym kolorze lub z tym samym znakiem co karta na wierzchu. Każdy kolor ma swój kształt.',
+        tutTitle2: 'Karty akcji', tutText2: 'Stop pomija następnego gracza, zmiana kierunku odwraca grę, a weź dwie daje następnemu dwie karty.',
+        tutTitle3: 'Dzikie karty', tutText3: 'Dzika karta pasuje do wszystkiego i wybierasz następny kolor. Kto pierwszy pozbędzie się kart, dostaje punkty za karty innych.'
+      },
+      fr: {
+        youName: 'Toi', rivalN: 'Rival {n}', cardsN: '{n} cartes', roundN: 'Manche {n}', toN: 'En {n} points', dailyHu: 'Nuances du jour',
+        yourTurn: 'À toi : même couleur ou même symbole, ou un joker', mustDraw: 'Rien ne va ; pioche', playDrawn: 'La nouvelle carte va ; joue-la ou passe',
+        canPlayFirst: 'Tu as une carte qui va', pickColour: 'Choisis la couleur suivante', colourNow: 'Couleur', passTurn: 'Passer', thinking: '{n} réfléchit…',
+        drewN: '{n} a pioché une carte', passedN: '{n} a passé', changedN: '{n} a choisi {s}', skippedN: 'Tour passé : {n}', reversed: 'Le sens du jeu s\'inverse',
+        hitN: '{n} a pioché {k} cartes', youHit: 'Tu as pioché {k} cartes', lastOne: 'Dernière carte !', roundWon: '{n} gagne la manche', youWonRound: 'Tu gagnes la manche !',
+        plusPts: '+{n} points', blocked: 'La pioche est vide et personne ne peut jouer ; la plus petite main gagne', nextRound: 'Manche suivante', matchWon: 'Tu gagnes la partie !', matchLost: '{n} gagne la partie',
+        newMatch: 'Nouvelle partie', rivals: 'Rivaux', level: 'Niveau', optNote: 'S\'applique à la prochaine partie.', rounds: 'Manches',
+        colRed: 'Rouge', colYellow: 'Jaune', colGreen: 'Vert', colBlue: 'Bleu',
+        cSkip: 'Passe', cRev: 'Inversion', cTwo: 'Pioche deux', cWild: 'Joker', cFour: 'Joker pioche quatre',
+        kbCards: 'Passer d\'une carte à l\'autre', kbPlay: 'Jouer la carte', kbDraw: 'Piocher', kbPass: 'Passer',
+        rules: 'Joue une carte de la même couleur ou du même symbole que celle du dessus. Chaque couleur a sa forme (rouge rond, jaune triangle, vert carré, bleu losange) : on les distingue même sans voir les couleurs. Passe : le joueur suivant saute son tour. Inversion : le sens du jeu change ; à deux, elle agit comme une passe. Pioche deux : le joueur suivant pioche deux cartes et saute son tour. Un joker va sur tout et tu choisis la couleur suivante ; le joker pioche quatre fait aussi piocher quatre cartes au suivant, qui saute son tour. Si rien ne va, pioche une carte ; joue-la si elle va, sinon ton tour passe. Le premier à vider sa main marque les cartes restées chez les autres : les chiffres leur valeur, passes, inversions et pioche deux 20, jokers 50. Le premier à 200 gagne la partie.',
+        tutTitle1: 'Assortis', tutText1: 'Joue une carte de la même couleur ou du même symbole que celle du dessus. Chaque couleur a sa forme.',
+        tutTitle2: 'Cartes d\'action', tutText2: 'La passe saute le joueur suivant, l\'inversion change le sens, et la pioche deux donne deux cartes au suivant.',
+        tutTitle3: 'Jokers', tutText3: 'Un joker va sur tout et tu choisis la couleur suivante. Le premier à vider sa main marque les cartes des autres.'
+      },
+      ar: {
+        youName: 'أنت', rivalN: 'المنافس {n}', cardsN: '{n} أوراق', roundN: 'الجولة {n}', toN: 'حتى {n} نقطة', dailyHu: 'ألوان اليوم',
+        yourTurn: 'دورك: طابق اللون أو الرمز، أو العب ورقة جوكر', mustDraw: 'لا ورقة مناسبة؛ اسحب من الكومة', playDrawn: 'الورقة الجديدة تناسب؛ العبها أو مرّر',
+        canPlayFirst: 'لديك ورقة مناسبة', pickColour: 'اختر اللون التالي', colourNow: 'اللون', passTurn: 'تمرير', thinking: '{n} يفكر…',
+        drewN: '{n} سحب ورقة', passedN: '{n} مرّر', changedN: '{n} اختار {s}', skippedN: 'فقد دوره: {n}', reversed: 'انعكس اتجاه اللعب',
+        hitN: '{n} سحب {k} أوراق', youHit: 'سحبت {k} أوراق', lastOne: 'آخر ورقة!', roundWon: '{n} فاز بالجولة', youWonRound: 'فزت بالجولة!',
+        plusPts: '+{n} نقطة', blocked: 'نفدت الكومة ولم يستطع أحد اللعب؛ فازت أصغر يد', nextRound: 'الجولة التالية', matchWon: 'فزت بالمباراة!', matchLost: '{n} فاز بالمباراة',
+        newMatch: 'مباراة جديدة', rivals: 'المنافسون', level: 'المستوى', optNote: 'يطبَّق من المباراة التالية.', rounds: 'الجولات',
+        colRed: 'أحمر', colYellow: 'أصفر', colGreen: 'أخضر', colBlue: 'أزرق',
+        cSkip: 'تخطٍّ', cRev: 'عكس', cTwo: 'اسحب اثنتين', cWild: 'جوكر', cFour: 'جوكر اسحب أربعًا',
+        kbCards: 'التنقل بين الأوراق', kbPlay: 'لعب الورقة', kbDraw: 'السحب من الكومة', kbPass: 'تمرير',
+        rules: 'العب ورقة تطابق الورقة العليا في اللون أو الرمز. لكل لون شكله (الأحمر دائرة، الأصفر مثلث، الأخضر مربع، الأزرق معيّن)، فتميّزها حتى دون رؤية الألوان. التخطي: يفقد اللاعب التالي دوره. العكس: يتغير اتجاه اللعب؛ وبين لاعبين يعمل كالتخطي. اسحب اثنتين: يسحب اللاعب التالي ورقتين ويفقد دوره. الجوكر يوضع على أي ورقة وتختار اللون التالي؛ وجوكر اسحب أربعًا يجعل التالي يسحب أربع أوراق ويفقد دوره أيضًا. إن لم تناسبك ورقة فاسحب واحدة؛ العبها إن ناسبت، وإلا مرّ دورك. أول من يُنهي أوراقه يحصل على نقاط أوراق الآخرين: الأرقام بقيمتها، والتخطي والعكس واسحب اثنتين 20، والجوكر 50. أول من يبلغ 200 يفوز بالمباراة.',
+        tutTitle1: 'طابِق', tutText1: 'العب ورقة تطابق الورقة العليا في اللون أو الرمز. لكل لون شكله.',
+        tutTitle2: 'أوراق الحركة', tutText2: 'التخطي يتجاوز اللاعب التالي، والعكس يقلب الاتجاه، واسحب اثنتين تعطي التالي ورقتين.',
+        tutTitle3: 'الجوكر', tutText3: 'الجوكر يوضع على أي ورقة وتختار اللون التالي. أول من يُنهي أوراقه يحصل على نقاط أوراق الآخرين.'
+      },
+      hi: {
+        youName: 'आप', rivalN: 'प्रतिद्वंद्वी {n}', cardsN: '{n} पत्ते', roundN: 'दौर {n}', toN: '{n} अंक तक', dailyHu: 'आज का रंगारंग',
+        yourTurn: 'आपकी बारी: रंग या निशान मिलाएँ, या वाइल्ड खेलें', mustDraw: 'कोई पत्ता नहीं बैठता; गड्डी से उठाएँ', playDrawn: 'नया पत्ता बैठता है; खेलें या छोड़ें',
+        canPlayFirst: 'आपके पास बैठने वाला पत्ता है', pickColour: 'अगला रंग चुनें', colourNow: 'रंग', passTurn: 'छोड़ें', thinking: '{n} सोच रहा है…',
+        drewN: '{n} ने एक पत्ता उठाया', passedN: '{n} ने बारी छोड़ी', changedN: '{n} ने {s} चुना', skippedN: 'बारी गई: {n}', reversed: 'खेल की दिशा उलट गई',
+        hitN: '{n} ने {k} पत्ते उठाए', youHit: 'आपने {k} पत्ते उठाए', lastOne: 'आख़िरी पत्ता!', roundWon: '{n} ने दौर जीता', youWonRound: 'आपने दौर जीता!',
+        plusPts: '+{n} अंक', blocked: 'गड्डी ख़त्म और कोई खेल नहीं सका; सबसे छोटा हाथ जीता', nextRound: 'अगला दौर', matchWon: 'आपने मैच जीता!', matchLost: '{n} ने मैच जीता',
+        newMatch: 'नया मैच', rivals: 'प्रतिद्वंद्वी', level: 'स्तर', optNote: 'अगले मैच से लागू होगा.', rounds: 'दौर',
+        colRed: 'लाल', colYellow: 'पीला', colGreen: 'हरा', colBlue: 'नीला',
+        cSkip: 'स्किप', cRev: 'उलटा', cTwo: 'दो उठाओ', cWild: 'वाइल्ड', cFour: 'वाइल्ड चार उठाओ',
+        kbCards: 'पत्तों के बीच जाएँ', kbPlay: 'पत्ता खेलें', kbDraw: 'गड्डी से उठाएँ', kbPass: 'छोड़ें',
+        rules: 'ऐसा पत्ता खेलें जिसका रंग या निशान ऊपर वाले पत्ते से मिले. हर रंग का अपना आकार है (लाल गोला, पीला त्रिकोण, हरा वर्ग, नीला हीरा), इसलिए रंग देखे बिना भी पहचान सकते हैं. स्किप: अगले खिलाड़ी की बारी जाती है. उलटा: दिशा बदलती है; दो खिलाड़ियों में यह स्किप जैसा है. दो उठाओ: अगला खिलाड़ी दो पत्ते उठाता है और उसकी बारी जाती है. वाइल्ड किसी भी पत्ते पर चलता है और अगला रंग आप चुनते हैं; वाइल्ड चार उठाओ से अगला खिलाड़ी चार पत्ते भी उठाता है और उसकी बारी जाती है. कुछ न बैठे तो एक पत्ता उठाएँ; बैठे तो खेलें, वरना बारी आगे जाती है. जो सबसे पहले हाथ ख़ाली करे उसे बाक़ी हाथों के पत्तों के अंक मिलते हैं: अंक वाले पत्ते अपनी क़ीमत, स्किप, उलटा और दो उठाओ 20, वाइल्ड 50. जो पहले 200 तक पहुँचे वह मैच जीतता है.',
+        tutTitle1: 'मिलाएँ', tutText1: 'ऐसा पत्ता खेलें जिसका रंग या निशान ऊपर वाले पत्ते से मिले. हर रंग का अपना आकार है.',
+        tutTitle2: 'ख़ास पत्ते', tutText2: 'स्किप अगले खिलाड़ी को लाँघता है, उलटा दिशा बदलता है, और दो उठाओ अगले को दो पत्ते देता है.',
+        tutTitle3: 'वाइल्ड', tutText3: 'वाइल्ड किसी भी पत्ते पर चलता है और अगला रंग आप चुनते हैं. जो पहले हाथ ख़ाली करे उसे बाक़ी पत्तों के अंक मिलते हैं.'
+      },
+      ru: {
+        youName: 'Вы', rivalN: 'Соперник {n}', cardsN: 'Карт: {n}', roundN: 'Раунд {n}', toN: 'До {n} очков', dailyHu: 'Оттенки дня',
+        yourTurn: 'Ваш ход: тот же цвет или знак, или дикая карта', mustDraw: 'Ничего не подходит; возьмите из колоды', playDrawn: 'Новая карта подходит; сыграйте её или пасуйте',
+        canPlayFirst: 'У вас есть подходящая карта', pickColour: 'Выберите следующий цвет', colourNow: 'Цвет', passTurn: 'Пас', thinking: '{n} думает…',
+        drewN: '{n} берёт карту', passedN: '{n} пасует', changedN: '{n} выбирает: {s}', skippedN: 'Пропускает ход: {n}', reversed: 'Направление игры сменилось',
+        hitN: '{n} берёт карт: {k}', youHit: 'Вы берёте карт: {k}', lastOne: 'Последняя карта!', roundWon: 'Раунд выиграл: {n}', youWonRound: 'Вы выиграли раунд!',
+        plusPts: '+{n} очков', blocked: 'Колода кончилась, и никто не может ходить; побеждает наименьшая рука', nextRound: 'Следующий раунд', matchWon: 'Вы выиграли матч!', matchLost: 'Матч выиграл: {n}',
+        newMatch: 'Новый матч', rivals: 'Соперники', level: 'Уровень', optNote: 'Действует со следующего матча.', rounds: 'Раунды',
+        colRed: 'Красный', colYellow: 'Жёлтый', colGreen: 'Зелёный', colBlue: 'Синий',
+        cSkip: 'Пропуск', cRev: 'Разворот', cTwo: 'Возьми две', cWild: 'Дикая', cFour: 'Дикая, возьми четыре',
+        kbCards: 'Переход между картами', kbPlay: 'Сыграть карту', kbDraw: 'Взять из колоды', kbPass: 'Пас',
+        rules: 'Сыграйте карту того же цвета или с тем же знаком, что и верхняя. У каждого цвета своя фигура (красный круг, жёлтый треугольник, зелёный квадрат, синий ромб), так что их можно различить и без цвета. Пропуск: следующий игрок пропускает ход. Разворот: направление игры меняется; вдвоём он действует как пропуск. Возьми две: следующий берёт две карты и пропускает ход. Дикая карта кладётся на любую, и вы выбираете следующий цвет; дикая «возьми четыре» ещё и заставляет следующего взять четыре карты и пропустить ход. Если ничего не подходит, возьмите одну карту; сыграйте её, если подходит, иначе ход переходит дальше. Кто первым избавится от карт, получает очки за карты у других: числа по номиналу, пропуск, разворот и возьми две по 20, дикие по 50. Кто первым наберёт 200, выигрывает матч.',
+        tutTitle1: 'Подбирайте', tutText1: 'Сыграйте карту того же цвета или с тем же знаком, что и верхняя. У каждого цвета своя фигура.',
+        tutTitle2: 'Карты действий', tutText2: 'Пропуск перескакивает следующего, разворот меняет направление, а «возьми две» даёт следующему две карты.',
+        tutTitle3: 'Дикие карты', tutText3: 'Дикая карта кладётся на любую, и вы выбираете следующий цвет. Кто первым избавится от карт, получает очки за карты других.'
+      },
+      zh: {
+        youName: '你', rivalN: '对手 {n}', cardsN: '{n} 张', roundN: '第 {n} 局', toN: '先到 {n} 分', dailyHu: '每日彩色牌',
+        yourTurn: '轮到你：跟颜色或符号，或者出万能牌', mustDraw: '没有能出的牌，从牌堆摸一张', playDrawn: '新摸的牌能出；出掉或者跳过',
+        canPlayFirst: '你有能出的牌', pickColour: '选择下一个颜色', colourNow: '颜色', passTurn: '跳过', thinking: '{n} 正在思考…',
+        drewN: '{n} 摸了一张牌', passedN: '{n} 跳过', changedN: '{n} 选了{s}', skippedN: '{n} 被跳过', reversed: '出牌方向反转',
+        hitN: '{n} 摸了 {k} 张', youHit: '你摸了 {k} 张', lastOne: '最后一张！', roundWon: '{n} 赢了这一局', youWonRound: '你赢了这一局！',
+        plusPts: '+{n} 分', blocked: '牌堆用完且无人能出，手牌分最少者获胜', nextRound: '下一局', matchWon: '你赢了比赛！', matchLost: '{n} 赢了比赛',
+        newMatch: '新比赛', rivals: '对手', level: '难度', optNote: '从下一场比赛开始生效。', rounds: '局数',
+        colRed: '红', colYellow: '黄', colGreen: '绿', colBlue: '蓝',
+        cSkip: '跳过牌', cRev: '反转', cTwo: '摸二', cWild: '万能牌', cFour: '万能摸四',
+        kbCards: '在手牌间移动', kbPlay: '出这张牌', kbDraw: '从牌堆摸牌', kbPass: '跳过',
+        rules: '出一张与桌面牌颜色或符号相同的牌。每种颜色都有自己的形状（红色圆形、黄色三角、绿色方形、蓝色菱形），不看颜色也能分辨。跳过牌：下家失去一轮。反转：出牌方向改变；两人对局时等于跳过。摸二：下家摸两张并失去一轮。万能牌可以压任何牌，由你指定下一个颜色；万能摸四还让下家摸四张并失去一轮。没有能出的牌就摸一张；能出就出，不能出就轮到下家。先出完手牌的人得到其他人手中剩余牌的分数：数字牌按点数，跳过、反转、摸二各20，万能牌50。先到200分的人赢得比赛。',
+        tutTitle1: '配对', tutText1: '出一张与桌面牌颜色或符号相同的牌。每种颜色都有自己的形状。',
+        tutTitle2: '功能牌', tutText2: '跳过牌越过下家，反转改变方向，摸二让下家摸两张。',
+        tutTitle3: '万能牌', tutText3: '万能牌可以压任何牌，由你指定下一个颜色。先出完的人得到其他人手中牌的分数。'
+      },
+      de: {
+        youName: 'Du', rivalN: 'Gegner {n}', cardsN: '{n} Karten', roundN: 'Runde {n}', toN: 'Bis {n} Punkte', dailyHu: 'Tägliches Farbenspiel',
+        yourTurn: 'Du bist dran: gleiche Farbe oder gleiches Zeichen, oder ein Joker', mustDraw: 'Nichts passt; zieh vom Stapel', playDrawn: 'Die neue Karte passt; spiel sie oder pass',
+        canPlayFirst: 'Du hast eine passende Karte', pickColour: 'Wähle die nächste Farbe', colourNow: 'Farbe', passTurn: 'Passen', thinking: 'Am Zug: {n}…',
+        drewN: 'Karte gezogen: {n}', passedN: 'Gepasst: {n}', changedN: 'Neue Farbe {s} von {n}', skippedN: 'Ausgesetzt: {n}', reversed: 'Die Richtung wechselt',
+        hitN: 'Karten gezogen ({k}): {n}', youHit: 'Du ziehst {k} Karten', lastOne: 'Letzte Karte!', roundWon: 'Rundensieg: {n}', youWonRound: 'Du gewinnst die Runde!',
+        plusPts: '+{n} Punkte', blocked: 'Der Stapel ist leer und keiner kann spielen; die kleinste Hand gewinnt', nextRound: 'Nächste Runde', matchWon: 'Du gewinnst das Match!', matchLost: 'Matchsieg: {n}',
+        newMatch: 'Neues Match', rivals: 'Gegner', level: 'Stufe', optNote: 'Gilt ab dem nächsten Match.', rounds: 'Runden',
+        colRed: 'Rot', colYellow: 'Gelb', colGreen: 'Grün', colBlue: 'Blau',
+        cSkip: 'Aussetzen', cRev: 'Richtungswechsel', cTwo: 'Zieh zwei', cWild: 'Joker', cFour: 'Joker, zieh vier',
+        kbCards: 'Zwischen Karten wechseln', kbPlay: 'Karte spielen', kbDraw: 'Vom Stapel ziehen', kbPass: 'Passen',
+        rules: 'Spiel eine Karte, die zur obersten Karte in Farbe oder Zeichen passt. Jede Farbe hat ihre Form (Rot Kreis, Gelb Dreieck, Grün Quadrat, Blau Raute), so erkennst du sie auch ohne Farbe. Aussetzen: der Nächste setzt aus. Richtungswechsel: die Richtung dreht sich; zu zweit wirkt er wie Aussetzen. Zieh zwei: der Nächste zieht zwei Karten und setzt aus. Ein Joker geht auf alles, und du wählst die nächste Farbe; der Joker „zieh vier“ lässt den Nächsten außerdem vier Karten ziehen und aussetzen. Passt nichts, ziehst du eine Karte; passt sie, spielst du sie, sonst ist dein Zug vorbei. Wer zuerst keine Karten mehr hat, bekommt die Punkte der Karten der anderen: Zahlen ihren Wert, Aussetzen, Richtungswechsel und Zieh zwei 20, Joker 50. Wer zuerst 200 hat, gewinnt das Match.',
+        tutTitle1: 'Bedienen', tutText1: 'Spiel eine Karte mit gleicher Farbe oder gleichem Zeichen wie die oberste. Jede Farbe hat ihre Form.',
+        tutTitle2: 'Aktionskarten', tutText2: 'Aussetzen überspringt den Nächsten, Richtungswechsel dreht die Runde, Zieh zwei gibt dem Nächsten zwei Karten.',
+        tutTitle3: 'Joker', tutText3: 'Ein Joker geht auf alles, und du wählst die nächste Farbe. Wer zuerst fertig ist, bekommt die Punkte der Karten der anderen.'
+      },
+      es: {
+        youName: 'Tú', rivalN: 'Rival {n}', cardsN: '{n} cartas', roundN: 'Ronda {n}', toN: 'A {n} puntos', dailyHu: 'Matices diario',
+        yourTurn: 'Tu turno: mismo color o mismo símbolo, o un comodín', mustDraw: 'No tienes jugada; roba del mazo', playDrawn: 'La carta nueva sirve; juégala o pasa',
+        canPlayFirst: 'Tienes una carta que sirve', pickColour: 'Elige el siguiente color', colourNow: 'Color', passTurn: 'Pasar', thinking: '{n} está pensando…',
+        drewN: '{n} robó una carta', passedN: '{n} pasó', changedN: '{n} eligió {s}', skippedN: 'Turno perdido: {n}', reversed: 'Cambia el sentido',
+        hitN: '{n} robó {k} cartas', youHit: 'Robaste {k} cartas', lastOne: '¡Última carta!', roundWon: '{n} ganó la ronda', youWonRound: '¡Ganaste la ronda!',
+        plusPts: '+{n} puntos', blocked: 'Se acabó el mazo y nadie podía jugar; ganó la mano más baja', nextRound: 'Siguiente ronda', matchWon: '¡Ganaste la partida!', matchLost: '{n} ganó la partida',
+        newMatch: 'Nueva partida', rivals: 'Rivales', level: 'Nivel', optNote: 'Se aplica desde la próxima partida.', rounds: 'Rondas',
+        colRed: 'Rojo', colYellow: 'Amarillo', colGreen: 'Verde', colBlue: 'Azul',
+        cSkip: 'Salto', cRev: 'Cambio de sentido', cTwo: 'Roba dos', cWild: 'Comodín', cFour: 'Comodín roba cuatro',
+        kbCards: 'Moverse entre cartas', kbPlay: 'Jugar la carta', kbDraw: 'Robar del mazo', kbPass: 'Pasar',
+        rules: 'Juega una carta del mismo color o del mismo símbolo que la de arriba. Cada color tiene su forma (rojo círculo, amarillo triángulo, verde cuadrado, azul rombo), así se distinguen aun sin ver el color. Salto: el siguiente pierde el turno. Cambio de sentido: el juego va al revés; con dos jugadores funciona como un salto. Roba dos: el siguiente roba dos cartas y pierde el turno. Un comodín va sobre cualquier carta y eliges el siguiente color; el comodín roba cuatro además hace robar cuatro al siguiente, que pierde el turno. Si no tienes jugada, roba una carta; juégala si sirve, si no, pasa tu turno. Quien se queda primero sin cartas suma las cartas de los demás: los números su valor, saltos, cambios de sentido y roba dos 20, comodines 50. Quien llega primero a 200 gana la partida.',
+        tutTitle1: 'Empareja', tutText1: 'Juega una carta del mismo color o del mismo símbolo que la de arriba. Cada color tiene su forma.',
+        tutTitle2: 'Cartas de acción', tutText2: 'El salto se salta al siguiente, el cambio de sentido da la vuelta al juego y roba dos le da dos cartas al siguiente.',
+        tutTitle3: 'Comodines', tutText3: 'Un comodín va sobre cualquier carta y eliges el siguiente color. Quien termina primero suma las cartas de los demás.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', { rivals: 2, level: 'medium' });
+  if (!(prefs.rivals >= 1 && prefs.rivals <= 3)) prefs.rivals = 2;
+  if (LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+
+  // The game's own card colours, not theme tokens: a card is a printed thing and looks
+  // the same in both themes. Each colour has its own shape for colour-blind players, and
+  // yellow takes dark ink because white on yellow cannot be read.
+  var COL = [
+    { body: '#D62839', ink: '#A51626', on: '#FFFFFF', name: 'colRed', shape: 'circle' },
+    { body: '#F2B705', ink: '#7A5600', on: '#2B2000', name: 'colYellow', shape: 'triangle' },
+    { body: '#11804B', ink: '#0B5E37', on: '#FFFFFF', name: 'colGreen', shape: 'square' },
+    { body: '#2B63D9', ink: '#1C47A6', on: '#FFFFFF', name: 'colBlue', shape: 'diamond' }
+  ];
+  var WILD_BODY = '#24212B';
+
+  var BOT_MS = 750, DEAL_MS = 45, STRIP = 44;
+  var M = null, botTimer = null, kf = -1, msg = '', colourFresh = false, pausedAt = 0, botRnd = Math.random, handNodes = [];
+
+  var top = el('div', { class: 'hu-top' });
+  var bots = el('div', { class: 'hu-bots' });
+  var stockBtn = el('button', { class: 'hu-stock', type: 'button', 'aria-label': C.t('kbDraw') });
+  var pile = el('div', { class: 'hu-pile' });
+  var nowBox = el('div', { class: 'hu-now' });
+  var table = el('div', { class: 'hu-table' }, [stockBtn, pile, nowBox]);
+  var status = el('div', { class: 'hu-status', role: 'status', 'aria-live': 'polite' });
+  var hand = el('div', { class: 'hu-hand' });
+  var actions = el('div', { class: 'hu-actions' });
+  var probe = el('div', { class: 'hu-probe', 'aria-hidden': 'true' });
+  var wrap = el('div', { class: 'hu-wrap' }, [probe, top, bots, table, status, hand, actions]);
+  stockBtn.addEventListener('click', function () { humanDraw(); });
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  function pname(p) { return p === 0 ? C.t('youName') : C.t('rivalN', { n: C.num(p) }); }
+  function colourName(s) { return C.t(COL[s].name); }
+  function human() { return M && M.R && M.R.turn === 0 && M.R.winner < 0; }
+
+  /* ------------------------------------------------------------ cards */
+
+  // the shape belongs to the colour, so a colour-blind player tells the cards apart by it
+  function shape(k, cx, cy, r, fill) {
+    var f = '" fill="' + fill + '"/>', sh = COL[k].shape;
+    if (sh === 'circle') return '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + f;
+    if (sh === 'triangle') return '<path d="M' + cx + ' ' + (cy - r) + ' L' + (cx + r) + ' ' + (cy + r * 0.8) + ' L' + (cx - r) + ' ' + (cy + r * 0.8) + 'Z' + f;
+    if (sh === 'square') return '<rect x="' + (cx - r * 0.82) + '" y="' + (cy - r * 0.82) + '" width="' + (r * 1.64) + '" height="' + (r * 1.64) + f;
+    return '<path d="M' + cx + ' ' + (cy - r * 1.1) + ' L' + (cx + r) + ' ' + cy + ' L' + cx + ' ' + (cy + r * 1.1) + ' L' + (cx - r) + ' ' + cy + 'Z' + f;
+  }
+  function label(v) { return v === E.TWO ? '+' + C.num(2) : v === E.FOUR ? '+' + C.num(4) : v < 10 ? C.num(v) : ''; }
+  // a symbol drawn round (cx, cy) at size s: the number, or the action's own mark
+  function symbol(v, cx, cy, s, fill) {
+    if (v === E.SKIP) {
+      return '<circle cx="' + cx + '" cy="' + cy + '" r="' + (s * 0.42) + '" fill="none" stroke="' + fill + '" stroke-width="' + (s * 0.13) + '"/>' +
+        '<path d="M' + (cx - s * 0.3) + ' ' + (cy + s * 0.3) + ' L' + (cx + s * 0.3) + ' ' + (cy - s * 0.3) + '" stroke="' + fill + '" stroke-width="' + (s * 0.13) + '" stroke-linecap="round"/>';
+    }
+    if (v === E.REV) {
+      var a = s * 0.42, w = s * 0.12;
+      return '<g fill="none" stroke="' + fill + '" stroke-width="' + w + '" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M' + (cx - a) + ' ' + (cy - a * 0.35) + ' H' + (cx + a) + ' M' + (cx + a * 0.5) + ' ' + (cy - a * 0.8) + ' L' + (cx + a) + ' ' + (cy - a * 0.35) + ' L' + (cx + a * 0.5) + ' ' + (cy + a * 0.1) + '"/>' +
+        '<path d="M' + (cx + a) + ' ' + (cy + a * 0.45) + ' H' + (cx - a) + ' M' + (cx - a * 0.5) + ' ' + (cy) + ' L' + (cx - a) + ' ' + (cy + a * 0.45) + ' L' + (cx - a * 0.5) + ' ' + (cy + a * 0.9) + '"/></g>';
+    }
+    if (v === E.WILD) {
+      var q = s * 0.22;
+      return shape(0, cx - q, cy - q, q * 0.85, COL[0].body) + shape(1, cx + q, cy - q, q * 0.85, COL[1].body) +
+        shape(2, cx - q, cy + q, q * 0.85, COL[2].body) + shape(3, cx + q, cy + q, q * 0.85, COL[3].body);
+    }
+    var t = label(v);
+    // 6 and 9 read the same upside down: a bar under them says which way is up
+    var bar = (v === 6 || v === 9) ? '<rect x="' + (cx - s * 0.2) + '" y="' + (cy + s * 0.42) + '" width="' + (s * 0.4) + '" height="' + (s * 0.07) + '" rx="' + (s * 0.03) + '" fill="' + fill + '"/>' : '';
+    return '<text x="' + cx + '" y="' + cy + '" dy=".35em" text-anchor="middle" font-size="' + (t.length > 1 ? s * 0.72 : s) + '" font-weight="900" fill="' + fill + '">' + t + '</text>' + bar;
+  }
+  // the inside of a card face, in a 50 x 70 box
+  function face(c) {
+    var k = E.colour(c), v = E.value(c), wild = k < 0, col = wild ? null : COL[k];
+    var body = wild ? WILD_BODY : col.body, ink = wild ? '#24212B' : col.ink, on = wild ? '#FFFFFF' : col.on;
+    var corner = function (x, y) {
+      var t = label(v), out = '';
+      if (t) out += '<text x="' + x + '" y="' + y + '" font-size="' + (t.length > 1 ? 9 : 11) + '" font-weight="900" fill="' + on + '">' + t + '</text>';
+      else if (v === E.WILD) out += symbol(v, x + 5, y - 4, 12, on);
+      else out += symbol(v, x + 4.5, y - 4, 10, on);
+      // the colour's shape sits under the index, so a card showing only its edge in a fan still says its colour
+      out += wild ? '' : shape(k, x + 4, y + 7, 3.2, on);
+      return out;
+    };
+    return '<rect width="50" height="70" rx="6" fill="' + body + '"/>' +
+      '<rect x="2.5" y="2.5" width="45" height="65" rx="4.5" fill="none" stroke="#FFFFFF" stroke-opacity=".55" stroke-width="1.2"/>' +
+      '<ellipse cx="25" cy="35" rx="16" ry="25" transform="rotate(28 25 35)" fill="#FFFFFF"/>' +
+      (wild ? '' : shape(k, 25, 35, 13, body) + '<ellipse cx="25" cy="35" rx="10.5" ry="12" fill="#FFFFFF" opacity=".9"/>') +
+      symbol(v, 25, 35, v === E.FOUR ? 20 : 22, ink) +
+      (v === E.FOUR ? symbol(E.WILD, 25, 52, 10, ink) : '') +
+      corner(5, 13) + '<g transform="rotate(180 25 35)">' + corner(5, 13) + '</g>';
+  }
+  function cardName(c) {
+    var v = E.value(c), k = E.colour(c);
+    var what = v < 10 ? C.num(v) : C.t({ 10: 'cSkip', 11: 'cRev', 12: 'cTwo', 13: 'cWild', 14: 'cFour' }[v]);
+    return k < 0 ? what : colourName(k) + ' ' + what;
+  }
+  function cardEl(c, extra) {
+    var b = el('button', { class: 'hu-card' + (extra ? ' ' + extra : ''), type: 'button', 'aria-label': cardName(c) });
+    b.innerHTML = '<svg viewBox="0 0 50 70" aria-hidden="true" font-family="inherit">' + face(c) + '</svg>';
+    b._c = c;
+    return b;
+  }
+
+  /* ------------------------------------------------------------ start */
+
+  function newMatch(daily) {
+    stopBot();
+    var n = daily ? 3 : prefs.rivals + 1;
+    M = { n: n, level: daily ? 'medium' : prefs.level, scores: [], round: 0, daily: daily || null, startedAt: Date.now() };
+    for (var p = 0; p < n; p++) M.scores.push(0);
+    newRound();
+  }
+  function newRound() {
+    stopBot();
+    M.round++;
+    var rnd = M.daily ? C.daily('hues', M.daily).rng : Math.random;
+    botRnd = M.daily ? C.daily('hues', M.daily + '|bots').rng : Math.random;
+    // the first player moves round by round, so nobody always leads
+    M.R = E.newRound(rnd, M.n, M.daily ? 0 : (M.round - 1) % M.n);
+    msg = ''; kf = -1;
+    render();
+    dealIn();
+    save();
+    maybeBot();
+  }
+  function resume(v) {
+    M = v;
+    // closed on the round's result: the match goes on with the next round
+    if (M.R.winner >= 0) { M.startedAt = Date.now() - (v.elapsed || 0); newRound(); return; }
+    msg = '';
+    botRnd = M.daily ? C.daily('hues', M.daily + '|bots|' + M.R.stock.length).rng : Math.random;
+    M.startedAt = Date.now() - (v.elapsed || 0);
+    render();
+    maybeBot();
+  }
+
+  /* ------------------------------------------------------------- draw */
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (M.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyHu') + ' — ' + C.num(M.daily) })]));
+    else {
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('roundN', { n: C.num(M.round) }) }));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('toN', { n: C.num(E.TARGET) }) }));
+    }
+    top.appendChild(C.cards.backPicker());
+    // options behind a gear in the top row, never in «?» (#409)
+    var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', showSettings);
+    top.appendChild(gear);
+  }
+
+  function renderBots() {
+    bots.innerHTML = '';
+    for (var p = 1; p < M.n; p++) {
+      var fan = el('div', { class: 'hu-fan', 'aria-hidden': 'true' });
+      var k = M.R.hands[p].length;
+      for (var i = 0; i < Math.min(k, 9); i++) fan.appendChild(C.cards.back());
+      var box = el('div', { class: 'hu-bot' + (M.R.turn === p && M.R.winner < 0 ? ' hu-bot--on' : ''), 'data-p': p }, [
+        el('span', { text: pname(p) }), fan,
+        el('span', { class: 'hu-count', text: C.t('cardsN', { n: C.num(k) }) + (M.daily ? '' : ' · ' + C.num(M.scores[p])) }),
+        k === 1 && M.R.winner < 0 ? el('span', { class: 'ch-badge ch-badge--accent hu-last', text: C.t('lastOne') }) : null
+      ]);
+      bots.appendChild(box);
+    }
+  }
+
+  function render() {
+    var R = M.R;
+    renderTop();
+    renderBots();
+    stockBtn.innerHTML = '';
+    stockBtn.appendChild(C.cards.back());
+    stockBtn.appendChild(el('span', { class: 'hu-left', text: C.num(R.stock.length) }));
+    var mustDraw = human() && !E.legal(R, 0).length && R.drawn < 0 && (R.stock.length || R.discard.length > 1);
+    stockBtn.classList.toggle('hu-stock--hint', !!mustDraw);
+    stockBtn.disabled = !human();
+    pile.innerHTML = '';
+    var tc = cardEl(E.top(R));
+    tc.disabled = true;
+    pile.appendChild(tc);
+    nowBox.className = 'hu-now' + (colourFresh ? ' hu-now--new' : '');
+    colourFresh = false;
+    var col = COL[R.colour];
+    nowBox.innerHTML = '<svg viewBox="0 0 40 40" aria-hidden="true">' + shape(R.colour, 20, 20, 15, col.body) + '</svg>';
+    nowBox.appendChild(el('span', { text: C.t('colourNow') + ': ' + colourName(R.colour) }));
+    var dir = el('span', { 'aria-label': R.dir > 0 ? '' : C.t('reversed') });
+    dir.innerHTML = '<svg class="hu-dir' + (R.dir < 0 ? ' hu-dir--back' : '') + '" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12a7 7 0 1 1-2.05-4.95" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M18.5 3.5v4.2h-4.2" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    if (M.n > 2) nowBox.appendChild(dir);
+    renderHand();
+    actions.innerHTML = '';
+    if (human() && E.canPass(R)) {
+      var pb = el('button', { class: 'ch-btn ch-btn--soft', type: 'button', text: C.t('passTurn') });
+      pb.addEventListener('click', humanPass);
+      actions.appendChild(pb);
+    }
+    var st = msg;
+    if (!st && R.winner < 0) {
+      if (R.turn !== 0) st = C.t('thinking', { n: pname(R.turn) });
+      else if (R.drawn >= 0) st = C.t('playDrawn');
+      else st = E.legal(R, 0).length ? C.t('yourTurn') : C.t('mustDraw');
+    }
+    status.textContent = st;
+  }
+
+  function sortKey(c) { var k = E.colour(c); return (k < 0 ? 4 : k) * 20 + E.value(c); }
+  function renderHand() {
+    var R = M.R, h = R.hands[0].slice().sort(function (a, b) { return sortKey(a) - sortKey(b) || a - b; });
+    var ok = human() ? E.legal(R, 0) : [];
+    hand.innerHTML = '';
+    handNodes = [];
+    // as many cards a row as leave each one a finger-wide strip; the rest wrap below
+    var cw = probe.offsetWidth || 56;
+    var room = hand.clientWidth || 360;
+    var fit = Math.max(2, Math.floor((room - cw) / STRIP) + 1);
+    var rows = Math.max(1, Math.ceil(h.length / fit)), per = Math.ceil(h.length / rows);
+    for (var r = 0; r < rows; r++) {
+      var part = h.slice(r * per, (r + 1) * per), row = el('div', { class: 'hu-row' });
+      var k = part.length, over = k > 1 ? Math.min(0, (room - cw * k) / (k - 1)) : 0;
+      part.forEach(function (c, i) {
+        var idx = handNodes.length;
+        var b = cardEl(c, (ok.indexOf(c) >= 0 ? 'hu-ok' : (human() ? 'hu-no' : '')) + (kf === idx ? ' hu-kf' : ''));
+        if (i) b.style.marginInlineStart = over + 'px';
+        b.addEventListener('click', function () { humanPlay(c, b); });
+        row.appendChild(b);
+        handNodes.push(b);
+      });
+      hand.appendChild(row);
+    }
+  }
+  function handNode(c) { for (var i = 0; i < handNodes.length; i++) if (handNodes[i]._c === c) return handNodes[i]; return null; }
+  function botBox(p) { return bots.querySelector('[data-p="' + p + '"]'); }
+
+  // a new round: the hand flies in from the deck one card at a time, turning over (#398)
+  function dealIn() {
+    if (C.ui.reduceMotion()) return;
+    var from = stockBtn.getBoundingClientRect();
+    for (var i = 0; i < handNodes.length; i++) C.ui.fly(handNodes[i], from, { ms: 220, delay: i * DEAL_MS, flip: true });
+  }
+  // the card just played arrives on the pile from the hand that played it
+  function flyToPile(fromRect, flip) {
+    if (!fromRect || !pile.firstChild) return;
+    C.ui.fly(pile.firstChild, fromRect, { ms: 240, flip: !!flip });
+  }
+  // cards handed to the player by a draw-two or wild draw-four arrive from the deck
+  function flyGot(got) {
+    var from = stockBtn.getBoundingClientRect();
+    got.forEach(function (g, i) { var n = handNode(g); if (n) C.ui.fly(n, from, { ms: 220, delay: 160 + i * 90, flip: true }); });
+  }
+
+  /* ------------------------------------------------------------ moves */
+
+  // what the card just played did, for the status line
+  function effectMsg(p) {
+    var R = M.R, fx = R.fx;
+    if (!fx || R.winner >= 0) return '';
+    if (fx.skip !== undefined) return C.t('skippedN', { n: pname(fx.skip) });
+    if (fx.rev) return C.t('reversed');
+    if (fx.hit !== undefined) return fx.hit === 0 ? C.t('youHit', { k: C.num(fx.got.length) }) : C.t('hitN', { n: pname(fx.hit), k: C.num(fx.got.length) });
+    return '';
+  }
+
+  function humanPlay(c, node) {
+    if (!human() || document.querySelector('.ch-scrim')) return;
+    if (E.legal(M.R, 0).indexOf(c) < 0) { C.feedback('bad'); C.ui.shake(node); return; }
+    var from = node.getBoundingClientRect();
+    if (E.isWild(c)) { askColour(function (s) { commitHuman(c, s, from); }); return; }
+    commitHuman(c, -1, from);
+  }
+  function commitHuman(c, s, from) {
+    if (!E.play(M.R, c, s, botRnd)) { C.feedback('bad'); return; }
+    if (E.isWild(c)) colourFresh = true;
+    C.audio.sfx('place'); C.haptic('tap');
+    msg = effectMsg(0); kf = -1;
+    // the award is for the round, so it comes at once, not at the end of the match
+    if (M.R.winner === 0 && E.value(c) === E.FOUR) C.achievements.unlock('hu-four');
+    after(from, false);
+  }
+  function humanDraw() {
+    if (!human() || document.querySelector('.ch-scrim')) return;
+    var R = M.R;
+    if (E.legal(R, 0).length) { C.feedback('bad'); msg = C.t('canPlayFirst'); render(); msg = ''; return; }
+    var s = R.colour, c = E.draw(R, botRnd);
+    if (c < 0) { C.feedback('bad'); render(); return; }
+    E.noteShort(R, 0, s);
+    C.audio.sfx('flip');
+    var from = stockBtn.getBoundingClientRect();
+    msg = '';
+    render();
+    var n = handNode(c);
+    if (n) C.ui.fly(n, from, { ms: 220, flip: true });
+    save();
+    // a drawn card that does not fit passes the turn at once
+    if (!E.legal(R, 0).length) setTimeout(function () { if (human() && R.drawn === c) { E.pass(R); after(null, false); } }, C.cards.pace(450));
+  }
+  function humanPass() {
+    if (!human() || !E.pass(M.R)) return;
+    C.feedback('tap');
+    msg = '';
+    after(null, false);
+  }
+
+  function after(from, flip) {
+    var fx = M.R.fx;
+    render();
+    flyToPile(from, flip);
+    if (fx && fx.hit === 0 && fx.got.length) flyGot(fx.got);
+    save();
+    if (M.R.winner >= 0) { endRound(); return; }
+    maybeBot();
+  }
+
+  function maybeBot() {
+    stopBot();
+    var R = M.R;
+    if (R.winner >= 0 || R.turn === 0) return;
+    botTimer = setTimeout(function () {
+      botTimer = null;
+      if (!M || M.R !== R || R.winner >= 0 || R.turn === 0) return;
+      var p = R.turn, m = E.botMove(R, M.level, botRnd);
+      if (m.play !== undefined) {
+        var from = botBox(p) ? botBox(p).getBoundingClientRect() : null;
+        E.play(R, m.play, m.colour, botRnd);
+        var bits = [];
+        if (E.isWild(m.play)) { colourFresh = true; bits.push(C.t('changedN', { n: pname(p), s: colourName(R.colour) })); }
+        var ef = effectMsg(p);
+        if (ef) bits.push(ef);
+        msg = bits.join(' · ');
+        C.audio.sfx('place');
+        after(from, true);
+        return;
+      }
+      if (m.draw) {
+        var s = R.colour;
+        if (E.draw(R, botRnd) >= 0) { E.noteShort(R, p, s); msg = C.t('drewN', { n: pname(p) }); C.audio.sfx('flip'); render(); save(); maybeBot(); return; }
+      }
+      E.pass(R);
+      msg = C.t('passedN', { n: pname(p) });
+      after(null, false);
+    }, C.cards.pace(C.ui.reduceMotion() ? 300 : BOT_MS));
+  }
+  function stopBot() { if (botTimer) { clearTimeout(botTimer); botTimer = null; } }
+
+  /* ------------------------------------------------------------ rounds */
+
+  function endRound() {
+    stopBot();
+    var R = M.R, w = R.winner, pts = E.roundPoints(R);
+    M.scores[w] += pts;
+    msg = w === 0 ? C.t('youWonRound') : C.t('roundWon', { n: pname(w) });
+    render();
+    if (w === 0 && pile.firstChild) C.ui.burst(pile.firstChild, { count: 24, speed: 240, ring: 30, colors: [COL[0].body, COL[1].body, COL[2].body, COL[3].body] });
+    var over = M.daily || M.scores[w] >= E.TARGET;
+    save();
+    if (over) { setTimeout(finish, C.cards.pace(900)); return; }
+    var lines = [];
+    for (var p = 0; p < M.n; p++) lines.push(el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: pname(p) }), el('b', { class: 'ch-num', text: C.num(M.scores[p]) })]));
+    setTimeout(function () {
+      C.ui.modal({
+        title: msg,
+        body: [el('p', { class: 'ch-dim', text: (R.blocked ? C.t('blocked') + ' · ' : '') + C.t('plusPts', { n: C.num(pts) }) }), el('div', { class: 'ch-list' }, lines)],
+        actions: [{ label: C.t('nextRound'), kind: 'primary', onClick: function () { newRound(); } }],
+        onClose: function () { if (M && M.R === R) newRound(); }
+      });
+    }, C.cards.pace(700));
+  }
+
+  function finish() {
+    var R = M.R, ms = Date.now() - M.startedAt, won;
+    var best = 0;
+    for (var p = 1; p < M.n; p++) if (M.scores[p] > M.scores[best]) best = p;
+    won = M.daily ? R.winner === 0 : best === 0;
+    var base = { easy: 6, medium: 12, hard: 20 }[M.level] || 12;
+    var coins = won ? base + (M.daily ? 8 : 0) : Math.max(2, Math.round(base * 0.3));
+    var points = won ? base * 4 + (M.daily ? 25 : 0) : Math.round(base * 1.2);
+    if (won) {
+      C.achievements.unlock('hu-win');
+      if (M.level === 'hard' && !M.daily) C.achievements.unlock('hu-hard');
+    }
+    if (M.daily) {
+      var first = C.stats.daily('hues', M.daily, { label: won ? C.t('youWonRound') : C.t('roundWon', { n: pname(R.winner) }), win: won });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    var lines = [];
+    for (var q = 0; q < M.n; q++) lines.push({ label: pname(q), value: C.num(M.scores[q]) });
+    if (!M.daily) lines.push({ label: C.t('rounds'), value: C.num(M.round) });
+    var scores = M.scores.slice();
+    ctx.finish({
+      won: won,
+      title: won ? C.t('matchWon') : C.t('matchLost', { n: pname(M.daily ? R.winner : best) }),
+      timeMs: ms, coins: coins, points: points,
+      lines: lines,
+      shareText: 'چوگان · رنگارنگ' + (M.daily ? ('\nروزانه ' + M.daily) : '') + '\n' + scores.map(function (s) { return C.num(s); }).join(' - '),
+      onAgain: M.daily ? null : function () { newMatch(null); }
+    });
+  }
+
+  /* ----------------------------------------------------------- dialogs */
+
+  function askColour(done) {
+    var m = null;
+    var grid = el('div', { class: 'hu-pick' });
+    [0, 1, 2, 3].forEach(function (s) {
+      var b = el('button', { type: 'button', style: { background: COL[s].body, color: COL[s].on } });
+      b.innerHTML = '<svg viewBox="0 0 30 30" aria-hidden="true">' + shape(s, 15, 15, 11, COL[s].on) + '</svg>';
+      b.appendChild(el('span', { text: colourName(s) }));
+      b.addEventListener('click', function () { if (m) m.close(); done(s); });
+      grid.appendChild(b);
+    });
+    m = C.ui.modal({ title: C.t('pickColour'), body: [grid], actions: [{ label: C.t('cancel') }] });
+  }
+
+  function showSettings() {
+    var seg1 = C.ui.segmented([1, 2, 3].map(function (n) { return { value: n, label: C.num(n) }; }), prefs.rivals, function (v) { prefs.rivals = v; ctx.store.set('prefs', prefs); });
+    var seg2 = C.ui.segmented(LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), prefs.level, function (v) { prefs.level = v; ctx.store.set('prefs', prefs); });
+    C.ui.modal({
+      title: C.t('settings'),
+      body: [el('div', { class: 'ch-list' }, [
+        el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('rivals') }), seg1]),
+        el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('level') }), seg2]),
+        C.cards.speedRow()
+      ]), el('p', { class: 'ch-dim', text: C.t('optNote') })],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  function askNew() {
+    if (document.querySelector('.ch-scrim')) return;
+    var dd = M ? M.daily : null;
+    var started = M && (M.round > 1 || M.R.stock.length !== E.SIZE - M.n * E.PER - 1 || M.R.discard.length > 1);
+    if (!started) { newMatch(dd); return; }
+    C.ui.confirm({ title: C.t('newMatch'), body: C.t('resetWarn'), onOk: function () { newMatch(dd); } });
+  }
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← →', C.t('kbCards')), kb('Enter', C.t('kbPlay')), kb('D', C.t('kbDraw')), kb('P', C.t('kbPass'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(tut()); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+
+  window.addEventListener('keydown', function (e) {
+    if (!human() || document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter'))) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var n = handNodes.length;
+    // the hand is laid out left to right in every language, so the arrows are not flipped
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      kf = kf < 0 ? 0 : (kf + (e.key === 'ArrowRight' ? 1 : n - 1)) % n;
+      renderHand(); e.preventDefault(); return;
+    }
+    if (e.key === 'Enter' && kf >= 0 && handNodes[kf]) { var b = handNodes[kf]; humanPlay(b._c, b); e.preventDefault(); return; }
+    if (C.keyIs(e, 'd')) { humanDraw(); e.preventDefault(); return; }
+    if (C.keyIs(e, 'p')) { humanPass(); e.preventDefault(); }
+  });
+
+  // a card for the tutorial pictures, at x, y in a 200 x 110 picture
+  function mini(c, x, y) { return '<svg x="' + x + '" y="' + y + '" width="40" height="56" viewBox="0 0 50 70">' + face(c) + '</svg>'; }
+  function tut() {
+    // ids: red 7 is 13, blue 7 is 88, green skip 69, yellow reverse 46, blue draw-two 98, a wild 100, a wild draw-four 104
+    var pic = function (inner) { return '<svg viewBox="0 0 200 110" width="100%" direction="ltr" font-family="inherit">' + inner + '</svg>'; };
+    return [
+      { title: C.t('tutTitle1'), text: C.t('tutText1'), art: pic(mini(13, 52, 27) + mini(88, 108, 27)) },
+      { title: C.t('tutTitle2'), text: C.t('tutText2'), art: pic(mini(69, 30, 27) + mini(46, 80, 27) + mini(98, 130, 27)) },
+      { title: C.t('tutTitle3'), text: C.t('tutText3'), art: pic(mini(100, 52, 27) + mini(104, 108, 27)) }
+    ];
+  }
+
+  /* ------------------------------------------------------------ save */
+
+  ctx.autosave(function () {
+    if (!M || !M.R || M.R.winner >= 0 && (M.daily || M.scores[M.R.winner] >= E.TARGET)) return { inProgress: false };
+    var v = JSON.parse(JSON.stringify(M));
+    v.elapsed = (pausedAt || Date.now()) - M.startedAt;
+    return { m: v };
+  });
+  function save() { ctx.save(); }
+  C.onPause(function () { stopBot(); if (!pausedAt) pausedAt = Date.now(); });
+  C.onResume(function () { if (pausedAt && M) M.startedAt += Date.now() - pausedAt; pausedAt = 0; if (M) maybeBot(); });
+  // a turned phone changes the room for the hand: lay it out again
+  window.addEventListener('resize', function () { if (M) renderHand(); });
+
+  /* ------------------------------------------------------------ start */
+
+  var saved = ctx.loadSave();
+  var sv = saved && saved.m && saved.m.R && E.validRound(saved.m.R) ? saved.m : null;
+  if (dailyDate) {
+    if (sv && sv.daily === dailyDate) resume(sv);
+    else newMatch(dailyDate);
+    if (C.stats.dailyDone('hues', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).hues;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (sv && !sv.daily) resume(sv);
+  else newMatch(null);
+  ctx.tutorialIfNew(tut());
+})();
+</script>
+</body>
+</html>
