@@ -24,10 +24,11 @@ jobs:
     name: Buffer post (${{ inputs.tag }})
     runs-on: ubuntu-latest
     steps:
-      - name: Check out the tag
+      # main carries the script; an older tag does not, so only its files are read from the tag
+      - name: Check out with tags
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag }}
+          fetch-depth: 0
       - name: Post
         env:
           BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
@@ -35,7 +36,8 @@ jobs:
           DRY: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
-          VERSION_CODE=$(grep -oE "APP_VERSION_CODE *= *[0-9]+" www/version.js | grep -oE "[0-9]+$")
+          VERSION_CODE=$(git show "${TAG}:www/version.js" | grep -oE "APP_VERSION_CODE *= *[0-9]+" | grep -oE "[0-9]+$")
+          git show "${TAG}:fastlane/metadata/android/en-US/changelogs/${VERSION_CODE}.txt" > "$RUNNER_TEMP/changelog.txt"
           SEND=""
           if [ "$DRY" != "true" ]; then SEND="--send"; fi
-          python3 tools/buffer-post.py "${TAG#v}" "fastlane/metadata/android/en-US/changelogs/${VERSION_CODE}.txt" $SEND
+          python3 tools/buffer-post.py "${TAG#v}" "$RUNNER_TEMP/changelog.txt" $SEND
