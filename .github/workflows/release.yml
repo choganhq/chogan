@@ -163,6 +163,22 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      # X has no free posting API, so the owner pastes this by hand (#1054). It comes first so a
+      # refused Telegram post cannot take it away.
+      - name: Write the X post into the run summary
+        run: |
+          set -euo pipefail
+          VERSION_CODE=$(grep -oE "APP_VERSION_CODE *= *[0-9]+" www/version.js | grep -oE "[0-9]+$")
+          {
+            echo "## Post for X"
+            echo '```'
+            echo "Chogan ${GITHUB_REF_NAME#v} is out"
+            echo
+            python3 tools/release-notes.py --x "fastlane/metadata/android/en-US/changelogs/${VERSION_CODE}.txt"
+            echo
+            echo "https://github.com/choganhq/chogan/releases/tag/${GITHUB_REF_NAME}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Post to the channel
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
