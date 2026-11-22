@@ -26,6 +26,7 @@ module.exports = function (T) {
       'release.yml posts through Buffer in its own job after the APK, with the key from the secret');
     const man = fs.readFileSync(path.join(ROOT, '.github/workflows/social-post.yml'), 'utf8');
     ok(/default: true/.test(man.split('dry_run:')[1] || '') && /buffer-post\.py/.test(man), 'social-post.yml runs the same script and is a dry run by default');
+    ok(!/ref: \$\{\{ inputs\.tag \}\}/.test(man) && /git show "\$\{TAG\}:www\/version\.js"/.test(man), 'social-post.yml runs the script from main and reads only the version and changelog from the tag');
   }
   return { testBufferPost };
 };
