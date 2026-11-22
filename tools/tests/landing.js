@@ -130,7 +130,7 @@ module.exports = function (T) {
     const out = [...html.matchAll(/href="(https:\/\/[^"]+)"/g)].map((m) => m[1]);
     for (const want of ['https://choganhq.github.io/chogan/', 'https://play.google.com/store/apps/details?id=io.github.choganhq.chogan',
       'https://f-droid.org/packages/io.github.choganhq.chogan/', 'https://github.com/choganhq/chogan/releases/latest',
-      'https://t.me/chogangamebot', 'https://t.me/chogan_games', 'https://github.com/choganhq/chogan', 'https://issues.playchogan.com']) {
+      'https://t.me/chogangamebot', 'https://t.me/chogan_games', 'https://x.com/choganhq', 'https://github.com/choganhq/chogan', 'https://issues.playchogan.com']) {
       ok(out.includes(want), 'the page links to ' + want);
     }
     ok(/<html lang="fa" dir="rtl">/.test(html), 'the source page starts in Persian, right to left');
