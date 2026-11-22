@@ -6095,6 +6095,7 @@ function testWaysToPlay() {
   ok(/el\('a', \{ href: 'https:\/\/t\.me\/chogan_games'/.test(home) && (home.match(/[ ,{]news: '/g) || []).length === LOCALE_CODES.length, 'the About card links the news channel, labelled in every language');
   // Without dir=ltr the Persian card showed «chogan_games@»
   ok(/href: 'https:\/\/t\.me\/chogan_games'[^}]*dir: 'ltr'/.test(home), 'the channel name keeps its @ in front in Persian');
+  ok(/href: 'https:\/\/x\.com\/choganhq'[^}]*dir: 'ltr'/.test(home), 'the About card links the X account, left to right so the handle keeps its @ in Persian');
   const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
   ok((readme.match(/https:\/\/t\.me\/chogan_games/g) || []).length >= 2, 'both halves of the README link the news channel');
   const fa = md.indexOf('## فارسی');
