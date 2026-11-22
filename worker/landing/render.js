@@ -7,7 +7,7 @@ import SHOTS from './shots-data.js';
 
 export const ORIGIN = 'https://playchogan.com';
 export const APP = 'https://choganhq.github.io/chogan';
-export const CODES = ['fa', 'en', 'zh', 'de', 'es', 'pl', 'fr', 'ar', 'hi'];
+export const CODES = ['fa', 'en', 'zh', 'de', 'es', 'pl', 'fr', 'ar', 'hi', 'ru'];
 
 // locale, direction, title (with the keywords people search for), description (about 150 characters)
 // and the alt text of the social card, per language. Persian and English live in the HTML itself.
@@ -39,6 +39,9 @@ export const LANGS = {
   hi: ['hi_IN', 'ltr', 'Chogan — मुफ़्त ऑफ़लाइन मिनी गेम: सुडोकू, शतरंज, हुक्म',
     'Chogan छोटे ऑफ़लाइन खेलों का मुफ़्त, ओपन-सोर्स ऐप है: सुडोकू, शतरंज, बैकगैमन, हुक्म और दर्जनों और। न विज्ञापन, न खरीदारी, न ट्रैकिंग।',
     'Chogan, छोटे खेल जिन्हें आप पूरा कर सकें'],
+  ru: ['ru_RU', 'ltr', 'Chogan — бесплатные офлайн-мини-игры: судоку, шахматы, Хокм',
+    'Chogan — бесплатное приложение с открытым кодом и короткими офлайн-играми: судоку, шахматы, нарды, Хокм и десятки других. Без рекламы и покупок.',
+    'Chogan, небольшие игры, которые можно пройти до конца'],
 };
 
 export const pageUrl = (l) => ORIGIN + '/' + l + '/';

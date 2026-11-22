@@ -134,7 +134,7 @@ module.exports = function (T) {
 
     // strings: board label and komi follow the size in every language
     const S = strings(html);
-    ok(LOCALE_CODES.length === 9 && LOCALE_CODES.every((l) => S[l]), 'the page has strings for all nine languages');
+    ok(LOCALE_CODES.length === 10 && LOCALE_CODES.every((l) => S[l]), 'the page has strings for all ten languages');
     for (const l of LOCALE_CODES) {
       const t = S[l] || {};
       ok(/\{n\}/.test(t.boardLabel || '') && !/9×9|۹×۹/.test(t.boardLabel || ''), l + ': the board label takes the size, not a fixed 9×9');

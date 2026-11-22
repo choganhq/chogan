@@ -26,7 +26,7 @@ const CACHE_HOST = 'https://issues-cache.invalid/';
 export const LANGS = [
   ['fa', 'فارسی', 'rtl', 'fa-IR'], ['en', 'English', 'ltr', 'en-GB'], ['zh', '中文', 'ltr', 'zh-Hans'],
   ['de', 'Deutsch', 'ltr', 'de-DE'], ['es', 'Español', 'ltr', 'es-ES'], ['pl', 'Polski', 'ltr', 'pl-PL'],
-  ['fr', 'Français', 'ltr', 'fr-FR'], ['ar', 'العربية', 'rtl', 'ar-u-nu-latn'], ['hi', 'हिन्दी', 'ltr', 'hi-IN'],
+  ['fr', 'Français', 'ltr', 'fr-FR'], ['ar', 'العربية', 'rtl', 'ar-u-nu-latn'], ['hi', 'हिन्दी', 'ltr', 'hi-IN'], ['ru', 'Русский', 'ltr', 'ru-RU'],
 ];
 
 export const S = {
@@ -137,6 +137,18 @@ export const S = {
     refresh: 'सूची हर पाँच मिनट में ताज़ा होती है। शिकायतों का टेक्स्ट वैसा ही दिखाया जाता है जैसा लिखा गया था।',
     theme: 'थीम (अपने-आप, हल्की, गहरी)', langGo: 'जाएँ', back: 'Chogan पर वापस', page: 'पेज {n}',
     filter: 'स्थिति', labels: 'लेबल',
+  },
+  ru: {
+    title: 'Обращения Chogan', lead: 'Копия публичных обращений и предложений Chogan, только для чтения.',
+    report: 'Сообщить о проблеме или идее', all: 'Все', open: 'Открытые', closed: 'Закрытые',
+    stOpen: 'Открыто', stDone: 'Сделано', stNotPlanned: 'Не планируется',
+    opened: 'Открыто: {d}', closedOn: 'Закрыто: {d}', noBody: '(без описания)',
+    allOnGithub: 'Все обращения на GitHub', newer: 'Новее', older: 'Старее', empty: 'Обращений нет.',
+    error: 'Не удалось загрузить список с GitHub. Попробуйте ещё раз через несколько минут.',
+    stale: 'GitHub недоступен; это последняя сохранённая копия.',
+    refresh: 'Список обновляется каждые пять минут. Текст обращений показан так, как его написали.',
+    theme: 'Тема (авто, светлая, тёмная)', langGo: 'Перейти', back: 'Назад в Chogan', page: 'Страница {n}',
+    filter: 'Статус', labels: 'Метки',
   },
 };
 
