@@ -51,5 +51,57 @@ export default {
    "400": "/shots/en-6-400.1b715c7e.webp",
    "800": "/shots/en-6-800.742bbf0c.webp"
   }
+ ],
+ "fa-dark": [
+  {
+   "400": "/shots/fa-dark-1-400.2b71f941.webp",
+   "800": "/shots/fa-dark-1-800.e01bb95d.webp"
+  },
+  {
+   "400": "/shots/fa-dark-2-400.fe568557.webp",
+   "800": "/shots/fa-dark-2-800.9e945d48.webp"
+  },
+  {
+   "400": "/shots/fa-dark-3-400.1b582f09.webp",
+   "800": "/shots/fa-dark-3-800.34c90b5b.webp"
+  },
+  {
+   "400": "/shots/fa-dark-4-400.3903eabc.webp",
+   "800": "/shots/fa-dark-4-800.55ad565e.webp"
+  },
+  {
+   "400": "/shots/fa-dark-5-400.f4ce0824.webp",
+   "800": "/shots/fa-dark-5-800.2c064e8c.webp"
+  },
+  {
+   "400": "/shots/fa-dark-6-400.a321d767.webp",
+   "800": "/shots/fa-dark-6-800.b1406041.webp"
+  }
+ ],
+ "en-dark": [
+  {
+   "400": "/shots/en-dark-1-400.aa25da8b.webp",
+   "800": "/shots/en-dark-1-800.955a0b44.webp"
+  },
+  {
+   "400": "/shots/en-dark-2-400.7cda87c8.webp",
+   "800": "/shots/en-dark-2-800.951b5f11.webp"
+  },
+  {
+   "400": "/shots/en-dark-3-400.db88b164.webp",
+   "800": "/shots/en-dark-3-800.78f4ece9.webp"
+  },
+  {
+   "400": "/shots/en-dark-4-400.ae675eeb.webp",
+   "800": "/shots/en-dark-4-800.1eaf9017.webp"
+  },
+  {
+   "400": "/shots/en-dark-5-400.c27bdb7b.webp",
+   "800": "/shots/en-dark-5-800.ed321132.webp"
+  },
+  {
+   "400": "/shots/en-dark-6-400.d7426328.webp",
+   "800": "/shots/en-dark-6-800.1e204bc3.webp"
+  }
  ]
 };

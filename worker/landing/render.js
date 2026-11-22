@@ -18,8 +18,8 @@ export const LANGS = {
   en: ['en_US', 'ltr', 'Chogan — free offline mini games: Sudoku, chess, Hokm',
     'Chogan is a free, open-source app of short offline games: Sudoku, chess, backgammon, Hokm and dozens more. No ads, no purchases, no tracking.',
     'Chogan, small games you can finish'],
-  zh: ['zh_CN', 'ltr', 'Chogan — 免费离线小游戏：数独、国际象棋、Hokm',
-    'Chogan 是免费开源的离线小游戏合集：数独、国际象棋、双陆棋、Hokm 等数十款游戏。没有广告、没有内购、没有追踪。',
+  zh: ['zh_CN', 'ltr', 'Chogan — 免费离线小游戏：数独、国际象棋、霍克姆',
+    'Chogan 是免费开源的离线小游戏合集：数独、国际象棋、双陆棋、霍克姆等数十款游戏。没有广告、没有内购、没有追踪。',
     'Chogan，可以玩完的小游戏'],
   de: ['de_DE', 'ltr', 'Chogan — kostenlose Offline-Minispiele: Sudoku, Schach, Hokm',
     'Chogan ist eine kostenlose Open-Source-App mit kurzen Offline-Spielen: Sudoku, Schach, Backgammon, Hokm und Dutzende mehr. Keine Werbung, keine Käufe.',
@@ -36,8 +36,8 @@ export const LANGS = {
   ar: ['ar_SA', 'rtl', 'Chogan — ألعاب صغيرة مجانية بلا إنترنت: سودوكو، شطرنج، حكم',
     'Chogan تطبيق مجاني ومفتوح المصدر لألعاب قصيرة بلا إنترنت: سودوكو وشطرنج وطاولة وحكم وعشرات غيرها. بلا إعلانات ولا مشتريات ولا تتبع.',
     'Chogan، ألعاب صغيرة يمكنك إنهاؤها'],
-  hi: ['hi_IN', 'ltr', 'Chogan — मुफ़्त ऑफ़लाइन मिनी गेम: सुडोकू, शतरंज, Hokm',
-    'Chogan छोटे ऑफ़लाइन खेलों का मुफ़्त, ओपन-सोर्स ऐप है: सुडोकू, शतरंज, बैकगैमन, Hokm और दर्जनों और। न विज्ञापन, न खरीदारी, न ट्रैकिंग।',
+  hi: ['hi_IN', 'ltr', 'Chogan — मुफ़्त ऑफ़लाइन मिनी गेम: सुडोकू, शतरंज, हुक्म',
+    'Chogan छोटे ऑफ़लाइन खेलों का मुफ़्त, ओपन-सोर्स ऐप है: सुडोकू, शतरंज, बैकगैमन, हुक्म और दर्जनों और। न विज्ञापन, न खरीदारी, न ट्रैकिंग।',
     'Chogan, छोटे खेल जिन्हें आप पूरा कर सकें'],
 };
 
@@ -55,6 +55,10 @@ const word = (key, l) => (l === 'fa' ? FA[key] : tr(key, l));
 
 // The English spans of index.html are the keys of i18n-data.js; swap them for the language's text.
 export function translateBody(html, l) {
+  // Each page keeps one language only: the CSS hides the other one anyway, but a crawler and a
+  // reader without styles would still get both (/de/ carried the whole Persian text).
+  const drop = l === 'fa' ? 'en' : 'fa';
+  html = html.replace(new RegExp('<(span|p) data-l="' + drop + '">[^<]*</\\1>', 'g'), '');
   if (l === 'en' || l === 'fa') return html;
   return html.replace(/<(span|p) data-l="en">([^<]*)<\/\1>/g, (all, tag, text) => {
     const lead = text.match(/^\s*/)[0];
@@ -86,7 +90,7 @@ export function ldJson(l) {
 export function headBlock(l, root) {
   const [locale, , title, desc, ogAlt] = LANGS[l];
   const own = root ? ORIGIN + '/' : pageUrl(l);
-  const card = ORIGIN + '/og/' + (l === 'fa' ? 'fa' : 'en') + '.png';
+  const card = ORIGIN + '/og/' + l + '.png';
   const alt = ogAlt;
   const alts = CODES.map((c) => '<link rel="alternate" hreflang="' + c + '" href="' + pageUrl(c) + '">').join('\n') +
     '\n<link rel="alternate" hreflang="x-default" href="' + ORIGIN + '/">';
@@ -115,12 +119,19 @@ export function headBlock(l, root) {
   ].join('\n');
 }
 
-// Only this language's screenshots: Persian ones for fa, the English ones for everyone else.
+// Only this language's screenshots: Persian ones for fa, the English ones for everyone else, and
+// a dark set the browser picks by prefers-color-scheme (the page script swaps it for a chosen theme).
+const SIZES = '(min-width: 768px) 227px, 200px';
 export function shotsBlock(l) {
   const set = l === 'fa' ? 'fa' : 'en';
   const alts = [word('The Chogan menu', l), ...['hokm', 'eightball', 'airhockey', 'chess', 'sudoku'].map((id) => GAMES[id][l])];
-  return SHOTS[set].map((s, i) => '<img src="' + s[400] + '" srcset="' + s[400] + ' 400w, ' + s[800] + ' 800w" sizes="200px" width="540" height="1080"' +
-    (i < 2 ? '' : ' loading="lazy"') + ' decoding="async" alt="' + esc(alts[i]) + '">').join('\n    ');
+  const ss = (s) => s[400] + ' 400w, ' + s[800] + ' 800w';
+  return SHOTS[set].map((s, i) => {
+    const d = SHOTS[set + '-dark'][i];
+    return '<picture><source media="(prefers-color-scheme: dark)" srcset="' + ss(d) + '" sizes="' + SIZES + '">' +
+      '<img src="' + s[400] + '" srcset="' + ss(s) + '" sizes="' + SIZES + '" width="540" height="1080"' +
+      (i < 2 ? '' : ' loading="lazy"') + ' decoding="async" alt="' + esc(alts[i]) + '"></picture>';
+  }).join('\n    ');
 }
 
 export function gamesBlock(l) {
