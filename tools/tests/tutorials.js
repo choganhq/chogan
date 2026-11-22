@@ -1,7 +1,7 @@
 'use strict';
 module.exports = function (T) {
   const { ok, head, fs, path, ROOT } = T;
-  const CODES = ['fa', 'en', 'zh', 'de', 'es', 'pl', 'fr', 'ar', 'hi'];
+  const CODES = ['fa', 'en', 'zh', 'de', 'es', 'pl', 'fr', 'ar', 'hi', 'ru'];
 
   // #1060: Go's tutorial began with liberties and captures and never said how a stone is
   // placed, which is what a first-time player was stuck on. It now opens with that step.

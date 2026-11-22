@@ -7,6 +7,7 @@ export default {
   "fr": "Sudoku",
   "ar": "سودوكو",
   "hi": "सुडोकू",
+  "ru": "Судоку",
   "zh": "数独",
   "de": "Sudoku",
   "es": "Sudoku"
@@ -18,6 +19,7 @@ export default {
   "fr": "Échecs",
   "ar": "الشطرنج",
   "hi": "शतरंज",
+  "ru": "Шахматы",
   "zh": "国际象棋",
   "de": "Schach",
   "es": "Ajedrez"
@@ -29,6 +31,7 @@ export default {
   "fr": "Backgammon",
   "ar": "طاولة الزهر",
   "hi": "बैकगैमन",
+  "ru": "Нарды",
   "zh": "双陆棋",
   "de": "Backgammon",
   "es": "Backgammon"
@@ -40,6 +43,7 @@ export default {
   "fr": "Hokm",
   "ar": "حُكم",
   "hi": "हुक्म",
+  "ru": "Хокм",
   "zh": "霍克姆",
   "de": "Hokm",
   "es": "Hokm"
@@ -51,6 +55,7 @@ export default {
   "fr": "Pasur",
   "ar": "باسور",
   "hi": "पासुर",
+  "ru": "Пасур",
   "zh": "帕苏尔",
   "de": "Pasur",
   "es": "Pasur"
@@ -62,6 +67,7 @@ export default {
   "fr": "Mahjong",
   "ar": "ماهجونغ",
   "hi": "माहजोंग",
+  "ru": "Маджонг",
   "zh": "麻将接龙",
   "de": "Mahjong",
   "es": "Mahjong"
@@ -73,6 +79,7 @@ export default {
   "fr": "Démineur",
   "ar": "كاسحة الألغام",
   "hi": "माइनस्वीपर",
+  "ru": "Сапёр",
   "zh": "扫雷",
   "de": "Minesweeper",
   "es": "Buscaminas"
@@ -84,6 +91,7 @@ export default {
   "fr": "Nonogramme",
   "ar": "نونوغرام",
   "hi": "नॉनोग्राम",
+  "ru": "Японский кроссворд",
   "zh": "数织",
   "de": "Nonogramm",
   "es": "Nonograma"
@@ -95,6 +103,7 @@ export default {
   "fr": "Dames",
   "ar": "الداما",
   "hi": "चेकर्स",
+  "ru": "Шашки",
   "zh": "西洋跳棋",
   "de": "Dame",
   "es": "Damas"
@@ -106,6 +115,7 @@ export default {
   "fr": "Petits chevaux",
   "ar": "لودو",
   "hi": "लूडो",
+  "ru": "Лудо",
   "zh": "飞行棋",
   "de": "Ludo",
   "es": "Ludo"
@@ -117,6 +127,7 @@ export default {
   "fr": "Billard 8",
   "ar": "بلياردو الثمانية",
   "hi": "8-बॉल पूल",
+  "ru": "Бильярд",
   "zh": "八球",
   "de": "8-Ball",
   "es": "Bola 8"
@@ -128,6 +139,7 @@ export default {
   "fr": "Snooker",
   "ar": "سنوكر",
   "hi": "स्नूकर",
+  "ru": "Снукер",
   "zh": "斯诺克",
   "de": "Snooker",
   "es": "Snooker"
@@ -139,6 +151,7 @@ export default {
   "fr": "Vingt-et-un",
   "ar": "واحد وعشرون",
   "hi": "ब्लैकजैक",
+  "ru": "Двадцать одно",
   "zh": "二十一点",
   "de": "Blackjack",
   "es": "Blackjack"
@@ -150,6 +163,7 @@ export default {
   "fr": "Klondike",
   "ar": "كلوندايك",
   "hi": "क्लोंडाइक",
+  "ru": "Косынка",
   "zh": "克朗代克",
   "de": "Klondike",
   "es": "Solitario"
@@ -161,6 +175,7 @@ export default {
   "fr": "Araignée",
   "ar": "العنكبوت",
   "hi": "स्पाइडर",
+  "ru": "Паук",
   "zh": "蜘蛛纸牌",
   "de": "Spider",
   "es": "Spider"
@@ -172,6 +187,7 @@ export default {
   "fr": "Défense de tours",
   "ar": "دفاع الأبراج",
   "hi": "टावर डिफ़ेंस",
+  "ru": "Защита башни",
   "zh": "塔防",
   "de": "Turm­verteidigung",
   "es": "Defensa de torres"
@@ -183,6 +199,7 @@ export default {
   "fr": "Chute de blocs",
   "ar": "الكتل المتساقطة",
   "hi": "गिरते ब्लॉक",
+  "ru": "Падающие блоки",
   "zh": "落块",
   "de": "Blocksturz",
   "es": "Lluvia de bloques"
@@ -194,6 +211,7 @@ export default {
   "fr": "Gomoku",
   "ar": "غوموكو",
   "hi": "गोमोकू",
+  "ru": "Гомоку",
   "zh": "五子棋",
   "de": "Gomoku",
   "es": "Gomoku"
@@ -205,6 +223,7 @@ export default {
   "fr": "Go",
   "ar": "غو",
   "hi": "गो",
+  "ru": "Го",
   "zh": "围棋",
   "de": "Go",
   "es": "Go"
@@ -216,6 +235,7 @@ export default {
   "fr": "Air hockey",
   "ar": "هوكي الهواء",
   "hi": "एयर हॉकी",
+  "ru": "Аэрохоккей",
   "zh": "桌上冰球",
   "de": "Airhockey",
   "es": "Air hockey"
@@ -227,6 +247,7 @@ export default {
   "fr": "Ping-pong",
   "ar": "تنس الطاولة",
   "hi": "पिंग पोंग",
+  "ru": "Пинг-понг",
   "zh": "乒乓球",
   "de": "Pingpong",
   "es": "Ping-pong"
@@ -238,6 +259,7 @@ export default {
   "fr": "Sortie",
   "ar": "طريق الخروج",
   "hi": "निकास",
+  "ru": "Выход",
   "zh": "出路",
   "de": "Ausweg",
   "es": "Salida"
@@ -249,6 +271,7 @@ export default {
   "fr": "Puzzle",
   "ar": "أحجية الصور",
   "hi": "जिगसॉ पहेली",
+  "ru": "Пазл",
   "zh": "拼图",
   "de": "Puzzle",
   "es": "Rompecabezas"
@@ -260,6 +283,7 @@ export default {
   "fr": "Mancala",
   "ar": "المنقلة",
   "hi": "मनकाला",
+  "ru": "Манкала",
   "zh": "播棋",
   "de": "Mancala",
   "es": "Mancala"

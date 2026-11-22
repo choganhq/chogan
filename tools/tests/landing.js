@@ -82,7 +82,7 @@ module.exports = function (T) {
       ok(meta(/name="twitter:title" content="([^"]+)"/) === meta(/<title>([^<]+)<\/title>/) && /twitter:card" content="summary_large_image"/.test(body), l + ': twitter title and the large card');
       ok(body.includes('og:image" content="https://playchogan.com/og/' + l + '.png"') && body.includes('twitter:image" content="https://playchogan.com/og/' + l + '.png"') && /og:image:width" content="1200"/.test(body) && /og:image:height" content="630"/.test(body) && /og:image:alt" content="[^"]+"/.test(body), l + ': a 1200x630 card with alt text');
       const alts = [...body.matchAll(/<link rel="alternate" hreflang="([^"]+)" href="([^"]+)"/g)].map((m) => m[1] + ' ' + abs(m[2]));
-      ok(alts.length === 10 && alts.includes('x-default /') && alts.includes('en /en/') && R.CODES.every((c) => alts.includes(c + ' /' + c + '/')), l + ': the full hreflang set, reciprocal, x-default is /');
+      ok(alts.length === 11 && alts.includes('x-default /') && alts.includes('en /en/') && R.CODES.every((c) => alts.includes(c + ' /' + c + '/')), l + ': the full hreflang set, reciprocal, x-default is /');
       const ld = JSON.parse(meta(/<script type="application\/ld\+json">(.*?)<\/script>/s));
       const app = ld['@graph'].find((n) => n['@type'] === 'SoftwareApplication');
       ok(app.inLanguage === l && app.url === 'https://playchogan.com/' + l + '/' && ld['@graph'].some((n) => n['@type'] === 'Organization') && ld['@graph'].some((n) => n['@type'] === 'WebSite') && !/aggregateRating|ratingValue/.test(JSON.stringify(ld)), l + ': JSON-LD in its own language with Organization and WebSite and no invented rating');
@@ -113,8 +113,8 @@ module.exports = function (T) {
     // --- sitemap
     const sm = fs.readFileSync(path.join(pub, 'sitemap.xml'), 'utf8');
     const locs = [...sm.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
-    ok(locs.length === 10 && locs[0] === 'https://playchogan.com/' && R.CODES.every((c) => locs.includes('https://playchogan.com/' + c + '/')), 'the sitemap lists / and every language page');
-    ok((sm.match(/<xhtml:link /g) || []).length === 100 && !locs.some((u) => /\/(fa|es|de|pl|fr|ar|hi|zh)$/.test(u)), 'each sitemap entry carries all ten alternates in the same form as the pages');
+    ok(locs.length === 11 && locs[0] === 'https://playchogan.com/' && R.CODES.every((c) => locs.includes('https://playchogan.com/' + c + '/')), 'the sitemap lists / and every language page');
+    ok((sm.match(/<xhtml:link /g) || []).length === 121 && !locs.some((u) => /\/(fa|es|de|pl|fr|ar|hi|zh|ru)$/.test(u)), 'each sitemap entry carries all eleven alternates in the same form as the pages');
 
     // --- files
     const FILES = [...fs.readFileSync(path.join(dir, 'index.js'), 'utf8').matchAll(/'(\/[^']+\.(?:png|svg|ico|woff2|txt|xml))'/g)].map((m) => m[1])
