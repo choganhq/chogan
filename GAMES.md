@@ -101,6 +101,7 @@ Every game in Chogan with a line about it. Each one in `www/games.json` has a ro
 | Speed | A card race against a bot with no turns: each of you holds five cards and a draw pile, and a card goes on either centre pile when it is one rank above or below the top card (the ace sits between the king and the two); your hand refills from your pile, fresh cards turn up on the centre piles when neither of you can play, and the first to play all their cards wins; three bot levels and a daily deal |
 | Ball Rain | Launch balls with the right power, with a bar under the board or by sliding your finger, so they rain through brass pins and windmills into the pockets; the power decides where a ball lands and the same power always takes the same path, so nothing is left to chance; every pocket has its own points, the green one opens the tulip for a few seconds and only an open tulip catches balls; score enough for one, two or three stars, and one star opens the next board |
 | Piano | A free piano with three octaves: play chords with several fingers at once, or use the computer keyboard; 17 old tunes to practise, with the next key lit; no score, no losing and no daily challenge |
+| Word Shower | Words fall toward your garden and you type each one letter by letter on the game's own keyboard, or a real one, to burst it; eight waves, five flowers as lives, three speeds, words in the app's language, and a list of your own words that does not count for the daily challenge or awards |
 
 ## فارسی
 
@@ -205,5 +206,6 @@ Every game in Chogan with a line about it. Each one in `www/games.json` has a ro
 | سرعت | مسابقه‌ی کارت با ربات بدون نوبت: هر کدام پنج کارت در دست و یک دسته‌ی کارت دارید و کارتی که یکی بالاتر یا پایین‌تر از کارت روی هر دسته‌ی وسط باشد رویش می‌نشیند (آس بین شاه و دو است)؛ دستت از دسته‌ات پر می‌شود، وقتی هیچ‌کدام نتوانید بازی کنید کارت تازه روی دسته‌های وسط رو می‌شود و هر کس زودتر همه‌ی کارت‌هایش را بازی کند می‌برد؛ سه سطح ربات و یک دست روزانه |
 | بارون توپ | توپ‌ها را با قدرت درست پرتاب کن، با نوار زیر تخته یا کشیدن انگشت، تا از لای میخ‌های برنجی و فرفره‌ها در جیب‌ها بیفتند؛ قدرت پرتاب تعیین می‌کند توپ کجا فرود بیاید و یک قدرت همیشه یک مسیر دارد، پس شانسی در کار نیست؛ هر جیب امتیاز خودش را دارد، جیب سبز چند ثانیه لاله را باز می‌کند و فقط لاله‌ی باز توپ می‌گیرد؛ برای یک، دو یا سه ستاره امتیاز کافی بگیر و یک ستاره تخته‌ی بعدی را باز می‌کند |
 | پیانو | پیانوی آزاد با سه اکتاو: با چند انگشت هم‌زمان آکورد بزن یا با صفحه‌کلید بنواز؛ ۱۷ آهنگ قدیمی برای تمرین که کلید بعدی‌شان روشن می‌شود؛ بدون امتیاز، بدون باخت و بدون چالش روزانه |
+| واژه‌باران | واژه‌ها به سوی باغت می‌بارند و هر کدام را با صفحه‌کلید خود بازی، یا صفحه‌کلید واقعی، حرف به حرف می‌نویسی تا بترکد؛ هشت موج، پنج گل به جای جان، سه سرعت، واژه‌ها به زبان اپ، و فهرستی از واژه‌های خودت که در چالش روزانه و دستاورد حساب نمی‌شود |
 
 </div>
