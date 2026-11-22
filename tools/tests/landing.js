@@ -77,7 +77,8 @@ module.exports = function (T) {
       ok(missing.length === 0, 'i18n.js covers every text in ' + l + (missing.length ? ', missing: ' + missing.slice(0, 3).join(' | ') : ''));
     }
     // #1033: the theme and language controls carry small icons
-    ok(/id="langbox"[^>]*><svg class="ic"/.test(html) && /tb\.innerHTML = \(d \? sun : moon\)/.test(html), 'the theme and language controls have icons');
+    ok(/id="langbox"[^>]*><svg class="ic"/.test(html) && /tb\.innerHTML = d \? sun : moon/.test(html), 'the theme and language controls have icons');
+    ok(/tb\.setAttribute\('aria-label'/.test(html) && !/innerHTML = [^;]*<span>/.test(html.slice(html.indexOf('function label'))), 'the theme button is icon only and keeps an accessible name');
     const cfg = fs.readFileSync(path.join(dir, 'wrangler.jsonc'), 'utf8');
     ok(/"name":\s*"playchogan-redirect"/.test(cfg) && !/"routes"/.test(cfg.replace(/\/\/.*$/gm, '')), 'the Worker keeps its name, so its existing routes stay bound');
   }
