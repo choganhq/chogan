@@ -1452,7 +1452,8 @@
     tap: [8],
     select: [5],
     success: [12, 40, 18],
-    error: [26, 60, 26],
+    // one short pulse: the old double buzz (26-60-26) felt like a scolding on every wrong tap (#1041)
+    error: [14],
     win: [10, 40, 10, 40, 30],
     warn: [16]
   };
