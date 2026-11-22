@@ -41,6 +41,10 @@ module.exports = function (T) {
       ok(out.includes(want), 'the page links to ' + want);
     }
     ok(/<html lang="fa" dir="rtl">/.test(html), 'the page starts in Persian, right to left');
+    // #1027: the visitor can switch themes against the system setting, and the choice is read before first paint
+    ok(/id="theme"/.test(html) && /:root\[data-theme=dark\]/.test(html) && /:root:not\(\[data-theme=light\]\)/.test(html) &&
+      /localStorage\.setItem\('theme'/.test(html) && html.indexOf('localStorage.getItem("theme")') < html.indexOf('<style>'),
+      'the page has a theme switch that overrides the system theme in both directions and is applied before the styles');
     const cfg = fs.readFileSync(path.join(dir, 'wrangler.jsonc'), 'utf8');
     ok(/"name":\s*"playchogan-redirect"/.test(cfg) && !/"routes"/.test(cfg.replace(/\/\/.*$/gm, '')), 'the Worker keeps its name, so its existing routes stay bound');
   }
