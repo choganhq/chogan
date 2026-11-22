@@ -183,3 +183,21 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: tools/telegram-post.sh "$GITHUB_REF_NAME"
+
+  # X, Mastodon and Bluesky through Buffer's free API (#1056). Its own job, so a stale key or a
+  # refused post fails only this one and never the release or the Telegram post.
+  social:
+    name: Post the release to X, Mastodon and Bluesky
+    runs-on: ubuntu-latest
+    needs: apk
+    if: ${{ !endsWith(github.ref_name, '-test') }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+      - name: Post through Buffer
+        env:
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+        run: |
+          set -euo pipefail
+          VERSION_CODE=$(grep -oE "APP_VERSION_CODE *= *[0-9]+" www/version.js | grep -oE "[0-9]+$")
+          python3 tools/buffer-post.py "${GITHUB_REF_NAME#v}" "fastlane/metadata/android/en-US/changelogs/${VERSION_CODE}.txt" --send
