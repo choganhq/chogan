@@ -2949,7 +2949,7 @@ function testFiles() {
   // two rows on a phone and one row on a wide screen, whatever the count (seven since #794)
   const langCols = Math.ceil(LOCALE_CODES.length / 2);
   ok(new RegExp('\\.ch-seg\\.ch-langs \\{[^}]*display: grid;[^}]*grid-template-columns: repeat\\(' + langCols + ', 1fr\\)').test(langCss), 'the language picker is two rows of ' + langCols + ' on a phone (' + LOCALE_CODES.length + ' languages)');
-  ok(new RegExp('@media \\(min-width: 600px\\) \\{ \\.ch-seg\\.ch-langs \\{ grid-template-columns: repeat\\(' + LOCALE_CODES.length + ', 1fr\\); \\} \\}').test(langCss), 'and one row of ' + LOCALE_CODES.length + ' on a wide screen');
+  ok(!/ch-langs \{ grid-template-columns: repeat\(/.test(langCss.split("\n").filter((l) => /@media/.test(l)).join("\n")), "no wide-window rule puts every language on one row: ten names overflowed the Profile dialog on a desktop (#1065)");
 
   // The show-welcome button was labelled with 'play' and read «بازی» (#295)
   ok(/C\.t\('showWelcome'\) \}\),[\s\S]{0,200}text: C\.t\('showBtn'\)/.test(menu) && (menu.match(/\bshowBtn: '[^']+'/g) || []).length === LOCALE_CODES.length, 'the show-welcome button has its own "Show" label in every language');
