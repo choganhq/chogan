@@ -46,7 +46,7 @@
 html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.7;
   font-family: Vazirmatn, Nunito, system-ui, sans-serif; }
-html[lang=en] body { font-family: Nunito, Vazirmatn, system-ui, sans-serif; }
+html:not([lang=fa]) body { font-family: Nunito, Vazirmatn, system-ui, sans-serif; }
 a { color: var(--accent); }
 .wrap { max-width: 720px; margin: 0 auto; padding: 20px 20px 48px; }
 .top { display: flex; justify-content: flex-end; gap: 8px; }
@@ -82,13 +82,12 @@ p { margin: 0 0 12px; }
 .links a { background: var(--soft); color: var(--soft-ink); text-decoration: none; border-radius: 999px; padding: 4px 14px; font-size: .95rem; }
 footer { margin-top: 36px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--dim); font-size: .9rem; }
 [data-l] { display: none; }
-html[lang=fa] [data-l=fa], html[lang=en] [data-l=en] { display: revert; }
-html[lang=fa] li[data-l=fa], html[lang=en] li[data-l=en] { display: list-item; }
+html[lang=fa] [data-l=fa], html:not([lang=fa]) [data-l=en] { display: revert; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="top"><button class="lang" id="theme" type="button" hidden></button><button class="lang" id="lang" type="button" hidden></button></div>
+  <div class="top"><button class="lang" id="theme" type="button" hidden></button><select class="lang" id="lang" aria-label="Language" hidden></select></div>
 
   <header class="hero">
     <img src="/icon.png" width="96" height="96" alt="">
@@ -115,14 +114,10 @@ html[lang=fa] li[data-l=fa], html[lang=en] li[data-l=en] { display: list-item; }
   </header>
 
   <ul class="facts">
-    <li data-l="fa"><b>رایگان، بدون تبلیغ</b>بدون خرید درون‌برنامه‌ای، بدون تحلیل‌گر و ردیاب.</li>
-    <li data-l="fa"><b>آفلاین</b>همه‌ی بازی‌ها بدون اینترنت کار می‌کنند.</li>
-    <li data-l="fa"><b>متن‌باز</b>کد کامل با مجوز MIT روی گیت‌هاب است.</li>
-    <li data-l="fa"><b>پیشرفتت مال خودت است</b>ذخیره روی خود دستگاه است. حساب کاربری نمی‌خواهد.</li>
-    <li data-l="en"><b>Free, no ads</b>No in-app purchases, no analytics, no trackers.</li>
-    <li data-l="en"><b>Offline</b>Every game works without a connection.</li>
-    <li data-l="en"><b>Open source</b>All code is on GitHub under the MIT licence.</li>
-    <li data-l="en"><b>Your progress is yours</b>Saved on your device. No account.</li>
+    <li><b><span data-l="fa">رایگان، بدون تبلیغ</span><span data-l="en">Free, no ads</span></b><span data-l="fa">بدون خرید درون‌برنامه‌ای، بدون تحلیل‌گر و ردیاب.</span><span data-l="en">No in-app purchases, no analytics, no trackers.</span></li>
+    <li><b><span data-l="fa">آفلاین</span><span data-l="en">Offline</span></b><span data-l="fa">همه‌ی بازی‌ها بدون اینترنت کار می‌کنند.</span><span data-l="en">Every game works without a connection.</span></li>
+    <li><b><span data-l="fa">متن‌باز</span><span data-l="en">Open source</span></b><span data-l="fa">کد کامل با مجوز MIT روی گیت‌هاب است.</span><span data-l="en">All code is on GitHub under the MIT licence.</span></li>
+    <li><b><span data-l="fa">پیشرفتت مال خودت است</span><span data-l="en">Your progress is yours</span></b><span data-l="fa">ذخیره روی خود دستگاه است. حساب کاربری نمی‌خواهد.</span><span data-l="en">Saved on your device. No account.</span></li>
   </ul>
 
   <div class="shots" tabindex="0" role="region" aria-label="Screenshots">
@@ -159,32 +154,42 @@ html[lang=fa] li[data-l=fa], html[lang=en] li[data-l=en] { display: list-item; }
     <br>MIT · <a href="https://github.com/choganhq">choganhq</a> · <a href="mailto:choganhq@gmail.com">choganhq@gmail.com</a>
   </footer>
 </div>
+<script src="/i18n.js"></script>
 <script>
-// Persian by default, English for browsers that ask for something else; the button
-// switches, and ?lang=fa|en forces one. Without script the page stays Persian.
+// Persian by default; the browser language picks one of the nine app languages, else English; the list
+// switches, and ?lang=xx forces one. Without script the page stays Persian.
 (function () {
-  var q = /[?&]lang=(fa|en)\b/.exec(location.search);
-  var nav = (navigator.language || 'fa').toLowerCase();
-  var lang = q ? q[1] : (nav.indexOf('fa') === 0 ? 'fa' : 'en');
-  var btn = document.getElementById('lang');
+  var LOC = [['fa', 'فارسی'], ['en', 'English'], ['zh', '中文'], ['de', 'Deutsch'], ['es', 'Español'],
+             ['pl', 'Polski'], ['fr', 'Français'], ['ar', 'العربية'], ['hi', 'हिन्दी']];
+  var codes = LOC.map(function (x) { return x[0]; });
+  var q = /[?&]lang=([a-z]{2})\b/.exec(location.search);
+  var nav = (navigator.language || 'fa').toLowerCase().slice(0, 2);
+  var lang = q && codes.indexOf(q[1]) >= 0 ? q[1] : (codes.indexOf(nav) >= 0 ? nav : 'en');
+  var sel = document.getElementById('lang');
+  LOC.forEach(function (x) { var o = document.createElement('option'); o.value = x[0]; o.textContent = x[1]; sel.appendChild(o); });
+  // The English spans are the source text; other languages replace their text from /i18n.js
+  var en = [].slice.call(document.querySelectorAll('[data-l=en]'));
+  en.forEach(function (e) { e.dataset.src = e.textContent; });
+  function t(key, l) { var d = (window.I18N || {})[l]; return (d && d[key]) || key; }
   function set(l) {
     lang = l;
     document.documentElement.lang = l;
-    document.documentElement.dir = l === 'fa' ? 'rtl' : 'ltr';
-    document.title = l === 'fa' ? 'چوگان — بازی‌های کوچک، تمام‌شدنی، بدون مزاحمت' : 'Chogan — small games you can finish';
-    btn.textContent = l === 'fa' ? 'English' : 'فارسی';
-    if (typeof label === 'function') label();
+    document.documentElement.dir = (l === 'fa' || l === 'ar') ? 'rtl' : 'ltr';
+    en.forEach(function (e) { e.textContent = l === 'en' || l === 'fa' ? e.dataset.src : t(e.dataset.src, l); });
+    document.title = l === 'fa' ? 'چوگان — بازی‌های کوچک، تمام‌شدنی، بدون مزاحمت' : l === 'en' ? 'Chogan — small games you can finish' : t('title', l);
+    sel.value = l;
+    label();
   }
   var tb = document.getElementById('theme');
   function isDark() {
-    var t = document.documentElement.dataset.theme;
-    return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    var th = document.documentElement.dataset.theme;
+    return th ? th === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
   }
   function label() {
-    var fa = lang === 'fa';
-    tb.textContent = isDark() ? (fa ? 'روشن' : 'Light') : (fa ? 'تاریک' : 'Dark');
+    var d = isDark();
+    tb.textContent = lang === 'fa' ? (d ? 'روشن' : 'تاریک') : t(d ? 'Light' : 'Dark', lang);
     var meta = document.querySelector('meta[name=theme-color]');
-    if (meta) meta.content = isDark() ? '#1A1714' : '#FBF6EF';
+    if (meta) meta.content = d ? '#1A1714' : '#FBF6EF';
   }
   tb.hidden = false;
   tb.addEventListener('click', function () {
@@ -193,8 +198,8 @@ html[lang=fa] li[data-l=fa], html[lang=en] li[data-l=en] { display: list-item; }
     try { localStorage.setItem('theme', next); } catch (e) {}
     label();
   });
-  btn.hidden = false;
-  btn.addEventListener('click', function () { set(lang === 'fa' ? 'en' : 'fa'); });
+  sel.hidden = false;
+  sel.addEventListener('change', function () { set(sel.value); });
   set(lang);
 })();
 </script>
