@@ -1,0 +1,1038 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>دوراک — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  /* a card face is a printed thing; in the dark theme it takes the raised surface so it stands off the table */
+  :root { --ch-pface: var(--c-surface); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ch-pface: var(--c-surface-3); } }
+  :root[data-theme="dark"] { --ch-pface: var(--c-surface-3); }
+  /* cards grow with the game area (#359); the table cards are a little smaller than the hand */
+  .dk-wrap { --cw: clamp(44px, min(13cqw, (100cqh - 340px) / 3.4), 96px); --tw: calc(var(--cw) * .86);
+    margin-block: auto; width: 100%; max-width: max(560px, calc(var(--cw) * 8)); display: flex; flex-direction: column; align-items: center; gap: var(--s-2); }
+  /* a phone on its side left the hand below the fold (844x390): the table goes left, the hand right */
+  @container game (min-aspect-ratio: 4 / 3) and (max-height: 560px) {
+    .dk-wrap { --cw: clamp(44px, min(8.5cqw, (100cqh - 120px) / 2.4), 90px); --tw: calc(var(--cw) * .62); max-width: none; display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); grid-template-areas: 'top status' 'bots hand' 'field hand' 'field acts';
+      align-items: center; justify-items: center; column-gap: var(--s-4); row-gap: var(--s-2); }
+    .dk-top { grid-area: top; } .dk-bots { grid-area: bots; } .dk-field { grid-area: field; } .dk-status { grid-area: status; }
+    .dk-actions { grid-area: acts; } .dk-hand { grid-area: hand; align-self: center; }
+    /* the rivals' tall boxes pushed the second row of the table off a 390px-high screen: one line each, the count says the size */
+    .dk-bot { padding: 3px 6px; flex-direction: row; flex-wrap: wrap; justify-content: center; column-gap: 6px; }
+    .dk-bot .dk-fan { display: none; }
+    .dk-bot .dk-role { min-height: 0; }
+  }
+  .dk-probe { position: absolute; width: var(--cw); height: 0; visibility: hidden; pointer-events: none; }
+  .dk-top { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; align-items: center; }
+  .dk-bots { width: 100%; display: flex; gap: var(--s-2); justify-content: center; }
+  .dk-bot { flex: 1; max-width: 180px; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 5px 8px;
+    background: var(--c-surface); border-radius: var(--r-md); box-shadow: var(--sh-1); border: 2px solid transparent; font-size: var(--fs-sm); font-weight: 700; color: var(--c-text-dim); }
+  .dk-bot--on { border-color: var(--game); }
+  .dk-bot--out { opacity: .55; }
+  .dk-fan { direction: ltr; display: flex; height: 24px; align-items: center; }
+  .dk-fan .ch-pback { width: 15px; border-width: 1px; border-radius: 3px; margin-inline-start: -10px; box-shadow: none; }
+  .dk-fan .ch-pback:first-child { margin-inline-start: 0; }
+  .dk-count { font-size: var(--fs-xs, 12px); }
+  .dk-role { font-size: var(--fs-xs, 12px); min-height: 1.4em; }
+  /* the deck sits left of the table in every language: the trump card turned under the stock, like on a real table */
+  .dk-field { direction: ltr; display: flex; align-items: center; justify-content: center; gap: var(--s-3); }
+  .dk-deck { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: var(--fs-xs, 12px); font-weight: 700; color: var(--c-text-dim); text-align: center; }
+  .dk-stock { position: relative; width: calc(var(--tw) * 1.5); height: calc(var(--tw) * 1.4); }
+  .dk-stock .dk-trump { --pw: var(--tw); position: absolute; left: calc(var(--tw) * .3); top: 0; transform: rotate(90deg); cursor: default; }
+  .dk-stock .dk-back { position: absolute; left: 0; top: 0; width: var(--tw); }
+  .dk-suit { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; font-size: calc(var(--tw) * .9); line-height: 1; color: var(--c-text-dim); }
+  .dk-suit--red { color: var(--c-bad); }
+  .dk-left { position: absolute; right: 2px; bottom: 2px; min-width: 22px; padding: 1px 5px; border-radius: 999px; background: var(--c-surface); box-shadow: var(--sh-1); font-size: var(--fs-xs, 12px); color: var(--c-text); }
+  .dk-off { max-width: calc(var(--tw) * 1.9); line-height: 1.3; }
+  /* six places on the table, always kept, so the board does not jump when a card arrives */
+  .dk-pairs { display: grid; grid-template-columns: repeat(3, calc(var(--tw) * 1.3)); grid-auto-rows: calc(var(--tw) * 1.78); gap: 6px;
+    min-height: calc(var(--tw) * 3.56 + 6px); align-content: center; }
+  .dk-pair { position: relative; }
+  .dk-pair .ch-pcard { --pw: var(--tw); position: absolute; top: 0; left: 0; cursor: default; }
+  .dk-pair .dk-d { left: calc(var(--tw) * .3); top: calc(var(--tw) * .38); transform: rotate(8deg); }
+  .dk-pair .dk-open { box-shadow: var(--sh-1), 0 0 0 2px var(--game); }
+  .dk-status { min-height: 2.6em; font-weight: 700; font-size: var(--fs-sm); color: var(--c-text-dim); text-align: center; display: flex; align-items: center; }
+  /* a big hand wraps into overlapping rows, so every card keeps a strip wide enough for a finger */
+  .dk-hand { direction: ltr; width: 100%; display: flex; flex-direction: column; align-items: center; min-height: calc(var(--cw) * 1.4 + 12px); padding-top: 12px; }
+  .dk-row { display: flex; justify-content: center; }
+  .dk-row + .dk-row { margin-top: calc(var(--cw) * -0.35); }
+  .dk-hand .ch-pcard { flex: 0 0 auto; transition: transform var(--t-fast) var(--ease); }
+  .dk-hand .dk-ok { transform: translateY(-10px); box-shadow: var(--sh-2), 0 0 0 2px var(--game); }
+  .dk-hand .dk-no { cursor: default; }
+  /* a dim veil, not opacity: a see-through card would show the row under it */
+  .dk-hand .dk-no::after { content: ''; position: absolute; top: 0; right: 0; bottom: 0; left: 0; border-radius: inherit; background: rgba(20, 16, 28, .3); pointer-events: none; }
+  .dk-hand .dk-kf { outline: 3px solid var(--game); outline-offset: 2px; }
+  .dk-hand .ch-pcard > * { pointer-events: none; }
+  .dk-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; min-height: 44px; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function DurakEngineFactory() {
+  'use strict';
+
+  // The 36-card deck, six to ace, in the core's card numbering: id = rank * 4 + suit,
+  // rank 0 is the ace and 5..12 are six to king, suit 0..3 is clubs, diamonds, hearts,
+  // spades. A save can then be checked card by card.
+  var RANKS = [0, 5, 6, 7, 8, 9, 10, 11, 12], SIZE = 36, PER = 6, MAXT = 6;
+  var DECK = [];
+  RANKS.forEach(function (r) { for (var s = 0; s < 4; s++) DECK.push(r * 4 + s); });
+  function rank(c) { return c >> 2; }
+  function suit(c) { return c & 3; }
+  // the ace is the highest card
+  function str(c) { var r = c >> 2; return r === 0 ? 13 : r; }
+  function canBeat(a, d, trump) {
+    return (suit(d) === suit(a) && str(d) > str(a)) || (suit(d) === trump && suit(a) !== trump);
+  }
+
+  function shuffle(a, rnd) {
+    for (var j = a.length - 1; j > 0; j--) { var k = Math.floor(rnd() * (j + 1)), t = a[j]; a[j] = a[k]; a[k] = t; }
+    return a;
+  }
+
+  // Six cards each. The rest is the stock; its bottom card (stock[0], drawn last) is
+  // turned face up and names the trump. The player with the lowest trump attacks first.
+  function newGame(rnd, n, opts) {
+    var d = shuffle(DECK.slice(), rnd);
+    var G = { n: n, hands: [], stock: null, trump: 0, trumpCard: -1, table: [], att: 0, def: 1, actor: 0, limit: MAXT, passes: 0, taking: false,
+      out: [], outAt: [], loser: -1, over: false, transfer: !!(opts && opts.transfer), seen: [], fx: null, drew: [], last: null, bouts: 0 };
+    for (var p = 0; p < n; p++) { G.hands.push(d.splice(0, PER)); G.out.push(false); G.outAt.push(-1); }
+    G.stock = d;
+    G.trumpCard = d[0];
+    G.trump = suit(d[0]);
+    var first = 0, low = 99;
+    for (var q = 0; q < n; q++) G.hands[q].forEach(function (c) { if (suit(c) === G.trump && str(c) < low) { low = str(c); first = q; } });
+    startBout(G, first);
+    return G;
+  }
+
+  function nextActive(G, p) {
+    for (var k = 1; k <= G.n; k++) { var q = (p + k) % G.n; if (!G.out[q]) return q; }
+    return p;
+  }
+  function startBout(G, att) {
+    if (G.out[att]) att = nextActive(G, att);
+    G.att = att;
+    G.def = nextActive(G, att);
+    G.table = [];
+    G.taking = false;
+    G.passes = 0;
+    G.actor = att;
+    // never more attack cards than the defender held when the bout began
+    G.limit = Math.min(MAXT, G.hands[G.def].length);
+    G.bouts++;
+  }
+  // everyone who may throw in, the attacker first, then round the table
+  function attackers(G) {
+    var out = [];
+    for (var k = 0; k < G.n; k++) { var q = (G.att + k) % G.n; if (q !== G.def && !G.out[q]) out.push(q); }
+    return out;
+  }
+  function onTable(G) {
+    var r = {};
+    G.table.forEach(function (t) { r[rank(t.a)] = 1; if (t.d >= 0) r[rank(t.d)] = 1; });
+    return r;
+  }
+  function unbeaten(G) { var n = 0; G.table.forEach(function (t) { if (t.d < 0) n++; }); return n; }
+  function throwable(G, p) {
+    if (!G.table.length || G.table.length >= G.limit || p === G.def) return [];
+    var r = onTable(G);
+    return G.hands[p].filter(function (c) { return r[rank(c)]; });
+  }
+  function beaters(G, i) {
+    var a = G.table[i].a;
+    return G.hands[G.def].filter(function (c) { return canBeat(a, c, G.trump); });
+  }
+  // which unbeaten card c should cover: one of its own suit first, the highest it can take
+  function beatTarget(G, c) {
+    var best = -1, bs = -1;
+    G.table.forEach(function (t, i) {
+      if (t.d >= 0 || !canBeat(t.a, c, G.trump)) return;
+      var s = (suit(t.a) === suit(c) ? 100 : 0) + str(t.a);
+      if (s > bs) { bs = s; best = i; }
+    });
+    return best;
+  }
+  // Transfer game: the defender passes the attack on with a card of the same rank, only
+  // while nothing is beaten, and only if the next player could face every card.
+  function transferCards(G) {
+    if (!G.transfer || G.over || G.taking || G.actor !== G.def || !G.table.length) return [];
+    var r = rank(G.table[0].a);
+    for (var i = 0; i < G.table.length; i++) if (G.table[i].d >= 0 || rank(G.table[i].a) !== r) return [];
+    var nx = nextActive(G, G.def);
+    if (nx === G.def || G.table.length + 1 > MAXT || G.hands[nx].length < G.table.length + 1) return [];
+    return G.hands[G.def].filter(function (c) { return rank(c) === r; });
+  }
+  function legal(G) {
+    if (G.over) return [];
+    var p = G.actor;
+    if (!G.table.length) return p === G.att ? G.hands[p].slice() : [];
+    if (p === G.def) {
+      if (G.taking) return [];
+      return G.hands[p].filter(function (c) { return beatTarget(G, c) >= 0; });
+    }
+    return throwable(G, p);
+  }
+
+  function takeFrom(h, c) { var i = h.indexOf(c); if (i < 0) return false; h.splice(i, 1); return true; }
+
+  // a lead or a throw-in
+  function play(G, c) {
+    if (G.over) return false;
+    var p = G.actor;
+    if (!G.table.length) { if (p !== G.att) return false; }
+    else if (throwable(G, p).indexOf(c) < 0) return false;
+    if (!takeFrom(G.hands[p], c)) return false;
+    G.table.push({ a: c, d: -1 });
+    G.passes = 0;
+    G.fx = { p: p, c: c };
+    // while the defender takes, the thrower keeps the turn and may add more
+    if (!G.taking) G.actor = G.def;
+    settle(G);
+    return true;
+  }
+  function defend(G, i, c) {
+    if (G.over || G.actor !== G.def || G.taking) return false;
+    var t = G.table[i];
+    if (!t || t.d >= 0 || G.hands[G.def].indexOf(c) < 0 || !canBeat(t.a, c, G.trump)) return false;
+    takeFrom(G.hands[G.def], c);
+    t.d = c;
+    G.fx = { p: G.def, c: c };
+    if (!unbeaten(G)) { G.actor = G.att; G.passes = 0; }
+    settle(G);
+    return true;
+  }
+  function take(G) {
+    if (G.over || G.actor !== G.def || G.taking || !unbeaten(G)) return false;
+    G.taking = true;
+    G.actor = G.att;
+    G.passes = 0;
+    G.fx = { take: G.def };
+    settle(G);
+    return true;
+  }
+  function doPass(G) {
+    G.passes++;
+    var list = attackers(G);
+    if (G.passes >= list.length) { if (G.taking) endTake(G); else endBeaten(G); return; }
+    var i = list.indexOf(G.actor);
+    G.actor = list[(i + 1) % list.length];
+  }
+  function pass(G) {
+    if (G.over || !G.table.length || G.actor === G.def) return false;
+    G.fx = { pass: G.actor };
+    doPass(G);
+    settle(G);
+    return true;
+  }
+  function transfer(G, c) {
+    if (transferCards(G).indexOf(c) < 0) return false;
+    var p = G.def, nx = nextActive(G, G.def);
+    takeFrom(G.hands[p], c);
+    G.table.push({ a: c, d: -1 });
+    G.att = p;
+    G.def = nx;
+    G.limit = Math.min(MAXT, G.hands[nx].length);
+    G.actor = nx;
+    G.passes = 0;
+    G.fx = { p: p, c: c, transfer: nx };
+    settle(G);
+    return true;
+  }
+
+  // what happens on its own: a full table, a defender with nothing left, a thrower with nothing to throw
+  function settle(G) {
+    for (var guard = 0; guard < 20 && !G.over && G.table.length; guard++) {
+      if (G.taking && G.table.length >= G.limit) { endTake(G); return; }
+      if (!G.taking && !unbeaten(G) && (G.table.length >= G.limit || !G.hands[G.def].length)) { endBeaten(G); return; }
+      if (G.actor !== G.def && !throwable(G, G.actor).length) { doPass(G); continue; }
+      return;
+    }
+  }
+
+  // hands are filled up to six, the attacker first, the others in turn, the defender last
+  function refill(G) {
+    G.drew = [];
+    var order = attackers(G).concat([G.def]);
+    order.forEach(function (p) {
+      var got = [];
+      while (G.hands[p].length < PER && G.stock.length) { var c = G.stock.pop(); G.hands[p].push(c); got.push(c); }
+      if (got.length) G.drew.push([p, got]);
+    });
+  }
+  function afterBout(G) {
+    if (!G.stock.length) {
+      for (var p = 0; p < G.n; p++) if (!G.out[p] && !G.hands[p].length) { G.out[p] = true; G.outAt[p] = G.bouts; }
+    }
+    var act = [];
+    for (var q = 0; q < G.n; q++) if (!G.out[q]) act.push(q);
+    if (act.length <= 1) {
+      G.over = true;
+      // the cards ran out for everyone together: nobody is left holding them
+      G.loser = act.length ? act[0] : -2;
+      G.actor = -1;
+    }
+  }
+  function endBeaten(G) {
+    var tb = G.table, d = G.def;
+    tb.forEach(function (t) { G.seen.push(t.a); if (t.d >= 0) G.seen.push(t.d); });
+    G.last = { table: tb, taken: -1, def: d };
+    refill(G);
+    afterBout(G);
+    if (G.over) { G.table = []; return; }
+    // the defender who held attacks next
+    startBout(G, G.out[d] ? nextActive(G, d) : d);
+  }
+  function endTake(G) {
+    var tb = G.table, d = G.def;
+    tb.forEach(function (t) { G.hands[d].push(t.a); if (t.d >= 0) G.hands[d].push(t.d); });
+    G.last = { table: tb, taken: d, def: d };
+    refill(G);
+    afterBout(G);
+    if (G.over) { G.table = []; return; }
+    // the one who took loses the attack: the player after them leads
+    startBout(G, nextActive(G, d));
+  }
+
+  function apply(G, m) {
+    if (!m) return false;
+    if (m.play !== undefined) return play(G, m.play);
+    if (m.defend) return defend(G, m.defend[0], m.defend[1]);
+    if (m.transfer !== undefined) return transfer(G, m.transfer);
+    if (m.take) return take(G);
+    if (m.pass) return pass(G);
+    return false;
+  }
+
+  function cost(G, c) { return str(c) + (suit(c) === G.trump ? 20 : 0); }
+  // nobody can beat c: every card that could is gone or in p's own hand
+  function boss(G, p, c) {
+    var gone = {};
+    G.seen.forEach(function (x) { gone[x] = 1; });
+    G.hands[p].forEach(function (x) { gone[x] = 1; });
+    for (var i = 0; i < SIZE; i++) if (!gone[DECK[i]] && canBeat(c, DECK[i], G.trump)) return false;
+    return true;
+  }
+
+  // Bots. Easy plays at random. Medium leads its cheapest card, covers with the cheapest
+  // card that does it, keeps high trumps while the deck lasts (it takes rather than spend
+  // a king or ace of trumps), throws in only cheap plain cards, and remembers what went
+  // to the discard: once the deck is gone it leads cards nobody can beat. Hard does the
+  // same, guards its queen and up, leads pairs it can follow, and throws trumps at the end.
+  function botMove(G, level, rnd) {
+    rnd = rnd || Math.random;
+    var p = G.actor, h = G.hands[p], late = !G.stock.length;
+    if (G.over || p < 0) return null;
+    if (!G.table.length) {
+      if (level === 'easy') return { play: h[Math.floor(rnd() * h.length)] };
+      var best = -1, bs = 1e9;
+      h.forEach(function (c) {
+        var s = cost(G, c);
+        if (late && boss(G, p, c)) s -= 25;
+        if (level === 'hard') h.forEach(function (x) { if (x !== c && rank(x) === rank(c)) s -= 2; });
+        if (s < bs || (s === bs && c < best)) { bs = s; best = c; }
+      });
+      return { play: best };
+    }
+    if (p === G.def && !G.taking) {
+      var tr = transferCards(G), unb = [];
+      G.table.forEach(function (t, i) { if (t.d < 0) unb.push(i); });
+      for (var k = 0; k < unb.length; k++) if (!beaters(G, unb[k]).length && !tr.length) return { take: true };
+      if (level === 'easy') {
+        if (tr.length && rnd() < 0.3) return { transfer: tr[0] };
+        var open = unb.filter(function (i) { return beaters(G, i).length; });
+        if (open.length < unb.length) return tr.length ? { transfer: tr[0] } : { take: true };
+        var bb0 = beaters(G, open[0]);
+        return { defend: [open[0], bb0[Math.floor(rnd() * bb0.length)]] };
+      }
+      var cheap = tr.filter(function (c) { return suit(c) !== G.trump && str(c) <= 10; });
+      if (cheap.length) return { transfer: cheap[0] };
+      for (var j = 0; j < unb.length; j++) if (!beaters(G, unb[j]).length) return tr.length ? { transfer: tr[0] } : { take: true };
+      // the hardest card first, with the cheapest card that covers it
+      unb.sort(function (a, b) { return cost(G, G.table[b].a) - cost(G, G.table[a].a); });
+      var i1 = unb[0], bb = beaters(G, i1).sort(function (a, b) { return cost(G, a) - cost(G, b); }), c1 = bb[0];
+      var guard = level === 'hard' ? 31 : 32, keep = level === 'hard' ? 0 : 6;
+      if (G.stock.length > keep && cost(G, c1) >= guard && G.table.length <= 2) return { take: true };
+      return { defend: [i1, c1] };
+    }
+    var L = throwable(G, p);
+    if (!L.length) return { pass: true };
+    if (level === 'easy') return rnd() < 0.5 ? { play: L[Math.floor(rnd() * L.length)] } : { pass: true };
+    L.sort(function (a, b) { return cost(G, a) - cost(G, b); });
+    var c2 = L[0];
+    if (suit(c2) === G.trump && !(level === 'hard' && late)) return { pass: true };
+    if (!late && !G.taking && str(c2) > 10) return { pass: true };
+    return { play: c2 };
+  }
+
+  // the rest of a game among bots alone, once the player is out
+  function playOut(G, level, rnd) {
+    for (var i = 0; i < 5000 && !G.over; i++) if (!apply(G, botMove(G, level, rnd))) return false;
+    return G.over;
+  }
+
+  function valid(v) {
+    if (!v || !(v.n >= 2 && v.n <= 4) || !Array.isArray(v.hands) || v.hands.length !== v.n || !Array.isArray(v.stock) || !Array.isArray(v.table) ||
+      !Array.isArray(v.seen) || !Array.isArray(v.out) || v.out.length !== v.n || !Array.isArray(v.outAt)) return false;
+    var seen = {}, n = 0, ok = true;
+    var add = function (c) { if (typeof c !== 'number' || DECK.indexOf(c) < 0 || seen[c]) ok = false; seen[c] = 1; n++; };
+    v.hands.forEach(function (h) { if (!Array.isArray(h)) ok = false; else h.forEach(add); });
+    v.stock.forEach(add); v.seen.forEach(add);
+    v.table.forEach(function (t) { if (!t || typeof t !== 'object') { ok = false; return; } add(t.a); if (t.d !== -1) add(t.d); });
+    if (!ok || n !== SIZE || !(v.trump >= 0 && v.trump < 4) || !(v.limit >= 0 && v.limit <= MAXT) || v.table.length > MAXT) return false;
+    if (DECK.indexOf(v.trumpCard) < 0 || suit(v.trumpCard) !== v.trump) return false;
+    if (!(v.att >= 0 && v.att < v.n) || !(v.def >= 0 && v.def < v.n)) return false;
+    return v.over ? true : (v.actor >= 0 && v.actor < v.n && v.att !== v.def);
+  }
+
+  return {
+    RANKS: RANKS, SIZE: SIZE, PER: PER, MAXT: MAXT, DECK: DECK,
+    rank: rank, suit: suit, str: str, canBeat: canBeat, newGame: newGame, nextActive: nextActive, attackers: attackers,
+    throwable: throwable, beaters: beaters, beatTarget: beatTarget, transferCards: transferCards, legal: legal,
+    play: play, defend: defend, take: take, pass: pass, transfer: transfer, apply: apply, botMove: botMove, playOut: playOut, valid: valid
+  };
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = DurakEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = DurakEngineFactory();
+  var LEVELS = ['easy', 'medium', 'hard'];
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'durak',
+    name: { fa: 'دوراک', en: 'Durak', zh: '杜拉克', de: 'Durak', es: 'Durak', pl: 'Dureń', fr: 'Durak', ar: 'دوراك', hi: 'दुराक', ru: 'Дурак' },
+    accent: '#880E14',
+    mood: 'menu',
+    cardSpeed: true,
+    scroll: true,
+    strings: {
+      fa: {
+        youName: 'تو', rivalN: 'حریف {n}', cardsN: '{n} کارت', dailyDk: 'دوراک روزانه', newMatch: 'بازی تازه', trumpIs: 'حکم {s}', discardN: 'سوخته: {n}',
+        roleAtt: 'حمله', roleDef: 'دفاع', roleOut: 'بیرون',
+        yourLead: 'نوبت حمله‌ی توست: هر کارتی بازی کن', throwIn: 'کارتی با عددی که روی زمین هست بینداز، یا «بس» را بزن', defendNow: 'هر کارت را بزن، یا همه را بردار',
+        theyTake: '{n} برمی‌دارد: باز هم بینداز یا «بس» را بزن', thinking: '{n} فکر می‌کند…',
+        tookN: '{n} کارت‌ها را برداشت', youTook: 'کارت‌ها را برداشتی', beatenOff: 'سوخت', transferN: '{n} حمله را به نفر بعد داد', youTransfer: 'حمله را به {n} دادی', youOut: 'دستت خالی شد: در امانی',
+        takeBtn: 'برمی‌دارم', doneBtn: 'بس', transferBtn: 'بده به بعدی', cantBeat: 'این کارت هیچ کارت حمله‌ای را نمی‌زند', cantThrow: 'فقط عددهایی که روی زمین هست',
+        notFool: 'دوراک نشدی!', youFool: 'دوراک شدی', drawEnd: 'مساوی: هیچ‌کس دوراک نشد', durakIs: 'دوراک', nobody: 'هیچ‌کس', bouts: 'دورها',
+        rivals: 'حریف‌ها', level: 'سطح', mode: 'بازی', modePod: 'انداختنی', modePer: 'دادنی', optNote: 'از بازی بعد اعمال می‌شود.',
+        kbCards: 'رفتن بین کارت‌ها', kbPlay: 'بازی کردن کارت', kbTake: 'برداشتن کارت‌ها', kbDone: 'بس', kbTrans: 'دادن حمله به نفر بعد',
+        rules: 'سی‌وشش کارت، از شش تا آس. به هر نفر شش کارت می‌رسد و کارت ته دسته، که رو به بالاست، خال حکم را نشان می‌دهد. مهاجم یک کارت بازی می‌کند و مدافع باید آن را بزند: با کارت بزرگ‌تر از همان خال، یا با هر حکمی (حکم را فقط حکم بزرگ‌تر می‌زند). بقیه می‌توانند کارت‌هایی با عددی که روی زمین هست بیندازند، تا شش کارت و نه بیشتر از کارت‌هایی که مدافع اول دور داشت. اگر مدافع همه را بزند کارت‌ها می‌سوزند و حمله‌ی بعد با خود اوست؛ وگرنه همه را برمی‌دارد و نفر بعد از او حمله می‌کند. بعد از هر دور دست‌ها از دسته تا شش پر می‌شوند، اول مهاجم و آخر مدافع. وقتی دسته تمام شد، هر کس کارتش تمام شود بیرون می‌رود. آخرین کسی که کارت در دست دارد دوراک است. در بازی دادنی، مدافع می‌تواند به جای زدن کارتی هم‌عدد بگذارد و حمله را به نفر بعد بدهد، به شرط آن‌که هنوز کارتی زده نشده باشد و نفر بعد کارت کافی داشته باشد.',
+        tutTitle1: 'حمله', tutText1: 'یک کارت بازی کن. مدافع باید آن را با کارت بزرگ‌تر از همان خال یا با حکم بزند.',
+        tutTitle2: 'دفاع', tutText2: 'همه‌ی کارت‌ها را بزن تا بسوزند، یا همه را بردار.',
+        tutTitle3: 'دوراک نشو', tutText3: 'بقیه کارت‌های هم‌عدد می‌اندازند. وقتی دسته تمام شد دستت را خالی کن؛ آخرین کسی که کارت دارد دوراک است.'
+      },
+      en: {
+        youName: 'You', rivalN: 'Rival {n}', cardsN: '{n} cards', dailyDk: 'Daily Durak', newMatch: 'New game', trumpIs: 'Trump {s}', discardN: 'Off: {n}',
+        roleAtt: 'Attacks', roleDef: 'Defends', roleOut: 'Out',
+        yourLead: 'Your attack: lead any card', throwIn: 'Throw in a card of a rank on the table, or press Done', defendNow: 'Beat each card, or take them all',
+        theyTake: '{n} takes: throw in more, or press Done', thinking: '{n} is thinking…',
+        tookN: '{n} took the cards', youTook: 'You took the cards', beatenOff: 'Beaten off', transferN: '{n} passed the attack on', youTransfer: 'You passed the attack to {n}', youOut: 'Your hand is empty: you are safe',
+        takeBtn: 'Take', doneBtn: 'Done', transferBtn: 'Pass on', cantBeat: 'That card can\'t beat any attack card', cantThrow: 'Only ranks already on the table',
+        notFool: 'You\'re not the durak!', youFool: 'You\'re the durak', drawEnd: 'A draw: nobody is the durak', durakIs: 'Durak', nobody: 'Nobody', bouts: 'Bouts',
+        rivals: 'Rivals', level: 'Level', mode: 'Game', modePod: 'Throw-in', modePer: 'Transfer', optNote: 'Applies from the next game.',
+        kbCards: 'Move between cards', kbPlay: 'Play the card', kbTake: 'Take the cards', kbDone: 'Done', kbTrans: 'Pass the attack on',
+        rules: '36 cards, six to ace. Everyone gets six; the bottom card of the deck lies face up and shows the trump suit. The attacker leads a card and the defender must beat it: with a higher card of the same suit, or with any trump (a trump falls only to a higher trump). The others may throw in cards of a rank already on the table, up to six and never more than the defender held at the start. If the defender beats everything, the cards are beaten off and the defender attacks next; if not, the defender takes them all and the next player attacks. After each bout hands are filled up to six from the deck, the attacker first and the defender last. Once the deck is gone, whoever runs out of cards is out. The last player left holding cards is the durak, the fool. In the Transfer game the defender may instead add a card of the same rank and pass the attack to the next player, while nothing is beaten yet and that player holds enough cards.',
+        tutTitle1: 'Attack', tutText1: 'Lead any card. The defender must beat it with a higher card of the same suit, or with a trump.',
+        tutTitle2: 'Defend', tutText2: 'Beat every card to send them off, or take them all into your hand.',
+        tutTitle3: 'Don\'t be the durak', tutText3: 'The others throw in cards of ranks on the table. Empty your hand once the deck is gone: the last one holding cards is the durak.'
+      },
+      pl: {
+        youName: 'Ty', rivalN: 'Rywal {n}', cardsN: 'Karty: {n}', dailyDk: 'Dureń dnia', newMatch: 'Nowa gra', trumpIs: 'Atut {s}', discardN: 'Odrzucone: {n}',
+        roleAtt: 'Atakuje', roleDef: 'Broni się', roleOut: 'Poza grą',
+        yourLead: 'Twój atak: wyłóż dowolną kartę', throwIn: 'Dorzuć kartę o wartości ze stołu albo naciśnij Koniec', defendNow: 'Pobij każdą kartę albo weź wszystkie',
+        theyTake: '{n} bierze: dorzuć więcej albo naciśnij Koniec', thinking: '{n} myśli…',
+        tookN: '{n} bierze karty', youTook: 'Bierzesz karty', beatenOff: 'Pobite', transferN: '{n} przekazuje atak dalej', youTransfer: 'Przekazujesz atak: {n}', youOut: 'Nie masz już kart: jesteś bezpieczny',
+        takeBtn: 'Biorę', doneBtn: 'Koniec', transferBtn: 'Przekaż', cantBeat: 'Ta karta nie bije żadnej karty ataku', cantThrow: 'Tylko wartości, które są na stole',
+        notFool: 'Nie jesteś durniem!', youFool: 'Jesteś durniem', drawEnd: 'Remis: nikt nie jest durniem', durakIs: 'Dureń', nobody: 'Nikt', bouts: 'Starcia',
+        rivals: 'Rywale', level: 'Poziom', mode: 'Gra', modePod: 'Z dorzucaniem', modePer: 'Z przekazywaniem', optNote: 'Obowiązuje od następnej gry.',
+        kbCards: 'Przechodzenie między kartami', kbPlay: 'Zagranie karty', kbTake: 'Wzięcie kart', kbDone: 'Koniec', kbTrans: 'Przekazanie ataku',
+        rules: '36 kart, od szóstki do asa. Każdy dostaje sześć; dolna karta talii leży odkryta i wskazuje kolor atutowy. Atakujący wykłada kartę, a broniący musi ją pobić: wyższą kartą w tym samym kolorze albo dowolnym atutem (atut bije tylko wyższy atut). Pozostali mogą dorzucać karty o wartościach, które są już na stole, najwyżej sześć i nie więcej, niż broniący miał na początku. Jeśli broniący pobije wszystko, karty idą do odrzuconych i to on atakuje następny; jeśli nie, bierze wszystkie, a atakuje następny gracz. Po każdym starciu ręce uzupełnia się do sześciu z talii, najpierw atakujący, na końcu broniący. Gdy talia się skończy, kto pozbędzie się kart, wychodzi z gry. Ostatni gracz z kartami w ręce zostaje durniem. W grze z przekazywaniem broniący może zamiast tego dołożyć kartę tej samej wartości i przekazać atak następnemu graczowi, dopóki nic nie jest pobite, a ten gracz ma dość kart.',
+        tutTitle1: 'Atak', tutText1: 'Wyłóż dowolną kartę. Broniący musi ją pobić wyższą kartą w tym samym kolorze albo atutem.',
+        tutTitle2: 'Obrona', tutText2: 'Pobij wszystkie karty, aby poszły do odrzuconych, albo weź je wszystkie do ręki.',
+        tutTitle3: 'Nie zostań durniem', tutText3: 'Inni dorzucają karty o wartościach ze stołu. Pozbądź się kart, gdy talia się skończy: ostatni z kartami zostaje durniem.'
+      },
+      fr: {
+        youName: 'Toi', rivalN: 'Rival {n}', cardsN: '{n} cartes', dailyDk: 'Durak du jour', newMatch: 'Nouvelle partie', trumpIs: 'Atout {s}', discardN: 'Défausse : {n}',
+        roleAtt: 'Attaque', roleDef: 'Défend', roleOut: 'Sorti',
+        yourLead: 'À toi d\'attaquer : pose une carte', throwIn: 'Ajoute une carte d\'une valeur déjà posée, ou appuie sur Fini', defendNow: 'Bats chaque carte, ou ramasse tout',
+        theyTake: '{n} ramasse : ajoute des cartes ou appuie sur Fini', thinking: '{n} réfléchit…',
+        tookN: '{n} a ramassé les cartes', youTook: 'Tu as ramassé les cartes', beatenOff: 'À la défausse', transferN: '{n} passe l\'attaque au suivant', youTransfer: 'Tu passes l\'attaque à {n}', youOut: 'Ta main est vide : tu es sauvé',
+        takeBtn: 'Je ramasse', doneBtn: 'Fini', transferBtn: 'Passer', cantBeat: 'Cette carte ne bat aucune carte d\'attaque', cantThrow: 'Seulement des valeurs déjà posées',
+        notFool: 'Tu n\'es pas le durak !', youFool: 'Tu es le durak', drawEnd: 'Égalité : personne n\'est le durak', durakIs: 'Durak', nobody: 'Personne', bouts: 'Assauts',
+        rivals: 'Rivaux', level: 'Niveau', mode: 'Jeu', modePod: 'Ajout', modePer: 'Transfert', optNote: 'S\'applique à la prochaine partie.',
+        kbCards: 'Passer d\'une carte à l\'autre', kbPlay: 'Jouer la carte', kbTake: 'Ramasser', kbDone: 'Fini', kbTrans: 'Passer l\'attaque',
+        rules: '36 cartes, du six à l\'as. Chacun en reçoit six ; la dernière carte du talon est retournée et donne l\'atout. L\'attaquant pose une carte et le défenseur doit la battre : avec une carte plus haute de la même couleur, ou avec n\'importe quel atout (un atout ne tombe que sous un atout plus haut). Les autres peuvent ajouter des cartes d\'une valeur déjà posée, jusqu\'à six et jamais plus que ce que le défenseur avait au départ. Si le défenseur bat tout, les cartes vont à la défausse et il attaque ensuite ; sinon il ramasse tout et c\'est au joueur suivant d\'attaquer. Après chaque assaut, les mains sont complétées à six depuis le talon, l\'attaquant d\'abord, le défenseur en dernier. Une fois le talon vide, qui n\'a plus de cartes sort. Le dernier joueur qui garde des cartes est le durak, l\'idiot. Dans le jeu Transfert, le défenseur peut à la place poser une carte de même valeur et passer l\'attaque au joueur suivant, tant que rien n\'est battu et que ce joueur a assez de cartes.',
+        tutTitle1: 'Attaque', tutText1: 'Pose une carte. Le défenseur doit la battre avec une carte plus haute de la même couleur, ou avec un atout.',
+        tutTitle2: 'Défense', tutText2: 'Bats toutes les cartes pour les envoyer à la défausse, ou ramasse-les toutes.',
+        tutTitle3: 'Ne sois pas le durak', tutText3: 'Les autres ajoutent des cartes de valeurs déjà posées. Vide ta main une fois le talon fini : le dernier avec des cartes est le durak.'
+      },
+      ar: {
+        youName: 'أنت', rivalN: 'المنافس {n}', cardsN: '{n} أوراق', dailyDk: 'دوراك اليوم', newMatch: 'لعبة جديدة', trumpIs: 'الحكم {s}', discardN: 'المحروقة: {n}',
+        roleAtt: 'يهاجم', roleDef: 'يدافع', roleOut: 'خرج',
+        yourLead: 'دورك في الهجوم: العب أي ورقة', throwIn: 'أضف ورقة بقيمة موجودة على الطاولة، أو اضغط انتهيت', defendNow: 'اقطع كل ورقة، أو خذها كلها',
+        theyTake: '{n} يأخذ: أضف المزيد أو اضغط انتهيت', thinking: '{n} يفكر…',
+        tookN: '{n} أخذ الأوراق', youTook: 'أخذت الأوراق', beatenOff: 'احترقت', transferN: '{n} مرّر الهجوم إلى التالي', youTransfer: 'مرّرت الهجوم إلى {n}', youOut: 'يدك فارغة: أنت في أمان',
+        takeBtn: 'آخذها', doneBtn: 'انتهيت', transferBtn: 'مرّر', cantBeat: 'هذه الورقة لا تقطع أي ورقة هجوم', cantThrow: 'فقط القيم الموجودة على الطاولة',
+        notFool: 'لست الدوراك!', youFool: 'أنت الدوراك', drawEnd: 'تعادل: لا أحد دوراك', durakIs: 'الدوراك', nobody: 'لا أحد', bouts: 'الجولات',
+        rivals: 'المنافسون', level: 'المستوى', mode: 'اللعبة', modePod: 'بالإضافة', modePer: 'بالتمرير', optNote: 'يطبَّق من اللعبة التالية.',
+        kbCards: 'التنقل بين الأوراق', kbPlay: 'لعب الورقة', kbTake: 'أخذ الأوراق', kbDone: 'انتهيت', kbTrans: 'تمرير الهجوم',
+        rules: '36 ورقة، من الستة إلى الآس. يأخذ كل لاعب ست أوراق؛ وآخر ورقة في الكومة مكشوفة وتحدد لون الحكم. يلعب المهاجم ورقة وعلى المدافع أن يقطعها: بورقة أعلى من اللون نفسه، أو بأي ورقة حكم (الحكم لا يقطعه إلا حكم أعلى). يمكن للآخرين إضافة أوراق بقيم موجودة على الطاولة، حتى ست أوراق ولا أكثر مما كان مع المدافع في البداية. إذا قطع المدافع كل شيء احترقت الأوراق وصار هو المهاجم التالي؛ وإلا أخذها كلها وهاجم اللاعب الذي بعده. بعد كل جولة تُكمَّل الأيدي إلى ست من الكومة، المهاجم أولًا والمدافع أخيرًا. بعد نفاد الكومة يخرج من تنفد أوراقه. آخر لاعب تبقى معه أوراق هو الدوراك، أي الأحمق. في لعبة التمرير يمكن للمدافع بدلًا من ذلك أن يضع ورقة بالقيمة نفسها ويمرّر الهجوم إلى اللاعب التالي، ما دام لم يُقطع شيء بعد ولدى ذلك اللاعب أوراق كافية.',
+        tutTitle1: 'الهجوم', tutText1: 'العب أي ورقة. على المدافع أن يقطعها بورقة أعلى من اللون نفسه، أو بورقة حكم.',
+        tutTitle2: 'الدفاع', tutText2: 'اقطع كل الأوراق لتحترق، أو خذها كلها إلى يدك.',
+        tutTitle3: 'لا تكن الدوراك', tutText3: 'يضيف الآخرون أوراقًا بقيم موجودة على الطاولة. أفرغ يدك بعد نفاد الكومة: آخر من تبقى معه أوراق هو الدوراك.'
+      },
+      hi: {
+        youName: 'आप', rivalN: 'प्रतिद्वंद्वी {n}', cardsN: '{n} पत्ते', dailyDk: 'आज का दुराक', newMatch: 'नया खेल', trumpIs: 'तुरुप {s}', discardN: 'कटे: {n}',
+        roleAtt: 'हमला', roleDef: 'बचाव', roleOut: 'बाहर',
+        yourLead: 'आपका हमला: कोई भी पत्ता चलें', throwIn: 'मेज़ पर मौजूद मान का पत्ता डालें, या बस दबाएँ', defendNow: 'हर पत्ता काटें, या सब उठा लें',
+        theyTake: '{n} उठा रहा है: और डालें या बस दबाएँ', thinking: '{n} सोच रहा है…',
+        tookN: '{n} ने पत्ते उठाए', youTook: 'आपने पत्ते उठाए', beatenOff: 'कट गए', transferN: '{n} ने हमला आगे बढ़ाया', youTransfer: 'आपने हमला {n} को दिया', youOut: 'आपका हाथ ख़ाली है: आप बच गए',
+        takeBtn: 'उठाता हूँ', doneBtn: 'बस', transferBtn: 'आगे दें', cantBeat: 'यह पत्ता किसी हमले के पत्ते को नहीं काटता', cantThrow: 'सिर्फ़ मेज़ पर मौजूद मान',
+        notFool: 'आप दुराक नहीं हैं!', youFool: 'आप दुराक हैं', drawEnd: 'बराबरी: कोई दुराक नहीं', durakIs: 'दुराक', nobody: 'कोई नहीं', bouts: 'हमले',
+        rivals: 'प्रतिद्वंद्वी', level: 'स्तर', mode: 'खेल', modePod: 'डालने वाला', modePer: 'आगे देने वाला', optNote: 'अगले खेल से लागू होगा.',
+        kbCards: 'पत्तों के बीच जाएँ', kbPlay: 'पत्ता चलें', kbTake: 'पत्ते उठाएँ', kbDone: 'बस', kbTrans: 'हमला आगे दें',
+        rules: '36 पत्ते, छक्के से इक्के तक. हर खिलाड़ी को छह मिलते हैं; गड्डी का सबसे नीचे का पत्ता खुला रहता है और तुरुप का रंग बताता है. हमलावर एक पत्ता चलता है और बचाव करने वाले को उसे काटना होता है: उसी रंग के बड़े पत्ते से, या किसी भी तुरुप से (तुरुप को सिर्फ़ बड़ा तुरुप काटता है). बाक़ी खिलाड़ी मेज़ पर मौजूद मान के पत्ते डाल सकते हैं, छह तक और उतने से ज़्यादा नहीं जितने बचाव वाले के पास शुरू में थे. अगर बचाव वाला सब काट दे तो पत्ते कट जाते हैं और अगला हमला वही करता है; वरना वह सब उठा लेता है और उसके बाद वाला हमला करता है. हर हमले के बाद हाथ गड्डी से छह तक भरे जाते हैं, पहले हमलावर और आख़िर में बचाव वाला. गड्डी ख़त्म होने के बाद जिसके पत्ते ख़त्म हों वह बाहर हो जाता है. जिसके हाथ में आख़िर तक पत्ते रह जाएँ वह दुराक, यानी मूर्ख है. आगे देने वाले खेल में बचाव वाला काटने की जगह उसी मान का पत्ता रखकर हमला अगले खिलाड़ी को दे सकता है, जब तक कुछ कटा न हो और अगले के पास काफ़ी पत्ते हों.',
+        tutTitle1: 'हमला', tutText1: 'कोई भी पत्ता चलें. बचाव वाले को उसे उसी रंग के बड़े पत्ते या तुरुप से काटना होगा.',
+        tutTitle2: 'बचाव', tutText2: 'सारे पत्ते काटें ताकि वे कट जाएँ, या सब अपने हाथ में उठा लें.',
+        tutTitle3: 'दुराक मत बनिए', tutText3: 'बाक़ी खिलाड़ी मेज़ पर मौजूद मान के पत्ते डालते हैं. गड्डी ख़त्म होने पर हाथ ख़ाली करें: आख़िर तक पत्ते रखने वाला दुराक है.'
+      },
+      ru: {
+        youName: 'Вы', rivalN: 'Соперник {n}', cardsN: 'Карт: {n}', dailyDk: 'Дурак дня', newMatch: 'Новая игра', trumpIs: 'Козырь {s}', discardN: 'Отбой: {n}',
+        roleAtt: 'Ходит', roleDef: 'Отбивается', roleOut: 'Вышел',
+        yourLead: 'Ваш ход: зайдите с любой карты', throwIn: 'Подкиньте карту того же достоинства, что на столе, или нажмите «Бито»', defendNow: 'Покройте каждую карту или возьмите все',
+        theyTake: '{n} берёт: подкиньте ещё или нажмите «Бито»', thinking: '{n} думает…',
+        tookN: '{n} берёт карты', youTook: 'Вы взяли карты', beatenOff: 'Отбой', transferN: '{n} переводит дальше', youTransfer: 'Вы перевели на: {n}', youOut: 'Карты кончились: вы спаслись',
+        takeBtn: 'Беру', doneBtn: 'Бито', transferBtn: 'Перевести', cantBeat: 'Эта карта ничего не кроет', cantThrow: 'Подкидывать можно только достоинства со стола',
+        notFool: 'Вы не дурак!', youFool: 'Вы — дурак', drawEnd: 'Ничья: дурака нет', durakIs: 'Дурак', nobody: 'Никто', bouts: 'Заходы',
+        rivals: 'Соперники', level: 'Уровень', mode: 'Игра', modePod: 'Подкидной', modePer: 'Переводной', optNote: 'Действует со следующей игры.',
+        kbCards: 'Переход между картами', kbPlay: 'Сыграть карту', kbTake: 'Беру', kbDone: 'Бито', kbTrans: 'Перевести',
+        rules: '36 карт, от шестёрки до туза. Каждому сдают по шесть; нижняя карта колоды лежит открыто и показывает козырь. Ходящий выкладывает карту, а отбивающийся должен её покрыть: старшей картой той же масти или любым козырем (козырь кроется только старшим козырем). Остальные могут подкидывать карты тех достоинств, что уже есть на столе, не больше шести и не больше, чем было у отбивающегося в начале хода. Если он покрыл всё, карты уходят в отбой, и следующим ходит он; если нет, он берёт все карты, а ходит следующий игрок. После каждого хода все добирают из колоды до шести: сначала ходивший, последним отбивавшийся. Когда колода кончилась, тот, у кого не осталось карт, выходит из игры. Последний, у кого остались карты, — дурак. В переводном дураке отбивающийся может вместо этого положить карту того же достоинства и перевести ход на следующего, пока ничего не покрыто и у того хватает карт.',
+        tutTitle1: 'Ход', tutText1: 'Зайдите с любой карты. Отбивающийся должен покрыть её старшей картой той же масти или козырем.',
+        tutTitle2: 'Отбой', tutText2: 'Покройте все карты, и они уйдут в отбой, или возьмите их все себе.',
+        tutTitle3: 'Не останьтесь дураком', tutText3: 'Остальные подкидывают карты тех же достоинств. Когда колода кончится, избавьтесь от карт: последний с картами — дурак.'
+      },
+      zh: {
+        youName: '你', rivalN: '对手 {n}', cardsN: '{n} 张', dailyDk: '每日杜拉克', newMatch: '新一局', trumpIs: '王牌 {s}', discardN: '弃牌：{n}',
+        roleAtt: '进攻', roleDef: '防守', roleOut: '出局',
+        yourLead: '轮到你进攻：出任意一张牌', throwIn: '追加一张桌上已有点数的牌，或按「完成」', defendNow: '压住每张牌，或者全部收下',
+        theyTake: '{n} 收牌：可以继续追加，或按「完成」', thinking: '{n} 正在思考…',
+        tookN: '{n} 收下了牌', youTook: '你收下了牌', beatenOff: '全部压住', transferN: '{n} 把进攻转给下家', youTransfer: '你把进攻转给了 {n}', youOut: '你的牌出完了：安全了',
+        takeBtn: '收牌', doneBtn: '完成', transferBtn: '转移', cantBeat: '这张牌压不住任何进攻牌', cantThrow: '只能追加桌上已有的点数',
+        notFool: '你不是杜拉克！', youFool: '你是杜拉克', drawEnd: '平局：没有杜拉克', durakIs: '杜拉克', nobody: '无人', bouts: '回合',
+        rivals: '对手', level: '难度', mode: '玩法', modePod: '追加', modePer: '转移', optNote: '从下一局开始生效。',
+        kbCards: '在手牌间移动', kbPlay: '出这张牌', kbTake: '收牌', kbDone: '完成', kbTrans: '转移进攻',
+        rules: '36 张牌，从 6 到 A。每人六张；牌堆最底下一张翻开，决定王牌花色。进攻者出一张牌，防守者必须压住它：用同花色更大的牌，或者任意王牌（王牌只能被更大的王牌压住）。其他人可以追加桌上已有点数的牌，最多六张，且不超过防守者本回合开始时的手牌数。防守者全部压住，牌就进弃牌堆，下回合由他进攻；否则他收下所有牌，由他的下家进攻。每回合结束后从牌堆补到六张，进攻者先补，防守者最后。牌堆用完后，手牌出完的人出局。最后还拿着牌的人就是杜拉克，也就是傻瓜。转移玩法中，在还没有牌被压住、且下家手牌足够时，防守者可以改为放一张同点数的牌，把进攻转给下家。',
+        tutTitle1: '进攻', tutText1: '出任意一张牌。防守者必须用同花色更大的牌或王牌压住它。',
+        tutTitle2: '防守', tutText2: '压住所有牌，让它们进弃牌堆；或者全部收进手里。',
+        tutTitle3: '别当杜拉克', tutText3: '其他人会追加桌上已有点数的牌。牌堆用完后尽快出完手牌：最后还有牌的人就是杜拉克。'
+      },
+      de: {
+        youName: 'Du', rivalN: 'Gegner {n}', cardsN: '{n} Karten', dailyDk: 'Durak des Tages', newMatch: 'Neues Spiel', trumpIs: 'Trumpf {s}', discardN: 'Abgelegt: {n}',
+        roleAtt: 'Greift an', roleDef: 'Verteidigt', roleOut: 'Raus',
+        yourLead: 'Du greifst an: spiel eine beliebige Karte', throwIn: 'Leg eine Karte mit einem Wert vom Tisch nach oder tippe Fertig', defendNow: 'Stich jede Karte oder nimm alle',
+        theyTake: '{n} nimmt: leg nach oder tippe Fertig', thinking: '{n} denkt nach…',
+        tookN: '{n} nimmt die Karten', youTook: 'Du hast die Karten genommen', beatenOff: 'Abgewehrt', transferN: '{n} schiebt den Angriff weiter', youTransfer: 'Du schiebst den Angriff zu {n}', youOut: 'Deine Hand ist leer: du bist sicher',
+        takeBtn: 'Nehmen', doneBtn: 'Fertig', transferBtn: 'Weiterschieben', cantBeat: 'Diese Karte sticht keine Angriffskarte', cantThrow: 'Nur Werte, die schon auf dem Tisch liegen',
+        notFool: 'Du bist nicht der Durak!', youFool: 'Du bist der Durak', drawEnd: 'Unentschieden: niemand ist der Durak', durakIs: 'Durak', nobody: 'Niemand', bouts: 'Angriffe',
+        rivals: 'Gegner', level: 'Stufe', mode: 'Spiel', modePod: 'Nachlegen', modePer: 'Weiterschieben', optNote: 'Gilt ab dem nächsten Spiel.',
+        kbCards: 'Zwischen Karten wechseln', kbPlay: 'Karte spielen', kbTake: 'Karten nehmen', kbDone: 'Fertig', kbTrans: 'Angriff weiterschieben',
+        rules: '36 Karten, Sechs bis Ass. Jeder bekommt sechs; die unterste Karte des Stapels liegt offen und zeigt die Trumpffarbe. Der Angreifer spielt eine Karte aus, und der Verteidiger muss sie stechen: mit einer höheren Karte derselben Farbe oder mit einem beliebigen Trumpf (ein Trumpf fällt nur durch einen höheren Trumpf). Die anderen dürfen Karten mit Werten nachlegen, die schon auf dem Tisch liegen, höchstens sechs und nie mehr, als der Verteidiger zu Beginn hatte. Sticht der Verteidiger alles, sind die Karten abgewehrt und er greift als Nächster an; sonst nimmt er alle, und der Spieler nach ihm greift an. Nach jedem Angriff wird aus dem Stapel auf sechs aufgefüllt, zuerst der Angreifer, zuletzt der Verteidiger. Ist der Stapel leer, scheidet aus, wer keine Karten mehr hat. Wer zuletzt noch Karten hält, ist der Durak, der Narr. Im Spiel Weiterschieben darf der Verteidiger stattdessen eine Karte gleichen Werts dazulegen und den Angriff an den nächsten Spieler weitergeben, solange nichts gestochen ist und dieser genug Karten hat.',
+        tutTitle1: 'Angriff', tutText1: 'Spiel eine beliebige Karte aus. Der Verteidiger muss sie mit einer höheren Karte derselben Farbe oder mit Trumpf stechen.',
+        tutTitle2: 'Verteidigung', tutText2: 'Stich alle Karten, dann sind sie abgewehrt, oder nimm sie alle auf die Hand.',
+        tutTitle3: 'Werd nicht der Durak', tutText3: 'Die anderen legen Karten mit Werten vom Tisch nach. Leere deine Hand, wenn der Stapel weg ist: Wer zuletzt Karten hält, ist der Durak.'
+      },
+      es: {
+        youName: 'Tú', rivalN: 'Rival {n}', cardsN: '{n} cartas', dailyDk: 'Durak del día', newMatch: 'Nueva partida', trumpIs: 'Triunfo {s}', discardN: 'Descarte: {n}',
+        roleAtt: 'Ataca', roleDef: 'Defiende', roleOut: 'Fuera',
+        yourLead: 'Tu ataque: juega cualquier carta', throwIn: 'Añade una carta de un valor que ya esté en la mesa, o pulsa Listo', defendNow: 'Gana cada carta, o llévatelas todas',
+        theyTake: '{n} se las lleva: añade más o pulsa Listo', thinking: '{n} está pensando…',
+        tookN: '{n} se llevó las cartas', youTook: 'Te llevaste las cartas', beatenOff: 'Defendido', transferN: 'Ataque transferido por {n}', youTransfer: 'Pasas el ataque a {n}', youOut: 'Tu mano está vacía: estás a salvo',
+        takeBtn: 'Me las llevo', doneBtn: 'Listo', transferBtn: 'Pasar', cantBeat: 'Esa carta no gana a ninguna de ataque', cantThrow: 'Solo valores que ya están en la mesa',
+        notFool: '¡No eres el durak!', youFool: 'Eres el durak', drawEnd: 'Empate: nadie es el durak', durakIs: 'Durak', nobody: 'Nadie', bouts: 'Asaltos',
+        rivals: 'Rivales', level: 'Nivel', mode: 'Juego', modePod: 'Añadir', modePer: 'Pasar', optNote: 'Se aplica desde la próxima partida.',
+        kbCards: 'Moverse entre cartas', kbPlay: 'Jugar la carta', kbTake: 'Llevarse las cartas', kbDone: 'Listo', kbTrans: 'Pasar el ataque',
+        rules: '36 cartas, del seis al as. Cada uno recibe seis; la última carta del mazo queda boca arriba y marca el palo de triunfo. El atacante juega una carta y el defensor debe ganarla: con una carta más alta del mismo palo o con cualquier triunfo (un triunfo solo cae ante un triunfo más alto). Los demás pueden añadir cartas de valores que ya estén en la mesa, hasta seis y nunca más de las que tenía el defensor al empezar. Si el defensor gana todas, las cartas van al descarte y él ataca después; si no, se las lleva todas y ataca el jugador siguiente. Tras cada asalto se roba del mazo hasta tener seis, primero el atacante y el defensor el último. Cuando se acaba el mazo, quien se queda sin cartas sale. El último jugador con cartas es el durak, el tonto. En el juego Pasar, el defensor puede en su lugar poner una carta del mismo valor y pasar el ataque al siguiente jugador, mientras no haya nada ganado y ese jugador tenga cartas suficientes.',
+        tutTitle1: 'Ataque', tutText1: 'Juega cualquier carta. El defensor debe ganarla con una carta más alta del mismo palo o con un triunfo.',
+        tutTitle2: 'Defensa', tutText2: 'Gana todas las cartas para mandarlas al descarte, o llévatelas todas a la mano.',
+        tutTitle3: 'No seas el durak', tutText3: 'Los demás añaden cartas de valores que ya están en la mesa. Vacía tu mano cuando se acabe el mazo: el último con cartas es el durak.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', { rivals: 1, level: 'medium', transfer: false });
+  if (!(prefs.rivals >= 1 && prefs.rivals <= 3)) prefs.rivals = 1;
+  if (LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+  prefs.transfer = prefs.transfer === true;
+
+  var BOT_MS = 750, DEAL_MS = 45, STRIP = 44;
+  var M = null, botTimer = null, holdTimer = null, hold = false, kf = -1, msg = '', pausedAt = 0, botRnd = Math.random, handNodes = [];
+
+  var top = el('div', { class: 'dk-top' });
+  var bots = el('div', { class: 'dk-bots' });
+  var stockBox = el('div', { class: 'dk-stock' });
+  var offBox = el('div', { class: 'dk-off' });
+  var deck = el('div', { class: 'dk-deck' }, [stockBox, offBox]);
+  var pairs = el('div', { class: 'dk-pairs' });
+  var field = el('div', { class: 'dk-field' }, [deck, pairs]);
+  var status = el('div', { class: 'dk-status', role: 'status', 'aria-live': 'polite' });
+  var hand = el('div', { class: 'dk-hand' });
+  var actions = el('div', { class: 'dk-actions' });
+  var probe = el('div', { class: 'dk-probe', 'aria-hidden': 'true' });
+  var wrap = el('div', { class: 'dk-wrap' }, [probe, top, bots, field, status, hand, actions]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  function pname(p) { return p === 0 ? C.t('youName') : C.t('rivalN', { n: C.num(p) }); }
+  // the player may act: their turn, nothing in flight, and still in the game
+  function human() { return !!(M && !M.G.over && !hold && M.G.actor === 0 && !M.G.out[0]); }
+
+  /* ------------------------------------------------------------ start */
+
+  function newMatch(daily) {
+    stopBot(); clearHold();
+    var n = daily ? 2 : prefs.rivals + 1;
+    M = { n: n, level: daily ? 'medium' : prefs.level, transfer: daily ? false : prefs.transfer, daily: daily || null, startedAt: Date.now(), G: null };
+    var rnd = M.daily ? C.daily('durak', M.daily).rng : Math.random;
+    botRnd = M.daily ? C.daily('durak', M.daily + '|bots').rng : Math.random;
+    M.G = E.newGame(rnd, n, { transfer: M.transfer });
+    msg = ''; kf = -1;
+    render();
+    dealIn();
+    save();
+    maybeBot();
+  }
+  function resume(v) {
+    stopBot(); clearHold();
+    M = v;
+    msg = ''; kf = -1;
+    botRnd = M.daily ? C.daily('durak', M.daily + '|bots|' + M.G.bouts).rng : Math.random;
+    M.startedAt = Date.now() - (v.elapsed || 0);
+    render();
+    maybeBot();
+  }
+
+  /* ------------------------------------------------------------- draw */
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (M.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyDk') + ' — ' + C.num(M.daily) })]));
+    else top.appendChild(el('span', { class: 'ch-badge', text: M.transfer ? C.t('modePer') : C.t('modePod') }));
+    top.appendChild(C.cards.backPicker());
+    // options behind a gear in the top row, never in «?» (#409)
+    var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', showSettings);
+    top.appendChild(gear);
+  }
+
+  function roleOf(p) {
+    var G = M.G;
+    if (G.out[p]) return C.t('roleOut');
+    if (G.over) return '';
+    return p === G.att ? C.t('roleAtt') : p === G.def ? C.t('roleDef') : '';
+  }
+  function renderBots() {
+    var G = M.G;
+    bots.innerHTML = '';
+    for (var p = 1; p < M.n; p++) {
+      var fan = el('div', { class: 'dk-fan', 'aria-hidden': 'true' });
+      var k = G.hands[p].length;
+      for (var i = 0; i < Math.min(k, 8); i++) fan.appendChild(C.cards.back());
+      bots.appendChild(el('div', { class: 'dk-bot' + (G.actor === p && !hold ? ' dk-bot--on' : '') + (G.out[p] ? ' dk-bot--out' : ''), 'data-p': p }, [
+        el('span', { text: pname(p) }), fan,
+        el('span', { class: 'dk-count', text: C.t('cardsN', { n: C.num(k) }) }),
+        el('span', { class: 'dk-role', text: roleOf(p) })
+      ]));
+    }
+  }
+
+  function renderDeck() {
+    var G = M.G;
+    stockBox.innerHTML = '';
+    if (G.stock.length) {
+      var tc = C.cards.el(G.trumpCard, 'dk-trump');
+      tc.disabled = true; tc.tabIndex = -1;
+      stockBox.appendChild(tc);
+      if (G.stock.length > 1) stockBox.appendChild(C.cards.back('dk-back'));
+      stockBox.appendChild(el('span', { class: 'dk-left', text: C.num(G.stock.length) }));
+    } else {
+      stockBox.appendChild(el('span', { class: 'dk-suit' + (G.trump === 1 || G.trump === 2 ? ' dk-suit--red' : ''), text: C.cards.GLYPH[G.trump] }));
+    }
+    offBox.textContent = C.t('trumpIs', { s: C.cards.GLYPH[G.trump] }) + ' · ' + C.t('discardN', { n: C.num(G.seen.length) });
+  }
+
+  function tableCard(c, extra) {
+    var b = C.cards.el(c, extra);
+    b.disabled = true; b.tabIndex = -1; b._c = c;
+    return b;
+  }
+  function renderPairs(tb) {
+    pairs.innerHTML = '';
+    var mine = human() && M.G.def === 0;
+    tb.forEach(function (t) {
+      var pr = el('div', { class: 'dk-pair' }, [tableCard(t.a, 'dk-a' + (t.d < 0 && mine ? ' dk-open' : ''))]);
+      if (t.d >= 0) pr.appendChild(tableCard(t.d, 'dk-d'));
+      pairs.appendChild(pr);
+    });
+  }
+
+  function sortKey(c) { var s = E.suit(c); return (s === M.G.trump ? 4 : s) * 20 + E.str(c); }
+  function renderHand(hide) {
+    var G = M.G, h = G.hands[0].filter(function (c) { return !hide || hide.indexOf(c) < 0; }).sort(function (a, b) { return sortKey(a) - sortKey(b); });
+    var me = human(), ok = me ? E.legal(G).concat(E.transferCards(G)) : [];
+    hand.innerHTML = '';
+    handNodes = [];
+    if (kf >= h.length) kf = h.length - 1;
+    // as many cards a row as leave each one a finger-wide strip; the rest wrap below
+    var cw = probe.offsetWidth || 56;
+    var room = hand.clientWidth || 360;
+    var fit = Math.max(2, Math.floor((room - cw) / STRIP) + 1);
+    var rows = Math.max(1, Math.ceil(h.length / fit)), per = Math.ceil(h.length / rows);
+    for (var r = 0; r < rows; r++) {
+      var part = h.slice(r * per, (r + 1) * per), row = el('div', { class: 'dk-row' });
+      var k = part.length, over = k > 1 ? Math.min(0, (room - cw * k) / (k - 1)) : 0;
+      part.forEach(function (c, i) {
+        var idx = handNodes.length;
+        var b = C.cards.el(c, (ok.indexOf(c) >= 0 ? 'dk-ok' : (me ? 'dk-no' : '')) + (kf === idx ? ' dk-kf' : ''));
+        b._c = c;
+        if (i) b.style.marginInlineStart = over + 'px';
+        b.addEventListener('click', function () { humanTap(c, b); });
+        row.appendChild(b);
+        handNodes.push(b);
+      });
+      hand.appendChild(row);
+    }
+  }
+
+  function renderActions() {
+    var G = M.G;
+    actions.innerHTML = '';
+    if (!human()) return;
+    if (G.def === 0 && !G.taking && G.table.length) {
+      var tr = E.transferCards(G);
+      if (tr.length) actions.appendChild(actBtn(C.t('transferBtn'), 'ch-btn ch-btn--soft', humanTransferAny));
+      actions.appendChild(actBtn(C.t('takeBtn'), 'ch-btn ch-btn--primary', humanTake));
+    } else if (G.table.length && G.def !== 0) {
+      actions.appendChild(actBtn(C.t('doneBtn'), 'ch-btn ch-btn--primary', humanPass));
+    }
+  }
+  function actBtn(label, cls, fn) {
+    var b = el('button', { class: cls, type: 'button', text: label });
+    b.addEventListener('click', fn);
+    return b;
+  }
+
+  function hint() {
+    var G = M.G;
+    if (G.over) return '';
+    if (G.out[0]) return C.t('youOut');
+    if (!human()) return hold ? '' : C.t('thinking', { n: pname(G.actor) });
+    if (!G.table.length) return C.t('yourLead');
+    if (G.def === 0) return C.t('defendNow');
+    if (G.taking) return C.t('theyTake', { n: pname(G.def) });
+    return C.t('throwIn');
+  }
+  // view: the table as it was when a bout ended, shown for a moment before it leaves
+  function render(view) {
+    renderTop();
+    renderBots();
+    renderDeck();
+    renderPairs(view ? view.table : M.G.table);
+    renderHand(view ? view.hide : null);
+    renderActions();
+    var h = hint();
+    status.textContent = msg && h ? msg + ' · ' + h : (msg || h);
+  }
+
+  function handNode(c) { for (var i = 0; i < handNodes.length; i++) if (handNodes[i]._c === c) return handNodes[i]; return null; }
+  function botBox(p) { return bots.querySelector('[data-p="' + p + '"]'); }
+  function tableNode(c) { var n = pairs.querySelectorAll('.ch-pcard'); for (var i = 0; i < n.length; i++) if (n[i]._c === c) return n[i]; return null; }
+
+  // a new game: the hand flies in from the deck one card at a time, turning over (#398)
+  function dealIn() {
+    if (C.ui.reduceMotion()) return;
+    var from = stockBox.getBoundingClientRect();
+    for (var i = 0; i < handNodes.length; i++) C.ui.fly(handNodes[i], from, { ms: 220, delay: i * DEAL_MS, flip: true });
+  }
+  // the card just put down arrives from the hand that played it
+  function flyPlaced(from, flip) {
+    var fx = M.G.fx;
+    if (!from || !fx || fx.c === undefined) return;
+    var n = tableNode(fx.c);
+    if (n) C.ui.fly(n, from, { ms: 240, flip: !!flip });
+  }
+  function flyDrawn() {
+    var G = M.G, from = stockBox.getBoundingClientRect(), k = 0;
+    (G.drew || []).forEach(function (d) {
+      if (d[0] !== 0) return;
+      d[1].forEach(function (c) { var n = handNode(c); if (n) C.ui.fly(n, from, { ms: 220, delay: 80 + (k++) * 70, flip: true }); });
+    });
+  }
+
+  /* ------------------------------------------------------------ moves */
+
+  function humanTap(c, node) {
+    if (!human() || document.querySelector('.ch-scrim')) return;
+    var G = M.G, from = node.getBoundingClientRect(), b0 = G.bouts;
+    if (!G.table.length || G.def !== 0) {
+      if (!E.play(G, c)) { refuse(node, C.t('cantThrow')); return; }
+    } else {
+      var i = E.beatTarget(G, c);
+      if (i >= 0) E.defend(G, i, c);
+      else if (E.transferCards(G).indexOf(c) >= 0) { doTransfer(c, from); return; }
+      else { refuse(node, C.t('cantBeat')); return; }
+    }
+    C.audio.sfx('place'); C.haptic('tap');
+    msg = '';
+    after(from, b0, false);
+  }
+  // a wrong card shakes and says why, without redrawing the hand under the finger
+  function refuse(node, why) { C.feedback('bad'); C.ui.shake(node); status.textContent = why; }
+  function humanTransferAny() {
+    if (!human()) return;
+    var tr = E.transferCards(M.G).slice().sort(function (a, b) { return sortKey(a) - sortKey(b); });
+    if (!tr.length) return;
+    var n = handNode(tr[0]);
+    doTransfer(tr[0], n ? n.getBoundingClientRect() : null);
+  }
+  function doTransfer(c, from) {
+    var G = M.G, b0 = G.bouts;
+    if (!E.transfer(G, c)) { C.feedback('bad'); return; }
+    C.audio.sfx('place'); C.haptic('tap');
+    C.achievements.unlock('dk-trans');
+    msg = C.t('youTransfer', { n: pname(G.def) });
+    after(from, b0, false);
+  }
+  function humanTake() {
+    if (!human()) return;
+    var b0 = M.G.bouts;
+    if (!E.take(M.G)) return;
+    C.feedback('tap');
+    msg = '';
+    after(null, b0, false);
+  }
+  function humanPass() {
+    if (!human()) return;
+    var b0 = M.G.bouts;
+    if (!E.pass(M.G)) return;
+    C.feedback('tap');
+    msg = '';
+    after(null, b0, false);
+  }
+
+  function after(from, b0, flip) {
+    var G = M.G;
+    if (G.bouts !== b0 || G.over) { boutEnd(from, flip); return; }
+    render();
+    flyPlaced(from, flip);
+    save();
+    maybeBot();
+  }
+
+  // A bout ended inside the last move. The table is shown as it stood for a moment, then
+  // its cards leave for the discard or for the hand that took them, and only then does the
+  // next bout appear with the cards drawn from the deck.
+  function boutEnd(from, flip) {
+    stopBot();
+    var G = M.G, L = G.last;
+    hold = true;
+    var hide = [];
+    (G.drew || []).forEach(function (d) { if (d[0] === 0) hide = hide.concat(d[1]); });
+    if (L.taken === 0) L.table.forEach(function (t) { hide.push(t.a); if (t.d >= 0) hide.push(t.d); });
+    msg = L.taken < 0 ? C.t('beatenOff') : L.taken === 0 ? C.t('youTook') : C.t('tookN', { n: pname(L.taken) });
+    render({ table: L.table, hide: hide });
+    flyPlaced(from, flip);
+    save();
+    var quick = C.ui.reduceMotion();
+    holdTimer = setTimeout(function () {
+      var to = L.taken < 0 ? stockBox : L.taken === 0 ? hand : botBox(L.taken);
+      if (to) pairs.querySelectorAll('.ch-pcard').forEach(function (n, i) { C.ui.sendTo(n, to, { ms: 320, delay: i * 25, scale: 0.6 }); });
+      if (L.taken < 0) C.audio.sfx('flip');
+      holdTimer = setTimeout(function () {
+        holdTimer = null;
+        hold = false;
+        if (G.out[0] && !G.over) E.playOut(G, M.level, botRnd);
+        if (G.over) { msg = ''; render(); save(); setTimeout(finish, C.cards.pace(500)); return; }
+        render();
+        flyDrawn();
+        save();
+        maybeBot();
+      }, C.cards.pace(quick ? 80 : 400));
+    }, C.cards.pace(quick ? 200 : 650));
+  }
+  function clearHold() { if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } hold = false; }
+
+  function maybeBot() {
+    stopBot();
+    var G = M.G;
+    if (G.over || hold || G.actor === 0 || G.actor < 0) return;
+    botTimer = setTimeout(function () {
+      botTimer = null;
+      if (!M || M.G !== G || G.over || hold || G.actor === 0) return;
+      var p = G.actor, b0 = G.bouts, m = E.botMove(G, M.level, botRnd);
+      var box = botBox(p), from = box ? box.getBoundingClientRect() : null;
+      if (!E.apply(G, m)) { E.apply(G, G.table.length && p !== G.def ? { pass: true } : { take: true }); }
+      msg = m && m.transfer !== undefined ? C.t('transferN', { n: pname(p) }) : '';
+      if (m && (m.play !== undefined || m.defend || m.transfer !== undefined)) C.audio.sfx('place');
+      after(from, b0, true);
+    }, C.cards.pace(C.ui.reduceMotion() ? 300 : BOT_MS));
+  }
+  function stopBot() { if (botTimer) { clearTimeout(botTimer); botTimer = null; } }
+
+  /* ------------------------------------------------------------ end */
+
+  function finish() {
+    if (!M || !M.G.over) return;
+    var G = M.G, ms = Date.now() - M.startedAt;
+    // the cards ran out together: those who went out in the last bout share a draw
+    var draw = G.loser === -2 && G.outAt[0] === G.bouts;
+    var won = G.loser !== 0 && !draw;
+    var base = { easy: 6, medium: 12, hard: 20 }[M.level] || 12;
+    var coins = won ? base + (M.daily ? 8 : 0) : Math.max(2, Math.round(base * 0.3));
+    var points = won ? base * 4 + (M.daily ? 25 : 0) : Math.round(base * 1.2);
+    var title = won ? C.t('notFool') : draw ? C.t('drawEnd') : C.t('youFool');
+    if (won) {
+      C.achievements.unlock('dk-win');
+      if (M.level === 'hard' && !M.daily) C.achievements.unlock('dk-hard');
+      if (pairs.firstChild || hand.firstChild) C.ui.burst(status, { count: 22, speed: 220, ring: 26 });
+    }
+    if (M.daily) {
+      var first = C.stats.daily('durak', M.daily, { label: title, win: won });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    var daily = M.daily;
+    ctx.finish({
+      won: won,
+      title: title,
+      timeMs: ms, coins: coins, points: points,
+      lines: [{ label: C.t('durakIs'), value: G.loser >= 0 ? pname(G.loser) : C.t('nobody') }, { label: C.t('bouts'), value: C.num(G.bouts) }],
+      shareText: 'چوگان · دوراک' + (daily ? ('\nروزانه ' + daily) : '') + '\n' + title,
+      onAgain: daily ? null : function () { newMatch(null); }
+    });
+  }
+
+  /* ----------------------------------------------------------- dialogs */
+
+  function showSettings() {
+    var save1 = function () { ctx.store.set('prefs', prefs); };
+    var seg1 = C.ui.segmented([1, 2, 3].map(function (n) { return { value: n, label: C.num(n) }; }), prefs.rivals, function (v) { prefs.rivals = v; save1(); });
+    var seg2 = C.ui.segmented(LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), prefs.level, function (v) { prefs.level = v; save1(); });
+    var seg3 = C.ui.segmented([{ value: 'pod', label: C.t('modePod') }, { value: 'per', label: C.t('modePer') }], prefs.transfer ? 'per' : 'pod', function (v) { prefs.transfer = v === 'per'; save1(); });
+    C.ui.modal({
+      title: C.t('settings'),
+      body: [el('div', { class: 'ch-list' }, [
+        el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('mode') }), seg3]),
+        el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('rivals') }), seg1]),
+        el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('level') }), seg2]),
+        C.cards.speedRow()
+      ]), el('p', { class: 'ch-dim', text: C.t('optNote') })],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  function askNew() {
+    if (document.querySelector('.ch-scrim')) return;
+    var dd = M ? M.daily : null;
+    var started = M && !M.G.over && (M.G.bouts > 1 || M.G.table.length > 0);
+    if (!started) { newMatch(dd); return; }
+    C.ui.confirm({ title: C.t('newMatch'), body: C.t('resetWarn'), onOk: function () { newMatch(dd); } });
+  }
+
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← →', C.t('kbCards')), kb('Enter', C.t('kbPlay')), kb('T', C.t('kbTake')), kb('D', C.t('kbDone')), kb('P', C.t('kbTrans'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(tut()); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+
+  window.addEventListener('keydown', function (e) {
+    if (!human() || document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter'))) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var n = handNodes.length;
+    // the hand is laid out left to right in every language, so the arrows are not flipped
+    if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && n) {
+      kf = kf < 0 ? 0 : (kf + (e.key === 'ArrowRight' ? 1 : n - 1)) % n;
+      renderHand(); e.preventDefault(); return;
+    }
+    if (e.key === 'Enter' && kf >= 0 && handNodes[kf]) { var b = handNodes[kf]; humanTap(b._c, b); e.preventDefault(); return; }
+    if (C.keyIs(e, 't')) { humanTake(); e.preventDefault(); return; }
+    if (C.keyIs(e, 'd')) { humanPass(); e.preventDefault(); return; }
+    if (C.keyIs(e, 'p')) { humanTransferAny(); e.preventDefault(); }
+  });
+
+  // a card for the tutorial pictures, drawn small: rank in the corner, suit in the middle
+  function mini(c, x, y, rot) {
+    var red = E.suit(c) === 1 || E.suit(c) === 2, ink = red ? '#C0392B' : '#24212B';
+    return '<g transform="rotate(' + (rot || 0) + ' ' + (x + 20) + ' ' + (y + 28) + ')"><rect x="' + x + '" y="' + y + '" width="40" height="56" rx="5" fill="#FFFFFF" stroke="#CFC8BD"/>' +
+      '<text x="' + (x + 5) + '" y="' + (y + 13) + '" font-size="12" font-weight="800" fill="' + ink + '">' + C.cards.rankText(E.rank(c)) + '</text>' +
+      '<text x="' + (x + 20) + '" y="' + (y + 40) + '" font-size="22" text-anchor="middle" fill="' + ink + '">' + C.cards.GLYPH[E.suit(c)] + '</text></g>';
+  }
+  function tut() {
+    // ids: 8 of hearts 34, queen of hearts 46, 6 of spades 23, 7 of clubs 24, 7 of diamonds 25, 7 of spades 27
+    var pic = function (inner) { return '<svg viewBox="0 0 200 110" width="100%" direction="ltr" font-family="inherit">' + inner + '</svg>'; };
+    return [
+      { title: C.t('tutTitle1'), text: C.t('tutText1'), art: pic(mini(34, 60, 22) + mini(46, 84, 34, 10)) },
+      { title: C.t('tutTitle2'), text: C.t('tutText2'), art: pic(mini(34, 30, 22) + mini(46, 52, 32, 10) + mini(25, 110, 22) + mini(23, 132, 32, 10)) },
+      { title: C.t('tutTitle3'), text: C.t('tutText3'), art: pic(mini(24, 40, 27) + mini(25, 80, 27) + mini(27, 120, 27)) }
+    ];
+  }
+
+  /* ------------------------------------------------------------ save */
+
+  ctx.autosave(function () {
+    if (!M || !M.G || M.G.over) return { inProgress: false };
+    var v = JSON.parse(JSON.stringify(M));
+    v.elapsed = (pausedAt || Date.now()) - M.startedAt;
+    return { m: v };
+  });
+  function save() { ctx.save(); }
+  C.onPause(function () { stopBot(); if (!pausedAt) pausedAt = Date.now(); });
+  C.onResume(function () { if (pausedAt && M) M.startedAt += Date.now() - pausedAt; pausedAt = 0; if (M && !hold) maybeBot(); });
+  // a turned phone changes the room for the hand: lay it out again
+  window.addEventListener('resize', function () { if (M && !hold) renderHand(); });
+
+  /* ------------------------------------------------------------ start */
+
+  var saved = ctx.loadSave();
+  var sv = saved && saved.m && saved.m.G && E.valid(saved.m.G) ? saved.m : null;
+  if (dailyDate) {
+    if (sv && sv.daily === dailyDate) resume(sv);
+    else newMatch(dailyDate);
+    if (C.stats.dailyDone('durak', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).durak;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (sv && !sv.daily) resume(sv);
+  else newMatch(null);
+  ctx.tutorialIfNew(tut());
+})();
+</script>
+</body>
+</html>

@@ -103,6 +103,7 @@ Every game in Chogan with a line about it. Each one in `www/games.json` has a ro
 | Piano | A free piano with three octaves: play chords with several fingers at once, or use the computer keyboard; 17 old tunes to practise, with the next key lit; no score, no losing and no daily challenge |
 | Hues | Play a card that matches the top card by colour or symbol and empty your hand first. Skips, reverses, draw twos, wilds and wild draw fours; every colour also has its own shape, so the cards read without seeing colour. Against 1 to 3 bots at three levels, a match to 200 points, and a daily round dealt the same for everyone |
 | Word Shower | Words fall toward your garden and you type each one letter by letter on the game's own keyboard, or a real one, to burst it; eight waves, five flowers as lives, three speeds, words in the app's language, and a list of your own words that does not count for the daily challenge or awards |
+| Durak | The Russian card game with a 36-card deck: beat each attack card with a higher card of its suit or a trump, or take them all; the others throw in cards of ranks already on the table. The last player holding cards is the durak, the fool. Against 1 to 3 bots at three levels, a transfer game behind the gear, and a daily deal against one bot |
 
 ## فارسی
 
@@ -209,5 +210,6 @@ Every game in Chogan with a line about it. Each one in `www/games.json` has a ro
 | پیانو | پیانوی آزاد با سه اکتاو: با چند انگشت هم‌زمان آکورد بزن یا با صفحه‌کلید بنواز؛ ۱۷ آهنگ قدیمی برای تمرین که کلید بعدی‌شان روشن می‌شود؛ بدون امتیاز، بدون باخت و بدون چالش روزانه |
 | رنگارنگ | کارتی که رنگ یا نشانش با کارت روی زمین یکی است بازی کن و زودتر از همه دستت را خالی کن. بسوزان، برگردان، دوتا بردار، همه‌رنگ و همه‌رنگِ چهارتا؛ هر رنگ شکل خودش را هم دارد تا بی‌دیدن رنگ هم خوانده شود. مقابل یک تا سه ربات در سه سطح، مسابقه تا ۲۰۰ امتیاز، و یک دست روزانه که برای همه یکسان پخش می‌شود |
 | واژه‌باران | واژه‌ها به سوی باغت می‌بارند و هر کدام را با صفحه‌کلید خود بازی، یا صفحه‌کلید واقعی، حرف به حرف می‌نویسی تا بترکد؛ هشت موج، پنج گل به جای جان، سه سرعت، واژه‌ها به زبان اپ، و فهرستی از واژه‌های خودت که در چالش روزانه و دستاورد حساب نمی‌شود |
+| دوراک | بازی ورق روسی با سی‌وشش کارت: هر کارت حمله را با کارت بزرگ‌تر همان خال یا با حکم بزن، یا همه را بردار؛ بقیه کارت‌هایی با عددی که روی زمین هست می‌اندازند. آخرین کسی که کارت در دست دارد دوراک است. مقابل یک تا سه ربات در سه سطح، بازی دادنی در تنظیمات، و یک دست روزانه مقابل یک ربات |
 
 </div>
