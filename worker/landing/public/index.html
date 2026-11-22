@@ -28,6 +28,7 @@
 "downloadUrl":"https://github.com/choganhq/chogan/releases/latest","image":"https://playchogan.com/icon.png",
 "sameAs":["https://github.com/choganhq/chogan","https://play.google.com/store/apps/details?id=io.github.choganhq.chogan","https://f-droid.org/packages/io.github.choganhq.chogan/","https://t.me/chogan_games"]}
 </script>
+<script>try{var t=localStorage.getItem("theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
 <style>
 @font-face { font-family: Vazirmatn; src: url(/vazirmatn-variable.woff2) format('woff2'); font-weight: 100 900; font-display: swap; }
 @font-face { font-family: Nunito; src: url(/nunito-latin.woff2) format('woff2'); font-weight: 200 1000; font-display: swap; }
@@ -36,9 +37,11 @@
   --accent: #B5532F; --accent-ink: #FFFFFF; --soft: #F6E6DC; --soft-ink: #8E3E21;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #1A1714; --card: #26221E; --ink: #F3ECE3; --dim: #B5AA9C; --line: #3A342E;
-          --accent: #E58A68; --accent-ink: #1A1714; --soft: #3A2A22; --soft-ink: #F0B89F; }
+  :root:not([data-theme=light]) { --bg: #1A1714; --card: #26221E; --ink: #F3ECE3; --dim: #B5AA9C; --line: #3A342E;
+          --accent: #E58A68; --accent-ink: #1A1714; --soft: #3A2A22; --soft-ink: #F0B89F; color-scheme: dark; }
 }
+:root[data-theme=dark] { --bg: #1A1714; --card: #26221E; --ink: #F3ECE3; --dim: #B5AA9C; --line: #3A342E;
+          --accent: #E58A68; --accent-ink: #1A1714; --soft: #3A2A22; --soft-ink: #F0B89F; color-scheme: dark; }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.7;
@@ -46,7 +49,7 @@ body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.7;
 html[lang=en] body { font-family: Nunito, Vazirmatn, system-ui, sans-serif; }
 a { color: var(--accent); }
 .wrap { max-width: 720px; margin: 0 auto; padding: 20px 20px 48px; }
-.top { display: flex; justify-content: flex-end; }
+.top { display: flex; justify-content: flex-end; gap: 8px; }
 .lang { font: inherit; font-size: .9rem; color: var(--ink); background: var(--card); border: 1px solid var(--line);
   border-radius: 999px; padding: 4px 14px; cursor: pointer; }
 .hero { text-align: center; padding: 20px 0 8px; }
@@ -77,7 +80,7 @@ html[lang=fa] li[data-l=fa], html[lang=en] li[data-l=en] { display: list-item; }
 </head>
 <body>
 <div class="wrap">
-  <div class="top"><button class="lang" id="lang" type="button" hidden></button></div>
+  <div class="top"><button class="lang" id="theme" type="button" hidden></button><button class="lang" id="lang" type="button" hidden></button></div>
 
   <header class="hero">
     <img src="/icon.png" width="96" height="96" alt="">
@@ -151,7 +154,26 @@ html[lang=fa] li[data-l=fa], html[lang=en] li[data-l=en] { display: list-item; }
     document.documentElement.dir = l === 'fa' ? 'rtl' : 'ltr';
     document.title = l === 'fa' ? 'چوگان — بازی‌های کوچک، تمام‌شدنی، بدون مزاحمت' : 'Chogan — small games you can finish';
     btn.textContent = l === 'fa' ? 'English' : 'فارسی';
+    if (typeof label === 'function') label();
   }
+  var tb = document.getElementById('theme');
+  function isDark() {
+    var t = document.documentElement.dataset.theme;
+    return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  function label() {
+    var fa = lang === 'fa';
+    tb.textContent = isDark() ? (fa ? 'روشن' : 'Light') : (fa ? 'تاریک' : 'Dark');
+    var meta = document.querySelector('meta[name=theme-color]');
+    if (meta) meta.content = isDark() ? '#1A1714' : '#FBF6EF';
+  }
+  tb.hidden = false;
+  tb.addEventListener('click', function () {
+    var next = isDark() ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem('theme', next); } catch (e) {}
+    label();
+  });
   btn.hidden = false;
   btn.addEventListener('click', function () { set(lang === 'fa' ? 'en' : 'fa'); });
   set(lang);
