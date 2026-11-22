@@ -6,7 +6,8 @@ const FILES = new Set([
   '/icon.png', '/favicon.svg',
   '/vazirmatn-variable.woff2', '/nunito-latin.woff2',
   '/OFL-Vazirmatn.txt', '/OFL-Nunito.txt', '/robots.txt', '/sitemap.xml',
-  '/shots/fa-1.png', '/shots/fa-4.png', '/shots/en-1.png', '/shots/en-4.png',
+  '/shots/fa-1.png', '/shots/fa-2.png', '/shots/fa-3.png', '/shots/fa-4.png', '/shots/fa-5.png', '/shots/fa-6.png',
+  '/shots/en-1.png', '/shots/en-2.png', '/shots/en-3.png', '/shots/en-4.png', '/shots/en-5.png', '/shots/en-6.png',
 ]);
 
 export default {
