@@ -80,7 +80,7 @@ module.exports = function (T) {
       ok(desc && desc.length >= (l === 'zh' ? 50 : 110) && desc.length <= 170, l + ': a description of about 150 characters (' + (desc || '').length + ')');
       ok(meta(/og:description" content="([^"]+)"/) === desc && meta(/twitter:description" content="([^"]+)"/) === desc, l + ': og and twitter descriptions repeat it');
       ok(meta(/name="twitter:title" content="([^"]+)"/) === meta(/<title>([^<]+)<\/title>/) && /twitter:card" content="summary_large_image"/.test(body), l + ': twitter title and the large card');
-      ok(/og:image" content="https:\/\/playchogan\.com\/og\/(fa|en)\.png"/.test(body) && /og:image:width" content="1200"/.test(body) && /og:image:height" content="630"/.test(body) && /og:image:alt" content="[^"]+"/.test(body), l + ': a 1200x630 card with alt text');
+      ok(body.includes('og:image" content="https://playchogan.com/og/' + l + '.png"') && body.includes('twitter:image" content="https://playchogan.com/og/' + l + '.png"') && /og:image:width" content="1200"/.test(body) && /og:image:height" content="630"/.test(body) && /og:image:alt" content="[^"]+"/.test(body), l + ': a 1200x630 card with alt text');
       const alts = [...body.matchAll(/<link rel="alternate" hreflang="([^"]+)" href="([^"]+)"/g)].map((m) => m[1] + ' ' + abs(m[2]));
       ok(alts.length === 10 && alts.includes('x-default /') && alts.includes('en /en/') && R.CODES.every((c) => alts.includes(c + ' /' + c + '/')), l + ': the full hreflang set, reciprocal, x-default is /');
       const ld = JSON.parse(meta(/<script type="application\/ld\+json">(.*?)<\/script>/s));
@@ -94,7 +94,15 @@ module.exports = function (T) {
       }
       // item 4: this language's screenshots only
       const srcs = [...body.matchAll(/<img src="(\/shots\/[^"]+)"/g)].map((m) => m[1]);
-      ok(srcs.length === 6 && srcs.every((s) => s.startsWith('/shots/' + (l === 'fa' ? 'fa' : 'en') + '-')) && !/\/shots\/(fa|en)-\d\.png/.test(body), l + ': six WebP screenshots, only its own set');
+      const darks = [...body.matchAll(/<source media="\(prefers-color-scheme: dark\)" srcset="([^"]+)"/g)].map((m) => m[1]);
+      const set = l === 'fa' ? 'fa' : 'en';
+      ok(darks.length === 6 && darks.every((d) => d.startsWith('/shots/' + set + '-dark-') && !d.includes('/shots/' + set + '-1-')) && body.includes('sizes="(min-width: 768px) 227px, 200px"'), l + ': a dark-theme set of six, and the real display width in sizes');
+      // item 2: one language per page
+      const gone = l === 'fa' ? 'en' : 'fa';
+      // the footer's own-language names (فارسی, العربية) are the only Arabic script a Latin page may hold
+      const visible = body.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<head>[\s\S]*?<\/head>|<a [^>]*hreflang="[^"]*"[^>]*>[^<]*<\/a>/g, '');
+      ok(!new RegExp('data-l="' + gone + '"').test(body) && (l === 'fa' || l === 'ar' || !/[\u0600-\u06FF]/.test(visible)), l + ': the page holds no text of the other source language');
+      ok(srcs.length === 6 && srcs.every((s) => s.startsWith('/shots/' + set + '-') && !s.includes('-dark-')) && !/\/shots\/(fa|en)-\d\.png/.test(body), l + ': six WebP screenshots, only its own set');
       ok((body.match(/<img src="\/shots[^>]*alt="[^"]{2,}"/g) || []).length === 6 && /role="region" aria-label="[^"%]+"/.test(body) && /<select id="lang" aria-label="[^"%]+"/.test(body), l + ': localized labels on the screenshots, the strip and the language list');
       ok(!/%[A-Z]+%/.test(body) && !/<!--[A-Z]+-->/.test(body), l + ': no placeholder is left in the page');
     }
@@ -112,10 +120,10 @@ module.exports = function (T) {
     const FILES = [...fs.readFileSync(path.join(dir, 'index.js'), 'utf8').matchAll(/'(\/[^']+\.(?:png|svg|ico|woff2|txt|xml))'/g)].map((m) => m[1])
       .concat(Object.values((await load('shots-data.js')).default).flat().flatMap((s) => Object.values(s)));
     ok(FILES.length >= 20 && FILES.every((f) => fs.existsSync(path.join(pub, f))), 'every file the Worker lists exists in public/ (' + FILES.length + ')');
-    ok(fs.readdirSync(path.join(pub, 'shots')).length === 24, 'public/shots holds exactly the 24 listed WebP files, no leftover PNG');
+    ok(fs.readdirSync(path.join(pub, 'shots')).length === 48, 'public/shots holds exactly the 48 listed WebP files, no leftover PNG');
     const refs = [...html.matchAll(/(?:src|href)="(\/[^"/][^"]*)"/g)].map((m) => m[1]).filter((f) => !/^\/(fa|en|zh|de|es|pl|fr|ar|hi)\/$/.test(f));
     ok(refs.length > 0 && refs.every((f) => FILES.includes(f)), 'every local file the page uses is one the Worker serves');
-    for (const f of ['fa', 'en']) {
+    for (const f of R.CODES) {
       const png = fs.readFileSync(path.join(pub, 'og', f + '.png'));
       ok(png.readUInt32BE(16) === 1200 && png.readUInt32BE(20) === 630, 'og/' + f + '.png is 1200x630');
     }
@@ -154,7 +162,14 @@ module.exports = function (T) {
     ok(/<main>[\s\S]*<h1>[\s\S]*<\/main>/.test(html), 'the content sits in <main>');
     ok(/@media \(min-width: 768px\) \{ \.shots \{ display: grid; grid-template-columns: repeat\(3, 1fr\)/.test(html), 'the screenshots form a 3x2 grid from 768px');
     ok(/@media \(min-width: 560px\) \{ \.facts \{ grid-template-columns: repeat\(2/.test(html) && /\.badges \{ display: grid; grid-template-columns: repeat\(2/.test(html) && /max-width: 339px\) \{ \.badges \{ grid-template-columns: 1fr/.test(html), 'facts and badges are grids that fall back to one column on a narrow phone');
-    ok((html.match(/text-wrap: balance/g) || []).length >= 3 && /\.shots img \{ filter: brightness/.test(html.replace(/\s+/g, ' ')), 'headings are balanced and screenshots are dimmed in dark mode');
+    ok((html.match(/text-wrap: balance/g) || []).length >= 3 && !/brightness\(/.test(html), 'headings are balanced and the dark screenshots are real files, not a dimmed filter');
+    const flat = html.replace(/\s+/g, ' ');
+    ok(/html\.kbd \.langbox:focus-within \{ outline: 3px solid var\(--accent\)/.test(flat) && !/(?<!kbd )\.langbox:focus-within/.test(flat) && /classList\.add\('kbd'\)/.test(html) && /classList\.remove\('kbd'\)/.test(html), 'the language ring shows for keyboard use only, not for a tap');
+    ok(/\.lang, \.btn, \.badge \{ -webkit-tap-highlight-color: transparent/.test(flat), 'a tap draws no grey flash on the controls');
+    const faces = [...html.matchAll(/@font-face \{([^}]*)\}/g)].map((m) => m[1]);
+    ok(faces.length === 2 && faces.every((f) => /unicode-range:/.test(f)) && /U\+0600-06FF/.test(faces.find((f) => /Vazirmatn/.test(f))) && /U\+0000-00FF/.test(faces.find((f) => /Nunito/.test(f))), 'each font declares its unicode-range, so a Latin page does not download the Persian font');
+    ok(/rel="apple-touch-icon" href="\/apple-touch-icon\.png"/.test(html) && fs.readFileSync(path.join(pub, 'apple-touch-icon.png')).readUInt32BE(16) === 180, 'the touch icon is its own 180px file');
+    ok(R.LANGS.zh[2].includes('霍克姆') && R.LANGS.hi[2].includes('हुक्म') && !/Hokm/.test(R.LANGS.zh[3] + R.LANGS.hi[3]), 'zh and hi use the local name of Hokm');
     ok(/id="theme" type="button" aria-pressed="false"/.test(html) && /setAttribute\('aria-pressed', d \? 'true' : 'false'\)/.test(html), 'the theme button reports its state with aria-pressed');
     ok(/id="langbox"[^>]*><svg class="ic"/.test(html) && /tb\.innerHTML = d \? sun : moon/.test(html) && !/innerHTML = [^;]*<span>/.test(html.slice(html.indexOf('function label'))), 'the theme and language controls are icon only and keep an accessible name');
 
@@ -167,7 +182,7 @@ module.exports = function (T) {
       const els = {};
       const el = () => ({ appendChild() {}, addEventListener() {}, setAttribute() {}, style: {}, dataset: {} });
       const doc = { documentElement: { lang: pathname === '/' ? 'en' : pathname.slice(1, 3), dataset: {} }, getElementById: (id) => (els[id] = els[id] || el()),
-        createElement: el, querySelector: () => null };
+        createElement: el, querySelector: () => null, querySelectorAll: () => [] };
       const loc = { pathname, search: search || '', hash: hash || '', replace: (u) => calls.push(u), assign: (u) => calls.push(u) };
       const fn = new Function('document', 'location', 'navigator', 'localStorage', 'matchAll', 'matchMedia', script.replace(/^<script>|<\/script>$/g, ''));
       fn(doc, loc, { languages: langs, language: langs[0], userAgent: ua || 'Mozilla/5.0' }, { getItem: () => saved || null, setItem() {} }, null, () => ({ matches: false }));

@@ -6,7 +6,7 @@ import SHOTS from './shots-data.js';
 
 const SHOT_FILES = Object.values(SHOTS).flat().flatMap((s) => Object.values(s));
 const FILES = new Set([
-  '/icon.png', '/favicon.svg', '/favicon.ico', '/og/fa.png', '/og/en.png',
+  '/icon.png', '/favicon.svg', '/favicon.ico', ...CODES.map((c) => '/og/' + c + '.png'), '/apple-touch-icon.png',
   '/vazirmatn-variable.woff2', '/nunito-latin.woff2',
   '/OFL-Vazirmatn.txt', '/OFL-Nunito.txt', '/robots.txt', '/sitemap.xml',
   ...SHOT_FILES,
@@ -16,7 +16,7 @@ const FILES = new Set([
 // are cached for a year; the page and the small files are revalidated so an edit shows at once.
 function cacheFor(path) {
   if (/\.woff2$|^\/shots\/|^\/og\//.test(path)) return 'public, max-age=31536000, immutable';
-  if (/^\/(icon\.png|favicon\.(svg|ico))$/.test(path)) return 'public, max-age=86400, must-revalidate';
+  if (/^\/(icon\.png|apple-touch-icon\.png|favicon\.(svg|ico))$/.test(path)) return 'public, max-age=86400, must-revalidate';
   if (/^\/(robots\.txt|sitemap\.xml)$/.test(path)) return 'public, max-age=3600';
   return 'public, max-age=0, must-revalidate';
 }
