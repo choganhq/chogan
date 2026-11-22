@@ -45,6 +45,11 @@ module.exports = function (T) {
     ok(/id="theme"/.test(html) && /:root\[data-theme=dark\]/.test(html) && /:root:not\(\[data-theme=light\]\)/.test(html) &&
       /localStorage\.setItem\('theme'/.test(html) && html.indexOf('localStorage.getItem("theme")') < html.indexOf('<style>'),
       'the page has a theme switch that overrides the system theme in both directions and is applied before the styles');
+    // #1029: six scrolling screenshots per language, a Telegram badge, and link labels fully in Persian
+    ok((html.match(/src="\/shots\/fa-\d\.png"/g) || []).length === 6 && (html.match(/src="\/shots\/en-\d\.png"/g) || []).length === 6,
+      'the page shows six screenshots in each language');
+    ok(/class="badge" href="https:\/\/t\.me\/chogangamebot"/.test(html), 'the top buttons include the Telegram Mini App');
+    ok(/data-l="fa">مینی‌اپ تلگرام</.test(html) && /data-l="fa">گیت‌هاب</.test(html), 'the Persian link labels are written in Persian');
     const cfg = fs.readFileSync(path.join(dir, 'wrangler.jsonc'), 'utf8');
     ok(/"name":\s*"playchogan-redirect"/.test(cfg) && !/"routes"/.test(cfg.replace(/\/\/.*$/gm, '')), 'the Worker keeps its name, so its existing routes stay bound');
   }
