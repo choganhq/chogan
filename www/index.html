@@ -1317,10 +1317,10 @@
 
     // Characters and palettes right under the profile card that shows the character (#253):
     // below a list with a row for every game, the owner had to scroll a long way to find them.
-    page.appendChild(el('div', { class: 'ch-section' }, [sectionHead(C.t('unlocks')), unlockShop()]));
+    page.appendChild(el('div', { class: 'ch-section', id: 'pf-unlocks' }, [sectionHead(C.t('unlocks')), unlockShop()]));
 
     // آمار
-    page.appendChild(el('div', { class: 'ch-section' }, [
+    page.appendChild(el('div', { class: 'ch-section', id: 'pf-stats' }, [
       sectionHead(C.t('statsTitle')),
       el('div', { class: 'ch-stats ch-stats--4' }, [
         el('div', { class: 'ch-stat' }, [el('b', { text: C.num(st.plays) }), el('span', { text: C.t('totalPlays') })]),
@@ -1351,8 +1351,8 @@
       ]));
     });
     // Settings before the long per-game list, for the same reason (#253)
-    page.appendChild(el('div', { class: 'ch-section' }, [sectionHead(C.t('settings')), settingsCard()]));
-    page.appendChild(el('div', { class: 'ch-section' }, [sectionHead(C.t('perGame')), per]));
+    page.appendChild(el('div', { class: 'ch-section', id: 'pf-settings' }, [sectionHead(C.t('settings')), settingsCard()]));
+    page.appendChild(el('div', { class: 'ch-section', id: 'pf-pergame' }, [sectionHead(C.t('perGame')), per]));
 
     // پاک کردن داده — one game at a time is in its sheet now (#292)
     var danger = el('div', { class: 'ch-card' });
@@ -1372,10 +1372,10 @@
         }
       })
     ]));
-    page.appendChild(el('div', { class: 'ch-section' }, [sectionHead(C.t('dangerZone')), danger]));
+    page.appendChild(el('div', { class: 'ch-section', id: 'pf-danger' }, [sectionHead(C.t('dangerZone')), danger]));
 
     // درباره
-    page.appendChild(el('div', { class: 'ch-card ch-card--tint' }, [
+    page.appendChild(el('div', { class: 'ch-card ch-card--tint', id: 'pf-about' }, [
       el('div', { class: 'ch-row', style: { 'margin-bottom': 'var(--s-2)' } }, [
         C.icon('info', 20), el('b', { text: C.t('about') })
       ]),
@@ -1468,6 +1468,35 @@
         })
       ])
     ]));
+    // Pills that jump to a section of this long page (#1070). The labels are the sections'
+    // own headings, so every language already has them.
+    var JUMPS = [['pf-unlocks', 'unlocks'], ['pf-stats', 'statsTitle'], ['pf-settings', 'settings'], ['pf-pergame', 'perGame'], ['pf-danger', 'dangerZone'], ['pf-about', 'about']];
+    var jump = el('nav', { class: 'ch-jump', 'aria-label': C.t('profile') });
+    var jumpBtns = JUMPS.map(function (j) {
+      var b = el('button', { class: 'ch-btn ch-btn--soft ch-btn--sm', type: 'button', text: C.t(j[1]), onclick: function () {
+        var t = page.querySelector('#' + j[0]);
+        if (t) t.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+      } });
+      jump.appendChild(b);
+      return b;
+    });
+    page.insertBefore(jump, page.children[1]);
+    // The pill of the section in view is lit. The page is not in the document yet while
+    // the view is built, so the listener drops itself only after it has seen the page
+    // attached and then gone (#1070: it first removed itself on the very first call).
+    var jumpSeen = false;
+    var litJump = function () {
+      if (page.isConnected) jumpSeen = true;
+      else if (jumpSeen) { document.removeEventListener('scroll', litJump, true); return; }
+      var cur = 0;
+      JUMPS.forEach(function (j, n) { var t = page.querySelector('#' + j[0]); if (t && t.getBoundingClientRect().top <= 120) cur = n; });
+      // At the very end the last section cannot reach the top, so it is the one in view
+      var de = document.documentElement;
+      if (de.scrollTop + de.clientHeight >= de.scrollHeight - 2 && de.scrollTop > 0) cur = JUMPS.length - 1;
+      jumpBtns.forEach(function (b, n) { if (n === cur) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current'); });
+    };
+    document.addEventListener('scroll', litJump, { passive: true, capture: true });
+    litJump();
     return page;
   }
 
