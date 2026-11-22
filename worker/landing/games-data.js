@@ -1,0 +1,267 @@
+// Names of the games the landing page lists, copied from www/games.json (a test keeps them equal).
+export default {
+ "sudoku": {
+  "fa": "سودوکو",
+  "en": "Sudoku",
+  "pl": "Sudoku",
+  "fr": "Sudoku",
+  "ar": "سودوكو",
+  "hi": "सुडोकू",
+  "zh": "数独",
+  "de": "Sudoku",
+  "es": "Sudoku"
+ },
+ "chess": {
+  "fa": "شطرنج",
+  "en": "Chess",
+  "pl": "Szachy",
+  "fr": "Échecs",
+  "ar": "الشطرنج",
+  "hi": "शतरंज",
+  "zh": "国际象棋",
+  "de": "Schach",
+  "es": "Ajedrez"
+ },
+ "backgammon": {
+  "fa": "تخته‌نرد",
+  "en": "Backgammon",
+  "pl": "Backgammon",
+  "fr": "Backgammon",
+  "ar": "طاولة الزهر",
+  "hi": "बैकगैमन",
+  "zh": "双陆棋",
+  "de": "Backgammon",
+  "es": "Backgammon"
+ },
+ "hokm": {
+  "fa": "حکم",
+  "en": "Hokm",
+  "pl": "Hokm",
+  "fr": "Hokm",
+  "ar": "حُكم",
+  "hi": "हुक्म",
+  "zh": "霍克姆",
+  "de": "Hokm",
+  "es": "Hokm"
+ },
+ "pasur": {
+  "fa": "پاسور",
+  "en": "Pasur",
+  "pl": "Pasur",
+  "fr": "Pasur",
+  "ar": "باسور",
+  "hi": "पासुर",
+  "zh": "帕苏尔",
+  "de": "Pasur",
+  "es": "Pasur"
+ },
+ "mahjong": {
+  "fa": "ماهجونگ",
+  "en": "Mahjong Solitaire",
+  "pl": "Mahjong",
+  "fr": "Mahjong",
+  "ar": "ماهجونغ",
+  "hi": "माहजोंग",
+  "zh": "麻将接龙",
+  "de": "Mahjong",
+  "es": "Mahjong"
+ },
+ "minesweeper": {
+  "fa": "مین‌روب",
+  "en": "Minesweeper",
+  "pl": "Saper",
+  "fr": "Démineur",
+  "ar": "كاسحة الألغام",
+  "hi": "माइनस्वीपर",
+  "zh": "扫雷",
+  "de": "Minesweeper",
+  "es": "Buscaminas"
+ },
+ "nonogram": {
+  "fa": "نونوگرام",
+  "en": "Nonogram",
+  "pl": "Nonogram",
+  "fr": "Nonogramme",
+  "ar": "نونوغرام",
+  "hi": "नॉनोग्राम",
+  "zh": "数织",
+  "de": "Nonogramm",
+  "es": "Nonograma"
+ },
+ "checkers": {
+  "fa": "چکرز",
+  "en": "Checkers",
+  "pl": "Warcaby",
+  "fr": "Dames",
+  "ar": "الداما",
+  "hi": "चेकर्स",
+  "zh": "西洋跳棋",
+  "de": "Dame",
+  "es": "Damas"
+ },
+ "ludo": {
+  "fa": "منچ",
+  "en": "Ludo",
+  "pl": "Chińczyk",
+  "fr": "Petits chevaux",
+  "ar": "لودو",
+  "hi": "लूडो",
+  "zh": "飞行棋",
+  "de": "Ludo",
+  "es": "Ludo"
+ },
+ "eightball": {
+  "fa": "بیلیارد",
+  "en": "8-Ball Pool",
+  "pl": "Ósemka",
+  "fr": "Billard 8",
+  "ar": "بلياردو الثمانية",
+  "hi": "8-बॉल पूल",
+  "zh": "八球",
+  "de": "8-Ball",
+  "es": "Bola 8"
+ },
+ "snooker": {
+  "fa": "اسنوکر",
+  "en": "Snooker",
+  "pl": "Snooker",
+  "fr": "Snooker",
+  "ar": "سنوكر",
+  "hi": "स्नूकर",
+  "zh": "斯诺克",
+  "de": "Snooker",
+  "es": "Snooker"
+ },
+ "blackjack": {
+  "fa": "بیست‌ویک",
+  "en": "Blackjack",
+  "pl": "Oczko",
+  "fr": "Vingt-et-un",
+  "ar": "واحد وعشرون",
+  "hi": "ब्लैकजैक",
+  "zh": "二十一点",
+  "de": "Blackjack",
+  "es": "Blackjack"
+ },
+ "klondike": {
+  "fa": "سالیتر",
+  "en": "Klondike",
+  "pl": "Klondike",
+  "fr": "Klondike",
+  "ar": "كلوندايك",
+  "hi": "क्लोंडाइक",
+  "zh": "克朗代克",
+  "de": "Klondike",
+  "es": "Solitario"
+ },
+ "spider": {
+  "fa": "عنکبوت",
+  "en": "Spider",
+  "pl": "Pająk",
+  "fr": "Araignée",
+  "ar": "العنكبوت",
+  "hi": "स्पाइडर",
+  "zh": "蜘蛛纸牌",
+  "de": "Spider",
+  "es": "Spider"
+ },
+ "tower-defence": {
+  "fa": "دفاع از برج",
+  "en": "Tower Defence",
+  "pl": "Tower Defence",
+  "fr": "Défense de tours",
+  "ar": "دفاع الأبراج",
+  "hi": "टावर डिफ़ेंस",
+  "zh": "塔防",
+  "de": "Turm­verteidigung",
+  "es": "Defensa de torres"
+ },
+ "blockdrop": {
+  "fa": "بلوک‌ریز",
+  "en": "Block Drop",
+  "pl": "Block Drop",
+  "fr": "Chute de blocs",
+  "ar": "الكتل المتساقطة",
+  "hi": "गिरते ब्लॉक",
+  "zh": "落块",
+  "de": "Blocksturz",
+  "es": "Lluvia de bloques"
+ },
+ "gomoku": {
+  "fa": "گوموکو",
+  "en": "Gomoku",
+  "pl": "Gomoku",
+  "fr": "Gomoku",
+  "ar": "غوموكو",
+  "hi": "गोमोकू",
+  "zh": "五子棋",
+  "de": "Gomoku",
+  "es": "Gomoku"
+ },
+ "go": {
+  "fa": "گو",
+  "en": "Go",
+  "pl": "Go",
+  "fr": "Go",
+  "ar": "غو",
+  "hi": "गो",
+  "zh": "围棋",
+  "de": "Go",
+  "es": "Go"
+ },
+ "airhockey": {
+  "fa": "ایرهاکی",
+  "en": "Air Hockey",
+  "pl": "Cymbergaj",
+  "fr": "Air hockey",
+  "ar": "هوكي الهواء",
+  "hi": "एयर हॉकी",
+  "zh": "桌上冰球",
+  "de": "Airhockey",
+  "es": "Air hockey"
+ },
+ "pingpong": {
+  "fa": "پینگ‌پنگ",
+  "en": "Ping Pong",
+  "pl": "Ping-Pong",
+  "fr": "Ping-pong",
+  "ar": "تنس الطاولة",
+  "hi": "पिंग पोंग",
+  "zh": "乒乓球",
+  "de": "Pingpong",
+  "es": "Ping-pong"
+ },
+ "wayout": {
+  "fa": "راه دررو",
+  "en": "Way Out",
+  "pl": "Strzałki",
+  "fr": "Sortie",
+  "ar": "طريق الخروج",
+  "hi": "निकास",
+  "zh": "出路",
+  "de": "Ausweg",
+  "es": "Salida"
+ },
+ "jigsaw": {
+  "fa": "جورچین",
+  "en": "Jigsaw",
+  "pl": "Puzzle",
+  "fr": "Puzzle",
+  "ar": "أحجية الصور",
+  "hi": "जिगसॉ पहेली",
+  "zh": "拼图",
+  "de": "Puzzle",
+  "es": "Rompecabezas"
+ },
+ "mancala": {
+  "fa": "منقله",
+  "en": "Mancala",
+  "pl": "Mancala",
+  "fr": "Mancala",
+  "ar": "المنقلة",
+  "hi": "मनकाला",
+  "zh": "播棋",
+  "de": "Mancala",
+  "es": "Mancala"
+ }
+};

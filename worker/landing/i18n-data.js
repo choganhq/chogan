@@ -1,9 +1,9 @@
 // Landing page translations. The key is the English text in index.html; fa and en live in the HTML.
 // Brand names (Google Play, F-Droid, GitHub, Chogan) stay as they are, so they are not listed.
-window.I18N = {
+export default {
 zh: {
-'title': 'Chogan — 可以玩完的小游戏',
 'Light': '浅色', 'Dark': '深色',
+'The Chogan menu': 'Chogan 主菜单', 'Screenshots': '截图', 'Language': '语言', 'Some of the games': '部分游戏',
 'Small games you can finish. No nonsense.': '可以玩完的小游戏，没有多余的东西。',
 'Play in the browser': '在浏览器中玩',
 'GET IT ON': '下载自', 'OPEN IN': '在以下打开', 'DIRECT DOWNLOAD': '直接下载',
@@ -19,8 +19,8 @@ zh: {
 'Chogan is built by Hossein as a hobby. Nothing is sent to a server.': 'Chogan 是 Hossein 出于兴趣开发的。不会向任何服务器发送数据。'
 },
 de: {
-'title': 'Chogan — kleine Spiele zum Fertigspielen',
 'Light': 'Hell', 'Dark': 'Dunkel',
+'The Chogan menu': 'Das Chogan-Menü', 'Screenshots': 'Screenshots', 'Language': 'Sprache', 'Some of the games': 'Einige der Spiele',
 'Small games you can finish. No nonsense.': 'Kleine Spiele zum Fertigspielen. Ohne Schnickschnack.',
 'Play in the browser': 'Im Browser spielen',
 'GET IT ON': 'ERHÄLTLICH BEI', 'OPEN IN': 'ÖFFNEN IN', 'DIRECT DOWNLOAD': 'DIREKTER DOWNLOAD',
@@ -36,8 +36,8 @@ de: {
 'Chogan is built by Hossein as a hobby. Nothing is sent to a server.': 'Chogan wird von Hossein als Hobby entwickelt. Nichts wird an einen Server gesendet.'
 },
 es: {
-'title': 'Chogan — juegos pequeños que puedes terminar',
 'Light': 'Claro', 'Dark': 'Oscuro',
+'The Chogan menu': 'El menú de Chogan', 'Screenshots': 'Capturas de pantalla', 'Language': 'Idioma', 'Some of the games': 'Algunos de los juegos',
 'Small games you can finish. No nonsense.': 'Juegos pequeños que puedes terminar. Sin tonterías.',
 'Play in the browser': 'Jugar en el navegador',
 'GET IT ON': 'DISPONIBLE EN', 'OPEN IN': 'ABRIR EN', 'DIRECT DOWNLOAD': 'DESCARGA DIRECTA',
@@ -53,8 +53,8 @@ es: {
 'Chogan is built by Hossein as a hobby. Nothing is sent to a server.': 'Chogan lo hace Hossein como afición. No se envía nada a ningún servidor.'
 },
 pl: {
-'title': 'Chogan — małe gry, które da się skończyć',
 'Light': 'Jasny', 'Dark': 'Ciemny',
+'The Chogan menu': 'Menu Chogan', 'Screenshots': 'Zrzuty ekranu', 'Language': 'Język', 'Some of the games': 'Część gier',
 'Small games you can finish. No nonsense.': 'Małe gry, które da się skończyć. Bez zbędnych dodatków.',
 'Play in the browser': 'Graj w przeglądarce',
 'GET IT ON': 'POBIERZ Z', 'OPEN IN': 'OTWÓRZ W', 'DIRECT DOWNLOAD': 'BEZPOŚREDNIE POBRANIE',
@@ -70,8 +70,8 @@ pl: {
 'Chogan is built by Hossein as a hobby. Nothing is sent to a server.': 'Chogan tworzy Hossein jako hobby. Nic nie jest wysyłane na serwer.'
 },
 fr: {
-'title': 'Chogan — de petits jeux que l’on peut finir',
 'Light': 'Clair', 'Dark': 'Sombre',
+'The Chogan menu': 'Le menu de Chogan', 'Screenshots': 'Captures d’écran', 'Language': 'Langue', 'Some of the games': 'Quelques jeux',
 'Small games you can finish. No nonsense.': 'De petits jeux que l’on peut finir. Sans fioritures.',
 'Play in the browser': 'Jouer dans le navigateur',
 'GET IT ON': 'DISPONIBLE SUR', 'OPEN IN': 'OUVRIR DANS', 'DIRECT DOWNLOAD': 'TÉLÉCHARGEMENT DIRECT',
@@ -87,8 +87,8 @@ fr: {
 'Chogan is built by Hossein as a hobby. Nothing is sent to a server.': 'Chogan est développé par Hossein pour le plaisir. Rien n’est envoyé à un serveur.'
 },
 ar: {
-'title': 'Chogan — ألعاب صغيرة يمكنك إنهاؤها',
 'Light': 'فاتح', 'Dark': 'داكن',
+'The Chogan menu': 'قائمة Chogan', 'Screenshots': 'لقطات الشاشة', 'Language': 'اللغة', 'Some of the games': 'بعض الألعاب',
 'Small games you can finish. No nonsense.': 'ألعاب صغيرة يمكنك إنهاؤها. بلا إزعاج.',
 'Play in the browser': 'العب في المتصفح',
 'GET IT ON': 'احصل عليه من', 'OPEN IN': 'افتح في', 'DIRECT DOWNLOAD': 'تنزيل مباشر',
@@ -104,8 +104,8 @@ ar: {
 'Chogan is built by Hossein as a hobby. Nothing is sent to a server.': 'يطوّر حسين تطبيق Chogan كهواية. لا يُرسل أي شيء إلى أي خادم.'
 },
 hi: {
-'title': 'Chogan — छोटे खेल जिन्हें आप पूरा कर सकें',
 'Light': 'हल्का', 'Dark': 'गहरा',
+'The Chogan menu': 'Chogan का मेनू', 'Screenshots': 'स्क्रीनशॉट', 'Language': 'भाषा', 'Some of the games': 'कुछ खेल',
 'Small games you can finish. No nonsense.': 'छोटे खेल जिन्हें आप पूरा कर सकें। बिना झंझट।',
 'Play in the browser': 'ब्राउज़र में खेलें',
 'GET IT ON': 'यहाँ से पाएँ', 'OPEN IN': 'यहाँ खोलें', 'DIRECT DOWNLOAD': 'सीधा डाउनलोड',
