@@ -11,12 +11,25 @@ module.exports = function (T) {
     const mod = await import(require('url').pathToFileURL(path.join(dir, 'index.js')).href);
     const served = [];
     const env = { ASSETS: { fetch: async (req) => { const u = new URL(req.url || req); served.push(u.pathname); return new Response('asset ' + u.pathname, { status: 200 }); } } };
+    // HTMLRewriter exists only inside Workers: a stand-in that records what the Worker sets
+    const set = {};
+    globalThis.HTMLRewriter = class { constructor() { this.h = []; } on(sel, h) { this.h.push([sel, h]); return this; }
+      transform(res) { for (const [sel, h] of this.h) h.element({ setAttribute: (k, v) => { set[sel + '|' + k] = v; }, setInnerContent: (v) => { set[sel] = v; } }); return res; } };
     const get = (p) => mod.default.fetch(new Request('https://playchogan.com' + p), env);
 
     let r = await get('/');
     ok(r.status === 200 && served[served.length - 1] === '/index.html', 'the root serves the landing page');
     r = await get('/?utm=x');
     ok(r.status === 200, 'the root with a query string is still the landing page');
+    // #1035: one address per language
+    r = await get('/es');
+    ok(r.status === 200 && set['link[rel=canonical]|href'] === 'https://playchogan.com/es' && set['html|lang'] === 'es' && set['title'].startsWith('Chogan — juegos'), '/es is the Spanish page with its own canonical and title');
+    r = await get('/fa/');
+    ok(r.status === 200 && set['html|dir'] === 'rtl', '/fa is served right-to-left');
+    r = await get('/');
+    ok(set['link[rel=canonical]|href'] === 'https://playchogan.com/' && set['html|lang'] === 'en', '/ is English');
+    r = await get('/en');
+    ok(r.status === 301 && r.headers.get('Location') === 'https://playchogan.com/', '/en redirects to the root');
     // Existing links (a game's address shared since #615) must keep opening the app.
     for (const p of ['/games/chess/?x=1', '/games/chess/index.html', '/privacy.html', '/lib/chogan.js']) {
       r = await get(p);
