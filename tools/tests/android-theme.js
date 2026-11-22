@@ -1,6 +1,6 @@
 'use strict';
 module.exports = function (T) {
-  const { ok, head, fs, path, ROOT } = T;
+  const { ok, head, fs, path, spawnSync, ROOT } = T;
 
   // #1009: the Android app stayed dark on a light phone. Capacitor's AppTheme.NoActionBar
   // extends Theme.AppCompat (a dark theme with isLightTheme=false), and the WebView takes
@@ -21,6 +21,9 @@ module.exports = function (T) {
     const bg = (block) => ((css.match(block) || [''])[0].match(/--c-bg: +(#[0-9A-F]{6});/) || [])[1];
     ok(day && day.toUpperCase() === bg(/^:root \{[\s\S]*?^\}/m), 'the launch background is the light page colour by day (' + day + ')');
     ok(night && night.toUpperCase() === bg(/^:root\[data-theme="dark"\] \{[\s\S]*?^\}/m), 'and the dark page colour at night (' + night + ')');
+    // aapt2 refuses "--" inside an XML comment, which a plain read of the file never shows
+    const parse = spawnSync('python3', ['-I', '-c', 'import sys,glob,xml.dom.minidom as m\nfs=glob.glob(sys.argv[1]+"/values*/*.xml")\n[m.parse(f) for f in fs]\nprint(len(fs))', res], { encoding: 'utf8' });
+    ok(parse.status === 0 && Number(parse.stdout) >= 4, 'every values XML file is well-formed (' + (parse.stdout || parse.stderr || '').trim().split('\n').pop() + ')');
   }
 
   return { testAndroidSystemTheme };
