@@ -97,6 +97,16 @@ module.exports = function (T) {
       ok(!near.length, name + ': the plain, peer, same-digit and selected shadings differ from each other (ΔE ≥ 6; peer/same ' + dE(v.peer, v.same).toFixed(1) +
         ', same/selected ' + dE(v.same, v.sel).toFixed(1) + ')' + (near.length ? ': ' + near.join('; ') : ''));
     }
+    // #851: the player who liked Ocean asked for it lighter, "even pure white", so the
+    // puzzle and not the colour holds the eye. Light Ocean is now white with pale blue
+    // shading; dark Ocean stays as it was (owner, 2026-11-20).
+    if (light.ocean && forced.ocean) {
+      const o = light.ocean, L = (h) => lab(h)[0];
+      ok(o.cell === '#FFFFFF', 'light Ocean cells are pure white (' + o.cell + ')');
+      ok(L(o.frame) >= 90 && L(o['given-bg']) >= 96 && L(o.peer) >= 93,
+        'light Ocean frame, given and peer shading are pale (L* ' + L(o.frame).toFixed(1) + ', ' + L(o['given-bg']).toFixed(1) + ', ' + L(o.peer).toFixed(1) + ')');
+      ok(forced.ocean.cell === '#141D26' && forced.ocean.frame === '#26333F' && forced.ocean.sel === '#2B4B6B', 'dark Ocean is unchanged');
+    }
     // real variety, not six copies: the six cell colours are all different
     const cells = new Set(ids.map((id) => light[id].cell + forced[id].cell));
     ok(cells.size === 6, 'the six themes have six different cell colours (' + cells.size + ')');
