@@ -3,15 +3,15 @@
 module.exports = function (T) {
   const { ok, head, fs, path, ROOT } = T;
   function testFontFaces() {
-    head('Fonts: Persian in Vazirmatn, Latin in Nunito, Hindi in Noto Sans Devanagari, under one family');
+    head('Fonts: Persian in Vazirmatn, Latin in Nunito, Hindi in Noto Sans Devanagari, Russian in Nunito Cyrillic, under one family');
     // Chrome joins faces of one family into one unicode-range set only when their style
     // descriptors are identical. Nunito's face said `font-weight: 200 1000` and Vazirmatn's
     // `100 900`, so Chrome picked the Nunito face alone and drew every Persian letter in the
     // system font (owner's phone, 0.25.0). A laptop with Vazirmatn installed hid it.
     const css = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
     const faces = [...css.matchAll(/@font-face \{([^}]*)\}/g)].map((m) => m[1]).filter((b) => /font-family: 'Vazirmatn'/.test(b));
-    ok(faces.length === 3, 'three Vazirmatn faces found (' + faces.length + ')');
-    if (faces.length !== 3) return;
+    ok(faces.length === 4, 'four Vazirmatn faces found (' + faces.length + ')');
+    if (faces.length !== 4) return;
     const desc = (b, k) => ((new RegExp(k + ':\\s*([^;]+);')).exec(b) || [, 'unset'])[1].trim();
     for (const k of ['font-weight', 'font-style', 'font-stretch']) {
       const v = faces.map((b) => desc(b, k));
@@ -21,6 +21,8 @@ module.exports = function (T) {
       'Vazirmatn covers everything and the later Nunito face only its Latin range');
     ok(/noto-devanagari/.test(faces[2]) && /unicode-range: U\+0900-097F/.test(faces[2]),
       'the Devanagari face is limited to the Devanagari block');
+    ok(/nunito-cyrillic/.test(faces[3]) && /unicode-range: [^;]*U\+0400-045F/.test(faces[3]),
+      'the Cyrillic face is limited to the Cyrillic block');
   }
   return { testFontFaces };
 };

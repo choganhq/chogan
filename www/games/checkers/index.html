@@ -111,9 +111,15 @@ function CheckersEngineFactory() {
     var hv = rules === 'huevo';
     var r = (i / N) | 0, c = i % N, p = owner(v), any = false, ds = dirs(v);
     var fly = hv ? (isKing(v) && !path.length) || isEmpress(v) : flying(rules, v);
+    // An Empress flies over the squares of pieces she took earlier in this move. They stay
+    // on the board until the move ends, and blocked her, so a chain that crossed its own
+    // path lost every piece beyond the crossing (HuevosKicker, #391). She still never
+    // lands on one, and no other piece gets this.
+    var emp = hv && isEmpress(v);
+    var clear = function (q) { return b[q] === 0 || (emp && caps.indexOf(q) >= 0); };
     for (var k = 0; k < ds.length; k++) {
       var dr = ds[k][0], dc = ds[k][1], r1 = r + dr, c1 = c + dc;
-      if (fly) while (r1 >= 0 && r1 < N && c1 >= 0 && c1 < N && b[r1 * N + c1] === 0) { r1 += dr; c1 += dc; }
+      if (fly) while (r1 >= 0 && r1 < N && c1 >= 0 && c1 < N && clear(r1 * N + c1)) { r1 += dr; c1 += dc; }
       if (r1 < 0 || r1 >= N || c1 < 0 || c1 >= N) continue;
       var over = r1 * N + c1;
       if (owner(b[over]) !== 3 - p || caps.indexOf(over) >= 0) continue;
@@ -464,7 +470,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = CheckersEn
   C.boot({});
   var ctx = C.game({
     id: 'checkers',
-    name: { fa: 'چکرز', en: 'Checkers', zh: '西洋跳棋', de: 'Dame', es: 'Damas', pl: 'Warcaby', fr: 'Dames', ar: 'الداما', hi: 'चेकर्स' },
+    name: { fa: 'چکرز', en: 'Checkers', zh: '西洋跳棋', de: 'Dame', es: 'Damas', pl: 'Warcaby', fr: 'Dames', ar: 'الداما', hi: 'चेकर्स', ru: 'Шашки' },
     accent: '#B82066',
     // a thinking game, like reversi
     mood: 'sudoku',
@@ -570,6 +576,23 @@ if (typeof module !== 'undefined' && module.exports) module.exports = CheckersEn
         tutTitle1: 'चलना', tutText1: 'गोटियाँ सिर्फ़ गहरे खानों पर, तिरछे आगे एक खाना चलती हैं। अपनी गोटी छुएँ, फिर जाने वाला खाना।',
         tutTitle2: 'काटना', tutText2: 'अगर विरोधी की गोटी आपकी गोटी के पास हो और उसके पीछे खाना ख़ाली हो, तो उसके ऊपर से कूदकर उसे काटें। काटना ज़रूरी है, और फिर से काट सकें तो आगे काटते रहना होगा।',
         tutTitle3: 'राजा', tutText3: 'आख़िरी पंक्ति तक पहुँची गोटी राजा बन जाती है और पीछे भी चल सकती है। जिस खिलाड़ी के पास कोई चाल न बचे, वह हार जाता है।'
+      },
+      ru: {
+        twoPlayers: 'Два игрока', vsAi: 'Против бота',
+        you: 'Ты', rival: 'Соперник', player2: 'Игрок 2', renameP2: 'Имя игрока 2',
+        draw: 'Ничья', playerWon: '{n} — победа', move: 'Ход', pieces: 'Шашки',
+        newMatch: 'Новая партия', undoMove: 'Отменить ход', cancelPick: 'Снять выбор',
+        dailyCheckers: 'Шашки дня', vsHard: 'против сильного бота',
+        classic: 'Классика', spanish: 'Испанские', huevo: 'Стиль Уэво',
+        huevoNote: 'Huevo Style, автор — HuevosKicker: бить всегда необязательно, и серию взятий можно остановить после любого прыжка; после взятия шашка встаёт сразу за побитой, а дамка летает только на первом прыжке. У каждой стороны есть Королева (светлая шашка с камнем): она ходит на одну клетку в любую сторону и бьёт как простая шашка во всех направлениях, а взятие Королевы выигрывает партию. На дальнем ряду она становится Императрицей и летает как дамка на каждом прыжке. Королеве или Императрице на краю доски даётся пятнадцать ходов; потом она должна уйти с края, иначе ты проиграл. Если игроку некуда ходить или ходить можно только Королевой, решает число шашек: у кого больше, тот победил, поровну — ничья. Если осталась одна Королева, у тебя последний ход. Шестьдесят полуходов без взятий и без ходов простыми шашками — ничья.', qEdge: 'Королева на краю, ходов осталось: {n}', qMust: 'Королева должна уйти с края', endQueen: 'Королева взята', endCount: 'Ходов нет: решает число шашек', endTimer: 'Королева не смогла уйти с края', endLone: 'Последний ход одинокой Королевы',
+        capForced: 'Бить обязательно', capFree: 'Бить по желанию',
+        freeNote: 'Если бить по желанию, взятие — только вариант, и можно сделать другой ход; начатое взятие всё равно доводится до конца.',
+        rulesNote: 'По испанским правилам дамка ходит по всей диагонали и бьёт издалека, и нужно брать больше всего шашек, а при равенстве — больше всего дамок.',
+        mustJump: 'Нужно бить', drawNote: 'Слишком много ходов без взятий: ничья',
+        boardLabel: 'Доска для шашек',
+        tutTitle1: 'Ходы', tutText1: 'Шашки ходят на одну клетку по диагонали вперёд, только по тёмным клеткам. Нажми на свою шашку, потом на клетку, куда идти.',
+        tutTitle2: 'Взятие', tutText2: 'Если рядом с твоей шашкой стоит шашка соперника, а за ней пусто, перепрыгни её, чтобы взять. Бить обязательно, и если можно бить дальше, нужно продолжать.',
+        tutTitle3: 'Дамки', tutText3: 'Шашка, дошедшая до дальнего ряда, становится дамкой и может ходить назад. Игрок, которому некуда ходить, проигрывает.'
       },
       zh: {
         twoPlayers: '双人', vsAi: '对战电脑',

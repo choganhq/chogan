@@ -1,0 +1,43 @@
+name: Social post
+
+# Hand-run version of the social job in release.yml (#1056): posts one release to X, Mastodon
+# and Bluesky through Buffer. Dry run is the default and posts nothing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'The release tag, e.g. v0.36.0'
+        required: true
+        type: string
+      dry_run:
+        description: 'Only print the post and the channels'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  post:
+    name: Buffer post (${{ inputs.tag }})
+    runs-on: ubuntu-latest
+    steps:
+      # main carries the script; an older tag does not, so only its files are read from the tag
+      - name: Check out with tags
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Post
+        env:
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          TAG: ${{ inputs.tag }}
+          DRY: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          VERSION_CODE=$(git show "${TAG}:www/version.js" | grep -oE "APP_VERSION_CODE *= *[0-9]+" | grep -oE "[0-9]+$")
+          git show "${TAG}:fastlane/metadata/android/en-US/changelogs/${VERSION_CODE}.txt" > "$RUNNER_TEMP/changelog.txt"
+          SEND=""
+          if [ "$DRY" != "true" ]; then SEND="--send"; fi
+          python3 tools/buffer-post.py "${TAG#v}" "$RUNNER_TEMP/changelog.txt" $SEND

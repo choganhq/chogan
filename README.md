@@ -15,7 +15,7 @@ Ways to play:
 - **Web:** [playchogan.com](https://playchogan.com) (it opens [choganhq.github.io/chogan](https://choganhq.github.io/chogan/)), installable as an app from the browser.
 - **Android:** [Google Play](https://play.google.com/store/apps/details?id=io.github.choganhq.chogan), [F-Droid](https://f-droid.org/packages/io.github.choganhq.chogan/), or the APK on the [Releases page](https://github.com/choganhq/chogan/releases).
 - **Telegram:** [@chogangamebot](https://t.me/chogangamebot) opens the web version inside Telegram.
-- **News:** every release is announced in the Telegram channel [@chogan_games](https://t.me/chogan_games).
+- **News:** every release is announced in the Telegram channel [@chogan_games](https://t.me/chogan_games) and on X, [@choganhq](https://x.com/choganhq).
 
 <p>
 <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/1.png" width="23%" alt="The menu">
@@ -28,7 +28,7 @@ Ways to play:
 
 Every game, with a line about each: [GAMES.md](GAMES.md#english).
 
-Around the games: search by name, pinned and recently played games and a row of new ones at the top of the menu, long-press shortcuts to games on the app icon, a daily challenge that is identical on every device with no server at all, a weekly offline league with five tiers, over 150 awards, a shared coin that is only ever spent on hints and cosmetics, stats and a profile, and a Persian, English, Simplified Chinese, German, Spanish and Polish interface with light and dark themes.
+Around the games: search by name, pinned and recently played games and a row of new ones at the top of the menu, long-press shortcuts to games on the app icon, a daily challenge that is identical on every device with no server at all, a weekly offline league with five tiers, over 150 awards, a shared coin that is only ever spent on hints and cosmetics, stats and a profile, and a Persian, English, Simplified Chinese, German, Spanish, Polish, French, Arabic, Hindi and Russian interface with light and dark themes.
 
 ### Why Chogan
 
@@ -77,7 +77,7 @@ So both sources carry the identical, identically-signed APK. You can install fro
 
 ### License
 
-MIT, see [LICENSE](LICENSE). The Vazirmatn font, the Latin subset of Nunito and the Devanagari subset of Noto Sans Devanagari are under the OFL; their licence texts ship beside the fonts in `www/fonts/OFL.txt`, `www/fonts/OFL-Nunito.txt` and `www/fonts/OFL-NotoSansDevanagari.txt`.
+MIT, see [LICENSE](LICENSE). The Vazirmatn font, the Latin and Cyrillic subsets of Nunito and the Devanagari subset of Noto Sans Devanagari are under the OFL; their licence texts ship beside the fonts in `www/fonts/OFL.txt`, `www/fonts/OFL-Nunito.txt` and `www/fonts/OFL-NotoSansDevanagari.txt`.
 
 ---
 
@@ -91,7 +91,7 @@ MIT, see [LICENSE](LICENSE). The Vazirmatn font, the Latin subset of Nunito and 
 - **وب:** [playchogan.com](https://playchogan.com) (که [choganhq.github.io/chogan](https://choganhq.github.io/chogan/) را باز می‌کند)، و از مرورگر مثل یک اپ نصب می‌شود.
 - **اندروید:** از [گوگل پلی](https://play.google.com/store/apps/details?id=io.github.choganhq.chogan)، [اف‌دروید](https://f-droid.org/packages/io.github.choganhq.chogan/)، یا فایل APK از بخش [Releases](https://github.com/choganhq/chogan/releases).
 - **تلگرام:** [@chogangamebot](https://t.me/chogangamebot) نسخه‌ی وب را داخل تلگرام باز می‌کند.
-- **خبرها:** هر نسخه‌ی تازه در کانال تلگرام [@chogan_games](https://t.me/chogan_games) (به انگلیسی) اعلام می‌شود.
+- **خبرها:** هر نسخه‌ی تازه در کانال تلگرام [@chogan_games](https://t.me/chogan_games) (به انگلیسی) اعلام می‌شود؛ در ایکس (توییتر) هم [@choganhq](https://x.com/choganhq).
 
 <p>
 <img src="fastlane/metadata/android/fa/images/phoneScreenshots/1.png" width="23%" alt="منو">
@@ -104,7 +104,7 @@ MIT, see [LICENSE](LICENSE). The Vazirmatn font, the Latin subset of Nunito and 
 
 همه‌ی بازی‌ها، هر کدام با یک خط توضیح: [GAMES.md](GAMES.md#فارسی).
 
-بیرون از بازی‌ها: جست‌وجوی بازی با نام، بازی‌های سنجاق‌شده، اخیراً بازی‌شده و ردیف بازی‌های تازه بالای منو، میان‌بر بازی‌ها با نگه داشتن آیکون اپ، چالش روزانه‌ی مشترک برای همه‌ی دستگاه‌ها بدون هیچ سروری، لیگ هفتگی آفلاین با پنج رده، بیش از ۱۵۰ دستاورد، سکه‌ی مشترک که فقط خرج راهنمایی و تزئینات می‌شود، آمار و پروفایل، و رابط فارسی، انگلیسی، چینی ساده‌شده، آلمانی، اسپانیایی و لهستانی با تم روشن و تاریک.
+بیرون از بازی‌ها: جست‌وجوی بازی با نام، بازی‌های سنجاق‌شده، اخیراً بازی‌شده و ردیف بازی‌های تازه بالای منو، میان‌بر بازی‌ها با نگه داشتن آیکون اپ، چالش روزانه‌ی مشترک برای همه‌ی دستگاه‌ها بدون هیچ سروری، لیگ هفتگی آفلاین با پنج رده، بیش از ۱۵۰ دستاورد، سکه‌ی مشترک که فقط خرج راهنمایی و تزئینات می‌شود، آمار و پروفایل، و رابط فارسی، انگلیسی، چینی ساده‌شده، آلمانی، اسپانیایی، لهستانی، فرانسوی، عربی، هندی و روسی با تم روشن و تاریک.
 
 ### چرا چوگان
 
@@ -125,7 +125,7 @@ www/
   sw.js                    سرویس‌ورکر آفلاین، کش-اول
   lib/chogan.css           سیستم طراحی: توکن‌های رنگ و شعاع و سایه و فاصله
   lib/chogan.js            هسته‌ی مشترک همه‌ی بازی‌ها
-  fonts/                   وزیرمتن، حروف لاتین نونیتو و حروف دوناگری نوتو، داخل بسته
+  fonts/                   وزیرمتن، حروف لاتین و سیریلیک نونیتو و حروف دوناگری نوتو، داخل بسته
   games/<id>/              هر بازی یک پوشه: index.html و icon.svg
 android/                   پروژه‌ی اندروید، فقط یک فایل جاوا
 template/game/             اسکلت بازی جدید
@@ -183,6 +183,6 @@ git tag v0.2.0 && git push origin v0.2.0
 
 ### مجوز
 
-MIT. متن کامل در [LICENSE](LICENSE). فونت وزیرمتن، زیرمجموعه‌ی لاتین نونیتو و زیرمجموعه‌ی دوناگری Noto Sans Devanagari زیر مجوز OFL هستند، متنشان کنار خود فونت‌ها در `www/fonts/OFL.txt`، `www/fonts/OFL-Nunito.txt` و `www/fonts/OFL-NotoSansDevanagari.txt`.
+MIT. متن کامل در [LICENSE](LICENSE). فونت وزیرمتن، زیرمجموعه‌های لاتین و سیریلیک نونیتو و زیرمجموعه‌ی دوناگری Noto Sans Devanagari زیر مجوز OFL هستند، متنشان کنار خود فونت‌ها در `www/fonts/OFL.txt`، `www/fonts/OFL-Nunito.txt` و `www/fonts/OFL-NotoSansDevanagari.txt`.
 
 </div>

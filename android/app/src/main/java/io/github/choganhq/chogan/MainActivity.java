@@ -34,6 +34,8 @@ public class MainActivity extends BridgeActivity {
             // System bars in the page's theme, not the device's (#402)
             bars = new BarsBridge(this);
             getBridge().getWebView().addJavascriptInterface(bars, "ChoganBars");
+            // Which build this is and where its store page is (#1023)
+            getBridge().getWebView().addJavascriptInterface(new AppInfoBridge(this), "ChoganApp");
         }
 
         openShortcut(getIntent());

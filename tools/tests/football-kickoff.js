@@ -48,7 +48,7 @@ module.exports = function (T) {
     }
     ok(played === 9 && wasted <= 3, 'the bot rarely aims a kick-off flick into the goal (' + wasted + ' of ' + played + ')');
     // #939: a disallowed kick-off goal shows its own banner, in every language
-    ok((html.match(/fbNoGoalBanner: '/g) || []).length === 9 && /bannerKey = 'fbNoGoalBanner'/.test(html), 'a disallowed kick-off goal has a no-goal banner in all nine languages');
+    ok((html.match(/fbNoGoalBanner: '/g) || []).length === 10 && /bannerKey = 'fbNoGoalBanner'/.test(html), 'a disallowed kick-off goal has a no-goal banner in all ten languages');
   }
   return { testFootballKickoff };
 };
