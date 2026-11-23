@@ -38,6 +38,7 @@ function AirHockeyEngineFactory() {
   var RP = 14, RM = 26, GOAL = 156;              // puck and mallet radius, goal mouth width
   var BOUNCE = 0.9, HITE = 0.92, VMAX = 1100, DRAG = 0.22, WAIT = 0.8, WIN = 7;
   var HAND = 2600;                                // a finger's top mallet speed
+  var SQUIRT = 300;                               // how fast a puck pressed into a board slips out along it
   var BOT = {
     easy:   { speed: 330, err: 34, react: 0.32, predict: false, strike: 0.6, corner: 0 },
     medium: { speed: 440, err: 28, react: 0.24, predict: true,  strike: 0.85, corner: 0.5 },
@@ -47,7 +48,7 @@ function AirHockeyEngineFactory() {
   function home(seat) { return { x: W / 2, y: seat === 0 ? H - 70 : 70, vx: 0, vy: 0 }; }
   function match() {
     var S = { score: [0, 0], winner: -1, wait: WAIT, t: 0, puck: { x: W / 2, y: H / 2, vx: 0, vy: 0 },
-      mal: [home(0), home(1)], bot: [null, null], hits: 0, touched: -1 };
+      mal: [home(0), home(1)], bot: [null, null], hits: 0, touched: -1, contact: [false, false] };
     return S;
   }
   function setBot(S, seat, level) { S.bot[seat] = level ? { level: level, timer: 0, tx: W / 2, ty: seat === 0 ? H - 70 : 70, err: 0 } : null; }
@@ -138,9 +139,14 @@ function AirHockeyEngineFactory() {
     // mallets: the puck rebounds off a moving mallet, taking its speed with it
     for (s = 0; s < 2; s++) {
       var m = S.mal[s], dx = P.x - m.x, dy = P.y - m.y, d = Math.hypot(dx, dy);
-      if (d >= RP + RM || d === 0) continue;
+      if (d >= RP + RM || d === 0) { S.contact[s] = false; continue; }
       var nx = dx / d, ny = dy / d, rel = (P.vx - m.vx) * nx + (P.vy - m.vy) * ny;
-      if (rel < 0) { P.vx -= (1 + HITE) * rel * nx; P.vy -= (1 + HITE) * rel * ny; speedCap(P); S.hits++; S.touched = s; ev.push('hit'); }
+      if (rel < 0) {
+        P.vx -= (1 + HITE) * rel * nx; P.vy -= (1 + HITE) * rel * ny; speedCap(P); S.touched = s;
+        // one touch is one hit: a mallet held on the puck counted one every step (#1090)
+        if (!S.contact[s]) { S.hits++; ev.push('hit'); }
+      }
+      S.contact[s] = true;
       P.x = m.x + nx * (RP + RM); P.y = m.y + ny * (RP + RM);
     }
     // side boards
@@ -150,6 +156,29 @@ function AirHockeyEngineFactory() {
     var inMouth = Math.abs(P.x - W / 2) < GOAL / 2 - RP * 0.3;
     if (P.y < RP && !inMouth) { P.y = RP; P.vy = Math.abs(P.vy) * BOUNCE; ev.push('wall'); }
     else if (P.y > H - RP && !inMouth) { P.y = H - RP; P.vy = -Math.abs(P.vy) * BOUNCE; ev.push('wall'); }
+    // A mallet pressing the puck into a board: the board put the puck back under the mallet
+    // every step, so it stuck there for as long as the player held on (#1090). The mallet
+    // gives way, and the puck slips out along the board, away from the mallet. In a corner
+    // there is no way out along a board, so the mallet only gives way.
+    var onX = P.x <= RP || P.x >= W - RP, onY = !inMouth && (P.y <= RP || P.y >= H - RP);
+    for (s = 0; s < 2 && (onX || onY); s++) {
+      m = S.mal[s]; dx = P.x - m.x; dy = P.y - m.y; d = Math.hypot(dx, dy);
+      if (d >= RP + RM) continue;
+      if (d < 1e-6) { dx = W / 2 - P.x; dy = H / 2 - P.y; d = Math.hypot(dx, dy); dx = -dx; dy = -dy; }
+      var c = clampMallet(s, P.x - dx / d * (RP + RM), P.y - dy / d * (RP + RM));
+      m.x = c.x; m.y = c.y; m.vx = m.vy = 0;
+      var dir;
+      if (onX && !onY) {
+        dir = Math.abs(dy) > 1 ? Math.sign(dy) : (P.y < H / 2 ? 1 : -1);
+        if (P.vy * dir < SQUIRT) P.vy = dir * SQUIRT;
+        if (P.vx * (P.x <= RP ? 1 : -1) < 0) P.vx = 0;
+      } else if (onY && !onX) {
+        // with no side to prefer, away from the goal mouth, never into it
+        dir = Math.abs(dx) > 1 ? Math.sign(dx) : (P.x < W / 2 ? -1 : 1);
+        if (P.vx * dir < SQUIRT) P.vx = dir * SQUIRT;
+        if (P.vy * (P.y <= RP ? 1 : -1) < 0) P.vy = 0;
+      }
+    }
     if (P.y < -RP || P.y > H + RP) {
       var who = P.y < 0 ? 0 : 1;
       S.score[who]++;
