@@ -19,7 +19,9 @@ module.exports = function (T) {
     ok(E.PIECES.tn.turn === W && E.PIECES.te.turn === N && E.PIECES.ts.turn === Ea && E.PIECES.tw.turn === S, 'each tee turns water from its stem to the water\'s right (clockwise), the end its arrow marks');
     ok(E.exitOf('tn', N) === W && E.exitOf('tn', Ea) === W && E.exitOf('tn', W) === Ea && E.exitOf('tn', S) === 0 &&
       E.exitOf('tw', W) === S && E.exitOf('tw', N) === S && E.exitOf('tw', S) === N && E.exitOf('tw', Ea) === 0, 'water into a tee\'s bar runs straight through, into its stem it turns to the arrow, and the closed side refuses it');
-    ok(/fl-arrow" transform="rotate\(' \+ ROT\[P\.turn\]/.test(html), 'the page draws each tee\'s arrow at its turning end');
+    // #1077: a tee or cross no longer has one fixed exit, so the page draws no arrow
+    ok(!/fl-arrow/.test(html), 'no tee arrow is drawn: the water picks its way');
+    ok(/class="fl-ring" cx="' \+ sx \+ '" cy="' \+ sy \+ '" r="40"/.test(html) && /\.fl-ring \{[^}]*stroke-width: 5;/.test(html), 'the countdown ring sits inside the source\'s outlet flange, so its opening shows (#1077)');
 
     // a hand-made board: one level with its rocks cleared and pieces laid by hand
     const board = (src, dir, pieces) => {
@@ -62,6 +64,40 @@ module.exports = function (T) {
     ok(!E.canEnter(B, at(3, 4), W) && !E.canEnter(B, at(3, 4), Ea) && E.canEnter(B, at(3, 4), N) && E.canEnter(B, at(3, 4), S), 'a cross run across takes water again only up or down');
     B.segs[at(3, 4)].push([S, N]);
     ok([N, Ea, S, W].every((d) => !E.canEnter(B, at(3, 4), d)), 'a cross run both ways is full');
+
+    // #1077: at a tee or a cross the water takes the longest laid run, from any opening
+    B = board(at(3, 3), Ea, { [at(3, 4)]: 'tw', [at(2, 4)]: 'v', [at(1, 4)]: 'v' });
+    runOut(B);
+    ok(B.segs[at(3, 4)][0][1] === N && B.filled === 3, 'water into a tee\'s stem goes the way with laid pipe, not to a dead end (' + B.filled + ' filled)');
+    B = board(at(3, 3), Ea, { [at(3, 4)]: 'ts', [at(4, 4)]: 'v', [at(5, 4)]: 'ne', [at(5, 5)]: 'h' });
+    runOut(B);
+    ok(B.segs[at(3, 4)][0][1] === S && B.filled === 4, 'water along a tee\'s bar turns into the stem when that run is longer (' + B.filled + ' filled)');
+    B = board(at(3, 3), Ea, { [at(3, 4)]: 'ts', [at(3, 5)]: 'h', [at(4, 4)]: 'v', [at(5, 4)]: 'v', [at(6, 4)]: 'v' });
+    runOut(B);
+    ok(B.segs[at(3, 4)][0][1] === S && B.filled === 4, 'of two laid ways the longer wins (' + B.filled + ' filled)');
+    B = board(at(3, 3), Ea, { [at(3, 4)]: 'tn', [at(3, 5)]: 'h', [at(2, 4)]: 'v' });
+    runOut(B);
+    ok(B.segs[at(3, 4)][0][1] === Ea, 'on a tie the water keeps the old way: straight along the bar');
+    B = board(at(3, 3), Ea, { [at(3, 4)]: 'x', [at(4, 4)]: 'v', [at(5, 4)]: 'v' });
+    runOut(B);
+    ok(B.segs[at(3, 4)][0][1] === S && B.filled === 3, 'a cross turns the water too when only a side opening leads on (' + B.filled + ' filled)');
+    B = board(at(3, 3), Ea, { [at(3, 4)]: 'x', [at(3, 5)]: 'h', [at(4, 4)]: 'v', [at(5, 4)]: 'ne', [at(5, 5)]: 'h' });
+    runOut(B);
+    ok(B.segs[at(3, 4)][0][1] === S && B.filled === 4 && B.spill.i === at(5, 5), 'a cross leaves its straight line for a longer laid way (' + B.filled + ' filled)');
+    // a piece laid while the water is still entering a tee changes its way
+    B = board(at(3, 3), Ea, { [at(3, 4)]: 'tw' });
+    B.queue[0] = 'v';
+    let k = 0;
+    while (!B.head || B.head.i !== at(3, 4)) { E.step(B, E.DT); if (++k > 60 * 120) break; }
+    ok(B.head && B.head.i === at(3, 4) && B.head.p < 0.5 && B.head.to === S, 'the water enters the empty tee heading the tie-break way');
+    E.place(B, at(2, 4));
+    ok(B.head.to === N && B.segs[at(3, 4)][0][1] === N, 'laying pipe on the other opening before the water reaches the middle turns it there');
+    runOut(B);
+    ok(B.filled === 2 && B.spill.i === at(2, 4), 'and the water follows the new piece (' + B.filled + ' filled)');
+    // a turned cross saves and restores
+    B = board(at(3, 3), Ea, { [at(3, 4)]: 'x', [at(4, 4)]: 'v', [at(5, 4)]: 'v' });
+    for (let q = 0; q < 60 * 40 && !(B.head && B.head.i === at(4, 4)); q++) E.step(B, E.DT);
+    ok(!!E.restore(JSON.parse(JSON.stringify(E.snapshot(B)))), 'a level with water turned through a cross saves and restores');
 
     // the countdown and the steady speed
     B = board(at(3, 0), Ea, { [at(3, 1)]: 'h', [at(3, 2)]: 'h', [at(3, 3)]: 'h', [at(3, 4)]: 'h', [at(3, 5)]: 'h', [at(3, 6)]: 'h', [at(3, 7)]: 'h' });

@@ -30,13 +30,12 @@
   .fl-hub { fill: var(--fl-case); }
   .fl-hubc { fill: var(--fl-chan); }
   .fl-flange { fill: var(--fl-flange); }
-  .fl-arrow { fill: var(--fl-case); }
   .fl-wat { fill: none; stroke: var(--fl-water); stroke-width: 17; stroke-linejoin: round; }
   .fl-rockb { fill: var(--fl-rock); }
   .fl-rockh { fill: var(--fl-rockhi); }
   .fl-src { fill: var(--game, var(--c-accent)); }
   .fl-srcw { fill: var(--fl-water); }
-  .fl-ring { fill: none; stroke: var(--fl-cursor); stroke-width: 7; stroke-linecap: round; }
+  .fl-ring { fill: none; stroke: var(--fl-cursor); stroke-width: 5; stroke-linecap: round; }
   .fl-cur { fill: none; stroke: var(--fl-cursor); stroke-width: 6; }
   .fl-puddle { fill: var(--fl-water); opacity: .75; }
   .fl-cell--poof { animation: fl-poof 420ms var(--ease); transform-box: fill-box; transform-origin: center; }
@@ -94,9 +93,8 @@ function FloodEngineFactory() {
     return r < 0 || c < 0 || r >= ROWS || c >= COLS ? -1 : r * COLS + c;
   }
 
-  // The pieces. A tee is named by its stem. Water that comes in by either end of a tee's
-  // bar runs straight through; water that comes in by the stem turns to its own right
-  // (clockwise), and the page draws an arrow at that end, so the branch is never a guess.
+  // The pieces. A tee is named by its stem. Its `turn` and a cross's straight line are only
+  // the tie-break now: at a tee or a cross the water takes the longest run (#1077).
   var PIECES = {
     h: { m: E | W, k: 'straight' }, v: { m: N | S, k: 'straight' },
     ne: { m: N | E, k: 'bend' }, es: { m: E | S, k: 'bend' }, sw: { m: S | W, k: 'bend' }, wn: { m: W | N, k: 'bend' },
@@ -116,7 +114,54 @@ function FloodEngineFactory() {
     if (P.k === 'tee') return inSide === P.stem ? P.turn : opp(inSide);
     return P.m & ~inSide;
   }
-  function axis(side) { return side === N || side === S ? 'v' : 'h'; }
+  // Every side water may leave a piece by, the tie-break first. `used` holds the sides an
+  // earlier pass took; only a cross takes a second pass, through the two it left free.
+  // #1077: a fixed exit at a tee or cross spilled water that had a laid pipe to follow.
+  function exitsOf(p, inSide, used) {
+    var P = PIECES[p];
+    used = used || 0;
+    if (!P || !(P.m & inSide) || (used & inSide) || (used && P.k !== 'cross')) return [];
+    var free = P.m & ~inSide & ~used, first = exitOf(p, inSide), xs = [];
+    if (free & first) xs.push(first);
+    for (var k = 0; k < 4; k++) if ((free & DIRS[k]) && DIRS[k] !== first) xs.push(DIRS[k]);
+    return xs;
+  }
+  function usedBits(St, j, skipLast) {
+    var segs = St.segs[j], u = 0, n = segs.length - (skipLast ? 1 : 0);
+    for (var k = 0; k < n; k++) u |= segs[k][0] | segs[k][1];
+    return u;
+  }
+  // How many cells water leaving cell i by side `out` would still fill over the pipe laid
+  // now, taking the best way at every tee and cross. `over` holds the sides this trial
+  // has used; the search is capped so a board of crosses stays quick, and the cap is a
+  // fixed count, so a daily board flows the same on every phone.
+  var SEARCH = 20000;
+  function runFrom(St, i, out, over, budget) {
+    var j = nb(i, out), inSide = opp(out);
+    if (j < 0 || --budget.n < 0) return 0;
+    var p = St.grid[j];
+    if (!p || St.rock[j] || j === St.src) return 0;
+    var u = over[j] !== undefined ? over[j] : usedBits(St, j), xs = exitsOf(p, inSide, u), best = 0;
+    for (var k = 0; k < xs.length; k++) {
+      over[j] = u | inSide | xs[k];
+      var r = runFrom(St, j, xs[k], over, budget);
+      if (r > best) best = r;
+    }
+    if (xs.length) over[j] = u; else return 0;
+    return 1 + best;
+  }
+  // the exit water entering cell j by inSide takes: the longest run, the tie-break on a tie
+  function pickExit(St, j, inSide, u) {
+    var xs = exitsOf(St.grid[j], inSide, u), best = -1, pick = xs[0] || 0;
+    if (xs.length < 2) return pick;
+    for (var k = 0; k < xs.length; k++) {
+      var over = {};
+      over[j] = u | inSide | xs[k];
+      var r = runFrom(St, j, xs[k], over, { n: SEARCH });
+      if (r > best) { best = r; pick = xs[k]; }
+    }
+    return pick;
+  }
 
   // the core's seeded generator, kept as a number so a level saves and restores exactly
   function draw32(st) {
@@ -199,10 +244,16 @@ function FloodEngineFactory() {
   function canEnter(St, j, inSide) {
     var p = St.grid[j];
     if (!p || St.rock[j] || j === St.src || !exitOf(p, inSide)) return false;
-    var segs = St.segs[j];
-    if (!segs.length) return true;
-    if (PIECES[p].k !== 'cross' || segs.length > 1) return false;
-    return axis(segs[0][0]) !== axis(inSide);
+    return exitsOf(p, inSide, usedBits(St, j)).length > 0;
+  }
+  // A piece laid while the water is still in the first half of a tee or cross can change
+  // its way: the water has not reached the middle yet, so nothing drawn jumps.
+  function rethink(St) {
+    var h = St.head;
+    if (!h || St.over || h.i === St.src || h.p >= 0.5) return;
+    var segs = St.segs[h.i], last = segs[segs.length - 1];
+    var out = pickExit(St, h.i, last[0], usedBits(St, h.i, true));
+    if (out && out !== last[1]) { last[1] = out; h.to = out; }
   }
 
   // Lay the next piece on cell i, or swap a laid piece for it. Refused on rocks, the
@@ -216,6 +267,7 @@ function FloodEngineFactory() {
     var was = St.grid[i], p = St.queue.shift();
     St.queue.push(nextPiece(St));
     St.grid[i] = p;
+    rethink(St);
     if (was) {
       St.busy = REPLACE_T; St.score = Math.max(0, St.score - P_REPLACE); St.replaced++;
       St.ev.push({ t: 'replace', i: i, was: was, p: p });
@@ -274,7 +326,7 @@ function FloodEngineFactory() {
         break;
       }
       var second = St.segs[j].length === 1;
-      var out = exitOf(St.grid[j], inSide);
+      var out = pickExit(St, j, inSide, usedBits(St, j));
       St.segs[j].push([inSide, out]);
       if (second) { St.crosses++; St.score += P_CROSS; St.ev.push({ t: 'cross', i: j }); }
       h.p -= 1; h.i = j; h.from = inSide; h.to = out;
@@ -301,7 +353,7 @@ function FloodEngineFactory() {
       for (var s = 0; s < o.segs[i].length; s++) {
         var g = o.segs[i][s];
         if (!Array.isArray(g) || g.length !== 2 || DIRS.indexOf(g[1]) < 0 || (g[0] !== 0 && DIRS.indexOf(g[0]) < 0)) return null;
-        if (i !== o.src && exitOf(o.grid[i], g[0]) !== g[1]) return null;
+        if (i !== o.src && exitsOf(o.grid[i], g[0], s ? o.segs[i][0][0] | o.segs[i][0][1] : 0).indexOf(g[1]) < 0) return null;
       }
     }
     if (o.cd > 0 ? o.head !== null : !(o.head && num(o.head.i, 0, NN - 1) && num(o.head.p, 0, 1) && o.segs[o.head.i].length > 0)) return null;
@@ -313,7 +365,7 @@ function FloodEngineFactory() {
   return {
     COLS: COLS, ROWS: ROWS, NN: NN, DT: DT, QUEUE: QUEUE, N: N, E: E, S: S, W: W, DIRS: DIRS, PIECES: PIECES, KINDS: KINDS,
     REPLACE_T: REPLACE_T, HURRY_T: HURRY_T, P_CELL: P_CELL, P_EXTRA: P_EXTRA, P_CROSS: P_CROSS, P_REPLACE: P_REPLACE, SPEEDS: SPEEDS,
-    opp: opp, cw: cw, nb: nb, exitOf: exitOf, mulberry: mulberry, params: params, clearBonus: clearBonus, findPath: findPath,
+    opp: opp, cw: cw, nb: nb, exitOf: exitOf, exitsOf: exitsOf, pickExit: pickExit, mulberry: mulberry, params: params, clearBonus: clearBonus, findPath: findPath,
     level: level, canEnter: canEnter, place: place, hurry: hurry, step: step, drain: drain, snapshot: snapshot, restore: restore
   };
 }
@@ -345,25 +397,25 @@ if (typeof module !== 'undefined') module.exports = FloodEngineFactory;
         flReachedL: 'مرحله‌ای که رسیدی', flClearedL: 'مرحله‌های تمام‌شده', flScoreL: 'امتیاز', flBestL: 'بهترین امتیاز', flBestN: 'رکورد تازه: {n}', flTriesL: 'تلاش‌ها',
         flEmpty: 'خالی', flRock: 'سنگ', flSource: 'منبع آب', flWet: 'آب دارد', flStraight: 'لوله‌ی صاف', flBend: 'زانویی', flTee: 'سه‌راهی', flCross: 'چهارراه', flCellN: 'ردیف {r} ستون {c}',
         kMove: 'جابه‌جا کردن نشانگر', kPlace: 'گذاشتن یا عوض کردن لوله', kHurry: 'باز کردن آب', kNew: 'دور تازه',
-        rules: 'لوله‌ی بعدی از صف کنار صفحه می‌آید. هر خانه‌ی خالی را بزن تا لوله آنجا بنشیند. شمارش معکوس که تمام شود، آب از منبع راه می‌افتد و با سرعتی ثابت در لوله‌هایی که گذاشته‌ای جلو می‌رود. هر جا لوله تمام شود یا سرش به دیوار یا لوله‌ای ناجور برسد، آب بیرون می‌ریزد و مرحله تمام است. اگر تا آن موقع آب از هدفِ مرحله بیشتر خانه را پر کرده باشد، به مرحله‌ی بعد می‌روی: هدف بلندتر، آب تندتر و سنگ بیشتر. لوله‌ای را که آب هنوز به آن نرسیده می‌شود دوباره زد تا با لوله‌ی بعدی عوض شود؛ این کار کمی وقت و پنج امتیاز می‌گیرد. لوله‌ای که آب در آن رفته دیگر عوض نمی‌شود. آب در سه‌راهی اگر از دو سرِ میله بیاید صاف رد می‌شود و اگر از پایه بیاید به سمت فلش می‌پیچد. چهارراه را آب می‌تواند دوبار، یک بار افقی و یک بار عمودی، رد کند و پنجاه امتیاز جایزه دارد. هر خانه ده امتیاز و بعد از هدف بیست امتیاز دارد. وقتی کارت تمام شد آب را باز کن تا تند برود. دور با اولین مرحله‌ای که به هدف نرسد تمام می‌شود. چالش روزانه برای همه یکی است.',
+        rules: 'لوله‌ی بعدی از صف کنار صفحه می‌آید. هر خانه‌ی خالی را بزن تا لوله آنجا بنشیند. شمارش معکوس که تمام شود، آب از منبع راه می‌افتد و با سرعتی ثابت در لوله‌هایی که گذاشته‌ای جلو می‌رود. هر جا لوله تمام شود یا سرش به دیوار یا لوله‌ای ناجور برسد، آب بیرون می‌ریزد و مرحله تمام است. اگر تا آن موقع آب از هدفِ مرحله بیشتر خانه را پر کرده باشد، به مرحله‌ی بعد می‌روی: هدف بلندتر، آب تندتر و سنگ بیشتر. لوله‌ای را که آب هنوز به آن نرسیده می‌شود دوباره زد تا با لوله‌ی بعدی عوض شود؛ این کار کمی وقت و پنج امتیاز می‌گیرد. لوله‌ای که آب در آن رفته دیگر عوض نمی‌شود. در سه‌راهی و چهارراه، آب راهی را می‌رود که از بیشترین لوله می‌گذرد، پس از هر دهانه‌اش می‌شود لوله را ادامه داد. چهارراه را آب می‌تواند دوبار رد کند، بار دوم از دو دهانه‌ای که خالی مانده، و پنجاه امتیاز جایزه دارد. هر خانه ده امتیاز و بعد از هدف بیست امتیاز دارد. وقتی کارت تمام شد آب را باز کن تا تند برود. دور با اولین مرحله‌ای که به هدف نرسد تمام می‌شود. چالش روزانه برای همه یکی است.',
         tutTitle1: 'لوله بگذار', tutText1: 'لوله‌ی بعدی صف را با زدن هر خانه‌ی خالی بگذار. دوباره زدن یک لوله آن را با بعدی عوض می‌کند.',
         tutTitle2: 'آب می‌آید', tutText2: 'شمارش که تمام شود آب از منبع راه می‌افتد. پیش از آنکه بیرون بریزد، به اندازه‌ی هدف لوله پر کن.',
-        tutTitle3: 'سه‌راهی و چهارراه', tutText3: 'آبی که از پایه‌ی سه‌راهی بیاید به سمت فلش می‌پیچد. چهارراه دوبار آب می‌گیرد و جایزه دارد.'
+        tutTitle3: 'سه‌راهی و چهارراه', tutText3: 'در سه‌راهی و چهارراه، آب راهی را می‌رود که لوله‌ی بیشتری دارد. چهارراه دوبار آب می‌گیرد و جایزه دارد.'
       },
       en: {
         flBoard: 'The Flood pipe board', flNext: 'Next', flQueue: 'Pieces coming up',
         flLevelN: 'Level {n}', flGoalN: 'Water: {a} of {b}', flScoreN: 'Score: {n}', flWaterIn: 'Water in {s} s', flFlowing: 'The water is running', flRushing: 'Water rushing',
-        flHurry: 'Open the tap', flStartL: 'Start', flGoOn: 'Tap to go on.', flLevelGoal: 'Lay at least {n} cells of pipe for the water to run through.',
+        flHurry: 'Open the tap', flStartL: 'Start', flGoOn: 'Tap to go on.', flLevelGoal: 'Place at least {n} cells of pipe for the water to run through.',
         flCleared: 'Level {n} cleared!', flNextLevel: 'Level {n}', flSpilled: 'The water spilled', flShort: 'Short of the goal',
         flGoalHit: 'Goal reached!', flCrossBonus: 'Twice through a cross!', flNewRun: 'New run', flDaily: 'Daily Flood',
         flSpeed: 'Water speed', flCalm: 'Calm', flNormal: 'Normal', flBrisk: 'Brisk',
         flReachedL: 'Level reached', flClearedL: 'Levels cleared', flScoreL: 'Score', flBestL: 'Best score', flBestN: 'New best: {n}', flTriesL: 'Tries',
         flEmpty: 'empty', flRock: 'rock', flSource: 'water source', flWet: 'has water', flStraight: 'straight pipe', flBend: 'bend', flTee: 'tee', flCross: 'cross', flCellN: 'Row {r} column {c}',
-        kMove: 'Move the cursor', kPlace: 'Lay or swap a piece', kHurry: 'Open the tap', kNew: 'New run',
-        rules: 'The next piece comes from the queue beside the board. Tap any empty cell to lay it there. When the countdown ends, the water leaves the source and runs through the pipe you have laid at a steady speed. Wherever the pipe stops, or its end meets the wall or a piece that does not fit, the water spills and the level is over. If by then the water has filled at least the level\'s goal, you go on to the next level: a longer goal, faster water and more rocks. Tap a piece the water has not reached yet to swap it for the next one; that costs a moment and five points. A piece the water has entered can never be swapped. In a tee, water coming in at either end of the bar runs straight through, and water coming in by the stem turns toward the arrow. Water can run through a cross twice, once across and once down, for a bonus of fifty. Each cell is worth ten points, twenty past the goal. When you are done, open the tap and the water rushes on. A run ends with the first level that falls short. The daily challenge is the same for everyone.',
-        tutTitle1: 'Lay pipe', tutText1: 'Tap any empty cell to lay the next piece from the queue. Tap a piece again to swap it for the next one.',
+        kMove: 'Move the cursor', kPlace: 'Place or swap a piece', kHurry: 'Open the tap', kNew: 'New run',
+        rules: 'The next piece comes from the queue beside the board. Tap any empty cell to place it there. When the countdown ends, the water leaves the source and runs through the pipe you have placed at a steady speed. Wherever the pipe stops, or its end meets the wall or a piece that does not fit, the water spills and the level is over. If by then the water has filled at least the level\'s goal, you go on to the next level: a longer goal, faster water and more rocks. Tap a piece the water has not reached yet to swap it for the next one; that costs a moment and five points. A piece the water has entered can never be swapped. At a tee or a cross, the water takes whichever way runs through the most pipe, so you can build on from any of its openings. Water can run through a cross twice, the second time through the two openings it left free, for a bonus of fifty. Each cell is worth ten points, twenty past the goal. When you are done, open the tap and the water rushes on. A run ends with the first level that falls short. The daily challenge is the same for everyone.',
+        tutTitle1: 'Place pipes', tutText1: 'Tap any empty cell to place the next piece from the queue. Tap a piece again to swap it for the next one.',
         tutTitle2: 'Here comes the water', tutText2: 'When the countdown ends, the water leaves the source. Fill the goal before it spills.',
-        tutTitle3: 'Tees and crosses', tutText3: 'Water coming in by a tee\'s stem turns toward the arrow. A cross takes water twice, for a bonus.'
+        tutTitle3: 'Tees and crosses', tutText3: 'At a tee or a cross, the water takes the way with the most pipe. A cross takes water twice, for a bonus.'
       },
       pl: {
         flBoard: 'Plansza rur Powodzi', flNext: 'Następna', flQueue: 'Nadchodzące elementy',
@@ -375,10 +427,10 @@ if (typeof module !== 'undefined') module.exports = FloodEngineFactory;
         flReachedL: 'Osiągnięty poziom', flClearedL: 'Ukończone poziomy', flScoreL: 'Wynik', flBestL: 'Najlepszy wynik', flBestN: 'Nowy rekord: {n}', flTriesL: 'Próby',
         flEmpty: 'puste', flRock: 'kamień', flSource: 'źródło wody', flWet: 'z wodą', flStraight: 'prosta rura', flBend: 'kolanko', flTee: 'trójnik', flCross: 'krzyżak', flCellN: 'Rząd {r} kolumna {c}',
         kMove: 'Przesuń kursor', kPlace: 'Połóż lub wymień element', kHurry: 'Odkręć kran', kNew: 'Nowa runda',
-        rules: 'Następny element przychodzi z kolejki obok planszy. Stuknij dowolne puste pole, aby go tam położyć. Gdy odliczanie się skończy, woda wypływa ze źródła i płynie przez ułożoną rurę ze stałą prędkością. Tam, gdzie rura się kończy albo jej koniec trafia na ścianę lub niepasujący element, woda się wylewa i poziom się kończy. Jeśli do tego czasu woda wypełniła co najmniej cel poziomu, przechodzisz dalej: dłuższy cel, szybsza woda i więcej kamieni. Stuknij element, do którego woda jeszcze nie dotarła, aby wymienić go na następny; kosztuje to chwilę i pięć punktów. Elementu, do którego weszła woda, nie można już wymienić. W trójniku woda wpływająca z któregoś końca belki płynie prosto, a wpływająca od nóżki skręca w stronę strzałki. Przez krzyżak woda może przepłynąć dwa razy, raz w poprzek i raz w dół, za premię pięćdziesięciu. Każde pole daje dziesięć punktów, a za celem dwadzieścia. Gdy skończysz, odkręć kran, a woda popędzi. Runda kończy się na pierwszym poziomie bez celu. Codzienne wyzwanie jest takie samo dla wszystkich.',
+        rules: 'Następny element przychodzi z kolejki obok planszy. Stuknij dowolne puste pole, aby go tam położyć. Gdy odliczanie się skończy, woda wypływa ze źródła i płynie przez ułożoną rurę ze stałą prędkością. Tam, gdzie rura się kończy albo jej koniec trafia na ścianę lub niepasujący element, woda się wylewa i poziom się kończy. Jeśli do tego czasu woda wypełniła co najmniej cel poziomu, przechodzisz dalej: dłuższy cel, szybsza woda i więcej kamieni. Stuknij element, do którego woda jeszcze nie dotarła, aby wymienić go na następny; kosztuje to chwilę i pięć punktów. Elementu, do którego weszła woda, nie można już wymienić. W trójniku i krzyżaku woda wybiera drogę, która prowadzi przez najwięcej rury, więc możesz budować dalej od każdego wylotu. Przez krzyżak woda może przepłynąć dwa razy, za drugim razem przez dwa wolne wyloty, za premię pięćdziesięciu. Każde pole daje dziesięć punktów, a za celem dwadzieścia. Gdy skończysz, odkręć kran, a woda popędzi. Runda kończy się na pierwszym poziomie bez celu. Codzienne wyzwanie jest takie samo dla wszystkich.',
         tutTitle1: 'Układaj rury', tutText1: 'Stuknij puste pole, aby położyć następny element z kolejki. Stuknij element ponownie, aby wymienić go na następny.',
         tutTitle2: 'Nadchodzi woda', tutText2: 'Po odliczaniu woda wypływa ze źródła. Wypełnij cel, zanim się wyleje.',
-        tutTitle3: 'Trójniki i krzyżaki', tutText3: 'Woda wpływająca od nóżki trójnika skręca w stronę strzałki. Krzyżak przyjmuje wodę dwa razy, za premię.'
+        tutTitle3: 'Trójniki i krzyżaki', tutText3: 'W trójniku i krzyżaku woda wybiera drogę z największą ilością rury. Krzyżak przyjmuje wodę dwa razy, za premię.'
       },
       fr: {
         flBoard: 'Le plateau de tuyaux de Crue', flNext: 'Suivante', flQueue: 'Pièces à venir',
@@ -390,10 +442,10 @@ if (typeof module !== 'undefined') module.exports = FloodEngineFactory;
         flReachedL: 'Niveau atteint', flClearedL: 'Niveaux terminés', flScoreL: 'Score', flBestL: 'Meilleur score', flBestN: 'Nouveau record : {n}', flTriesL: 'Essais',
         flEmpty: 'vide', flRock: 'rocher', flSource: 'source d’eau', flWet: 'a de l’eau', flStraight: 'tuyau droit', flBend: 'coude', flTee: 'té', flCross: 'croix', flCellN: 'Ligne {r} colonne {c}',
         kMove: 'Déplacer le curseur', kPlace: 'Poser ou échanger une pièce', kHurry: 'Ouvrir le robinet', kNew: 'Nouvelle partie',
-        rules: 'La pièce suivante vient de la file à côté du plateau. Touche n’importe quelle case vide pour l’y poser. À la fin du compte à rebours, l’eau quitte la source et avance à vitesse constante dans le tuyau que tu as posé. Là où le tuyau s’arrête, ou si son bout touche le mur ou une pièce qui ne raccorde pas, l’eau déborde et le niveau est fini. Si l’eau a rempli au moins l’objectif du niveau, tu passes au suivant : un objectif plus long, une eau plus rapide et plus de rochers. Touche une pièce que l’eau n’a pas encore atteinte pour l’échanger contre la suivante ; cela coûte un instant et cinq points. Une pièce où l’eau est entrée ne peut plus être échangée. Dans un té, l’eau qui entre par un bout de la barre passe tout droit, et celle qui entre par le pied tourne vers la flèche. L’eau peut traverser une croix deux fois, une fois en travers et une fois en long, pour un bonus de cinquante. Chaque case vaut dix points, vingt au-delà de l’objectif. Quand tu as fini, ouvre le robinet et l’eau file. Une partie s’arrête au premier niveau manqué. Le défi du jour est le même pour tous.',
+        rules: 'La pièce suivante vient de la file à côté du plateau. Touche n’importe quelle case vide pour l’y poser. À la fin du compte à rebours, l’eau quitte la source et avance à vitesse constante dans le tuyau que tu as posé. Là où le tuyau s’arrête, ou si son bout touche le mur ou une pièce qui ne raccorde pas, l’eau déborde et le niveau est fini. Si l’eau a rempli au moins l’objectif du niveau, tu passes au suivant : un objectif plus long, une eau plus rapide et plus de rochers. Touche une pièce que l’eau n’a pas encore atteinte pour l’échanger contre la suivante ; cela coûte un instant et cinq points. Une pièce où l’eau est entrée ne peut plus être échangée. Dans un té ou une croix, l’eau prend le chemin qui passe par le plus de tuyau : tu peux donc continuer depuis n’importe quelle ouverture. L’eau peut traverser une croix deux fois, la seconde par les deux ouvertures restées libres, pour un bonus de cinquante. Chaque case vaut dix points, vingt au-delà de l’objectif. Quand tu as fini, ouvre le robinet et l’eau file. Une partie s’arrête au premier niveau manqué. Le défi du jour est le même pour tous.',
         tutTitle1: 'Pose des tuyaux', tutText1: 'Touche une case vide pour poser la pièce suivante de la file. Touche une pièce à nouveau pour l’échanger contre la suivante.',
         tutTitle2: 'L’eau arrive', tutText2: 'À la fin du compte à rebours, l’eau quitte la source. Remplis l’objectif avant qu’elle déborde.',
-        tutTitle3: 'Tés et croix', tutText3: 'L’eau qui entre par le pied d’un té tourne vers la flèche. Une croix prend l’eau deux fois, avec un bonus.'
+        tutTitle3: 'Tés et croix', tutText3: 'Dans un té ou une croix, l’eau prend le chemin le plus long. Une croix prend l’eau deux fois, avec un bonus.'
       },
       ar: {
         flBoard: 'لوحة أنابيب الفيضان', flNext: 'التالية', flQueue: 'القطع القادمة',
@@ -405,10 +457,10 @@ if (typeof module !== 'undefined') module.exports = FloodEngineFactory;
         flReachedL: 'المستوى الذي بلغته', flClearedL: 'المستويات المجتازة', flScoreL: 'النقاط', flBestL: 'أفضل نتيجة', flBestN: 'رقم قياسي جديد: {n}', flTriesL: 'المحاولات',
         flEmpty: 'فارغة', flRock: 'صخرة', flSource: 'منبع الماء', flWet: 'فيها ماء', flStraight: 'أنبوب مستقيم', flBend: 'كوع', flTee: 'وصلة T', flCross: 'تقاطع', flCellN: 'الصف {r} العمود {c}',
         kMove: 'حرّك المؤشر', kPlace: 'ضع قطعة أو بدّلها', kHurry: 'افتح الصنبور', kNew: 'جولة جديدة',
-        rules: 'تأتي القطعة التالية من الطابور بجانب اللوحة. انقر أي خانة فارغة لتضعها فيها. عند انتهاء العد التنازلي يخرج الماء من المنبع ويجري بسرعة ثابتة في الأنبوب الذي مددته. حيثما ينتهي الأنبوب، أو يصطدم طرفه بالجدار أو بقطعة لا تتصل به، ينسكب الماء وينتهي المستوى. إن كان الماء قد ملأ هدف المستوى على الأقل تنتقل إلى المستوى التالي: هدف أطول، وماء أسرع، وصخور أكثر. انقر قطعة لم يصلها الماء بعد لتبدلها بالتالية؛ وهذا يكلفك لحظة وخمس نقاط. القطعة التي دخلها الماء لا يمكن تبديلها أبدًا. في وصلة T يمر الماء الداخل من أحد طرفي الذراع مستقيمًا، والماء الداخل من الساق ينعطف نحو السهم. يمكن للماء أن يعبر التقاطع مرتين، مرة عرضًا ومرة طولًا، مقابل مكافأة خمسين نقطة. كل خانة بعشر نقاط، وبعشرين بعد الهدف. حين تنتهي افتح الصنبور فيندفع الماء. تنتهي الجولة عند أول مستوى لا تبلغ هدفه. تحدي اليوم واحد للجميع.',
+        rules: 'تأتي القطعة التالية من الطابور بجانب اللوحة. انقر أي خانة فارغة لتضعها فيها. عند انتهاء العد التنازلي يخرج الماء من المنبع ويجري بسرعة ثابتة في الأنبوب الذي مددته. حيثما ينتهي الأنبوب، أو يصطدم طرفه بالجدار أو بقطعة لا تتصل به، ينسكب الماء وينتهي المستوى. إن كان الماء قد ملأ هدف المستوى على الأقل تنتقل إلى المستوى التالي: هدف أطول، وماء أسرع، وصخور أكثر. انقر قطعة لم يصلها الماء بعد لتبدلها بالتالية؛ وهذا يكلفك لحظة وخمس نقاط. القطعة التي دخلها الماء لا يمكن تبديلها أبدًا. في وصلة T والتقاطع يسلك الماء الطريق الذي يمر بأكبر عدد من الأنابيب، فيمكنك أن تكمل البناء من أي فتحة. يمكن للماء أن يعبر التقاطع مرتين، في المرة الثانية من الفتحتين الباقيتين، مقابل مكافأة خمسين نقطة. كل خانة بعشر نقاط، وبعشرين بعد الهدف. حين تنتهي افتح الصنبور فيندفع الماء. تنتهي الجولة عند أول مستوى لا تبلغ هدفه. تحدي اليوم واحد للجميع.',
         tutTitle1: 'مدّ الأنابيب', tutText1: 'انقر أي خانة فارغة لتضع القطعة التالية من الطابور. انقر قطعة مرة أخرى لتبدلها بالتالية.',
         tutTitle2: 'الماء قادم', tutText2: 'عند انتهاء العد التنازلي يخرج الماء من المنبع. املأ الهدف قبل أن ينسكب.',
-        tutTitle3: 'وصلات T والتقاطعات', tutText3: 'الماء الداخل من ساق وصلة T ينعطف نحو السهم. التقاطع يمر فيه الماء مرتين، مقابل مكافأة.'
+        tutTitle3: 'وصلات T والتقاطعات', tutText3: 'في وصلة T والتقاطع يسلك الماء الطريق الأطول. التقاطع يمر فيه الماء مرتين، مقابل مكافأة.'
       },
       hi: {
         flBoard: 'बाढ़ का पाइप बोर्ड', flNext: 'अगला', flQueue: 'आने वाले टुकड़े',
@@ -420,10 +472,10 @@ if (typeof module !== 'undefined') module.exports = FloodEngineFactory;
         flReachedL: 'पहुँचा स्तर', flClearedL: 'पूरे स्तर', flScoreL: 'स्कोर', flBestL: 'सर्वश्रेष्ठ स्कोर', flBestN: 'नया रिकॉर्ड: {n}', flTriesL: 'कोशिशें',
         flEmpty: 'ख़ाली', flRock: 'चट्टान', flSource: 'पानी का स्रोत', flWet: 'पानी भरा', flStraight: 'सीधा पाइप', flBend: 'मोड़', flTee: 'टी', flCross: 'क्रॉस', flCellN: 'पंक्ति {r} स्तंभ {c}',
         kMove: 'कर्सर हिलाएँ', kPlace: 'टुकड़ा बिछाएँ या बदलें', kHurry: 'नल खोलें', kNew: 'नई दौड़',
-        rules: 'अगला टुकड़ा बोर्ड के पास की कतार से आता है। उसे बिछाने के लिए कोई भी ख़ाली खाना छुएँ। उलटी गिनती ख़त्म होने पर पानी स्रोत से निकलता है और आपके बिछाए पाइप में एक जैसी रफ़्तार से बहता है। जहाँ पाइप रुकता है, या उसका सिरा दीवार से या ऐसे टुकड़े से मिलता है जो फ़िट नहीं होता, वहाँ पानी बिखर जाता है और स्तर ख़त्म हो जाता है। अगर तब तक पानी ने स्तर का लक्ष्य भर दिया हो, तो आप अगले स्तर पर जाते हैं: लंबा लक्ष्य, तेज़ पानी और ज़्यादा चट्टानें। जिस टुकड़े तक पानी अभी नहीं पहुँचा, उसे छूकर अगले से बदलें; इसमें थोड़ा समय और पाँच अंक लगते हैं। जिस टुकड़े में पानी आ चुका, वह कभी नहीं बदला जा सकता। टी में, पट्टी के किसी भी सिरे से आया पानी सीधा निकल जाता है, और डंडी से आया पानी तीर की ओर मुड़ता है। क्रॉस से पानी दो बार गुज़र सकता है, एक बार आड़ा और एक बार खड़ा, जिससे पचास का बोनस मिलता है। हर खाना दस अंक का है, लक्ष्य के बाद बीस का। काम पूरा हो जाए तो नल खोलें और पानी तेज़ी से बहेगा। दौड़ उस पहले स्तर पर ख़त्म होती है जो लक्ष्य से कम रह जाए। रोज़ की चुनौती सबके लिए एक जैसी है।',
+        rules: 'अगला टुकड़ा बोर्ड के पास की कतार से आता है। उसे बिछाने के लिए कोई भी ख़ाली खाना छुएँ। उलटी गिनती ख़त्म होने पर पानी स्रोत से निकलता है और आपके बिछाए पाइप में एक जैसी रफ़्तार से बहता है। जहाँ पाइप रुकता है, या उसका सिरा दीवार से या ऐसे टुकड़े से मिलता है जो फ़िट नहीं होता, वहाँ पानी बिखर जाता है और स्तर ख़त्म हो जाता है। अगर तब तक पानी ने स्तर का लक्ष्य भर दिया हो, तो आप अगले स्तर पर जाते हैं: लंबा लक्ष्य, तेज़ पानी और ज़्यादा चट्टानें। जिस टुकड़े तक पानी अभी नहीं पहुँचा, उसे छूकर अगले से बदलें; इसमें थोड़ा समय और पाँच अंक लगते हैं। जिस टुकड़े में पानी आ चुका, वह कभी नहीं बदला जा सकता। टी या क्रॉस में पानी वही रास्ता लेता है जिसमें सबसे ज़्यादा पाइप हो, इसलिए आप किसी भी मुँह से आगे बना सकते हैं। क्रॉस से पानी दो बार गुज़र सकता है, दूसरी बार बचे हुए दो मुँहों से, जिससे पचास का बोनस मिलता है। हर खाना दस अंक का है, लक्ष्य के बाद बीस का। काम पूरा हो जाए तो नल खोलें और पानी तेज़ी से बहेगा। दौड़ उस पहले स्तर पर ख़त्म होती है जो लक्ष्य से कम रह जाए। रोज़ की चुनौती सबके लिए एक जैसी है।',
         tutTitle1: 'पाइप बिछाएँ', tutText1: 'कतार से अगला टुकड़ा बिछाने के लिए कोई भी ख़ाली खाना छुएँ। किसी टुकड़े को फिर छूकर अगले से बदलें।',
         tutTitle2: 'पानी आ रहा है', tutText2: 'उलटी गिनती ख़त्म होने पर पानी स्रोत से निकलता है। बिखरने से पहले लक्ष्य भरें।',
-        tutTitle3: 'टी और क्रॉस', tutText3: 'टी की डंडी से आया पानी तीर की ओर मुड़ता है। क्रॉस से पानी दो बार गुज़रता है, बोनस के साथ।'
+        tutTitle3: 'टी और क्रॉस', tutText3: 'टी या क्रॉस में पानी सबसे लंबा रास्ता लेता है। क्रॉस से पानी दो बार गुज़रता है, बोनस के साथ।'
       },
       ru: {
         flBoard: 'Поле труб «Потопа»', flNext: 'Следующая', flQueue: 'Очередь деталей',
@@ -435,10 +487,10 @@ if (typeof module !== 'undefined') module.exports = FloodEngineFactory;
         flReachedL: 'Достигнутый уровень', flClearedL: 'Пройдено уровней', flScoreL: 'Счёт', flBestL: 'Рекорд', flBestN: 'Новый рекорд: {n}', flTriesL: 'Попытки',
         flEmpty: 'пусто', flRock: 'камень', flSource: 'источник воды', flWet: 'с водой', flStraight: 'прямая труба', flBend: 'колено', flTee: 'тройник', flCross: 'крестовина', flCellN: 'Ряд {r}, столбец {c}',
         kMove: 'Двигать курсор', kPlace: 'Положить или заменить деталь', kHurry: 'Открыть кран', kNew: 'Новый забег',
-        rules: 'Следующая деталь берётся из очереди рядом с полем. Нажми на любую пустую клетку, чтобы положить её туда. Когда отсчёт закончится, вода выйдет из источника и с постоянной скоростью потечёт по проложенной трубе. Где труба обрывается или её конец упирается в стену или в неподходящую деталь, вода разливается, и уровень окончен. Если к этому моменту вода заполнила хотя бы цель уровня, ты переходишь на следующий: цель длиннее, вода быстрее, камней больше. Нажми на деталь, до которой вода ещё не дошла, чтобы заменить её следующей; это стоит мгновения и пяти очков. Деталь, в которую вошла вода, заменить уже нельзя. В тройнике вода, вошедшая с любого конца перекладины, идёт прямо, а вошедшая через ответвление поворачивает в сторону стрелки. Через крестовину вода может пройти дважды — поперёк и вдоль, за бонус в пятьдесят очков. Каждая клетка стоит десять очков, а после цели — двадцать. Когда закончишь, открой кран, и вода помчится дальше. Забег заканчивается на первом уровне, где цель не достигнута. Задание дня одинаково для всех.',
+        rules: 'Следующая деталь берётся из очереди рядом с полем. Нажми на любую пустую клетку, чтобы положить её туда. Когда отсчёт закончится, вода выйдет из источника и с постоянной скоростью потечёт по проложенной трубе. Где труба обрывается или её конец упирается в стену или в неподходящую деталь, вода разливается, и уровень окончен. Если к этому моменту вода заполнила хотя бы цель уровня, ты переходишь на следующий: цель длиннее, вода быстрее, камней больше. Нажми на деталь, до которой вода ещё не дошла, чтобы заменить её следующей; это стоит мгновения и пяти очков. Деталь, в которую вошла вода, заменить уже нельзя. В тройнике и крестовине вода выбирает путь, где больше всего трубы, так что строить дальше можно от любого выхода. Через крестовину вода может пройти дважды — во второй раз через два оставшихся выхода, за бонус в пятьдесят очков. Каждая клетка стоит десять очков, а после цели — двадцать. Когда закончишь, открой кран, и вода помчится дальше. Забег заканчивается на первом уровне, где цель не достигнута. Задание дня одинаково для всех.',
         tutTitle1: 'Прокладывай трубу', tutText1: 'Нажми на любую пустую клетку, чтобы положить следующую деталь из очереди. Нажми на деталь ещё раз, чтобы заменить её следующей.',
         tutTitle2: 'Вот и вода', tutText2: 'Когда отсчёт закончится, вода выйдет из источника. Заполни цель, пока она не разлилась.',
-        tutTitle3: 'Тройники и крестовины', tutText3: 'Вода, вошедшая в тройник через ответвление, поворачивает к стрелке. Через крестовину вода проходит дважды — за бонус.'
+        tutTitle3: 'Тройники и крестовины', tutText3: 'В тройнике и крестовине вода выбирает самый длинный путь. Через крестовину вода проходит дважды — за бонус.'
       },
       zh: {
         flBoard: '洪水的管道棋盘', flNext: '下一个', flQueue: '即将到来的管子',
@@ -450,10 +502,10 @@ if (typeof module !== 'undefined') module.exports = FloodEngineFactory;
         flReachedL: '到达关卡', flClearedL: '完成关卡', flScoreL: '得分', flBestL: '最高分', flBestN: '新纪录：{n}', flTriesL: '尝试次数',
         flEmpty: '空', flRock: '石头', flSource: '水源', flWet: '有水', flStraight: '直管', flBend: '弯管', flTee: '三通', flCross: '十字管', flCellN: '第 {r} 行第 {c} 列',
         kMove: '移动光标', kPlace: '放下或替换管子', kHurry: '打开水阀', kNew: '新一局',
-        rules: '下一个管子来自棋盘旁边的队列。点任意空格把它放在那里。倒计时结束后，水从水源出发，以固定速度流过你铺好的管道。管道在哪里断开，或者管口碰到墙或接不上的管子，水就会漫出来，这一关结束。如果此时水已经填满了这一关的目标格数，就进入下一关：目标更长，水更快，石头更多。点一下水还没到达的管子，可以用下一个管子替换它，这要花一点时间和五分。水已经流进的管子不能再替换。在三通里，从横杆两端进来的水直着穿过，从竖脚进来的水朝箭头方向转弯。水可以两次穿过十字管，一次横着一次竖着，奖励五十分。每格十分，超过目标后每格二十分。铺完了就打开水阀，让水快速流过。第一次没达到目标的关卡结束这一局。每日挑战对所有人都一样。',
+        rules: '下一个管子来自棋盘旁边的队列。点任意空格把它放在那里。倒计时结束后，水从水源出发，以固定速度流过你铺好的管道。管道在哪里断开，或者管口碰到墙或接不上的管子，水就会漫出来，这一关结束。如果此时水已经填满了这一关的目标格数，就进入下一关：目标更长，水更快，石头更多。点一下水还没到达的管子，可以用下一个管子替换它，这要花一点时间和五分。水已经流进的管子不能再替换。在三通和十字管里，水会走管道最长的那条路，所以从任何一个口都能接着铺。水可以两次穿过十字管，第二次走剩下的两个口，奖励五十分。每格十分，超过目标后每格二十分。铺完了就打开水阀，让水快速流过。第一次没达到目标的关卡结束这一局。每日挑战对所有人都一样。',
         tutTitle1: '铺管子', tutText1: '点任意空格放下队列里的下一个管子。再点一次已放的管子就用下一个替换它。',
         tutTitle2: '水来了', tutText2: '倒计时结束，水从水源出发。在它漫出之前填满目标。',
-        tutTitle3: '三通和十字管', tutText3: '从三通竖脚进来的水朝箭头方向转弯。十字管能过两次水，有奖励。'
+        tutTitle3: '三通和十字管', tutText3: '在三通和十字管里，水会走管道最长的路。十字管能过两次水，有奖励。'
       },
       de: {
         flBoard: 'Das Rohrbrett von Flut', flNext: 'Nächstes', flQueue: 'Kommende Teile',
@@ -465,10 +517,10 @@ if (typeof module !== 'undefined') module.exports = FloodEngineFactory;
         flReachedL: 'Erreichtes Level', flClearedL: 'Geschaffte Level', flScoreL: 'Punkte', flBestL: 'Bestwert', flBestN: 'Neuer Bestwert: {n}', flTriesL: 'Versuche',
         flEmpty: 'leer', flRock: 'Fels', flSource: 'Wasserquelle', flWet: 'mit Wasser', flStraight: 'gerades Rohr', flBend: 'Bogen', flTee: 'T-Stück', flCross: 'Kreuz', flCellN: 'Reihe {r} Spalte {c}',
         kMove: 'Cursor bewegen', kPlace: 'Teil legen oder tauschen', kHurry: 'Hahn aufdrehen', kNew: 'Neuer Lauf',
-        rules: 'Das nächste Teil kommt aus der Reihe neben dem Brett. Tippe auf ein leeres Feld, um es dort hinzulegen. Wenn der Countdown endet, verlässt das Wasser die Quelle und fließt mit gleichem Tempo durch das Rohr, das du gelegt hast. Wo das Rohr aufhört oder sein Ende an die Wand oder ein Teil stößt, das nicht passt, läuft das Wasser über und das Level ist vorbei. Hat das Wasser bis dahin mindestens das Ziel des Levels gefüllt, geht es ins nächste: längeres Ziel, schnelleres Wasser und mehr Felsen. Tippe ein Teil an, das das Wasser noch nicht erreicht hat, um es gegen das nächste zu tauschen; das kostet einen Moment und fünf Punkte. Ein Teil, in das Wasser geflossen ist, lässt sich nie mehr tauschen. Im T-Stück fließt Wasser, das an einem Ende des Balkens hineinkommt, geradeaus durch, und Wasser vom Fuß biegt zum Pfeil ab. Durch ein Kreuz kann das Wasser zweimal fließen, einmal quer und einmal längs, für fünfzig Bonuspunkte. Jedes Feld bringt zehn Punkte, nach dem Ziel zwanzig. Wenn du fertig bist, dreh den Hahn auf und das Wasser rauscht los. Ein Lauf endet mit dem ersten Level, das sein Ziel verfehlt. Die Tagesaufgabe ist für alle gleich.',
+        rules: 'Das nächste Teil kommt aus der Reihe neben dem Brett. Tippe auf ein leeres Feld, um es dort hinzulegen. Wenn der Countdown endet, verlässt das Wasser die Quelle und fließt mit gleichem Tempo durch das Rohr, das du gelegt hast. Wo das Rohr aufhört oder sein Ende an die Wand oder ein Teil stößt, das nicht passt, läuft das Wasser über und das Level ist vorbei. Hat das Wasser bis dahin mindestens das Ziel des Levels gefüllt, geht es ins nächste: längeres Ziel, schnelleres Wasser und mehr Felsen. Tippe ein Teil an, das das Wasser noch nicht erreicht hat, um es gegen das nächste zu tauschen; das kostet einen Moment und fünf Punkte. Ein Teil, in das Wasser geflossen ist, lässt sich nie mehr tauschen. Im T-Stück und im Kreuz nimmt das Wasser den Weg durch das meiste Rohr, du kannst also an jeder Öffnung weiterbauen. Durch ein Kreuz kann das Wasser zweimal fließen, beim zweiten Mal durch die beiden freien Öffnungen, für fünfzig Bonuspunkte. Jedes Feld bringt zehn Punkte, nach dem Ziel zwanzig. Wenn du fertig bist, dreh den Hahn auf und das Wasser rauscht los. Ein Lauf endet mit dem ersten Level, das sein Ziel verfehlt. Die Tagesaufgabe ist für alle gleich.',
         tutTitle1: 'Rohre legen', tutText1: 'Tippe auf ein leeres Feld, um das nächste Teil aus der Reihe zu legen. Tippe ein Teil nochmal an, um es gegen das nächste zu tauschen.',
         tutTitle2: 'Das Wasser kommt', tutText2: 'Nach dem Countdown verlässt das Wasser die Quelle. Fülle das Ziel, bevor es überläuft.',
-        tutTitle3: 'T-Stücke und Kreuze', tutText3: 'Wasser vom Fuß eines T-Stücks biegt zum Pfeil ab. Ein Kreuz nimmt zweimal Wasser auf, mit Bonus.'
+        tutTitle3: 'T-Stücke und Kreuze', tutText3: 'Im T-Stück und im Kreuz nimmt das Wasser den längsten Weg. Ein Kreuz nimmt zweimal Wasser auf, mit Bonus.'
       },
       es: {
         flBoard: 'El tablero de tuberías de Riada', flNext: 'Siguiente', flQueue: 'Piezas que vienen',
@@ -480,10 +532,10 @@ if (typeof module !== 'undefined') module.exports = FloodEngineFactory;
         flReachedL: 'Nivel alcanzado', flClearedL: 'Niveles superados', flScoreL: 'Puntos', flBestL: 'Mejor puntuación', flBestN: 'Nuevo récord: {n}', flTriesL: 'Intentos',
         flEmpty: 'vacía', flRock: 'roca', flSource: 'fuente de agua', flWet: 'con agua', flStraight: 'tubo recto', flBend: 'codo', flTee: 'T', flCross: 'cruz', flCellN: 'Fila {r} columna {c}',
         kMove: 'Mover el cursor', kPlace: 'Poner o cambiar una pieza', kHurry: 'Abrir el grifo', kNew: 'Nueva partida',
-        rules: 'La siguiente pieza sale de la fila junto al tablero. Toca cualquier casilla vacía para ponerla ahí. Cuando acaba la cuenta atrás, el agua sale de la fuente y avanza a velocidad constante por la tubería que has puesto. Donde la tubería se acaba, o su extremo da con la pared o con una pieza que no encaja, el agua se derrama y el nivel termina. Si para entonces el agua ha llenado al menos el objetivo del nivel, pasas al siguiente: objetivo más largo, agua más rápida y más rocas. Toca una pieza a la que el agua aún no ha llegado para cambiarla por la siguiente; cuesta un momento y cinco puntos. Una pieza por la que ya entró el agua no se puede cambiar. En una T, el agua que entra por un extremo de la barra pasa recta, y la que entra por el pie gira hacia la flecha. El agua puede cruzar una cruz dos veces, una de lado y otra de arriba abajo, con un premio de cincuenta. Cada casilla vale diez puntos, veinte pasado el objetivo. Cuando termines, abre el grifo y el agua corre deprisa. La partida acaba en el primer nivel que no llega al objetivo. El reto diario es igual para todos.',
+        rules: 'La siguiente pieza sale de la fila junto al tablero. Toca cualquier casilla vacía para ponerla ahí. Cuando acaba la cuenta atrás, el agua sale de la fuente y avanza a velocidad constante por la tubería que has puesto. Donde la tubería se acaba, o su extremo da con la pared o con una pieza que no encaja, el agua se derrama y el nivel termina. Si para entonces el agua ha llenado al menos el objetivo del nivel, pasas al siguiente: objetivo más largo, agua más rápida y más rocas. Toca una pieza a la que el agua aún no ha llegado para cambiarla por la siguiente; cuesta un momento y cinco puntos. Una pieza por la que ya entró el agua no se puede cambiar. En una T o una cruz, el agua toma el camino que pasa por más tubería, así que puedes seguir desde cualquier boca. El agua puede cruzar una cruz dos veces, la segunda por las dos bocas que quedaron libres, con un premio de cincuenta. Cada casilla vale diez puntos, veinte pasado el objetivo. Cuando termines, abre el grifo y el agua corre deprisa. La partida acaba en el primer nivel que no llega al objetivo. El reto diario es igual para todos.',
         tutTitle1: 'Pon tubería', tutText1: 'Toca una casilla vacía para poner la siguiente pieza de la fila. Toca una pieza otra vez para cambiarla por la siguiente.',
         tutTitle2: 'Llega el agua', tutText2: 'Al acabar la cuenta atrás, el agua sale de la fuente. Llena el objetivo antes de que se derrame.',
-        tutTitle3: 'Tes y cruces', tutText3: 'El agua que entra por el pie de una T gira hacia la flecha. Una cruz recibe agua dos veces, con premio.'
+        tutTitle3: 'Tes y cruces', tutText3: 'En una T o una cruz, el agua toma el camino más largo. Una cruz recibe agua dos veces, con premio.'
       }
     }
   });
@@ -546,7 +598,6 @@ if (typeof module !== 'undefined') module.exports = FloodEngineFactory;
   /* ------------------------------------------------------------ pieces */
 
   var EDGE = { 1: [50, 0], 2: [100, 50], 4: [50, 100], 8: [0, 50] };
-  var ROT = { 1: -90, 2: 0, 4: 90, 8: 180 };
   function sides(m) { return E.DIRS.filter(function (d) { return m & d; }); }
   // a path from side a to side b in a 100×100 cell: a quarter circle for a bend, through
   // the middle for anything else; a = 0 starts in the middle (the source)
@@ -572,8 +623,6 @@ if (typeof module !== 'undefined') module.exports = FloodEngineFactory;
     sides(P.m).forEach(function (q) { var f = FLANGE[q]; s += '<rect class="fl-flange" x="' + f[0] + '" y="' + f[1] + '" width="' + f[2] + '" height="' + f[3] + '" rx="2"/>'; });
     s += '<path class="fl-chan" d="' + d + '"/>';
     if (hub) s += '<circle class="fl-hubc" cx="50" cy="50" r="15"/>';
-    // the tee's arrow: where water from the stem goes
-    if (P.k === 'tee') s += '<path class="fl-arrow" transform="rotate(' + ROT[P.turn] + ' 50 50)" d="M70 40L86 50L70 60Z"/>';
     return s;
   }
   function rockSvg(i) {
@@ -783,7 +832,7 @@ if (typeof module !== 'undefined') module.exports = FloodEngineFactory;
     }
     // the countdown ring round the source, the spill and the keyboard cursor
     var fx = '', sx = (S.src % E.COLS) * 100 + 50, sy = Math.floor(S.src / E.COLS) * 100 + 50;
-    if (S.cd > 0 && mode !== 'end') fx += '<circle class="fl-ring" cx="' + sx + '" cy="' + sy + '" r="44" pathLength="100" stroke-dasharray="' + (S.cd / S.cd0 * 100).toFixed(1) + ' 200" transform="rotate(-90 ' + sx + ' ' + sy + ')"/>';
+    if (S.cd > 0 && mode !== 'end') fx += '<circle class="fl-ring" cx="' + sx + '" cy="' + sy + '" r="40" pathLength="100" stroke-dasharray="' + (S.cd / S.cd0 * 100).toFixed(1) + ' 200" transform="rotate(-90 ' + sx + ' ' + sy + ')"/>';
     if (S.over && !S.passed && S.spill) {
       var sp = S.spill, e = EDGE[sp.side], px = (sp.i % E.COLS) * 100 + e[0], py = Math.floor(sp.i / E.COLS) * 100 + e[1];
       fx += '<ellipse class="fl-puddle" cx="' + px + '" cy="' + py + '" rx="34" ry="24"/><circle class="fl-puddle" cx="' + (px + 22) + '" cy="' + (py - 18) + '" r="9"/><circle class="fl-puddle" cx="' + (px - 26) + '" cy="' + (py + 14) + '" r="7"/>';
