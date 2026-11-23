@@ -1,0 +1,1229 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>کوی‌کوی — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  /* cards grow with the game area (#359): the hand, the table a little smaller, the captured piles small */
+  .kk-wrap { --cw: clamp(40px, min(11.5cqw, (100cqh - 400px) / 2.2), 84px); --tw: calc(var(--cw) * .84); --kw: clamp(18px, calc(var(--cw) * .44), 32px);
+    margin-block: auto; width: 100%; max-width: max(560px, calc(var(--cw) * 9)); display: flex; flex-direction: column; align-items: center; gap: var(--s-2); }
+  /* a phone on its side left the hand below the fold (844x390): the table goes left, the hand right;
+     5.2cqw keeps eight hand cards side by side in the right column (7cqw made them overlap at 844px) */
+  @container game (min-aspect-ratio: 4 / 3) and (max-height: 560px) {
+    .kk-wrap { --cw: clamp(36px, min(5.2cqw, (100cqh - 150px) / 2.3), 80px); --tw: calc(var(--cw) * .9); --kw: clamp(14px, calc(var(--cw) * .36), 26px);
+      max-width: none; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+      grid-template-areas: 'top status' 'opp mine' 'board hand'; align-items: center; justify-items: center; column-gap: var(--s-4); row-gap: var(--s-2); }
+    .kk-top { grid-area: top; } .kk-opp { grid-area: opp; } .kk-board { grid-area: board; } .kk-status { grid-area: status; }
+    .kk-mine { grid-area: mine; } .kk-hand { grid-area: hand; align-self: center; }
+  }
+  .kk-probe { position: absolute; width: var(--cw); height: 0; visibility: hidden; pointer-events: none; }
+  .kk-top { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; align-items: center; }
+  /* a side: who, how many points their yaku make now, and the captured cards in four piles by rank */
+  .kk-side { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .kk-who { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; font-size: var(--fs-sm); font-weight: 700; color: var(--c-text-dim); }
+  .kk-opp .kk-who { padding: 3px 10px; border-radius: var(--r-md); border: 2px solid transparent; }
+  .kk-opp--on .kk-who { border-color: var(--game); }
+  .kk-fan { direction: ltr; display: flex; height: 22px; align-items: center; }
+  .kk-fan .ch-pback { width: 14px; aspect-ratio: 2 / 3; border-width: 1px; border-radius: 3px; margin-inline-start: -9px; box-shadow: none; }
+  .kk-fan .ch-pback:first-child { margin-inline-start: 0; }
+  .kk-caps { direction: ltr; display: flex; flex-wrap: wrap; gap: 4px 10px; justify-content: center; align-items: center; min-height: calc(var(--kw) * 1.5 + 2px); }
+  .kk-pile { display: flex; align-items: center; }
+  .kk-pile .kk-card { --pw: var(--kw); margin-inline-start: calc(var(--kw) * -.58); cursor: default; box-shadow: 0 0 0 1px rgba(0, 0, 0, .12); }
+  .kk-pile .kk-card:nth-child(2) { margin-inline-start: 2px; }
+  .kk-mark { width: 14px; height: 14px; flex: 0 0 auto; }
+  .kk-made { font-size: var(--fs-xs, 12px); color: var(--c-text-dim); text-align: center; min-height: 1.3em; }
+  /* the deck sits left of the table in every language */
+  .kk-board { direction: ltr; width: 100%; display: flex; align-items: center; justify-content: center; gap: var(--s-3); }
+  .kk-deck { position: relative; flex: 0 0 auto; width: calc(var(--tw) * 1.2); display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .kk-stock { position: relative; width: var(--tw); aspect-ratio: 2 / 3; }
+  .kk-stock .ch-pback { position: absolute; left: 0; top: 0; width: var(--tw); aspect-ratio: 2 / 3; }
+  .kk-stock .kk-card { position: absolute; left: 0; top: 0; z-index: 1; cursor: default; box-shadow: var(--sh-2), 0 0 0 2px var(--game); }
+  .kk-left { font-size: var(--fs-xs, 12px); font-weight: 700; color: var(--c-text-dim); }
+  .kk-field { flex: 1; display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; align-content: center;
+    max-width: calc((var(--tw) + 5px) * 6); min-height: calc(var(--tw) * 3 + 5px); }
+  .kk-card { --pw: var(--cw); position: relative; flex: 0 0 auto; width: var(--pw); aspect-ratio: 2 / 3; padding: 0; margin: 0; border: 0;
+    border-radius: calc(var(--pw) * .1); background: #FFF8EC; box-shadow: var(--sh-1); overflow: hidden; cursor: pointer; color: inherit; font: inherit;
+    transition: transform var(--t-fast) var(--ease); }
+  .kk-card svg { display: block; width: 100%; height: 100%; pointer-events: none; }
+  .kk-field .kk-card { --pw: var(--tw); cursor: default; }
+  .kk-stock .kk-card { --pw: var(--tw); }
+  .kk-field .kk-hit { cursor: pointer; transform: translateY(-5px); box-shadow: var(--sh-2), 0 0 0 3px var(--game); }
+  .kk-field .kk-pair { box-shadow: var(--sh-1), 0 0 0 2px var(--game); }
+  .kk-status { min-height: 2.6em; font-weight: 700; font-size: var(--fs-sm); color: var(--c-text-dim); text-align: center; display: flex; align-items: center; justify-content: center; }
+  /* a big hand wraps into overlapping rows, so every card keeps a strip wide enough for a finger */
+  .kk-hand { direction: ltr; width: 100%; display: flex; flex-direction: column; align-items: center; min-height: calc(var(--cw) * 1.5 + 14px); padding-top: 14px; }
+  .kk-row { display: flex; justify-content: center; }
+  .kk-row + .kk-row { margin-top: calc(var(--cw) * -0.5); }
+  .kk-hand .kk-ok { transform: translateY(-8px); box-shadow: var(--sh-2), 0 0 0 2px var(--game); }
+  .kk-hand .kk-sel { transform: translateY(-14px); box-shadow: var(--sh-2), 0 0 0 3px var(--game); }
+  .kk-hand .kk-wait { cursor: default; }
+  .kk-kf { outline: 3px solid var(--game); outline-offset: 2px; }
+  .kk-yaku .ch-item__label small { display: block; font-weight: 400; color: var(--c-text-dim); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function KoiKoiEngineFactory() {
+  'use strict';
+
+  // 48 hanafuda cards, four a month: id = month * 4 + i, month 0 is January. Ranks:
+  // 0 bright, 1 animal, 2 ribbon, 3 plain, in the order the four cards of each month are
+  // printed in a standard deck, so a save can be checked card by card.
+  var BRIGHT = 0, ANIMAL = 1, RIBBON = 2, PLAIN = 3;
+  var LAYOUT = [
+    [0, 2, 3, 3], // January, pine: crane, poem ribbon
+    [1, 2, 3, 3], // February, plum: bush warbler, poem ribbon
+    [0, 2, 3, 3], // March, cherry: curtain, poem ribbon
+    [1, 2, 3, 3], // April, wisteria: cuckoo, red ribbon
+    [1, 2, 3, 3], // May, iris: bridge, red ribbon
+    [1, 2, 3, 3], // June, peony: butterflies, blue ribbon
+    [1, 2, 3, 3], // July, bush clover: boar, red ribbon
+    [0, 1, 3, 3], // August, pampas grass: moon, geese
+    [1, 2, 3, 3], // September, chrysanthemum: sake cup, blue ribbon
+    [1, 2, 3, 3], // October, maple: deer, blue ribbon
+    [0, 1, 2, 3], // November, willow: rain man, swallow, red ribbon, lightning
+    [0, 3, 3, 3]  // December, paulownia: phoenix
+  ];
+  var SIZE = 48, PER = 8, DECK = [];
+  for (var d0 = 0; d0 < SIZE; d0++) DECK.push(d0);
+  var CRANE = 0, CURTAIN = 8, MOON = 28, RAINMAN = 40, PHOENIX = 44, CUP = 32, BOAR = 24, DEER = 36, BUTTERFLY = 20;
+  var BRIGHTS = [CRANE, CURTAIN, MOON, RAINMAN, PHOENIX];
+  var POEMS = [1, 5, 9], BLUES = [21, 33, 37];
+  function month(c) { return c >> 2; }
+  function rank(c) { return LAYOUT[c >> 2][c & 3]; }
+  // the ribbon's kind for the card's drawing and for the yaku: poem, blue or plain red
+  function ribbonKind(c) { return POEMS.indexOf(c) >= 0 ? 'poem' : BLUES.indexOf(c) >= 0 ? 'blue' : rank(c) === RIBBON ? 'red' : ''; }
+
+  // Every yaku a pile holds, with its points. They add up: three red poems with two more
+  // ribbons score both Red Poems and Ribbons. Flower Viewing and Moon Viewing are in, as in
+  // most rule sets; their points are the common 5.
+  var YAKU = ['goko', 'shiko', 'ameshiko', 'sanko', 'ino', 'tane', 'akatan', 'aotan', 'tan', 'kasu', 'hanami', 'tsukimi'];
+  function yaku(cards) {
+    var has = {}, nb = 0, na = 0, nr = 0, np = 0, out = [], total = 0;
+    cards.forEach(function (c) {
+      has[c] = 1;
+      var r = rank(c);
+      if (r === BRIGHT) nb++; else if (r === ANIMAL) na++; else if (r === RIBBON) nr++; else np++;
+    });
+    var all = function (list) { return list.every(function (c) { return has[c]; }); };
+    var add = function (k, p) { out.push({ k: k, p: p }); total += p; };
+    if (nb === 5) add('goko', 10);
+    else if (nb === 4) { if (has[RAINMAN]) add('ameshiko', 7); else add('shiko', 8); }
+    else if (nb === 3 && !has[RAINMAN]) add('sanko', 5);
+    if (has[BOAR] && has[DEER] && has[BUTTERFLY]) add('ino', 5);
+    if (na >= 5) add('tane', na - 4);
+    if (all(POEMS)) add('akatan', 5);
+    if (all(BLUES)) add('aotan', 5);
+    if (nr >= 5) add('tan', nr - 4);
+    if (np >= 10) add('kasu', np - 9);
+    if (has[CURTAIN] && has[CUP]) add('hanami', 5);
+    if (has[MOON] && has[CUP]) add('tsukimi', 5);
+    return { list: out, total: total };
+  }
+  // a round won with 7 or more is doubled
+  function points(total) { return total >= 7 ? total * 2 : total; }
+
+  function shuffle(a, rnd) {
+    for (var j = a.length - 1; j > 0; j--) { var k = Math.floor(rnd() * (j + 1)), t = a[j]; a[j] = a[k]; a[k] = t; }
+    return a;
+  }
+  function wholeMonth(cards) {
+    var n = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    return cards.some(function (c) { return ++n[month(c)] === 4; });
+  }
+
+  // Eight cards each and eight face up on the table; the rest is the deck, drawn from its end.
+  // A table holding a whole month could never be captured, so that deal is dealt again.
+  function newGame(rnd, first) {
+    var d, tries = 0;
+    do { d = shuffle(DECK.slice(), rnd); } while (wholeMonth(d.slice(16, 24)) && ++tries < 50);
+    first = first === 1 ? 1 : 0;
+    return { hands: [d.slice(0, PER), d.slice(PER, 2 * PER)], field: d.slice(16, 24), deck: d.slice(24), caps: [[], []],
+      first: first, turn: first, phase: 'play', flipped: -1, base: [0, 0], koi: [0, 0], winner: -1, score: 0, made: [], turns: 0, fx: null };
+  }
+
+  function matches(G, c) { return G.field.filter(function (f) { return month(f) === month(c); }); }
+  // the cards a card takes: none, the one chosen of two, or all of one or three
+  function takes(ms, c, pick) { return !ms.length ? [] : ms.length === 2 ? [c, pick] : [c].concat(ms); }
+  function capture(G, c, ms, pick) {
+    var got = takes(ms, c, pick);
+    if (!got.length) { G.field.push(c); return []; }
+    G.field = G.field.filter(function (f) { return got.indexOf(f) < 0; });
+    Array.prototype.push.apply(G.caps[G.turn], got);
+    return got;
+  }
+
+  // The hand card goes out. With two of its month on the table the player names the one
+  // to take; then the turn waits for the deck's card.
+  function play(G, c, pick) {
+    if (G.phase !== 'play') return false;
+    var h = G.hands[G.turn], i = h.indexOf(c);
+    if (i < 0) return false;
+    var ms = matches(G, c);
+    if (ms.length === 2 && ms.indexOf(pick) < 0) return false;
+    h.splice(i, 1);
+    G.fx = { p: G.turn, play: c, took: [], flip: -1, ftook: [] };
+    G.fx.took = capture(G, c, ms, pick);
+    G.phase = 'flip';
+    return true;
+  }
+  // the deck's top card is turned and matched the same way; two of its month wait for a choice
+  function flip(G) {
+    if (G.phase !== 'flip') return false;
+    var d = G.deck.pop();
+    G.fx.flip = d;
+    var ms = matches(G, d);
+    if (ms.length === 2) { G.flipped = d; G.phase = 'pickFlip'; return 'pick'; }
+    G.fx.ftook = capture(G, d, ms, -1);
+    afterTurn(G);
+    return true;
+  }
+  function pickFlip(G, t) {
+    if (G.phase !== 'pickFlip') return false;
+    var d = G.flipped, ms = matches(G, d);
+    if (ms.indexOf(t) < 0) return false;
+    G.fx.ftook = capture(G, d, ms, t);
+    G.flipped = -1;
+    afterTurn(G);
+    return true;
+  }
+  // A pile scoring more than at the last koi-koi has made a new yaku: the player chooses,
+  // except with an empty hand, where there is nothing left to go on with.
+  function afterTurn(G) {
+    G.turns++;
+    var s = yaku(G.caps[G.turn]).total;
+    if (s > G.base[G.turn]) {
+      if (!G.hands[G.turn].length) end(G, G.turn);
+      else G.phase = 'decide';
+      return;
+    }
+    next(G);
+  }
+  function decide(G, koi) {
+    if (G.phase !== 'decide') return false;
+    if (koi) { G.base[G.turn] = yaku(G.caps[G.turn]).total; G.koi[G.turn]++; next(G); }
+    else end(G, G.turn);
+    return true;
+  }
+  function end(G, w) {
+    var y = yaku(G.caps[w]);
+    G.winner = w; G.score = points(y.total); G.made = y.list.map(function (x) { return x.k; }); G.phase = 'over';
+  }
+  // both hands out with nobody calling shobu: a draw, no points
+  function next(G) {
+    if (!G.hands[0].length && !G.hands[1].length) { G.winner = -1; G.score = 0; G.made = []; G.phase = 'over'; return; }
+    G.turn = 1 - G.turn;
+    G.phase = 'play';
+  }
+
+  /* -------------------------------------------------------------- bots */
+
+  // A pile's worth to a bot: its yaku now, plus how far it is toward the others. Only what
+  // the bot can see goes in: its own hand, the table and both piles, never the other hand or
+  // the deck's order.
+  function worth(cards) {
+    var has = {}, nb = 0, na = 0, nr = 0, np = 0;
+    cards.forEach(function (c) { has[c] = 1; var r = rank(c); if (r === 0) nb++; else if (r === 1) na++; else if (r === 2) nr++; else np++; });
+    var cnt = function (list) { var k = 0; list.forEach(function (c) { if (has[c]) k++; }); return k; };
+    var ino = cnt([BOAR, DEER, BUTTERFLY]), po = cnt(POEMS), bl = cnt(BLUES);
+    return yaku(cards).total * 10 + nb * nb * 1.3 + ino * ino * 1.4 + na * 0.8 + po * po * 1.2 + bl * bl * 1.2 + nr * 0.7 + np * 0.35 +
+      (has[CUP] ? 2 + (has[CURTAIN] ? 0 : 1) + (has[MOON] ? 0 : 1) : 0);
+  }
+  function gain(pile, got) { return got.length ? worth(pile.concat(got)) - worth(pile) : 0; }
+  function moves(G) {
+    var out = [];
+    G.hands[G.turn].forEach(function (c) {
+      var ms = matches(G, c);
+      if (ms.length === 2) ms.forEach(function (f) { out.push({ card: c, pick: f }); });
+      else out.push({ card: c, pick: -1 });
+    });
+    return out;
+  }
+  // the cards the bot cannot see: the other hand and the deck, as one unknown pool
+  function unseen(G, me) {
+    var seen = {};
+    G.hands[me].concat(G.field, G.caps[0], G.caps[1]).forEach(function (c) { seen[c] = 1; });
+    if (G.flipped >= 0) seen[G.flipped] = 1;
+    return DECK.filter(function (c) { return !seen[c]; });
+  }
+  // the chance the other player holds at least one of `u` unseen cards of a month
+  function holdChance(u, pool, h) {
+    if (!u || !h) return 0;
+    var none = 1;
+    for (var i = 0; i < h; i++) none *= Math.max(0, pool - u - i) / (pool - i);
+    return 1 - none;
+  }
+  function monthLeft(G, me, m) { return unseen(G, me).filter(function (c) { return month(c) === m; }).length; }
+  function score(G, mv, level) {
+    var me = G.turn, op = 1 - me, ms = matches(G, mv.card), got = takes(ms, mv.card, mv.pick);
+    if (!got.length) {
+      // a card given to the table: the less it is worth to anyone, the better
+      var v = -gain(G.caps[me], [mv.card]) * 0.3;
+      if (level === 'hard') {
+        var pool = unseen(G, me), p = holdChance(monthLeft(G, me, month(mv.card)), pool.length, G.hands[op].length);
+        v -= p * (gain(G.caps[op], [mv.card]) + 1);
+      }
+      return v;
+    }
+    var s = gain(G.caps[me], got) + 2;
+    if (level === 'hard') {
+      // taking what the other player is collecting is worth almost as much as collecting it
+      s += gain(G.caps[op], got.filter(function (c) { return c !== mv.card; })) * 0.7;
+      if (ms.length === 2) {
+        var left = ms[0] === mv.pick ? ms[1] : ms[0], pl = unseen(G, me);
+        s -= holdChance(monthLeft(G, me, month(left)), pl.length, G.hands[op].length) * gain(G.caps[op], [left]) * 0.7;
+      }
+    }
+    return s;
+  }
+  function best(list, val, rnd) {
+    var top = -1e9, keep = [];
+    list.forEach(function (x) { var v = val(x); if (v > top + 1e-9) { top = v; keep = [x]; } else if (Math.abs(v - top) <= 1e-9) keep.push(x); });
+    return keep[Math.floor(rnd() * keep.length)];
+  }
+  function botPlay(G, level, rnd) {
+    var ms = moves(G);
+    if (level === 'easy') return ms[Math.floor(rnd() * ms.length)];
+    return best(ms, function (m) { return score(G, m, level); }, rnd);
+  }
+  function botPick(G, level, rnd) {
+    var ms = matches(G, G.flipped);
+    if (level === 'easy') return ms[Math.floor(rnd() * ms.length)];
+    return best(ms, function (t) { return score(G, { card: G.flipped, pick: t }, level); }, rnd);
+  }
+  // Koi-koi or shobu. Medium goes on while it has cards and the other side has no yaku;
+  // hard also stops when any card still in play would give the other side a new yaku.
+  function botKoi(G, level, rnd) {
+    var me = G.turn, op = 1 - me, s = yaku(G.caps[me]).total, left = G.hands[me].length;
+    if (level === 'easy') return rnd() < 0.5;
+    if (s >= 7 || G.base[op] > 0) return false;
+    if (level === 'medium') return left >= 4;
+    var now = Math.max(yaku(G.caps[op]).total, G.base[op]);
+    var near = unseen(G, me).concat(G.field).filter(function (c) { return yaku(G.caps[op].concat([c])).total > now; }).length;
+    return left >= 3 && near === 0;
+  }
+  // one whole turn for a bot at `level`; the tests play rounds with it
+  function botTurn(G, level, rnd) {
+    var m = botPlay(G, level, rnd);
+    if (!play(G, m.card, m.pick)) return false;
+    if (flip(G) === 'pick') pickFlip(G, botPick(G, level, rnd));
+    if (G.phase === 'decide') decide(G, botKoi(G, level, rnd));
+    return true;
+  }
+
+  var PHASES = ['play', 'flip', 'pickFlip', 'decide', 'over'];
+  function valid(v) {
+    if (!v || !Array.isArray(v.hands) || v.hands.length !== 2 || !Array.isArray(v.field) || !Array.isArray(v.deck) ||
+      !Array.isArray(v.caps) || v.caps.length !== 2 || PHASES.indexOf(v.phase) < 0 || !(v.turn === 0 || v.turn === 1) ||
+      !Array.isArray(v.base) || !Array.isArray(v.koi)) return false;
+    var seen = {}, n = 0, ok = true;
+    var add = function (c) { if (typeof c !== 'number' || !(c >= 0 && c < SIZE) || c !== Math.floor(c) || seen[c]) ok = false; seen[c] = 1; n++; };
+    v.hands.concat(v.caps).forEach(function (h) { if (!Array.isArray(h)) ok = false; else h.forEach(add); });
+    v.field.forEach(add); v.deck.forEach(add);
+    if (v.flipped !== -1) add(v.flipped);
+    if (!ok || n !== SIZE || v.hands[0].length > PER || v.hands[1].length > PER) return false;
+    if (v.phase === 'pickFlip' && (v.flipped < 0 || matches(v, v.flipped).length !== 2)) return false;
+    if (v.phase !== 'pickFlip' && v.flipped !== -1) return false;
+    if (v.phase === 'flip' && !v.deck.length) return false;
+    return true;
+  }
+
+  return {
+    SIZE: SIZE, PER: PER, DECK: DECK, LAYOUT: LAYOUT, YAKU: YAKU, BRIGHTS: BRIGHTS, POEMS: POEMS, BLUES: BLUES,
+    CRANE: CRANE, CURTAIN: CURTAIN, MOON: MOON, RAINMAN: RAINMAN, PHOENIX: PHOENIX, CUP: CUP, BOAR: BOAR, DEER: DEER, BUTTERFLY: BUTTERFLY,
+    month: month, rank: rank, ribbonKind: ribbonKind, yaku: yaku, points: points, newGame: newGame, matches: matches,
+    play: play, flip: flip, pickFlip: pickFlip, decide: decide, moves: moves, worth: worth, unseen: unseen,
+    botPlay: botPlay, botPick: botPick, botKoi: botKoi, botTurn: botTurn, valid: valid
+  };
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = KoiKoiEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = KoiKoiEngineFactory();
+  var LEVELS = ['easy', 'medium', 'hard'];
+  var YKEY = { goko: 'yGoko', shiko: 'yShiko', ameshiko: 'yAmeshiko', sanko: 'ySanko', ino: 'yIno', tane: 'yTane', akatan: 'yAkatan', aotan: 'yAotan', tan: 'yTan', kasu: 'yKasu', hanami: 'yHanami', tsukimi: 'yTsukimi' };
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'koikoi',
+    name: { fa: 'کوی‌کوی', en: 'Koi-Koi', zh: '花札来来', de: 'Koi-Koi', es: 'Koi-Koi', pl: 'Koi-Koi', fr: 'Koi-Koi', ar: 'كوي كوي', hi: 'कोई-कोई', ru: 'Кой-кой' },
+    accent: '#C62100',
+    mood: 'menu',
+    cardSpeed: true,
+    scroll: true,
+    strings: {
+      fa: {
+        youName: 'تو', botName: 'ربات', dailyKk: 'کوی‌کوی روزانه', newMatch: 'بازی تازه', roundOf: 'دور {n} از {m}', deckN: 'دسته: {n}', monthN: 'ماه {n}',
+        rankB: 'روشن', rankA: 'جانور', rankR: 'روبان', rankP: 'ساده', ptsN: '{n} امتیاز', koiN: 'کوی‌کوی ×{n}',
+        yourTurn: 'یک کارت از دستت بازی کن', pickHand: 'دو کارت از این ماه روی زمین است: یکی را برای برداشتن بزن', pickFlip: 'کارت رو شده با دو کارت زمین جور است: یکی را بزن', botThinks: 'ربات فکر می‌کند…',
+        koiTitle: 'یاکوی تازه!', koiBody: 'الان {n} امتیاز داری. ادامه می‌دهی تا بیشتر شود، یا همین‌جا تمام می‌کنی؟', koiBtn: 'کوی‌کوی (ادامه)', shobuBtn: 'شوبو (تمام)',
+        botKoi: 'ربات گفت کوی‌کوی', youKoi: 'گفتی کوی‌کوی', roundWin: 'این دور را بردی: {n} امتیاز', roundLose: 'ربات این دور را برد: {n} امتیاز', roundDraw: 'دست‌ها تمام شد: بی‌امتیاز', nextRound: 'دور بعد',
+        youWin: 'بردی!', youLose: 'ربات برد', drawEnd: 'مساوی', yourPts: 'امتیاز تو', botPts: 'امتیاز ربات', level: 'سطح', rounds: 'دورها', optNote: 'از بازی بعد اعمال می‌شود.',
+        yakuList: 'یاکوها', doubled: 'جمع ۷ امتیاز یا بیشتر دو برابر می‌شود.', kbCards: 'رفتن بین کارت‌ها', kbPlay: 'بازی کردن یا برداشتن کارت',
+        yGoko: 'پنج روشن', yShiko: 'چهار روشن', yAmeshiko: 'چهار روشن بارانی', ySanko: 'سه روشن', yIno: 'گراز، گوزن، پروانه', yTane: 'جانورها', yAkatan: 'روبان‌های شعر', yAotan: 'روبان‌های آبی',
+        yTan: 'روبان‌ها', yKasu: 'ساده‌ها', yHanami: 'تماشای شکوفه', yTsukimi: 'تماشای ماه',
+        dGoko: 'هر پنج کارت روشن', dShiko: 'چهار روشن، بی مرد زیر باران', dAmeshiko: 'چهار روشن، با مرد زیر باران', dSanko: 'سه روشن، بی مرد زیر باران', dIno: 'گراز، گوزن و پروانه‌ها',
+        dTane: 'پنج جانور؛ هر جانور بیشتر یک امتیاز', dAkatan: 'سه روبان سرخ شعردار', dAotan: 'سه روبان آبی', dTan: 'پنج روبان؛ هر روبان بیشتر یک امتیاز', dKasu: 'ده ساده؛ هر ساده‌ی بیشتر یک امتیاز',
+        dHanami: 'پرده‌ی شکوفه و جام ساکه', dTsukimi: 'ماه و جام ساکه',
+        rules: 'چهل‌وهشت کارت، برای هر ماه سال چهار تا. ماه هر کارت را گلش و عدد گوشه‌اش نشان می‌دهد و نشان گوشه‌ی دیگر رتبه‌اش را: ستاره برای روشن، لوزی برای جانور، روبان برای روبان، و ساده‌ها بی‌نشان‌اند. به تو و ربات هشت کارت می‌رسد و هشت کارت رو به بالا روی زمین می‌آید. در نوبتت یک کارت بازی کن: اگر کارتی از همان ماه روی زمین باشد هر دو را برمی‌داری؛ اگر دو تا باشد یکی را انتخاب می‌کنی؛ اگر سه تا باشد هر چهار تا مال توست؛ وگرنه کارتت روی زمین می‌ماند. بعد کارت روی دسته رو می‌شود و همین‌طور جور می‌شود. با کارت‌های برده یاکو می‌سازی. هر بار که یاکوی تازه بسازی انتخاب می‌کنی: شوبو دور را تمام می‌کند و امتیاز یاکوهایت را می‌گیری؛ کوی‌کوی بازی را ادامه می‌دهد تا بیشتر شود، ولی اگر ربات زودتر یاکو بسازد و تمام کند، امتیاز مال اوست. اگر دست‌ها بی‌شوبو تمام شود، دور مساوی و بی‌امتیاز است. در بازی سه‌دوری شروع‌کننده نوبتی عوض می‌شود و جمع بیشتر می‌برد.',
+        tutTitle1: 'جور کن', tutText1: 'کارتی بازی کن که ماهش با کارتی روی زمین یکی است تا هر دو را ببری. ماه را از گل و عدد گوشه بشناس.',
+        tutTitle2: 'یاکو بساز', tutText2: 'کارت‌های برده در چهار دسته جمع می‌شوند: روشن، جانور، روبان و ساده. بعضی دسته‌ها یاکو می‌سازند؛ فهرستشان در راهنماست.',
+        tutTitle3: 'کوی‌کوی یا شوبو', tutText3: 'با یاکوی تازه، شوبو امتیاز را همین حالا می‌گیرد و کوی‌کوی برای امتیاز بیشتر ادامه می‌دهد؛ اما اگر ربات زودتر تمام کند، امتیاز مال اوست.'
+      },
+      en: {
+        youName: 'You', botName: 'Bot', dailyKk: 'Daily Koi-Koi', newMatch: 'New game', roundOf: 'Round {n} of {m}', deckN: 'Deck: {n}', monthN: 'Month {n}',
+        rankB: 'Bright', rankA: 'Animal', rankR: 'Ribbon', rankP: 'Plain', ptsN: '{n} pts', koiN: 'Koi-koi ×{n}',
+        yourTurn: 'Play a card from your hand', pickHand: 'Two cards of this month are on the table: tap the one to take', pickFlip: 'The drawn card matches two on the table: tap the one to take', botThinks: 'The bot is thinking…',
+        koiTitle: 'New yaku!', koiBody: 'You have {n} points now. Go on for more, or stop and score them?', koiBtn: 'Koi-koi (go on)', shobuBtn: 'Shobu (stop)',
+        botKoi: 'The bot called koi-koi', youKoi: 'You called koi-koi', roundWin: 'You won the round: {n} points', roundLose: 'The bot won the round: {n} points', roundDraw: 'The hands ran out: no points', nextRound: 'Next round',
+        youWin: 'You won!', youLose: 'The bot won', drawEnd: 'A draw', yourPts: 'Your points', botPts: 'Bot’s points', level: 'Level', rounds: 'Rounds', optNote: 'Applies from the next game.',
+        yakuList: 'Yaku', doubled: 'A total of 7 points or more is doubled.', kbCards: 'Move between cards', kbPlay: 'Play or take the card',
+        yGoko: 'Five Brights', yShiko: 'Four Brights', yAmeshiko: 'Rainy Four', ySanko: 'Three Brights', yIno: 'Boar, Deer, Butterflies', yTane: 'Animals', yAkatan: 'Red Poems', yAotan: 'Blue Ribbons',
+        yTan: 'Ribbons', yKasu: 'Plains', yHanami: 'Flower Viewing', yTsukimi: 'Moon Viewing',
+        dGoko: 'All five brights', dShiko: 'Four brights without the rain man', dAmeshiko: 'Four brights with the rain man', dSanko: 'Three brights without the rain man', dIno: 'The boar, the deer and the butterflies',
+        dTane: 'Five animals; one more point for each extra', dAkatan: 'The three red ribbons with poems', dAotan: 'The three blue ribbons', dTan: 'Five ribbons; one more point for each extra', dKasu: 'Ten plains; one more point for each extra',
+        dHanami: 'The cherry curtain and the sake cup', dTsukimi: 'The moon and the sake cup',
+        rules: '48 cards, four for each month of the year. A card shows its month by its flower and the number in its corner, and its rank by the mark in the other corner: a star for brights, a diamond for animals, a ribbon for ribbons, and no mark for plains. You and the bot get eight cards each, and eight go face up on the table. On your turn play a card: if a table card has the same month, you take both; if two do, you choose one; if three do, all four are yours; otherwise your card stays on the table. Then the top card of the deck is turned and matched the same way. Your captured cards make yaku. Each time you make a new yaku you choose: shobu ends the round and scores your yaku; koi-koi plays on for more, but if the bot makes a yaku first and stops, the points are the bot’s. If the hands run out with no shobu, the round is a draw with no points. In a three-round game the first player takes turns and the higher total wins.',
+        tutTitle1: 'Match', tutText1: 'Play a card of the same month as a card on the table to take both. Tell the month by its flower and the number in the corner.',
+        tutTitle2: 'Make yaku', tutText2: 'Captured cards sort into four piles: brights, animals, ribbons and plains. Some sets make yaku; the list is in the help.',
+        tutTitle3: 'Koi-koi or shobu', tutText3: 'With a new yaku, shobu scores it now and koi-koi goes on for more; but if the bot stops first, the points are the bot’s.'
+      },
+      pl: {
+        youName: 'Ty', botName: 'Bot', dailyKk: 'Koi-Koi dnia', newMatch: 'Nowa gra', roundOf: 'Runda {n} z {m}', deckN: 'Talia: {n}', monthN: 'Miesiąc {n}',
+        rankB: 'Światło', rankA: 'Zwierzę', rankR: 'Wstążka', rankP: 'Zwykła', ptsN: '{n} pkt', koiN: 'Koi-koi ×{n}',
+        yourTurn: 'Zagraj kartę z ręki', pickHand: 'Na stole leżą dwie karty tego miesiąca: dotknij tej, którą bierzesz', pickFlip: 'Odkryta karta pasuje do dwóch na stole: dotknij tej, którą bierzesz', botThinks: 'Bot myśli…',
+        koiTitle: 'Nowe yaku!', koiBody: 'Masz teraz {n} pkt. Grasz dalej po więcej czy kończysz i liczysz?', koiBtn: 'Koi-koi (dalej)', shobuBtn: 'Shobu (koniec)',
+        botKoi: 'Bot mówi koi-koi', youKoi: 'Mówisz koi-koi', roundWin: 'Wygrywasz rundę: {n} pkt', roundLose: 'Bot wygrywa rundę: {n} pkt', roundDraw: 'Ręce się skończyły: bez punktów', nextRound: 'Następna runda',
+        youWin: 'Wygrana!', youLose: 'Wygrywa bot', drawEnd: 'Remis', yourPts: 'Twoje punkty', botPts: 'Punkty bota', level: 'Poziom', rounds: 'Rundy', optNote: 'Działa od następnej gry.',
+        yakuList: 'Yaku', doubled: 'Wynik 7 pkt lub więcej się podwaja.', kbCards: 'Ruch między kartami', kbPlay: 'Zagraj lub weź kartę',
+        yGoko: 'Pięć świateł', yShiko: 'Cztery światła', yAmeshiko: 'Deszczowe cztery', ySanko: 'Trzy światła', yIno: 'Dzik, jeleń, motyle', yTane: 'Zwierzęta', yAkatan: 'Czerwone wiersze', yAotan: 'Niebieskie wstążki',
+        yTan: 'Wstążki', yKasu: 'Zwykłe', yHanami: 'Podziwianie kwiatów', yTsukimi: 'Podziwianie księżyca',
+        dGoko: 'Wszystkie pięć świateł', dShiko: 'Cztery światła bez człowieka w deszczu', dAmeshiko: 'Cztery światła z człowiekiem w deszczu', dSanko: 'Trzy światła bez człowieka w deszczu', dIno: 'Dzik, jeleń i motyle',
+        dTane: 'Pięć zwierząt; punkt za każde kolejne', dAkatan: 'Trzy czerwone wstążki z wierszami', dAotan: 'Trzy niebieskie wstążki', dTan: 'Pięć wstążek; punkt za każdą kolejną', dKasu: 'Dziesięć zwykłych; punkt za każdą kolejną',
+        dHanami: 'Kurtyna wiśni i czarka sake', dTsukimi: 'Księżyc i czarka sake',
+        rules: '48 kart, po cztery na każdy miesiąc roku. Miesiąc karty widać po kwiecie i numerze w rogu, a jej rangę po znaku w drugim rogu: gwiazda to światło, romb to zwierzę, wstążka to wstążka, a zwykłe karty nie mają znaku. Ty i bot dostajecie po osiem kart, a osiem leży odkrytych na stole. W swoim ruchu zagraj kartę: jeśli na stole jest karta tego samego miesiąca, bierzesz obie; jeśli są dwie, wybierasz jedną; jeśli trzy, wszystkie cztery są twoje; w przeciwnym razie twoja karta zostaje na stole. Potem odkrywa się wierzchnią kartę talii i dopasowuje tak samo. Zebrane karty tworzą yaku. Za każdym nowym yaku wybierasz: shobu kończy rundę i liczy twoje yaku; koi-koi gra dalej po więcej, ale jeśli bot pierwszy ułoży yaku i skończy, punkty są jego. Jeśli ręce się skończą bez shobu, runda jest remisem bez punktów. W grze na trzy rundy zaczyna się na zmianę i wygrywa wyższa suma.',
+        tutTitle1: 'Dopasuj', tutText1: 'Zagraj kartę tego samego miesiąca co karta na stole, by wziąć obie. Miesiąc poznasz po kwiecie i numerze w rogu.',
+        tutTitle2: 'Układaj yaku', tutText2: 'Zebrane karty trafiają na cztery stosy: światła, zwierzęta, wstążki i zwykłe. Niektóre zestawy tworzą yaku; lista jest w pomocy.',
+        tutTitle3: 'Koi-koi czy shobu', tutText3: 'Przy nowym yaku shobu liczy je od razu, a koi-koi gra dalej po więcej; ale jeśli bot skończy pierwszy, punkty są jego.'
+      },
+      fr: {
+        youName: 'Toi', botName: 'Robot', dailyKk: 'Koi-Koi du jour', newMatch: 'Nouvelle partie', roundOf: 'Manche {n} sur {m}', deckN: 'Pioche : {n}', monthN: 'Mois {n}',
+        rankB: 'Lumière', rankA: 'Animal', rankR: 'Ruban', rankP: 'Simple', ptsN: '{n} pts', koiN: 'Koi-koi ×{n}',
+        yourTurn: 'Joue une carte de ta main', pickHand: 'Deux cartes de ce mois sont sur la table : touche celle à prendre', pickFlip: 'La carte retournée va avec deux cartes de la table : touche celle à prendre', botThinks: 'Le robot réfléchit…',
+        koiTitle: 'Nouveau yaku !', koiBody: 'Tu as {n} points. Continuer pour plus, ou t’arrêter et les marquer ?', koiBtn: 'Koi-koi (continuer)', shobuBtn: 'Shobu (arrêter)',
+        botKoi: 'Le robot a dit koi-koi', youKoi: 'Tu as dit koi-koi', roundWin: 'Manche gagnée : {n} points', roundLose: 'Le robot gagne la manche : {n} points', roundDraw: 'Les mains sont vides : aucun point', nextRound: 'Manche suivante',
+        youWin: 'Gagné !', youLose: 'Le robot gagne', drawEnd: 'Égalité', yourPts: 'Tes points', botPts: 'Points du robot', level: 'Niveau', rounds: 'Manches', optNote: 'S’applique à la partie suivante.',
+        yakuList: 'Yaku', doubled: 'Un total de 7 points ou plus est doublé.', kbCards: 'Passer d’une carte à l’autre', kbPlay: 'Jouer ou prendre la carte',
+        yGoko: 'Cinq lumières', yShiko: 'Quatre lumières', yAmeshiko: 'Quatre sous la pluie', ySanko: 'Trois lumières', yIno: 'Sanglier, cerf, papillons', yTane: 'Animaux', yAkatan: 'Poèmes rouges', yAotan: 'Rubans bleus',
+        yTan: 'Rubans', yKasu: 'Simples', yHanami: 'Contempler les fleurs', yTsukimi: 'Contempler la lune',
+        dGoko: 'Les cinq lumières', dShiko: 'Quatre lumières sans l’homme sous la pluie', dAmeshiko: 'Quatre lumières avec l’homme sous la pluie', dSanko: 'Trois lumières sans l’homme sous la pluie', dIno: 'Le sanglier, le cerf et les papillons',
+        dTane: 'Cinq animaux ; un point de plus par animal en plus', dAkatan: 'Les trois rubans rouges à poème', dAotan: 'Les trois rubans bleus', dTan: 'Cinq rubans ; un point de plus par ruban en plus', dKasu: 'Dix simples ; un point de plus par carte en plus',
+        dHanami: 'Le rideau des cerisiers et la coupe de saké', dTsukimi: 'La lune et la coupe de saké',
+        rules: '48 cartes, quatre pour chaque mois de l’année. Une carte montre son mois par sa fleur et le nombre dans son coin, et son rang par la marque de l’autre coin : une étoile pour les lumières, un losange pour les animaux, un ruban pour les rubans, rien pour les simples. Toi et le robot recevez huit cartes chacun, et huit sont posées face visible sur la table. À ton tour, joue une carte : si une carte de la table est du même mois, tu prends les deux ; s’il y en a deux, tu en choisis une ; s’il y en a trois, les quatre sont à toi ; sinon ta carte reste sur la table. Puis la carte du dessus de la pioche est retournée et associée de la même façon. Tes cartes prises forment des yaku. À chaque nouveau yaku, tu choisis : shobu termine la manche et marque tes yaku ; koi-koi continue pour plus, mais si le robot fait un yaku d’abord et s’arrête, les points sont à lui. Si les mains se vident sans shobu, la manche est nulle, sans points. En trois manches, on commence chacun son tour et le plus haut total gagne.',
+        tutTitle1: 'Associe', tutText1: 'Joue une carte du même mois qu’une carte de la table pour prendre les deux. Le mois se lit à la fleur et au nombre du coin.',
+        tutTitle2: 'Fais des yaku', tutText2: 'Les cartes prises se rangent en quatre piles : lumières, animaux, rubans et simples. Certains ensembles font des yaku ; la liste est dans l’aide.',
+        tutTitle3: 'Koi-koi ou shobu', tutText3: 'Avec un nouveau yaku, shobu le marque tout de suite et koi-koi continue pour plus ; mais si le robot s’arrête avant, les points sont à lui.'
+      },
+      ar: {
+        youName: 'أنت', botName: 'الروبوت', dailyKk: 'كوي كوي اليومية', newMatch: 'لعبة جديدة', roundOf: 'الجولة {n} من {m}', deckN: 'الرزمة: {n}', monthN: 'الشهر {n}',
+        rankB: 'مضيئة', rankA: 'حيوان', rankR: 'شريط', rankP: 'عادية', ptsN: '{n} نقطة', koiN: 'كوي كوي ×{n}',
+        yourTurn: 'العب ورقة من يدك', pickHand: 'على الطاولة ورقتان من هذا الشهر: المس التي تأخذها', pickFlip: 'الورقة المكشوفة تطابق ورقتين على الطاولة: المس التي تأخذها', botThinks: 'الروبوت يفكر…',
+        koiTitle: 'ياكو جديد!', koiBody: 'معك الآن {n} نقطة. هل تكمل لتزيد، أم تتوقف وتحسبها؟', koiBtn: 'كوي كوي (أكمل)', shobuBtn: 'شوبو (توقف)',
+        botKoi: 'قال الروبوت كوي كوي', youKoi: 'قلت كوي كوي', roundWin: 'فزت بالجولة: {n} نقطة', roundLose: 'فاز الروبوت بالجولة: {n} نقطة', roundDraw: 'انتهت الأيدي: بلا نقاط', nextRound: 'الجولة التالية',
+        youWin: 'فزت!', youLose: 'فاز الروبوت', drawEnd: 'تعادل', yourPts: 'نقاطك', botPts: 'نقاط الروبوت', level: 'المستوى', rounds: 'الجولات', optNote: 'يُطبق من اللعبة التالية.',
+        yakuList: 'الياكو', doubled: 'مجموع 7 نقاط أو أكثر يتضاعف.', kbCards: 'التنقل بين الأوراق', kbPlay: 'لعب الورقة أو أخذها',
+        yGoko: 'خمس مضيئات', yShiko: 'أربع مضيئات', yAmeshiko: 'أربع ممطرة', ySanko: 'ثلاث مضيئات', yIno: 'خنزير، غزال، فراشات', yTane: 'الحيوانات', yAkatan: 'أشرطة القصائد', yAotan: 'الأشرطة الزرقاء',
+        yTan: 'الأشرطة', yKasu: 'العاديات', yHanami: 'تأمل الأزهار', yTsukimi: 'تأمل القمر',
+        dGoko: 'المضيئات الخمس كلها', dShiko: 'أربع مضيئات دون رجل المطر', dAmeshiko: 'أربع مضيئات مع رجل المطر', dSanko: 'ثلاث مضيئات دون رجل المطر', dIno: 'الخنزير والغزال والفراشات',
+        dTane: 'خمسة حيوانات؛ نقطة لكل حيوان زائد', dAkatan: 'الأشرطة الحمراء الثلاثة ذات القصائد', dAotan: 'الأشرطة الزرقاء الثلاثة', dTan: 'خمسة أشرطة؛ نقطة لكل شريط زائد', dKasu: 'عشر عاديات؛ نقطة لكل ورقة زائدة',
+        dHanami: 'ستارة الكرز وكأس الساكي', dTsukimi: 'القمر وكأس الساكي',
+        rules: '48 ورقة، أربع لكل شهر من السنة. تُظهر الورقة شهرها بزهرتها وبالرقم في زاويتها، ورتبتها بالعلامة في الزاوية الأخرى: نجمة للمضيئة، معيّن للحيوان، شريط للشريط، ولا علامة للعادية. تأخذ أنت والروبوت ثماني أوراق لكل منكما، وتوضع ثماني مكشوفة على الطاولة. في دورك العب ورقة: إن كانت على الطاولة ورقة من الشهر نفسه تأخذ الاثنتين؛ وإن كانت اثنتان تختار واحدة؛ وإن كانت ثلاث فالأربع لك؛ وإلا بقيت ورقتك على الطاولة. ثم تُكشف الورقة العليا من الرزمة وتُطابق بالطريقة نفسها. أوراقك المأخوذة تصنع الياكو. كلما صنعت ياكو جديدًا تختار: شوبو ينهي الجولة ويحسب ياكوك؛ وكوي كوي يكمل لمزيد، لكن إن صنع الروبوت ياكو أولًا وتوقف فالنقاط له. إن نفدت الأيدي دون شوبو فالجولة تعادل بلا نقاط. في لعبة الجولات الثلاث يتناوب البادئ ويفوز المجموع الأعلى.',
+        tutTitle1: 'طابق', tutText1: 'العب ورقة من شهر ورقة على الطاولة لتأخذ الاثنتين. اعرف الشهر من الزهرة والرقم في الزاوية.',
+        tutTitle2: 'اصنع الياكو', tutText2: 'تُرتب الأوراق المأخوذة في أربع كومات: مضيئة وحيوان وشريط وعادية. بعض المجموعات تصنع ياكو؛ القائمة في المساعدة.',
+        tutTitle3: 'كوي كوي أم شوبو', tutText3: 'مع ياكو جديد، شوبو يحسبه الآن وكوي كوي يكمل لمزيد؛ لكن إن توقف الروبوت أولًا فالنقاط له.'
+      },
+      hi: {
+        youName: 'आप', botName: 'बॉट', dailyKk: 'आज का कोई-कोई', newMatch: 'नया खेल', roundOf: 'दौर {n} / {m}', deckN: 'गड्डी: {n}', monthN: 'महीना {n}',
+        rankB: 'चमक', rankA: 'जानवर', rankR: 'फ़ीता', rankP: 'सादा', ptsN: '{n} अंक', koiN: 'कोई-कोई ×{n}',
+        yourTurn: 'अपने हाथ से एक पत्ता खेलें', pickHand: 'मेज़ पर इस महीने के दो पत्ते हैं: जो लेना है उसे छुएँ', pickFlip: 'खुला पत्ता मेज़ के दो पत्तों से मिलता है: जो लेना है उसे छुएँ', botThinks: 'बॉट सोच रहा है…',
+        koiTitle: 'नया याकू!', koiBody: 'अभी आपके {n} अंक हैं. और के लिए आगे खेलें, या रुककर इन्हें गिनें?', koiBtn: 'कोई-कोई (आगे)', shobuBtn: 'शोबू (रुकें)',
+        botKoi: 'बॉट ने कोई-कोई कहा', youKoi: 'आपने कोई-कोई कहा', roundWin: 'दौर आपका: {n} अंक', roundLose: 'दौर बॉट का: {n} अंक', roundDraw: 'हाथ ख़ाली हो गए: कोई अंक नहीं', nextRound: 'अगला दौर',
+        youWin: 'आप जीते!', youLose: 'बॉट जीता', drawEnd: 'बराबरी', yourPts: 'आपके अंक', botPts: 'बॉट के अंक', level: 'स्तर', rounds: 'दौर', optNote: 'अगले खेल से लागू होगा.',
+        yakuList: 'याकू', doubled: '7 या ज़्यादा अंकों का जोड़ दोगुना होता है.', kbCards: 'पत्तों के बीच जाएँ', kbPlay: 'पत्ता खेलें या लें',
+        yGoko: 'पाँच चमक', yShiko: 'चार चमक', yAmeshiko: 'बारिश वाले चार', ySanko: 'तीन चमक', yIno: 'सूअर, हिरन, तितलियाँ', yTane: 'जानवर', yAkatan: 'लाल कविताएँ', yAotan: 'नीले फ़ीते',
+        yTan: 'फ़ीते', yKasu: 'सादे', yHanami: 'फूल दर्शन', yTsukimi: 'चाँद दर्शन',
+        dGoko: 'पाँचों चमक वाले पत्ते', dShiko: 'बारिश वाले आदमी के बिना चार चमक', dAmeshiko: 'बारिश वाले आदमी के साथ चार चमक', dSanko: 'बारिश वाले आदमी के बिना तीन चमक', dIno: 'सूअर, हिरन और तितलियाँ',
+        dTane: 'पाँच जानवर; हर अतिरिक्त पर एक अंक', dAkatan: 'कविता वाले तीन लाल फ़ीते', dAotan: 'तीन नीले फ़ीते', dTan: 'पाँच फ़ीते; हर अतिरिक्त पर एक अंक', dKasu: 'दस सादे; हर अतिरिक्त पर एक अंक',
+        dHanami: 'चेरी का पर्दा और साके का प्याला', dTsukimi: 'चाँद और साके का प्याला',
+        rules: '48 पत्ते, साल के हर महीने के चार. पत्ता अपना महीना अपने फूल और कोने की संख्या से दिखाता है, और अपनी श्रेणी दूसरे कोने के निशान से: चमक के लिए तारा, जानवर के लिए हीरा, फ़ीते के लिए फ़ीता, और सादे पर कोई निशान नहीं. आपको और बॉट को आठ-आठ पत्ते मिलते हैं और आठ मेज़ पर खुले रखे जाते हैं. अपनी बारी में एक पत्ता खेलें: मेज़ पर उसी महीने का पत्ता हो तो दोनों आपके; दो हों तो एक चुनें; तीन हों तो चारों आपके; वरना आपका पत्ता मेज़ पर रहता है. फिर गड्डी का ऊपरी पत्ता खोला जाता है और उसी तरह मिलाया जाता है. जीते पत्तों से याकू बनते हैं. हर नए याकू पर आप चुनते हैं: शोबू दौर ख़त्म करके आपके याकू गिनता है; कोई-कोई और के लिए खेल जारी रखता है, पर अगर बॉट पहले याकू बनाकर रुक जाए तो अंक बॉट के. अगर बिना शोबू हाथ ख़ाली हो जाएँ तो दौर बराबरी पर, बिना अंक. तीन दौर के खेल में शुरुआत बारी-बारी से होती है और ज़्यादा जोड़ जीतता है.',
+        tutTitle1: 'मिलाएँ', tutText1: 'मेज़ के किसी पत्ते के महीने वाला पत्ता खेलें और दोनों ले लें. महीना फूल और कोने की संख्या से पहचानें.',
+        tutTitle2: 'याकू बनाएँ', tutText2: 'जीते पत्ते चार ढेरों में जाते हैं: चमक, जानवर, फ़ीते और सादे. कुछ समूह याकू बनाते हैं; सूची मदद में है.',
+        tutTitle3: 'कोई-कोई या शोबू', tutText3: 'नए याकू पर शोबू उसे अभी गिनता है और कोई-कोई और के लिए आगे खेलता है; पर अगर बॉट पहले रुके तो अंक बॉट के.'
+      },
+      ru: {
+        youName: 'Вы', botName: 'Бот', dailyKk: 'Кой-кой дня', newMatch: 'Новая игра', roundOf: 'Раунд {n} из {m}', deckN: 'Колода: {n}', monthN: 'Месяц {n}',
+        rankB: 'Свет', rankA: 'Животное', rankR: 'Лента', rankP: 'Простая', ptsN: '{n} очк.', koiN: 'Кой-кой ×{n}',
+        yourTurn: 'Сыграйте карту с руки', pickHand: 'На столе две карты этого месяца: коснитесь той, которую берёте', pickFlip: 'Открытая карта подходит к двум на столе: коснитесь той, которую берёте', botThinks: 'Бот думает…',
+        koiTitle: 'Новое яку!', koiBody: 'Сейчас у вас {n} очк. Играть дальше ради большего или остановиться и записать?', koiBtn: 'Кой-кой (дальше)', shobuBtn: 'Сёбу (стоп)',
+        botKoi: 'Бот сказал «кой-кой»', youKoi: 'Вы сказали «кой-кой»', roundWin: 'Раунд ваш: {n} очк.', roundLose: 'Раунд за ботом: {n} очк.', roundDraw: 'Руки опустели: без очков', nextRound: 'Следующий раунд',
+        youWin: 'Победа!', youLose: 'Победил бот', drawEnd: 'Ничья', yourPts: 'Ваши очки', botPts: 'Очки бота', level: 'Уровень', rounds: 'Раунды', optNote: 'Действует со следующей игры.',
+        yakuList: 'Яку', doubled: 'Сумма от 7 очков удваивается.', kbCards: 'Переход между картами', kbPlay: 'Сыграть или взять карту',
+        yGoko: 'Пять светов', yShiko: 'Четыре света', yAmeshiko: 'Дождливые четыре', ySanko: 'Три света', yIno: 'Кабан, олень, бабочки', yTane: 'Животные', yAkatan: 'Красные стихи', yAotan: 'Синие ленты',
+        yTan: 'Ленты', yKasu: 'Простые', yHanami: 'Любование цветами', yTsukimi: 'Любование луной',
+        dGoko: 'Все пять светов', dShiko: 'Четыре света без человека под дождём', dAmeshiko: 'Четыре света с человеком под дождём', dSanko: 'Три света без человека под дождём', dIno: 'Кабан, олень и бабочки',
+        dTane: 'Пять животных; очко за каждое следующее', dAkatan: 'Три красные ленты со стихами', dAotan: 'Три синие ленты', dTan: 'Пять лент; очко за каждую следующую', dKasu: 'Десять простых; очко за каждую следующую',
+        dHanami: 'Занавес сакуры и чашка сакэ', dTsukimi: 'Луна и чашка сакэ',
+        rules: '48 карт, по четыре на каждый месяц года. Месяц карты видно по цветку и числу в углу, а её ранг по знаку в другом углу: звезда у светов, ромб у животных, лента у лент, у простых знака нет. Вам и боту раздают по восемь карт, и восемь кладут на стол лицом вверх. В свой ход сыграйте карту: если на столе есть карта того же месяца, вы берёте обе; если таких две, выбираете одну; если три, все четыре ваши; иначе ваша карта остаётся на столе. Затем открывают верхнюю карту колоды и сопоставляют так же. Взятые карты складываются в яку. С каждым новым яку вы выбираете: сёбу заканчивает раунд и записывает ваши яку; кой-кой продолжает игру ради большего, но если бот первым соберёт яку и остановится, очки достанутся ему. Если руки опустеют без сёбу, раунд заканчивается вничью без очков. В игре на три раунда первыми ходят по очереди, побеждает большая сумма.',
+        tutTitle1: 'Подберите пару', tutText1: 'Сыграйте карту того же месяца, что и карта на столе, и заберите обе. Месяц узнаётся по цветку и числу в углу.',
+        tutTitle2: 'Собирайте яку', tutText2: 'Взятые карты ложатся в четыре стопки: светы, животные, ленты и простые. Некоторые наборы дают яку; список в справке.',
+        tutTitle3: 'Кой-кой или сёбу', tutText3: 'С новым яку сёбу записывает его сразу, а кой-кой играет дальше ради большего; но если бот остановится первым, очки его.'
+      },
+      zh: {
+        youName: '你', botName: '机器人', dailyKk: '每日花札', newMatch: '新游戏', roundOf: '第 {n} 局，共 {m} 局', deckN: '牌堆：{n}', monthN: '{n} 月',
+        rankB: '光', rankA: '种', rankR: '短册', rankP: '素', ptsN: '{n} 分', koiN: '来来 ×{n}',
+        yourTurn: '从手牌中打出一张', pickHand: '桌上有两张同月的牌：点一下要拿的那张', pickFlip: '翻开的牌与桌上两张同月：点一下要拿的那张', botThinks: '机器人思考中…',
+        koiTitle: '新役！', koiBody: '你现在有 {n} 分。继续争取更多，还是停下计分？', koiBtn: '来来（继续）', shobuBtn: '胜负（停下）',
+        botKoi: '机器人喊了来来', youKoi: '你喊了来来', roundWin: '你赢下本局：{n} 分', roundLose: '机器人赢下本局：{n} 分', roundDraw: '手牌出完：不计分', nextRound: '下一局',
+        youWin: '你赢了！', youLose: '机器人赢了', drawEnd: '平局', yourPts: '你的分数', botPts: '机器人的分数', level: '难度', rounds: '局数', optNote: '从下一局起生效。',
+        yakuList: '役', doubled: '总分 7 分或以上翻倍。', kbCards: '在牌之间移动', kbPlay: '打出或拿取这张牌',
+        yGoko: '五光', yShiko: '四光', yAmeshiko: '雨四光', ySanko: '三光', yIno: '猪鹿蝶', yTane: '种', yAkatan: '赤短', yAotan: '青短',
+        yTan: '短册', yKasu: '素', yHanami: '花见酒', yTsukimi: '月见酒',
+        dGoko: '五张光牌全部', dShiko: '四张光牌，不含雨中人', dAmeshiko: '四张光牌，含雨中人', dSanko: '三张光牌，不含雨中人', dIno: '猪、鹿和蝴蝶',
+        dTane: '五张种牌；每多一张加一分', dAkatan: '三张写诗的红短册', dAotan: '三张青短册', dTan: '五张短册；每多一张加一分', dKasu: '十张素牌；每多一张加一分',
+        dHanami: '樱幕和酒杯', dTsukimi: '月亮和酒杯',
+        rules: '共 48 张牌，一年每月四张。牌的花和角上的数字表示月份，另一角的标记表示等级：星是光，菱形是种，丝带是短册，素牌没有标记。你和机器人各发八张，桌上翻开八张。轮到你时打出一张：桌上有同月的牌就两张都拿走；有两张就选一张；有三张则四张都归你；否则你的牌留在桌上。然后翻开牌堆最上面一张，同样配对。拿到的牌组成役。每组成一个新役，你要选择：胜负结束本局并计你的役；来来继续争取更多，但若机器人先组成役并停下，分数归机器人。若手牌出完仍无人喊胜负，本局平局不计分。三局制中轮流先手，总分高者胜。',
+        tutTitle1: '配对', tutText1: '打出与桌上某张同月的牌，两张都拿走。看花和角上的数字认月份。',
+        tutTitle2: '组役', tutText2: '拿到的牌分成四堆：光、种、短册和素。某些组合构成役；完整列表在帮助里。',
+        tutTitle3: '来来还是胜负', tutText3: '组成新役时，胜负立即计分，来来继续争取更多；但若机器人先停下，分数归它。'
+      },
+      de: {
+        youName: 'Du', botName: 'Bot', dailyKk: 'Koi-Koi des Tages', newMatch: 'Neues Spiel', roundOf: 'Runde {n} von {m}', deckN: 'Stapel: {n}', monthN: 'Monat {n}',
+        rankB: 'Licht', rankA: 'Tier', rankR: 'Band', rankP: 'Schlicht', ptsN: '{n} Pkt.', koiN: 'Koi-koi ×{n}',
+        yourTurn: 'Spiel eine Karte aus deiner Hand', pickHand: 'Zwei Karten dieses Monats liegen offen: tippe die, die du nimmst', pickFlip: 'Die aufgedeckte Karte passt zu zwei Karten: tippe die, die du nimmst', botThinks: 'Der Bot überlegt…',
+        koiTitle: 'Neues Yaku!', koiBody: 'Du hast jetzt {n} Punkte. Weiterspielen für mehr oder aufhören und werten?', koiBtn: 'Koi-koi (weiter)', shobuBtn: 'Shobu (Schluss)',
+        botKoi: 'Der Bot sagt Koi-koi', youKoi: 'Du sagst Koi-koi', roundWin: 'Runde gewonnen: {n} Punkte', roundLose: 'Runde an den Bot: {n} Punkte', roundDraw: 'Die Hände sind leer: keine Punkte', nextRound: 'Nächste Runde',
+        youWin: 'Gewonnen!', youLose: 'Der Bot gewinnt', drawEnd: 'Unentschieden', yourPts: 'Deine Punkte', botPts: 'Punkte des Bots', level: 'Stufe', rounds: 'Runden', optNote: 'Gilt ab dem nächsten Spiel.',
+        yakuList: 'Yaku', doubled: 'Eine Summe ab 7 Punkten zählt doppelt.', kbCards: 'Zwischen Karten wechseln', kbPlay: 'Karte spielen oder nehmen',
+        yGoko: 'Fünf Lichter', yShiko: 'Vier Lichter', yAmeshiko: 'Regen-Vier', ySanko: 'Drei Lichter', yIno: 'Eber, Hirsch, Falter', yTane: 'Tiere', yAkatan: 'Rote Gedichte', yAotan: 'Blaue Bänder',
+        yTan: 'Bänder', yKasu: 'Schlichte', yHanami: 'Blütenschau', yTsukimi: 'Mondschau',
+        dGoko: 'Alle fünf Lichter', dShiko: 'Vier Lichter ohne den Mann im Regen', dAmeshiko: 'Vier Lichter mit dem Mann im Regen', dSanko: 'Drei Lichter ohne den Mann im Regen', dIno: 'Eber, Hirsch und Schmetterlinge',
+        dTane: 'Fünf Tiere; ein Punkt mehr für jedes weitere', dAkatan: 'Die drei roten Bänder mit Gedicht', dAotan: 'Die drei blauen Bänder', dTan: 'Fünf Bänder; ein Punkt mehr für jedes weitere', dKasu: 'Zehn Schlichte; ein Punkt mehr für jede weitere',
+        dHanami: 'Der Kirschvorhang und die Sake-Schale', dTsukimi: 'Der Mond und die Sake-Schale',
+        rules: '48 Karten, vier für jeden Monat des Jahres. Eine Karte zeigt ihren Monat durch ihre Blume und die Zahl in der Ecke, ihren Rang durch das Zeichen in der anderen Ecke: ein Stern für Lichter, eine Raute für Tiere, ein Band für Bänder, kein Zeichen für Schlichte. Du und der Bot bekommt je acht Karten, acht liegen offen auf dem Tisch. Spiel in deinem Zug eine Karte: Liegt eine Karte desselben Monats offen, nimmst du beide; liegen zwei, wählst du eine; liegen drei, gehören dir alle vier; sonst bleibt deine Karte liegen. Dann wird die oberste Karte des Stapels aufgedeckt und genauso gepaart. Deine genommenen Karten bilden Yaku. Bei jedem neuen Yaku wählst du: Shobu beendet die Runde und wertet deine Yaku; Koi-koi spielt weiter für mehr, doch bildet der Bot zuerst ein Yaku und hört auf, gehen die Punkte an ihn. Sind die Hände ohne Shobu leer, endet die Runde unentschieden ohne Punkte. Bei drei Runden beginnt man abwechselnd, und die höhere Summe gewinnt.',
+        tutTitle1: 'Paare bilden', tutText1: 'Spiel eine Karte des Monats einer offenen Karte und nimm beide. Den Monat erkennst du an der Blume und der Zahl in der Ecke.',
+        tutTitle2: 'Yaku sammeln', tutText2: 'Genommene Karten kommen auf vier Stapel: Lichter, Tiere, Bänder und Schlichte. Manche Sätze ergeben Yaku; die Liste steht in der Hilfe.',
+        tutTitle3: 'Koi-koi oder Shobu', tutText3: 'Mit einem neuen Yaku wertet Shobu sofort, Koi-koi spielt weiter für mehr; hört der Bot aber zuerst auf, gehen die Punkte an ihn.'
+      },
+      es: {
+        youName: 'Tú', botName: 'Bot', dailyKk: 'Koi-Koi del día', newMatch: 'Nueva partida', roundOf: 'Ronda {n} de {m}', deckN: 'Mazo: {n}', monthN: 'Mes {n}',
+        rankB: 'Luz', rankA: 'Animal', rankR: 'Cinta', rankP: 'Simple', ptsN: '{n} pts', koiN: 'Koi-koi ×{n}',
+        yourTurn: 'Juega una carta de tu mano', pickHand: 'Hay dos cartas de este mes en la mesa: toca la que te llevas', pickFlip: 'La carta destapada va con dos de la mesa: toca la que te llevas', botThinks: 'El bot está pensando…',
+        koiTitle: '¡Nuevo yaku!', koiBody: 'Ahora tienes {n} puntos. ¿Sigues por más o paras y los anotas?', koiBtn: 'Koi-koi (seguir)', shobuBtn: 'Shobu (parar)',
+        botKoi: 'El bot dijo koi-koi', youKoi: 'Dijiste koi-koi', roundWin: 'Ronda ganada: {n} puntos', roundLose: 'Ronda para el bot: {n} puntos', roundDraw: 'Se acabaron las manos: sin puntos', nextRound: 'Siguiente ronda',
+        youWin: '¡Ganaste!', youLose: 'Ganó el bot', drawEnd: 'Empate', yourPts: 'Tus puntos', botPts: 'Puntos del bot', level: 'Nivel', rounds: 'Rondas', optNote: 'Se aplica desde la próxima partida.',
+        yakuList: 'Yaku', doubled: 'Un total de 7 puntos o más se duplica.', kbCards: 'Moverse entre cartas', kbPlay: 'Jugar o llevarse la carta',
+        yGoko: 'Cinco luces', yShiko: 'Cuatro luces', yAmeshiko: 'Cuatro con lluvia', ySanko: 'Tres luces', yIno: 'Jabalí, ciervo, mariposas', yTane: 'Animales', yAkatan: 'Poemas rojos', yAotan: 'Cintas azules',
+        yTan: 'Cintas', yKasu: 'Simples', yHanami: 'Ver las flores', yTsukimi: 'Ver la luna',
+        dGoko: 'Las cinco luces', dShiko: 'Cuatro luces sin el hombre de la lluvia', dAmeshiko: 'Cuatro luces con el hombre de la lluvia', dSanko: 'Tres luces sin el hombre de la lluvia', dIno: 'El jabalí, el ciervo y las mariposas',
+        dTane: 'Cinco animales; un punto más por cada extra', dAkatan: 'Las tres cintas rojas con poema', dAotan: 'Las tres cintas azules', dTan: 'Cinco cintas; un punto más por cada extra', dKasu: 'Diez simples; un punto más por cada extra',
+        dHanami: 'La cortina de cerezos y la copa de sake', dTsukimi: 'La luna y la copa de sake',
+        rules: '48 cartas, cuatro por cada mes del año. Una carta muestra su mes por su flor y el número de su esquina, y su rango por la marca de la otra esquina: una estrella las luces, un rombo los animales, una cinta las cintas, y nada las simples. Tú y el bot recibís ocho cartas cada uno, y ocho van boca arriba a la mesa. En tu turno juega una carta: si en la mesa hay una del mismo mes, te llevas las dos; si hay dos, eliges una; si hay tres, las cuatro son tuyas; si no, tu carta se queda en la mesa. Luego se destapa la carta de arriba del mazo y se empareja igual. Tus cartas ganadas forman yaku. Con cada yaku nuevo eliges: shobu termina la ronda y anota tus yaku; koi-koi sigue por más, pero si el bot forma un yaku antes y para, los puntos son del bot. Si se acaban las manos sin shobu, la ronda queda en empate sin puntos. En tres rondas se empieza por turnos y gana el total más alto.',
+        tutTitle1: 'Empareja', tutText1: 'Juega una carta del mismo mes que una de la mesa para llevarte las dos. El mes se ve por la flor y el número de la esquina.',
+        tutTitle2: 'Forma yaku', tutText2: 'Las cartas ganadas van a cuatro montones: luces, animales, cintas y simples. Algunos grupos forman yaku; la lista está en la ayuda.',
+        tutTitle3: 'Koi-koi o shobu', tutText3: 'Con un yaku nuevo, shobu lo anota ya y koi-koi sigue por más; pero si el bot para antes, los puntos son suyos.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', { level: 'medium', rounds: 1 });
+  if (LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+  if (prefs.rounds !== 3) prefs.rounds = 1;
+
+  var BOT_MS = 750, DEAL_MS = 45, STRIP = 44;
+  var M = null, botTimer = null, holdTimer = null, hold = false, sel = -1, kf = -1, msg = '', pausedAt = 0, botRnd = Math.random, handNodes = [], showDrawn = -1, koiBox = null;
+
+  var top = el('div', { class: 'kk-top' });
+  var opp = el('div', { class: 'kk-side kk-opp' });
+  var stock = el('div', { class: 'kk-stock' });
+  var left = el('div', { class: 'kk-left' });
+  var deck = el('div', { class: 'kk-deck' }, [stock, left]);
+  var field = el('div', { class: 'kk-field' });
+  var board = el('div', { class: 'kk-board' }, [deck, field]);
+  var status = el('div', { class: 'kk-status', role: 'status', 'aria-live': 'polite' });
+  var mine = el('div', { class: 'kk-side kk-mine' });
+  var hand = el('div', { class: 'kk-hand' });
+  var probe = el('div', { class: 'kk-probe', 'aria-hidden': 'true' });
+  var wrap = el('div', { class: 'kk-wrap' }, [probe, top, opp, board, status, mine, hand]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  function human() { return !!(M && !hold && M.G.turn === 0 && (M.G.phase === 'play' || M.G.phase === 'pickFlip')); }
+
+  /* ------------------------------------------------------------ cards */
+
+  // Our own hanafuda, drawn in code: a flower for the month with its number in the top
+  // corner, and a rank mark in the other corner that differs by shape (star, diamond,
+  // ribbon tag, none), so a colour-blind player reads it as well.
+  var INK = '#3A2E2A';
+  function blossom(x, y, r, col, notch) {
+    var s = '';
+    for (var k = 0; k < 5; k++) {
+      var a = (k * 72 - 90) * Math.PI / 180, px = x + Math.cos(a) * r * 0.62, py = y + Math.sin(a) * r * 0.62;
+      s += '<circle cx="' + px.toFixed(1) + '" cy="' + py.toFixed(1) + '" r="' + (r * 0.5).toFixed(1) + '" fill="' + col + '"/>';
+      if (notch) s += '<circle cx="' + (x + Math.cos(a) * r * 1.08).toFixed(1) + '" cy="' + (y + Math.sin(a) * r * 1.08).toFixed(1) + '" r="' + (r * 0.17).toFixed(1) + '" fill="#FFF8EC"/>';
+    }
+    return s + '<circle cx="' + x + '" cy="' + y + '" r="' + (r * 0.3).toFixed(1) + '" fill="#F2C14E"/>';
+  }
+  function star(x, y, R, r, fill, stroke) {
+    var p = [];
+    for (var k = 0; k < 10; k++) { var a = (k * 36 - 90) * Math.PI / 180, q = k % 2 ? r : R; p.push((x + Math.cos(a) * q).toFixed(1) + ',' + (y + Math.sin(a) * q).toFixed(1)); }
+    return '<polygon points="' + p.join(' ') + '" fill="' + fill + '"' + (stroke ? ' stroke="' + stroke + '" stroke-width=".7" stroke-linejoin="round"' : '') + '/>';
+  }
+  function leaf5(x, y, r, col) {
+    var p = [];
+    for (var k = 0; k < 10; k++) { var a = (k * 36 - 90) * Math.PI / 180, q = k % 2 ? r * 0.45 : r; p.push((x + Math.cos(a) * q).toFixed(1) + ',' + (y + Math.sin(a) * q).toFixed(1)); }
+    return '<polygon points="' + p.join(' ') + '" fill="' + col + '"/><path d="M' + x + ' ' + y + ' l0 ' + (r * 1.3).toFixed(1) + '" stroke="#7A3A1A" stroke-width=".8"/>';
+  }
+  function bird(x, y, s, body, wing, opts) {
+    opts = opts || {};
+    return '<g transform="translate(' + x + ' ' + y + ') scale(' + s + ')">' +
+      '<path d="M-8 1 Q-2 -5 6 -2 L10 -3 L7 0 Q2 6 -6 4 L-11 6 Z" fill="' + body + '" stroke="' + INK + '" stroke-width=".7"/>' +
+      '<path d="M-3 -1 Q2 -9 7 -11 Q4 -3 2 1 Z" fill="' + wing + '" stroke="' + INK + '" stroke-width=".6"/>' +
+      '<circle cx="6.2" cy="-2.4" r=".8" fill="' + INK + '"/>' + (opts.extra || '') + '</g>';
+  }
+  function motif(m) {
+    switch (m) {
+      case 0: // pine
+        return '<path d="M20 59 C18 50 23 44 19 36" stroke="#6B4A2E" stroke-width="2.4" fill="none"/>' +
+          [[12, 46, 8], [28, 42, 9], [19, 53, 7], [21, 38, 6]].map(function (f) {
+            return '<path d="M' + (f[0] - f[2]) + ' ' + f[1] + ' a' + f[2] + ' ' + f[2] + ' 0 0 1 ' + (2 * f[2]) + ' 0 z" fill="#2F6B3A"/>' +
+              '<path d="M' + f[0] + ' ' + f[1] + ' l-' + (f[2] * .6) + ' -' + (f[2] * .7) + ' M' + f[0] + ' ' + f[1] + ' l0 -' + (f[2] * .9) + ' M' + f[0] + ' ' + f[1] + ' l' + (f[2] * .6) + ' -' + (f[2] * .7) + '" stroke="#9CC59A" stroke-width=".6"/>';
+          }).join('');
+      case 1: // plum
+        return '<path d="M3 57 C14 47 20 47 37 38" stroke="#4A3328" stroke-width="2" fill="none"/><path d="M18 49 L22 41" stroke="#4A3328" stroke-width="1.2"/>' +
+          blossom(10, 50, 4.5, '#C8324B') + blossom(23, 41, 4.5, '#C8324B') + blossom(31, 45, 4, '#C8324B') + blossom(17, 56, 3.5, '#C8324B');
+      case 2: // cherry
+        return '<path d="M1 44 Q20 38 39 44 L39 48 Q20 42 1 48 Z" fill="#F7D6DE"/>' +
+          blossom(9, 52, 4.6, '#F09AB0', true) + blossom(21, 49, 5, '#F09AB0', true) + blossom(32, 53, 4.4, '#F09AB0', true) + blossom(15, 41, 3.8, '#F09AB0', true) + blossom(28, 40, 3.6, '#F09AB0', true);
+      case 3: // wisteria
+        return '<path d="M1 36 Q20 32 39 36" stroke="#6B4A2E" stroke-width="1.6" fill="none"/>' + [9, 20, 31].map(function (x, i) {
+          var s = '';
+          for (var k = 0; k < 6; k++) s += '<circle cx="' + (x + (k % 2 ? 1.2 : -1.2)) + '" cy="' + (38 + i % 2 + k * 3.3) + '" r="' + (2.6 - k * 0.3).toFixed(1) + '" fill="' + (k % 2 ? '#9C82D1' : '#7A5BB0') + '"/>';
+          return s;
+        }).join('');
+      case 4: // iris
+        return [8, 15, 25, 32].map(function (x, i) { return '<path d="M' + x + ' 59 Q' + (x + (i % 2 ? 3 : -3)) + ' 47 ' + (x + (i < 2 ? 3 : -3)) + ' 36" stroke="#3E7F4A" stroke-width="1.8" fill="none"/>'; }).join('') +
+          [[13, 41], [27, 44]].map(function (f) {
+            return '<path d="M' + f[0] + ' ' + f[1] + ' q-6 -2 -6 4 q4 0 6 -4 z M' + f[0] + ' ' + f[1] + ' q6 -2 6 4 q-4 0 -6 -4 z M' + f[0] + ' ' + f[1] + ' q-2 -7 0 -9 q2 2 0 9 z" fill="#5B4BB5" stroke="#2E2470" stroke-width=".5"/>';
+          }).join('');
+      case 5: // peony
+        return '<ellipse cx="9" cy="52" rx="7" ry="3" fill="#3E7F4A" transform="rotate(-25 9 52)"/><ellipse cx="31" cy="52" rx="7" ry="3" fill="#3E7F4A" transform="rotate(25 31 52)"/>' +
+          '<circle cx="20" cy="47" r="9" fill="#C2304A"/><circle cx="20" cy="47" r="6.2" fill="#E05A72"/><circle cx="20" cy="47" r="3.2" fill="#F3A3B3"/>' +
+          '<path d="M11 47 q2 -3 4 0 q2 -3 4 0 q2 -3 4 0 q2 -3 4 0" stroke="#8E1E33" stroke-width=".6" fill="none"/>';
+      case 6: // bush clover
+        return ['M2 59 Q18 34 38 46', 'M6 59 Q24 42 38 56'].map(function (d) { return '<path d="' + d + '" stroke="#5A3A2A" stroke-width="1" fill="none"/>'; }).join('') +
+          [[8, 49], [13, 44], [19, 41], [25, 41], [31, 43], [14, 54], [21, 50], [28, 50], [34, 53]].map(function (p, i) {
+            return '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="1.7" fill="#B4367A"/><ellipse cx="' + (p[0] + 2) + '" cy="' + (p[1] + 2.4) + '" rx="1.8" ry="1" fill="#5E8F4A" transform="rotate(' + (i % 2 ? 30 : -30) + ' ' + (p[0] + 2) + ' ' + (p[1] + 2.4) + ')"/>';
+          }).join('');
+      case 7: // pampas grass on a dark hill
+        return '<path d="M1 59 L1 45 Q20 31 39 45 L39 59 Z" fill="#2B2B2B"/>' +
+          [6, 11, 16, 21, 26, 31, 35].map(function (x, i) { var y = 45 - Math.sin((x / 40) * Math.PI) * 9; return '<path d="M' + x + ' ' + (y + 4).toFixed(1) + ' q' + (i % 2 ? 2 : -2) + ' -5 ' + (i % 2 ? 1 : -1) + ' -9" stroke="#E8E2D2" stroke-width=".8" fill="none"/>'; }).join('');
+      case 8: // chrysanthemum
+        var s8 = '';
+        for (var k = 0; k < 14; k++) s8 += '<ellipse cx="20" cy="41.5" rx="1.7" ry="5" fill="#E0A21B" stroke="#9A6A0E" stroke-width=".4" transform="rotate(' + (k * 360 / 14).toFixed(1) + ' 20 47)"/>';
+        return '<path d="M6 59 Q10 52 16 50 M34 59 Q30 52 24 50" stroke="#3E7F4A" stroke-width="1.6" fill="none"/>' + s8 + '<circle cx="20" cy="47" r="2.6" fill="#B5651D"/>';
+      case 9: // maple
+        return '<path d="M4 58 Q18 46 36 40" stroke="#6B4A2E" stroke-width="1.2" fill="none"/>' + leaf5(11, 47, 5.5, '#D2531E') + leaf5(26, 43, 6, '#C2301E') + leaf5(20, 54, 4.6, '#E8892E') + leaf5(33, 53, 4, '#D2531E');
+      case 10: // willow
+        return [6, 12, 18, 24, 30, 35].map(function (x, i) { return '<path d="M' + x + ' 30 Q' + (x + (i % 2 ? 4 : -2)) + ' 44 ' + (x + 1) + ' 58" stroke="#3E7F4A" stroke-width="1.3" fill="none"/>' +
+          '<path d="M' + (x + 1) + ' 40 l2 1 M' + (x + 1) + ' 48 l-2 1" stroke="#7DB36E" stroke-width="1"/>'; }).join('');
+      default: // paulownia
+        return '<path d="M4 59 Q8 46 16 50 Q14 40 22 42 Q28 38 30 46 Q38 46 37 59 Z" fill="#3E7F4A"/><path d="M20 59 L20 46" stroke="#24502C" stroke-width=".8"/>' +
+          [0, 1, 2, 3].map(function (k) { return '<ellipse cx="' + (20 + (k % 2 ? 1.4 : -1.4)) + '" cy="' + (36 + k * 2.6) + '" rx="2.2" ry="1.6" fill="#7B4FA0"/>'; }).join('');
+    }
+  }
+  function ribbon(kind) {
+    var col = kind === 'blue' ? '#2C4F9E' : '#C8322E', s = '<g transform="rotate(-10 20 26)"><path d="M14.5 13 h11 v25 l-5.5 -4 l-5.5 4 z" fill="' + col + '" stroke="' + INK + '" stroke-width=".8"/>';
+    // a poem is written on it; a blue one has white bands; a plain red one has nothing
+    if (kind === 'poem') s += '<path d="M18 17 v4 M18 23 v3 M18 28 v4 M22 16 v5 M22 23 v6" stroke="' + INK + '" stroke-width="1.3" stroke-linecap="round"/>';
+    if (kind === 'blue') s += '<path d="M14.5 19 h11 M14.5 27 h11" stroke="#FFFFFF" stroke-width="1.6"/>';
+    return s + '</g>';
+  }
+  function special(c) {
+    switch (c) {
+      case E.CRANE: return '<circle cx="21" cy="22" r="9" fill="#D8382E"/>' + bird(19, 29, 1.25, '#FFFFFF', '#FFFFFF', { extra: '<path d="M8 -3 l-1 -9" stroke="' + INK + '" stroke-width="1.6"/><circle cx="7" cy="-12.5" r="1.6" fill="#D8382E"/>' });
+      case E.CURTAIN: return '<path d="M8 13 h24" stroke="#6B4A2E" stroke-width="2"/>' + [0, 1, 2, 3, 4, 5].map(function (k) { return '<rect x="' + (8 + k * 4) + '" y="14" width="4" height="' + (k % 2 ? 19 : 21) + '" fill="' + (k % 2 ? '#FFFFFF' : '#D8382E') + '" stroke="' + INK + '" stroke-width=".5"/>'; }).join('');
+      case E.MOON: return '<circle cx="20" cy="22" r="10" fill="#F5E7B8" stroke="#B79A4A" stroke-width=".8"/>';
+      case 29: return [[12, 18], [21, 14], [29, 20]].map(function (p) { return '<path d="M' + (p[0] - 4) + ' ' + (p[1] - 2) + ' L' + p[0] + ' ' + p[1] + ' L' + (p[0] + 4) + ' ' + (p[1] - 2) + '" stroke="' + INK + '" stroke-width="1.6" fill="none" stroke-linejoin="round"/>'; }).join('');
+      case E.RAINMAN: return '<path d="M8 25 a12 10 0 0 1 24 0 z" fill="#D8382E" stroke="' + INK + '" stroke-width=".8"/><path d="M20 15 L20 25 M14 25 L18 16 M26 25 L22 16" stroke="' + INK + '" stroke-width=".5"/>' +
+        '<path d="M20 25 v10 q0 2 -2 2" stroke="' + INK + '" stroke-width="1.2" fill="none"/>' + [6, 33, 10, 30].map(function (x, i) { return '<path d="M' + x + ' ' + (12 + i * 3) + ' l-2 5" stroke="#5B7FB8" stroke-width=".8"/>'; }).join('');
+      case E.PHOENIX: return '<circle cx="20" cy="21" r="10" fill="#F2C14E"/>' + ['#C8322E', '#2E7D4F', '#2C4F9E'].map(function (col, k) { return '<path d="M16 24 Q' + (6 + k * 2) + ' ' + (30 + k * 3) + ' ' + (4 + k * 3) + ' ' + (22 + k * 5) + '" stroke="' + col + '" stroke-width="2" fill="none"/>'; }).join('') +
+        bird(22, 22, 1.1, '#E07A2E', '#C8322E', { extra: '<path d="M6 -3 l2 -4 l1 3 l2 -3" stroke="#C8322E" stroke-width="1" fill="none"/>' });
+      case 4: return bird(20, 23, 1.1, '#7C9A3A', '#5E7A2A');
+      case 12: return '<path d="M30 12 a5 5 0 1 0 2 8 a4 4 0 1 1 -2 -8" fill="#F5E7B8"/>' + bird(18, 22, 1.15, '#4A4A62', '#2F2F45');
+      case 16: return '<path d="M4 30 L12 23 L20 30 L28 23 L36 29" stroke="#8A5A2B" stroke-width="3.2" fill="none" stroke-linejoin="round"/><path d="M4 30 L12 23 L20 30 L28 23 L36 29" stroke="#C49461" stroke-width="1" fill="none"/>';
+      case E.BUTTERFLY: return [[13, 19, '#3E6FB0'], [27, 25, '#E6A23C']].map(function (b) {
+        return '<g transform="translate(' + b[0] + ' ' + b[1] + ')"><ellipse cx="-3" cy="-2" rx="3.4" ry="2.6" fill="' + b[2] + '" stroke="' + INK + '" stroke-width=".5"/><ellipse cx="3" cy="-2" rx="3.4" ry="2.6" fill="' + b[2] + '" stroke="' + INK + '" stroke-width=".5"/>' +
+          '<ellipse cx="-2.2" cy="2.4" rx="2.2" ry="1.8" fill="' + b[2] + '" stroke="' + INK + '" stroke-width=".5"/><ellipse cx="2.2" cy="2.4" rx="2.2" ry="1.8" fill="' + b[2] + '" stroke="' + INK + '" stroke-width=".5"/><path d="M0 -4 v8" stroke="' + INK + '" stroke-width="1"/></g>';
+      }).join('');
+      case E.BOAR: return '<ellipse cx="20" cy="26" rx="11" ry="6.5" fill="#6B4A2E" stroke="' + INK + '" stroke-width=".7"/><path d="M29 22 l6 3 l-5 4 z" fill="#6B4A2E" stroke="' + INK + '" stroke-width=".7"/>' +
+        '<path d="M33 27 q2 1 1 3" stroke="#FFFFFF" stroke-width="1" fill="none"/><path d="M13 31 v4 M18 32 v4 M23 32 v4 M27 31 v4" stroke="' + INK + '" stroke-width="1.6"/><circle cx="31" cy="24" r=".7" fill="#FFFFFF"/>';
+      case E.CUP: return '<path d="M9 18 h22 l-4 11 h-14 z" fill="#C8322E" stroke="' + INK + '" stroke-width=".8"/><path d="M9 18 h22" stroke="#F2C14E" stroke-width="1.4"/><path d="M16 29 h8 l1 3 h-10 z" fill="#C8322E" stroke="' + INK + '" stroke-width=".6"/>' + star(20, 23, 3.2, 1.4, '#F2C14E');
+      case E.DEER: return '<ellipse cx="18" cy="28" rx="9" ry="5" fill="#B5763A" stroke="' + INK + '" stroke-width=".7"/><path d="M25 26 L29 17 L32 18 L28 27 Z" fill="#B5763A" stroke="' + INK + '" stroke-width=".6"/>' +
+        '<path d="M29 17 l-2 -5 M29 17 l1 -6 M28 14 l-3 -1 M30 13 l3 -1" stroke="' + INK + '" stroke-width=".9" fill="none"/><path d="M12 32 v5 M16 33 v5 M21 33 v5 M24 32 v5" stroke="' + INK + '" stroke-width="1.3"/><circle cx="15" cy="27" r=".8" fill="#FFF8EC"/><circle cx="20" cy="26" r=".8" fill="#FFF8EC"/>';
+      case 41: return '<path d="M8 16 L20 24 L32 16 L22 21 L20 30 L18 21 Z" fill="#2B2B3A" stroke="' + INK + '" stroke-width=".6"/><path d="M19 30 l-3 5 M21 30 l3 5" stroke="#2B2B3A" stroke-width="1.2"/><circle cx="20" cy="23" r="1.4" fill="#D8382E"/>';
+      case 43: return '<path d="M23 11 L14 27 L20 27 L16 41 L28 22 L21 22 L26 11 Z" fill="#F2C14E" stroke="' + INK + '" stroke-width=".8" stroke-linejoin="round"/>';
+    }
+    return '';
+  }
+  function badge(c) {
+    var r = E.rank(c);
+    if (r === 0) return star(32.5, 8, 5.6, 2.4, '#E8B33A', '#6B4A12');
+    if (r === 1) return '<path d="M32.5 2.4 L37.6 8 L32.5 13.6 L27.4 8 Z" fill="#4E8F5A" stroke="#1F3D25" stroke-width=".7"/>';
+    if (r === 2) { var k = E.ribbonKind(c); return '<path d="M30 2.5 h5 v11 l-2.5 -2.2 l-2.5 2.2 z" fill="' + (k === 'blue' ? '#2C4F9E' : '#C8322E') + '" stroke="' + INK + '" stroke-width=".7"/>'; }
+    return '';
+  }
+  var svgCache = {};
+  function cardSvg(c) {
+    var key = c + '|' + C.num(c);
+    if (svgCache[key]) return svgCache[key];
+    var m = E.month(c), s = '<rect x=".5" y=".5" width="39" height="59" rx="3.5" fill="#FFF8EC" stroke="#8C7A66"/>';
+    if (c === E.MOON) s += '<rect x="1" y="1" width="38" height="46" rx="3" fill="#D8562E"/>';
+    if (c === 29) s += '<rect x="1" y="1" width="38" height="46" rx="3" fill="#EBCB9C"/>';
+    if (E.rank(c) === 0) s += '<rect x="2.6" y="2.6" width="34.8" height="54.8" rx="2.4" fill="none" stroke="#C9962B" stroke-width="1.6"/>';
+    s += motif(m) + (E.rank(c) === 2 ? ribbon(E.ribbonKind(c)) : special(c));
+    s += '<circle cx="8" cy="8" r="5.8" fill="#FFF8EC" stroke="' + INK + '" stroke-width=".9"/><text x="8" y="10.7" font-size="' + (m >= 9 ? 6.4 : 7.6) + '" font-weight="800" text-anchor="middle" fill="' + INK + '" font-family="inherit">' + C.num(m + 1) + '</text>';
+    s += badge(c);
+    return (svgCache[key] = '<svg viewBox="0 0 40 60" aria-hidden="true" direction="ltr">' + s + '</svg>');
+  }
+  var RANKKEY = ['rankB', 'rankA', 'rankR', 'rankP'];
+  function cardLabel(c) { return C.t('monthN', { n: C.num(E.month(c) + 1) }) + ' · ' + C.t(RANKKEY[E.rank(c)]); }
+  function cardEl(c, cls, tap) {
+    var b = el('button', { class: 'kk-card' + (cls ? ' ' + cls : ''), type: 'button', 'aria-label': cardLabel(c), 'data-c': String(c) });
+    b.innerHTML = cardSvg(c);
+    b._c = c;
+    if (tap) b.addEventListener('click', function () { tap(c, b); });
+    else { b.tabIndex = -1; b.setAttribute('aria-disabled', 'true'); }
+    return b;
+  }
+  function markSvg(r) {
+    var inner = r === 0 ? star(7, 7, 6.4, 2.8, '#E8B33A', '#6B4A12') : r === 1 ? '<path d="M7 .8 L13 7 L7 13.2 L1 7 Z" fill="#4E8F5A" stroke="#1F3D25" stroke-width=".8"/>' :
+      r === 2 ? '<path d="M4.5 1 h5 v11.5 l-2.5 -2.2 l-2.5 2.2 z" fill="#C8322E" stroke="' + INK + '" stroke-width=".8"/>' : '<circle cx="7" cy="7" r="4.6" fill="none" stroke="#8C7A66" stroke-width="1.4"/>';
+    var s = el('span', { class: 'kk-mark', 'aria-hidden': 'true' });
+    s.innerHTML = '<svg viewBox="0 0 14 14" width="14" height="14">' + inner + '</svg>';
+    return s;
+  }
+
+  /* ------------------------------------------------------------ start */
+
+  function newMatch(daily) {
+    stopBot(); clearHold(); closeKoi();
+    M = { level: daily ? 'medium' : prefs.level, rounds: daily ? 1 : prefs.rounds, daily: daily || null, round: 1, totals: [0, 0], startedAt: Date.now(), G: null };
+    startRound(0);
+  }
+  function startRound(first) {
+    var rnd = M.daily ? C.daily('koikoi', M.daily).rng : Math.random;
+    botRnd = M.daily ? C.daily('koikoi', M.daily + '|bots').rng : Math.random;
+    M.G = E.newGame(rnd, first);
+    msg = ''; sel = -1; kf = -1; showDrawn = -1;
+    render();
+    dealIn();
+    save();
+    step();
+  }
+  function resume(v) {
+    stopBot(); clearHold(); closeKoi();
+    M = v;
+    msg = ''; sel = -1; kf = -1; showDrawn = -1;
+    botRnd = M.daily ? C.daily('koikoi', M.daily + '|bots|' + M.G.turns).rng : Math.random;
+    M.startedAt = Date.now() - (v.elapsed || 0);
+    render();
+    step();
+  }
+
+  /* ------------------------------------------------------------- draw */
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (M.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyKk') + ' — ' + C.num(M.daily) })]));
+    else top.appendChild(el('span', { class: 'ch-badge', text: C.t(M.level) }));
+    if (M.rounds > 1) top.appendChild(el('span', { class: 'ch-badge', text: C.t('roundOf', { n: C.num(M.round), m: C.num(M.rounds) }) + ' · ' + C.num(M.totals[0]) + '–' + C.num(M.totals[1]) }));
+    // options behind a gear in the top row, never in «?» (#409)
+    var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', showSettings);
+    top.appendChild(gear);
+  }
+  function piles(p) {
+    var caps = el('div', { class: 'kk-caps' });
+    [0, 1, 2, 3].forEach(function (r) {
+      var cs = M.G.caps[p].filter(function (c) { return E.rank(c) === r; }).sort(function (a, b) { return a - b; });
+      if (!cs.length) return;
+      var pile = el('div', { class: 'kk-pile', title: C.t(RANKKEY[r]) + ' · ' + C.num(cs.length) }, [markSvg(r)]);
+      cs.forEach(function (c) { pile.appendChild(cardEl(c)); });
+      caps.appendChild(pile);
+    });
+    return caps;
+  }
+  function madeLine(p) {
+    var y = E.yaku(M.G.caps[p]);
+    return y.list.map(function (x) { return C.t(YKEY[x.k]); }).join(' · ');
+  }
+  function whoBits(p) {
+    var G = M.G, y = E.yaku(G.caps[p]).total, bits = [];
+    bits.push(el('span', { class: 'ch-badge', text: C.t('ptsN', { n: C.num(y) }) }));
+    if (G.koi[p]) bits.push(el('span', { class: 'ch-badge ch-badge--accent', text: C.t('koiN', { n: C.num(G.koi[p]) }) }));
+    return bits;
+  }
+  function renderSides() {
+    var G = M.G;
+    opp.innerHTML = '';
+    opp.className = 'kk-side kk-opp' + (G.turn === 1 && G.phase !== 'over' ? ' kk-opp--on' : '');
+    var fan = el('div', { class: 'kk-fan', 'aria-hidden': 'true' });
+    for (var i = 0; i < G.hands[1].length; i++) fan.appendChild(C.cards.back());
+    opp.appendChild(el('div', { class: 'kk-who' }, [el('span', { text: C.t('botName') }), fan].concat(whoBits(1))));
+    opp.appendChild(piles(1));
+    opp.appendChild(el('div', { class: 'kk-made', text: madeLine(1) }));
+    mine.innerHTML = '';
+    mine.appendChild(el('div', { class: 'kk-made', text: madeLine(0) }));
+    mine.appendChild(piles(0));
+    mine.appendChild(el('div', { class: 'kk-who' }, [el('span', { text: C.t('youName') })].concat(whoBits(0))));
+  }
+  // the cards the player may take right now: the two of a chosen card's month, or of the drawn card
+  function choices() {
+    var G = M.G;
+    if (!human()) return [];
+    if (G.phase === 'pickFlip') return E.matches(G, G.flipped);
+    if (sel >= 0) return E.matches(G, sel);
+    return [];
+  }
+  function renderBoard() {
+    var G = M.G, ch = choices();
+    stock.innerHTML = '';
+    if (G.deck.length) stock.appendChild(C.cards.back());
+    var up = G.phase === 'pickFlip' ? G.flipped : showDrawn;
+    if (up >= 0) stock.appendChild(cardEl(up, 'kk-drawn'));
+    left.textContent = C.t('deckN', { n: C.num(G.deck.length) });
+    field.innerHTML = '';
+    var hot = human() && kf >= 0 && handNodes[kf] && G.phase === 'play' ? E.month(handNodes[kf]._c) : -1;
+    G.field.forEach(function (c) {
+      var can = ch.indexOf(c) >= 0;
+      field.appendChild(cardEl(c, can ? 'kk-hit' : (E.month(c) === hot ? 'kk-pair' : ''), can ? fieldTap : null));
+    });
+  }
+  function renderHand() {
+    var G = M.G, me = human() && G.phase === 'play';
+    var h = G.hands[0].slice().sort(function (a, b) { return a - b; });
+    hand.innerHTML = '';
+    handNodes = [];
+    if (kf >= h.length) kf = h.length - 1;
+    var cw = probe.offsetWidth || 48;
+    var room = hand.clientWidth || 360;
+    var fit = Math.max(2, Math.floor((room - cw) / STRIP) + 1);
+    var rows = Math.max(1, Math.ceil(h.length / fit)), per = Math.ceil(h.length / rows);
+    for (var r = 0; r < rows; r++) {
+      var part = h.slice(r * per, (r + 1) * per), row = el('div', { class: 'kk-row' });
+      var k = part.length, over = k > 1 ? Math.min(4, (room - cw * k) / (k - 1)) : 0;
+      part.forEach(function (c, i) {
+        var idx = handNodes.length;
+        var cls = c === sel ? 'kk-sel' : me && E.matches(G, c).length ? 'kk-ok' : me ? '' : 'kk-wait';
+        var b = cardEl(c, cls + (kf === idx ? ' kk-kf' : ''), handTap);
+        if (i) b.style.marginInlineStart = over + 'px';
+        row.appendChild(b);
+        handNodes.push(b);
+      });
+      hand.appendChild(row);
+    }
+  }
+  function hint() {
+    var G = M.G;
+    if (G.phase === 'over') return '';
+    if (hold) return '';
+    if (G.turn === 1) return C.t('botThinks');
+    if (G.phase === 'pickFlip') return C.t('pickFlip');
+    if (sel >= 0) return C.t('pickHand');
+    if (G.phase === 'play') return C.t('yourTurn');
+    return '';
+  }
+  function render() {
+    renderTop();
+    renderSides();
+    renderHand();
+    renderBoard();
+    var h = hint();
+    status.textContent = msg && h ? msg + ' · ' + h : (msg || h);
+  }
+
+  // where every card stood before a move, so each one can glide from there to where it is now
+  function snap() {
+    var at = {};
+    wrap.querySelectorAll('[data-c]').forEach(function (n) { at[n.getAttribute('data-c')] = n.getBoundingClientRect(); });
+    return at;
+  }
+  function glide(prev, origin) {
+    wrap.querySelectorAll('[data-c]').forEach(function (n) {
+      var a = prev[n.getAttribute('data-c')];
+      if (a) {
+        var b = n.getBoundingClientRect();
+        if (Math.abs(a.left - b.left) > 2 || Math.abs(a.top - b.top) > 2 || Math.abs(a.width - b.width) > 2) C.ui.fly(n, a, { ms: 320 });
+      } else if (origin) C.ui.fly(n, origin, { ms: 300, flip: true });
+    });
+  }
+  function dealIn() {
+    if (C.ui.reduceMotion()) return;
+    var from = stock.getBoundingClientRect();
+    for (var i = 0; i < handNodes.length; i++) C.ui.fly(handNodes[i], from, { ms: 220, delay: i * DEAL_MS, flip: true });
+    field.querySelectorAll('.kk-card').forEach(function (n, i) { C.ui.fly(n, from, { ms: 220, delay: (handNodes.length + i) * DEAL_MS, flip: true }); });
+  }
+
+  /* ------------------------------------------------------------ moves */
+
+  function handTap(c, node) {
+    if (!human() || M.G.phase !== 'play' || document.querySelector('.ch-scrim')) return;
+    var ms = E.matches(M.G, c);
+    if (ms.length === 2) { sel = sel === c ? -1 : c; C.feedback('tap'); render(); return; }
+    doPlay(c, -1);
+  }
+  function fieldTap(t) {
+    if (!human() || document.querySelector('.ch-scrim')) return;
+    var G = M.G;
+    if (G.phase === 'pickFlip') { pickDrawn(t); return; }
+    if (sel >= 0 && E.matches(G, sel).indexOf(t) >= 0) doPlay(sel, t);
+  }
+  function doPlay(c, pick) {
+    var G = M.G, prev = snap();
+    if (!E.play(G, c, pick)) { C.feedback('bad'); return; }
+    sel = -1; kf = -1; msg = '';
+    C.audio.sfx('place'); C.haptic('tap');
+    hold = true;
+    render();
+    glide(prev, null);
+    tookFx(G.fx.took);
+    save();
+    later(drawStep, 560);
+  }
+  function botPlayStep() {
+    var G = M.G, m = E.botPlay(G, M.level, botRnd), box = opp.querySelector('.kk-who'), prev = snap();
+    E.play(G, m.card, m.pick);
+    msg = '';
+    C.audio.sfx('place');
+    hold = true;
+    render();
+    glide(prev, box ? box.getBoundingClientRect() : null);
+    tookFx(G.fx.took);
+    save();
+    later(drawStep, 560);
+  }
+  // The deck's card turns over on the deck first, then goes where it matches.
+  function drawStep() {
+    var G = M.G;
+    if (G.phase !== 'flip') { holdOff(); return; }
+    showDrawn = G.deck[G.deck.length - 1];
+    render();
+    var n = stock.querySelector('.kk-drawn');
+    if (n) C.ui.fly(n, stock.querySelector('.ch-pback') || stock, { ms: 260, flip: true });
+    C.audio.sfx('flip');
+    later(function () {
+      var prev = snap();
+      var r = E.flip(G);
+      showDrawn = -1;
+      if (r === 'pick') {
+        if (G.turn === 0) { hold = false; render(); save(); return; }
+        render(); save();
+        later(function () { botPickStep(); }, BOT_MS);
+        return;
+      }
+      render();
+      glide(prev, null);
+      tookFx(G.fx.ftook);
+      save();
+      later(turnEnd, 520);
+    }, 520);
+  }
+  function pickDrawn(t) {
+    var G = M.G, prev = snap();
+    if (!E.pickFlip(G, t)) { C.feedback('bad'); return; }
+    C.audio.sfx('place'); C.haptic('tap');
+    hold = true;
+    render();
+    glide(prev, null);
+    tookFx(G.fx.ftook);
+    save();
+    later(turnEnd, 520);
+  }
+  function botPickStep() {
+    var G = M.G;
+    if (G.phase !== 'pickFlip') { holdOff(); return; }
+    var prev = snap();
+    E.pickFlip(G, E.botPick(G, M.level, botRnd));
+    C.audio.sfx('place');
+    hold = true;
+    render();
+    glide(prev, null);
+    tookFx(G.fx.ftook);
+    save();
+    later(turnEnd, 520);
+  }
+  function tookFx(got) {
+    if (!got || !got.length) return;
+    if (M.G.caps[0].length && E.BRIGHTS.every(function (c) { return M.G.caps[0].indexOf(c) >= 0; })) C.achievements.unlock('kk-five');
+  }
+  function turnEnd() {
+    var G = M.G;
+    if (G.phase === 'decide') {
+      if (G.turn === 0) { hold = false; render(); save(); askKoi(); return; }
+      later(botDecide, BOT_MS);
+      return;
+    }
+    if (G.phase === 'over') { roundOver(); return; }
+    holdOff();
+  }
+  function botDecide() {
+    var G = M.G;
+    if (G.phase !== 'decide' || G.turn !== 1) { holdOff(); return; }
+    var koi = E.botKoi(G, M.level, botRnd);
+    E.decide(G, koi);
+    if (koi) { msg = C.t('botKoi'); C.ui.toast({ icon: 'bolt', title: C.t('botKoi') }); holdOff(); return; }
+    roundOver();
+  }
+  function askKoi() {
+    var G = M.G;
+    if (koiBox || G.phase !== 'decide' || G.turn !== 0) return;
+    var y = E.yaku(G.caps[0]);
+    var list = el('div', { class: 'ch-list kk-yaku' }, y.list.map(function (x) {
+      return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t(YKEY[x.k]) }), el('b', { class: 'ch-num', text: C.num(x.p) })]);
+    }));
+    C.ui.burst(status, { count: 14, speed: 160, ring: 18 });
+    koiBox = C.ui.modal({
+      title: C.t('koiTitle'),
+      dismissable: false,
+      body: [list, el('p', { class: 'ch-dim', text: C.t('koiBody', { n: C.num(E.points(y.total)) }) })],
+      actions: [
+        { label: C.t('koiBtn'), onClick: function () { koiBox = null; chooseKoi(true); } },
+        { label: C.t('shobuBtn'), kind: 'primary', onClick: function () { koiBox = null; chooseKoi(false); } }
+      ]
+    });
+  }
+  function closeKoi() { if (koiBox) { koiBox.close('x'); koiBox = null; } }
+  function chooseKoi(koi) {
+    var G = M.G;
+    if (!E.decide(G, koi)) return;
+    if (koi) { msg = C.t('youKoi'); render(); save(); step(); return; }
+    hold = true;
+    roundOver();
+  }
+  function holdOff() {
+    hold = false;
+    render();
+    save();
+    step();
+  }
+  // what the state asks for next: a bot move, the deck's card, a choice, or the end of a round
+  function step() {
+    stopBot();
+    var G = M.G;
+    if (hold) return;
+    if (G.phase === 'over') { hold = true; roundOver(); return; }
+    if (G.phase === 'flip') { hold = true; drawStep(); return; }
+    if (G.phase === 'decide') { if (G.turn === 0) askKoi(); else { hold = true; later(botDecide, BOT_MS); } return; }
+    if (G.turn !== 1) return;
+    if (G.phase === 'pickFlip') { hold = true; later(botPickStep, BOT_MS); return; }
+    botTimer = setTimeout(function () { botTimer = null; if (M && M.G === G && !hold && G.turn === 1 && G.phase === 'play') botPlayStep(); }, C.cards.pace(C.ui.reduceMotion() ? 300 : BOT_MS));
+  }
+  function later(fn, ms) {
+    var G = M.G;
+    if (holdTimer) clearTimeout(holdTimer);
+    holdTimer = setTimeout(function () { holdTimer = null; if (M && M.G === G) fn(); }, C.cards.pace(C.ui.reduceMotion() ? Math.min(ms, 150) : ms));
+  }
+  function stopBot() { if (botTimer) { clearTimeout(botTimer); botTimer = null; } }
+  function clearHold() { if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } hold = false; }
+
+  /* ------------------------------------------------------------ end */
+
+  function roundOver() {
+    var G = M.G;
+    hold = true;
+    if (!G.counted) {
+      if (G.winner >= 0) M.totals[G.winner] += G.score;
+      G.counted = true;
+    }
+    if (G.winner === 0 && G.made.indexOf('goko') >= 0) C.achievements.unlock('kk-five');
+    msg = G.winner === 0 ? C.t('roundWin', { n: C.num(G.score) }) : G.winner === 1 ? C.t('roundLose', { n: C.num(G.score) }) : C.t('roundDraw');
+    if (G.winner === 0) C.ui.burst(status, { count: 18, speed: 200, ring: 22 });
+    render();
+    save();
+    if (M.round >= M.rounds) { later(finish, 700); return; }
+    later(function () {
+      C.ui.modal({
+        title: C.t('roundOf', { n: C.num(M.round), m: C.num(M.rounds) }),
+        dismissable: false,
+        body: [el('p', { text: msg }), madeList(G), el('div', { class: 'ch-list' }, [
+          el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('yourPts') }), el('b', { class: 'ch-num', text: C.num(M.totals[0]) })]),
+          el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('botPts') }), el('b', { class: 'ch-num', text: C.num(M.totals[1]) })])
+        ])],
+        actions: [{ label: C.t('nextRound'), kind: 'primary', onClick: function () { M.round++; hold = false; startRound(1 - G.first); } }]
+      });
+    }, 700);
+  }
+  function madeList(G) {
+    return el('p', { class: 'ch-dim', text: G.made.map(function (k) { return C.t(YKEY[k]); }).join(' · ') });
+  }
+  function finish() {
+    if (!M || M.G.phase !== 'over' || M.round < M.rounds) return;
+    var G = M.G, ms = Date.now() - M.startedAt, t = M.totals;
+    var won = t[0] > t[1], draw = t[0] === t[1];
+    var base = { easy: 6, medium: 12, hard: 20 }[M.level] || 12;
+    var coins = won ? base + (M.daily ? 8 : 0) + (M.rounds > 1 ? 6 : 0) : Math.max(2, Math.round(base * 0.3));
+    var points = won ? base * 4 + t[0] * 3 + (M.daily ? 25 : 0) : Math.round(base * 1.2) + t[0];
+    var title = won ? C.t('youWin') : draw ? C.t('drawEnd') : C.t('youLose');
+    if (won) {
+      C.achievements.unlock('kk-win');
+      if (M.level === 'hard' && !M.daily) C.achievements.unlock('kk-hard');
+    }
+    if (M.daily) {
+      var first = C.stats.daily('koikoi', M.daily, { label: title + ' · ' + C.num(t[0]) + '–' + C.num(t[1]), win: won });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    var daily = M.daily, lines = [{ label: C.t('yourPts'), value: C.num(t[0]) }, { label: C.t('botPts'), value: C.num(t[1]) }];
+    if (G.made.length) lines.push({ label: C.t('yakuList'), value: G.made.map(function (k) { return C.t(YKEY[k]); }).join(' · ') });
+    ctx.finish({
+      won: won,
+      title: title,
+      timeMs: ms, coins: coins, points: points,
+      lines: lines,
+      shareText: 'چوگان · کوی‌کوی' + (daily ? ('\nروزانه ' + daily) : '') + '\n' + title + ' ' + t[0] + '–' + t[1],
+      onAgain: daily ? null : function () { newMatch(null); }
+    });
+  }
+
+  /* ----------------------------------------------------------- dialogs */
+
+  function showSettings() {
+    var save1 = function () { ctx.store.set('prefs', prefs); };
+    var seg1 = C.ui.segmented(LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), prefs.level, function (v) { prefs.level = v; save1(); });
+    var seg2 = C.ui.segmented([1, 3].map(function (n) { return { value: n, label: C.num(n) }; }), prefs.rounds, function (v) { prefs.rounds = v; save1(); });
+    C.ui.modal({
+      title: C.t('settings'),
+      body: [el('div', { class: 'ch-list' }, [
+        el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('level') }), seg1]),
+        el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('rounds') }), seg2]),
+        C.cards.speedRow()
+      ]), el('p', { class: 'ch-dim', text: C.t('optNote') })],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  function askNew() {
+    if (document.querySelector('.ch-scrim')) return;
+    var dd = M ? M.daily : null;
+    var started = M && M.G.phase !== 'over' && (M.G.turns > 0 || M.round > 1 || M.G.phase !== 'play' || M.G.hands[0].length < E.PER);
+    if (!started) { newMatch(dd); return; }
+    C.ui.confirm({ title: C.t('newMatch'), body: C.t('resetWarn'), onOk: function () { newMatch(dd); } });
+  }
+
+  var YPTS = { goko: '10', shiko: '8', ameshiko: '7', sanko: '5', ino: '5', tane: '1+', akatan: '5', aotan: '5', tan: '1+', kasu: '1+', hanami: '5', tsukimi: '5' };
+  var YDESC = { goko: 'dGoko', shiko: 'dShiko', ameshiko: 'dAmeshiko', sanko: 'dSanko', ino: 'dIno', tane: 'dTane', akatan: 'dAkatan', aotan: 'dAotan', tan: 'dTan', kasu: 'dKasu', hanami: 'dHanami', tsukimi: 'dTsukimi' };
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('yakuList') }),
+        el('div', { class: 'ch-list kk-yaku' }, E.YAKU.map(function (k) {
+          return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label' }, [document.createTextNode(C.t(YKEY[k])), el('small', { text: C.t(YDESC[k]) })]),
+            el('span', { class: 'ch-badge', text: YPTS[k].replace(/\d+/g, function (d) { return C.num(+d); }) })]);
+        })),
+        el('p', { class: 'ch-dim', text: C.t('doubled') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← →', C.t('kbCards')), kb('Enter', C.t('kbPlay'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(tut()); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+
+  window.addEventListener('keydown', function (e) {
+    if (!human() || document.querySelector('.ch-scrim')) return;
+    var tg = e.target, tag = tg && tg.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter'))) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    // while choosing, the arrows walk the table cards that can be taken; otherwise the hand.
+    // Both are laid out left to right in every language, so the arrows are not flipped.
+    var ch = choices(), nodes = ch.length ? Array.prototype.slice.call(field.querySelectorAll('.kk-hit')) : handNodes, n = nodes.length;
+    if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && n) {
+      kf = kf < 0 ? 0 : (kf + (e.key === 'ArrowRight' ? 1 : n - 1)) % n;
+      if (ch.length) { nodes.forEach(function (x, i) { x.classList.toggle('kk-kf', i === kf); }); }
+      else render();
+      e.preventDefault(); return;
+    }
+    if (e.key === 'Enter' && kf >= 0 && nodes[kf]) {
+      var b = nodes[kf];
+      kf = -1;
+      if (ch.length) fieldTap(b._c); else handTap(b._c, b);
+      e.preventDefault();
+    }
+  });
+
+  function tut() {
+    // a card drawn inside the picture at x, y, 40 units wide
+    var card = function (c, x, y, rot, glow) {
+      return '<g transform="rotate(' + (rot || 0) + ' ' + (x + 20) + ' ' + (y + 30) + ')">' + (glow ? '<rect x="' + (x - 2) + '" y="' + (y - 2) + '" width="44" height="64" rx="5" fill="#C62100"/>' : '') +
+        cardSvg(c).replace('<svg ', '<svg x="' + x + '" y="' + y + '" width="40" height="60" ') + '</g>';
+    };
+    var pic = function (inner) { return '<svg viewBox="0 0 200 110" width="100%" direction="ltr" font-family="inherit">' + inner + '</svg>'; };
+    return [
+      { title: C.t('tutTitle1'), text: C.t('tutText1'), art: pic(card(26, 40, 30, -6, true) + card(24, 115, 22, 6, true)) },
+      { title: C.t('tutTitle2'), text: C.t('tutText2'), art: pic(card(E.CRANE, 10, 25) + card(E.BOAR, 58, 25) + card(5, 106, 25) + card(47, 154, 25)) },
+      { title: C.t('tutTitle3'), text: C.t('tutText3'), art: pic(card(E.CURTAIN, 50, 25, -8) + card(E.CUP, 110, 25, 8)) }
+    ];
+  }
+
+  /* ------------------------------------------------------------ save */
+
+  ctx.autosave(function () {
+    if (!M || !M.G || (M.G.phase === 'over' && M.round >= M.rounds)) return { inProgress: false };
+    var v = JSON.parse(JSON.stringify(M));
+    v.elapsed = (pausedAt || Date.now()) - M.startedAt;
+    return { m: v };
+  });
+  function save() { ctx.save(); }
+  C.onPause(function () { stopBot(); if (!pausedAt) pausedAt = Date.now(); });
+  C.onResume(function () { if (pausedAt && M) M.startedAt += Date.now() - pausedAt; pausedAt = 0; if (M && !hold) step(); });
+  // a turned phone changes the room for the hand: lay it out again
+  window.addEventListener('resize', function () { if (M) renderHand(); });
+
+  /* ------------------------------------------------------------ start */
+
+  var saved = ctx.loadSave();
+  var sv = saved && saved.m && saved.m.G && E.valid(saved.m.G) && saved.m.totals && saved.m.round >= 1 ? saved.m : null;
+  if (dailyDate) {
+    if (sv && sv.daily === dailyDate) resume(sv);
+    else newMatch(dailyDate);
+    if (C.stats.dailyDone('koikoi', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).koikoi;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (sv && !sv.daily) resume(sv);
+  else newMatch(null);
+  ctx.tutorialIfNew(tut());
+})();
+</script>
+</body>
+</html>

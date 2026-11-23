@@ -178,9 +178,13 @@ module.exports = function (T) {
       return [116 * f(Y) - 16, 500 * (f(X) - f(Y)), 200 * (f(Y) - f(Z))];
     };
     const dE = (a, b) => { const P2 = lab(a), Q2 = lab(b); return Math.hypot(P2[0] - Q2[0], P2[1] - Q2[1], P2[2] - Q2[2]); };
-    const near = gm ? others.map((g) => [g.id, dE(g.color, gm.color)]).sort((x, y) => x[1] - y[1])[0] : ['none', 0];
-    ok(!!gm && near[1] >= 15 && 1.05 / (lumC(gm.color) + 0.05) >= 4.5 && html.indexOf("accent: '" + gm.color + "'") > 0,
-      'the accent differs from every other game by ΔE ≥ 15 (nearest ' + near[0] + ', ' + near[1].toFixed(1) + '), keeps white text at 4.5:1 and matches the page');
+    // The owner's accent rule (2026-11-21): ΔE ≥ 15 within the game's own category and ≥ 8 against
+    // the rest. The old ≥ 15-against-all rule left almost no colour for a new game (Koi-Koi's red,
+    // a card game, sits 10.2 from Hex's).
+    const nearest = (pool) => gm && pool.length ? pool.map((g) => [g.id, dE(g.color, gm.color)]).sort((x, y) => x[1] - y[1])[0] : ['none', 0];
+    const nSame = nearest(others.filter((g) => gm && g.cat === gm.cat)), near = nearest(others);
+    ok(!!gm && nSame[1] >= 15 && near[1] >= 8 && 1.05 / (lumC(gm.color) + 0.05) >= 4.5 && html.indexOf("accent: '" + gm.color + "'") > 0,
+      'the accent differs by ΔE ≥ 15 from every ' + (gm && gm.cat) + ' game (nearest ' + nSame[0] + ', ' + (nSame[1] || 0).toFixed(1) + ') and ≥ 8 from all others (nearest ' + near[0] + ', ' + (near[1] || 0).toFixed(1) + '), keeps white text at 4.5:1 and matches the page');
     // the two sides' stones must read on the empty cell in both themes
     const ratio = (a, b) => { const x = lumC(a), y = lumC(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
     const tok = (k) => [...html.matchAll(new RegExp('--hx-' + k + ': (#[0-9A-Fa-f]{6})', 'g'))].map((m) => m[1]);

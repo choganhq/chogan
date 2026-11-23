@@ -1,0 +1,1267 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>زنبورستان — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  /* Cream and dark tiles in both themes, as on a real table; only their edges and the
+     highlight change, so a dark tile still shows on the dark page */
+  :root { --ap-w: #F6EBD3; --ap-w-edge: #BFA77B; --ap-k: #3B302A; --ap-k-edge: #1A1410; --ap-ink-w: #3A2A1C; --ap-ink-k: #F4E9D2;
+    --ap-grid: rgba(120, 90, 40, .16); --ap-hi: #A66400; --ap-cur: #3A2A1C; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --ap-w-edge: #8E7A55; --ap-k: #221B17; --ap-k-edge: #7A6A58; --ap-grid: rgba(240, 210, 150, .13); --ap-hi: #F0A848; --ap-cur: #F4E9D2; }
+  }
+  :root[data-theme="dark"] { --ap-w-edge: #8E7A55; --ap-k: #221B17; --ap-k-edge: #7A6A58; --ap-grid: rgba(240, 210, 150, .13); --ap-hi: #F0A848; --ap-cur: #F4E9D2; }
+  .ap-wrap > .ch-fit { --fit-ar: .9; }
+  @container game (min-aspect-ratio: 5 / 4) { .ap-wrap > .ch-fit { --fit-ar: 1.35; } }
+  .ch-nocq .ch-gamemain.ch-wide .ap-wrap > .ch-fit { --fit-ar: 1.35; }
+  .ch-fit > .ap-box { position: relative; aspect-ratio: var(--fit-ar); }
+  /* a canvas does not stretch to its offsets alone (#919), so it gets a size too */
+  .ap-canvas { position: absolute; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: pointer; }
+  .ap-zoom { position: absolute; bottom: 4px; inset-inline-end: 4px; display: flex; flex-direction: column; gap: 4px; }
+  .ap-zoom .ch-iconbtn { background: var(--c-surface); box-shadow: var(--sh-1); width: 36px; height: 36px; }
+  .ap-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .ap-sides { width: 100%; max-width: 520px; display: flex; flex-direction: column; gap: var(--s-2); }
+  /* wrap: in a landscape phone the side column is ~280px and a one-line tray cut off the last insect and the names */
+  .ap-side { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; background: var(--c-surface); border-radius: var(--r-md);
+    padding: 5px 8px; box-shadow: var(--sh-1); border: 2px solid transparent; min-height: 52px;
+    transition: border-color var(--t-mid) var(--ease); }
+  .ap-side--on { border-color: var(--game); box-shadow: var(--sh-2); }
+  /* an outlined hexagon: the dark side's plain swatch vanished on the dark theme's card */
+  .ap-side__dot { position: relative; width: 18px; height: 20px; flex: 0 0 18px; background: var(--c-text-dim); }
+  .ap-side__dot, .ap-side__dot span { clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); }
+  .ap-side__dot span { position: absolute; top: 1.5px; right: 1.5px; bottom: 1.5px; left: 1.5px; }
+  .ap-side__text { flex: 1 1 80px; min-width: 0; display: flex; flex-direction: column; }
+  .ap-side__name { min-width: 0; font-weight: 700; font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ap-side__sub { font-size: var(--fs-xs); color: var(--c-text-dim); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ap-tray { display: flex; gap: 3px; flex: 0 0 auto; margin-inline-start: auto; }
+  /* a landscape phone has ~317px under the bar: with the tray wrapped, two-line names pushed the status out of sight */
+  @media (max-height: 480px) {
+    .ap-side__text { flex-direction: row; align-items: baseline; gap: 8px; }
+    .ap-side { min-height: 0; padding: 3px 8px; }
+  }
+  .ap-pc { position: relative; width: 38px; height: 42px; border-radius: 10px; border: 2px solid transparent; background: transparent;
+    padding: 0; display: grid; place-items: center; cursor: pointer; color: inherit; }
+  .ap-pc canvas { width: 32px; height: 32px; pointer-events: none; }
+  .ap-pc__n { position: absolute; bottom: -1px; inset-inline-end: -1px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px;
+    background: var(--c-text); color: var(--c-bg); font-size: 11px; font-weight: 800; line-height: 16px; text-align: center; pointer-events: none; }
+  .ap-pc--none { opacity: .25; }
+  .ap-pc--sel { border-color: var(--game); background: var(--c-surface-2); }
+  .ap-thinking .ap-side__name { animation: ap-blink 900ms infinite; }
+  @keyframes ap-blink { 50% { opacity: .55; } }
+  /* the hints change in this row, so it keeps its height and the board above never moves
+     between two taps */
+  .ap-status { min-height: 48px; display: flex; align-items: center; justify-content: center; gap: var(--s-2); flex-wrap: wrap;
+    font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function ApiaryEngineFactory() {
+  'use strict';
+
+  // There is no board: the pieces themselves are the hive. A cell is an axial hex
+  // coordinate (q, r) packed into one number, key = (q + OFF) * W + (r + OFF), so a
+  // neighbour is a fixed offset away. With 22 pieces nothing can get further than 22
+  // cells from the first one, well inside the 64 × 64 window.
+  var LEVELS = ['easy', 'medium', 'hard'];
+  var QUEEN = 0, BEETLE = 1, HOPPER = 2, SPIDER = 3, ANT = 4;
+  var START = [1, 2, 3, 2, 3];
+  var W = 64, OFF = 32, ORIGIN = OFF * W + OFF;
+  // in turning order, so directions i - 1 and i + 1 are the two cells that a step in
+  // direction i squeezes between (the gate of the sliding rule)
+  var DQ = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+  var D = DQ.map(function (d) { return d[0] * W + d[1]; });
+  // a game that goes on this many plies without a surrounded queen is drawn, so two
+  // careful bots (or two careful people) cannot circle for ever
+  var CAP = 240;
+
+  function qr(k) { return [Math.floor(k / W) - OFF, k % W - OFF]; }
+  function key(q, r) { return (q + OFF) * W + (r + OFF); }
+  function inWindow(k) { var q = Math.floor(k / W), r = k % W; return q > 0 && q < W - 1 && r > 0 && r < W - 1; }
+  function sideOf(c) { return c >> 3; }
+  function typeOf(c) { return c & 7; }
+
+  function newGame() {
+    return { st: {}, hand: [START.slice(), START.slice()], turn: 0, plies: 0, winner: -1, last: null };
+  }
+  function clone(S) {
+    var st = {};
+    for (var k in S.st) st[k] = S.st[k].slice();
+    return { st: st, hand: [S.hand[0].slice(), S.hand[1].slice()], turn: S.turn, plies: S.plies, winner: S.winner,
+      last: S.last ? { from: S.last.from, to: S.last.to } : null };
+  }
+
+  function height(S, k) { var s = S.st[k]; return s ? s.length : 0; }
+  function top(S, k) { var s = S.st[k]; return s ? s[s.length - 1] : -1; }
+  function cells(S) { return Object.keys(S.st).map(Number); }
+  function placed(S, t) { var h = S.hand[t]; return 11 - h[0] - h[1] - h[2] - h[3] - h[4]; }
+  // the queen must be in by a side's fourth piece
+  function mustQueen(S, t) { return S.hand[t][QUEEN] === 1 && placed(S, t) === 3; }
+
+  function queenAt(S, t) {
+    var code = t * 8 + QUEEN;
+    for (var k in S.st) if (S.st[k].indexOf(code) >= 0) return +k;
+    return -1;
+  }
+  // occupied cells around a side's queen, 6 means surrounded
+  function around(S, t) {
+    var k = queenAt(S, t), n = 0;
+    if (k < 0) return 0;
+    for (var i = 0; i < 6; i++) if (S.st[k + D[i]]) n++;
+    return n;
+  }
+
+  // Cells whose piece holds the hive together: lifting it would split the rest in two.
+  // Tarjan's articulation points over the occupied cells.
+  function pinnedSet(S) {
+    var occ = cells(S), idx = {}, n = occ.length, out = {};
+    if (n < 3) return out;
+    occ.forEach(function (k, i) { idx[k] = i; });
+    var disc = new Int16Array(n).fill(-1), low = new Int16Array(n), time = 0;
+    function dfs(u, parent) {
+      disc[u] = low[u] = time++;
+      var kids = 0, k = occ[u];
+      for (var i = 0; i < 6; i++) {
+        var v = idx[k + D[i]];
+        if (v === undefined) continue;
+        if (disc[v] < 0) {
+          kids++;
+          dfs(v, u);
+          if (low[v] < low[u]) low[u] = low[v];
+          if (parent >= 0 && low[v] >= disc[u]) out[k] = true;
+        } else if (v !== parent && disc[v] < low[u]) low[u] = disc[v];
+      }
+      if (parent < 0 && kids > 1) out[k] = true;
+    }
+    dfs(0, -1);
+    return out;
+  }
+  function connected(S) {
+    var occ = cells(S);
+    if (occ.length < 2) return true;
+    var seen = {}, q = [occ[0]];
+    seen[occ[0]] = 1;
+    for (var h = 0; h < q.length; h++) for (var i = 0; i < 6; i++) {
+      var n = q[h] + D[i];
+      if (S.st[n] && !seen[n]) { seen[n] = 1; q.push(n); }
+    }
+    return q.length === occ.length;
+  }
+
+  // Empty cells where side t may put a new piece: touching its own pieces and none of
+  // the other side's (only the top of a stack counts). The first two pieces of a game
+  // are the exception: the first goes anywhere, the second just touches it.
+  function placeCells(S, t) {
+    var occ = cells(S);
+    if (!occ.length) return [ORIGIN];
+    if (occ.length === 1) return D.map(function (d) { return occ[0] + d; });
+    var out = [], seen = {};
+    occ.forEach(function (k) {
+      for (var i = 0; i < 6; i++) {
+        var c = k + D[i];
+        if (S.st[c] || seen[c]) continue;
+        seen[c] = 1;
+        var mine = false, theirs = false;
+        for (var j = 0; j < 6; j++) {
+          var tp = top(S, c + D[j]);
+          if (tp < 0) continue;
+          if (sideOf(tp) === t) mine = true; else theirs = true;
+        }
+        if (mine && !theirs) out.push(c);
+      }
+    });
+    return out;
+  }
+  function placements(S, t) {
+    var h = S.hand[t], out = [];
+    var types = mustQueen(S, t) ? [QUEEN] : [0, 1, 2, 3, 4].filter(function (y) { return h[y] > 0; });
+    if (!types.length) return out;
+    var where = placeCells(S, t);
+    types.forEach(function (y) { where.forEach(function (c) { out.push([0, y, c]); }); });
+    return out;
+  }
+
+  // A ground step from a in direction i: the target is empty, and of the two cells the
+  // piece passes between exactly one is taken. Both taken is a gate too narrow to slide
+  // through; neither taken means the piece would leave the hive on its way.
+  function slides(S, a, i) {
+    if (S.st[a + D[i]]) return false;
+    var g1 = !!S.st[a + D[(i + 5) % 6]], g2 = !!S.st[a + D[(i + 1) % 6]];
+    return g1 !== g2;
+  }
+  function antDests(S, a) {
+    var seen = {}, q = [a], out = [];
+    seen[a] = 1;
+    for (var h = 0; h < q.length; h++) for (var i = 0; i < 6; i++) {
+      var b = q[h] + D[i];
+      if (seen[b] || !slides(S, q[h], i)) continue;
+      seen[b] = 1; q.push(b); out.push(b);
+    }
+    return out;
+  }
+  // exactly three steps, never back onto a cell already walked
+  function spiderDests(S, a) {
+    var out = [], got = {};
+    (function walk(c, depth, path) {
+      if (depth === 3) { if (!got[c]) { got[c] = 1; out.push(c); } return; }
+      for (var i = 0; i < 6; i++) {
+        var b = c + D[i];
+        if (path.indexOf(b) >= 0 || !slides(S, c, i)) continue;
+        path.push(b); walk(b, depth + 1, path); path.pop();
+      }
+    })(a, 0, [a]);
+    return out;
+  }
+  function hopperDests(S, a) {
+    var out = [];
+    for (var i = 0; i < 6; i++) {
+      var b = a + D[i];
+      if (!S.st[b]) continue;
+      while (S.st[b]) b += D[i];
+      out.push(b);
+    }
+    return out;
+  }
+  // A beetle may climb on and off the hive. Its gate is the two shared neighbours'
+  // heights: it cannot pass when both are higher than where it starts and where it lands.
+  function beetleDests(S, a) {
+    var out = [], hs = height(S, a);
+    for (var i = 0; i < 6; i++) {
+      var b = a + D[i], hd = height(S, b);
+      var h1 = height(S, a + D[(i + 5) % 6]), h2 = height(S, a + D[(i + 1) % 6]);
+      if (Math.min(h1, h2) > Math.max(hs, hd)) continue;
+      if (hs === 0 && hd === 0 && !h1 && !h2) continue;
+      out.push(b);
+    }
+    return out;
+  }
+  function queenDests(S, a) {
+    var out = [];
+    for (var i = 0; i < 6; i++) if (slides(S, a, i)) out.push(a + D[i]);
+    return out;
+  }
+  var DESTS = [queenDests, beetleDests, hopperDests, spiderDests, antDests];
+
+  // Where the piece on top of cell a can go. It is lifted while its targets are found,
+  // so it never counts as its own support.
+  function destsFrom(S, a) {
+    var s = S.st[a], code = s.pop();
+    if (!s.length) delete S.st[a];
+    var out = DESTS[typeOf(code)](S, a);
+    if (!S.st[a]) S.st[a] = s;
+    s.push(code);
+    return out;
+  }
+  function movements(S, t, pins) {
+    var out = [];
+    if (S.hand[t][QUEEN] === 1) return out;
+    pins = pins || pinnedSet(S);
+    cells(S).forEach(function (a) {
+      var c = top(S, a);
+      if (sideOf(c) !== t) return;
+      if (height(S, a) === 1 && pins[a]) return;
+      destsFrom(S, a).forEach(function (b) { out.push([1, a, b]); });
+    });
+    return out;
+  }
+  // every legal move of the side to play; a side with none passes
+  function moves(S) {
+    if (S.winner >= 0) return [];
+    var t = S.turn, out = placements(S, t).concat(movements(S, t));
+    return out.length ? out : [[2, 0, 0]];
+  }
+  function same(a, b) { return a[0] === b[0] && a[1] === b[1] && a[2] === b[2]; }
+  function legal(S, m) {
+    if (!m || S.winner >= 0) return false;
+    var ms = moves(S);
+    for (var i = 0; i < ms.length; i++) if (same(ms[i], m)) return true;
+    return false;
+  }
+
+  function apply(S, m) {
+    var t = S.turn;
+    if (m[0] === 0) {
+      (S.st[m[2]] || (S.st[m[2]] = [])).push(t * 8 + m[1]);
+      S.hand[t][m[1]]--;
+      S.last = { from: -1, to: m[2] };
+    } else if (m[0] === 1) {
+      var s = S.st[m[1]], code = s.pop();
+      if (!s.length) delete S.st[m[1]];
+      (S.st[m[2]] || (S.st[m[2]] = [])).push(code);
+      S.last = { from: m[1], to: m[2] };
+    } else S.last = null;
+    S.plies++;
+    S.turn = 1 - t;
+    var dead0 = around(S, 0) === 6, dead1 = around(S, 1) === 6;
+    if (dead0 && dead1) S.winner = 2;
+    else if (dead0) S.winner = 1;
+    else if (dead1) S.winner = 0;
+    else if (S.plies >= CAP) S.winner = 2;
+    return S;
+  }
+  function play(S, m) {
+    if (!legal(S, m)) return false;
+    apply(S, m);
+    return true;
+  }
+
+  /* --------------------------------------------------------------- bot */
+
+  // How cramped a queen is, by the number of taken cells around her: each extra one
+  // costs more than the last, because the last two are the ones that end the game
+  var CRAMP = [0, 2, 6, 13, 24, 42, 0];
+  // what a piece that can still move is worth: an ant goes anywhere, a spider not far
+  var FREE = [1, 3, 2, 1.5, 4];
+  function evaluate(S, t) {
+    if (S.winner >= 0) return S.winner === 2 ? 0 : S.winner === t ? 100000 : -100000;
+    var v = CRAMP[around(S, 1 - t)] - 1.15 * CRAMP[around(S, t)];
+    var pins = pinnedSet(S), qk = [queenAt(S, 0), queenAt(S, 1)];
+    for (var k in S.st) {
+      var s = S.st[k], c = s[s.length - 1], side = sideOf(c), y = typeOf(c), sign = side === t ? 1 : -1;
+      if (s.length > 1 || !pins[k]) v += sign * FREE[y] * 0.7;
+      if (y === BEETLE && s.length > 1) {
+        v += sign * 2;
+        // a beetle on the other queen keeps her from moving and covers a cell next to her
+        if (+k === qk[1 - side]) v += sign * 9;
+      }
+    }
+    for (var x = 0; x < 2; x++) {
+      var sg = x === t ? 1 : -1, h = S.hand[x];
+      v += sg * 0.25 * (h[1] + h[2] + h[3] + h[4]);
+      if (h[QUEEN] === 1 && placed(S, x) >= 2) v -= sg * 3;
+    }
+    return v;
+  }
+  function after(S, m) { return apply(clone(S), m); }
+
+  // easy: the best-looking move by a wide, noisy margin, now and then any move at all;
+  // medium: the best move one ply ahead, avoiding replies that win at once;
+  // hard: two plies, its best few moves against every reply, within a time budget
+  function think(S, level, rnd, budgetMs) {
+    rnd = rnd || Math.random;
+    var t = S.turn, ms = moves(S);
+    if (ms.length === 1) return ms[0];
+    var rated = ms.map(function (m) { var n = after(S, m); return { m: m, n: n, v: evaluate(n, t) }; });
+    for (var w = 0; w < rated.length; w++) if (rated[w].n.winner === t) return rated[w].m;
+    if (level === 'easy') {
+      if (rnd() < 0.25) return ms[Math.floor(rnd() * ms.length)];
+      var be = null, bv = -Infinity;
+      rated.forEach(function (x) { var v = x.v + rnd() * 18; if (v > bv) { bv = v; be = x.m; } });
+      return be;
+    }
+    rated.sort(function (a, b) { return b.v - a.v; });
+    var wide = level === 'hard', keep = wide ? 14 : 8, t0 = Date.now(), budget = budgetMs || (wide ? 450 : 200);
+    var best = rated[0].m, bestV = -Infinity;
+    for (var i = 0; i < rated.length && i < keep; i++) {
+      if (i > 0 && Date.now() - t0 > budget) break;
+      var x = rated[i], replies = moves(x.n), worst = Infinity;
+      for (var j = 0; j < replies.length; j++) {
+        var r = after(x.n, replies[j]);
+        var v = wide ? evaluate(r, t) : (r.winner === 1 - t ? -100000 : x.v);
+        if (v < worst) worst = v;
+        if (worst <= bestV) break;
+      }
+      if (worst === Infinity) worst = x.v;
+      worst += rnd() * (wide ? 0.4 : 3);
+      if (worst > bestV) { bestV = worst; best = x.m; }
+    }
+    return best;
+  }
+
+  // The daily game opens the same way for everyone: a piece of each side, never a queen
+  function dailyOpening(rnd) {
+    var a = 1 + Math.floor(rnd() * 4), b = 1 + Math.floor(rnd() * 4), d = Math.floor(rnd() * 6);
+    return [[0, a, ORIGIN], [0, b, ORIGIN + D[d]]];
+  }
+
+  function valid(S) {
+    if (!S || typeof S !== 'object' || !S.st || typeof S.st !== 'object') return false;
+    if (!Array.isArray(S.hand) || S.hand.length !== 2) return false;
+    if ((S.turn !== 0 && S.turn !== 1) || !(S.plies >= 0 && S.plies < CAP && S.plies % 1 === 0)) return false;
+    if ([-1, 0, 1, 2].indexOf(S.winner) < 0) return false;
+    var count = [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]];
+    for (var x = 0; x < 2; x++) {
+      if (!Array.isArray(S.hand[x]) || S.hand[x].length !== 5) return false;
+      for (var y = 0; y < 5; y++) { var h = S.hand[x][y]; if (!(h >= 0 && h <= START[y] && h % 1 === 0)) return false; count[x][y] += h; }
+    }
+    for (var k in S.st) {
+      var s = S.st[k];
+      if (!/^\d+$/.test(k) || !inWindow(+k) || !Array.isArray(s) || !s.length) return false;
+      for (var i = 0; i < s.length; i++) {
+        var c = s[i];
+        if (typeof c !== 'number' || c < 0 || c > 12 || c % 1 || typeOf(c) > 4) return false;
+        // only beetles climb
+        if (i > 0 && typeOf(c) !== BEETLE) return false;
+        count[sideOf(c)][typeOf(c)]++;
+      }
+    }
+    for (var x2 = 0; x2 < 2; x2++) {
+      for (var y2 = 0; y2 < 5; y2++) if (count[x2][y2] !== START[y2]) return false;
+      if (S.hand[x2][QUEEN] === 1 && placed(S, x2) > 3) return false;
+    }
+    if (S.plies < placed(S, 0) + placed(S, 1)) return false;
+    if (S.last !== null && S.last !== undefined && (typeof S.last !== 'object' || !S.st[S.last.to])) return false;
+    return connected(S);
+  }
+
+  return { LEVELS: LEVELS, QUEEN: QUEEN, BEETLE: BEETLE, HOPPER: HOPPER, SPIDER: SPIDER, ANT: ANT, START: START, W: W, ORIGIN: ORIGIN,
+    D: D, DQ: DQ, CAP: CAP, qr: qr, key: key, sideOf: sideOf, typeOf: typeOf, newGame: newGame, clone: clone, height: height, top: top,
+    cells: cells, placed: placed, mustQueen: mustQueen, queenAt: queenAt, around: around, pinnedSet: pinnedSet, connected: connected,
+    placeCells: placeCells, placements: placements, slides: slides, destsFrom: destsFrom, movements: movements, moves: moves,
+    legal: legal, apply: apply, play: play, evaluate: evaluate, think: think, dailyOpening: dailyOpening, valid: valid };
+}
+if (typeof module !== 'undefined') module.exports = ApiaryEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = ApiaryEngineFactory(), SQ3 = Math.sqrt(3);
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'apiary',
+    name: { fa: 'زنبورستان', en: 'Apiary', zh: '蜂场', de: 'Bienenstand', es: 'Colmenar', pl: 'Pasieka', fr: 'Rucher', ar: 'المنحل', hi: 'मधुवाटिका', ru: 'Пасека' },
+    accent: '#A66400',
+    mood: 'sudoku',
+    strings: {
+      fa: {
+        board: 'کندوی زنبورستان', vsBot: 'مقابل ربات', two: 'دو نفره', bot: 'ربات', playerN: 'بازیکن {n}', modeT: 'بازیکن‌ها', levelT: 'سطح ربات',
+        newMatch: 'بازی تازه', begin: 'شروع', undoMove: 'برگرداندن حرکت', endWarn: 'بازی فعلی تمام می‌شود. ادامه؟', settingsT: 'بازی تازه',
+        yourMove: 'یک مهره از سینی یا روی صفحه انتخاب کن', pickDest: 'روی یکی از خانه‌های روشن بزن', qMust: 'مهره‌ی چهارم: حالا باید ملکه را بگذاری',
+        turnOf: 'نوبت {n}', thinking: 'ربات فکر می‌کند…', dailyAp: 'زنبورستان روزانه', vsMedium: 'مقابل ربات متوسط', playerWon: '{n} برد', drawT: 'مساوی',
+        qHand: 'ملکه هنوز در سینی', passed: '{n}: حرکتی نیست، نوبت رد شد',
+        pinned: 'با برداشتن این مهره کندو دو تکه می‌شود', noQueen: 'اول ملکه را بگذار، بعد حرکت کن', stuck: 'این مهره جایی برای رفتن ندارد', covered: 'یک سوسک روی این مهره نشسته',
+        pQ: 'ملکه', pB: 'سوسک', pG: 'ملخ', pS: 'عنکبوت', pA: 'مورچه',
+        zoomIn: 'بزرگ‌نمایی', zoomOut: 'کوچک‌نمایی', fitBoard: 'دیدن همه‌ی کندو', turnsL: 'نوبت‌ها',
+        rules: 'هر بازیکن یازده مهره دارد: یک ملکه، دو سوسک، سه ملخ، دو عنکبوت و سه مورچه. در هر نوبت یا مهره‌ای از سینی‌ات می‌گذاری یا یکی از مهره‌هایت را جابه‌جا می‌کنی. صفحه‌ای در کار نیست: خود مهره‌ها کندو را می‌سازند و کندو هیچ‌وقت نباید دو تکه شود. مهره‌ی تازه باید به مهره‌های خودت بچسبد و به هیچ مهره‌ی حریف نه (دو مهره‌ی اول بازی فقط به هم می‌چسبند). ملکه باید تا مهره‌ی چهارمت گذاشته شود و تا او نیامده هیچ مهره‌ای حرکت نمی‌کند. ملکه یک خانه می‌رود. سوسک یک خانه می‌رود و می‌تواند روی کندو بالا برود؛ مهره‌ی زیر او تکان نمی‌خورد. ملخ در خط راست از روی یک یا چند مهره تا اولین خانه‌ی خالی می‌پرد. عنکبوت درست سه خانه می‌لغزد و مورچه هر چقدر بخواهد. مهره‌ای که می‌لغزد از تنگه‌ای که دو طرفش پر است رد نمی‌شود. ملکه‌ی حریف را از هر شش طرف محاصره کن تا ببری؛ اگر هر دو ملکه با هم محاصره شوند، بازی مساوی است. کسی که حرکت مجاز ندارد، نوبتش رد می‌شود.',
+        kCursor: 'جابه‌جایی بین خانه‌ها', kGo: 'انتخاب یا بازی روی خانه', kPick: 'انتخاب مهره از سینی', kEsc: 'لغو انتخاب', kZoom: 'بزرگ‌نمایی و کوچک‌نمایی',
+        tutTitle1: 'ملکه را محاصره کن', tutText1: 'ملکه‌ی حریف را از هر شش طرف محاصره کن. مهره‌های هر دو طرف حساب می‌شوند.',
+        tutTitle2: 'پنج جور حشره', tutText2: 'ملکه و سوسک یک خانه می‌روند، ملخ می‌پرد، عنکبوت سه خانه می‌لغزد و مورچه هر جا که بخواهد.',
+        tutTitle3: 'یک کندو', tutText3: 'کندو هیچ‌وقت نباید دو تکه شود، حتی وسط حرکت. مهره‌ای که کندو را نگه داشته، تکان نمی‌خورد.'
+      },
+      en: {
+        board: 'Apiary hive', vsBot: 'Against the bot', two: 'Two players', bot: 'Bot', playerN: 'Player {n}', modeT: 'Players', levelT: 'Bot level',
+        newMatch: 'New game', begin: 'Start', undoMove: 'Undo move', endWarn: 'This ends the current game. Continue?', settingsT: 'New game',
+        yourMove: 'Pick a piece in your tray or on the board', pickDest: 'Tap a highlighted cell', qMust: 'Fourth piece: your queen must go in now',
+        turnOf: '{n}’s turn', thinking: 'The bot is thinking…', dailyAp: 'Daily Apiary', vsMedium: 'against the medium bot', playerWon: '{n} wins', drawT: 'Draw',
+        qHand: 'Queen still in hand', passed: '{n}: no move, turn passed',
+        pinned: 'Lifting this piece would split the hive', noQueen: 'Place your queen before you move', stuck: 'This piece has nowhere to go', covered: 'A beetle is sitting on this piece',
+        pQ: 'Queen', pB: 'Beetle', pG: 'Grasshopper', pS: 'Spider', pA: 'Ant',
+        zoomIn: 'Zoom in', zoomOut: 'Zoom out', fitBoard: 'Show the whole hive', turnsL: 'Turns',
+        rules: 'Each player has eleven pieces: a queen, two beetles, three grasshoppers, two spiders and three ants. On your turn you either place a piece from your tray or move one of yours. There is no board: the pieces themselves form the hive, and it must never split in two. A new piece must touch your own pieces and none of your opponent’s (the first two pieces of the game just touch each other). Your queen must be in by your fourth piece, and nothing moves before she is. The queen steps one cell. The beetle steps one cell and may climb onto the hive; a piece under it cannot move. The grasshopper jumps in a straight line over one or more pieces to the first empty cell. The spider slides exactly three cells, the ant as far as it likes. A sliding piece cannot squeeze through a gap with pieces on both sides. Surround the other queen on all six sides to win; if both queens are surrounded at once, it is a draw. A player with no legal move passes.',
+        kCursor: 'Move between cells', kGo: 'Pick or play on the cell', kPick: 'Pick a piece from your tray', kEsc: 'Cancel the selection', kZoom: 'Zoom in and out',
+        tutTitle1: 'Surround the queen', tutText1: 'Surround the other queen on all six sides. Pieces of both colours count.',
+        tutTitle2: 'Five kinds of insect', tutText2: 'Queen and beetle step one cell, the grasshopper jumps, the spider slides three cells and the ant anywhere.',
+        tutTitle3: 'One hive', tutText3: 'The hive must never split, not even halfway through a move. A piece that holds it together cannot move.'
+      },
+      pl: {
+        board: 'Ul pasieki', vsBot: 'Przeciwko botowi', two: 'Dwóch graczy', bot: 'Bot', playerN: 'Gracz {n}', modeT: 'Gracze', levelT: 'Poziom bota',
+        newMatch: 'Nowa gra', begin: 'Start', undoMove: 'Cofnij ruch', endWarn: 'To zakończy bieżącą grę. Kontynuować?', settingsT: 'Nowa gra',
+        yourMove: 'Wybierz element z tacki lub z planszy', pickDest: 'Dotknij podświetlonego pola', qMust: 'Czwarty element: teraz musi wejść królowa',
+        turnOf: 'Ruch: {n}', thinking: 'Bot myśli…', dailyAp: 'Codzienna Pasieka', vsMedium: 'przeciwko botowi na średnim poziomie', playerWon: '{n} wygrywa', drawT: 'Remis',
+        qHand: 'Królowa jeszcze na tacce', passed: '{n}: brak ruchu, kolejka przechodzi',
+        pinned: 'Zdjęcie tego elementu rozdzieliłoby ul', noQueen: 'Najpierw wystaw królową, potem się ruszaj', stuck: 'Ten element nie ma dokąd pójść', covered: 'Na tym elemencie siedzi żuk',
+        pQ: 'Królowa', pB: 'Żuk', pG: 'Konik polny', pS: 'Pająk', pA: 'Mrówka',
+        zoomIn: 'Powiększ', zoomOut: 'Pomniejsz', fitBoard: 'Pokaż cały ul', turnsL: 'Tury',
+        rules: 'Każdy gracz ma jedenaście elementów: królową, dwa żuki, trzy koniki polne, dwa pająki i trzy mrówki. W swojej turze wystawiasz element z tacki albo przesuwasz jeden ze swoich. Nie ma planszy: same elementy tworzą ul, który nigdy nie może się rozdzielić. Nowy element musi dotykać twoich elementów i żadnego elementu rywala (dwa pierwsze elementy gry po prostu się stykają). Królowa musi wejść najpóźniej jako twój czwarty element i nic się nie rusza, zanim wejdzie. Królowa idzie o jedno pole. Żuk idzie o jedno pole i może wejść na ul; element pod nim nie może się ruszać. Konik polny skacze w linii prostej nad jednym lub kilkoma elementami na pierwsze wolne pole. Pająk przesuwa się o dokładnie trzy pola, mrówka dowolnie daleko. Przesuwany element nie przeciśnie się przez szczelinę zajętą z obu stron. Otocz królową rywala ze wszystkich sześciu stron, aby wygrać; gdy obie królowe zostaną otoczone naraz, jest remis. Gracz bez dozwolonego ruchu pasuje.',
+        kCursor: 'Ruch między polami', kGo: 'Wybierz lub zagraj na polu', kPick: 'Wybierz element z tacki', kEsc: 'Anuluj wybór', kZoom: 'Powiększ i pomniejsz',
+        tutTitle1: 'Otocz królową', tutText1: 'Otocz królową rywala ze wszystkich sześciu stron. Liczą się elementy obu kolorów.',
+        tutTitle2: 'Pięć rodzajów owadów', tutText2: 'Królowa i żuk idą o jedno pole, konik skacze, pająk przesuwa się o trzy pola, a mrówka dokądkolwiek.',
+        tutTitle3: 'Jeden ul', tutText3: 'Ul nigdy nie może się rozdzielić, nawet w trakcie ruchu. Element, który go spaja, nie może się ruszyć.'
+      },
+      fr: {
+        board: 'Ruche du rucher', vsBot: 'Contre le robot', two: 'Deux joueurs', bot: 'Robot', playerN: 'Joueur {n}', modeT: 'Joueurs', levelT: 'Niveau du robot',
+        newMatch: 'Nouvelle partie', begin: 'Commencer', undoMove: 'Annuler le coup', endWarn: 'Cela met fin à la partie en cours. Continuer ?', settingsT: 'Nouvelle partie',
+        yourMove: 'Choisis une pièce dans ta réserve ou sur le plateau', pickDest: 'Touche une case en surbrillance', qMust: 'Quatrième pièce : ta reine doit entrer maintenant',
+        turnOf: 'Au tour de {n}', thinking: 'Le robot réfléchit…', dailyAp: 'Rucher du jour', vsMedium: 'contre le robot moyen', playerWon: '{n} gagne', drawT: 'Égalité',
+        qHand: 'Reine encore en réserve', passed: '{n} : aucun coup, le tour passe',
+        pinned: 'Retirer cette pièce couperait la ruche en deux', noQueen: 'Pose ta reine avant de déplacer', stuck: 'Cette pièce ne peut aller nulle part', covered: 'Un scarabée est posé sur cette pièce',
+        pQ: 'Reine', pB: 'Scarabée', pG: 'Sauterelle', pS: 'Araignée', pA: 'Fourmi',
+        zoomIn: 'Zoomer', zoomOut: 'Dézoomer', fitBoard: 'Voir toute la ruche', turnsL: 'Tours',
+        rules: 'Chaque joueur a onze pièces : une reine, deux scarabées, trois sauterelles, deux araignées et trois fourmis. À ton tour, tu poses une pièce de ta réserve ou tu déplaces l’une des tiennes. Il n’y a pas de plateau : les pièces forment elles-mêmes la ruche, qui ne doit jamais se couper en deux. Une nouvelle pièce doit toucher tes pièces et aucune pièce adverse (les deux premières pièces de la partie se touchent simplement). Ta reine doit entrer au plus tard avec ta quatrième pièce, et rien ne bouge avant elle. La reine avance d’une case. Le scarabée avance d’une case et peut monter sur la ruche ; une pièce sous lui ne peut pas bouger. La sauterelle saute en ligne droite par-dessus une ou plusieurs pièces jusqu’à la première case vide. L’araignée glisse d’exactement trois cases, la fourmi aussi loin qu’elle veut. Une pièce qui glisse ne passe pas entre deux pièces qui la serrent des deux côtés. Entoure la reine adverse sur ses six côtés pour gagner ; si les deux reines sont entourées en même temps, c’est une égalité. Un joueur sans coup légal passe.',
+        kCursor: 'Passer d’une case à l’autre', kGo: 'Choisir ou jouer sur la case', kPick: 'Choisir une pièce de la réserve', kEsc: 'Annuler la sélection', kZoom: 'Zoomer et dézoomer',
+        tutTitle1: 'Entoure la reine', tutText1: 'Entoure la reine adverse sur ses six côtés. Les pièces des deux couleurs comptent.',
+        tutTitle2: 'Cinq sortes d’insectes', tutText2: 'La reine et le scarabée avancent d’une case, la sauterelle saute, l’araignée glisse de trois cases et la fourmi n’importe où.',
+        tutTitle3: 'Une seule ruche', tutText3: 'La ruche ne doit jamais se couper, même pendant un déplacement. Une pièce qui la tient ensemble ne peut pas bouger.'
+      },
+      ar: {
+        board: 'خلية المنحل', vsBot: 'ضد الروبوت', two: 'لاعبان', bot: 'الروبوت', playerN: 'اللاعب {n}', modeT: 'اللاعبون', levelT: 'مستوى الروبوت',
+        newMatch: 'لعبة جديدة', begin: 'ابدأ', undoMove: 'تراجع', endWarn: 'سينهي هذا اللعبة الحالية. هل تتابع؟', settingsT: 'لعبة جديدة',
+        yourMove: 'اختر قطعة من صينيتك أو من اللوح', pickDest: 'انقر خانة مضيئة', qMust: 'القطعة الرابعة: يجب أن تدخل الملكة الآن',
+        turnOf: 'دور {n}', thinking: 'الروبوت يفكر…', dailyAp: 'المنحل اليومي', vsMedium: 'ضد الروبوت المتوسط', playerWon: 'فاز {n}', drawT: 'تعادل',
+        qHand: 'الملكة ما زالت في الصينية', passed: 'لا حركة لدى {n} فيمرّر دوره',
+        pinned: 'رفع هذه القطعة يقسم الخلية إلى قسمين', noQueen: 'ضع ملكتك قبل أن تحرّك', stuck: 'لا مكان تذهب إليه هذه القطعة', covered: 'خنفساء تجلس فوق هذه القطعة',
+        pQ: 'الملكة', pB: 'الخنفساء', pG: 'الجندب', pS: 'العنكبوت', pA: 'النملة',
+        zoomIn: 'تكبير', zoomOut: 'تصغير', fitBoard: 'إظهار الخلية كلها', turnsL: 'الأدوار',
+        rules: 'لكل لاعب إحدى عشرة قطعة: ملكة وخنفساءان وثلاثة جنادب وعنكبوتان وثلاث نملات. في دورك إما تضع قطعة من صينيتك أو تحرّك إحدى قطعك. لا لوح في هذه اللعبة: القطع نفسها تكوّن الخلية، ويجب ألا تنقسم أبدًا. القطعة الجديدة يجب أن تلمس قطعك ولا تلمس أي قطعة للخصم (أول قطعتين في اللعبة تتلامسان فقط). يجب أن تدخل ملكتك مع قطعتك الرابعة على الأكثر، ولا يتحرك شيء قبلها. الملكة تخطو خانة واحدة. الخنفساء تخطو خانة واحدة ويمكنها أن تصعد فوق الخلية؛ والقطعة التي تحتها لا تتحرك. الجندب يقفز في خط مستقيم فوق قطعة أو أكثر إلى أول خانة فارغة. العنكبوت ينزلق ثلاث خانات بالضبط، والنملة إلى أي مسافة. القطعة المنزلقة لا تمر من فجوة مسدودة من الجانبين. حاصر ملكة الخصم من جهاتها الست لتفوز؛ وإن حوصرت الملكتان معًا فهو تعادل. من لا يملك حركة مسموحة يمرّر دوره.',
+        kCursor: 'تنقل بين الخانات', kGo: 'اختر أو العب على الخانة', kPick: 'اختر قطعة من الصينية', kEsc: 'إلغاء الاختيار', kZoom: 'تكبير وتصغير',
+        tutTitle1: 'حاصر الملكة', tutText1: 'حاصر ملكة الخصم من جهاتها الست. قطع اللونين كلها تُحسب.',
+        tutTitle2: 'خمسة أنواع من الحشرات', tutText2: 'الملكة والخنفساء تخطوان خانة، الجندب يقفز، العنكبوت ينزلق ثلاث خانات والنملة إلى أي مكان.',
+        tutTitle3: 'خلية واحدة', tutText3: 'يجب ألا تنقسم الخلية أبدًا، ولا حتى في منتصف الحركة. القطعة التي تمسكها معًا لا تتحرك.'
+      },
+      hi: {
+        board: 'मधुवाटिका का छत्ता', vsBot: 'बॉट से', two: 'दो खिलाड़ी', bot: 'बॉट', playerN: 'खिलाड़ी {n}', modeT: 'खिलाड़ी', levelT: 'बॉट का स्तर',
+        newMatch: 'नया खेल', begin: 'शुरू करें', undoMove: 'चाल वापस', endWarn: 'इससे मौजूदा खेल ख़त्म हो जाएगा। जारी रखें?', settingsT: 'नया खेल',
+        yourMove: 'अपनी ट्रे से या बोर्ड पर कोई मोहरा चुनें', pickDest: 'किसी चमकते ख़ाने को छुएँ', qMust: 'चौथा मोहरा: अब रानी को रखना ही होगा',
+        turnOf: '{n} की बारी', thinking: 'बॉट सोच रहा है…', dailyAp: 'रोज़ की मधुवाटिका', vsMedium: 'मध्यम बॉट के ख़िलाफ़', playerWon: '{n} की जीत', drawT: 'बराबरी',
+        qHand: 'रानी अभी ट्रे में', passed: '{n}: कोई चाल नहीं, बारी आगे गई',
+        pinned: 'यह मोहरा उठाने से छत्ता दो टुकड़ों में बँट जाएगा', noQueen: 'चलने से पहले अपनी रानी रखें', stuck: 'इस मोहरे के जाने की कोई जगह नहीं', covered: 'इस मोहरे पर एक भृंग बैठा है',
+        pQ: 'रानी', pB: 'भृंग', pG: 'टिड्डा', pS: 'मकड़ी', pA: 'चींटी',
+        zoomIn: 'बड़ा करें', zoomOut: 'छोटा करें', fitBoard: 'पूरा छत्ता दिखाएँ', turnsL: 'बारियाँ',
+        rules: 'हर खिलाड़ी के पास ग्यारह मोहरे हैं: एक रानी, दो भृंग, तीन टिड्डे, दो मकड़ियाँ और तीन चींटियाँ। अपनी बारी में आप या तो ट्रे से एक मोहरा रखते हैं या अपना कोई मोहरा चलते हैं। कोई बोर्ड नहीं है: मोहरे ख़ुद छत्ता बनाते हैं, और छत्ता कभी दो टुकड़ों में नहीं बँटना चाहिए। नया मोहरा आपके अपने मोहरों को छूना चाहिए और विरोधी के किसी मोहरे को नहीं (खेल के पहले दो मोहरे बस एक-दूसरे को छूते हैं)। आपकी रानी चौथे मोहरे तक आ जानी चाहिए, और उसके आने से पहले कुछ नहीं चलता। रानी एक ख़ाना चलती है। भृंग एक ख़ाना चलता है और छत्ते के ऊपर चढ़ सकता है; उसके नीचे का मोहरा नहीं चल सकता। टिड्डा सीधी रेखा में एक या ज़्यादा मोहरों के ऊपर से पहले ख़ाली ख़ाने तक कूदता है। मकड़ी ठीक तीन ख़ाने सरकती है, चींटी जितनी दूर चाहे। सरकता मोहरा ऐसे दर्रे से नहीं निकल सकता जिसके दोनों ओर मोहरे हों। जीतने के लिए विरोधी की रानी को छहों ओर से घेरें; दोनों रानियाँ एक साथ घिरें तो बराबरी। जिसके पास कोई वैध चाल न हो, उसकी बारी आगे चली जाती है।',
+        kCursor: 'ख़ानों के बीच जाएँ', kGo: 'ख़ाने पर चुनें या चलें', kPick: 'ट्रे से मोहरा चुनें', kEsc: 'चुनाव रद्द करें', kZoom: 'बड़ा और छोटा करें',
+        tutTitle1: 'रानी को घेरें', tutText1: 'विरोधी की रानी को छहों ओर से घेरें। दोनों रंगों के मोहरे गिने जाते हैं।',
+        tutTitle2: 'पाँच तरह के कीड़े', tutText2: 'रानी और भृंग एक ख़ाना चलते हैं, टिड्डा कूदता है, मकड़ी तीन ख़ाने सरकती है और चींटी कहीं भी।',
+        tutTitle3: 'एक छत्ता', tutText3: 'छत्ता कभी नहीं बँटना चाहिए, चाल के बीच में भी नहीं। जो मोहरा उसे जोड़े रखता है, वह नहीं चल सकता।'
+      },
+      ru: {
+        board: 'Улей пасеки', vsBot: 'Против бота', two: 'Два игрока', bot: 'Бот', playerN: 'Игрок {n}', modeT: 'Игроки', levelT: 'Уровень бота',
+        newMatch: 'Новая игра', begin: 'Начать', undoMove: 'Отменить ход', endWarn: 'Текущая игра закончится. Продолжить?', settingsT: 'Новая игра',
+        yourMove: 'Выберите фишку в запасе или на поле', pickDest: 'Коснитесь подсвеченной клетки', qMust: 'Четвёртая фишка: пора выставить матку',
+        turnOf: 'Ход: {n}', thinking: 'Бот думает…', dailyAp: 'Пасека дня', vsMedium: 'против бота среднего уровня', playerWon: 'Победа: {n}', drawT: 'Ничья',
+        qHand: 'Матка ещё в запасе', passed: '{n}: ходов нет, пропуск',
+        pinned: 'Без этой фишки улей распадётся надвое', noQueen: 'Сначала выставьте матку, потом ходите', stuck: 'Этой фишке некуда идти', covered: 'На этой фишке сидит жук',
+        pQ: 'Матка', pB: 'Жук', pG: 'Кузнечик', pS: 'Паук', pA: 'Муравей',
+        zoomIn: 'Приблизить', zoomOut: 'Отдалить', fitBoard: 'Показать весь улей', turnsL: 'Ходы',
+        rules: 'У каждого игрока одиннадцать фишек: матка, два жука, три кузнечика, два паука и три муравья. В свой ход вы либо выставляете фишку из запаса, либо передвигаете одну из своих. Поля нет: сами фишки образуют улей, и он никогда не должен распадаться. Новая фишка должна касаться ваших фишек и ни одной фишки соперника (первые две фишки игры просто касаются друг друга). Матка должна выйти не позже вашей четвёртой фишки, и до неё ничего не ходит. Матка шагает на одну клетку. Жук шагает на одну клетку и может забираться на улей; фишка под ним не может ходить. Кузнечик прыгает по прямой через одну или несколько фишек на первую пустую клетку. Паук скользит ровно на три клетки, муравей — как угодно далеко. Скользящая фишка не протиснется в щель, занятую с обеих сторон. Окружите матку соперника со всех шести сторон, чтобы победить; если обе матки окружены одновременно — ничья. Игрок без допустимого хода пропускает его.',
+        kCursor: 'Перейти между клетками', kGo: 'Выбрать или сыграть на клетку', kPick: 'Выбрать фишку из запаса', kEsc: 'Отменить выбор', kZoom: 'Приблизить и отдалить',
+        tutTitle1: 'Окружите матку', tutText1: 'Окружите матку соперника со всех шести сторон. Считаются фишки обоих цветов.',
+        tutTitle2: 'Пять видов насекомых', tutText2: 'Матка и жук шагают на клетку, кузнечик прыгает, паук скользит на три клетки, а муравей куда угодно.',
+        tutTitle3: 'Один улей', tutText3: 'Улей никогда не должен распадаться, даже посреди хода. Фишка, которая его скрепляет, не может ходить.'
+      },
+      zh: {
+        board: '蜂场蜂巢', vsBot: '对战电脑', two: '双人', bot: '电脑', playerN: '玩家 {n}', modeT: '玩家', levelT: '电脑难度',
+        newMatch: '新一局', begin: '开始', undoMove: '悔棋', endWarn: '将结束当前对局，是否继续？', settingsT: '新一局',
+        yourMove: '从托盘或棋盘上选一枚棋子', pickDest: '点一个高亮的格子', qMust: '第四枚棋子：现在必须放下蜂后',
+        turnOf: '轮到{n}', thinking: '电脑思考中……', dailyAp: '每日蜂场', vsMedium: '对战中等电脑', playerWon: '{n}获胜', drawT: '平局',
+        qHand: '蜂后还在托盘里', passed: '{n}无棋可走，跳过一回合',
+        pinned: '拿走这枚棋子会把蜂巢分成两半', noQueen: '先放下蜂后才能移动', stuck: '这枚棋子无处可去', covered: '有一只甲虫压在这枚棋子上',
+        pQ: '蜂后', pB: '甲虫', pG: '蚱蜢', pS: '蜘蛛', pA: '蚂蚁',
+        zoomIn: '放大', zoomOut: '缩小', fitBoard: '显示整个蜂巢', turnsL: '回合',
+        rules: '每位玩家有十一枚棋子：一只蜂后、两只甲虫、三只蚱蜢、两只蜘蛛和三只蚂蚁。轮到你时，要么从托盘放下一枚棋子，要么移动一枚自己的棋子。没有棋盘：棋子本身组成蜂巢，而且蜂巢永远不能断成两块。新棋子必须挨着自己的棋子，并且不能挨着对方的任何棋子（每局的头两枚棋子只需彼此相邻）。蜂后最迟要作为你的第四枚棋子放下，在她上场之前任何棋子都不能移动。蜂后走一格。甲虫走一格，还可以爬到蜂巢上面；压在它下面的棋子不能动。蚱蜢沿直线跳过一枚或多枚棋子，落在第一个空格。蜘蛛恰好滑动三格，蚂蚁想滑多远都行。滑动的棋子不能挤过两侧都被占住的缝隙。把对方的蜂后六面围住就获胜；如果两只蜂后同时被围住，则为平局。没有合法走法的玩家跳过这一回合。',
+        kCursor: '在格子之间移动', kGo: '在该格选择或走棋', kPick: '从托盘选棋子', kEsc: '取消选择', kZoom: '放大和缩小',
+        tutTitle1: '围住蜂后', tutText1: '把对方的蜂后六面都围住。双方的棋子都算数。',
+        tutTitle2: '五种昆虫', tutText2: '蜂后和甲虫走一格，蚱蜢跳跃，蜘蛛滑三格，蚂蚁哪里都能去。',
+        tutTitle3: '一个蜂巢', tutText3: '蜂巢永远不能断开，移动途中也不行。把蜂巢连在一起的棋子不能移动。'
+      },
+      de: {
+        board: 'Bienenstand-Stock', vsBot: 'Gegen den Bot', two: 'Zu zweit', bot: 'Bot', playerN: 'Spieler {n}', modeT: 'Spieler', levelT: 'Bot-Stufe',
+        newMatch: 'Neue Partie', begin: 'Start', undoMove: 'Zug zurück', endWarn: 'Die aktuelle Partie endet. Weiter?', settingsT: 'Neue Partie',
+        yourMove: 'Wähle einen Stein aus deinem Vorrat oder auf dem Brett', pickDest: 'Tippe ein markiertes Feld', qMust: 'Vierter Stein: Jetzt muss die Königin rein',
+        turnOf: 'Am Zug: {n}', thinking: 'Der Bot überlegt …', dailyAp: 'Bienenstand des Tages', vsMedium: 'gegen den mittleren Bot', playerWon: 'Sieg: {n}', drawT: 'Unentschieden',
+        qHand: 'Königin noch im Vorrat', passed: '{n}: kein Zug möglich, Runde ausgesetzt',
+        pinned: 'Ohne diesen Stein zerfiele der Stock in zwei Teile', noQueen: 'Setze erst deine Königin, dann darfst du ziehen', stuck: 'Dieser Stein kann nirgendwohin', covered: 'Auf diesem Stein sitzt ein Käfer',
+        pQ: 'Königin', pB: 'Käfer', pG: 'Grashüpfer', pS: 'Spinne', pA: 'Ameise',
+        zoomIn: 'Vergrößern', zoomOut: 'Verkleinern', fitBoard: 'Ganzen Stock zeigen', turnsL: 'Züge',
+        rules: 'Jeder hat elf Steine: eine Königin, zwei Käfer, drei Grashüpfer, zwei Spinnen und drei Ameisen. In deinem Zug setzt du einen Stein aus deinem Vorrat ein oder bewegst einen deiner Steine. Es gibt kein Brett: Die Steine bilden selbst den Stock, und er darf nie in zwei Teile zerfallen. Ein neuer Stein muss deine eigenen Steine berühren und keinen gegnerischen (die ersten beiden Steine der Partie berühren sich einfach). Deine Königin muss spätestens als vierter Stein kommen, und vorher bewegt sich nichts. Die Königin geht ein Feld. Der Käfer geht ein Feld und darf auf den Stock klettern; ein Stein unter ihm kann nicht ziehen. Der Grashüpfer springt in gerader Linie über einen oder mehrere Steine auf das erste freie Feld. Die Spinne gleitet genau drei Felder, die Ameise beliebig weit. Ein gleitender Stein zwängt sich nicht durch eine Lücke, die auf beiden Seiten besetzt ist. Umzingle die gegnerische Königin auf allen sechs Seiten, um zu gewinnen; sind beide Königinnen zugleich umzingelt, ist es unentschieden. Wer keinen erlaubten Zug hat, setzt aus.',
+        kCursor: 'Zwischen Feldern wechseln', kGo: 'Auf dem Feld wählen oder ziehen', kPick: 'Stein aus dem Vorrat wählen', kEsc: 'Auswahl aufheben', kZoom: 'Vergrößern und verkleinern',
+        tutTitle1: 'Umzingle die Königin', tutText1: 'Umzingle die gegnerische Königin auf allen sechs Seiten. Steine beider Farben zählen.',
+        tutTitle2: 'Fünf Arten Insekten', tutText2: 'Königin und Käfer gehen ein Feld, der Grashüpfer springt, die Spinne gleitet drei Felder und die Ameise überallhin.',
+        tutTitle3: 'Ein Stock', tutText3: 'Der Stock darf nie zerfallen, auch nicht mitten im Zug. Ein Stein, der ihn zusammenhält, kann nicht ziehen.'
+      },
+      es: {
+        board: 'Colmena del colmenar', vsBot: 'Contra el bot', two: 'Dos jugadores', bot: 'Bot', playerN: 'Jugador {n}', modeT: 'Jugadores', levelT: 'Nivel del bot',
+        newMatch: 'Nueva partida', begin: 'Empezar', undoMove: 'Deshacer jugada', endWarn: 'Esto termina la partida actual. ¿Seguir?', settingsT: 'Nueva partida',
+        yourMove: 'Elige una pieza de tu bandeja o del tablero', pickDest: 'Toca una casilla iluminada', qMust: 'Cuarta pieza: ahora tiene que entrar tu reina',
+        turnOf: 'Turno de {n}', thinking: 'El bot está pensando…', dailyAp: 'Colmenar diario', vsMedium: 'contra el bot medio', playerWon: 'Gana: {n}', drawT: 'Empate',
+        qHand: 'Reina aún en la bandeja', passed: '{n}: sin jugada, pasa el turno',
+        pinned: 'Quitar esta pieza partiría la colmena en dos', noQueen: 'Pon tu reina antes de mover', stuck: 'Esta pieza no tiene adónde ir', covered: 'Un escarabajo está encima de esta pieza',
+        pQ: 'Reina', pB: 'Escarabajo', pG: 'Saltamontes', pS: 'Araña', pA: 'Hormiga',
+        zoomIn: 'Acercar', zoomOut: 'Alejar', fitBoard: 'Ver toda la colmena', turnsL: 'Turnos',
+        rules: 'Cada jugador tiene once piezas: una reina, dos escarabajos, tres saltamontes, dos arañas y tres hormigas. En tu turno pones una pieza de tu bandeja o mueves una de las tuyas. No hay tablero: las propias piezas forman la colmena, y nunca debe partirse en dos. Una pieza nueva debe tocar tus piezas y ninguna del rival (las dos primeras piezas de la partida solo se tocan entre sí). Tu reina debe entrar como muy tarde con tu cuarta pieza, y nada se mueve antes. La reina avanza una casilla. El escarabajo avanza una casilla y puede subirse a la colmena; la pieza que queda debajo no puede moverse. El saltamontes salta en línea recta sobre una o más piezas hasta la primera casilla vacía. La araña se desliza exactamente tres casillas, la hormiga todo lo que quiera. Una pieza que se desliza no cabe por un hueco con piezas a ambos lados. Rodea la reina rival por sus seis lados para ganar; si las dos reinas quedan rodeadas a la vez, es empate. Quien no tiene jugada legal pasa.',
+        kCursor: 'Moverse entre casillas', kGo: 'Elegir o jugar en la casilla', kPick: 'Elegir una pieza de la bandeja', kEsc: 'Cancelar la selección', kZoom: 'Acercar y alejar',
+        tutTitle1: 'Rodea a la reina', tutText1: 'Rodea a la reina rival por sus seis lados. Cuentan las piezas de los dos colores.',
+        tutTitle2: 'Cinco clases de insectos', tutText2: 'La reina y el escarabajo avanzan una casilla, el saltamontes salta, la araña se desliza tres casillas y la hormiga a cualquier sitio.',
+        tutTitle3: 'Una sola colmena', tutText3: 'La colmena nunca debe partirse, ni siquiera a mitad de un movimiento. Una pieza que la mantiene unida no puede moverse.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var MODES = ['bot', 'two'], PIECE_KEYS = ['pQ', 'pB', 'pG', 'pS', 'pA'];
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs) prefs = { mode: 'bot', level: 'medium' };
+  if (MODES.indexOf(prefs.mode) < 0) prefs.mode = 'bot';
+  if (E.LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+
+  // G: the game around the engine's state S. sel: what the player has picked, a type in
+  // the tray ({ hand: type }) or a piece on the board ({ from: cell }).
+  var G = null, timer = null, sel = null, hint = '', hintTimer = null, kbOn = false, cur = E.ORIGIN;
+  // manual: the view after a pan or pinch, until the fit button; vNow is the view on
+  // screen, eased toward the fitted one after every move
+  var manual = null, vNow = null, vFrom = null, vTo = null, vT0 = 0, lastWH = '', shown = null, anim = null, raf = 0;
+
+  var cv = el('canvas', { class: 'ap-canvas', role: 'img', 'aria-label': C.t('board') });
+  function zbtn(icon, label, fn) {
+    var b = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': label, title: label }, [C.icon(icon, 18)]);
+    b.addEventListener('click', function () { C.feedback('tap'); fn(); });
+    return b;
+  }
+  var zoom = el('div', { class: 'ap-zoom' }, [zbtn('plus', C.t('zoomIn'), function () { zoomBy(1.25); }), zbtn('minus', C.t('zoomOut'), function () { zoomBy(0.8); }),
+    zbtn('expand', C.t('fitBoard'), fit)]);
+  var box = el('div', { class: 'ap-box' }, [cv, zoom]);
+  var top = el('div', { class: 'ap-top ch-above' });
+  var sides = el('div', { class: 'ap-sides ch-above' });
+  var status = el('div', { class: 'ap-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'ap-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, sides, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newMatch'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ setup */
+
+  function newGame(o) {
+    stop();
+    var daily = o.daily || null;
+    G = { mode: daily ? 'bot' : o.mode, level: daily ? 'medium' : o.level, daily: daily, S: E.newGame(), hist: [], startedAt: Date.now(), done: false };
+    // the day's game opens with the same two pieces for everyone, then it is your move
+    if (daily) E.dailyOpening(C.daily('apiary', daily).rng).forEach(function (m) { E.apply(G.S, m); });
+    else { prefs.mode = o.mode; prefs.level = o.level; ctx.store.set('prefs', prefs); }
+    sel = null; manual = null; vNow = null; anim = null; cur = E.ORIGIN;
+    turnStart();
+    render(); save();
+    maybeBot();
+  }
+  function current() { return { mode: G.mode, level: G.level }; }
+
+  function isBot(side) { return G.mode === 'bot' && side === 1; }
+  function busy() { return !G || G.done || isBot(G.S.turn); }
+  function stop() { if (timer) { clearTimeout(timer); timer = null; } }
+
+  // a player who must put the queen in now finds her already picked
+  function turnStart() {
+    sel = null;
+    if (G && !G.done && !isBot(G.S.turn) && E.mustQueen(G.S, G.S.turn)) sel = { hand: E.QUEEN };
+  }
+
+  function maybeBot() {
+    if (!G || G.done || !isBot(G.S.turn)) return;
+    renderSide();
+    timer = setTimeout(function () {
+      timer = null;
+      if (!G || G.done || !isBot(G.S.turn)) return;
+      // the daily bot plays from the day's seed, so everyone meets the same opponent
+      var rnd = G.daily ? C.daily('apiary', G.daily + '|' + G.S.plies).rng : Math.random;
+      act(E.think(G.S, G.level, rnd));
+    }, C.ui.reduceMotion() ? 200 : 450);
+  }
+
+  /* ------------------------------------------------------------- moves */
+
+  function act(m) {
+    var before = E.clone(G.S), who = G.S.turn;
+    var code = m[0] === 1 ? E.top(G.S, m[1]) : who * 8 + m[1];
+    if (!E.play(G.S, m)) { C.feedback('bad'); return false; }
+    G.hist.push(before);
+    if (G.hist.length > 300) G.hist.shift();
+    startAnim(m, code);
+    C.feedback(isBot(who) ? 'clack' : 'place');
+    settle();
+    return true;
+  }
+  // after a move: the end, or a side with nothing to do passes (and maybe the next too)
+  function settle() {
+    while (G.S.winner < 0) {
+      var ms = E.moves(G.S);
+      if (ms.length !== 1 || ms[0][0] !== 2) break;
+      var who = G.S.turn;
+      G.hist.push(E.clone(G.S));
+      E.apply(G.S, ms[0]);
+      C.ui.toast({ icon: 'info', title: C.t('passed', { n: pname(who) }) });
+    }
+    if (G.S.winner >= 0) { G.done = true; sel = null; render(); finish(); return; }
+    turnStart();
+    render(); save();
+    maybeBot();
+  }
+  function onlyPass(S) { var ms = E.moves(S); return ms.length === 1 && ms[0][0] === 2; }
+
+  // Against the bot one undo takes back its reply and your move together
+  function undo() {
+    if (!G || G.done || !G.hist.length) return;
+    stop();
+    var h = G.hist.pop();
+    while (G.hist.length && (isBot(h.turn) || onlyPass(h))) h = G.hist.pop();
+    G.S = h; anim = null;
+    C.feedback('tap');
+    turnStart();
+    render(); save();
+    maybeBot();
+  }
+
+  /* ------------------------------------------------------------ result */
+
+  function pname(side) {
+    if (G.mode === 'bot') return side === 0 ? (C.state.profile.name || C.t('you')) : C.t('bot') + ' · ' + C.t(G.level);
+    return C.t('playerN', { n: C.num(side + 1) });
+  }
+
+  // your beetle sitting on the bot's queen when she falls
+  function beetleOnQueen(S) {
+    var q = E.queenAt(S, 1);
+    return q >= 0 && E.top(S, q) === 0 * 8 + E.BEETLE;
+  }
+  function finish() {
+    stop();
+    var S = G.S, vsBot = G.mode === 'bot', draw = S.winner === 2, won = vsBot ? S.winner === 0 : !draw;
+    var base = vsBot ? ({ easy: 8, medium: 14, hard: 22 }[G.level] || 14) : 8;
+    var coins = Math.max(2, Math.round(won ? base : base * (draw ? 0.5 : 0.3))) + (G.daily ? 8 : 0);
+    var points = Math.max(3, Math.round(won ? base * 4 : base * (draw ? 2 : 1.2))) + (G.daily ? 25 : 0);
+    if (vsBot && won) {
+      C.achievements.unlock('ap-win');
+      if (G.level === 'hard') C.achievements.unlock('ap-hard');
+      if (beetleOnQueen(S)) C.achievements.unlock('ap-beetle');
+    }
+    var title = draw ? C.t('drawT') : vsBot ? (won ? C.t('won') : C.t('lost')) : C.t('playerWon', { n: pname(S.winner) });
+    if (G.daily) {
+      var first = C.stats.daily('apiary', G.daily, { label: title, win: won });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    setTimeout(function () {
+      ctx.finish({
+        won: vsBot ? won : null,
+        title: title,
+        timeMs: Date.now() - G.startedAt, coins: coins, points: points,
+        lines: [{ label: C.t('turnsL'), value: C.num(Math.ceil(S.plies / 2)) }],
+        shareText: 'چوگان · زنبورستان' + (G.daily ? ('\nروزانه ' + G.daily) : '') + '\n' + title,
+        paint: cardPaint(),
+        onAgain: G.daily ? null : function () { newGame(current()); }
+      });
+    }, C.ui.reduceMotion() ? 150 : 800);
+  }
+
+  /* ------------------------------------------------------------- saves */
+
+  ctx.autosave(function () {
+    if (!G || G.done || !G.hist.length) return { inProgress: false };
+    return { g: { mode: G.mode, level: G.level, daily: G.daily, S: G.S, elapsed: Date.now() - G.startedAt } };
+  });
+  function save() { ctx.save(); }
+  function validSave(sv) {
+    var g = sv && sv.g;
+    return !!(g && MODES.indexOf(g.mode) >= 0 && E.LEVELS.indexOf(g.level) >= 0 && E.valid(g.S) && g.S.winner < 0);
+  }
+  function restore(g) {
+    G = { mode: g.mode, level: g.level, daily: g.daily || null, S: g.S, hist: [], startedAt: Date.now() - (g.elapsed || 0), done: false };
+    turnStart();
+    render();
+    maybeBot();
+  }
+
+  function askNew() {
+    if (G && G.daily) { go({ daily: G.daily }); return; }
+    settings();
+    function go(o) { if (!G || G.done || !G.hist.length) newGame(o); else C.ui.confirm({ title: C.t('newMatch'), body: C.t('endWarn'), onOk: function () { newGame(o); } }); }
+  }
+  function settings() {
+    var o = G && !G.daily ? current() : { mode: prefs.mode, level: prefs.level };
+    var body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
+    function rows() {
+      body.innerHTML = '';
+      body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('modeT') }));
+      body.appendChild(C.ui.segmented([{ value: 'bot', label: C.t('vsBot') }, { value: 'two', label: C.t('two') }], o.mode, function (v) { o.mode = v; rows(); }));
+      if (o.mode === 'bot') {
+        body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('levelT') }));
+        body.appendChild(C.ui.segmented(E.LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), o.level, function (v) { o.level = v; }));
+      }
+      if (G && !G.done && G.hist.length) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('endWarn') }));
+    }
+    rows();
+    C.ui.modal({
+      title: C.t('settingsT'), closeButton: true, body: [body],
+      actions: [{ label: C.t('cancel') }, { label: C.t('begin'), kind: 'primary', onClick: function () { newGame(o); } }]
+    });
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function colors() {
+    var cs = getComputedStyle(document.documentElement);
+    var v = function (k, f) { return cs.getPropertyValue(k).trim() || f; };
+    return { w: v('--ap-w', '#F6EBD3'), wEdge: v('--ap-w-edge', '#BFA77B'), k: v('--ap-k', '#3B302A'), kEdge: v('--ap-k-edge', '#1A1410'),
+      inkW: v('--ap-ink-w', '#3A2A1C'), inkK: v('--ap-ink-k', '#F4E9D2'), grid: v('--ap-grid', 'rgba(120,90,40,.16)'),
+      hi: v('--ap-hi', '#A66400'), cur: v('--ap-cur', '#3A2A1C') };
+  }
+  // one colour per insect, the same on both sides' tiles, so a piece is told by colour
+  // as well as by shape
+  var BUG = ['#E0A100', '#8E5CC9', '#3E9E47', '#B5652E', '#2E7FD0'];
+
+  // A cell's centre in hive units (pointy-top hexagons of radius 1)
+  function world(k) { var p = E.qr(k); return [SQ3 * (p[0] + p[1] / 2), 1.5 * p[1]]; }
+  function cellAt(x, y) {
+    var r = y / 1.5, q = x / SQ3 - r / 2, s = -q - r;
+    var rq = Math.round(q), rr = Math.round(r), rs = Math.round(s);
+    var dq = Math.abs(rq - q), dr = Math.abs(rr - r), ds = Math.abs(rs - s);
+    if (dq > dr && dq > ds) rq = -rr - rs; else if (dr > ds) rr = -rq - rs;
+    return E.key(rq, rr);
+  }
+  // The cells every move can reach are next to the hive, so fitting the hive and one ring
+  // around it keeps all of them in view and the view does not jump when a piece is picked
+  function ring(S) {
+    var occ = E.cells(S), out = {};
+    if (!occ.length) occ = [E.ORIGIN];
+    occ.forEach(function (k) { out[k] = 1; for (var i = 0; i < 6; i++) out[k + E.D[i]] = 1; });
+    return Object.keys(out).map(Number);
+  }
+  function fitView(S, W, H) {
+    var x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    ring(S).forEach(function (k) { var p = world(k); x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); });
+    x0 -= 0.95; x1 += 0.95; y0 -= 1.05; y1 += 1.05;
+    var R = Math.min(W / (x1 - x0), H / (y1 - y0), Math.min(W, H) / 7);
+    return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, R: R };
+  }
+  function toPx(v, W, H, k) { var p = world(k); return [W / 2 + (p[0] - v.cx) * v.R, H / 2 + (p[1] - v.cy) * v.R]; }
+
+  function hexPath(g, x, y, rad) {
+    g.beginPath();
+    for (var k = 0; k < 6; k++) { var an = Math.PI / 6 + k * Math.PI / 3; if (k) g.lineTo(x + rad * Math.cos(an), y + rad * Math.sin(an)); else g.moveTo(x + rad * Math.cos(an), y + rad * Math.sin(an)); }
+    g.closePath();
+  }
+  function ell(g, x, y, rx, ry, rot) { g.beginPath(); g.ellipse(x, y, rx, ry, rot || 0, 0, Math.PI * 2); }
+  function line(g, pts) { g.beginPath(); pts.forEach(function (p, i) { if (i) g.lineTo(p[0], p[1]); else g.moveTo(p[0], p[1]); }); g.stroke(); }
+
+  // The five insects, drawn in a box from -1 to 1 with the head up: legs and outlines in
+  // the tile's ink, bodies in the insect's colour
+  function glyph(g, type, x, y, s, ink) {
+    g.save();
+    g.translate(x, y); g.scale(s, s);
+    g.lineCap = 'round'; g.lineJoin = 'round'; g.strokeStyle = ink; g.lineWidth = 0.09;
+    var body = BUG[type];
+    if (type === E.QUEEN) {
+      g.fillStyle = 'rgba(255,255,255,.75)';
+      ell(g, -0.36, -0.12, 0.36, 0.2, -0.5); g.fill(); g.stroke();
+      ell(g, 0.36, -0.12, 0.36, 0.2, 0.5); g.fill(); g.stroke();
+      g.fillStyle = body; ell(g, 0, 0.22, 0.3, 0.5); g.fill();
+      g.save(); ell(g, 0, 0.22, 0.3, 0.5); g.clip();
+      g.fillStyle = ink; g.fillRect(-0.4, 0.12, 0.8, 0.11); g.fillRect(-0.4, 0.38, 0.8, 0.11);
+      g.restore();
+      ell(g, 0, 0.22, 0.3, 0.5); g.stroke();
+      g.fillStyle = ink; ell(g, 0, -0.42, 0.17, 0.16); g.fill();
+      // her crown
+      g.fillStyle = body;
+      g.beginPath(); g.moveTo(-0.2, -0.6); g.lineTo(-0.24, -0.88); g.lineTo(-0.09, -0.74); g.lineTo(0, -0.93); g.lineTo(0.09, -0.74); g.lineTo(0.24, -0.88); g.lineTo(0.2, -0.6); g.closePath();
+      g.fill(); g.lineWidth = 0.06; g.stroke();
+    } else if (type === E.BEETLE) {
+      [-1, 1].forEach(function (d) {
+        line(g, [[0.25 * d, -0.15], [0.62 * d, -0.42]]); line(g, [[0.3 * d, 0.1], [0.7 * d, 0.12]]); line(g, [[0.25 * d, 0.35], [0.6 * d, 0.68]]);
+        line(g, [[0.08 * d, -0.62], [0.24 * d, -0.88]]);
+      });
+      g.fillStyle = ink; ell(g, 0, -0.5, 0.2, 0.15); g.fill();
+      g.fillStyle = body; ell(g, 0, 0.12, 0.4, 0.55); g.fill(); g.stroke();
+      line(g, [[0, -0.4], [0, 0.66]]);
+      g.fillStyle = 'rgba(255,255,255,.35)'; ell(g, -0.17, -0.08, 0.08, 0.16, 0.3); g.fill();
+    } else if (type === E.HOPPER) {
+      g.rotate(-0.35);
+      line(g, [[0.1, 0.05], [0.45, -0.42], [0.62, 0.42]]);
+      line(g, [[-0.25, 0.12], [-0.38, 0.45]]); line(g, [[-0.05, 0.14], [0.02, 0.48]]);
+      line(g, [[-0.62, -0.18], [-0.95, -0.55]]); line(g, [[-0.62, -0.18], [-0.75, -0.7]]);
+      g.fillStyle = body; ell(g, 0.05, 0, 0.62, 0.2); g.fill(); g.stroke();
+      ell(g, -0.6, -0.1, 0.18, 0.17); g.fill(); g.stroke();
+      g.fillStyle = ink; ell(g, -0.64, -0.14, 0.05, 0.05); g.fill();
+      g.lineWidth = 0.13; line(g, [[0.12, 0], [0.45, -0.3], [0.58, 0.28]]);
+    } else if (type === E.SPIDER) {
+      [-1, 1].forEach(function (d) {
+        line(g, [[0.12 * d, -0.1], [0.5 * d, -0.55], [0.7 * d, -0.4]]);
+        line(g, [[0.15 * d, 0], [0.62 * d, -0.18], [0.85 * d, 0.02]]);
+        line(g, [[0.15 * d, 0.1], [0.6 * d, 0.3], [0.78 * d, 0.6]]);
+        line(g, [[0.12 * d, 0.18], [0.42 * d, 0.6], [0.5 * d, 0.88]]);
+      });
+      g.fillStyle = body; ell(g, 0, 0.28, 0.3, 0.34); g.fill(); g.stroke();
+      ell(g, 0, -0.18, 0.2, 0.18); g.fill(); g.stroke();
+      g.fillStyle = ink; ell(g, -0.07, -0.24, 0.04, 0.04); g.fill(); ell(g, 0.07, -0.24, 0.04, 0.04); g.fill();
+    } else {
+      [-1, 1].forEach(function (d) {
+        line(g, [[0.06 * d, -0.12], [0.45 * d, -0.4], [0.6 * d, -0.3]]);
+        line(g, [[0.08 * d, -0.05], [0.55 * d, 0], [0.7 * d, 0.15]]);
+        line(g, [[0.06 * d, 0.02], [0.4 * d, 0.38], [0.5 * d, 0.62]]);
+        line(g, [[0.06 * d, -0.62], [0.2 * d, -0.85], [0.36 * d, -0.9]]);
+      });
+      g.fillStyle = body;
+      ell(g, 0, -0.5, 0.16, 0.15); g.fill(); g.stroke();
+      ell(g, 0, -0.1, 0.13, 0.18); g.fill(); g.stroke();
+      ell(g, 0, 0.42, 0.24, 0.32); g.fill(); g.stroke();
+    }
+    g.restore();
+  }
+  function tile(g, x, y, R, code, col, alpha) {
+    var side = E.sideOf(code);
+    g.globalAlpha = alpha === undefined ? 1 : alpha;
+    hexPath(g, x, y + R * 0.07, R * 0.93); g.fillStyle = 'rgba(0,0,0,.22)'; g.fill();
+    hexPath(g, x, y, R * 0.93);
+    g.fillStyle = side ? col.k : col.w; g.fill();
+    g.strokeStyle = side ? col.kEdge : col.wEdge; g.lineWidth = Math.max(1, R * 0.07); g.stroke();
+    glyph(g, E.typeOf(code), x, y, R * 0.56, side ? col.inkK : col.inkW);
+    g.globalAlpha = 1;
+  }
+  // A stack shows its lower tiles peeking out below, and its height in a corner badge
+  function stack(g, x, y, R, s, col, skipTop) {
+    var n = s.length - (skipTop ? 1 : 0);
+    for (var i = 0; i < n; i++) tile(g, x, y + (n - 1 - i) * R * 0.16, R, s[i], col);
+    if (s.length > 1 && !skipTop) {
+      var bx = x + R * 0.62, by = y - R * 0.58, br = Math.max(7, R * 0.27);
+      g.fillStyle = col.hi; g.beginPath(); g.arc(bx, by, br, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#FFFFFF'; g.font = '800 ' + Math.round(br * 1.25) + 'px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(C.num(s.length), bx, by + br * 0.05);
+    }
+  }
+
+  function paintBoard(g, W, H, o, col) {
+    var S = o.S, v = o.view, R = v.R, P = function (k) { return toPx(v, W, H, k); };
+    // the empty ring around the hive, faint, so the hexagonal grid can be read
+    g.strokeStyle = col.grid; g.lineWidth = Math.max(1, R * 0.05);
+    ring(S).forEach(function (k) { if (!S.st[k]) { var p = P(k); hexPath(g, p[0], p[1], R * 0.9); g.stroke(); } });
+    if (o.last && o.last.from >= 0 && !S.st[o.last.from]) {
+      var lf = P(o.last.from);
+      g.setLineDash([R * 0.18, R * 0.14]); g.strokeStyle = col.hi; g.lineWidth = Math.max(1.5, R * 0.07);
+      hexPath(g, lf[0], lf[1], R * 0.8); g.stroke(); g.setLineDash([]);
+    }
+    var occ = E.cells(S).sort(function (a, b) { return world(a)[1] - world(b)[1] || world(a)[0] - world(b)[0]; });
+    var moving = o.anim ? o.anim.to : -1;
+    occ.forEach(function (k) {
+      var p = P(k);
+      stack(g, p[0], p[1], R, S.st[k], col, k === moving);
+    });
+    if (o.last && S.st[o.last.to] && o.last.to !== moving) {
+      var lt = P(o.last.to);
+      g.strokeStyle = col.hi; g.lineWidth = Math.max(2, R * 0.1);
+      hexPath(g, lt[0], lt[1], R * 0.99); g.stroke();
+    }
+    if (o.from >= 0) {
+      var sp = P(o.from);
+      g.strokeStyle = col.hi; g.lineWidth = Math.max(3, R * 0.16);
+      hexPath(g, sp[0], sp[1], R * 1.0); g.stroke();
+    }
+    (o.targets || []).forEach(function (k) {
+      var p = P(k);
+      g.globalAlpha = 0.22; g.fillStyle = col.hi; hexPath(g, p[0], p[1], R * 0.9); g.fill(); g.globalAlpha = 1;
+      g.strokeStyle = col.hi; g.lineWidth = Math.max(1.5, R * 0.07); hexPath(g, p[0], p[1], R * 0.9); g.stroke();
+      g.fillStyle = col.hi; g.beginPath(); g.arc(p[0], p[1] - (S.st[k] ? R * 0.55 : 0), Math.max(3, R * 0.15), 0, Math.PI * 2); g.fill();
+    });
+    if (o.cursor >= 0) {
+      var cp = P(o.cursor);
+      g.strokeStyle = col.cur; g.lineWidth = Math.max(2, R * 0.09); g.setLineDash([R * 0.12, R * 0.1]);
+      hexPath(g, cp[0], cp[1], R * 0.82); g.stroke(); g.setLineDash([]);
+    }
+    if (o.anim) {
+      var a = o.anim, to = P(a.to), e = a.p < 0.5 ? 2 * a.p * a.p : 1 - Math.pow(-2 * a.p + 2, 2) / 2;
+      if (a.from >= 0) {
+        var fr = P(a.from), x = fr[0] + (to[0] - fr[0]) * e, y = fr[1] + (to[1] - fr[1]) * e - Math.sin(Math.PI * e) * R * 0.35;
+        tile(g, x, y, R * (1 + 0.12 * Math.sin(Math.PI * e)), a.code, col);
+      } else tile(g, to[0], to[1] - (1 - e) * R * 0.6, R * (0.6 + 0.4 * e), a.code, col, 0.35 + 0.65 * e);
+    }
+  }
+
+  function boxSize() {
+    var r = box.getBoundingClientRect();
+    return { w: Math.max(1, Math.floor(r.width)), h: Math.max(1, Math.floor(r.height || r.width)) };
+  }
+  function startAnim(m, code) {
+    if (C.ui.reduceMotion() || m[0] === 2) { anim = null; return; }
+    anim = { from: m[0] === 1 ? m[1] : -1, to: m[2], code: code, t0: performance.now(), dur: 260, p: 0 };
+  }
+  function targets() {
+    if (!sel || busy()) return [];
+    return E.moves(G.S).filter(function (m) { return sel.from !== undefined ? m[0] === 1 && m[1] === sel.from : m[0] === 0 && m[1] === sel.hand; })
+      .map(function (m) { return m[2]; });
+  }
+  function draw() {
+    raf = 0;
+    if (!G) return;
+    var sz = boxSize(), W = sz.w, H = sz.h, dpr = Math.min(2, window.devicePixelRatio || 1), now = performance.now();
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    cv.style.width = W + 'px'; cv.style.height = H + 'px';
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    // the view eases toward its target after a move; a resize or a pan snaps to it
+    var want = manual || fitView(G.S, W, H), wh = W + 'x' + H;
+    if (!vNow || manual || wh !== lastWH || C.ui.reduceMotion()) { vNow = want; vTo = null; }
+    else if (!vTo || Math.abs(vTo.cx - want.cx) + Math.abs(vTo.cy - want.cy) + Math.abs(vTo.R - want.R) > 1e-6) { vFrom = vNow; vTo = want; vT0 = now; }
+    if (vTo) {
+      var p = Math.min(1, (now - vT0) / 300), e = 1 - Math.pow(1 - p, 3);
+      vNow = { cx: vFrom.cx + (vTo.cx - vFrom.cx) * e, cy: vFrom.cy + (vTo.cy - vFrom.cy) * e, R: vFrom.R + (vTo.R - vFrom.R) * e };
+      if (p >= 1) vTo = null;
+    }
+    lastWH = wh;
+    if (anim) { anim.p = Math.min(1, (now - anim.t0) / anim.dur); }
+    var mine = !busy();
+    paintBoard(g, W, H, { S: G.S, view: vNow, last: G.S.last, anim: anim, from: mine && sel && sel.from !== undefined ? sel.from : -1,
+      targets: targets(), cursor: kbOn && mine ? cur : -1 }, colors());
+    // taps are read against the view drawn last (2026-10-19)
+    shown = { v: vNow, W: W, H: H };
+    if (anim && anim.p >= 1) anim = null;
+    if (anim || vTo) kick();
+  }
+  function kick() { if (!raf) raf = requestAnimationFrame(draw); }
+  function cardPaint() {
+    var S = E.clone(G.S);
+    return function (g, W, H) { paintBoard(g, W, H, { S: S, view: fitView(S, W, H), last: null, from: -1, targets: [], cursor: -1 }, colors()); };
+  }
+
+  function zoomBy(f) {
+    if (!shown) return;
+    var lim = Math.min(shown.W, shown.H);
+    manual = { cx: shown.v.cx, cy: shown.v.cy, R: Math.max(8, Math.min(lim / 2.5, shown.v.R * f)) };
+    draw();
+  }
+  function fit() { manual = null; vNow = null; draw(); }
+
+  // a small tile for the tray buttons
+  function trayCanvas(code) {
+    var c = el('canvas'), d = Math.min(2, window.devicePixelRatio || 1), s = 32;
+    c.width = s * d; c.height = s * d;
+    var g = c.getContext('2d');
+    g.setTransform(d, 0, 0, d, 0, 0);
+    tile(g, s / 2, s / 2 - 1, s * 0.5, code, colors());
+    return c;
+  }
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (G.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyAp') + ' — ' + C.num(G.daily) })]));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('vsMedium') }));
+      return;
+    }
+    top.appendChild(el('button', { class: 'ch-badge ch-tap', type: 'button', onclick: settings,
+      text: G.mode === 'bot' ? C.t('vsBot') + ' · ' + C.t(G.level) : C.t('two') }));
+    var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', settings);
+    top.appendChild(gear);
+  }
+  function renderSide() {
+    sides.innerHTML = '';
+    var S = G.S, t = S.turn;
+    [0, 1].forEach(function (k) {
+      var n = E.around(S, k), qIn = S.hand[k][E.QUEEN] === 0;
+      var tray = el('div', { class: 'ap-tray' });
+      for (var y = 0; y < 5; y++) {
+        var left = S.hand[k][y], picked = sel && sel.hand === y && t === k && !busy();
+        var b = el('button', { class: 'ap-pc' + (left ? '' : ' ap-pc--none') + (picked ? ' ap-pc--sel' : ''), type: 'button',
+          'aria-label': C.t(PIECE_KEYS[y]) + ' × ' + C.num(left), title: C.t(PIECE_KEYS[y]), 'aria-pressed': picked ? 'true' : 'false' },
+          [trayCanvas(k * 8 + y), el('span', { class: 'ap-pc__n', text: C.num(left) })]);
+        b.addEventListener('click', (function (side, type) { return function () { tapTray(side, type); }; })(k, y));
+        tray.appendChild(b);
+      }
+      sides.appendChild(el('div', { class: 'ap-side' + (t === k && !G.done ? ' ap-side--on' : '') + (isBot(k) && t === 1 && !G.done ? ' ap-thinking' : '') }, [
+        el('div', { class: 'ap-side__dot' }, [el('span', { style: { background: k === 0 ? 'var(--ap-w-edge)' : 'var(--ap-k)' } })]),
+        el('div', { class: 'ap-side__text' }, [
+          el('div', { class: 'ap-side__name', text: pname(k) }),
+          el('div', { class: 'ap-side__sub', text: qIn ? C.t('pQ') + ' ' + C.num(n) + '/' + C.num(6) : C.t('qHand') })
+        ]),
+        tray
+      ]));
+    });
+    status.innerHTML = '';
+    if (G.done) return;
+    var line = isBot(t) ? C.t('thinking') : hint || (sel ? (E.mustQueen(S, t) ? C.t('qMust') : C.t('pickDest')) : C.t('yourMove'));
+    if (G.mode === 'two') line = C.t('turnOf', { n: pname(t) }) + ' · ' + line;
+    status.appendChild(el('span', { text: line }));
+  }
+  function render() { renderTop(); renderSide(); draw(); }
+
+  function say(key) {
+    hint = C.t(key);
+    if (hintTimer) clearTimeout(hintTimer);
+    hintTimer = setTimeout(function () { hint = ''; hintTimer = null; if (G) renderSide(); }, 2600);
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  function tapTray(side, type) {
+    if (busy() || side !== G.S.turn) { C.feedback('bad'); return; }
+    if (sel && sel.hand === type && !E.mustQueen(G.S, side)) { sel = null; C.feedback('tap'); render(); return; }
+    var can = E.moves(G.S).some(function (m) { return m[0] === 0 && m[1] === type; });
+    if (!can) {
+      C.feedback('bad');
+      if (G.S.hand[side][type] > 0 && E.mustQueen(G.S, side)) say('qMust');
+      render(); return;
+    }
+    hint = ''; sel = { hand: type };
+    C.feedback('select');
+    render();
+  }
+  function tapCell(k) {
+    if (busy()) return;
+    var S = G.S, t = S.turn, ms = E.moves(S);
+    if (sel) {
+      for (var i = 0; i < ms.length; i++) {
+        var m = ms[i];
+        if (m[2] === k && (sel.from !== undefined ? m[0] === 1 && m[1] === sel.from : m[0] === 0 && m[1] === sel.hand)) { hint = ''; act(m); return; }
+      }
+    }
+    var tp = E.top(S, k);
+    if (tp >= 0 && E.sideOf(tp) === t) {
+      if (sel && sel.from === k) { sel = null; C.feedback('tap'); render(); return; }
+      if (ms.some(function (m) { return m[0] === 1 && m[1] === k; })) { hint = ''; sel = { from: k }; C.feedback('select'); render(); return; }
+      C.feedback('bad');
+      say(S.hand[t][E.QUEEN] ? 'noQueen' : E.height(S, k) === 1 && E.pinnedSet(S)[k] ? 'pinned' : 'stuck');
+      sel = E.mustQueen(S, t) ? { hand: E.QUEEN } : null;
+      render(); return;
+    }
+    if (tp >= 0 && S.st[k].slice(0, -1).some(function (c) { return E.sideOf(c) === t; })) { C.feedback('bad'); say('covered'); }
+    if (!E.mustQueen(S, t)) sel = null;
+    render();
+  }
+
+  function readTap(x, y) {
+    if (!shown) return -1;
+    var r = cv.getBoundingClientRect(), v = shown.v;
+    return cellAt((x - r.left - shown.W / 2) / v.R + v.cx, (y - r.top - shown.H / 2) / v.R + v.cy);
+  }
+
+  // One finger: a tap picks or plays, a drag pans. Two fingers pinch to zoom. A tap is a
+  // press that ended within 8 px of where it began.
+  var ptrs = {}, gest = null;
+  function ptrList() { return Object.keys(ptrs).map(function (id) { return ptrs[id]; }); }
+  cv.addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    try { cv.setPointerCapture(e.pointerId); } catch (er) { /* a synthetic pointer has nothing to capture */ }
+    ptrs[e.pointerId] = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY };
+    var l = ptrList();
+    if (l.length === 1) gest = { kind: 'tap', v: shown ? shown.v : null };
+    else if (l.length === 2 && shown) {
+      var d = Math.hypot(l[0].x - l[1].x, l[0].y - l[1].y) || 1;
+      gest = { kind: 'pinch', d0: d, v: { cx: shown.v.cx, cy: shown.v.cy, R: shown.v.R }, mx: (l[0].x + l[1].x) / 2, my: (l[0].y + l[1].y) / 2 };
+    }
+  });
+  cv.addEventListener('pointermove', function (e) {
+    var p = ptrs[e.pointerId];
+    if (!p || !gest || !shown) return;
+    p.x = e.clientX; p.y = e.clientY;
+    var lim = Math.min(shown.W, shown.H);
+    if (gest.kind === 'pinch') {
+      var l = ptrList();
+      if (l.length < 2) return;
+      var d = Math.hypot(l[0].x - l[1].x, l[0].y - l[1].y) || 1, mx = (l[0].x + l[1].x) / 2, my = (l[0].y + l[1].y) / 2;
+      var R = Math.max(8, Math.min(lim / 2.5, gest.v.R * d / gest.d0));
+      // the hive point under the fingers' first midpoint stays under their midpoint now
+      var r = cv.getBoundingClientRect();
+      var wx = (gest.mx - r.left - shown.W / 2) / gest.v.R + gest.v.cx, wy = (gest.my - r.top - shown.H / 2) / gest.v.R + gest.v.cy;
+      manual = { cx: wx - (mx - r.left - shown.W / 2) / R, cy: wy - (my - r.top - shown.H / 2) / R, R: R };
+      draw(); return;
+    }
+    if (gest.kind === 'tap' && Math.hypot(p.x - p.sx, p.y - p.sy) > 8 && gest.v) gest.kind = 'pan';
+    if (gest.kind === 'pan') {
+      manual = { cx: gest.v.cx - (p.x - p.sx) / gest.v.R, cy: gest.v.cy - (p.y - p.sy) / gest.v.R, R: gest.v.R };
+      draw();
+    }
+  });
+  function ptrEnd(e) {
+    var p = ptrs[e.pointerId];
+    if (!p) return;
+    delete ptrs[e.pointerId];
+    if (gest && gest.kind === 'tap' && e.type === 'pointerup') { kbOn = false; tapCell(readTap(p.sx, p.sy)); }
+    // lifting one of two fingers ends the pinch without the other finger becoming a tap
+    if (!ptrList().length) gest = null; else if (gest && gest.kind === 'pinch') gest = { kind: 'done' };
+  }
+  cv.addEventListener('pointerup', ptrEnd);
+  cv.addEventListener('pointercancel', ptrEnd);
+  cv.addEventListener('wheel', function (e) { e.preventDefault(); zoomBy(e.deltaY < 0 ? 1.1 : 1 / 1.1); }, { passive: false });
+
+  window.addEventListener('keydown', function (e) {
+    if (!G || document.querySelector('.ch-scrim')) return;
+    if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var tg = e.target && e.target.tagName;
+    if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT') return;
+    if (e.key === '+' || e.key === '=') { zoomBy(1.25); e.preventDefault(); return; }
+    if (e.key === '-') { zoomBy(0.8); e.preventDefault(); return; }
+    if (e.key === '0') { fit(); e.preventDefault(); return; }
+    if (busy()) return;
+    if (/^[1-5]$/.test(e.key)) { tapTray(G.S.turn, +e.key - 1); e.preventDefault(); return; }
+    if (e.key === 'Escape' && sel) { sel = null; render(); e.preventDefault(); return; }
+    // the hive is drawn the same way in every language, so the arrows are geometric (#338):
+    // each goes to the neighbour lying closest to its direction on the screen
+    var want = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.key];
+    if (want) {
+      e.preventDefault();
+      if (!kbOn) { kbOn = true; var tg0 = targets(); if (tg0.length && tg0.indexOf(cur) < 0) cur = tg0[0]; draw(); return; }
+      var best = -1, bd = 0.3, c0 = world(cur);
+      for (var i = 0; i < 6; i++) {
+        var n = cur + E.D[i], w = world(n), dx = w[0] - c0[0], dy = w[1] - c0[1], l = Math.hypot(dx, dy), dot = (dx * want[0] + dy * want[1]) / l;
+        if (dot > bd + 1e-6) { bd = dot; best = n; }
+      }
+      if (best >= 0 && ring(G.S).indexOf(best) >= 0) cur = best;
+      draw(); return;
+    }
+    if ((e.key === 'Enter' || e.key === ' ') && kbOn && tg !== 'BUTTON') { e.preventDefault(); tapCell(cur); }
+  });
+
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  else window.addEventListener('resize', draw);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← ↑ → ↓', C.t('kCursor')), kb('Space / Enter', C.t('kGo')), kb('1 – 5', C.t('kPick')), kb('Esc', C.t('kEsc')),
+          kb('+ / −', C.t('kZoom')), kb('0', C.t('fitBoard')), kb('U / Ctrl+Z', C.t('undoMove'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // the tutorial pictures are drawn with the game's own tiles
+  function tArt(kind) {
+    var Wd = 220, Hd = 120, c = document.createElement('canvas'), col = colors();
+    c.width = Wd * 2; c.height = Hd * 2;
+    var g = c.getContext('2d');
+    g.setTransform(2, 0, 0, 2, 0, 0);
+    var R = 17, at = function (q, r) { return [Wd / 2 + R * SQ3 * (q + r / 2), Hd / 2 + R * 1.5 * r]; }, put = function (q, r, code) { var p = at(q, r); tile(g, p[0], p[1], R, code, col); };
+    if (kind === 1) {
+      put(0, 0, 8 + E.QUEEN);
+      [[1, 0, 1], [1, -1, 4], [0, -1, 2], [-1, 0, 12], [-1, 1, 3], [0, 1, 10]].forEach(function (x) { put(x[0], x[1], x[2]); });
+    } else if (kind === 2) {
+      for (var y = 0; y < 5; y++) put(y - 2, 0, y);
+    } else {
+      [[-2, 0, 4], [-1, 0, 9], [1, 0, 2], [2, 0, 11]].forEach(function (x) { put(x[0], x[1], x[2]); });
+      put(0, 0, 3);
+      var p = at(0, 0);
+      g.strokeStyle = '#C0262D'; g.lineWidth = 3; g.beginPath(); g.arc(p[0], p[1], R * 1.05, 0, Math.PI * 2); g.stroke();
+      g.beginPath(); g.moveTo(p[0] - R * 0.75, p[1] - R * 0.75); g.lineTo(p[0] + R * 0.75, p[1] + R * 0.75); g.stroke();
+    }
+    return '<img alt="" width="100%" src="' + c.toDataURL() + '">';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  var saved = ctx.loadSave();
+  if (validSave(saved) && (saved.g.daily || null) === (dailyDate || null)) restore(saved.g);
+  else newGame(dailyDate ? { daily: dailyDate } : { mode: prefs.mode, level: prefs.level });
+  if (dailyDate && C.stats.dailyDone('apiary', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).apiary;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
