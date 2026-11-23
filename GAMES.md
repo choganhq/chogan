@@ -104,6 +104,7 @@ Every game in Chogan with a line about it. Each one in `www/games.json` has a ro
 | Hues | Play a card that matches the top card by colour or symbol and empty your hand first. Skips, reverses, draw twos, wilds and wild draw fours; every colour also has its own shape, so the cards read without seeing colour. Against 1 to 3 bots at three levels, a match to 200 points, and a daily round dealt the same for everyone |
 | Word Shower | Words fall toward your garden and you type each one letter by letter on the game's own keyboard, or a real one, to burst it; eight waves, five flowers as lives, three speeds, words in the app's language, and a list of your own words that does not count for the daily challenge or awards |
 | Durak | The Russian card game with a 36-card deck: beat each attack card with a higher card of its suit or a trump, or take them all; the others throw in cards of ranks already on the table. The last player holding cards is the durak, the fool. Against 1 to 3 bots at three levels, a transfer game behind the gear, and a daily deal against one bot |
+| Apiary | A hive with no board: each side places and moves a queen, two beetles, three grasshoppers, two spiders and three ants, and the hive must never split. Surround the other queen on all six sides to win. Against a bot at three levels or two players on one phone, and a daily game against the medium bot with the same opening for everyone |
 
 ## فارسی
 
@@ -211,5 +212,6 @@ Every game in Chogan with a line about it. Each one in `www/games.json` has a ro
 | رنگارنگ | کارتی که رنگ یا نشانش با کارت روی زمین یکی است بازی کن و زودتر از همه دستت را خالی کن. بسوزان، برگردان، دوتا بردار، همه‌رنگ و همه‌رنگِ چهارتا؛ هر رنگ شکل خودش را هم دارد تا بی‌دیدن رنگ هم خوانده شود. مقابل یک تا سه ربات در سه سطح، مسابقه تا ۲۰۰ امتیاز، و یک دست روزانه که برای همه یکسان پخش می‌شود |
 | واژه‌باران | واژه‌ها به سوی باغت می‌بارند و هر کدام را با صفحه‌کلید خود بازی، یا صفحه‌کلید واقعی، حرف به حرف می‌نویسی تا بترکد؛ هشت موج، پنج گل به جای جان، سه سرعت، واژه‌ها به زبان اپ، و فهرستی از واژه‌های خودت که در چالش روزانه و دستاورد حساب نمی‌شود |
 | دوراک | بازی ورق روسی با سی‌وشش کارت: هر کارت حمله را با کارت بزرگ‌تر همان خال یا با حکم بزن، یا همه را بردار؛ بقیه کارت‌هایی با عددی که روی زمین هست می‌اندازند. آخرین کسی که کارت در دست دارد دوراک است. مقابل یک تا سه ربات در سه سطح، بازی دادنی در تنظیمات، و یک دست روزانه مقابل یک ربات |
+| زنبورستان | کندویی بدون صفحه: هر طرف یک ملکه، دو سوسک، سه ملخ، دو عنکبوت و سه مورچه می‌گذارد و جابه‌جا می‌کند و کندو هیچ‌وقت نباید دو تکه شود. ملکه‌ی حریف را از هر شش طرف محاصره کن تا ببری. مقابل ربات در سه سطح یا دو نفره روی یک گوشی، و یک بازی روزانه مقابل ربات متوسط با شروعی یکسان برای همه |
 
 </div>

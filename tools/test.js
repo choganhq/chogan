@@ -9522,8 +9522,10 @@ function testCrazyEights() {
   };
   const dE = (a, b) => { const A = lab(a), Q = lab(b); return Math.hypot(A[0] - Q[0], A[1] - Q[1], A[2] - Q[2]); };
   const lum = (x) => rgb(x).map((c) => c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)).reduce((a, c, i) => a + c * [0.2126, 0.7152, 0.0722][i], 0);
-  const near = games.filter((g) => g.id !== 'crazyeights').map((g) => [g.id, dE(g.color, gm.color)]).sort((x, y) => x[1] - y[1])[0];
-  ok(near[1] >= 15 && 1.05 / (lum(gm.color) + 0.05) >= 4.5, 'the accent differs from every other game by ΔE ≥ 15 (nearest ' + near[0] + ', ' + near[1].toFixed(1) + ') and keeps white text at 4.5:1');
+  // The owner's accent rule (approved.md item 7): ΔE ≥ 15 within the category, ≥ 8 against the rest.
+  const near = (f) => games.filter((g) => g.id !== 'crazyeights' && f(g)).map((g) => [g.id, dE(g.color, gm.color)]).sort((x, y) => x[1] - y[1])[0];
+  const nc = near((g) => g.cat === gm.cat), na = near(() => true);
+  ok(nc[1] >= 15 && na[1] >= 8 && 1.05 / (lum(gm.color) + 0.05) >= 4.5, 'the accent differs by ΔE ≥ 15 in its category (nearest ' + nc[0] + ', ' + nc[1].toFixed(1) + '), ≥ 8 overall (nearest ' + na[0] + ', ' + na[1].toFixed(1) + ') and keeps white text at 4.5:1');
   const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
   ok(['ce-win', 'ce-hard', 'ce-eight'].every((id) => new RegExp("\\{ id: '" + id + "',[^\\n]*dde: '[^\\n]*des: '").test(core) && html.indexOf("unlock('" + id + "')") > 0), 'the three Crazy Eights awards exist in every language and are unlocked');
   ok(Date.now() - t0 < 10000, 'the Crazy Eights tests finish in under 10 s (' + (Date.now() - t0) + ' ms)');
