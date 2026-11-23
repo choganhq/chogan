@@ -1,0 +1,1026 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>واژه‌باران — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  .wf-wrap > .ch-fit { --fit-ar: 0.9; }
+  .ch-fit > .wf-box { width: 100%; height: 100%; position: relative; }
+  /* a canvas is a replaced element: without its own width and height it keeps the
+     backing-store size times the pixel ratio (#919) */
+  .wf-box canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; border-radius: var(--r-md);
+    touch-action: none; direction: ltr; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .wf-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2) var(--s-3); flex-wrap: wrap;
+    font-weight: 700; color: var(--c-text-dim); font-variant-numeric: tabular-nums; min-height: 40px; }
+  .wf-top > span { white-space: nowrap; }
+  /* The keyboard is drawn by the game for the alphabet in play, so a phone never has
+     to open its own keyboard over the sky. Rows keep the physical order of a real
+     keyboard in every language, hence ltr even under a Persian page. */
+  .wf-kb { direction: ltr; display: flex; flex-direction: column; gap: 5px; user-select: none; -webkit-user-select: none;
+    touch-action: manipulation; --gap: 4px; }
+  .wf-row { display: flex; justify-content: center; gap: var(--gap); }
+  .wf-key { flex: 0 1 calc((100% - (var(--cols) - 1) * var(--gap)) / var(--cols)); min-width: 0; padding: 0;
+    height: 44px; height: clamp(40px, 8cqh, 56px); border: 0; border-radius: 8px; font: inherit; font-size: 1.15rem; font-weight: 700;
+    background: var(--c-surface-2, var(--c-surface)); color: var(--c-text); box-shadow: 0 2px 0 var(--c-border);
+    cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background-color .12s, transform .06s; }
+  .wf-key--wide { flex-basis: calc(1.5 * (100% - (var(--cols) - 1) * var(--gap)) / var(--cols)); }
+  .wf-key svg { pointer-events: none; }
+  .wf-key.wf-next { background: var(--game, var(--c-accent)); color: var(--game-ink, #fff); }
+  .wf-key.wf-hit { transform: translateY(2px); box-shadow: none; }
+  .wf-key.wf-bad { background: var(--c-danger, #C0392B); color: #fff; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .wf-key.wf-next { color: var(--game-ink-dark, #111); } }
+  :root[data-theme="dark"] .wf-key.wf-next { color: var(--game-ink-dark, #111); }
+  @container game (min-aspect-ratio: 5 / 4) {
+    /* beside the sky the keyboard needs room for twelve keys a row */
+    .wf-wrap.ch-split { --side-w: clamp(300px, 44cqw, 560px); }
+    .wf-wrap > .ch-fit { --fit-ar: 1; }
+  }
+  .wf-words { display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--s-3); max-height: 40vh; overflow-y: auto; }
+  .wf-chip { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 10px; border-radius: 999px;
+    background: var(--c-surface-2, var(--c-surface)); border: 1px solid var(--c-border); font-weight: 600; }
+  [dir="rtl"] .wf-chip { padding: 2px 10px 2px 4px; }
+  .wf-chip button { border: 0; background: none; color: var(--c-text-dim); width: 32px; height: 32px; border-radius: 50%;
+    cursor: pointer; font: inherit; font-size: 1.1rem; line-height: 1; }
+  .wf-addrow { display: flex; gap: var(--s-2); margin-top: var(--s-3); }
+  .wf-addrow .ch-field { flex: 1; min-width: 0; }
+  .wf-err { min-height: 1.4em; color: var(--c-danger, #C0392B); font-size: .9rem; margin-top: 4px; }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function WordfallEngineFactory() {
+  'use strict';
+
+  var WAVES = 8, LIVES = 5, MAX_CUSTOM = 50, MIN_CUSTOM = 5, LEVELS = ['easy', 'medium', 'hard'];
+  // Seconds a word of five letters takes to fall in the first wave, and the gap between
+  // two new words. Tuned by the bot runs in tools/tests/wordfall.js: a steady typist of
+  // about 1.6, 2 and 2.8 letters a second clears easy, medium and hard.
+  var FALL = { easy: 15, medium: 11, hard: 8 }, GAP = { easy: 5.2, medium: 3.7, hard: 2.6 };
+  var BREAK = 2.2;
+  // shortest and longest word of each wave, so a run grows from cat to elephant
+  var LO = [3, 3, 3, 4, 4, 4, 5, 5], HI = [4, 5, 5, 6, 6, 7, 8, 9];
+
+  // The keyboard of each alphabet, row by row, in the order of the usual physical layout
+  var KB = {
+    fa: ['ضصثقفغعهخحجچ', 'شسیبلاتنمکگ', 'ظطزرذدپوژ'],
+    ar: ['ضصثقفغعهخحجد', 'شسيبلاتنمكط', 'ئءؤرىةوزظذ'],
+    ru: ['йцукенгшщзхъ', 'фывапролджэ', 'ячсмитьбю'],
+    en: ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'],
+    pl: ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'],
+    fr: ['azertyuiop', 'qsdfghjklm', 'wxcvbn'],
+    de: ['qwertzuiopü', 'asdfghjklöä', 'yxcvbnmß'],
+    es: ['qwertyuiop', 'asdfghjklñ', 'zxcvbnm']
+  };
+  // Where those keys sit on a keyboard without the layout installed (e.code), for the
+  // scripts a Latin keyboard cannot type
+  var CODES = [
+    ['KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyT', 'KeyY', 'KeyU', 'KeyI', 'KeyO', 'KeyP', 'BracketLeft', 'BracketRight'],
+    ['KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH', 'KeyJ', 'KeyK', 'KeyL', 'Semicolon', 'Quote'],
+    ['KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB', 'KeyN', 'KeyM', 'Comma', 'Period']
+  ];
+  var CODES3 = { ar: ['KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyN', 'KeyM', 'Comma', 'Period', 'Slash', 'Backquote'] };
+  // Letters typed or written in more than one way count as the key they share: Arabic
+  // yeh and kaf on a Persian keyboard, accents a phone keyboard hides behind a long press
+  // Quoted keys: a bare `en: {` here would be read as the page's string table by tools/test.js
+  var FOLD = {
+    'fa': { 'ي': 'ی', 'ى': 'ی', 'ئ': 'ی', 'ك': 'ک', 'آ': 'ا', 'أ': 'ا', 'إ': 'ا', 'ۀ': 'ه', 'ة': 'ه' },
+    'ar': { 'أ': 'ا', 'إ': 'ا', 'آ': 'ا', 'ٱ': 'ا' },
+    'ru': { 'ё': 'е' },
+    'pl': { 'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z' },
+    'fr': { 'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e', 'à': 'a', 'â': 'a', 'ç': 'c', 'î': 'i', 'ï': 'i', 'ô': 'o', 'ù': 'u', 'û': 'u', 'ü': 'u' },
+    'es': { 'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u', 'ü': 'u' },
+    'en': {}, 'de': {}
+  };
+  // Common, easy words written for this game, three to nine letters
+  var WORDS = {
+    en: 'cat dog sun sea sky car bus egg hat cup pen box map key owl fox ant bee jam toy ' +
+      'tree bird fish frog lion bear duck goat milk cake rice soup corn rain snow wind star moon lamp door road ship boat book ball song kite leaf rose seed nest home park farm hill lake sand bell ' +
+      'river apple grape lemon melon bread honey water cloud storm green black white brown happy smile dance music piano tiger zebra horse sheep mouse train plant beach chair table ' +
+      'rabbit monkey turtle garden window pencil orange yellow purple winter summer spring autumn forest island bridge castle planet rocket dragon flower basket butter cookie candle jacket pocket ladder violin guitar kitten parrot ' +
+      'blanket balloon rainbow thunder chicken dolphin penguin giraffe kitchen picture morning evening journey teacher pumpkin library ' +
+      'sunshine elephant mountain umbrella treasure dinosaur notebook pancakes sandwich squirrel ' +
+      'butterfly chocolate adventure wonderful pineapple snowflake telescope',
+    fa: 'سیب باغ ماه کوه شیر نان چای قند توت هلو کیف میز قلم شعر ساز گرم سرد شاد روز سال برف باد ابر رود دشت ' +
+      'کتاب دریا خانه مادر پدر دوست شهر جنگل باران زمین درخت ماهی گربه روباه زنبور پنیر انار انگور گیلاس بادام گردو پسته کفش کلاه دامن مداد دفتر پنجره دیوار حیاط کوچه بازی توپ قایق ماشین قطار رنگ سبز سرخ زرد سفید سیاه بنفش صبح ظهر هفته بهار پاییز شادی لبخند آرام زیبا بزرگ کوچک تازه شیرین قصه آواز عکس چراغ آینه فرش گلدان خیار پیاز گنجشک کبوتر آبشار نیمکت ' +
+      'برادر خواهر ستاره خورشید آسمان پرنده خرگوش پروانه پیراهن شلوار صندلی خیابان مدرسه معلم شاگرد زمستان مهربان نقاشی باغچه هندوانه پرتقال نارنگی زردآلو داستان بیابان بادکنک سنجاقک دبستان شیرینی آفتابی ' +
+      'بادبادک دوچرخه هواپیما تابستان خانواده آموزگار روزنامه کوهستان جشنواره خوشحالی ماهیگیر کارخانه دانشگاه شهربازی ' +
+      'کتابخانه آشپزخانه ماهیگیری نوازندگی بهارستان',
+    de: 'Hut Eis Tee Kuh Bus Zug Uhr Rad Bär See Tag ' +
+      'Haus Baum Hund Maus Ball Buch Brot Mond Wind Wald Berg Meer Boot Auto Bett Rock Ente Hase Igel Eule Saft Lied Turm Blatt Licht rot blau gelb ' +
+      'Katze Milch Apfel Birne Sonne Stern Regen Wolke Blume Fluss Insel Tisch Stuhl Lampe Schuh Jacke Farbe Vogel Fisch Pferd Schaf Löwe Tiger Fuchs Biene Käse Suppe Honig Woche Musik Spiel Puppe Feuer Schnee Wiese Kerze Gabel Abend Nacht grün weiß Gurke ' +
+      'Garten Schiff Straße Schule Freund Mutter Vater Fenster Zucker Wasser Kaffee Morgen Sommer Winter Herbst Drache Schloss Brücke Zimmer Küche Teller Löffel Messer Banane Tomate Kirsche Traube Zitrone ' +
+      'Fahrrad Spiegel Geschenk Elefant Giraffe Pinguin Frühling Erdbeere Kartoffel Abenteuer Sonnenhut',
+    es: 'sol mar pan pez oso uva día ' +
+      'casa gato luna flor agua mesa cama tren lago nube pato mono rojo azul rosa niño niña sopa río isla pera ' +
+      'perro cielo árbol leche queso fruta libro silla barco avión calle playa nieve vaca oveja ratón tigre león zorro abeja falda color verde feliz amigo madre padre juego tarde noche torre fuego dulce arroz huevo pollo otoño ' +
+      'manzana limón naranja fresa melón puerta ventana ciudad pueblo bosque lluvia viento jardín pájaro caballo conejo tortuga camisa zapato blanco negro familia escuela maestro música canción baile pelota cometa regalo fiesta mañana semana verano guitarra piano dragón puente lámpara espejo cuchara tenedor cocina galleta helado tomate patata jirafa delfín ballena tesoro sonrisa estrella montaña hermano ' +
+      'mariposa sombrero amarillo invierno castillo elefante pingüino aventura primavera chocolate zanahoria bicicleta',
+    pl: 'dom kot lis ser sok noc las ' +
+      'pies ryba ptak koń mysz wilk sowa jeż żaba góra okno stół zupa woda brat lato zima smok skarb słoń most rano ' +
+      'krowa owca kaczka zając motyl słońce niebo chmura deszcz śnieg wiatr morze rzeka drzewo kwiat liść trawa ogród park miasto droga zamek wieża statek łódź pociąg auto rower szkoła drzwi łóżko lampa zegar kubek chleb mleko masło jabłko banan ciasto miód matka ojciec babcia muzyka taniec zabawa piłka lalka prezent wiosna jesień biały czarny radość żółty żyrafa delfin ' +
+      'księżyc gwiazda jezioro książka zeszyt ołówek krzesło talerz łyżka gruszka śliwka wiśnia cytryna pomidor ogórek marchew herbata siostra dziadek dziecko kolega piosenka latawiec święto wieczór tydzień zielony uśmiech pingwin ' +
+      'pszczoła czerwony przygoda wieloryb truskawka niebieski czekolada',
+    fr: 'chat lune mer ciel pain lait lit rue lac vent ours riz feu jeu ami été île ' +
+      'chien arbre fleur pomme poire table porte train ville plage neige lapin tigre lion singe robe rouge bleu vert jaune blanc noir rose mère père frère danse fête matin soir nuit hiver piano pont tour lampe glace soupe ' +
+      'maison soleil raisin citron orange fraise melon livre chaise bateau avion rivière forêt nuage pluie étoile jardin oiseau cheval vache mouton canard souris renard abeille tortue chemise chapeau couleur heureux enfant famille école musique chanson ballon cadeau semaine automne guitare dragon château miroir cuisine gâteau bonbon poulet tomate carotte girafe dauphin baleine trésor sourire ' +
+      'fromage fenêtre voiture village montagne poisson papillon chaussure chocolat cuillère éléphant pingouin aventure printemps',
+    ru: 'дом кот пёс сад лес сыр мёд чай суп сок мяч кит ' +
+      'рыба конь утка мышь лиса волк заяц сова луна небо снег море река гора лист парк мост поезд стол стул окно часы хлеб груша слива лимон банан мама папа брат друг игра утро ночь лето зима слон жираф клад ' +
+      'собака птица корова овца пчела солнце звезда облако дождь ветер озеро дерево цветок трава город дорога замок башня лодка машина школа книга дверь лампа чашка ложка масло яблоко вишня огурец морковь пирог вода сестра музыка песня танец кукла вечер неделя весна осень синий белый радость улыбка дракон пингвин дельфин ' +
+      'медведь бабочка лягушка деревня корабль тетрадь кровать тарелка молоко помидор бабушка дедушка ребёнок подарок красный зелёный жёлтый чёрный шоколад ' +
+      'велосипед карандаш клубника праздник',
+    ar: 'بيت قطة كلب شمس قمر بحر نهر جبل ماء خبز جبن عنب موز تمر قلم طفل سمك أسد نمر قرد باب كوب صحن مطر ثلج ريح ليل يوم شهر سنة صيف فرح عيد عسل شاي جسر برج كنز فيل ' +
+      'نجمة سماء شجرة وردة زهرة حليب تفاح ليمون كتاب دفتر مدرسة معلم طالب صديق أخت عائلة طائر حصان بقرة خروف بطة فأر أرنب ثعلب نحلة فراشة نافذة سرير كرسي طاولة مصباح ساعة ملعقة سيارة قطار سفينة طائرة دراجة شارع مدينة قرية حديقة غابة بحيرة سحابة صباح مساء أسبوع ربيع خريف شتاء أحمر أزرق أخضر أصفر أبيض أسود لعبة كرة هدية أغنية رقص حلوى كعكة قهوة زرافة دلفين بطريق تنين قلعة ' +
+      'برتقال سلحفاة موسيقى مغامرة ابتسامة تلفزيون استراحة مستكشف بستاني'
+  };
+
+  function alpha(lang) { return KB[lang] ? lang : 'en'; }
+  var SETS = {};
+  Object.keys(KB).forEach(function (a) { var s = {}; KB[a].join('').split('').forEach(function (c) { s[c] = true; }); SETS[a] = s; });
+  function fold(a, ch) { var c = String(ch).toLowerCase(); return (FOLD[a] && FOLD[a][c]) || c; }
+  function foldWord(a, w) { var out = ''; for (var i = 0; i < w.length; i++) out += fold(a, w[i]); return out; }
+  function isLetter(a, ch) { return !!SETS[alpha(a)][ch]; }
+  function list(a) { return WORDS[alpha(a)].split(' ').filter(Boolean); }
+  function count(w) { return 4 + w; }
+
+  // a small seeded generator whose state lives in the run, so a saved run carries on
+  // with the same words it would have had
+  function rnd(S) {
+    S.r = (S.r + 0x6D2B79F5) >>> 0;
+    var t = S.r;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  function newRun(o) {
+    var a = alpha(o.lang), custom = o.custom && o.custom.length >= MIN_CUSTOM ? o.custom.slice() : null;
+    return {
+      v: 1, lang: a, level: LEVELS.indexOf(o.level) >= 0 ? o.level : 'medium', custom: custom,
+      wave: 1, left: count(1), words: [], target: -1, next: 1, used: [],
+      lives: LIVES, score: 0, hits: 0, misses: 0, kills: 0, status: 'run',
+      pause: BREAK, spawnT: 0, r: (o.seed >>> 0) || 1, t: 0
+    };
+  }
+
+  // The next word: of the wave's length, not used yet this run, and if possible not
+  // starting with a letter already falling, so the first key never has to guess
+  function pick(S) {
+    var pool = S.custom || list(S.lang), w = S.wave - 1, cand = [];
+    var fresh = pool.filter(function (x) { return S.used.indexOf(x) < 0; });
+    if (!fresh.length) { S.used = []; fresh = pool.slice(); }
+    if (S.custom) cand = fresh;
+    else {
+      for (var widen = 0; widen < 10 && cand.length < 3; widen++) {
+        cand = fresh.filter(function (x) { var n = x.length; return n >= LO[w] - widen && n <= HI[w] + widen; });
+      }
+      if (!cand.length) cand = fresh;
+    }
+    var firsts = S.words.map(function (x) { return x.f[0]; });
+    var clear = cand.filter(function (x) { return firsts.indexOf(fold(S.lang, x[0])) < 0; });
+    if (clear.length) cand = clear;
+    var word = cand[Math.floor(rnd(S) * cand.length)];
+    S.used.push(word);
+    return word;
+  }
+  function fallTime(S, n) { return FALL[S.level] * (0.7 + n * 0.06) * (1 - 0.035 * (S.wave - 1)); }
+  function gapTime(S) { return GAP[S.level] * (1 - 0.03 * (S.wave - 1)); }
+
+  function spawn(S) {
+    var w = pick(S), f = foldWord(S.lang, w);
+    var o = { id: S.next++, w: w, f: f, x: 0.15 + rnd(S) * 0.7, y: 0, v: 1 / fallTime(S, f.length), typed: 0 };
+    S.words.push(o); S.left--; S.spawnT = gapTime(S);
+    return o;
+  }
+  function byId(S, id) { for (var i = 0; i < S.words.length; i++) if (S.words[i].id === id) return S.words[i]; return null; }
+
+  // Time passes: words fall, new ones appear, a wave ends when its last word is gone.
+  // Returns what happened, for the page's sounds and sparks.
+  function step(S, dt) {
+    var ev = [];
+    if (S.status !== 'run') return ev;
+    S.t += dt;
+    if (S.pause > 0) {
+      S.pause -= dt;
+      if (S.pause > 0) return ev;
+      ev.push({ type: 'spawn', word: spawn(S) });
+    } else if (S.left > 0) {
+      S.spawnT -= dt;
+      // an empty sky never makes a quick typist wait for the next word
+      if (S.spawnT <= 0 || !S.words.length) ev.push({ type: 'spawn', word: spawn(S) });
+    }
+    for (var i = S.words.length - 1; i >= 0; i--) {
+      var o = S.words[i];
+      o.y += o.v * dt;
+      if (o.y < 1) continue;
+      S.words.splice(i, 1);
+      if (S.target === o.id) S.target = -1;
+      S.lives--;
+      ev.push({ type: 'ground', word: o });
+      if (S.lives <= 0) { S.status = 'lost'; ev.push({ type: 'lose' }); return ev; }
+    }
+    if (S.left <= 0 && !S.words.length) {
+      if (S.wave >= WAVES) { S.status = 'won'; ev.push({ type: 'win' }); }
+      else { S.wave++; S.left = count(S.wave); S.pause = BREAK; ev.push({ type: 'wave', wave: S.wave }); }
+    }
+    return ev;
+  }
+
+  // points for a burst word: longer words and words caught high up are worth more
+  function points(o) { var n = o.f.length; return n * 10 + Math.round(n * 10 * Math.max(0, 1 - o.y)); }
+
+  // One letter typed (already folded). The first letter of a word picks the lowest
+  // word that starts with it; the rest must follow in order. A wrong letter costs
+  // accuracy only, never a flower.
+  function key(S, ch) {
+    if (S.status !== 'run' || !S.words.length) return { type: 'none' };
+    var o = S.target >= 0 ? byId(S, S.target) : null;
+    if (!o) {
+      S.target = -1;
+      for (var i = 0; i < S.words.length; i++) {
+        var c = S.words[i];
+        if (c.f[0] === ch && (!o || c.y > o.y)) o = c;
+      }
+      if (!o) { S.misses++; return { type: 'miss' }; }
+      S.target = o.id; o.typed = 0;
+    }
+    if (o.f[o.typed] !== ch) { S.misses++; return { type: 'miss', word: o }; }
+    o.typed++; S.hits++;
+    if (o.typed < o.f.length) return { type: 'hit', word: o };
+    var p = points(o);
+    S.score += p; S.kills++; S.target = -1;
+    S.words.splice(S.words.indexOf(o), 1);
+    return { type: 'kill', word: o, points: p };
+  }
+  // let go of the word being typed: its letters are forgotten, nothing is lost
+  function drop(S) {
+    var o = S.target >= 0 ? byId(S, S.target) : null;
+    if (o) o.typed = 0;
+    S.target = -1;
+    return !!o;
+  }
+  // the key a perfect typist presses next, for the tests' bot and the key hint
+  function nextKey(S) {
+    var o = S.target >= 0 ? byId(S, S.target) : null;
+    if (o) return o.f[o.typed];
+    var low = null;
+    S.words.forEach(function (c) { if (!low || c.y > low.y) low = c; });
+    return low ? low.f[0] : null;
+  }
+
+  function accuracy(S) { return S.hits + S.misses ? S.hits / (S.hits + S.misses) : 1; }
+  function result(S) {
+    var acc = accuracy(S), won = S.status === 'won';
+    var total = Math.round(S.score * (0.5 + 0.5 * acc)) + Math.max(0, S.lives) * 25;
+    var stars = !won ? 0 : S.lives >= 4 && acc >= 0.95 ? 3 : S.lives >= 2 && acc >= 0.85 ? 2 : 1;
+    return { won: won, score: total, acc: acc, stars: stars, lives: Math.max(0, S.lives), waves: won ? WAVES : S.wave - 1, kills: S.kills };
+  }
+
+  // A word of one's own: only letters of the keyboard in play, two to twelve of them,
+  // not twice, and at most fifty words
+  function validateCustom(lang, raw, have) {
+    var a = alpha(lang), w = String(raw || '').trim(), f = foldWord(a, w);
+    have = have || [];
+    if (!w) return { ok: false, reason: 'length' };
+    for (var i = 0; i < f.length; i++) if (!SETS[a][f[i]]) return { ok: false, reason: 'letters' };
+    if (f.length < 2 || f.length > 12) return { ok: false, reason: 'length' };
+    if (have.some(function (x) { return foldWord(a, x) === f; })) return { ok: false, reason: 'dup' };
+    if (have.length >= MAX_CUSTOM) return { ok: false, reason: 'full' };
+    return { ok: true, word: w };
+  }
+
+  function valid(S) {
+    if (!S || S.v !== 1 || !KB[S.lang] || LEVELS.indexOf(S.level) < 0 || S.status !== 'run') return false;
+    var ints = ['wave', 'left', 'next', 'lives', 'score', 'hits', 'misses', 'kills', 'target', 'r'];
+    if (!ints.every(function (k) { return typeof S[k] === 'number' && Math.floor(S[k]) === S[k]; })) return false;
+    if (S.wave < 1 || S.wave > WAVES || S.lives < 1 || S.lives > LIVES || S.left < 0 || S.left > count(S.wave)) return false;
+    if (typeof S.pause !== 'number' || typeof S.spawnT !== 'number' || !Array.isArray(S.used) || !Array.isArray(S.words)) return false;
+    if (S.custom !== null && (!Array.isArray(S.custom) || S.custom.length < MIN_CUSTOM)) return false;
+    return S.words.every(function (o) {
+      return o && typeof o.w === 'string' && o.f === foldWord(S.lang, o.w) && typeof o.y === 'number' && o.y >= 0 && o.y < 1 &&
+        typeof o.x === 'number' && o.v > 0 && o.typed >= 0 && o.typed < o.f.length;
+    });
+  }
+
+  return {
+    WAVES: WAVES, LIVES: LIVES, LEVELS: LEVELS, MAX_CUSTOM: MAX_CUSTOM, MIN_CUSTOM: MIN_CUSTOM, LO: LO, HI: HI,
+    KB: KB, CODES: CODES, CODES3: CODES3, WORDS: WORDS,
+    alpha: alpha, fold: fold, foldWord: foldWord, isLetter: isLetter, list: list, count: count,
+    newRun: newRun, step: step, key: key, drop: drop, nextKey: nextKey, points: points,
+    accuracy: accuracy, result: result, validateCustom: validateCustom, valid: valid
+  };
+}
+if (typeof module !== 'undefined') module.exports = WordfallEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = WordfallEngineFactory();
+  var ACCENT = '#3E2C77';
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'wordfall',
+    name: { fa: 'واژه‌باران', en: 'Word Shower', zh: '单词雨', de: 'Wörterregen', es: 'Lluvia de palabras', pl: 'Deszcz słów', fr: 'Pluie de mots', ar: 'مطر الكلمات', hi: 'शब्द वर्षा', ru: 'Дождь слов' },
+    accent: '#3E2C77',
+    mood: 'menu',
+    strings: {
+      fa: {
+        board: 'آسمان واژه‌ها', wfWave: 'موج {n} از {m}', wfScore: 'امتیاز {n}', wfLives: 'گل‌های مانده: {n}', wfSpeed: 'سرعت', wfWords: 'واژه‌ها',
+        wfBuiltIn: 'واژه‌های بازی', wfMine: 'واژه‌های من', wfEdit: 'ویرایش واژه‌های من', wfAdd: 'افزودن', wfPlaceholder: 'واژه‌ی تازه', wfCount: '{n} از {m} واژه',
+        wfNeed: 'برای بازی با واژه‌های خودت دست‌کم {n} واژه بنویس.', wfClear: 'پاک کردن همه', wfErrLetters: 'فقط حروف همین صفحه‌کلید.', wfErrLen: 'هر واژه ۲ تا ۱۲ حرف دارد.',
+        wfErrDup: 'این واژه در فهرست هست.', wfErrFull: 'فهرست پر است.', wfCustomNote: 'بازی با واژه‌های خودت در چالش روزانه، رکورد و دستاورد حساب نمی‌شود.',
+        wfNew: 'بازی تازه', kType: 'نوشتن حروف یک واژه', kDrop: 'رها کردن واژه', wfWon: 'باغ سالم ماند!', wfLost: 'واژه‌ها باغ را پوشاندند', wfBestN: 'رکورد تازه: {n}',
+        wfAcc: 'دقت', wfKills: 'واژه‌های ترکانده', wfWaves: 'موج‌ها', wfResume: 'برای ادامه یک کلید بزن', wfWaveStart: 'موج {n}', wfDaily: 'باران روزانه', wfDel: 'پاک کردن {w}',
+        wfLetters: 'در چینی و هندی واژه‌ها انگلیسی‌اند و با صفحه‌کلید انگلیسی نوشته می‌شوند.', wfCleanNote: 'هر پنج گل سالم ماند!',
+        rules: 'واژه‌ها از آسمان به سوی باغت می‌بارند. هر واژه را حرف به حرف بنویس تا بترکد: حرف اول، پایین‌ترین واژه‌ای را که با آن شروع می‌شود نشانه می‌گیرد و بقیه را به ترتیب می‌نویسی. حرف اشتباه فقط از دقت کم می‌کند، نه از گل‌ها. هر واژه‌ای که به زمین برسد یکی از پنج گلت را می‌برد و با از دست رفتن همه، بازی تمام است. با گذشتن از هشت موج می‌بری. واژه‌های بلند و واژه‌هایی که بالاتر بترکند امتیاز بیشتری دارند و دقت و گل‌های مانده هم به امتیاز آخر اضافه می‌شوند. با چرخ‌دنده سرعت را عوض کن یا با واژه‌های خودت بازی کن؛ این بازی‌ها در رکورد، دستاورد و چالش روزانه حساب نمی‌شوند. باران روزانه با سرعت متوسط است و برای همه‌ی هم‌زبان‌ها یکی است.',
+        tutTitle1: 'واژه‌ها می‌بارند', tutText1: 'واژه‌ها به سوی باغ پایین می‌آیند. پیش از رسیدنشان به زمین بنویسشان.',
+        tutTitle2: 'حرف به حرف', tutText2: 'حرف اول را روی صفحه‌کلید بازی بزن تا آن واژه نشانه گرفته شود، بعد بقیه‌اش را به ترتیب بنویس.',
+        tutTitle3: 'گل‌ها را نگه دار', tutText3: 'هر واژه‌ای که به زمین برسد یک گل می‌برد. هشت موج را با گل‌های بیشتری تمام کن.'
+      },
+      en: {
+        board: 'Sky of words', wfWave: 'Wave {n} of {m}', wfScore: 'Score {n}', wfLives: 'Flowers left: {n}', wfSpeed: 'Speed', wfWords: 'Words',
+        wfBuiltIn: 'Game words', wfMine: 'My words', wfEdit: 'Edit my words', wfAdd: 'Add', wfPlaceholder: 'A new word', wfCount: '{n} of {m} words',
+        wfNeed: 'Write at least {n} words to play with your own.', wfClear: 'Delete all', wfErrLetters: 'Only letters on this keyboard.', wfErrLen: 'A word has 2 to 12 letters.',
+        wfErrDup: 'That word is already on the list.', wfErrFull: 'The list is full.', wfCustomNote: 'A run with your own words does not count for the daily game, records or awards.',
+        wfNew: 'New run', kType: 'Type the letters of a word', kDrop: 'Let go of the word', wfWon: 'The garden is safe!', wfLost: 'The words buried the garden', wfBestN: 'New best: {n}',
+        wfAcc: 'Accuracy', wfKills: 'Words burst', wfWaves: 'Waves', wfResume: 'Press a key to go on', wfWaveStart: 'Wave {n}', wfDaily: 'Daily Shower', wfDel: 'Delete {w}',
+        wfLetters: 'In Chinese and Hindi the words are English, typed on an English keyboard.', wfCleanNote: 'All five flowers made it!',
+        rules: 'Words fall from the sky toward your garden. Type a word letter by letter to burst it: the first letter picks the lowest word that starts with it, then type the rest in order. A wrong letter costs accuracy, never a flower. Every word that reaches the ground takes one of your five flowers, and when they are all gone the run is over. Get through eight waves to win. Long words and words burst high up score more, and your accuracy and the flowers left add to the final score. The gear changes the speed or lets you play with your own words; those runs do not count for records, awards or the daily game. The daily shower is at medium speed and the same for everyone in your language.',
+        tutTitle1: 'Words fall', tutText1: 'Words drift down toward the garden. Type them before they reach the ground.',
+        tutTitle2: 'Letter by letter', tutText2: 'Tap the first letter on the game keyboard to aim at that word, then type the rest in order.',
+        tutTitle3: 'Keep the flowers', tutText3: 'Every word that lands takes a flower. Finish eight waves with as many flowers as you can.'
+      },
+      pl: {
+        board: 'Niebo słów', wfWave: 'Fala {n} z {m}', wfScore: 'Wynik {n}', wfLives: 'Pozostałe kwiaty: {n}', wfSpeed: 'Szybkość', wfWords: 'Słowa',
+        wfBuiltIn: 'Słowa z gry', wfMine: 'Moje słowa', wfEdit: 'Edytuj moje słowa', wfAdd: 'Dodaj', wfPlaceholder: 'Nowe słowo', wfCount: '{n} z {m} słów',
+        wfNeed: 'Wpisz co najmniej {n} słów, aby grać własnymi.', wfClear: 'Usuń wszystkie', wfErrLetters: 'Tylko litery z tej klawiatury.', wfErrLen: 'Słowo ma od 2 do 12 liter.',
+        wfErrDup: 'To słowo już jest na liście.', wfErrFull: 'Lista jest pełna.', wfCustomNote: 'Gra własnymi słowami nie liczy się do gry dnia, rekordów ani odznak.',
+        wfNew: 'Nowa gra', kType: 'Wpisuj litery słowa', kDrop: 'Puść słowo', wfWon: 'Ogród ocalał!', wfLost: 'Słowa zasypały ogród', wfBestN: 'Nowy rekord: {n}',
+        wfAcc: 'Celność', wfKills: 'Rozbite słowa', wfWaves: 'Fale', wfResume: 'Naciśnij klawisz, aby grać dalej', wfWaveStart: 'Fala {n}', wfDaily: 'Deszcz dnia', wfDel: 'Usuń {w}',
+        wfLetters: 'Po chińsku i w hindi słowa są angielskie i wpisuje się je na angielskiej klawiaturze.', wfCleanNote: 'Wszystkie pięć kwiatów ocalało!',
+        rules: 'Słowa spadają z nieba na twój ogród. Wpisz słowo litera po literze, aby je rozbić: pierwsza litera wybiera najniższe słowo, które się na nią zaczyna, a resztę wpisujesz po kolei. Zła litera obniża celność, ale nie zabiera kwiatu. Każde słowo, które spadnie na ziemię, zabiera jeden z pięciu kwiatów, a gdy znikną wszystkie, gra się kończy. Przetrwaj osiem fal, aby wygrać. Długie słowa i słowa rozbite wysoko dają więcej punktów, a celność i pozostałe kwiaty dodają się do wyniku. Zębatka zmienia szybkość albo pozwala grać własnymi słowami; takie gry nie liczą się do rekordów, odznak ani gry dnia. Deszcz dnia ma średnią szybkość i jest taki sam dla wszystkich w twoim języku.',
+        tutTitle1: 'Słowa spadają', tutText1: 'Słowa opadają na ogród. Wpisz je, zanim dotkną ziemi.',
+        tutTitle2: 'Litera po literze', tutText2: 'Stuknij pierwszą literę na klawiaturze gry, aby wycelować w to słowo, a potem wpisz resztę po kolei.',
+        tutTitle3: 'Chroń kwiaty', tutText3: 'Każde słowo, które spadnie, zabiera kwiat. Ukończ osiem fal z jak największą liczbą kwiatów.'
+      },
+      fr: {
+        board: 'Le ciel de mots', wfWave: 'Vague {n} sur {m}', wfScore: 'Score {n}', wfLives: 'Fleurs restantes : {n}', wfSpeed: 'Vitesse', wfWords: 'Mots',
+        wfBuiltIn: 'Mots du jeu', wfMine: 'Mes mots', wfEdit: 'Modifier mes mots', wfAdd: 'Ajouter', wfPlaceholder: 'Un nouveau mot', wfCount: '{n} mots sur {m}',
+        wfNeed: 'Écris au moins {n} mots pour jouer avec les tiens.', wfClear: 'Tout effacer', wfErrLetters: 'Seulement les lettres de ce clavier.', wfErrLen: 'Un mot a de 2 à 12 lettres.',
+        wfErrDup: 'Ce mot est déjà dans la liste.', wfErrFull: 'La liste est pleine.', wfCustomNote: 'Une partie avec tes propres mots ne compte ni pour le défi du jour, ni pour les records, ni pour les trophées.',
+        wfNew: 'Nouvelle partie', kType: 'Taper les lettres d’un mot', kDrop: 'Lâcher le mot', wfWon: 'Le jardin est sauvé !', wfLost: 'Les mots ont recouvert le jardin', wfBestN: 'Nouveau record : {n}',
+        wfAcc: 'Précision', wfKills: 'Mots éclatés', wfWaves: 'Vagues', wfResume: 'Appuie sur une touche pour continuer', wfWaveStart: 'Vague {n}', wfDaily: 'Pluie du jour', wfDel: 'Effacer {w}',
+        wfLetters: 'En chinois et en hindi, les mots sont en anglais et se tapent sur un clavier anglais.', wfCleanNote: 'Les cinq fleurs ont tenu !',
+        rules: 'Des mots tombent du ciel vers ton jardin. Tape un mot lettre par lettre pour le faire éclater : la première lettre vise le mot le plus bas qui commence par elle, puis tape le reste dans l’ordre. Une mauvaise lettre coûte de la précision, jamais une fleur. Chaque mot qui touche le sol prend une de tes cinq fleurs, et quand il n’y en a plus, la partie est finie. Passe huit vagues pour gagner. Les mots longs et les mots éclatés haut rapportent plus, et ta précision et les fleurs restantes s’ajoutent au score final. La roue dentée change la vitesse ou te laisse jouer avec tes propres mots ; ces parties ne comptent ni pour les records, ni pour les trophées, ni pour le défi du jour. La pluie du jour est à vitesse moyenne et la même pour tous dans ta langue.',
+        tutTitle1: 'Les mots tombent', tutText1: 'Les mots descendent vers le jardin. Tape-les avant qu’ils touchent le sol.',
+        tutTitle2: 'Lettre par lettre', tutText2: 'Touche la première lettre sur le clavier du jeu pour viser ce mot, puis tape le reste dans l’ordre.',
+        tutTitle3: 'Garde les fleurs', tutText3: 'Chaque mot qui tombe prend une fleur. Finis huit vagues avec le plus de fleurs possible.'
+      },
+      ar: {
+        board: 'سماء الكلمات', wfWave: 'الموجة {n} من {m}', wfScore: 'النقاط {n}', wfLives: 'الزهور الباقية: {n}', wfSpeed: 'السرعة', wfWords: 'الكلمات',
+        wfBuiltIn: 'كلمات اللعبة', wfMine: 'كلماتي', wfEdit: 'تعديل كلماتي', wfAdd: 'إضافة', wfPlaceholder: 'كلمة جديدة', wfCount: '{n} من {m} كلمة',
+        wfNeed: 'اكتب {n} كلمات على الأقل لتلعب بكلماتك.', wfClear: 'حذف الكل', wfErrLetters: 'حروف هذه اللوحة فقط.', wfErrLen: 'الكلمة من حرفين إلى 12 حرفًا.',
+        wfErrDup: 'هذه الكلمة في القائمة بالفعل.', wfErrFull: 'القائمة ممتلئة.', wfCustomNote: 'اللعب بكلماتك لا يُحسب في تحدي اليوم ولا في الأرقام القياسية ولا في الأوسمة.',
+        wfNew: 'جولة جديدة', kType: 'اكتب حروف الكلمة', kDrop: 'اترك الكلمة', wfWon: 'نجت الحديقة!', wfLost: 'غطّت الكلمات الحديقة', wfBestN: 'رقم قياسي جديد: {n}',
+        wfAcc: 'الدقة', wfKills: 'كلمات مفرقعة', wfWaves: 'الموجات', wfResume: 'اضغط مفتاحًا للمتابعة', wfWaveStart: 'الموجة {n}', wfDaily: 'مطر اليوم', wfDel: 'حذف {w}',
+        wfLetters: 'في الصينية والهندية تكون الكلمات إنجليزية وتُكتب بلوحة مفاتيح إنجليزية.', wfCleanNote: 'نجت الزهور الخمس كلها!',
+        rules: 'تتساقط الكلمات من السماء نحو حديقتك. اكتب الكلمة حرفًا حرفًا لتفرقعها: الحرف الأول يختار أدنى كلمة تبدأ به، ثم تكتب البقية بالترتيب. الحرف الخطأ ينقص الدقة فقط ولا يأخذ زهرة. كل كلمة تصل إلى الأرض تأخذ زهرة من زهورك الخمس، وحين تذهب كلها تنتهي الجولة. اجتز ثماني موجات لتفوز. الكلمات الطويلة والكلمات التي تفرقعها عاليًا تمنح نقاطًا أكثر، وتُضاف الدقة والزهور الباقية إلى النتيجة. الترس يغيّر السرعة أو يتيح اللعب بكلماتك؛ وهذه الجولات لا تُحسب في الأرقام القياسية ولا الأوسمة ولا تحدي اليوم. مطر اليوم بسرعة متوسطة وهو نفسه للجميع في لغتك.',
+        tutTitle1: 'الكلمات تتساقط', tutText1: 'تنزل الكلمات نحو الحديقة. اكتبها قبل أن تصل إلى الأرض.',
+        tutTitle2: 'حرفًا حرفًا', tutText2: 'المس الحرف الأول على لوحة اللعبة لتصوّب على تلك الكلمة، ثم اكتب البقية بالترتيب.',
+        tutTitle3: 'احمِ الزهور', tutText3: 'كل كلمة تسقط تأخذ زهرة. أنهِ ثماني موجات بأكثر ما يمكن من الزهور.'
+      },
+      hi: {
+        board: 'शब्दों का आकाश', wfWave: 'लहर {n} / {m}', wfScore: 'अंक {n}', wfLives: 'बचे फूल: {n}', wfSpeed: 'गति', wfWords: 'शब्द',
+        wfBuiltIn: 'खेल के शब्द', wfMine: 'मेरे शब्द', wfEdit: 'मेरे शब्द बदलें', wfAdd: 'जोड़ें', wfPlaceholder: 'नया शब्द', wfCount: '{m} में से {n} शब्द',
+        wfNeed: 'अपने शब्दों से खेलने के लिए कम से कम {n} शब्द लिखें।', wfClear: 'सब मिटाएँ', wfErrLetters: 'सिर्फ़ इस कीबोर्ड के अक्षर।', wfErrLen: 'शब्द में 2 से 12 अक्षर होते हैं।',
+        wfErrDup: 'यह शब्द पहले से सूची में है।', wfErrFull: 'सूची भर गई है।', wfCustomNote: 'अपने शब्दों वाला खेल रोज़ की चुनौती, रिकॉर्ड या पुरस्कारों में नहीं गिना जाता।',
+        wfNew: 'नया खेल', kType: 'शब्द के अक्षर टाइप करें', kDrop: 'शब्द छोड़ें', wfWon: 'बगीचा बच गया!', wfLost: 'शब्दों ने बगीचा ढक दिया', wfBestN: 'नया रिकॉर्ड: {n}',
+        wfAcc: 'सटीकता', wfKills: 'फोड़े गए शब्द', wfWaves: 'लहरें', wfResume: 'आगे खेलने के लिए कोई कुंजी दबाएँ', wfWaveStart: 'लहर {n}', wfDaily: 'रोज़ की बारिश', wfDel: '{w} मिटाएँ',
+        wfLetters: 'चीनी और हिंदी में शब्द अंग्रेज़ी के होते हैं और अंग्रेज़ी कीबोर्ड पर टाइप होते हैं।', wfCleanNote: 'पाँचों फूल बच गए!',
+        rules: 'शब्द आसमान से आपके बगीचे की ओर गिरते हैं। किसी शब्द को अक्षर-दर-अक्षर टाइप करके फोड़ें: पहला अक्षर उससे शुरू होने वाले सबसे नीचे के शब्द को चुनता है, फिर बाकी क्रम से टाइप करें। गलत अक्षर से सिर्फ़ सटीकता घटती है, फूल नहीं जाता। ज़मीन तक पहुँचा हर शब्द आपके पाँच फूलों में से एक ले जाता है, और सब चले जाएँ तो खेल खत्म। जीतने के लिए आठ लहरें पार करें। लंबे शब्द और ऊँचाई पर फोड़े गए शब्द ज़्यादा अंक देते हैं, और सटीकता व बचे फूल अंतिम अंकों में जुड़ते हैं। गियर से गति बदलें या अपने शब्दों से खेलें; ऐसे खेल रिकॉर्ड, पुरस्कार या रोज़ की चुनौती में नहीं गिने जाते। रोज़ की बारिश मध्यम गति पर है और आपकी भाषा में सबके लिए एक जैसी है।',
+        tutTitle1: 'शब्द गिरते हैं', tutText1: 'शब्द बगीचे की ओर नीचे आते हैं। ज़मीन छूने से पहले उन्हें टाइप करें।',
+        tutTitle2: 'अक्षर-दर-अक्षर', tutText2: 'खेल के कीबोर्ड पर पहला अक्षर दबाकर उस शब्द पर निशाना लगाएँ, फिर बाकी क्रम से टाइप करें।',
+        tutTitle3: 'फूल बचाएँ', tutText3: 'गिरने वाला हर शब्द एक फूल ले जाता है। ज़्यादा से ज़्यादा फूलों के साथ आठ लहरें पूरी करें।'
+      },
+      ru: {
+        board: 'Небо слов', wfWave: 'Волна {n} из {m}', wfScore: 'Очки {n}', wfLives: 'Осталось цветов: {n}', wfSpeed: 'Скорость', wfWords: 'Слова',
+        wfBuiltIn: 'Слова игры', wfMine: 'Мои слова', wfEdit: 'Изменить мои слова', wfAdd: 'Добавить', wfPlaceholder: 'Новое слово', wfCount: 'Слов: {n} из {m}',
+        wfNeed: 'Напишите хотя бы {n} слов, чтобы играть своими.', wfClear: 'Удалить все', wfErrLetters: 'Только буквы этой клавиатуры.', wfErrLen: 'В слове от 2 до 12 букв.',
+        wfErrDup: 'Это слово уже в списке.', wfErrFull: 'Список заполнен.', wfCustomNote: 'Игра своими словами не идёт в зачёт задания дня, рекордов и наград.',
+        wfNew: 'Новая игра', kType: 'Печатать буквы слова', kDrop: 'Отпустить слово', wfWon: 'Сад спасён!', wfLost: 'Слова засыпали сад', wfBestN: 'Новый рекорд: {n}',
+        wfAcc: 'Точность', wfKills: 'Лопнувшие слова', wfWaves: 'Волны', wfResume: 'Нажмите клавишу, чтобы продолжить', wfWaveStart: 'Волна {n}', wfDaily: 'Дождь дня', wfDel: 'Удалить {w}',
+        wfLetters: 'На китайском и хинди слова английские и печатаются на английской клавиатуре.', wfCleanNote: 'Все пять цветов уцелели!',
+        rules: 'Слова падают с неба на ваш сад. Напечатайте слово буква за буквой, чтобы оно лопнуло: первая буква выбирает самое нижнее слово, которое с неё начинается, а остальное печатайте по порядку. Неверная буква снижает точность, но не отнимает цветок. Каждое слово, упавшее на землю, забирает один из пяти цветов, и когда их не останется, игра окончена. Пройдите восемь волн, чтобы победить. Длинные слова и слова, лопнувшие высоко, дают больше очков, а точность и оставшиеся цветы прибавляются к итогу. Шестерёнка меняет скорость или позволяет играть своими словами; такие игры не идут в зачёт рекордов, наград и задания дня. Дождь дня идёт на средней скорости и одинаков для всех на вашем языке.',
+        tutTitle1: 'Слова падают', tutText1: 'Слова опускаются к саду. Напечатайте их, пока они не коснулись земли.',
+        tutTitle2: 'Буква за буквой', tutText2: 'Нажмите первую букву на клавиатуре игры, чтобы прицелиться в это слово, затем печатайте остальное по порядку.',
+        tutTitle3: 'Берегите цветы', tutText3: 'Каждое упавшее слово забирает цветок. Пройдите восемь волн, сохранив как можно больше цветов.'
+      },
+      zh: {
+        board: '单词天空', wfWave: '第 {n} / {m} 波', wfScore: '得分 {n}', wfLives: '剩余花朵：{n}', wfSpeed: '速度', wfWords: '单词',
+        wfBuiltIn: '游戏单词', wfMine: '我的单词', wfEdit: '编辑我的单词', wfAdd: '添加', wfPlaceholder: '新单词', wfCount: '{n} / {m} 个单词',
+        wfNeed: '至少写 {n} 个单词才能用自己的单词玩。', wfClear: '全部删除', wfErrLetters: '只能用这个键盘上的字母。', wfErrLen: '单词长度为 2 到 12 个字母。',
+        wfErrDup: '这个单词已经在列表里了。', wfErrFull: '列表已满。', wfCustomNote: '用自己的单词玩的局不计入每日挑战、纪录和成就。',
+        wfNew: '新一局', kType: '输入单词的字母', kDrop: '放开这个单词', wfWon: '花园保住了！', wfLost: '单词淹没了花园', wfBestN: '新纪录：{n}',
+        wfAcc: '准确率', wfKills: '击破的单词', wfWaves: '波数', wfResume: '按任意键继续', wfWaveStart: '第 {n} 波', wfDaily: '每日单词雨', wfDel: '删除 {w}',
+        wfLetters: '在中文和印地语界面中，单词是英文的，用英文键盘输入。', wfCleanNote: '五朵花全部保住了！',
+        rules: '单词从天上落向你的花园。逐个字母输入一个单词就能击破它：第一个字母会选中以它开头、位置最低的单词，然后按顺序输入其余字母。打错字母只降低准确率，不会失去花朵。每个落到地面的单词会带走你五朵花中的一朵，花全部失去时本局结束。撑过八波即获胜。长单词和在高处击破的单词得分更多，准确率和剩余花朵也会加到最终得分里。齿轮可以改变速度，或者用自己的单词来玩；这样的局不计入纪录、成就和每日挑战。每日单词雨为中速，同一语言的所有人都相同。',
+        tutTitle1: '单词落下', tutText1: '单词朝花园飘落。在它们落地之前输入它们。',
+        tutTitle2: '逐个字母', tutText2: '在游戏键盘上点第一个字母来瞄准那个单词，然后按顺序输入其余字母。',
+        tutTitle3: '保护花朵', tutText3: '每个落地的单词会带走一朵花。尽量多保住花朵，完成八波。'
+      },
+      de: {
+        board: 'Der Wörterhimmel', wfWave: 'Welle {n} von {m}', wfScore: 'Punkte {n}', wfLives: 'Übrige Blumen: {n}', wfSpeed: 'Tempo', wfWords: 'Wörter',
+        wfBuiltIn: 'Spielwörter', wfMine: 'Meine Wörter', wfEdit: 'Meine Wörter bearbeiten', wfAdd: 'Hinzufügen', wfPlaceholder: 'Ein neues Wort', wfCount: '{n} von {m} Wörtern',
+        wfNeed: 'Schreib mindestens {n} Wörter, um mit deinen eigenen zu spielen.', wfClear: 'Alle löschen', wfErrLetters: 'Nur Buchstaben dieser Tastatur.', wfErrLen: 'Ein Wort hat 2 bis 12 Buchstaben.',
+        wfErrDup: 'Dieses Wort steht schon auf der Liste.', wfErrFull: 'Die Liste ist voll.', wfCustomNote: 'Eine Runde mit eigenen Wörtern zählt nicht für das Tagesspiel, Bestwerte oder Auszeichnungen.',
+        wfNew: 'Neue Runde', kType: 'Die Buchstaben eines Wortes tippen', kDrop: 'Das Wort loslassen', wfWon: 'Der Garten ist gerettet!', wfLost: 'Die Wörter haben den Garten zugedeckt', wfBestN: 'Neuer Bestwert: {n}',
+        wfAcc: 'Genauigkeit', wfKills: 'Geplatzte Wörter', wfWaves: 'Wellen', wfResume: 'Drück eine Taste, um weiterzuspielen', wfWaveStart: 'Welle {n}', wfDaily: 'Regen des Tages', wfDel: '{w} löschen',
+        wfLetters: 'Auf Chinesisch und Hindi sind die Wörter englisch und werden auf einer englischen Tastatur getippt.', wfCleanNote: 'Alle fünf Blumen haben es geschafft!',
+        rules: 'Wörter fallen vom Himmel auf deinen Garten zu. Tipp ein Wort Buchstabe für Buchstabe, um es platzen zu lassen: Der erste Buchstabe wählt das unterste Wort, das mit ihm beginnt, dann tippst du den Rest der Reihe nach. Ein falscher Buchstabe kostet Genauigkeit, nie eine Blume. Jedes Wort, das den Boden erreicht, nimmt dir eine deiner fünf Blumen, und sind alle weg, ist die Runde vorbei. Schaffe acht Wellen, um zu gewinnen. Lange Wörter und hoch oben geplatzte Wörter bringen mehr, und Genauigkeit und übrige Blumen zählen zum Endstand. Das Zahnrad ändert das Tempo oder lässt dich mit eigenen Wörtern spielen; solche Runden zählen nicht für Bestwerte, Auszeichnungen oder das Tagesspiel. Der Regen des Tages läuft im mittleren Tempo und ist für alle in deiner Sprache gleich.',
+        tutTitle1: 'Wörter fallen', tutText1: 'Die Wörter sinken auf den Garten zu. Tipp sie, bevor sie den Boden erreichen.',
+        tutTitle2: 'Buchstabe für Buchstabe', tutText2: 'Tipp den ersten Buchstaben auf der Spieltastatur, um auf das Wort zu zielen, dann den Rest der Reihe nach.',
+        tutTitle3: 'Rette die Blumen', tutText3: 'Jedes Wort, das landet, nimmt eine Blume. Schaffe acht Wellen mit möglichst vielen Blumen.'
+      },
+      es: {
+        board: 'El cielo de palabras', wfWave: 'Oleada {n} de {m}', wfScore: 'Puntos {n}', wfLives: 'Flores que quedan: {n}', wfSpeed: 'Velocidad', wfWords: 'Palabras',
+        wfBuiltIn: 'Palabras del juego', wfMine: 'Mis palabras', wfEdit: 'Editar mis palabras', wfAdd: 'Añadir', wfPlaceholder: 'Una palabra nueva', wfCount: '{n} de {m} palabras',
+        wfNeed: 'Escribe al menos {n} palabras para jugar con las tuyas.', wfClear: 'Borrar todas', wfErrLetters: 'Solo letras de este teclado.', wfErrLen: 'Una palabra tiene de 2 a 12 letras.',
+        wfErrDup: 'Esa palabra ya está en la lista.', wfErrFull: 'La lista está llena.', wfCustomNote: 'Una partida con tus palabras no cuenta para el reto del día, los récords ni los logros.',
+        wfNew: 'Partida nueva', kType: 'Escribir las letras de una palabra', kDrop: 'Soltar la palabra', wfWon: '¡El jardín está a salvo!', wfLost: 'Las palabras cubrieron el jardín', wfBestN: 'Nuevo récord: {n}',
+        wfAcc: 'Precisión', wfKills: 'Palabras reventadas', wfWaves: 'Oleadas', wfResume: 'Pulsa una tecla para seguir', wfWaveStart: 'Oleada {n}', wfDaily: 'Lluvia del día', wfDel: 'Borrar {w}',
+        wfLetters: 'En chino y en hindi las palabras son inglesas y se escriben con un teclado inglés.', wfCleanNote: '¡Las cinco flores aguantaron!',
+        rules: 'Caen palabras del cielo hacia tu jardín. Escribe una palabra letra a letra para reventarla: la primera letra elige la palabra más baja que empieza por ella y luego escribes el resto en orden. Una letra equivocada cuesta precisión, nunca una flor. Cada palabra que llega al suelo se lleva una de tus cinco flores, y cuando no queda ninguna la partida termina. Supera ocho oleadas para ganar. Las palabras largas y las que revientas arriba dan más puntos, y la precisión y las flores que quedan se suman al resultado. El engranaje cambia la velocidad o te deja jugar con tus propias palabras; esas partidas no cuentan para récords, logros ni el reto del día. La lluvia del día va a velocidad media y es igual para todos en tu idioma.',
+        tutTitle1: 'Caen palabras', tutText1: 'Las palabras bajan hacia el jardín. Escríbelas antes de que toquen el suelo.',
+        tutTitle2: 'Letra a letra', tutText2: 'Toca la primera letra en el teclado del juego para apuntar a esa palabra y luego escribe el resto en orden.',
+        tutTitle3: 'Cuida las flores', tutText3: 'Cada palabra que cae se lleva una flor. Termina ocho oleadas con todas las flores que puedas.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var LEVEL_COINS = { easy: [3, 10], medium: [5, 18], hard: [8, 28] };
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || E.LEVELS.indexOf(prefs.level) < 0) prefs = { level: 'medium' };
+  var custom = ctx.store.get('custom', null);
+  if (!custom || typeof custom !== 'object') custom = {};
+  var useCustom = ctx.store.get('useCustom', false) === true;
+
+  // literal keys, so the string check in tools/test.js can see them (#143)
+  function levelName(l) { return { easy: C.t('easy'), medium: C.t('medium'), hard: C.t('hard') }[l]; }
+  function appAlpha() { return E.alpha(C.state.settings.lang); }
+  function myWords(a) { return Array.isArray(custom[a]) ? custom[a].filter(function (w) { return typeof w === 'string'; }) : []; }
+
+  // S: the run, straight from the engine. waiting: held after a return to the app
+  // until a key, so a word never lands while the player looks away.
+  var S = null, daily = null, raf = 0, last = 0, paused = false, waiting = false, ended = false, startedAt = 0, elapsed0 = 0;
+  var sparks = [], labels = [], flash = 0;
+
+  var cv = el('canvas', { role: 'img', 'aria-label': C.t('board') });
+  var box = el('div', { class: 'wf-box' }, [cv]);
+  var top = el('div', { class: 'wf-top ch-above', role: 'status', 'aria-live': 'off' });
+  var tWave = el('span'), tScore = el('span'), tLives = el('span', { 'aria-hidden': 'true' }), tBadge = el('span');
+  top.appendChild(tBadge); top.appendChild(tWave); top.appendChild(tScore); top.appendChild(tLives);
+  var kbBox = el('div', { class: 'wf-kb', role: 'group', 'aria-label': C.t('keyboard') });
+  var wrap = el('div', { class: 'wf-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, kbBox])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  if (!dailyDate) {
+    ctx.button({ icon: 'gear', label: C.t('settings'), onClick: showSettings });
+    ctx.button({ icon: 'refresh', label: C.t('wfNew'), onClick: askNew });
+  }
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* --------------------------------------------------------------- game */
+
+  function newRun() {
+    var a = appAlpha(), list = myWords(a), mine = !dailyDate && useCustom && list.length >= E.MIN_CUSTOM;
+    // the daily run comes from the day's seed, so it is the same for everyone in a language
+    var seed = dailyDate ? C.daily('wordfall', dailyDate).seed : 1 + Math.floor(Math.random() * 4294967294);
+    S = E.newRun({ seed: seed, lang: a, level: dailyDate ? 'medium' : prefs.level, custom: mine ? list : null });
+    daily = dailyDate || null;
+    ended = false; waiting = false; last = 0; sparks = []; labels = []; startedAt = Date.now(); elapsed0 = 0;
+    buildKeys(); renderTop(); save(); kick();
+  }
+  function started() { return S && !ended && (S.hits + S.misses > 0 || S.wave > 1); }
+  function askNew() {
+    if (started()) C.ui.confirm({ title: C.t('wfNew'), body: C.t('resetWarn'), onOk: newRun });
+    else newRun();
+  }
+  function elapsed() { return elapsed0 + (startedAt ? Date.now() - startedAt : 0); }
+
+  function press(ch) {
+    if (!S || ended) return;
+    if (waiting) { resume(); return; }
+    var r = E.key(S, ch);
+    if (r.type === 'none') return;
+    if (r.type === 'miss') { C.feedback('bad'); flash = 1; flashKey(ch, 'wf-bad'); }
+    else {
+      flashKey(ch, 'wf-hit');
+      if (r.type === 'kill') {
+        C.audio.sfx('pop');
+        burst(r.word); renderTop(); save();
+      } else C.audio.sfx('tap');
+    }
+    hintKeys();
+    kick();
+  }
+  function letGo() { if (S && !ended && E.drop(S)) { C.feedback('select'); hintKeys(); kick(); } }
+
+  function onEvents(ev) {
+    ev.forEach(function (e) {
+      if (e.type === 'ground') { C.feedback('thud'); flash = 1; renderTop(); hintKeys(); save(); }
+      else if (e.type === 'wave') { renderTop(); save(); }
+      else if (e.type === 'win' || e.type === 'lose') finish();
+    });
+  }
+
+  function finish() {
+    if (ended) return;
+    ended = true;
+    var R = E.result(S), ms = elapsed(), mine = !!S.custom, lv = S.level, note = null;
+    var base = LEVEL_COINS[lv], coins = 0, points = 0;
+    if (!mine) {
+      coins = R.won ? base[0] : Math.min(base[0] - 1, Math.max(1, Math.floor(R.waves / 3)));
+      points = R.won ? base[1] : Math.max(1, R.waves * 2);
+      if (R.won) {
+        C.achievements.unlock('wf-win');
+        if (lv === 'hard') C.achievements.unlock('wf-hard');
+        if (R.lives === E.LIVES && R.acc >= 0.95) { C.achievements.unlock('wf-clean'); note = C.t('wfCleanNote'); }
+      }
+      if (daily) {
+        if (!C.stats.daily('wordfall', daily, { label: C.t('wfScore', { n: C.num(R.score) }), win: R.won, stars: R.stars })) {
+          coins = Math.max(1, Math.round(coins * 0.2)); points = Math.max(1, Math.round(points * 0.2));
+        }
+      } else if (R.score > 0 && C.stats.best('wordfall', 'score' + lv, R.score)) note = C.t('wfBestN', { n: C.num(R.score) });
+    }
+    ctx.clearSave();
+    hintKeys(); draw();
+    var fin = { daily: daily, lv: lv, mine: mine };
+    var pct = C.num(Math.round(R.acc * 100)) + (C.isRtl() ? '٪' : '%');
+    setTimeout(function () {
+      ctx.finish({
+        won: R.won, title: R.won ? C.t('wfWon') : C.t('wfLost'), note: note, stars: R.won ? R.stars : null, timeMs: ms, coins: coins, points: points,
+        lines: (fin.daily ? [{ label: C.t('daily'), value: C.num(fin.daily) }] : []).concat([
+          { label: C.t('wfScore', { n: '' }).trim(), value: C.num(R.score) },
+          { label: C.t('wfWaves'), value: C.num(R.waves) + ' / ' + C.num(E.WAVES) },
+          { label: C.t('wfKills'), value: C.num(R.kills) },
+          { label: C.t('wfAcc'), value: pct }
+        ]),
+        shareText: 'چوگان · واژه‌باران' + (fin.daily ? ('\nروزانه ' + fin.daily) : '') + '\nامتیاز ' + R.score + ' · موج ' + R.waves + ' از ' + E.WAVES + (R.won ? '\n' + '★'.repeat(R.stars) : ''),
+        againLabel: C.t('wfNew'),
+        onAgain: function () { newRun(); }
+      });
+    }, C.ui.reduceMotion() ? 200 : 700);
+  }
+
+  /* --------------------------------------------------------------- loop */
+
+  function blocked() { return paused || waiting || document.hidden || !!document.querySelector('.ch-scrim'); }
+  function tick(now) {
+    raf = 0;
+    if (!S) return;
+    var stop = blocked() || ended;
+    var dt = !last || stop ? 0 : Math.min(0.1, (now - last) / 1000);
+    last = now;
+    if (dt > 0) {
+      var ev = [];
+      // small fixed steps, so a slow frame never lets a word skip past the ground line
+      for (var left = dt; left > 1e-6 && !ended; left -= 1 / 60) {
+        ev = ev.concat(E.step(S, Math.min(1 / 60, left)));
+        if (S.status !== 'run') break;
+      }
+      if (ev.length) onEvents(ev);
+    }
+    advance(dt);
+    draw(now);
+    if (!stop || sparks.length || labels.length || flash > 0) raf = requestAnimationFrame(tick);
+  }
+  function kick() { if (!raf) { last = 0; raf = requestAnimationFrame(tick); } }
+  function resume() { if (waiting) { waiting = false; startedAt = Date.now(); last = 0; kick(); } }
+  // Away from the app the run holds, and it waits for a key when the app comes back
+  function hold() {
+    if (S && !ended && !waiting) { waiting = true; elapsed0 = elapsed(); startedAt = 0; }
+    draw();
+  }
+
+  /* --------------------------------------------------------------- view */
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  // a dusk sky over a small garden: the accent's violet, lightened on dark surfaces
+  function palette() {
+    return dark()
+      ? { sky0: '#141127', sky1: '#2A2148', cloud: 'rgba(200,190,255,0.07)', pill: '#2E2750', pillT: '#3E3470', text: '#ECE8FF', typed: '#B6A8F5', aim: 'rgba(182,168,245,0.55)',
+        ground: '#1F3A2A', ground2: '#28503A', petal: ['#F28DB2', '#F6C760', '#9FB8FF', '#F59E7A', '#C9A2F2'], stem: '#5DBB7A', dead: '#6B6478', veil: 'rgba(10,8,22,0.62)', label: '#ECE8FF', red: '#FF7A7A' }
+      : { sky0: '#DCD4F3', sky1: '#F7F2EC', cloud: 'rgba(255,255,255,0.65)', pill: '#FFFFFF', pillT: '#EEE9FB', text: '#241A49', typed: ACCENT, aim: 'rgba(62,44,119,0.45)',
+        ground: '#BFDDAE', ground2: '#9FCB8C', petal: ['#E0568A', '#E3A21A', '#4D74D8', '#E06A3C', '#9A5BD6'], stem: '#3D8A55', dead: '#A69FB0', veil: 'rgba(247,242,236,0.78)', label: '#241A49', red: '#C0392B' };
+  }
+  function rtlAlpha(a) { return a === 'fa' || a === 'ar'; }
+
+  // the view last drawn: a touch is never read against a size the player did not see
+  var drawn = { w: 0, h: 0, sky: 0 }, font = null;
+  function size() {
+    var r = box.getBoundingClientRect();
+    return { w: Math.max(120, Math.floor(r.width) || 0), h: Math.max(120, Math.floor(r.height) || 0) };
+  }
+  function wordBox(g, o, Z, fs) {
+    var w = g.measureText(o.w).width + fs * 1.1, h = fs * 1.7;
+    var x = Math.max(4 + w / 2, Math.min(Z.w - 4 - w / 2, o.x * Z.w));
+    var y = 6 + h / 2 + o.y * (drawn.sky - h - 6);
+    return { x: x, y: y, w: w, h: h };
+  }
+  function rr(g, x, y, w, h, r) {
+    g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+  }
+  function flower(g, x, y, s, color, P, alive) {
+    g.strokeStyle = alive ? P.stem : P.dead; g.lineWidth = Math.max(1.5, s * 0.14); g.lineCap = 'round';
+    g.beginPath(); g.moveTo(x, y + s * 1.6);
+    if (alive) g.quadraticCurveTo(x - s * 0.2, y + s * 0.8, x, y);
+    else g.quadraticCurveTo(x + s * 0.2, y + s * 0.5, x + s * 0.7, y + s * 0.6);
+    g.stroke();
+    var cx = alive ? x : x + s * 0.75, cy = alive ? y : y + s * 0.75, pr = s * (alive ? 0.42 : 0.3);
+    g.fillStyle = alive ? color : P.dead;
+    for (var i = 0; i < 5; i++) {
+      var a = i * Math.PI * 2 / 5 - Math.PI / 2;
+      g.beginPath(); g.arc(cx + Math.cos(a) * pr, cy + Math.sin(a) * pr, pr * 0.72, 0, Math.PI * 2); g.fill();
+    }
+    g.fillStyle = alive ? '#FFE9A8' : P.dead; g.beginPath(); g.arc(cx, cy, pr * 0.55, 0, Math.PI * 2); g.fill();
+  }
+
+  function draw(now) {
+    if (!S) return;
+    now = now || performance.now();
+    var Z = size(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
+    var P = palette(), groundH = Math.max(34, Math.min(70, Z.h * 0.15));
+    drawn = { w: Z.w, h: Z.h, sky: Z.h - groundH };
+    if (!font) font = getComputedStyle(document.body).fontFamily || 'sans-serif';
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var sky = g.createLinearGradient(0, 0, 0, Z.h);
+    sky.addColorStop(0, P.sky0); sky.addColorStop(1, P.sky1);
+    g.fillStyle = sky; g.fillRect(0, 0, Z.w, Z.h);
+
+    // slow clouds keep the sky alive between waves
+    var drift = (now / 1000) * 6;
+    g.fillStyle = P.cloud;
+    [[0.12, 0.18, 1], [0.55, 0.32, 1.3], [0.85, 0.12, 0.8], [0.35, 0.55, 1.1]].forEach(function (c, i) {
+      var cw = Z.w * 0.22 * c[2], x = ((c[0] * Z.w + drift * (1 + i * 0.3)) % (Z.w + cw)) - cw / 2, y = c[1] * drawn.sky;
+      g.beginPath(); g.ellipse(x, y, cw / 2, cw / 7, 0, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.ellipse(x - cw * 0.15, y - cw / 9, cw / 4, cw / 7, 0, 0, Math.PI * 2); g.fill();
+    });
+
+    // the garden: one flower for each life, wilted once lost
+    var gy = drawn.sky;
+    g.fillStyle = P.ground2; g.fillRect(0, gy, Z.w, groundH);
+    g.fillStyle = P.ground; rr(g, -10, gy, Z.w + 20, groundH * 0.45, groundH * 0.2); g.fill();
+    var fs0 = Math.max(6, Math.min(14, groundH * 0.2));
+    for (var f = 0; f < E.LIVES; f++) {
+      var fx = Z.w * (f + 0.5) / E.LIVES, fy = gy + groundH * 0.3;
+      flower(g, fx, fy, fs0, P.petal[f], P, f < S.lives);
+    }
+
+    // words, the one being typed in front with its typed part in the accent
+    var fs = Math.max(14, Math.min(26, Z.w * 0.048));
+    g.font = '700 ' + fs + 'px ' + font; g.textBaseline = 'middle'; g.textAlign = 'center';
+    var rtl = rtlAlpha(S.lang);
+    try { g.direction = rtl ? 'rtl' : 'ltr'; } catch (er) { /* old WebViews */ }
+    var tgt = null, list = S.words.slice();
+    list.forEach(function (o) { if (o.id === S.target) tgt = o; });
+    if (tgt) { list.splice(list.indexOf(tgt), 1); list.push(tgt); }
+    if (tgt) {
+      var tb = wordBox(g, tgt, Z, fs);
+      g.strokeStyle = P.aim; g.lineWidth = 2; g.setLineDash([4, 6]);
+      g.beginPath(); g.moveTo(Z.w / 2, gy); g.lineTo(tb.x, tb.y + tb.h / 2); g.stroke(); g.setLineDash([]);
+    }
+    list.forEach(function (o) {
+      var b = wordBox(g, o, Z, fs), on = o === tgt;
+      g.fillStyle = on ? P.pillT : P.pill;
+      g.shadowColor = 'rgba(30,20,70,0.18)'; g.shadowBlur = on ? 10 : 4; g.shadowOffsetY = 2;
+      rr(g, b.x - b.w / 2, b.y - b.h / 2, b.w, b.h, b.h / 2); g.fill();
+      g.shadowColor = 'transparent'; g.shadowBlur = 0; g.shadowOffsetY = 0;
+      if (on) { g.strokeStyle = P.typed; g.lineWidth = 2; g.stroke(); }
+      g.fillStyle = P.text; g.fillText(o.w, b.x, b.y + 1);
+      if (o.typed > 0) {
+        // the typed letters are the same text clipped to their width, so joined
+        // Persian and Arabic letters keep their shapes
+        var full = g.measureText(o.w).width, part = Math.min(full, g.measureText(o.w.slice(0, o.typed)).width);
+        g.save(); g.beginPath();
+        if (rtl) g.rect(b.x + full / 2 - part, b.y - b.h / 2, part + 1, b.h); else g.rect(b.x - full / 2 - 1, b.y - b.h / 2, part + 1, b.h);
+        g.clip(); g.fillStyle = P.typed; g.fillText(o.w, b.x, b.y + 1); g.restore();
+      }
+    });
+    try { g.direction = C.isRtl() ? 'rtl' : 'ltr'; } catch (er) { /* old WebViews */ }
+
+    sparks.forEach(function (p) { g.globalAlpha = Math.max(0, p.life); g.fillStyle = p.c; g.beginPath(); g.arc(p.x * Z.w, p.y * Z.h, p.r, 0, Math.PI * 2); g.fill(); });
+    g.globalAlpha = 1;
+    g.font = '800 ' + Math.round(fs * 0.85) + 'px ' + font;
+    labels.forEach(function (l) { g.globalAlpha = Math.max(0, Math.min(1, l.life * 1.5)); g.fillStyle = P.typed; g.fillText('+' + C.num(l.n), l.x * Z.w, l.y * Z.h); });
+    g.globalAlpha = 1;
+
+    if (flash > 0) { g.globalAlpha = flash * 0.25; g.fillStyle = P.red; g.fillRect(0, 0, Z.w, Z.h); g.globalAlpha = 1; }
+
+    if (!ended && S.pause > 0 && !S.words.length) {
+      g.font = '800 ' + Math.round(fs * 1.4) + 'px ' + font; g.fillStyle = P.label; g.globalAlpha = 0.8;
+      g.fillText(C.t('wfWaveStart', { n: C.num(S.wave) }), Z.w / 2, drawn.sky * 0.45);
+      g.globalAlpha = 1;
+    }
+    if (waiting && !ended) {
+      g.fillStyle = P.veil; g.fillRect(0, 0, Z.w, Z.h);
+      g.font = '800 ' + Math.round(fs * 0.95) + 'px ' + font; g.fillStyle = P.label;
+      g.fillText(C.t('wfResume'), Z.w / 2, Z.h * 0.45);
+    }
+  }
+
+  function advance(dt) {
+    if (flash > 0) flash = Math.max(0, flash - dt * 3 - (dt ? 0 : 0.05));
+    sparks = sparks.filter(function (p) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 0.6 * dt; p.life -= dt * 1.6; return p.life > 0; });
+    labels = labels.filter(function (l) { l.y -= 0.08 * dt; l.life -= dt; return l.life > 0; });
+    if (!dt && (sparks.length || labels.length)) {
+      // a paused frame still lets the last spark fade, so nothing hangs on screen
+      sparks.forEach(function (p) { p.life -= 0.05; }); labels.forEach(function (l) { l.life -= 0.05; });
+    }
+  }
+  function burst(o) {
+    var Z = { w: drawn.w || 1, h: drawn.h || 1 }, x = Math.max(0.08, Math.min(0.92, o.x)), y = (6 + o.y * (drawn.sky - 30)) / Z.h;
+    labels.push({ x: x, y: y, n: E.points(o) || 0, life: 1 });
+    if (C.ui.reduceMotion()) return;
+    var cols = palette().petal;
+    for (var i = 0; i < 14; i++) {
+      var a = Math.random() * Math.PI * 2, v = 0.12 + Math.random() * 0.25;
+      sparks.push({ x: x, y: y, vx: Math.cos(a) * v * Z.h / Z.w, vy: Math.sin(a) * v - 0.1, r: 2 + Math.random() * 2.5, life: 1, c: cols[i % cols.length] });
+    }
+  }
+
+  function renderTop() {
+    if (!S) return;
+    tBadge.innerHTML = '';
+    if (daily) tBadge.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('wfDaily') })]));
+    else if (S.custom) tBadge.appendChild(el('span', { class: 'ch-badge', text: C.t('wfMine') }));
+    else tBadge.appendChild(el('span', { class: 'ch-badge', text: levelName(S.level) }));
+    tWave.textContent = C.t('wfWave', { n: C.num(S.wave), m: C.num(E.WAVES) });
+    tScore.textContent = C.t('wfScore', { n: C.num(S.score) });
+    tLives.textContent = '✿'.repeat(Math.max(0, S.lives)) + '·'.repeat(Math.max(0, E.LIVES - S.lives));
+    top.setAttribute('aria-label', tWave.textContent + ' · ' + tScore.textContent + ' · ' + C.t('wfLives', { n: C.num(S.lives) }));
+    cv.setAttribute('aria-label', C.t('board') + ' · ' + S.words.map(function (o) { return o.w; }).join(' '));
+  }
+
+  /* ----------------------------------------------------------- keyboard */
+
+  // The keys are built once per alphabet. During play only classes change, so a key
+  // under the finger is never replaced between press and release (#750).
+  var keyEls = {}, kbAlpha = null;
+  function buildKeys() {
+    if (!S || kbAlpha === S.lang) { hintKeys(); return; }
+    kbAlpha = S.lang; keyEls = {};
+    kbBox.innerHTML = '';
+    var rows = E.KB[S.lang], cols = Math.max.apply(null, rows.map(function (r) { return r.length; }));
+    kbBox.style.setProperty('--cols', cols);
+    rows.forEach(function (row, ri) {
+      var line = el('div', { class: 'wf-row' });
+      row.split('').forEach(function (ch) {
+        var b = el('button', { class: 'wf-key', type: 'button', text: ch, lang: S.lang });
+        b.addEventListener('pointerdown', function (e) { e.preventDefault(); press(ch); });
+        // a key reached by Tab and pressed with Enter or Space has no pointer
+        b.addEventListener('click', function (e) { if (e.detail === 0) press(ch); });
+        keyEls[ch] = b; line.appendChild(b);
+      });
+      if (ri === rows.length - 1) {
+        var d = el('button', { class: 'wf-key wf-key--wide', type: 'button', 'aria-label': C.t('kDrop'), title: C.t('kDrop') }, [C.icon('close', 18)]);
+        d.addEventListener('pointerdown', function (e) { e.preventDefault(); letGo(); });
+        d.addEventListener('click', function (e) { if (e.detail === 0) letGo(); });
+        line.appendChild(d);
+      }
+      kbBox.appendChild(line);
+    });
+    hintKeys();
+  }
+  // once a word is aimed at, its next letter lights up: on an unfamiliar layout the
+  // hunt for a key should not be what costs a flower
+  var hinted = null;
+  function hintKeys() {
+    var k = S && !ended && S.target >= 0 ? E.nextKey(S) : null;
+    if (k === hinted) return;
+    if (hinted && keyEls[hinted]) keyEls[hinted].classList.remove('wf-next');
+    hinted = k;
+    if (k && keyEls[k]) keyEls[k].classList.add('wf-next');
+  }
+  function flashKey(ch, cls) {
+    var b = keyEls[ch];
+    if (!b) return;
+    b.classList.add(cls);
+    setTimeout(function () { b.classList.remove(cls); }, cls === 'wf-bad' ? 220 : 90);
+  }
+
+  // A physical key: the character it types if the alphabet has it, otherwise where it
+  // sits. Persian, Arabic and Russian map by position for a keyboard without that
+  // layout; Latin alphabets use the core's letter match, which also works on the
+  // Persian layout (#341).
+  function keyChar(e) {
+    var a = S.lang;
+    if (e.key && e.key.length === 1) {
+      var c = E.fold(a, e.key);
+      if (E.isLetter(a, c)) return c;
+    }
+    if (a === 'fa' || a === 'ar' || a === 'ru') {
+      for (var r = 0; r < 3; r++) {
+        var codes = r === 2 && E.CODES3[a] ? E.CODES3[a] : E.CODES[r], i = codes.indexOf(e.code);
+        if (i >= 0 && i < E.KB[a][r].length) return E.KB[a][r][i];
+      }
+      return null;
+    }
+    var letters = E.KB[a].join('');
+    for (var j = 0; j < letters.length; j++) if (/[a-z]/.test(letters[j]) && C.keyIs(e, letters[j])) return letters[j];
+    return null;
+  }
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || !S || ended) return;
+    if (e.key === 'Escape' || e.key === 'Backspace') { e.preventDefault(); if (waiting) resume(); else letGo(); return; }
+    if (waiting) { if (e.key !== 'Tab' && e.key !== 'Shift') { e.preventDefault(); resume(); } return; }
+    // Enter or Space on a focused button keeps its own meaning
+    if ((e.key === 'Enter' || e.key === ' ') && document.activeElement && document.activeElement.tagName === 'BUTTON') return;
+    var ch = keyChar(e);
+    if (!ch) return;
+    e.preventDefault();
+    press(ch);
+  });
+  cv.addEventListener('pointerdown', function (e) { if (waiting) { e.preventDefault(); resume(); } });
+  cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  /* ------------------------------------------------------------ dialogs */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    var body = [el('p', { class: 'ch-dim', text: C.t('rules') })];
+    var lang = C.state.settings.lang;
+    if (lang === 'zh' || lang === 'hi') body.push(el('p', { class: 'ch-dim', text: C.t('wfLetters') }));
+    body.push(el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }));
+    body.push(el('div', { class: 'ch-list' }, [kb('A–Z', C.t('kType')), kb('Esc ⌫', C.t('kDrop'))]));
+    C.ui.modal({
+      title: C.t('help'), body: body,
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  // A change of speed or words starts a new run; one already under way asks first
+  function apply(change) {
+    if (started()) C.ui.confirm({ title: C.t('wfNew'), body: C.t('resetWarn'), onOk: function () { change(); newRun(); } });
+    else { change(); newRun(); }
+  }
+  function showSettings() {
+    var a = appAlpha(), err = el('p', { class: 'wf-err', role: 'status' });
+    var m = null;
+    var words = C.ui.segmented([{ value: false, label: C.t('wfBuiltIn') }, { value: true, label: C.t('wfMine') }], useCustom && myWords(a).length >= E.MIN_CUSTOM, function (v) {
+      if (v && myWords(a).length < E.MIN_CUSTOM) { if (m) m.close(); editWords(); return; }
+      if (m) m.close();
+      apply(function () { useCustom = v; ctx.store.set('useCustom', v); });
+    });
+    var edit = el('button', { class: 'ch-btn ch-btn--ghost', type: 'button', style: { 'margin-top': 'var(--s-3)' }, onclick: function () { if (m) m.close(); editWords(); } },
+      [C.icon('pencil', 18), el('span', { text: C.t('wfEdit') })]);
+    m = C.ui.modal({
+      title: C.t('settings'), closeButton: true,
+      body: [
+        el('h3', { text: C.t('wfSpeed') }),
+        C.ui.segmented(E.LEVELS.map(function (l) { return { value: l, label: levelName(l) }; }), prefs.level, function (l) {
+          if (l === prefs.level) return;
+          m.close();
+          apply(function () { prefs.level = l; ctx.store.set('prefs', prefs); });
+        }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('wfWords') }),
+        words, edit, err,
+        el('p', { class: 'ch-dim', text: C.t('wfCustomNote') })
+      ],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  function editWords() {
+    var a = appAlpha(), list = myWords(a);
+    var input = el('input', { class: 'ch-field', type: 'text', maxlength: '24', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', dir: 'auto', lang: a, placeholder: C.t('wfPlaceholder'), 'aria-label': C.t('wfPlaceholder') });
+    var err = el('p', { class: 'wf-err', role: 'status' }), count = el('p', { class: 'ch-dim' }), chips = el('div', { class: 'wf-words' });
+    var clear = el('button', { class: 'ch-btn ch-btn--ghost', type: 'button', onclick: function () {
+      if (!list.length) return;
+      C.ui.confirm({ title: C.t('wfClear'), body: C.t('wfClear') + '?', danger: true, okLabel: C.t('wfClear'), onOk: function () { list = []; store(); paint(); } });
+    } }, C.t('wfClear'));
+    function store() {
+      custom[a] = list.slice(); ctx.store.set('custom', custom);
+      if (list.length < E.MIN_CUSTOM && useCustom) { useCustom = false; ctx.store.set('useCustom', false); }
+    }
+    function paint() {
+      count.textContent = C.t('wfCount', { n: C.num(list.length), m: C.num(E.MAX_CUSTOM) }) + (list.length < E.MIN_CUSTOM ? ' · ' + C.t('wfNeed', { n: C.num(E.MIN_CUSTOM) }) : '');
+      chips.innerHTML = '';
+      list.forEach(function (w, i) {
+        var x = el('button', { type: 'button', 'aria-label': C.t('wfDel', { w: w }), text: '×' });
+        x.addEventListener('click', function () { list.splice(i, 1); store(); paint(); C.feedback('tap'); });
+        chips.appendChild(el('span', { class: 'wf-chip', lang: a }, [el('span', { text: w }), x]));
+      });
+      clear.disabled = !list.length;
+    }
+    function add() {
+      var v = E.validateCustom(a, input.value, list);
+      if (!v.ok) {
+        err.textContent = { letters: C.t('wfErrLetters'), length: C.t('wfErrLen'), dup: C.t('wfErrDup'), full: C.t('wfErrFull') }[v.reason];
+        C.feedback('bad'); return;
+      }
+      list.push(v.word); store(); input.value = ''; err.textContent = ''; paint(); C.feedback('select');
+      input.focus();
+    }
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+    var addBtn = el('button', { class: 'ch-btn ch-btn--primary', type: 'button', onclick: add }, C.t('wfAdd'));
+    paint();
+    C.ui.modal({
+      title: C.t('wfMine'), closeButton: true,
+      body: [el('p', { class: 'ch-dim', text: C.t('wfCustomNote') }), el('div', { class: 'wf-addrow' }, [input, addBtn]), err, count, chips],
+      actions: [{ label: C.t('wfClear'), kind: 'danger', keepOpen: true, onClick: function () { clear.click(); } },
+        { label: C.t('done'), kind: 'primary', onClick: function () {
+          // a full enough list is put to use at once; that is why the player opened it
+          if (list.length >= E.MIN_CUSTOM && !useCustom) apply(function () { useCustom = true; ctx.store.set('useCustom', true); });
+        } }]
+    });
+    setTimeout(function () { input.focus(); }, 60);
+  }
+
+  // Tutorial pictures: a small sky with word pills drawn as bars, in the light
+  // theme's literal colours, so they read the same in every language
+  function tArt(step) {
+    var s = '<svg viewBox="0 0 200 110" width="100%"><defs><linearGradient id="wfs" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#DCD4F3"/><stop offset="1" stop-color="#F7F2EC"/></linearGradient></defs>' +
+      '<rect x="20" y="2" width="160" height="106" rx="10" fill="url(#wfs)"/><rect x="20" y="88" width="160" height="20" fill="#9FCB8C"/>';
+    var fl = function (x, alive) {
+      return alive ? '<path d="M' + x + ' 104v-9" stroke="#3D8A55" stroke-width="2"/><circle cx="' + x + '" cy="93" r="5" fill="#E0568A"/><circle cx="' + x + '" cy="93" r="2.2" fill="#FFE9A8"/>'
+        : '<path d="M' + x + ' 104q1-5 5-6" stroke="#A69FB0" stroke-width="2" fill="none"/><circle cx="' + (x + 6) + '" cy="98" r="3.5" fill="#A69FB0"/>';
+    };
+    for (var i = 0; i < 5; i++) s += fl(40 + i * 30, !(step === 3 && i === 4));
+    var pill = function (x, y, w, typed, on) {
+      var t = '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="14" rx="7" fill="' + (on ? '#EEE9FB' : '#fff') + '"' + (on ? ' stroke="' + ACCENT + '" stroke-width="1.5"' : '') + '/>';
+      for (var k = 0; k < Math.floor((w - 10) / 7); k++) t += '<rect x="' + (x + 6 + k * 7) + '" y="' + (y + 4) + '" width="5" height="6" rx="1" fill="' + (k < typed ? ACCENT : '#241A49') + '" opacity="' + (k < typed ? 1 : 0.55) + '"/>';
+      return t;
+    };
+    if (step === 1) s += pill(40, 14, 46, 0) + pill(110, 40, 40, 0) + pill(60, 62, 52, 0) + '<path d="M86 30v8M82 34l4 4 4-4" stroke="' + ACCENT + '" stroke-width="1.5" fill="none"/>';
+    if (step === 2) s += pill(40, 14, 46, 0) + pill(110, 26, 40, 0) + '<path d="M100 88L86 70" stroke="rgba(62,44,119,0.45)" stroke-width="1.5" stroke-dasharray="3 4"/>' + pill(60, 56, 52, 3, true);
+    if (step === 3) s += pill(70, 20, 46, 0) + '<rect x="146" y="76" width="40" height="12" rx="6" fill="#fff" opacity=".7"/>';
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // the run is saved on every burst word, every lost flower and when the app goes away;
+  // the daily run has its own slot
+  ctx.autosave(function () {
+    if (!S || ended) return { inProgress: false };
+    return { run: S, daily: daily, elapsed: elapsed() };
+  });
+  function save() { ctx.save(); }
+  C.onPause(function () { paused = true; hold(); ctx.save(); });
+  C.onResume(function () { paused = false; last = 0; kick(); });
+  document.addEventListener('visibilitychange', function () { if (document.hidden) { hold(); ctx.save(); } else { last = 0; kick(); } });
+  // back from the back/forward cache, the page runs on without a load (#385)
+  window.addEventListener('pageshow', function (e) { if (e.persisted) { paused = false; hold(); last = 0; kick(); } });
+  // a dialog closing does not tell the page; the loop looks again while one is open
+  setInterval(function () { if (S && !raf && !ended && !document.hidden && !paused) kick(); }, 400);
+
+  var saved = ctx.loadSave();
+  if (saved && saved.run && E.valid(saved.run) && (saved.daily || null) === (dailyDate || null)) {
+    S = saved.run; daily = saved.daily || null; elapsed0 = +saved.elapsed || 0; startedAt = 0;
+    ended = false; waiting = true;
+    buildKeys(); renderTop(); draw();
+  } else newRun();
+  if (dailyDate && C.stats.dailyDone('wordfall', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).wordfall;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  // the sky is redrawn whenever its box changes (rotation, side rows) and once the web
+  // font has arrived and moved the layout (Bowling lesson)
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { font = null; draw(); });
+  if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { draw(); }); } catch (er) { /* old WebViews */ } }
+  new MutationObserver(function () { draw(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>

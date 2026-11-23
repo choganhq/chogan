@@ -1,0 +1,1030 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>تپه‌ماهور — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  /* Four shades of green for the heights, darker = higher in the light theme and lighter =
+     higher in the dark one; every square also carries its height as rings and a digit, so
+     the map reads without telling the greens apart */
+  :root { --hs-h0: #EEF2E2; --hs-h1: #D3E0B4; --hs-h2: #B3C98A; --hs-h3: #8FAE63; --hs-ring: rgba(36, 56, 16, .42); --hs-grid: rgba(36, 56, 16, .2);
+    --hs-cliff: #3B2A14; --hs-ink: #22320F; --hs-hi: #3C8400; --hs-cur: #1E2A10;
+    --hs-p0: #FFF8E8; --hs-p0e: #5A4320; --hs-p1: #2E2620; --hs-p1e: #F2E6CC; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --hs-h0: #1E2618; --hs-h1: #2C3A22; --hs-h2: #3D5030; --hs-h3: #52693E; --hs-ring: rgba(226, 242, 196, .34);
+      --hs-grid: rgba(226, 242, 196, .14); --hs-cliff: #EAD9AE; --hs-ink: #E6F0D2; --hs-hi: #9BD35A; --hs-cur: #F0F6E4; }
+  }
+  :root[data-theme="dark"] { --hs-h0: #1E2618; --hs-h1: #2C3A22; --hs-h2: #3D5030; --hs-h3: #52693E; --hs-ring: rgba(226, 242, 196, .34);
+    --hs-grid: rgba(226, 242, 196, .14); --hs-cliff: #EAD9AE; --hs-ink: #E6F0D2; --hs-hi: #9BD35A; --hs-cur: #F0F6E4; }
+  .hs-wrap > .ch-fit { --fit-ar: 1; }
+  .ch-fit > .hs-box { position: relative; aspect-ratio: var(--fit-ar); }
+  /* a canvas does not stretch to its offsets alone (#919), so it gets a size too */
+  .hs-canvas { position: absolute; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: pointer; }
+  .hs-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .hs-sides { width: 100%; max-width: 520px; display: flex; flex-direction: column; gap: var(--s-2); }
+  .hs-side { display: flex; align-items: center; gap: 8px; min-width: 0; background: var(--c-surface); border-radius: var(--r-md);
+    padding: 6px 10px; box-shadow: var(--sh-1); border: 2px solid transparent; transition: border-color var(--t-mid) var(--ease); }
+  .hs-side--on { border-color: var(--game); box-shadow: var(--sh-2); }
+  /* The deep forest accent all but vanished as the turn outline on the dark surface */
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .hs-side--on { border-color: var(--game-text-dark, var(--game)); } }
+  :root[data-theme="dark"] .hs-side--on { border-color: var(--game-text-dark, var(--game)); }
+  .hs-side__dot { width: 18px; height: 18px; flex: 0 0 18px; border-radius: 50%; border: 2px solid; }
+  .hs-side__name { flex: 1 1 auto; min-width: 0; font-weight: 700; font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hs-side__sub { flex: 0 0 auto; font-size: var(--fs-xs); color: var(--c-text-dim); font-weight: 700; white-space: nowrap; }
+  .hs-thinking .hs-side__name { animation: hs-blink 900ms infinite; }
+  @keyframes hs-blink { 50% { opacity: .55; } }
+  @media (max-height: 480px) { .hs-side { padding: 3px 8px; } }
+  /* the hints change in this row, so it keeps its height and the board never moves
+     between two taps */
+  .hs-status { min-height: 48px; display: flex; align-items: center; justify-content: center; gap: var(--s-2); flex-wrap: wrap;
+    font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function HillsideEngineFactory() {
+  'use strict';
+
+  // A 7 × 7 map of heights 0–3 with two small armies on it. A cell is r * 7 + c; side 0
+  // starts at the bottom (rows 5–6) and moves first, side 1 is its point reflection
+  // (cell i ↔ 48 − i), so a map that is the same under that reflection is fair to both.
+  var N = 7, NN = 49, LEVELS = ['easy', 'medium', 'hard'];
+  var CHIEF = 1, CLIMBER = 2, RUNNER = 3, JUMPER = 4;
+  // each side's own hilltop, where its chief starts; the other chief standing on it wins
+  var HILL = [45, 3];
+  // a game that goes on this many plies is drawn, so two careful sides cannot circle for ever
+  var CAP = 160;
+  var START = [[43, JUMPER], [44, RUNNER], [45, CHIEF], [46, RUNNER], [47, JUMPER], [36, CLIMBER], [38, CLIMBER], [40, CLIMBER]];
+  var VAL = [0, 0, 3, 5, 3.5];
+  var WIN = 1000;
+
+  function at(r, c) { return r >= 0 && r < N && c >= 0 && c < N ? r * N + c : -1; }
+  function sideOf(p) { return p >> 3; }
+  function typeOf(p) { return p & 7; }
+  function table(ds) {
+    var out = [];
+    for (var i = 0; i < NN; i++) {
+      var r = Math.floor(i / N), c = i % N, l = [];
+      ds.forEach(function (d) { var k = at(r + d[0], c + d[1]); if (k >= 0) l.push(k); });
+      out.push(l);
+    }
+    return out;
+  }
+  var K8 = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+  var O4 = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+  var NB8 = table(K8), NB4 = table(O4), JMP = table(K8.map(function (d) { return [d[0] * 2, d[1] * 2]; }));
+
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      var t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  /* ------------------------------------------------------------- the map */
+
+  function symmetric(h) {
+    if (!h || h.length !== NN) return false;
+    for (var i = 0; i < NN; i++) if (h[i] !== h[NN - 1 - i]) return false;
+    return true;
+  }
+  // cliffs: neighbouring cells (straight) two or more levels apart, drawn as thick lines
+  function cliffs(h) {
+    var n = 0;
+    for (var i = 0; i < NN; i++) NB4[i].forEach(function (k) { if (k > i && Math.abs(h[k] - h[i]) >= 2) n++; });
+    return n;
+  }
+  // Cells a piece of this type could reach from `from` on an empty board
+  function reach(h, type, from) {
+    var seen = {}, q = [from];
+    seen[from] = 1;
+    while (q.length) {
+      var a = q.shift();
+      var nb = type === CHIEF ? NB8[a] : type === JUMPER ? JMP[a] : NB4[a];
+      for (var j = 0; j < nb.length; j++) {
+        var k = nb[j];
+        if (seen[k]) continue;
+        if ((type === CHIEF || type === RUNNER) && Math.abs(h[k] - h[a]) > 1) continue;
+        seen[k] = 1; q.push(k);
+      }
+    }
+    return seen;
+  }
+  // A map is played only if it is fair and every piece can take part: the chief can walk
+  // from hilltop to hilltop, each runner can get to the far side, every height is used and
+  // there are some cliffs, but not a maze of them.
+  function valid(h) {
+    if (!symmetric(h)) return false;
+    for (var i = 0; i < NN; i++) if (h[i] !== (h[i] | 0) || h[i] < 0 || h[i] > 3) return false;
+    if (h[HILL[0]] !== 3 || h[HILL[1]] !== 3) return false;
+    var count = [0, 0, 0, 0];
+    h.forEach(function (v) { count[v]++; });
+    if (count.some(function (n) { return n < 5; })) return false;
+    var cl = cliffs(h);
+    if (cl < 6 || cl > 30) return false;
+    if (!reach(h, CHIEF, HILL[0])[HILL[1]]) return false;
+    for (var s = 0; s < START.length; s++) {
+      var r = reach(h, START[s][1], START[s][0]), far = false;
+      for (var k = 0; k < 14; k++) if (r[k]) { far = true; break; }
+      if (!far) return false;
+    }
+    return true;
+  }
+  // One attempt: smooth hills and dips laid down in mirrored pairs, then cut into four
+  // levels at fixed shares. Only the first half is computed and copied to the mirror, so
+  // rounding can never make the two halves differ.
+  function tryMap(rnd) {
+    var raw = new Array(NN).fill(0), bumps = [], nb = 4 + Math.floor(rnd() * 4), b, i;
+    for (b = 0; b < nb; b++) {
+      var amp = 0.6 + rnd();
+      bumps.push({ r: rnd() * 7 - 0.5, c: rnd() * 7 - 0.5, a: rnd() < 0.35 ? -amp : amp, w: Math.pow(1.1 + rnd() * 1.6, 2) });
+    }
+    for (i = 0; i <= 24; i++) {
+      var r = Math.floor(i / N), c = i % N, v = (rnd() - 0.5) * 0.35;
+      for (b = 0; b < nb; b++) {
+        var u = bumps[b];
+        v += u.a * (Math.exp(-((r - u.r) * (r - u.r) + (c - u.c) * (c - u.c)) / u.w) +
+          Math.exp(-((r - 6 + u.r) * (r - 6 + u.r) + (c - 6 + u.c) * (c - 6 + u.c)) / u.w));
+      }
+      raw[i] = v; raw[NN - 1 - i] = v;
+    }
+    var sorted = raw.slice().sort(function (x, y) { return x - y; });
+    var t1 = sorted[14], t2 = sorted[29], t3 = sorted[41];
+    var h = raw.map(function (v) { return (v >= t1) + (v >= t2) + (v >= t3); });
+    h[HILL[0]] = 3; h[HILL[1]] = 3;
+    return valid(h) ? h : null;
+  }
+  // a known good map, used only if a seed somehow never produces one
+  var FALLBACK = [1, 2, 2, 3, 2, 1, 0, 0, 1, 2, 2, 1, 0, 0, 0, 0, 3, 1, 0, 2, 3, 1, 3, 1, 0, 1, 3, 1,
+    3, 2, 0, 1, 3, 0, 0, 0, 0, 1, 2, 2, 1, 0, 0, 1, 2, 3, 2, 2, 1];
+  function genMap(rnd) {
+    for (var t = 0; t < 400; t++) { var h = tryMap(rnd); if (h) return h; }
+    return FALLBACK.slice();
+  }
+
+  // Steps the chief needs from each cell to the other side's hilltop, per side (the bot's
+  // sense of direction); 99 where it cannot get there at all
+  function hillDist(h) {
+    return [0, 1].map(function (s) {
+      var d = new Array(NN).fill(99), q = [HILL[1 - s]];
+      d[HILL[1 - s]] = 0;
+      while (q.length) {
+        var a = q.shift();
+        NB8[a].forEach(function (k) { if (d[k] === 99 && Math.abs(h[k] - h[a]) <= 1) { d[k] = d[a] + 1; q.push(k); } });
+      }
+      return d;
+    });
+  }
+
+  /* ------------------------------------------------------------- the game */
+
+  function newGame(seed) {
+    seed = seed >>> 0;
+    var h = genMap(mulberry32(seed)), b = new Array(NN).fill(0);
+    START.forEach(function (p) { b[p[0]] = p[1]; b[NN - 1 - p[0]] = 8 + p[1]; });
+    return { seed: seed, h: h, b: b, turn: 0, plies: 0, winner: -1, how: '', last: null, dist: hillDist(h) };
+  }
+  // the map and its distances never change during a game, so clones share them
+  function clone(S) {
+    return { seed: S.seed, h: S.h, b: S.b.slice(), turn: S.turn, plies: S.plies, winner: S.winner, how: S.how,
+      last: S.last ? { from: S.last.from, to: S.last.to, cap: S.last.cap } : null, dist: S.dist };
+  }
+
+  function free(S, k, side) { var p = S.b[k]; return !p || sideOf(p) !== side; }
+  function targets(S, from) {
+    var p = S.b[from], out = [];
+    if (!p) return out;
+    var s = sideOf(p), t = typeOf(p), h = S.h, j;
+    if (t === CHIEF) {
+      NB8[from].forEach(function (k) { if (Math.abs(h[k] - h[from]) <= 1 && free(S, k, s)) out.push(k); });
+    } else if (t === CLIMBER) {
+      NB4[from].forEach(function (k) { if (free(S, k, s)) out.push(k); });
+    } else if (t === JUMPER) {
+      JMP[from].forEach(function (k) { if (free(S, k, s)) out.push(k); });
+    } else {
+      for (j = 0; j < 4; j++) {
+        var cur = from, r = Math.floor(from / N), c = from % N;
+        for (;;) {
+          r += O4[j][0]; c += O4[j][1];
+          var k = at(r, c);
+          if (k < 0 || Math.abs(h[k] - h[cur]) > 1) break;
+          if (S.b[k]) { if (sideOf(S.b[k]) !== s) out.push(k); break; }
+          out.push(k); cur = k;
+        }
+      }
+    }
+    return out;
+  }
+  function moves(S) {
+    var out = [];
+    if (S.winner >= 0) return out;
+    for (var i = 0; i < NN; i++) {
+      var p = S.b[i];
+      if (p && sideOf(p) === S.turn) targets(S, i).forEach(function (k) { out.push([i, k]); });
+    }
+    return out;
+  }
+  function legal(S, m) {
+    if (!m || S.winner >= 0) return false;
+    var p = S.b[m[0]];
+    return !!p && sideOf(p) === S.turn && targets(S, m[0]).indexOf(m[1]) >= 0;
+  }
+  function apply(S, m) {
+    var from = m[0], to = m[1], cap = S.b[to], mover = S.turn, p = S.b[from];
+    S.b[to] = p; S.b[from] = 0;
+    S.last = { from: from, to: to, cap: cap };
+    S.plies++;
+    S.turn = 1 - mover;
+    if (cap && typeOf(cap) === CHIEF) { S.winner = mover; S.how = 'chief'; }
+    else if (typeOf(p) === CHIEF && to === HILL[1 - mover]) { S.winner = mover; S.how = 'hill'; }
+    else if (!moves(S).length) { S.winner = mover; S.how = 'stuck'; }
+    else if (S.plies >= CAP) { S.winner = 2; S.how = 'cap'; }
+  }
+  function play(S, m) { if (!legal(S, m)) return false; apply(S, m); return true; }
+
+  /* -------------------------------------------------------------- the bot */
+
+  // Material, a little for standing high, and how close each chief is to the other hilltop
+  function evaluate(S, side) {
+    var v = 0, ch = [-1, -1];
+    for (var i = 0; i < NN; i++) {
+      var p = S.b[i];
+      if (!p) continue;
+      var s = sideOf(p), t = typeOf(p);
+      if (t === CHIEF) { ch[s] = i; continue; }
+      v += (s === side ? 1 : -1) * (VAL[t] + 0.08 * S.h[i]);
+    }
+    if (ch[side] < 0) return -WIN;
+    if (ch[1 - side] < 0) return WIN;
+    return v + 0.45 * (S.dist[1 - side][ch[1 - side]] - S.dist[side][ch[side]]);
+  }
+  // captures first, the biggest victim first, so alpha-beta cuts early
+  function ordered(S) {
+    var ms = moves(S);
+    return ms.map(function (m) { var c = S.b[m[1]]; return { m: m, k: c ? (typeOf(c) === CHIEF ? 100 : VAL[typeOf(c)]) : 0 }; })
+      .sort(function (a, b) { return b.k - a.k; }).map(function (x) { return x.m; });
+  }
+  function search(S, depth, alpha, beta, ply, clock) {
+    if (S.winner >= 0) return S.winner === 2 ? 0 : (S.winner === S.turn ? WIN - ply : -(WIN - ply));
+    if (depth <= 0) return evaluate(S, S.turn);
+    if (clock && ++clock.n % 256 === 0 && Date.now() > clock.end) throw clock;
+    var ms = ordered(S), best = -Infinity;
+    for (var i = 0; i < ms.length; i++) {
+      var n = clone(S);
+      apply(n, ms[i]);
+      var v = -search(n, depth - 1, -beta, -alpha, ply + 1, clock);
+      if (v > best) best = v;
+      if (v > alpha) alpha = v;
+      if (alpha >= beta) break;
+    }
+    return best;
+  }
+  function rootScores(S, ms, depth, clock) {
+    return ms.map(function (m) { var n = clone(S); apply(n, m); return -search(n, depth - 1, -Infinity, Infinity, 1, clock); });
+  }
+  function pick(ms, scores, noise, rnd) {
+    var best = 0, bv = -Infinity;
+    for (var i = 0; i < ms.length; i++) {
+      var v = scores[i] + (noise ? (rnd() - 0.5) * noise : 0);
+      if (v > bv) { bv = v; best = i; }
+    }
+    return ms[best];
+  }
+  // easy looks one move ahead with a lot of noise, medium two, hard deepens until its
+  // time is up. Every level takes a win that is one move away.
+  function think(S, level, rnd, budgetMs) {
+    rnd = rnd || Math.random;
+    var ms = ordered(S);
+    if (!ms.length) return null;
+    for (var i = 0; i < ms.length; i++) { var n = clone(S); apply(n, ms[i]); if (n.winner === S.turn) return ms[i]; }
+    if (level === 'easy') {
+      if (rnd() < 0.3) return ms[Math.floor(rnd() * ms.length)];
+      return pick(ms, rootScores(S, ms, 1), 2.4, rnd);
+    }
+    if (level !== 'hard') return pick(ms, rootScores(S, ms, 2), 0.3, rnd);
+    var clock = { n: 0, end: Date.now() + (budgetMs || 450) }, best = pick(ms, rootScores(S, ms, 2), 0, rnd);
+    try {
+      for (var d = 3; d <= 8; d++) {
+        var sc = rootScores(S, ms, d, clock);
+        best = pick(ms, sc, 0, rnd);
+        // the best line first, so the next depth cuts the rest sooner
+        var order = ms.map(function (m, j) { return j; }).sort(function (a, b) { return sc[b] - sc[a]; });
+        ms = order.map(function (j) { return ms[j]; });
+        if (Math.max.apply(null, sc) > WIN / 2) break;
+      }
+    } catch (e) { if (e !== clock) throw e; }
+    return best;
+  }
+
+  return { N: N, NN: NN, CAP: CAP, LEVELS: LEVELS, CHIEF: CHIEF, CLIMBER: CLIMBER, RUNNER: RUNNER, JUMPER: JUMPER,
+    HILL: HILL, START: START, FALLBACK: FALLBACK, NB4: NB4, NB8: NB8, mulberry32: mulberry32, sideOf: sideOf, typeOf: typeOf,
+    tryMap: tryMap, genMap: genMap, valid: valid, symmetric: symmetric, cliffs: cliffs, reach: reach, hillDist: hillDist,
+    newGame: newGame, clone: clone, targets: targets, moves: moves, legal: legal, apply: apply, play: play,
+    evaluate: evaluate, think: think };
+}
+if (typeof module !== 'undefined') module.exports = HillsideEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = HillsideEngineFactory(), N = E.N, NN = E.NN;
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'hillside',
+    name: { fa: 'تپه‌ماهور', en: 'Hillside', zh: '丘陵', de: 'Hügelland', es: 'Lomas', pl: 'Pagórki', fr: 'Coteaux', ar: 'التلال', hi: 'पहाड़ी', ru: 'Холмогорье' },
+    accent: '#0E4208',
+    mood: 'sudoku',
+    strings: {
+      fa: {
+        board: 'نقشه‌ی تپه‌ماهور', vsBot: 'مقابل ربات', two: 'دو نفره', bot: 'ربات', playerN: 'بازیکن {n}', modeT: 'بازیکن‌ها', levelT: 'سطح ربات',
+        newMap: 'نقشه‌ی تازه', sameMap: 'همین نقشه، جای عوض', begin: 'شروع', undoMove: 'برگرداندن حرکت', endWarn: 'بازی فعلی تمام می‌شود. ادامه؟', settingsT: 'بازی تازه',
+        yourMove: 'یکی از مهره‌هایت را انتخاب کن', pickDest: 'روی یکی از خانه‌های نشان‌دار بزن', turnOf: 'نوبت {n}', thinking: 'ربات فکر می‌کند…',
+        dailyHs: 'تپه‌ماهور روزانه', vsMedium: 'مقابل ربات متوسط', playerWon: '{n} برد', drawT: 'مساوی',
+        stuck: 'این مهره جایی برای رفتن ندارد', steep: 'شیب تند است: سردار و تیزرو فقط یک طبقه بالا یا پایین می‌روند',
+        pK: 'سردار', pC: 'کوهنورد', pR: 'تیزرو', pJ: 'جهنده', leftN: 'مهره‌ها: {n}', heightN: 'ارتفاع {n}',
+        hillWin: 'سردار به پرچم تپه‌ی حریف رسید', chiefWin: 'سردار حریف گرفته شد', stuckWin: 'حریف دیگر حرکتی نداشت', capDraw: 'هشتاد نوبت گذشت و بازی مساوی شد', turnsL: 'نوبت‌ها',
+        rules: 'تپه‌ماهور روی نقشه‌ای هفت در هفت از تپه و دره بازی می‌شود. هر خانه ارتفاعی از ۰ تا ۳ دارد که هم از رنگش پیداست، هم از حلقه‌هایش و هم از عدد گوشه‌اش. هر بازی نقشه‌ی تازه‌ای دارد که برای هر دو طرف یکسان است. هر طرف یک سردار، سه کوهنورد، دو تیزرو و دو جهنده دارد. سردار یک خانه به هر طرف می‌رود. کوهنورد یک خانه مستقیم می‌رود، نه مورب. تیزرو در خط مستقیم هر چقدر بخواهد می‌لغزد. جهنده درست دو خانه به هر طرف می‌پرد، از روی هر چیزی. سردار و تیزرو در هر قدم بیش از یک طبقه بالا یا پایین نمی‌روند؛ چنین پرتگاهی با خط پررنگ کشیده شده. کوهنورد و جهنده به ارتفاع اهمیتی نمی‌دهند. روی مهره‌ی حریف برو تا آن را بگیری. با گرفتن سردار حریف یا رساندن سردار خودت به تپه‌ی پرچم‌دار حریف ببر. طرفی که حرکتی ندارد می‌بازد و بعد از هشتاد نوبت برای هر طرف، بازی مساوی است.',
+        kCursor: 'جابه‌جایی بین خانه‌ها', kGo: 'انتخاب یا حرکت روی خانه', kEsc: 'لغو انتخاب',
+        tutTitle1: 'نقشه‌ای از تپه‌ها', tutText1: 'هر خانه ارتفاعی از ۰ تا ۳ دارد: رنگ، حلقه‌ها و عدد گوشه‌اش. خط پررنگ یعنی پرتگاه.',
+        tutTitle2: 'چهار جور مهره', tutText2: 'سردار یک خانه به هر طرف، کوهنورد یک خانه مستقیم و از هر شیبی، تیزرو در خط مستقیم تا دور، جهنده دو خانه از روی همه چیز.',
+        tutTitle3: 'سردار را بگیر یا به پرچم برس', tutText3: 'سردار حریف را بگیر، یا سردار خودت را به تپه‌ی پرچم‌دار حریف برسان.'
+      },
+      en: {
+        board: 'Hillside map', vsBot: 'Against the bot', two: 'Two players', bot: 'Bot', playerN: 'Player {n}', modeT: 'Players', levelT: 'Bot level',
+        newMap: 'New map', sameMap: 'Same map, sides swapped', begin: 'Start', undoMove: 'Undo move', endWarn: 'This ends the current game. Continue?', settingsT: 'New game',
+        yourMove: 'Pick one of your pieces', pickDest: 'Tap a marked square', turnOf: '{n}’s turn', thinking: 'The bot is thinking…',
+        dailyHs: 'Daily Hillside', vsMedium: 'against the medium bot', playerWon: '{n} wins', drawT: 'Draw',
+        stuck: 'This piece has nowhere to go', steep: 'Too steep: the chief and the runners go up or down only one level',
+        pK: 'Chief', pC: 'Climber', pR: 'Runner', pJ: 'Jumper', leftN: 'Pieces: {n}', heightN: 'Height {n}',
+        hillWin: 'The chief reached the enemy flag', chiefWin: 'The enemy chief was captured', stuckWin: 'The other side had no move left', capDraw: 'Eighty turns passed: a draw', turnsL: 'Turns',
+        rules: 'Hillside is played on a 7 × 7 map of hills and valleys. Each square has a height from 0 to 3, shown by its shade, its rings and the number in its corner. Every game has a new map, the same for both sides. Each side has a chief, three climbers, two runners and two jumpers. The chief steps one square in any direction. A climber steps one square straight, not diagonally. A runner slides straight as far as it likes. A jumper leaps exactly two squares in any direction, over anything. The chief and the runners cannot go up or down more than one level in a step; a thick line marks such a cliff. Climbers and jumpers ignore height. Move onto an enemy piece to capture it. Win by capturing the enemy chief or by bringing your own chief onto the enemy’s flag hilltop. A side with no move loses, and after eighty turns each the game is a draw.',
+        kCursor: 'Move between squares', kGo: 'Pick or move to the square', kEsc: 'Cancel the selection',
+        tutTitle1: 'A map of hills', tutText1: 'Each square has a height from 0 to 3: its shade, its rings and its number. A thick line is a cliff.',
+        tutTitle2: 'Four kinds of piece', tutText2: 'The chief steps anywhere, the climber steps straight up any slope, the runner slides straight and far, the jumper leaps two squares over anything.',
+        tutTitle3: 'Take the chief or reach the flag', tutText3: 'Capture the enemy chief, or bring your own chief onto the enemy’s flag hilltop.'
+      },
+      pl: {
+        board: 'Mapa pagórków', vsBot: 'Przeciwko botowi', two: 'Dwóch graczy', bot: 'Bot', playerN: 'Gracz {n}', modeT: 'Gracze', levelT: 'Poziom bota',
+        newMap: 'Nowa mapa', sameMap: 'Ta sama mapa, zamiana stron', begin: 'Start', undoMove: 'Cofnij ruch', endWarn: 'To zakończy bieżącą grę. Kontynuować?', settingsT: 'Nowa gra',
+        yourMove: 'Wybierz jeden ze swoich pionów', pickDest: 'Dotknij zaznaczonego pola', turnOf: 'Ruch: {n}', thinking: 'Bot myśli…',
+        dailyHs: 'Codzienne Pagórki', vsMedium: 'przeciwko botowi na średnim poziomie', playerWon: '{n} wygrywa', drawT: 'Remis',
+        stuck: 'Ten pion nie ma dokąd pójść', steep: 'Za stromo: wódz i biegacze wchodzą lub schodzą tylko o jeden poziom',
+        pK: 'Wódz', pC: 'Wspinacz', pR: 'Biegacz', pJ: 'Skoczek', leftN: 'Piony: {n}', heightN: 'Wysokość {n}',
+        hillWin: 'Wódz dotarł do flagi rywala', chiefWin: 'Wódz rywala został zbity', stuckWin: 'Rywal nie miał już ruchu', capDraw: 'Minęło osiemdziesiąt tur: remis', turnsL: 'Tury',
+        rules: 'Pagórki rozgrywa się na mapie 7 × 7 ze wzgórz i dolin. Każde pole ma wysokość od 0 do 3, widoczną po odcieniu, pierścieniach i liczbie w rogu. Każda gra ma nową mapę, taką samą dla obu stron. Każda strona ma wodza, trzech wspinaczy, dwóch biegaczy i dwóch skoczków. Wódz idzie o jedno pole w dowolną stronę. Wspinacz idzie o jedno pole prosto, nie na ukos. Biegacz sunie prosto dowolnie daleko. Skoczek skacze dokładnie o dwa pola w dowolną stronę, nad czymkolwiek. Wódz i biegacze nie wchodzą ani nie schodzą o więcej niż jeden poziom na krok; takie urwisko oznacza gruba linia. Wspinacze i skoczkowie nie zważają na wysokość. Wejdź na pion rywala, aby go zbić. Wygrywasz, zbijając wodza rywala albo wprowadzając swojego wodza na wzgórze z flagą rywala. Strona bez ruchu przegrywa, a po osiemdziesięciu turach każdej strony jest remis.',
+        kCursor: 'Ruch między polami', kGo: 'Wybierz lub idź na pole', kEsc: 'Anuluj wybór',
+        tutTitle1: 'Mapa wzgórz', tutText1: 'Każde pole ma wysokość od 0 do 3: odcień, pierścienie i liczbę. Gruba linia to urwisko.',
+        tutTitle2: 'Cztery rodzaje pionów', tutText2: 'Wódz idzie wszędzie o pole, wspinacz prosto po każdym zboczu, biegacz sunie prosto i daleko, skoczek skacze o dwa pola nad wszystkim.',
+        tutTitle3: 'Zbij wodza lub dojdź do flagi', tutText3: 'Zbij wodza rywala albo wprowadź swojego wodza na wzgórze z flagą rywala.'
+      },
+      fr: {
+        board: 'Carte des coteaux', vsBot: 'Contre le robot', two: 'Deux joueurs', bot: 'Robot', playerN: 'Joueur {n}', modeT: 'Joueurs', levelT: 'Niveau du robot',
+        newMap: 'Nouvelle carte', sameMap: 'Même carte, camps inversés', begin: 'Commencer', undoMove: 'Annuler le coup', endWarn: 'Cela met fin à la partie en cours. Continuer ?', settingsT: 'Nouvelle partie',
+        yourMove: 'Choisis une de tes pièces', pickDest: 'Touche une case marquée', turnOf: 'Au tour de {n}', thinking: 'Le robot réfléchit…',
+        dailyHs: 'Coteaux du jour', vsMedium: 'contre le robot moyen', playerWon: '{n} gagne', drawT: 'Égalité',
+        stuck: 'Cette pièce ne peut aller nulle part', steep: 'Trop raide : le chef et les coureurs ne montent ou ne descendent que d’un niveau',
+        pK: 'Chef', pC: 'Grimpeur', pR: 'Coureur', pJ: 'Sauteur', leftN: 'Pièces : {n}', heightN: 'Hauteur {n}',
+        hillWin: 'Le chef a atteint le drapeau adverse', chiefWin: 'Le chef adverse a été pris', stuckWin: 'L’adversaire n’avait plus de coup', capDraw: 'Quatre-vingts tours passés : égalité', turnsL: 'Tours',
+        rules: 'Coteaux se joue sur une carte de 7 × 7 faite de collines et de vallées. Chaque case a une hauteur de 0 à 3, visible à sa teinte, à ses anneaux et au chiffre dans son coin. Chaque partie a une nouvelle carte, la même pour les deux camps. Chaque camp a un chef, trois grimpeurs, deux coureurs et deux sauteurs. Le chef avance d’une case dans toutes les directions. Un grimpeur avance d’une case tout droit, pas en diagonale. Un coureur glisse tout droit aussi loin qu’il veut. Un sauteur bondit d’exactement deux cases dans toutes les directions, par-dessus tout. Le chef et les coureurs ne montent ni ne descendent de plus d’un niveau par pas ; un trait épais marque une telle falaise. Les grimpeurs et les sauteurs ignorent la hauteur. Va sur une pièce adverse pour la prendre. Gagne en prenant le chef adverse ou en amenant ton chef sur la colline au drapeau adverse. Un camp sans coup perd, et après quatre-vingts tours chacun la partie est nulle.',
+        kCursor: 'Passer d’une case à l’autre', kGo: 'Choisir ou aller sur la case', kEsc: 'Annuler la sélection',
+        tutTitle1: 'Une carte de collines', tutText1: 'Chaque case a une hauteur de 0 à 3 : sa teinte, ses anneaux et son chiffre. Un trait épais est une falaise.',
+        tutTitle2: 'Quatre sortes de pièces', tutText2: 'Le chef avance partout, le grimpeur tout droit sur toute pente, le coureur glisse tout droit et loin, le sauteur bondit de deux cases par-dessus tout.',
+        tutTitle3: 'Prends le chef ou atteins le drapeau', tutText3: 'Prends le chef adverse, ou amène ton chef sur la colline au drapeau adverse.'
+      },
+      ar: {
+        board: 'خريطة التلال', vsBot: 'ضد الروبوت', two: 'لاعبان', bot: 'الروبوت', playerN: 'اللاعب {n}', modeT: 'اللاعبون', levelT: 'مستوى الروبوت',
+        newMap: 'خريطة جديدة', sameMap: 'الخريطة نفسها مع تبديل الجانبين', begin: 'ابدأ', undoMove: 'تراجع', endWarn: 'سينهي هذا اللعبة الحالية. هل تتابع؟', settingsT: 'لعبة جديدة',
+        yourMove: 'اختر إحدى قطعك', pickDest: 'انقر خانة معلّمة', turnOf: 'دور {n}', thinking: 'الروبوت يفكر…',
+        dailyHs: 'التلال اليومية', vsMedium: 'ضد الروبوت المتوسط', playerWon: 'فاز {n}', drawT: 'تعادل',
+        stuck: 'لا مكان تذهب إليه هذه القطعة', steep: 'منحدر شديد: الزعيم والعدّاؤون يصعدون أو ينزلون مستوى واحدًا فقط',
+        pK: 'الزعيم', pC: 'المتسلّق', pR: 'العدّاء', pJ: 'القافز', leftN: 'القطع: {n}', heightN: 'الارتفاع {n}',
+        hillWin: 'وصل الزعيم إلى راية الخصم', chiefWin: 'أُسر زعيم الخصم', stuckWin: 'لم تبقَ للخصم أي حركة', capDraw: 'مرّت ثمانون جولة: تعادل', turnsL: 'الأدوار',
+        rules: 'تُلعب التلال على خريطة ٧ × ٧ من التلال والوديان. لكل خانة ارتفاع من ٠ إلى ٣، يظهر من لونها وحلقاتها والرقم في زاويتها. لكل لعبة خريطة جديدة، متماثلة للجانبين. لكل جانب زعيم وثلاثة متسلّقين وعدّاءان وقافزان. الزعيم يخطو خانة في أي اتجاه. المتسلّق يخطو خانة مستقيمة، لا قطرية. العدّاء ينزلق مستقيمًا إلى أي مسافة. القافز يقفز خانتين بالضبط في أي اتجاه، فوق أي شيء. لا يصعد الزعيم والعدّاؤون ولا ينزلون أكثر من مستوى في الخطوة؛ ويُرسم مثل هذا الجرف بخط سميك. المتسلّقون والقافزون لا يبالون بالارتفاع. انتقل إلى قطعة الخصم لتأسرها. تفوز بأسر زعيم الخصم أو بإيصال زعيمك إلى تلة الخصم ذات الراية. الجانب الذي لا يملك حركة يخسر، وبعد ثمانين دورًا لكل جانب تنتهي اللعبة بالتعادل.',
+        kCursor: 'تنقل بين الخانات', kGo: 'اختر أو انتقل إلى الخانة', kEsc: 'إلغاء الاختيار',
+        tutTitle1: 'خريطة من التلال', tutText1: 'لكل خانة ارتفاع من ٠ إلى ٣: لونها وحلقاتها ورقمها. الخط السميك جرف.',
+        tutTitle2: 'أربعة أنواع من القطع', tutText2: 'الزعيم يخطو في كل اتجاه، والمتسلّق مستقيمًا على أي منحدر، والعدّاء ينزلق مستقيمًا وبعيدًا، والقافز يقفز خانتين فوق كل شيء.',
+        tutTitle3: 'أسر الزعيم أو بلوغ الراية', tutText3: 'أسر زعيم الخصم، أو أوصل زعيمك إلى تلة الخصم ذات الراية.'
+      },
+      hi: {
+        board: 'पहाड़ी का नक़्शा', vsBot: 'बॉट से', two: 'दो खिलाड़ी', bot: 'बॉट', playerN: 'खिलाड़ी {n}', modeT: 'खिलाड़ी', levelT: 'बॉट का स्तर',
+        newMap: 'नया नक़्शा', sameMap: 'वही नक़्शा, पक्ष बदले', begin: 'शुरू करें', undoMove: 'चाल वापस', endWarn: 'इससे मौजूदा खेल ख़त्म हो जाएगा। जारी रखें?', settingsT: 'नया खेल',
+        yourMove: 'अपना कोई मोहरा चुनें', pickDest: 'किसी निशान वाले ख़ाने को छुएँ', turnOf: '{n} की बारी', thinking: 'बॉट सोच रहा है…',
+        dailyHs: 'रोज़ की पहाड़ी', vsMedium: 'मध्यम बॉट के ख़िलाफ़', playerWon: '{n} की जीत', drawT: 'बराबरी',
+        stuck: 'इस मोहरे के जाने की कोई जगह नहीं', steep: 'बहुत खड़ी ढलान: सरदार और धावक एक ही स्तर ऊपर या नीचे जाते हैं',
+        pK: 'सरदार', pC: 'पर्वतारोही', pR: 'धावक', pJ: 'कुदाक', leftN: 'मोहरे: {n}', heightN: 'ऊँचाई {n}',
+        hillWin: 'सरदार विरोधी के झंडे तक पहुँच गया', chiefWin: 'विरोधी का सरदार पकड़ा गया', stuckWin: 'विरोधी के पास कोई चाल नहीं बची', capDraw: 'अस्सी बारियाँ बीत गईं: बराबरी', turnsL: 'बारियाँ',
+        rules: 'पहाड़ी पहाड़ियों और घाटियों के 7 × 7 नक़्शे पर खेली जाती है। हर ख़ाने की ऊँचाई 0 से 3 तक है, जो उसके रंग, उसके छल्लों और कोने के अंक से दिखती है। हर खेल का नक़्शा नया होता है, दोनों पक्षों के लिए एक जैसा। हर पक्ष के पास एक सरदार, तीन पर्वतारोही, दो धावक और दो कुदाक हैं। सरदार किसी भी दिशा में एक ख़ाना चलता है। पर्वतारोही सीधा एक ख़ाना चलता है, तिरछा नहीं। धावक सीधी रेखा में जितनी दूर चाहे सरकता है। कुदाक किसी भी दिशा में ठीक दो ख़ाने कूदता है, किसी के भी ऊपर से। सरदार और धावक एक क़दम में एक स्तर से ज़्यादा ऊपर या नीचे नहीं जा सकते; ऐसी चट्टान मोटी रेखा से दिखाई गई है। पर्वतारोही और कुदाक ऊँचाई की परवाह नहीं करते। विरोधी के मोहरे पर जाकर उसे पकड़ें। विरोधी का सरदार पकड़कर या अपने सरदार को विरोधी की झंडे वाली पहाड़ी पर पहुँचाकर जीतें। जिस पक्ष के पास कोई चाल न हो वह हारता है, और हर पक्ष की अस्सी बारियों के बाद खेल बराबरी पर ख़त्म होता है।',
+        kCursor: 'ख़ानों के बीच जाएँ', kGo: 'ख़ाने पर चुनें या जाएँ', kEsc: 'चुनाव रद्द करें',
+        tutTitle1: 'पहाड़ियों का नक़्शा', tutText1: 'हर ख़ाने की ऊँचाई 0 से 3 है: रंग, छल्ले और अंक। मोटी रेखा चट्टान है।',
+        tutTitle2: 'चार तरह के मोहरे', tutText2: 'सरदार हर दिशा में एक ख़ाना, पर्वतारोही हर ढलान पर सीधा, धावक सीधा और दूर तक, कुदाक हर चीज़ के ऊपर से दो ख़ाने।',
+        tutTitle3: 'सरदार पकड़ें या झंडे तक पहुँचें', tutText3: 'विरोधी का सरदार पकड़ें, या अपने सरदार को विरोधी की झंडे वाली पहाड़ी पर पहुँचाएँ।'
+      },
+      ru: {
+        board: 'Карта холмов', vsBot: 'Против бота', two: 'Два игрока', bot: 'Бот', playerN: 'Игрок {n}', modeT: 'Игроки', levelT: 'Уровень бота',
+        newMap: 'Новая карта', sameMap: 'Та же карта, стороны наоборот', begin: 'Начать', undoMove: 'Отменить ход', endWarn: 'Текущая игра закончится. Продолжить?', settingsT: 'Новая игра',
+        yourMove: 'Выберите свою фигуру', pickDest: 'Коснитесь отмеченной клетки', turnOf: 'Ход: {n}', thinking: 'Бот думает…',
+        dailyHs: 'Холмогорье дня', vsMedium: 'против бота среднего уровня', playerWon: 'Победа: {n}', drawT: 'Ничья',
+        stuck: 'Этой фигуре некуда идти', steep: 'Слишком круто: вождь и бегуны поднимаются или спускаются только на один уровень',
+        pK: 'Вождь', pC: 'Скалолаз', pR: 'Бегун', pJ: 'Прыгун', leftN: 'Фигуры: {n}', heightN: 'Высота {n}',
+        hillWin: 'Вождь дошёл до флага соперника', chiefWin: 'Вождь соперника взят', stuckWin: 'У соперника не осталось ходов', capDraw: 'Прошло восемьдесят ходов: ничья', turnsL: 'Ходы',
+        rules: 'Холмогорье играют на карте 7 × 7 из холмов и долин. У каждой клетки высота от 0 до 3: её видно по оттенку, кольцам и цифре в углу. В каждой игре новая карта, одинаковая для обеих сторон. У каждой стороны вождь, три скалолаза, два бегуна и два прыгуна. Вождь шагает на одну клетку в любую сторону. Скалолаз шагает на одну клетку прямо, не по диагонали. Бегун скользит прямо как угодно далеко. Прыгун прыгает ровно на две клетки в любую сторону, через что угодно. Вождь и бегуны не поднимаются и не спускаются больше чем на один уровень за шаг; такой обрыв отмечен толстой линией. Скалолазам и прыгунам высота не важна. Встаньте на фигуру соперника, чтобы взять её. Победа — взять вождя соперника или привести своего вождя на холм с флагом соперника. Сторона без ходов проигрывает, а после восьмидесяти ходов каждой стороны — ничья.',
+        kCursor: 'Перейти между клетками', kGo: 'Выбрать или пойти на клетку', kEsc: 'Отменить выбор',
+        tutTitle1: 'Карта холмов', tutText1: 'У каждой клетки высота от 0 до 3: оттенок, кольца и цифра. Толстая линия — обрыв.',
+        tutTitle2: 'Четыре вида фигур', tutText2: 'Вождь шагает куда угодно, скалолаз — прямо по любому склону, бегун скользит прямо и далеко, прыгун прыгает на две клетки через всё.',
+        tutTitle3: 'Возьмите вождя или дойдите до флага', tutText3: 'Возьмите вождя соперника или приведите своего вождя на холм с флагом соперника.'
+      },
+      zh: {
+        board: '丘陵地图', vsBot: '对战电脑', two: '双人', bot: '电脑', playerN: '玩家 {n}', modeT: '玩家', levelT: '电脑难度',
+        newMap: '新地图', sameMap: '同一地图，交换双方', begin: '开始', undoMove: '悔棋', endWarn: '将结束当前对局，是否继续？', settingsT: '新一局',
+        yourMove: '选一枚自己的棋子', pickDest: '点一个有标记的格子', turnOf: '轮到{n}', thinking: '电脑思考中……',
+        dailyHs: '每日丘陵', vsMedium: '对战中等电脑', playerWon: '{n}获胜', drawT: '平局',
+        stuck: '这枚棋子无处可去', steep: '太陡了：首领和奔行者一步只能上下一层',
+        pK: '首领', pC: '攀登者', pR: '奔行者', pJ: '跳跃者', leftN: '棋子：{n}', heightN: '高度 {n}',
+        hillWin: '首领到达了对方的旗帜', chiefWin: '对方的首领被吃掉了', stuckWin: '对方已无棋可走', capDraw: '已过八十回合：平局', turnsL: '回合',
+        rules: '丘陵在一张 7 × 7 的山丘与谷地地图上进行。每个格子的高度在 0 到 3 之间，可以从颜色深浅、圆环和角上的数字看出。每局都是一张新地图，对双方完全相同。每方有一名首领、三名攀登者、两名奔行者和两名跳跃者。首领向任意方向走一格。攀登者直走一格，不能斜走。奔行者沿直线想滑多远就滑多远。跳跃者向任意方向恰好跳两格，可以越过任何东西。首领和奔行者每一步上下都不能超过一层；这样的悬崖用粗线标出。攀登者和跳跃者不受高度限制。走到对方棋子上即可吃掉它。吃掉对方首领，或把自己的首领带到对方插旗的山顶，即可获胜。无棋可走的一方判负；双方各走八十回合后为平局。',
+        kCursor: '在格子之间移动', kGo: '在该格选择或走棋', kEsc: '取消选择',
+        tutTitle1: '一张丘陵地图', tutText1: '每个格子的高度在 0 到 3 之间：看颜色、圆环和数字。粗线是悬崖。',
+        tutTitle2: '四种棋子', tutText2: '首领向任意方向走一格，攀登者直走、不怕任何坡，奔行者直线远滑，跳跃者越过一切跳两格。',
+        tutTitle3: '吃掉首领或到达旗帜', tutText3: '吃掉对方的首领，或把自己的首领带到对方插旗的山顶。'
+      },
+      de: {
+        board: 'Hügelland-Karte', vsBot: 'Gegen den Bot', two: 'Zu zweit', bot: 'Bot', playerN: 'Spieler {n}', modeT: 'Spieler', levelT: 'Bot-Stufe',
+        newMap: 'Neue Karte', sameMap: 'Gleiche Karte, Seiten getauscht', begin: 'Start', undoMove: 'Zug zurück', endWarn: 'Die aktuelle Partie endet. Weiter?', settingsT: 'Neue Partie',
+        yourMove: 'Wähle eine deiner Figuren', pickDest: 'Tippe ein markiertes Feld', turnOf: 'Am Zug: {n}', thinking: 'Der Bot überlegt …',
+        dailyHs: 'Hügelland des Tages', vsMedium: 'gegen den mittleren Bot', playerWon: 'Sieg: {n}', drawT: 'Unentschieden',
+        stuck: 'Diese Figur kann nirgendwohin', steep: 'Zu steil: Häuptling und Läufer steigen nur eine Stufe hinauf oder hinab',
+        pK: 'Häuptling', pC: 'Kletterer', pR: 'Läufer', pJ: 'Springer', leftN: 'Figuren: {n}', heightN: 'Höhe {n}',
+        hillWin: 'Der Häuptling hat die gegnerische Fahne erreicht', chiefWin: 'Der gegnerische Häuptling wurde geschlagen', stuckWin: 'Die Gegenseite hatte keinen Zug mehr', capDraw: 'Achtzig Runden vorbei: unentschieden', turnsL: 'Züge',
+        rules: 'Hügelland wird auf einer Karte von 7 × 7 Feldern aus Hügeln und Tälern gespielt. Jedes Feld hat eine Höhe von 0 bis 3, zu sehen an seiner Tönung, seinen Ringen und der Zahl in der Ecke. Jede Partie hat eine neue Karte, für beide Seiten gleich. Jede Seite hat einen Häuptling, drei Kletterer, zwei Läufer und zwei Springer. Der Häuptling geht ein Feld in jede Richtung. Ein Kletterer geht ein Feld gerade, nicht schräg. Ein Läufer gleitet gerade beliebig weit. Ein Springer springt genau zwei Felder in jede Richtung, über alles hinweg. Häuptling und Läufer steigen pro Schritt höchstens eine Stufe hinauf oder hinab; eine dicke Linie markiert eine solche Klippe. Kletterern und Springern ist die Höhe gleich. Zieh auf eine gegnerische Figur, um sie zu schlagen. Du gewinnst, wenn du den gegnerischen Häuptling schlägst oder deinen eigenen Häuptling auf den gegnerischen Fahnenhügel bringst. Wer keinen Zug hat, verliert, und nach achtzig Zügen pro Seite endet die Partie unentschieden.',
+        kCursor: 'Zwischen Feldern wechseln', kGo: 'Feld wählen oder dorthin ziehen', kEsc: 'Auswahl aufheben',
+        tutTitle1: 'Eine Karte aus Hügeln', tutText1: 'Jedes Feld hat eine Höhe von 0 bis 3: Tönung, Ringe und Zahl. Eine dicke Linie ist eine Klippe.',
+        tutTitle2: 'Vier Arten Figuren', tutText2: 'Der Häuptling geht überallhin, der Kletterer gerade jeden Hang hinauf, der Läufer gleitet gerade und weit, der Springer springt zwei Felder über alles.',
+        tutTitle3: 'Häuptling schlagen oder Fahne erreichen', tutText3: 'Schlag den gegnerischen Häuptling oder bring deinen Häuptling auf den gegnerischen Fahnenhügel.'
+      },
+      es: {
+        board: 'Mapa de las lomas', vsBot: 'Contra el bot', two: 'Dos jugadores', bot: 'Bot', playerN: 'Jugador {n}', modeT: 'Jugadores', levelT: 'Nivel del bot',
+        newMap: 'Mapa nuevo', sameMap: 'Mismo mapa, lados cambiados', begin: 'Empezar', undoMove: 'Deshacer jugada', endWarn: 'Esto termina la partida actual. ¿Seguir?', settingsT: 'Nueva partida',
+        yourMove: 'Elige una de tus piezas', pickDest: 'Toca una casilla marcada', turnOf: 'Turno de {n}', thinking: 'El bot está pensando…',
+        dailyHs: 'Lomas del día', vsMedium: 'contra el bot medio', playerWon: 'Gana: {n}', drawT: 'Empate',
+        stuck: 'Esta pieza no tiene adónde ir', steep: 'Demasiado empinado: el jefe y los corredores solo suben o bajan un nivel',
+        pK: 'Jefe', pC: 'Escalador', pR: 'Corredor', pJ: 'Saltador', leftN: 'Piezas: {n}', heightN: 'Altura {n}',
+        hillWin: 'El jefe llegó a la bandera rival', chiefWin: 'El jefe rival fue capturado', stuckWin: 'El rival se quedó sin jugadas', capDraw: 'Pasaron ochenta turnos: empate', turnsL: 'Turnos',
+        rules: 'Lomas se juega en un mapa de 7 × 7 de colinas y valles. Cada casilla tiene una altura de 0 a 3, que se ve por su tono, sus anillos y el número de su esquina. Cada partida tiene un mapa nuevo, igual para los dos lados. Cada lado tiene un jefe, tres escaladores, dos corredores y dos saltadores. El jefe avanza una casilla en cualquier dirección. Un escalador avanza una casilla recto, no en diagonal. Un corredor se desliza recto tan lejos como quiera. Un saltador salta exactamente dos casillas en cualquier dirección, por encima de lo que sea. El jefe y los corredores no suben ni bajan más de un nivel por paso; una línea gruesa marca ese acantilado. A los escaladores y saltadores no les importa la altura. Ve a una pieza rival para capturarla. Ganas capturando al jefe rival o llevando a tu jefe a la colina con la bandera rival. El lado sin jugadas pierde, y tras ochenta turnos de cada lado la partida es empate.',
+        kCursor: 'Moverse entre casillas', kGo: 'Elegir o ir a la casilla', kEsc: 'Cancelar la selección',
+        tutTitle1: 'Un mapa de colinas', tutText1: 'Cada casilla tiene una altura de 0 a 3: su tono, sus anillos y su número. Una línea gruesa es un acantilado.',
+        tutTitle2: 'Cuatro clases de piezas', tutText2: 'El jefe avanza a cualquier lado, el escalador recto por cualquier cuesta, el corredor se desliza recto y lejos, el saltador salta dos casillas sobre todo.',
+        tutTitle3: 'Captura al jefe o llega a la bandera', tutText3: 'Captura al jefe rival, o lleva a tu jefe a la colina con la bandera rival.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var MODES = ['bot', 'two'], PIECE_KEYS = [null, 'pK', 'pC', 'pR', 'pJ'];
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs) prefs = { mode: 'bot', level: 'medium' };
+  if (MODES.indexOf(prefs.mode) < 0) prefs.mode = 'bot';
+  if (E.LEVELS.indexOf(prefs.level) < 0) prefs.level = 'medium';
+
+  // G: the game around the engine's state S. human: the side you play against the bot (1 after
+  // "same map, sides swapped", and then the board is turned so your pieces stay at the bottom).
+  // sel: the square of the piece picked, or -1. cur: the keyboard cursor's square.
+  var G = null, timer = null, sel = -1, hint = '', hintTimer = null, kbOn = false, cur = 45;
+  var shown = null, anim = null, raf = 0;
+
+  var cv = el('canvas', { class: 'hs-canvas', role: 'img', 'aria-label': C.t('board') });
+  var box = el('div', { class: 'hs-box' }, [cv]);
+  var top = el('div', { class: 'hs-top ch-above' });
+  var sides = el('div', { class: 'hs-sides ch-above' });
+  var status = el('div', { class: 'hs-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'hs-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, sides, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'undo', label: C.t('undoMove'), onClick: undo });
+  ctx.button({ icon: 'refresh', label: C.t('newMap'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------ setup */
+
+  function freshSeed() { return Math.floor(Math.random() * 4294967296) >>> 0; }
+  function newGame(o) {
+    stop();
+    var daily = o.daily || null, mode = daily ? 'bot' : o.mode;
+    var seed = daily ? Math.floor(C.daily('hillside', daily).rng() * 4294967296) >>> 0 : (o.seed === undefined ? freshSeed() : o.seed >>> 0);
+    G = { mode: mode, level: daily ? 'medium' : o.level, daily: daily, human: mode === 'bot' && !daily && o.human === 1 ? 1 : 0,
+      S: E.newGame(seed), hist: [], moves: [], startedAt: Date.now(), done: false };
+    if (!daily) { prefs.mode = o.mode; prefs.level = o.level; ctx.store.set('prefs', prefs); }
+    sel = -1; anim = null; cur = E.HILL[G.human];
+    render(); save();
+    maybeBot();
+  }
+  function current() { return { mode: G.mode, level: G.level }; }
+
+  function isBot(side) { return G.mode === 'bot' && side !== G.human; }
+  function busy() { return !G || G.done || isBot(G.S.turn); }
+  function stop() { if (timer) { clearTimeout(timer); timer = null; } }
+  // with the sides swapped the board is drawn turned round, so your pieces stay at the bottom
+  function flipped() { return G && G.mode === 'bot' && G.human === 1; }
+
+  function maybeBot() {
+    if (!G || G.done || !isBot(G.S.turn)) return;
+    renderSide();
+    timer = setTimeout(function () {
+      timer = null;
+      if (!G || G.done || !isBot(G.S.turn)) return;
+      // the daily bot plays from the day's seed, so everyone meets the same opponent
+      var rnd = G.daily ? C.daily('hillside', G.daily + '|' + G.S.plies).rng : Math.random;
+      act(E.think(G.S, G.level, rnd));
+    }, C.ui.reduceMotion() ? 200 : 450);
+  }
+
+  /* ------------------------------------------------------------- moves */
+
+  function act(m) {
+    var before = E.clone(G.S), who = G.S.turn, code = G.S.b[m[0]], victim = G.S.b[m[1]];
+    if (!E.play(G.S, m)) { C.feedback('bad'); return false; }
+    G.hist.push(before);
+    G.moves.push([m[0], m[1]]);
+    startAnim(m, code, victim);
+    C.feedback(isBot(who) ? 'clack' : 'place');
+    sel = -1;
+    if (G.S.winner >= 0) { G.done = true; render(); finish(); return true; }
+    render(); save();
+    maybeBot();
+    return true;
+  }
+
+  // Against the bot one undo takes back its reply and your move together
+  function undo() {
+    if (!G || G.done) return;
+    // back to the latest position where a person was to move; when the bot opened, its
+    // first move stays
+    var i = G.hist.length - 1;
+    while (i >= 0 && isBot(G.hist[i].turn)) i--;
+    if (i < 0) return;
+    stop();
+    G.S = G.hist[i]; G.hist.length = i; G.moves.length = i;
+    anim = null; sel = -1;
+    C.feedback('tap');
+    render(); save();
+    maybeBot();
+  }
+
+  /* ------------------------------------------------------------ result */
+
+  function pname(side) {
+    if (G.mode === 'bot') return side === G.human ? (C.state.profile.name || C.t('you')) : C.t('bot') + ' · ' + C.t(G.level);
+    return C.t('playerN', { n: C.num(side + 1) });
+  }
+  function count(S, side) { var n = 0; for (var i = 0; i < NN; i++) if (S.b[i] && E.sideOf(S.b[i]) === side) n++; return n; }
+
+  function finish() {
+    stop();
+    var S = G.S, vsBot = G.mode === 'bot', draw = S.winner === 2, won = vsBot ? S.winner === G.human : !draw;
+    var base = vsBot ? ({ easy: 8, medium: 14, hard: 22 }[G.level] || 14) : 8;
+    var coins = Math.max(2, Math.round(won ? base : base * (draw ? 0.5 : 0.3))) + (G.daily ? 8 : 0);
+    var points = Math.max(3, Math.round(won ? base * 4 : base * (draw ? 2 : 1.2))) + (G.daily ? 25 : 0);
+    if (vsBot && won) {
+      C.achievements.unlock('hs-win');
+      if (G.level === 'hard') C.achievements.unlock('hs-hard');
+      if (S.how === 'hill') C.achievements.unlock('hs-flag');
+    }
+    var title = draw ? C.t('drawT') : vsBot ? (won ? C.t('won') : C.t('lost')) : C.t('playerWon', { n: pname(S.winner) });
+    var how = C.t({ hill: 'hillWin', chief: 'chiefWin', stuck: 'stuckWin', cap: 'capDraw' }[S.how] || 'capDraw');
+    if (G.daily) {
+      var first = C.stats.daily('hillside', G.daily, { label: title, win: won });
+      if (!first) { coins = Math.round(coins * 0.2); points = Math.round(points * 0.2); }
+    }
+    ctx.clearSave();
+    setTimeout(function () {
+      ctx.finish({
+        won: vsBot ? won : null,
+        title: title,
+        note: how,
+        timeMs: Date.now() - G.startedAt, coins: coins, points: points,
+        lines: [{ label: C.t('turnsL'), value: C.num(Math.ceil(S.plies / 2)) }],
+        shareText: 'چوگان · تپه‌ماهور' + (G.daily ? ('\nروزانه ' + G.daily) : '') + '\n' + title,
+        paint: cardPaint(),
+        onAgain: G.daily ? null : function () { newGame(current()); }
+      });
+    }, C.ui.reduceMotion() ? 150 : 800);
+  }
+
+  /* ------------------------------------------------------------- saves */
+
+  // a save is the map's seed and the moves, replayed and checked on load
+  ctx.autosave(function () {
+    if (!G || G.done || !G.moves.length) return { inProgress: false };
+    return { g: { mode: G.mode, level: G.level, daily: G.daily, seed: G.S.seed, human: G.human, moves: G.moves, elapsed: Date.now() - G.startedAt } };
+  });
+  function save() { ctx.save(); }
+  function replay(g) {
+    if (!g || MODES.indexOf(g.mode) < 0 || E.LEVELS.indexOf(g.level) < 0 || typeof g.seed !== 'number' || (g.human !== 0 && g.human !== 1) || !Array.isArray(g.moves)) return null;
+    var S = E.newGame(g.seed), hist = [];
+    for (var i = 0; i < g.moves.length; i++) {
+      var m = g.moves[i];
+      if (!Array.isArray(m) || S.winner >= 0) return null;
+      hist.push(E.clone(S));
+      if (!E.play(S, [m[0], m[1]])) return null;
+    }
+    return S.winner < 0 ? { S: S, hist: hist } : null;
+  }
+  function validSave(sv) { return !!(sv && replay(sv.g)); }
+  function restore(g) {
+    var r = replay(g);
+    G = { mode: g.mode, level: g.level, daily: g.daily || null, human: g.mode === 'bot' ? g.human : 0, S: r.S, hist: r.hist,
+      moves: g.moves.map(function (m) { return [m[0], m[1]]; }), startedAt: Date.now() - (g.elapsed || 0), done: false };
+    sel = -1; cur = E.HILL[G.human];
+    render();
+    maybeBot();
+  }
+
+  function askNew() {
+    if (G && G.daily) { go({ daily: G.daily }); return; }
+    settings();
+  }
+  function go(o) { if (!G || G.done || !G.moves.length) newGame(o); else C.ui.confirm({ title: C.t('newMap'), body: C.t('endWarn'), onOk: function () { newGame(o); } }); }
+  function settings() {
+    var o = G && !G.daily ? current() : { mode: prefs.mode, level: prefs.level };
+    var body = el('div', { class: 'ch-col', style: { gap: 'var(--s-3)', 'align-items': 'center' } });
+    function rows() {
+      body.innerHTML = '';
+      body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('modeT') }));
+      body.appendChild(C.ui.segmented([{ value: 'bot', label: C.t('vsBot') }, { value: 'two', label: C.t('two') }], o.mode, function (v) { o.mode = v; rows(); }));
+      if (o.mode === 'bot') {
+        body.appendChild(el('div', { class: 'ch-xs ch-dim', text: C.t('levelT') }));
+        body.appendChild(C.ui.segmented(E.LEVELS.map(function (l) { return { value: l, label: C.t(l) }; }), o.level, function (v) { o.level = v; }));
+      }
+      if (G && !G.done && G.moves.length) body.appendChild(el('p', { class: 'ch-xs ch-dim', text: C.t('endWarn') }));
+    }
+    rows();
+    var acts = [{ label: C.t('cancel') }];
+    // the same map again with the sides swapped, so a lost map can be tried from the other end
+    if (G && !G.daily) acts.push({ label: C.t('sameMap'), onClick: function () {
+      newGame({ mode: o.mode, level: o.level, seed: G.S.seed, human: o.mode === 'bot' && G.mode === 'bot' ? 1 - G.human : (o.mode === 'bot' ? 1 : 0) });
+    } });
+    acts.push({ label: C.t('newMap'), kind: 'primary', onClick: function () { newGame({ mode: o.mode, level: o.level }); } });
+    C.ui.modal({ title: C.t('settingsT'), closeButton: true, body: [body], actions: acts });
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function colors() {
+    var cs = getComputedStyle(document.documentElement);
+    var v = function (k, f) { return cs.getPropertyValue(k).trim() || f; };
+    return { h: [v('--hs-h0', '#EEF2E2'), v('--hs-h1', '#D3E0B4'), v('--hs-h2', '#B3C98A'), v('--hs-h3', '#8FAE63')],
+      ring: v('--hs-ring', 'rgba(36,56,16,.42)'), grid: v('--hs-grid', 'rgba(36,56,16,.2)'), cliff: v('--hs-cliff', '#3B2A14'), ink: v('--hs-ink', '#22320F'),
+      hi: v('--hs-hi', '#3C8400'), cur: v('--hs-cur', '#1E2A10'),
+      p: [v('--hs-p0', '#FFF8E8'), v('--hs-p1', '#2E2620')], pe: [v('--hs-p0e', '#5A4320'), v('--hs-p1e', '#F2E6CC')] };
+  }
+
+  // Board geometry: the 7 × 7 squares fill the largest square that fits, centred
+  function geo(W, H, flip) {
+    var L = Math.floor(Math.min(W, H) - 2), s = L / N;
+    return { x0: (W - L) / 2, y0: (H - L) / 2, s: s, L: L, flip: !!flip };
+  }
+  function cellXY(o, k) {
+    var v = o.flip ? NN - 1 - k : k;
+    return [o.x0 + (v % N) * o.s, o.y0 + Math.floor(v / N) * o.s];
+  }
+  function cellAt(o, x, y) {
+    var c = Math.floor((x - o.x0) / o.s), r = Math.floor((y - o.y0) / o.s);
+    if (r < 0 || r >= N || c < 0 || c >= N) return -1;
+    var v = r * N + c;
+    return o.flip ? NN - 1 - v : v;
+  }
+  function rrect(g, x, y, w, h, r) {
+    g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+  }
+
+  // One square: its shade, a ring per level (so height reads without colour), the digit in
+  // the top-left corner on its own patch, and a pennant on each side's hilltop
+  function square(g, x, y, s, hgt, col, flagSide) {
+    g.fillStyle = col.h[hgt]; g.fillRect(x, y, s + 0.5, s + 0.5);
+    g.strokeStyle = col.ring; g.lineWidth = Math.max(1, s * 0.03);
+    for (var j = 1; j <= hgt; j++) { var ins = s * (0.06 + 0.085 * j); rrect(g, x + ins, y + ins, s - 2 * ins, s - 2 * ins, s * (0.2 - 0.03 * j)); g.stroke(); }
+    var ps = s * 0.27;
+    g.fillStyle = col.h[hgt]; g.fillRect(x + 1, y + 1, ps, ps);
+    g.fillStyle = col.ink; g.font = '800 ' + Math.round(s * 0.22) + 'px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(C.num(hgt), x + 1 + ps / 2, y + 1 + ps / 2 + s * 0.01);
+    if (flagSide >= 0) {
+      var px = x + s * 0.8, py0 = y + s * 0.08, py1 = y + s * 0.4;
+      g.strokeStyle = col.ink; g.lineWidth = Math.max(1.2, s * 0.035); g.lineCap = 'round';
+      g.beginPath(); g.moveTo(px, py0); g.lineTo(px, py1); g.stroke();
+      g.beginPath(); g.moveTo(px, py0); g.lineTo(px - s * 0.2, py0 + s * 0.08); g.lineTo(px, py0 + s * 0.16); g.closePath();
+      g.fillStyle = col.p[flagSide]; g.fill(); g.strokeStyle = col.pe[flagSide]; g.lineWidth = Math.max(1, s * 0.022); g.stroke();
+    }
+  }
+  function terrain(g, o, h, col) {
+    var i, k;
+    for (i = 0; i < NN; i++) { var p = cellXY(o, i); square(g, p[0], p[1], o.s, h[i], col, E.HILL.indexOf(i)); }
+    g.strokeStyle = col.grid; g.lineWidth = 1;
+    for (i = 0; i <= N; i++) {
+      g.beginPath(); g.moveTo(o.x0 + i * o.s, o.y0); g.lineTo(o.x0 + i * o.s, o.y0 + o.L); g.stroke();
+      g.beginPath(); g.moveTo(o.x0, o.y0 + i * o.s); g.lineTo(o.x0 + o.L, o.y0 + i * o.s); g.stroke();
+    }
+    // cliffs: a thick line on the edge between two squares more than one level apart
+    g.strokeStyle = col.cliff; g.lineWidth = Math.max(2.5, o.s * 0.08); g.lineCap = 'round';
+    for (i = 0; i < NN; i++) {
+      for (var d = 0; d < 2; d++) {
+        k = d ? i + N : i + 1;
+        if (d === 0 && i % N === N - 1) continue;
+        if (k >= NN || Math.abs(h[k] - h[i]) < 2) continue;
+        var a = cellXY(o, i), b = cellXY(o, k);
+        var mx = (a[0] + b[0]) / 2 + o.s / 2, my = (a[1] + b[1]) / 2 + o.s / 2, inset = o.s * 0.08;
+        g.beginPath();
+        if (a[1] === b[1]) { g.moveTo(mx, my - o.s / 2 + inset); g.lineTo(mx, my + o.s / 2 - inset); }
+        else { g.moveTo(mx - o.s / 2 + inset, my); g.lineTo(mx + o.s / 2 - inset, my); }
+        g.stroke();
+      }
+    }
+  }
+
+  // The four pieces' marks, drawn in a box from -1 to 1
+  function glyph(g, type, x, y, s, ink) {
+    g.save();
+    g.translate(x, y); g.scale(s, s);
+    g.strokeStyle = ink; g.fillStyle = ink; g.lineWidth = 0.16; g.lineCap = 'round'; g.lineJoin = 'round';
+    if (type === E.CHIEF) {
+      g.beginPath(); g.moveTo(-0.6, 0.45); g.lineTo(-0.66, -0.4); g.lineTo(-0.3, -0.05); g.lineTo(0, -0.62); g.lineTo(0.3, -0.05); g.lineTo(0.66, -0.4); g.lineTo(0.6, 0.45); g.closePath();
+      g.fill();
+    } else if (type === E.CLIMBER) {
+      [[-0.05], [0.42]].forEach(function (yy) { g.beginPath(); g.moveTo(-0.5, yy[0] + 0.12); g.lineTo(0, yy[0] - 0.38); g.lineTo(0.5, yy[0] + 0.12); g.stroke(); });
+    } else if (type === E.RUNNER) {
+      g.lineWidth = 0.13;
+      g.beginPath(); g.moveTo(-0.62, 0); g.lineTo(0.62, 0); g.moveTo(0, -0.62); g.lineTo(0, 0.62); g.stroke();
+      [[0, -1], [0, 1], [-1, 0], [1, 0]].forEach(function (d) {
+        var tx = d[0] * 0.66, ty = d[1] * 0.66, px = -d[1], py = d[0];
+        g.beginPath(); g.moveTo(tx + d[0] * 0.1, ty + d[1] * 0.1); g.lineTo(tx - d[0] * 0.2 + px * 0.2, ty - d[1] * 0.2 + py * 0.2); g.lineTo(tx - d[0] * 0.2 - px * 0.2, ty - d[1] * 0.2 - py * 0.2); g.closePath(); g.fill();
+      });
+    } else {
+      g.beginPath(); g.moveTo(0, -0.62); g.lineTo(0.55, 0); g.lineTo(0, 0.62); g.lineTo(-0.55, 0); g.closePath(); g.stroke();
+      g.beginPath(); g.arc(0, 0, 0.14, 0, Math.PI * 2); g.fill();
+    }
+    g.restore();
+  }
+  function piece(g, x, y, s, code, col, alpha) {
+    var side = E.sideOf(code), r = s * 0.36;
+    g.globalAlpha = alpha === undefined ? 1 : alpha;
+    g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.arc(x, y + r * 0.14, r, 0, Math.PI * 2); g.fill();
+    g.fillStyle = col.p[side]; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = col.pe[side]; g.lineWidth = Math.max(1.5, s * 0.05); g.stroke();
+    glyph(g, E.typeOf(code), x, y, r * 0.78, col.pe[side]);
+    g.globalAlpha = 1;
+  }
+
+  function paintBoard(g, W, H, o, col) {
+    var S = o.S, gm = geo(W, H, o.flip), s = gm.s;
+    var mid = function (k) { var p = cellXY(gm, k); return [p[0] + s / 2, p[1] + s / 2]; };
+    terrain(g, gm, S.h, col);
+    if (o.last) [o.last.from, o.last.to].forEach(function (k) {
+      var p = cellXY(gm, k);
+      g.globalAlpha = 0.28; g.fillStyle = col.hi; g.fillRect(p[0] + 1, p[1] + 1, s - 2, s - 2); g.globalAlpha = 1;
+    });
+    var moving = o.anim ? o.anim.to : -1;
+    for (var i = 0; i < NN; i++) {
+      if (!S.b[i] || i === moving) continue;
+      var c = mid(i);
+      piece(g, c[0], c[1], s, S.b[i], col);
+    }
+    if (o.sel >= 0) {
+      var sc = mid(o.sel);
+      g.strokeStyle = col.hi; g.lineWidth = Math.max(3, s * 0.08);
+      g.beginPath(); g.arc(sc[0], sc[1], s * 0.44, 0, Math.PI * 2); g.stroke();
+    }
+    (o.targets || []).forEach(function (k) {
+      var p = mid(k);
+      g.fillStyle = col.hi; g.strokeStyle = col.hi;
+      if (S.b[k]) { g.lineWidth = Math.max(2.5, s * 0.07); g.beginPath(); g.arc(p[0], p[1], s * 0.45, 0, Math.PI * 2); g.stroke(); }
+      else { g.beginPath(); g.arc(p[0], p[1], Math.max(4, s * 0.13), 0, Math.PI * 2); g.fill(); }
+    });
+    if (o.cursor >= 0) {
+      var cp = cellXY(gm, o.cursor);
+      g.strokeStyle = col.cur; g.lineWidth = Math.max(2, s * 0.05); g.setLineDash([s * 0.12, s * 0.09]);
+      g.strokeRect(cp[0] + s * 0.05, cp[1] + s * 0.05, s * 0.9, s * 0.9); g.setLineDash([]);
+    }
+    if (o.anim) {
+      var a = o.anim, e = a.p < 0.5 ? 2 * a.p * a.p : 1 - Math.pow(-2 * a.p + 2, 2) / 2, fr = mid(a.from), to = mid(a.to);
+      if (a.victim) piece(g, to[0], to[1], s, a.victim, col, 1 - e);
+      // a jumper arcs over what it leaps; the others slide
+      var lift = E.typeOf(a.code) === E.JUMPER ? Math.sin(Math.PI * e) * s * 0.55 : 0;
+      piece(g, fr[0] + (to[0] - fr[0]) * e, fr[1] + (to[1] - fr[1]) * e - lift, s * (1 + lift / s * 0.35), a.code, col);
+    }
+    return gm;
+  }
+
+  function boxSize() {
+    var r = box.getBoundingClientRect();
+    return { w: Math.max(1, Math.floor(r.width)), h: Math.max(1, Math.floor(r.height || r.width)) };
+  }
+  function startAnim(m, code, victim) {
+    if (C.ui.reduceMotion()) { anim = null; return; }
+    anim = { from: m[0], to: m[1], code: code, victim: victim, t0: performance.now(), dur: E.typeOf(code) === E.JUMPER ? 340 : 240, p: 0 };
+  }
+  function targets() { return sel >= 0 && !busy() ? E.targets(G.S, sel) : []; }
+  function draw() {
+    raf = 0;
+    if (!G) return;
+    var sz = boxSize(), W = sz.w, H = sz.h, dpr = Math.min(2, window.devicePixelRatio || 1), now = performance.now();
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    if (anim) anim.p = Math.min(1, (now - anim.t0) / anim.dur);
+    var mine = !busy();
+    var gm = paintBoard(g, W, H, { S: G.S, flip: flipped(), last: G.S.last, anim: anim, sel: mine ? sel : -1, targets: targets(), cursor: kbOn && mine ? cur : -1 }, colors());
+    // taps are read against the board drawn last (2026-10-19)
+    shown = gm;
+    if (anim && anim.p >= 1) anim = null;
+    if (anim) kick();
+  }
+  function kick() { if (!raf) raf = requestAnimationFrame(draw); }
+  function cardPaint() {
+    var S = E.clone(G.S), flip = flipped();
+    return function (g, W, H) { paintBoard(g, W, H, { S: S, flip: flip, last: null, sel: -1, targets: [], cursor: -1 }, colors()); };
+  }
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (G.daily) {
+      top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyHs') + ' — ' + C.num(G.daily) })]));
+      top.appendChild(el('span', { class: 'ch-badge', text: C.t('vsMedium') }));
+      return;
+    }
+    top.appendChild(el('button', { class: 'ch-badge ch-tap', type: 'button', onclick: settings,
+      text: G.mode === 'bot' ? C.t('vsBot') + ' · ' + C.t(G.level) : C.t('two') }));
+    var gear = el('button', { class: 'ch-iconbtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') }, [C.icon('gear', 20)]);
+    gear.addEventListener('click', settings);
+    top.appendChild(gear);
+  }
+  function renderSide() {
+    sides.innerHTML = '';
+    var S = G.S, t = S.turn, bottom = flipped() ? 1 : 0;
+    // the side at the top of the board is listed first
+    [1 - bottom, bottom].forEach(function (k) {
+      sides.appendChild(el('div', { class: 'hs-side' + (t === k && !G.done ? ' hs-side--on' : '') + (isBot(k) && t === k && !G.done ? ' hs-thinking' : '') }, [
+        el('span', { class: 'hs-side__dot', style: { background: 'var(--hs-p' + k + ')', 'border-color': 'var(--hs-p' + k + 'e)' } }),
+        el('div', { class: 'hs-side__name', text: pname(k) }),
+        el('div', { class: 'hs-side__sub', text: C.t('leftN', { n: C.num(count(S, k)) }) })
+      ]));
+    });
+    status.innerHTML = '';
+    if (G.done) return;
+    var line = isBot(t) ? C.t('thinking') : hint || (sel >= 0 ? C.t('pickDest') : C.t('yourMove'));
+    if (G.mode === 'two') line = C.t('turnOf', { n: pname(t) }) + ' · ' + line;
+    status.appendChild(el('span', { text: line }));
+  }
+  function render() { renderTop(); renderSide(); draw(); }
+
+  function say(key) {
+    hint = C.t(key);
+    if (hintTimer) clearTimeout(hintTimer);
+    hintTimer = setTimeout(function () { hint = ''; hintTimer = null; if (G) renderSide(); }, 2600);
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  // a step the piece could take on flat ground but the slope forbids
+  function tooSteep(S, from, k) {
+    var t = E.typeOf(S.b[from]);
+    if (t === E.CHIEF) return E.NB8[from].indexOf(k) >= 0 && Math.abs(S.h[k] - S.h[from]) > 1;
+    if (t === E.RUNNER) return E.NB4[from].indexOf(k) >= 0 && Math.abs(S.h[k] - S.h[from]) > 1;
+    return false;
+  }
+  function tapCell(k) {
+    if (busy() || k < 0) return;
+    var S = G.S, t = S.turn;
+    if (sel >= 0 && E.targets(S, sel).indexOf(k) >= 0) { hint = ''; act([sel, k]); return; }
+    var p = S.b[k];
+    if (p && E.sideOf(p) === t) {
+      if (sel === k) { sel = -1; C.feedback('tap'); render(); return; }
+      if (E.targets(S, k).length) { hint = ''; sel = k; C.feedback('select'); render(); return; }
+      C.feedback('bad'); say('stuck'); sel = -1; render(); return;
+    }
+    if (sel >= 0 && tooSteep(S, sel, k)) { C.feedback('bad'); say('steep'); render(); return; }
+    sel = -1;
+    render();
+  }
+
+  // a press is a tap when it ends within 8 px of where it began
+  var press = null;
+  cv.addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    try { cv.setPointerCapture(e.pointerId); } catch (er) { /* a synthetic pointer has nothing to capture */ }
+    press = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  });
+  cv.addEventListener('pointerup', function (e) {
+    if (!press || press.id !== e.pointerId) return;
+    var p = press; press = null;
+    if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > 8 || !shown) return;
+    var r = cv.getBoundingClientRect();
+    kbOn = false;
+    tapCell(cellAt(shown, p.x - r.left, p.y - r.top));
+  });
+  cv.addEventListener('pointercancel', function () { press = null; });
+
+  window.addEventListener('keydown', function (e) {
+    if (!G || document.querySelector('.ch-scrim')) return;
+    if (C.undoKey(e)) { undo(); e.preventDefault(); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var tg = e.target && e.target.tagName;
+    if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT') return;
+    if (busy()) return;
+    if (e.key === 'Escape' && sel >= 0) { sel = -1; render(); e.preventDefault(); return; }
+    // the board is drawn the same way in every language, so the arrows are geometric (#338),
+    // moving on the screen even when the board is turned round
+    var want = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[e.key];
+    if (want) {
+      e.preventDefault();
+      if (!kbOn) { kbOn = true; draw(); return; }
+      var v = flipped() ? NN - 1 - cur : cur, r = Math.floor(v / N) + want[0], c = v % N + want[1];
+      if (r >= 0 && r < N && c >= 0 && c < N) { v = r * N + c; cur = flipped() ? NN - 1 - v : v; }
+      draw(); return;
+    }
+    if ((e.key === 'Enter' || e.key === ' ') && kbOn && tg !== 'BUTTON') { e.preventDefault(); tapCell(cur); }
+  });
+
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  else window.addEventListener('resize', draw);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('← ↑ → ↓', C.t('kCursor')), kb('Space / Enter', C.t('kGo')), kb('Esc', C.t('kEsc')), kb('U / Ctrl+Z', C.t('undoMove'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // the tutorial pictures are drawn with the game's own squares and pieces
+  function tArt(kind) {
+    var Wd = 220, Hd = 110, c = document.createElement('canvas'), col = colors();
+    c.width = Wd * 2; c.height = Hd * 2;
+    var g = c.getContext('2d');
+    g.setTransform(2, 0, 0, 2, 0, 0);
+    var s = 40, x0 = (Wd - 5 * s) / 2, y0 = (Hd - 2 * s) / 2;
+    if (kind === 1) {
+      var hs = [0, 1, 2, 3, 3, 0, 1, 0, 3, 2];
+      hs.forEach(function (h, i) { square(g, x0 + (i % 5) * s, y0 + Math.floor(i / 5) * s, s, h, col, -1); });
+      g.strokeStyle = col.cliff; g.lineWidth = 3.2; g.lineCap = 'round';
+      for (var a = 0; a < 10; a++) {
+        if (a % 5 < 4 && Math.abs(hs[a + 1] - hs[a]) > 1) { g.beginPath(); g.moveTo(x0 + (a % 5 + 1) * s, y0 + Math.floor(a / 5) * s + 3); g.lineTo(x0 + (a % 5 + 1) * s, y0 + (Math.floor(a / 5) + 1) * s - 3); g.stroke(); }
+        if (a < 5 && Math.abs(hs[a + 5] - hs[a]) > 1) { g.beginPath(); g.moveTo(x0 + (a % 5) * s + 3, y0 + s); g.lineTo(x0 + (a % 5 + 1) * s - 3, y0 + s); g.stroke(); }
+      }
+    } else if (kind === 2) {
+      for (var i = 0; i < 10; i++) square(g, x0 + (i % 5) * s, y0 + Math.floor(i / 5) * s, s, i % 5 === 2 ? 2 : 1, col, -1);
+      [E.CHIEF, E.CLIMBER, E.RUNNER, E.JUMPER].forEach(function (t, j) { piece(g, x0 + (j + 0.5 + (j > 1 ? 1 : 0)) * s, y0 + s * 0.5, s, t, col); });
+      [E.CHIEF, E.CLIMBER, E.RUNNER, E.JUMPER].forEach(function (t, j) { piece(g, x0 + (j + 0.5 + (j > 1 ? 1 : 0)) * s, y0 + s * 1.5, s, 8 + t, col); });
+    } else {
+      for (var q = 0; q < 10; q++) square(g, x0 + (q % 5) * s, y0 + Math.floor(q / 5) * s, s, [1, 2, 3, 2, 1][q % 5] - (q >= 5 ? 1 : 0), col, q === 2 ? 1 : -1);
+      piece(g, x0 + s * 1.5, y0 + s * 0.5, s, E.CHIEF, col);
+      g.strokeStyle = col.hi; g.lineWidth = 3; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(x0 + s * 1.85, y0 + s * 0.5); g.lineTo(x0 + s * 2.3, y0 + s * 0.5); g.stroke();
+      g.beginPath(); g.moveTo(x0 + s * 2.3, y0 + s * 0.38); g.lineTo(x0 + s * 2.45, y0 + s * 0.5); g.lineTo(x0 + s * 2.3, y0 + s * 0.62); g.closePath(); g.fillStyle = col.hi; g.fill();
+      piece(g, x0 + s * 3.5, y0 + s * 1.5, s, 8 + E.CHIEF, col, 0.45);
+      piece(g, x0 + s * 2.5, y0 + s * 1.5, s, E.JUMPER, col);
+    }
+    return '<img alt="" width="100%" src="' + c.toDataURL() + '">';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  var saved = ctx.loadSave();
+  if (validSave(saved) && (saved.g.daily || null) === (dailyDate || null)) restore(saved.g);
+  else newGame(dailyDate ? { daily: dailyDate } : { mode: prefs.mode, level: prefs.level });
+  if (dailyDate && C.stats.dailyDone('hillside', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).hillside;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
