@@ -13,8 +13,13 @@ module.exports = function (T) {
     const cr = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
     const files = [
       { id: 'trio', surface: '--tr-card', marks: ['--tr-c0', '--tr-c1', '--tr-c2'], light: '#FFFFFF' },
-      { id: 'linkup', surface: '--lu-board', marks: ['--lu-o', '--lu-b'], light: '#F4EDE0' }
+      { id: 'linkup', surface: '--lu-board', marks: ['--lu-o', '--lu-b'], light: '#F4EDE0' },
+      // #1076: the back behind Four in a Row's holes stayed pale; the discs keep their
+      // colours, the rims outline the holes and the keyboard column is drawn in --fr-ink
+      { id: 'fourrow', surface: '--fr-back', marks: ['--fr-a', '--fr-b', '--fr-rim'], light: '#F3ECF4', pageInk: '--fr-ink' }
     ];
+    const darkPage = (fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8').match(/--c-bg:\s*(#[0-9A-Fa-f]{6});/g) || []).map((m) => m.match(/#[0-9A-Fa-f]{6}/)[0]).find((c) => lum(c) < 0.05);
+    ok(!!darkPage, 'the dark theme\'s page colour was found (' + darkPage + ')');
     for (const f of files) {
       const html = fs.readFileSync(path.join(ROOT, 'www/games', f.id, 'index.html'), 'utf8');
       const auto = html.match(/@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-theme="light"\]\) \{([^}]*)\}/);
@@ -22,12 +27,17 @@ module.exports = function (T) {
       ok(!!auto && !!fixed, f.id + ': dark values for the system theme and for the chosen one');
       if (!(auto && fixed)) continue;
       ok(auto[1].trim() === fixed[1].trim(), f.id + ': both dark blocks hold the same values');
-      const val = (k) => ((fixed[1].match(new RegExp(k + ':\\s*(#[0-9A-Fa-f]{6})')) || [])[1]);
+      // a colour the dark block leaves alone keeps its light value
+      const val = (k) => ((fixed[1].match(new RegExp(k + ':\\s*(#[0-9A-Fa-f]{6})')) || html.match(new RegExp(k + ':\\s*(#[0-9A-Fa-f]{6})')) || [])[1]);
       const surface = val(f.surface);
       ok(!!surface && lum(surface) < 0.05, f.id + ': the dark ' + f.surface + ' is a dark surface (' + surface + ', luminance ' + (surface ? lum(surface).toFixed(3) : '-') + ')');
       for (const k of f.marks) {
         const v = val(k);
         ok(!!v && cr(v, surface) >= 4.5, f.id + ': ' + k + ' reads on the dark surface at 4.5:1 or better (' + v + ', ' + (v ? cr(v, surface).toFixed(1) : '-') + ')');
+      }
+      if (f.pageInk) {
+        const v = val(f.pageInk);
+        ok(!!v && !!darkPage && cr(v, darkPage) >= 4.5, f.id + ': ' + f.pageInk + ' reads on the dark page at 4.5:1 or better (' + v + ', ' + (v && darkPage ? cr(v, darkPage).toFixed(1) : '-') + ')');
       }
       ok(new RegExp(f.surface + ': ' + f.light, 'i').test(html), f.id + ': the light theme keeps its ' + f.light);
     }
