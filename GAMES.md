@@ -105,6 +105,7 @@ Every game in Chogan with a line about it. Each one in `www/games.json` has a ro
 | Word Shower | Words fall toward your garden and you type each one letter by letter on the game's own keyboard, or a real one, to burst it; eight waves, five flowers as lives, three speeds, words in the app's language, and a list of your own words that does not count for the daily challenge or awards |
 | Durak | The Russian card game with a 36-card deck: beat each attack card with a higher card of its suit or a trump, or take them all; the others throw in cards of ranks already on the table. The last player holding cards is the durak, the fool. Against 1 to 3 bots at three levels, a transfer game behind the gear, and a daily deal against one bot |
 | Apiary | A hive with no board: each side places and moves a queen, two beetles, three grasshoppers, two spiders and three ants, and the hive must never split. Surround the other queen on all six sides to win. Against a bot at three levels or two players on one phone, and a daily game against the medium bot with the same opening for everyone |
+| Hillside | A new 7 × 7 map of hills and valleys every game, mirrored so both sides start alike; each square shows its height from 0 to 3 by shade, rings and number. A chief, climbers, runners and jumpers each meet the slopes in their own way. Capture the other chief or bring yours onto its flag hilltop to win. Against a bot at three levels or two players on one phone, and a daily map against the medium bot |
 
 ## فارسی
 
@@ -213,5 +214,6 @@ Every game in Chogan with a line about it. Each one in `www/games.json` has a ro
 | واژه‌باران | واژه‌ها به سوی باغت می‌بارند و هر کدام را با صفحه‌کلید خود بازی، یا صفحه‌کلید واقعی، حرف به حرف می‌نویسی تا بترکد؛ هشت موج، پنج گل به جای جان، سه سرعت، واژه‌ها به زبان اپ، و فهرستی از واژه‌های خودت که در چالش روزانه و دستاورد حساب نمی‌شود |
 | دوراک | بازی ورق روسی با سی‌وشش کارت: هر کارت حمله را با کارت بزرگ‌تر همان خال یا با حکم بزن، یا همه را بردار؛ بقیه کارت‌هایی با عددی که روی زمین هست می‌اندازند. آخرین کسی که کارت در دست دارد دوراک است. مقابل یک تا سه ربات در سه سطح، بازی دادنی در تنظیمات، و یک دست روزانه مقابل یک ربات |
 | زنبورستان | کندویی بدون صفحه: هر طرف یک ملکه، دو سوسک، سه ملخ، دو عنکبوت و سه مورچه می‌گذارد و جابه‌جا می‌کند و کندو هیچ‌وقت نباید دو تکه شود. ملکه‌ی حریف را از هر شش طرف محاصره کن تا ببری. مقابل ربات در سه سطح یا دو نفره روی یک گوشی، و یک بازی روزانه مقابل ربات متوسط با شروعی یکسان برای همه |
+| تپه‌ماهور | در هر بازی نقشه‌ای تازه و قرینه از تپه و دره روی صفحه‌ی هفت در هفت؛ ارتفاع هر خانه از ۰ تا ۳ با رنگ، حلقه و عدد پیداست. سردار، کوهنورد، تیزرو و جهنده هر کدام جور خودشان با شیب‌ها کنار می‌آیند. سردار حریف را بگیر یا سردار خودت را به پرچم تپه‌اش برسان تا ببری. مقابل ربات در سه سطح یا دو نفره روی یک گوشی، و نقشه‌ای روزانه مقابل ربات متوسط |
 
 </div>
