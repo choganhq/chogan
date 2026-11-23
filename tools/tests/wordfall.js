@@ -219,6 +219,17 @@ module.exports = function (T) {
     ok(/class: 'ch-fit'/.test(html) && /ch-split/.test(html) && /ctx\.tutorialIfNew\(TUT\)/.test(html) && !/localStorage|history\.(push|replace)State/.test(html), 'core layout, a tutorial, no direct storage or history');
     ok(!/<input[^>]*hidden|\.focus\(\)/.test(html.slice(html.indexOf('function buildKeys'), html.indexOf('function buildKeys') + 4000)) && /pointerdown/.test(html), 'the on-screen keyboard types on pointerdown and never focuses a hidden input');
     ok(/C\.keyIs\(/.test(html) && /e\.code/.test(html), 'a physical keyboard works: Latin letters through C.keyIs, the other scripts by key position');
+    // #1095: the lit next key can be turned off behind the gear for a harder game;
+    // it stays on by default, and turning it off keeps the run going
+    const hintFn = (html.match(/function hintKeys\(\) \{[\s\S]*?\n  \}/) || [''])[0];
+    ok(/hintOn\(\)/.test(hintFn) && /function hintOn\(\) \{ return prefs\.hint !== false; \}/.test(html),
+      'the next-key light obeys the saved choice, on unless turned off');
+    const setFn = (html.match(/function showSettings\(\) \{[\s\S]*?\n  \}/) || [''])[0];
+    ok(/C\.t\('wfHint'\)/.test(setFn) && /prefs\.hint = v; ctx\.store\.set\('prefs', prefs\); hintKeys\(\);/.test(setFn),
+      'the gear offers the key light, saves it and repaints the keyboard without a new run');
+    const strBlocks = LOCALE_CODES.map((l) => (html.match(new RegExp('\\n      ' + l + ': \\{[\\s\\S]*?\\n      \\}')) || [''])[0]);
+    ok(strBlocks.length > 0 && strBlocks.every((b) => /wfHint: '[^']+'/.test(b) && /wfHintOn: '[^']+'/.test(b) && /wfHintOff: '[^']+'/.test(b)),
+      'the key-light labels exist in every language');
     ok(Date.now() - t0 < 3000, 'the Word Shower tests finish in under 3 s (' + (Date.now() - t0) + ' ms)');
   }
   return { testWordfall };
