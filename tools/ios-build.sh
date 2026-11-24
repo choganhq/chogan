@@ -47,12 +47,15 @@ printf '%s' "$APPLE_KEY_P8" > "$KEYFILE"
 AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEYFILE"
       -authenticationKeyID "$APPLE_KEY_ID" -authenticationKeyIssuerID "$APPLE_ISSUER_ID")
 
+# The archive is built unsigned: signing it here asks for a development profile, which needs a
+# registered device. The export step below signs it for the store with a cloud-managed
+# distribution certificate and profile.
 cd ios/App
 xcodebuild -project App.xcodeproj -scheme App -configuration Release -sdk iphoneos \
   -archivePath "$WORK/App.xcarchive" archive \
   PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
   MARKETING_VERSION="$VER" CURRENT_PROJECT_VERSION="$CODE" \
-  CODE_SIGN_STYLE=Automatic "${AUTH[@]}"
+  CODE_SIGNING_ALLOWED=NO
 
 DEST=export
 [ "$MODE" = upload ] && DEST=upload
