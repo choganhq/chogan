@@ -55,7 +55,7 @@ SIGN="$WORK/sign"
 cleanup() { "$PY" "$ROOT/tools/apple-asc.py" unsign "$SIGN" || echo "could not delete the temporary certificate"; security delete-keychain "$WORK/ci.keychain-db" 2>/dev/null || true; rm -f "$KEYFILE"; }
 trap cleanup EXIT
 openssl x509 -inform DER -in "$SIGN/dist.cer" -out "$SIGN/dist.pem"
-openssl pkcs12 -export -inkey "$SIGN/key.pem" -in "$SIGN/dist.pem" -out "$SIGN/dist.p12" -passout pass:ci
+openssl pkcs12 -export -inkey "$SIGN/key.pem" -in "$SIGN/dist.pem" -out "$SIGN/dist.p12" -passout pass:ci -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1
 KC="$WORK/ci.keychain-db"
 security create-keychain -p ci "$KC"
 security set-keychain-settings -lut 3600 "$KC"
