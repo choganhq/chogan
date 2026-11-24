@@ -22,8 +22,12 @@ module.exports = function (T) {
     ok(E.WHITES.length === 22 && ms.filter((m) => E.isBlack(m)).length === 15, '22 white and 15 black keys');
 
     // layout: what a finger touches is the key drawn there
-    const L8 = E.layout(390, 200, 4), L22 = E.layout(1280, 260, 4), Lt = E.layout(390, 200, 5);
+    const L8 = E.layout(390, 200, 4), L22 = E.layout(1320, 200, 4), Lt = E.layout(390, 200, 5);
     ok(E.whitesFor(300) === 8 && E.whitesFor(390) === 8 && E.whitesFor(844) === 19 && E.whitesFor(1280) === 22, 'a narrow phone shows 8 white keys, a wide screen all 22');
+    // a phone held sideways (#1114): the keys were 45 px wide and 4 times as tall; a key is now at least a quarter of its height wide
+    const Ls = E.layout(891, 249, 4);
+    ok(Ls.ww >= 249 / 4 - 0.01 && Ls.whites.length >= 8 && E.whitesFor(366, 320) === 8 && E.whitesFor(1256, 463) >= 15, 'a sideways phone gets wider keys (' + Ls.whites.length + ' at ' + Ls.ww.toFixed(0) + ' px), an upright one still 8, a desktop still both octaves of the computer keyboard');
+    ok(/@media \(orientation: landscape\) and \(max-height: 540px\) \{[^@]*\.pn-head \{ display: flex/.test(html) && /el\('div', \{ class: 'pn-head' \}, \[bar, status\]\)/.test(html), 'on a sideways phone the buttons and the status line share one row, so the keys get the height');
     ok(L8.lo === 60 && L8.hi === 72 && L22.lo === 48 && L22.hi === 84 && Lt.hi === 84 && Lt.lo === 72, 'the window starts on the chosen C and never runs past C6');
     let hitsOk = 0, hitsAll = 0;
     for (const L of [L8, L22, E.layout(844, 180, 3)]) {
