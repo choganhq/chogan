@@ -1,0 +1,43 @@
+name: iOS
+
+# Builds the iOS app from the same www/ as the web and Android apps (#1110). There is no
+# ios/ folder in the repo: Capacitor generates it here, so there is nothing hand-kept to
+# drift. This job only proves the app compiles for the simulator (no signing, no secrets);
+# signing and the TestFlight upload come once the Apple team's secrets exist.
+
+on:
+  workflow_dispatch:
+  # GitHub only dispatches a workflow that exists on main, so a PR run is how it is tried first.
+  pull_request:
+    paths: ['.github/workflows/ios.yml', 'capacitor.config.json']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: iOS simulator build
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+      - name: Generate the iOS project
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/cap"
+          cd "$RUNNER_TEMP/cap"
+          npm init -y >/dev/null
+          npm install --silent @capacitor/core@8.6.2 @capacitor/cli@8.6.2 @capacitor/ios@8.6.2
+          cp "$GITHUB_WORKSPACE/capacitor.config.json" .
+          ln -s "$GITHUB_WORKSPACE/www" www
+          npx cap add ios
+          npx cap sync ios
+          ls ios/App
+      - name: Build for the simulator
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/cap/ios/App"
+          xcodebuild -project App.xcodeproj -scheme App -sdk iphonesimulator \
+            -configuration Debug -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build | tail -30
+          test -d "$(find ~/Library/Developer/Xcode/DerivedData -name App.app -path '*iphonesimulator*' | head -1)"

@@ -1,0 +1,36 @@
+name: Apple
+
+# Talks to App Store Connect with the team key in APPLE_KEY_ID, APPLE_ISSUER_ID and
+# APPLE_KEY_P8 (#1110). check: read only, proves the key works and lists apps and bundle
+# ids. register-bundle: registers io.github.choganhq.chogan as an iOS bundle id if it is
+# missing. Secrets are only read here, never printed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'check (read only) or register-bundle'
+        required: true
+        default: check
+        type: choice
+        options: [check, register-bundle]
+
+permissions:
+  contents: read
+
+jobs:
+  apple:
+    name: App Store Connect
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Call App Store Connect
+        env:
+          KEY_ID: ${{ secrets.APPLE_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APPLE_ISSUER_ID }}
+          KEY_P8: ${{ secrets.APPLE_KEY_P8 }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          python3 -m pip install --quiet pyjwt cryptography
+          python3 tools/apple-asc.py "$MODE"

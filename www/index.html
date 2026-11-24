@@ -373,15 +373,26 @@
   function gname(g) { return g.name[lang()] || g.name.en || g.name.fa; }
   function gsum(g) { return g.summary[lang()] || g.summary.en || g.summary.fa; }
 
-  // روشن کردن رنگ بدون color-mix، برای وب‌ویوهای قدیمی
-  function lighten(hex, k) {
-    var h = String(hex).replace('#', '');
-    var n = parseInt(h, 16);
-    var r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-    r = Math.round(r + (255 - r) * k);
-    g = Math.round(g + (255 - g) * k);
-    b = Math.round(b + (255 - b) * k);
-    return 'rgb(' + r + ',' + g + ',' + b + ')';
+  // The two ends of a banner that carries white text. Every part of it must
+  // keep 4.5:1 for white: the daily banner's end, lightened by a fixed .38,
+  // and the Silver league banner read near 2.5:1 (#1076). The colour is
+  // darkened only as far as it needs to be, then lightened only as far as
+  // white still reads.
+  function whiteBanner(hex) {
+    var h = String(hex).replace('#', ''), n = parseInt(h, 16);
+    var base = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    var mix = function (to, k) { return base.map(function (v) { return Math.round(v + (to - v) * k); }); };
+    var ok = function (rgb) {
+      var L = rgb.map(function (v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+      return 1.05 / (0.2126 * L[0] + 0.7152 * L[1] + 0.0722 * L[2] + 0.05) >= 4.5;
+    };
+    var css = function (rgb) { return 'rgb(' + rgb.join(',') + ')'; };
+    var k = 0;
+    while (!ok(mix(0, k)) && k < 1) k = Math.min(1, k + 0.02);
+    // too light for white: a gradient from a little deeper to just readable
+    if (k > 0) return { from: css(mix(0, Math.min(1, k + 0.12))), to: css(mix(0, k)) };
+    for (k = 0.38; k > 0.001; k -= 0.02) if (ok(mix(255, k))) break;
+    return { from: css(base), to: css(mix(255, Math.max(0, k))) };
   }
 
   function applyPalette() {
@@ -545,9 +556,10 @@
     var idx = Math.abs(C.hash32(today)) % DG.length;
     var feat = DG[idx];
     var done = C.stats.dailyDone(feat.id, today);
+    var heroBg = whiteBanner(feat.color);
     var hero = el('div', {
       class: 'ch-card ch-tap ch-enter ch-kbnav', tabindex: '0', role: 'link', 'aria-label': C.t('todayChallenge') + ' — ' + gname(feat),
-      style: { background: feat.color, 'background-image': 'linear-gradient(135deg, ' + C.alpha(feat.color, 1) + ' 0%, ' + lighten(feat.color, .38) + ' 100%)', color: '#fff', 'margin-bottom': 'var(--s-5)' },
+      style: { background: heroBg.from, 'background-image': 'linear-gradient(135deg, ' + heroBg.from + ' 0%, ' + heroBg.to + ' 100%)', color: '#fff', 'margin-bottom': 'var(--s-5)' },
       onclick: function () { goGame(feat, today); }
     }, [
       el('div', { class: 'ch-row' }, [
@@ -944,7 +956,8 @@
     var dleft = Math.floor(ms / 86400000);
     var hleft = Math.floor((ms % 86400000) / 3600000);
 
-    page.appendChild(el('div', { class: 'ch-tier ch-enter', style: { '--tier-c': t.color, 'margin-bottom': 'var(--s-4)' } }, [
+    var tierBg = whiteBanner(t.color);
+    page.appendChild(el('div', { class: 'ch-tier ch-enter', style: { '--tier-from': tierBg.from, '--tier-to': tierBg.to, 'margin-bottom': 'var(--s-4)' } }, [
       el('div', { class: 'ch-tier__medal', html: tierMedal(lg.tier, 66) }),
       el('div', { class: 'ch-grow' }, [
         el('div', { class: 'ch-sm', style: { opacity: '.85' }, text: C.t('myTier') }),
@@ -2036,7 +2049,16 @@
     return best;
   }
 
+  // #1102: a desktop player reached for Ctrl+F to find a game and got the browser's page find,
+  // which cannot see past the tiles already drawn. On the games tab it focuses the menu's own
+  // search (Cmd+F on a Mac); on any other tab the browser keeps its find.
+  function isFindKey(e) { return (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && C.keyIs(e, 'f'); }
   document.addEventListener('keydown', function (e) {
+    if (isFindKey(e) && !document.querySelector('.ch-scrim')) {
+      var find = app.querySelector('.ch-search__input');
+      if (find && find.getClientRects().length) { e.preventDefault(); find.focus(); find.select(); }
+      return;
+    }
     if (e.ctrlKey || e.metaKey || e.altKey || document.querySelector('.ch-scrim')) return;
     var cur = document.activeElement;
     var onItem = cur && cur.classList && cur.classList.contains('ch-kbnav') && app.contains(cur);

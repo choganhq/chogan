@@ -15,7 +15,7 @@ zh: {
 'Your progress is yours': '进度属于你自己', 'Saved on your device. No account.': '保存在你的设备上，无需账号。',
 'What is inside?': '里面有什么？',
 'Dozens of games in one app: puzzles, board games, card games and games of skill. Sudoku, nonograms, chess, backgammon, Hokm, Pasur and many more. A session lasts five to fifteen minutes, so you feel you finished something. There is a new daily challenge every day, and new games keep arriving. The interface is in Persian, English and several other languages.': '一个应用里有几十款游戏：益智、棋盘、纸牌和技巧类。数独、数织、国际象棋、双陆棋、Hokm、Pasur 等等。每局五到十五分钟，让你有完成了什么的感觉。每天都有新的每日挑战，新游戏也在不断加入。界面支持波斯语、英语等多种语言。',
-'X (Twitter)': 'X（推特）', 'More places': '更多入口', 'News channel': '新闻频道', 'Report a bug or idea': '报告问题或提建议', 'Privacy': '隐私',
+'X (Twitter)': 'X（推特）', 'Bluesky': 'Bluesky', 'Mastodon': 'Mastodon', 'More places': '更多入口', 'News channel': '新闻频道', 'Report a bug or idea': '报告问题或提建议', 'Privacy': '隐私',
 'Chogan is built by Hossein as a hobby. Nothing is sent to a server.': 'Chogan 是 Hossein 出于兴趣开发的。不会向任何服务器发送数据。'
 },
 de: {
@@ -32,7 +32,7 @@ de: {
 'Your progress is yours': 'Dein Fortschritt gehört dir', 'Saved on your device. No account.': 'Auf deinem Gerät gespeichert. Kein Konto nötig.',
 'What is inside?': 'Was steckt drin?',
 'Dozens of games in one app: puzzles, board games, card games and games of skill. Sudoku, nonograms, chess, backgammon, Hokm, Pasur and many more. A session lasts five to fifteen minutes, so you feel you finished something. There is a new daily challenge every day, and new games keep arriving. The interface is in Persian, English and several other languages.': 'Dutzende Spiele in einer App: Rätsel, Brettspiele, Kartenspiele und Geschicklichkeitsspiele. Sudoku, Nonogramme, Schach, Backgammon, Hokm, Pasur und viele mehr. Eine Runde dauert fünf bis fünfzehn Minuten, sodass du das Gefühl hast, etwas abgeschlossen zu haben. Jeden Tag gibt es eine neue Tagesaufgabe, und ständig kommen neue Spiele dazu. Die Oberfläche gibt es auf Persisch, Englisch und in mehreren weiteren Sprachen.',
-'X (Twitter)': 'X (Twitter)', 'More places': 'Weitere Orte', 'News channel': 'Neuigkeiten-Kanal', 'Report a bug or idea': 'Fehler melden oder Idee vorschlagen', 'Privacy': 'Datenschutz',
+'X (Twitter)': 'X (Twitter)', 'Bluesky': 'Bluesky', 'Mastodon': 'Mastodon', 'More places': 'Weitere Orte', 'News channel': 'Neuigkeiten-Kanal', 'Report a bug or idea': 'Fehler melden oder Idee vorschlagen', 'Privacy': 'Datenschutz',
 'Chogan is built by Hossein as a hobby. Nothing is sent to a server.': 'Chogan wird von Hossein als Hobby entwickelt. Nichts wird an einen Server gesendet.'
 },
 es: {
@@ -49,7 +49,7 @@ es: {
 'Your progress is yours': 'Tu progreso es tuyo', 'Saved on your device. No account.': 'Se guarda en tu dispositivo. Sin cuenta.',
 'What is inside?': '¿Qué hay dentro?',
 'Dozens of games in one app: puzzles, board games, card games and games of skill. Sudoku, nonograms, chess, backgammon, Hokm, Pasur and many more. A session lasts five to fifteen minutes, so you feel you finished something. There is a new daily challenge every day, and new games keep arriving. The interface is in Persian, English and several other languages.': 'Decenas de juegos en una sola app: puzles, juegos de mesa, de cartas y de habilidad. Sudoku, nonogramas, ajedrez, backgammon, Hokm, Pasur y muchos más. Una partida dura de cinco a quince minutos, así que sientes que has terminado algo. Hay un nuevo reto diario cada día y siguen llegando juegos nuevos. La interfaz está en persa, inglés y varios idiomas más.',
-'X (Twitter)': 'X (Twitter)', 'More places': 'Más lugares', 'News channel': 'Canal de novedades', 'Report a bug or idea': 'Informar de un error o idea', 'Privacy': 'Privacidad',
+'X (Twitter)': 'X (Twitter)', 'Bluesky': 'Bluesky', 'Mastodon': 'Mastodon', 'More places': 'Más lugares', 'News channel': 'Canal de novedades', 'Report a bug or idea': 'Informar de un error o idea', 'Privacy': 'Privacidad',
 'Chogan is built by Hossein as a hobby. Nothing is sent to a server.': 'Chogan lo hace Hossein como afición. No se envía nada a ningún servidor.'
 },
 pl: {
@@ -66,7 +66,7 @@ pl: {
 'Your progress is yours': 'Twoje postępy należą do ciebie', 'Saved on your device. No account.': 'Zapisane na twoim urządzeniu. Bez konta.',
 'What is inside?': 'Co jest w środku?',
 'Dozens of games in one app: puzzles, board games, card games and games of skill. Sudoku, nonograms, chess, backgammon, Hokm, Pasur and many more. A session lasts five to fifteen minutes, so you feel you finished something. There is a new daily challenge every day, and new games keep arriving. The interface is in Persian, English and several other languages.': 'Dziesiątki gier w jednej aplikacji: łamigłówki, gry planszowe, karciane i zręcznościowe. Sudoku, nonogramy, szachy, backgammon, Hokm, Pasur i wiele innych. Jedna sesja trwa od pięciu do piętnastu minut, więc czujesz, że coś skończyłeś. Każdego dnia czeka nowe wyzwanie dnia, a nowe gry wciąż przybywają. Interfejs jest po persku, angielsku i w kilku innych językach.',
-'X (Twitter)': 'X (Twitter)', 'More places': 'Więcej miejsc', 'News channel': 'Kanał z nowościami', 'Report a bug or idea': 'Zgłoś błąd lub pomysł', 'Privacy': 'Prywatność',
+'X (Twitter)': 'X (Twitter)', 'Bluesky': 'Bluesky', 'Mastodon': 'Mastodon', 'More places': 'Więcej miejsc', 'News channel': 'Kanał z nowościami', 'Report a bug or idea': 'Zgłoś błąd lub pomysł', 'Privacy': 'Prywatność',
 'Chogan is built by Hossein as a hobby. Nothing is sent to a server.': 'Chogan tworzy Hossein jako hobby. Nic nie jest wysyłane na serwer.'
 },
 fr: {
@@ -83,7 +83,7 @@ fr: {
 'Your progress is yours': 'Ta progression t’appartient', 'Saved on your device. No account.': 'Enregistrée sur ton appareil. Sans compte.',
 'What is inside?': 'Qu’y a-t-il dedans ?',
 'Dozens of games in one app: puzzles, board games, card games and games of skill. Sudoku, nonograms, chess, backgammon, Hokm, Pasur and many more. A session lasts five to fifteen minutes, so you feel you finished something. There is a new daily challenge every day, and new games keep arriving. The interface is in Persian, English and several other languages.': 'Des dizaines de jeux dans une seule application : puzzles, jeux de plateau, jeux de cartes et jeux d’adresse. Sudoku, nonogrammes, échecs, backgammon, Hokm, Pasur et bien d’autres. Une partie dure de cinq à quinze minutes, donc on a le sentiment d’avoir terminé quelque chose. Un nouveau défi quotidien arrive chaque jour, et de nouveaux jeux s’ajoutent sans cesse. L’interface est en persan, en anglais et dans plusieurs autres langues.',
-'X (Twitter)': 'X (Twitter)', 'More places': 'Plus de liens', 'News channel': 'Chaîne d’actualités', 'Report a bug or idea': 'Signaler un bug ou une idée', 'Privacy': 'Confidentialité',
+'X (Twitter)': 'X (Twitter)', 'Bluesky': 'Bluesky', 'Mastodon': 'Mastodon', 'More places': 'Plus de liens', 'News channel': 'Chaîne d’actualités', 'Report a bug or idea': 'Signaler un bug ou une idée', 'Privacy': 'Confidentialité',
 'Chogan is built by Hossein as a hobby. Nothing is sent to a server.': 'Chogan est développé par Hossein pour le plaisir. Rien n’est envoyé à un serveur.'
 },
 ar: {
@@ -100,7 +100,7 @@ ar: {
 'Your progress is yours': 'تقدّمك ملكك', 'Saved on your device. No account.': 'محفوظ على جهازك. بلا حساب.',
 'What is inside?': 'ماذا بداخله؟',
 'Dozens of games in one app: puzzles, board games, card games and games of skill. Sudoku, nonograms, chess, backgammon, Hokm, Pasur and many more. A session lasts five to fifteen minutes, so you feel you finished something. There is a new daily challenge every day, and new games keep arriving. The interface is in Persian, English and several other languages.': 'عشرات الألعاب في تطبيق واحد: ألغاز وألعاب لوحية وألعاب ورق وألعاب مهارة. سودوكو، نونوغرام، شطرنج، طاولة، حكم، پاسور وغيرها الكثير. الجلسة من خمس إلى خمس عشرة دقيقة، فتشعر أنك أنهيت شيئاً. هناك تحدٍّ يومي جديد كل يوم، وألعاب جديدة تصل باستمرار. الواجهة بالفارسية والإنجليزية وعدة لغات أخرى.',
-'X (Twitter)': 'إكس (تويتر)', 'More places': 'روابط أخرى', 'News channel': 'قناة الأخبار', 'Report a bug or idea': 'أبلغ عن خطأ أو اقترح فكرة', 'Privacy': 'الخصوصية',
+'X (Twitter)': 'إكس (تويتر)', 'Bluesky': 'Bluesky', 'Mastodon': 'Mastodon', 'More places': 'روابط أخرى', 'News channel': 'قناة الأخبار', 'Report a bug or idea': 'أبلغ عن خطأ أو اقترح فكرة', 'Privacy': 'الخصوصية',
 'Chogan is built by Hossein as a hobby. Nothing is sent to a server.': 'يطوّر حسين تطبيق Chogan كهواية. لا يُرسل أي شيء إلى أي خادم.'
 },
 hi: {
@@ -117,7 +117,7 @@ hi: {
 'Your progress is yours': 'आपकी प्रगति आपकी है', 'Saved on your device. No account.': 'आपके डिवाइस पर सहेजी जाती है। कोई खाता नहीं।',
 'What is inside?': 'अंदर क्या है?',
 'Dozens of games in one app: puzzles, board games, card games and games of skill. Sudoku, nonograms, chess, backgammon, Hokm, Pasur and many more. A session lasts five to fifteen minutes, so you feel you finished something. There is a new daily challenge every day, and new games keep arriving. The interface is in Persian, English and several other languages.': 'एक ऐप में दर्जनों खेल: पहेलियाँ, बोर्ड गेम, ताश के खेल और कौशल के खेल। सुडोकू, नोनोग्राम, शतरंज, बैकगैमन, हुक्म, पासूर और बहुत कुछ। एक सत्र पाँच से पंद्रह मिनट का होता है, इसलिए आपको लगता है कि आपने कुछ पूरा किया। हर दिन एक नई दैनिक चुनौती होती है और नए खेल लगातार जुड़ते रहते हैं। इंटरफ़ेस फ़ारसी, अंग्रेज़ी और कई अन्य भाषाओं में है।',
-'X (Twitter)': 'X (ट्विटर)', 'More places': 'और जगहें', 'News channel': 'समाचार चैनल', 'Report a bug or idea': 'बग बताएँ या सुझाव दें', 'Privacy': 'गोपनीयता',
+'X (Twitter)': 'X (ट्विटर)', 'Bluesky': 'Bluesky', 'Mastodon': 'Mastodon', 'More places': 'और जगहें', 'News channel': 'समाचार चैनल', 'Report a bug or idea': 'बग बताएँ या सुझाव दें', 'Privacy': 'गोपनीयता',
 'Chogan is built by Hossein as a hobby. Nothing is sent to a server.': 'Chogan को Hossein शौक़ के तौर पर बनाते हैं। कुछ भी किसी सर्वर को नहीं भेजा जाता।'
 },
 ru: {
@@ -134,7 +134,7 @@ ru: {
 'Your progress is yours': 'Ваш прогресс — только ваш', 'Saved on your device. No account.': 'Хранится на вашем устройстве. Без аккаунта.',
 'What is inside?': 'Что внутри?',
 'Dozens of games in one app: puzzles, board games, card games and games of skill. Sudoku, nonograms, chess, backgammon, Hokm, Pasur and many more. A session lasts five to fifteen minutes, so you feel you finished something. There is a new daily challenge every day, and new games keep arriving. The interface is in Persian, English and several other languages.': 'Десятки игр в одном приложении: головоломки, настольные, карточные игры и игры на ловкость. Судоку, японские кроссворды, шахматы, нарды, Хокм, Пасур и многое другое. Одна партия длится от пяти до пятнадцати минут — остаётся чувство, что вы что-то завершили. Каждый день — новое ежедневное испытание, и новые игры продолжают появляться. Интерфейс доступен на персидском, английском и ещё нескольких языках.',
-'X (Twitter)': 'X (Twitter)', 'More places': 'Где ещё найти', 'News channel': 'Канал новостей', 'Report a bug or idea': 'Сообщить об ошибке или идее', 'Privacy': 'Конфиденциальность',
+'X (Twitter)': 'X (Twitter)', 'Bluesky': 'Bluesky', 'Mastodon': 'Mastodon', 'More places': 'Где ещё найти', 'News channel': 'Канал новостей', 'Report a bug or idea': 'Сообщить об ошибке или идее', 'Privacy': 'Конфиденциальность',
 'Chogan is built by Hossein as a hobby. Nothing is sent to a server.': 'Chogan делает Хоссейн в качестве хобби. Ничего не отправляется на сервер.'
 }
 };
