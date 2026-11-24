@@ -1,0 +1,935 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>چهل‌تکه — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  .ql-wrap > .ch-fit { --fit-ar: 1; }
+  .ch-fit > .ql-box { width: 100%; height: 100%; position: relative; }
+  /* a canvas is a replaced element: without its own width and height it keeps the
+     backing-store size times the pixel ratio (#919) */
+  .ql-box canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block;
+    touch-action: manipulation; direction: ltr; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .ql-box canvas:focus-visible { outline: 3px solid var(--game, var(--c-accent)); outline-offset: 2px; border-radius: var(--r-md); }
+  .ql-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .ql-side { align-items: center; }
+  .ql-status { font-weight: 700; color: var(--c-text-dim); font-variant-numeric: tabular-nums;
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 0 var(--s-4); }
+  .ql-status > span { white-space: nowrap; }
+  .ql-status b { color: var(--c-text); }
+  .ql-hint { min-height: 2.6em; text-align: center; color: var(--c-text-dim); font-size: .92rem; line-height: 1.3;
+    display: flex; align-items: center; justify-content: center; }
+  .ql-tray { display: flex; justify-content: center; gap: var(--s-3); }
+  .ql-tile { width: 68px; height: 68px; padding: 5px; border-radius: var(--r-md); border: 2px solid var(--c-line);
+    background: var(--c-surface); cursor: pointer; display: grid; place-items: center; box-shadow: var(--sh-1);
+    transition: transform var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease); }
+  .ql-tile svg { width: 100%; height: 100%; display: block; transition: transform 160ms var(--ease); }
+  .ql-tile[aria-pressed="true"] { border-color: var(--game, var(--c-accent)); box-shadow: 0 0 0 3px var(--game-soft, var(--c-accent-soft)), var(--sh-1); transform: translateY(-3px); }
+  .ql-tile:disabled { cursor: default; box-shadow: none; border-style: dashed; background: transparent; }
+  .ql-tile:focus-visible { outline: 3px solid var(--game, var(--c-accent)); outline-offset: 2px; }
+  .ql-acts { display: flex; justify-content: center; gap: var(--s-2); }
+  .ql-acts .ch-btn { min-height: 44px; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .ql-tile[aria-pressed="true"] { border-color: var(--game-text-dark, var(--game)); } }
+  :root[data-theme="dark"] .ql-tile[aria-pressed="true"] { border-color: var(--game-text-dark, var(--game)); }
+  @media (prefers-reduced-motion: reduce) { :root:not([data-motion="on"]) .ql-tile, :root:not([data-motion="on"]) .ql-tile svg { transition: none; } }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function QuiltEngineFactory() {
+  'use strict';
+
+  // A tile is four triangles cut by its diagonals, listed clockwise from the top:
+  // [N, E, S, W], each a colour 0..K-1. A triangle's outer side is that side of the tile.
+  // K, NOISE and EXTRA were tuned with bot playouts (#1079): four colours or a smoother
+  // colour field left the last holes with no tile that fits, so even a look-ahead bot
+  // stalled near 80% and never finished a quilt; three colours with this much noise let
+  // it fill nine tenths on average and finish one game in six.
+  var K = 3, SIZES = [5, 6], DAILY_N = 6, TRAY = 3, EXTRA = 6, SWAPS = 3, NOISE = 0.4, BIG = 10;
+  var N = 0, E = 1, S = 2, W = 3, DR = [-1, 0, 1, 0], DC = [0, 1, 0, -1];
+
+  function opp(d) { return (d + 2) % 4; }
+  // a quarter turn clockwise: what was on the west side is now on top
+  function rot(t) { return [t[3], t[0], t[1], t[2]]; }
+  function rotN(t, k) { for (var i = 0; i < ((k % 4) + 4) % 4; i++) t = rot(t); return t; }
+  function nb(n, i, d) {
+    var r = Math.floor(i / n) + DR[d], c = i % n + DC[d];
+    return r < 0 || c < 0 || r >= n || c >= n ? -1 : r * n + c;
+  }
+  function empty(n) { var b = []; for (var i = 0; i < n * n; i++) b.push(null); return b; }
+  function placed(B) { var k = 0; for (var i = 0; i < B.length; i++) if (B[i]) k++; return k; }
+
+  // Legal when every side that meets a placed tile shows the same colour on both sides
+  // of the shared edge. A cell with no placed neighbour takes any tile.
+  function fits(B, n, i, t) {
+    if (B[i]) return false;
+    for (var d = 0; d < 4; d++) {
+      var j = nb(n, i, d);
+      if (j >= 0 && B[j] && B[j][opp(d)] !== t[d]) return false;
+    }
+    return true;
+  }
+  // the quarter turns (0..3) from t's current turn that make it fit at i, or -1
+  function turnsTo(B, n, i, t) {
+    for (var k = 0; k < 4; k++) if (fits(B, n, i, rotN(t, k))) return k;
+    return -1;
+  }
+  // the cells a tile fits in its current turn, and the others it would fit after turning
+  function spots(B, n, t) {
+    var now = [], turn = [];
+    for (var i = 0; i < n * n; i++) {
+      if (B[i]) continue;
+      var k = turnsTo(B, n, i, t);
+      if (k === 0) now.push(i); else if (k > 0) turn.push(i);
+    }
+    return { now: now, turn: turn };
+  }
+  function anyFit(B, n, t) {
+    for (var i = 0; i < n * n; i++) if (turnsTo(B, n, i, t) >= 0) return true;
+    return false;
+  }
+
+  // A triangle is cell * 4 + side. Inside a tile it touches its two neighbours across
+  // the diagonals (N meets E and W, never S); across a shared edge it touches the facing
+  // triangle of the next tile. Same colour on both sides joins them into one patch.
+  function links(B, n, x) {
+    var i = x >> 2, d = x & 3, out = [], t = B[i];
+    var a = (d + 1) % 4, b = (d + 3) % 4;
+    if (t[a] === t[d]) out.push(i * 4 + a);
+    if (t[b] === t[d]) out.push(i * 4 + b);
+    var j = nb(n, i, d);
+    if (j >= 0 && B[j] && B[j][opp(d)] === t[d]) out.push(j * 4 + opp(d));
+    return out;
+  }
+  // the patch a triangle belongs to, and whether it is closed: none of its triangles
+  // faces an empty cell (the board's edge closes a side)
+  function region(B, n, x) {
+    var seen = {}, list = [x], open = false;
+    seen[x] = true;
+    for (var h = 0; h < list.length; h++) {
+      var y = list[h], j = nb(n, y >> 2, y & 3);
+      if (j >= 0 && !B[j]) open = true;
+      var l = links(B, n, y);
+      for (var q = 0; q < l.length; q++) if (!seen[l[q]]) { seen[l[q]] = true; list.push(l[q]); }
+    }
+    list.sort(function (p, q) { return p - q; });
+    return { tris: list, color: B[x >> 2][x & 3], closed: !open };
+  }
+  function regions(B, n) {
+    var seen = {}, out = [];
+    for (var i = 0; i < n * n; i++) {
+      if (!B[i]) continue;
+      for (var d = 0; d < 4; d++) {
+        var x = i * 4 + d;
+        if (seen[x]) continue;
+        var R = region(B, n, x);
+        for (var q = 0; q < R.tris.length; q++) seen[R.tris[q]] = true;
+        out.push(R);
+      }
+    }
+    return out;
+  }
+  // a closed patch scores one point a triangle, two a triangle from BIG triangles up
+  function value(size) { return size >= BIG ? size * 2 : size; }
+
+  // Put t at i (the caller has checked it fits) and return the patches it closed.
+  // A closed patch never touches an empty cell, so every patch the new tile belongs to
+  // was open until now, and no patch closes without one of the new triangles: a
+  // neighbour's side that faced this cell now faces a triangle of its own colour.
+  // So each patch is scored exactly once, by the tile that closes it.
+  function place(B, n, i, t) {
+    B[i] = t.slice();
+    var done = [], seen = {};
+    for (var d = 0; d < 4; d++) {
+      var x = i * 4 + d;
+      if (seen[x]) continue;
+      var R = region(B, n, x);
+      for (var q = 0; q < R.tris.length; q++) seen[R.tris[q]] = true;
+      if (R.closed) { R.points = value(R.tris.length); done.push(R); }
+    }
+    return done;
+  }
+
+  function shuffle(a, rnd) {
+    for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(rnd() * (i + 1)), x = a[i]; a[i] = a[j]; a[j] = x; }
+    return a;
+  }
+
+  // The bag is cut from a hidden finished quilt, so every game can be completed: colour
+  // fields grow from a few seed points (the nearest seed wins), which gives the broad
+  // patches a quilt has, and some edges take a random colour instead so the tiles are
+  // varied enough to fill the last holes. Both tiles on an edge show its colour. The tiles
+  // are shuffled and turned at random, and a few spare copies are added.
+  function generate(n, rnd) {
+    var pts = [], m = n + 2;
+    for (var p = 0; p < m; p++) pts.push({ x: rnd() * n, y: rnd() * n, c: p < K ? p : Math.floor(rnd() * K) });
+    var col = function (x, y) {
+      if (rnd() < NOISE) return Math.floor(rnd() * K);
+      var best = 0, bd = Infinity;
+      for (var q = 0; q < pts.length; q++) { var dx = pts[q].x - x, dy = pts[q].y - y, dd = dx * dx + dy * dy; if (dd < bd) { bd = dd; best = q; } }
+      return pts[best].c;
+    };
+    var hz = [], vt = [], r, c;
+    for (r = 0; r <= n; r++) { hz.push([]); for (c = 0; c < n; c++) hz[r].push(col(c + 0.5, r)); }
+    for (r = 0; r < n; r++) { vt.push([]); for (c = 0; c <= n; c++) vt[r].push(col(c, r + 0.5)); }
+    var sol = [], bag = [];
+    for (r = 0; r < n; r++) for (c = 0; c < n; c++) sol.push([hz[r][c], vt[r][c + 1], hz[r + 1][c], vt[r][c]]);
+    for (var i = 0; i < sol.length; i++) bag.push(sol[i].slice());
+    for (var e = 0; e < EXTRA; e++) bag.push(sol[Math.floor(rnd() * sol.length)].slice());
+    shuffle(bag, rnd);
+    for (var b = 0; b < bag.length; b++) bag[b] = rotN(bag[b], Math.floor(rnd() * 4));
+    return { n: n, bag: bag, sol: sol };
+  }
+
+  function fresh(n) { return { n: n, board: empty(n), tray: [], next: 0, score: 0, patches: 0, best: 0, moves: 0, swaps: SWAPS }; }
+  function refill(st, bag) {
+    while (st.tray.length < TRAY) st.tray.push(null);
+    for (var k = 0; k < TRAY; k++) if (!st.tray[k] && st.next < bag.length) st.tray[k] = bag[st.next++].slice();
+  }
+  function start(n, bag) { var st = fresh(n); refill(st, bag); return st; }
+
+  // Play tray tile k at cell i, turned `turns` quarter turns from how it lies in the
+  // tray. Returns the patches it closed, or null when the move is not legal.
+  function move(st, bag, k, i, turns) {
+    var t = st.tray[k];
+    if (!t || typeof i !== 'number' || i < 0 || i >= st.n * st.n || Math.floor(i) !== i) return null;
+    var tt = rotN(t, turns || 0);
+    if (!fits(st.board, st.n, i, tt)) return null;
+    var done = place(st.board, st.n, i, tt);
+    st.tray[k] = null;
+    st.moves++;
+    for (var q = 0; q < done.length; q++) {
+      st.score += done[q].points; st.patches++;
+      if (done[q].tris.length > st.best) st.best = done[q].tris.length;
+    }
+    refill(st, bag);
+    return done;
+  }
+  // set tray tile k aside for the next one in the bag: three times a game
+  function canSwap(st, bag) { return st.swaps > 0 && st.next < bag.length; }
+  function swap(st, bag, k) {
+    if (!st.tray[k] || !canSwap(st, bag)) return false;
+    st.tray[k] = null; st.swaps--;
+    refill(st, bag);
+    return true;
+  }
+  function full(st) { return placed(st.board) === st.n * st.n; }
+  // no tile in the tray fits anywhere, in any turn
+  function stuck(st) {
+    for (var k = 0; k < st.tray.length; k++) if (st.tray[k] && anyFit(st.board, st.n, st.tray[k])) return false;
+    return true;
+  }
+  // over when the quilt is full, or nothing in the tray fits and no swap can help
+  function over(st, bag) { return full(st) || (stuck(st) && !canSwap(st, bag)); }
+  // three stars from nine tenths of the quilt, two from three quarters, else one
+  function stars(st) {
+    var f = placed(st.board) / (st.n * st.n);
+    return f >= 0.9 ? 3 : f >= 0.75 ? 2 : 1;
+  }
+
+  // A save is the seed and the moves; it is replayed through the rules, so an edited
+  // save cannot put an illegal quilt on the board. A move is [k, cell, turns]; a swap is
+  // [k, -1, 0].
+  function replay(n, bag, moves) {
+    if (SIZES.indexOf(n) < 0 || !Array.isArray(moves)) return null;
+    var st = start(n, bag);
+    for (var q = 0; q < moves.length; q++) {
+      var m = moves[q];
+      if (!Array.isArray(m) || m.length !== 3 || [0, 1, 2].indexOf(m[0]) < 0 || [0, 1, 2, 3].indexOf(m[2]) < 0) return null;
+      if (m[1] === -1 ? !swap(st, bag, m[0]) : !move(st, bag, m[0], m[1], m[2])) return null;
+      if (q < moves.length - 1 && over(st, bag)) return null;
+    }
+    return st;
+  }
+
+  return {
+    K: K, SIZES: SIZES, DAILY_N: DAILY_N, TRAY: TRAY, EXTRA: EXTRA, SWAPS: SWAPS, BIG: BIG, N: N, E: E, S: S, W: W,
+    opp: opp, rot: rot, rotN: rotN, nb: nb, empty: empty, placed: placed, fits: fits, turnsTo: turnsTo, spots: spots,
+    anyFit: anyFit, links: links, region: region, regions: regions, value: value, place: place, generate: generate,
+    fresh: fresh, refill: refill, start: start, move: move, canSwap: canSwap, swap: swap, full: full, stuck: stuck,
+    over: over, stars: stars, replay: replay
+  };
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = QuiltEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = QuiltEngineFactory();
+  var ACCENT = '#B43C57';
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'quilt',
+    name: { fa: 'چهل‌تکه', en: 'Quilt', zh: '百衲被', de: 'Flickendecke', es: 'Colcha', pl: 'Patchwork', fr: 'Patchwork', ar: 'اللحاف المرقّع', hi: 'गुदड़ी', ru: 'Лоскутное одеяло' },
+    accent: ACCENT,
+    mood: 'menu',
+    strings: {
+      fa: {
+        board: 'لحاف', sizeN: '{n}×{n}', dailyQl: 'چهل‌تکه‌ی روزانه', scoreN: 'امتیاز: {n}', leftN: 'کیسه: {n}', swapsN: 'عوض: {n}',
+        pickTile: 'یک تکه از سینی انتخاب کن', fitsN: 'در {n} خانه جا می‌شود', fitsTurnN: 'در {n} خانه جا می‌شود؛ با چرخاندن در {m} خانه‌ی دیگر هم', onlyTurnN: 'بچرخانش تا در {m} خانه جا شود',
+        noFit: 'این تکه فعلاً هیچ‌جا جا نمی‌شود', turnedFit: 'چرخید تا جا شود؛ دوباره بزن تا بدوزی', notHere: 'اینجا جا نمی‌شود', stuckSwap: 'هیچ تکه‌ای جا نمی‌شود؛ یکی را عوض کن ({n} بار مانده)',
+        closedN: 'وصله بسته شد: +{n}', turnBtn: 'چرخاندن', swapBtn: 'عوض کردن', tileN: 'تکه‌ی {n}: {c}، از بالا ساعتگرد', emptySlot: 'خالی',
+        col0: 'نارنجی', col1: 'آبی', col2: 'زرد', cellAt: 'ردیف {r} ستون {c}', boardN: 'لحاف، {p} از {t} خانه دوخته شده',
+        doneFull: 'لحاف کامل شد!', doneStuck: 'دیگر تکه‌ای جا نمی‌شود', scoreL: 'امتیاز', filledL: 'خانه‌های دوخته', patchesL: 'وصله‌های بسته', bigL: 'بزرگ‌ترین وصله',
+        bestScoreN: 'رکورد تازه: {n}', qlNew: 'لحاف تازه', starsN: '{s} ستاره از ۳',
+        kPick: 'انتخاب تکه', kTurn: 'چرخاندن تکه', kMove: 'جابه‌جایی روی لحاف', kPlace: 'دوختن در خانه', kSwap: 'عوض کردن تکه', kNew: 'لحاف تازه',
+        rules: 'هر تکه مربعی است که قطرهایش آن را چهار مثلث رنگی کرده‌اند. یکی از سه تکه‌ی سینی را بزن تا انتخاب شود و خانه‌هایی که جا می‌شود روشن شوند؛ دوباره بزن تا ربع دور بچرخد. بعد خانه‌ی خالی را بزن تا تکه دوخته شود. هر ضلعی که به تکه‌ی دیگری می‌خورد باید دو طرفش هم‌رنگ باشد؛ اولین تکه و خانه‌ای که همسایه ندارد هر تکه‌ای را می‌گیرد. خانه‌ی خط‌چین با چرخاندن جا می‌شود و زدنش تکه را خودش می‌چرخاند. مثلث‌های هم‌رنگی که ضلع مشترک دارند یک وصله‌اند. وصله‌ای که هیچ مثلثش رو به خانه‌ی خالی نیست بسته می‌شود و به ازای هر مثلث یک امتیاز می‌دهد؛ از ده مثلث به بالا دو امتیاز. هر رنگ نشان خودش را هم دارد: نارنجی نقطه، آبی خط، زرد حلقه. بازی وقتی تمام می‌شود که لحاف پر شود یا هیچ تکه‌ای در سینی جا نشود؛ تا سه بار می‌توانی تکه‌ی گیرکرده را با بعدی عوض کنی. نُه‌دهم لحاف سه ستاره، سه‌چهارم دو ستاره. لحاف روزانه ۶×۶ است و تکه‌هایش برای همه یکی است.',
+        tutTitle0: 'تکه را بردار', tutText0: 'اول یکی از تکه‌های سینی را بزن. خانه‌هایی که جا می‌شود روشن می‌شوند؛ دوباره بزن تا بچرخد.',
+        tutTitle1: 'لبه‌ها را جور کن', tutText1: 'خانه‌ی روشن را بزن تا تکه دوخته شود. هر ضلعی که به تکه‌ی دیگری می‌خورد باید دو طرفش هم‌رنگ باشد.',
+        tutTitle2: 'وصله را ببند', tutText2: 'رنگ‌های هم‌رنگِ چسبیده یک وصله‌اند. وقتی دور وصله دیگر خانه‌ی خالی نباشد بسته می‌شود و امتیاز می‌دهد.',
+        tutTitle3: 'لحاف را پر کن', tutText3: 'وقتی لحاف پر شود یا هیچ تکه‌ای جا نشود بازی تمام است. تکه‌ی گیرکرده را تا سه بار عوض کن.'
+      },
+      en: {
+        board: 'The quilt', sizeN: '{n}×{n}', dailyQl: 'Daily Quilt', scoreN: 'Score: {n}', leftN: 'Bag: {n}', swapsN: 'Swaps: {n}',
+        pickTile: 'Pick a tile from the tray', fitsN: 'Fits in {n} cells', fitsTurnN: 'Fits in {n} cells; turn it for {m} more', onlyTurnN: 'Turn it to fit in {m} cells',
+        noFit: 'This tile fits nowhere yet', turnedFit: 'Turned to fit: tap again to sew it in', notHere: 'It does not fit there', stuckSwap: 'Nothing fits: swap a tile ({n} left)',
+        closedN: 'Patch closed: +{n}', turnBtn: 'Turn', swapBtn: 'Swap', tileN: 'Tile {n}: {c}, clockwise from the top', emptySlot: 'Empty',
+        col0: 'orange', col1: 'blue', col2: 'yellow', cellAt: 'Row {r}, column {c}', boardN: 'The quilt, {p} of {t} cells sewn',
+        doneFull: 'The quilt is complete!', doneStuck: 'No more tiles fit', scoreL: 'Score', filledL: 'Cells sewn', patchesL: 'Patches closed', bigL: 'Largest patch',
+        bestScoreN: 'New best: {n}', qlNew: 'New quilt', starsN: '{s} of 3 stars',
+        kPick: 'Pick a tile', kTurn: 'Turn the tile', kMove: 'Move on the quilt', kPlace: 'Sew into the cell', kSwap: 'Swap the tile', kNew: 'New quilt',
+        rules: 'Each tile is a square cut by its diagonals into four coloured triangles. Tap one of the three tiles in the tray to pick it, and the cells where it fits light up; tap it again to turn it a quarter. Then tap an empty cell to sew it in. Every side that touches another tile must have the same colour on both sides; the first tile, and any cell with no neighbours, takes any tile. A dashed cell fits after a turn, and tapping it turns the tile for you. Triangles of one colour that share a side form a patch. A patch with no triangle facing an empty cell is closed and scores a point per triangle, two per triangle from ten up. Each colour has its own mark as well: orange a dot, blue a bar, yellow a ring. The game ends when the quilt is full or no tile in the tray fits; up to three times you can swap a stuck tile for the next one. Nine tenths of the quilt earns three stars, three quarters two. The daily quilt is 6×6 with the same tiles for everyone.',
+        tutTitle0: 'Pick a tile', tutText0: 'First tap a tile in the tray. The cells where it fits light up; tap it again to turn it.',
+        tutTitle1: 'Match the edges', tutText1: 'Tap a lit cell to sew the tile in. Every side that touches another tile must have the same colour on both sides.',
+        tutTitle2: 'Close a patch', tutText2: 'Touching triangles of one colour form a patch. When no empty cell is left beside it, it closes and scores.',
+        tutTitle3: 'Fill the quilt', tutText3: 'The game ends when the quilt is full or nothing fits. You can swap a stuck tile up to three times.'
+      },
+      pl: {
+        board: 'Kołdra', sizeN: '{n}×{n}', dailyQl: 'Patchwork dnia', scoreN: 'Wynik: {n}', leftN: 'Worek: {n}', swapsN: 'Zamiany: {n}',
+        pickTile: 'Wybierz płytkę z tacki', fitsN: 'Pasuje do {n} pól', fitsTurnN: 'Pasuje do {n} pól; po obrocie do {m} więcej', onlyTurnN: 'Obróć, aby pasowała do {m} pól',
+        noFit: 'Ta płytka na razie nigdzie nie pasuje', turnedFit: 'Obrócona, by pasowała: dotknij znowu, aby ją przyszyć', notHere: 'Tu nie pasuje', stuckSwap: 'Nic nie pasuje: zamień płytkę (zostało {n})',
+        closedN: 'Łata zamknięta: +{n}', turnBtn: 'Obróć', swapBtn: 'Zamień', tileN: 'Płytka {n}: {c}, zgodnie z zegarem od góry', emptySlot: 'Pusto',
+        col0: 'pomarańczowy', col1: 'niebieski', col2: 'żółty', cellAt: 'Rząd {r}, kolumna {c}', boardN: 'Kołdra, przyszyto {p} z {t} pól',
+        doneFull: 'Kołdra gotowa!', doneStuck: 'Żadna płytka już nie pasuje', scoreL: 'Wynik', filledL: 'Przyszyte pola', patchesL: 'Zamknięte łaty', bigL: 'Największa łata',
+        bestScoreN: 'Nowy rekord: {n}', qlNew: 'Nowa kołdra', starsN: '{s} z 3 gwiazdek',
+        kPick: 'Wybierz płytkę', kTurn: 'Obróć płytkę', kMove: 'Ruch po kołdrze', kPlace: 'Przyszyj w polu', kSwap: 'Zamień płytkę', kNew: 'Nowa kołdra',
+        rules: 'Każda płytka to kwadrat podzielony przekątnymi na cztery kolorowe trójkąty. Dotknij jednej z trzech płytek na tacce, aby ją wybrać, a pola, do których pasuje, się podświetlą; dotknij jej znowu, aby obrócić o ćwierć obrotu. Potem dotknij pustego pola, aby ją przyszyć. Każdy bok stykający się z inną płytką musi mieć ten sam kolor po obu stronach; pierwsza płytka i pole bez sąsiadów przyjmą każdą płytkę. Pole z przerywaną ramką pasuje po obrocie, a dotknięcie go obraca płytkę za ciebie. Trójkąty jednego koloru o wspólnym boku tworzą łatę. Łata, której żaden trójkąt nie patrzy na puste pole, jest zamknięta i daje punkt za trójkąt, od dziesięciu trójkątów dwa. Każdy kolor ma też swój znak: pomarańczowy kropkę, niebieski kreskę, żółty kółko. Gra kończy się, gdy kołdra jest pełna albo żadna płytka z tacki nie pasuje; do trzech razy możesz zamienić zablokowaną płytkę na następną. Dziewięć dziesiątych kołdry daje trzy gwiazdki, trzy czwarte dwie. Kołdra dnia ma 6×6 i te same płytki dla wszystkich.',
+        tutTitle0: 'Wybierz płytkę', tutText0: 'Najpierw dotknij płytki na tacce. Pola, do których pasuje, się podświetlą; dotknij znowu, aby ją obrócić.',
+        tutTitle1: 'Dopasuj brzegi', tutText1: 'Dotknij podświetlonego pola, aby przyszyć płytkę. Każdy bok stykający się z inną płytką musi mieć ten sam kolor po obu stronach.',
+        tutTitle2: 'Zamknij łatę', tutText2: 'Stykające się trójkąty jednego koloru tworzą łatę. Gdy obok nie ma już pustego pola, łata się zamyka i daje punkty.',
+        tutTitle3: 'Wypełnij kołdrę', tutText3: 'Gra kończy się, gdy kołdra jest pełna albo nic nie pasuje. Zablokowaną płytkę możesz zamienić do trzech razy.'
+      },
+      fr: {
+        board: 'Le patchwork', sizeN: '{n}×{n}', dailyQl: 'Patchwork du jour', scoreN: 'Score : {n}', leftN: 'Sac : {n}', swapsN: 'Échanges : {n}',
+        pickTile: 'Choisis une tuile dans le plateau', fitsN: 'Va dans {n} cases', fitsTurnN: 'Va dans {n} cases ; tourne-la pour {m} de plus', onlyTurnN: 'Tourne-la pour qu’elle aille dans {m} cases',
+        noFit: 'Cette tuile ne va encore nulle part', turnedFit: 'Tournée pour aller : touche encore pour la coudre', notHere: 'Elle ne va pas ici', stuckSwap: 'Rien ne va : échange une tuile ({n} restants)',
+        closedN: 'Pièce fermée : +{n}', turnBtn: 'Tourner', swapBtn: 'Échanger', tileN: 'Tuile {n} : {c}, dans le sens horaire depuis le haut', emptySlot: 'Vide',
+        col0: 'orange', col1: 'bleu', col2: 'jaune', cellAt: 'Ligne {r}, colonne {c}', boardN: 'Le patchwork, {p} cases cousues sur {t}',
+        doneFull: 'Le patchwork est fini !', doneStuck: 'Plus aucune tuile ne va', scoreL: 'Score', filledL: 'Cases cousues', patchesL: 'Pièces fermées', bigL: 'Plus grande pièce',
+        bestScoreN: 'Nouveau record : {n}', qlNew: 'Nouveau patchwork', starsN: '{s} étoiles sur 3',
+        kPick: 'Choisir une tuile', kTurn: 'Tourner la tuile', kMove: 'Se déplacer sur le patchwork', kPlace: 'Coudre dans la case', kSwap: 'Échanger la tuile', kNew: 'Nouveau patchwork',
+        rules: 'Chaque tuile est un carré coupé par ses diagonales en quatre triangles colorés. Touche l’une des trois tuiles du plateau pour la choisir, et les cases où elle va s’allument ; touche-la encore pour la tourner d’un quart de tour. Puis touche une case vide pour la coudre. Chaque côté qui touche une autre tuile doit avoir la même couleur des deux côtés ; la première tuile, et toute case sans voisine, accepte n’importe quelle tuile. Une case en pointillé va après un tour, et la toucher tourne la tuile pour toi. Les triangles d’une couleur qui partagent un côté forment une pièce. Une pièce dont aucun triangle ne donne sur une case vide est fermée et rapporte un point par triangle, deux à partir de dix. Chaque couleur a aussi sa marque : orange un point, bleu un trait, jaune un anneau. La partie s’arrête quand le patchwork est plein ou qu’aucune tuile du plateau ne va ; jusqu’à trois fois, tu peux échanger une tuile bloquée contre la suivante. Neuf dixièmes du patchwork donnent trois étoiles, trois quarts deux. Le patchwork du jour fait 6×6 avec les mêmes tuiles pour tous.',
+        tutTitle0: 'Choisis une tuile', tutText0: 'Touche d’abord une tuile du plateau. Les cases où elle va s’allument ; touche-la encore pour la tourner.',
+        tutTitle1: 'Assortis les bords', tutText1: 'Touche une case allumée pour coudre la tuile. Chaque côté qui touche une autre tuile doit avoir la même couleur des deux côtés.',
+        tutTitle2: 'Ferme une pièce', tutText2: 'Les triangles d’une couleur qui se touchent forment une pièce. Quand plus aucune case vide ne la borde, elle se ferme et marque.',
+        tutTitle3: 'Remplis le patchwork', tutText3: 'La partie s’arrête quand le patchwork est plein ou que rien ne va. Tu peux échanger une tuile bloquée jusqu’à trois fois.'
+      },
+      ar: {
+        board: 'اللحاف', sizeN: '{n}×{n}', dailyQl: 'لحاف اليوم', scoreN: 'النقاط: {n}', leftN: 'الكيس: {n}', swapsN: 'التبديلات: {n}',
+        pickTile: 'اختر قطعة من الصينية', fitsN: 'تناسب {n} خانات', fitsTurnN: 'تناسب {n} خانات، ومع التدوير {m} أخرى', onlyTurnN: 'دوّرها لتناسب {m} خانات',
+        noFit: 'هذه القطعة لا تناسب أي مكان بعد', turnedFit: 'دارت لتناسب: المس مرة أخرى لتخيطها', notHere: 'لا تناسب هنا', stuckSwap: 'لا شيء يناسب: بدّل قطعة (بقي {n})',
+        closedN: 'أُغلقت رقعة: +{n}', turnBtn: 'تدوير', swapBtn: 'تبديل', tileN: 'القطعة {n}: {c}، مع عقارب الساعة من الأعلى', emptySlot: 'فارغة',
+        col0: 'برتقالي', col1: 'أزرق', col2: 'أصفر', cellAt: 'الصف {r}، العمود {c}', boardN: 'اللحاف، خِيطت {p} من {t} خانة',
+        doneFull: 'اكتمل اللحاف!', doneStuck: 'لم تعد أي قطعة تناسب', scoreL: 'النقاط', filledL: 'الخانات المخيطة', patchesL: 'الرقع المغلقة', bigL: 'أكبر رقعة',
+        bestScoreN: 'رقم قياسي جديد: {n}', qlNew: 'لحاف جديد', starsN: '{s} من 3 نجوم',
+        kPick: 'اختيار قطعة', kTurn: 'تدوير القطعة', kMove: 'التنقل على اللحاف', kPlace: 'الخياطة في الخانة', kSwap: 'تبديل القطعة', kNew: 'لحاف جديد',
+        rules: 'كل قطعة مربع يقسمه قطراه إلى أربعة مثلثات ملونة. المس إحدى القطع الثلاث في الصينية لتختارها، فتضيء الخانات التي تناسبها؛ المسها مرة أخرى لتدور ربع دورة. ثم المس خانة فارغة لتخيطها. كل ضلع يلامس قطعة أخرى يجب أن يكون لونه واحدًا على الجانبين؛ أول قطعة، وأي خانة بلا جيران، تقبل أي قطعة. الخانة المنقطة تناسب بعد التدوير، ولمسها يدير القطعة لك. المثلثات من لون واحد التي تتشارك ضلعًا تكوّن رقعة. الرقعة التي لا يواجه أي من مثلثاتها خانة فارغة تُغلق وتعطي نقطة لكل مثلث، ونقطتين من عشرة مثلثات فأكثر. لكل لون علامته أيضًا: البرتقالي نقطة، والأزرق خط، والأصفر حلقة. تنتهي اللعبة حين يمتلئ اللحاف أو لا تناسب أي قطعة في الصينية؛ ويمكنك حتى ثلاث مرات أن تبدّل قطعة عالقة بالتالية. تسعة أعشار اللحاف تعطي ثلاث نجوم، وثلاثة أرباعه نجمتين. لحاف اليوم 6×6 وقطعه نفسها للجميع.',
+        tutTitle0: 'اختر قطعة', tutText0: 'المس أولًا قطعة في الصينية. تضيء الخانات التي تناسبها؛ المسها مرة أخرى لتدور.',
+        tutTitle1: 'طابق الحواف', tutText1: 'المس خانة مضيئة لتخيط القطعة. كل ضلع يلامس قطعة أخرى يجب أن يكون لونه واحدًا على الجانبين.',
+        tutTitle2: 'أغلق رقعة', tutText2: 'المثلثات المتلامسة من لون واحد تكوّن رقعة. حين لا تبقى بجانبها خانة فارغة تُغلق وتعطي نقاطًا.',
+        tutTitle3: 'املأ اللحاف', tutText3: 'تنتهي اللعبة حين يمتلئ اللحاف أو لا يناسب شيء. يمكنك تبديل قطعة عالقة حتى ثلاث مرات.'
+      },
+      hi: {
+        board: 'गुदड़ी', sizeN: '{n}×{n}', dailyQl: 'रोज़ की गुदड़ी', scoreN: 'अंक: {n}', leftN: 'थैला: {n}', swapsN: 'बदलाव: {n}',
+        pickTile: 'ट्रे से एक टुकड़ा चुनें', fitsN: '{n} खानों में फ़िट', fitsTurnN: '{n} खानों में फ़िट; घुमाने पर {m} और में', onlyTurnN: '{m} खानों में फ़िट करने के लिए घुमाएँ',
+        noFit: 'यह टुकड़ा अभी कहीं फ़िट नहीं होता', turnedFit: 'फ़िट होने के लिए घुमा दिया: सिलने के लिए फिर छुएँ', notHere: 'यहाँ फ़िट नहीं होता', stuckSwap: 'कुछ फ़िट नहीं होता: एक टुकड़ा बदलें ({n} बाक़ी)',
+        closedN: 'पैबंद बंद हुआ: +{n}', turnBtn: 'घुमाएँ', swapBtn: 'बदलें', tileN: 'टुकड़ा {n}: {c}, ऊपर से घड़ी की दिशा में', emptySlot: 'ख़ाली',
+        col0: 'नारंगी', col1: 'नीला', col2: 'पीला', cellAt: 'पंक्ति {r}, स्तंभ {c}', boardN: 'गुदड़ी, {t} में से {p} खाने सिले',
+        doneFull: 'गुदड़ी पूरी हुई!', doneStuck: 'अब कोई टुकड़ा फ़िट नहीं होता', scoreL: 'अंक', filledL: 'सिले खाने', patchesL: 'बंद पैबंद', bigL: 'सबसे बड़ा पैबंद',
+        bestScoreN: 'नया रिकॉर्ड: {n}', qlNew: 'नई गुदड़ी', starsN: '3 में से {s} सितारे',
+        kPick: 'टुकड़ा चुनें', kTurn: 'टुकड़ा घुमाएँ', kMove: 'गुदड़ी पर चलें', kPlace: 'खाने में सिलें', kSwap: 'टुकड़ा बदलें', kNew: 'नई गुदड़ी',
+        rules: 'हर टुकड़ा एक वर्ग है जिसे उसके विकर्ण चार रंगीन त्रिभुजों में बाँटते हैं। ट्रे के तीन टुकड़ों में से एक को छूकर चुनें, जिन खानों में वह फ़िट होता है वे चमक उठेंगे; उसे फिर छुएँ तो वह चौथाई घूमेगा। फिर किसी ख़ाली खाने को छूकर उसे सिल दें। दूसरे टुकड़े को छूने वाली हर भुजा के दोनों ओर एक ही रंग होना चाहिए; पहला टुकड़ा, और बिना पड़ोसी वाला कोई भी खाना, कोई भी टुकड़ा ले लेता है। बिंदुदार खाना घुमाने के बाद फ़िट होता है, और उसे छूने पर टुकड़ा अपने आप घूम जाता है। एक रंग के त्रिभुज जो एक भुजा साझा करते हैं, एक पैबंद बनाते हैं। जिस पैबंद का कोई त्रिभुज ख़ाली खाने की ओर नहीं है वह बंद हो जाता है और हर त्रिभुज पर एक अंक देता है, दस से ऊपर दो। हर रंग का अपना निशान भी है: नारंगी पर बिंदु, नीले पर रेखा, पीले पर छल्ला। खेल तब ख़त्म होता है जब गुदड़ी भर जाए या ट्रे का कोई टुकड़ा फ़िट न हो; तीन बार तक आप अटके टुकड़े को अगले से बदल सकते हैं। गुदड़ी का नौ-दसवाँ हिस्सा तीन सितारे देता है, तीन-चौथाई दो। रोज़ की गुदड़ी 6×6 की है और सबके लिए एक जैसे टुकड़े हैं।',
+        tutTitle0: 'टुकड़ा चुनें', tutText0: 'पहले ट्रे के किसी टुकड़े को छुएँ। जिन खानों में वह फ़िट होता है वे चमकेंगे; घुमाने के लिए फिर छुएँ।',
+        tutTitle1: 'किनारे मिलाएँ', tutText1: 'टुकड़ा सिलने के लिए चमकते खाने को छुएँ। दूसरे टुकड़े को छूने वाली हर भुजा के दोनों ओर एक ही रंग हो।',
+        tutTitle2: 'पैबंद बंद करें', tutText2: 'एक रंग के छूते त्रिभुज एक पैबंद बनाते हैं। जब उसके पास कोई ख़ाली खाना न बचे, वह बंद होकर अंक देता है।',
+        tutTitle3: 'गुदड़ी भरें', tutText3: 'गुदड़ी भरने पर या कुछ फ़िट न होने पर खेल ख़त्म। अटका टुकड़ा तीन बार तक बदल सकते हैं।'
+      },
+      ru: {
+        board: 'Одеяло', sizeN: '{n}×{n}', dailyQl: 'Одеяло дня', scoreN: 'Очки: {n}', leftN: 'В мешке: {n}', swapsN: 'Замены: {n}',
+        pickTile: 'Выберите плитку на подносе', fitsN: 'Подходит к клеткам: {n}', fitsTurnN: 'Подходит к клеткам: {n}; если повернуть, ещё {m}', onlyTurnN: 'Поверните, чтобы подошла к клеткам: {m}',
+        noFit: 'Эта плитка пока никуда не подходит', turnedFit: 'Повёрнута, чтобы подошла: коснитесь ещё раз, чтобы пришить', notHere: 'Сюда не подходит', stuckSwap: 'Ничего не подходит: замените плитку (осталось {n})',
+        closedN: 'Лоскут закрыт: +{n}', turnBtn: 'Повернуть', swapBtn: 'Заменить', tileN: 'Плитка {n}: {c}, по часовой стрелке сверху', emptySlot: 'Пусто',
+        col0: 'оранжевый', col1: 'синий', col2: 'жёлтый', cellAt: 'Ряд {r}, столбец {c}', boardN: 'Одеяло, пришито клеток: {p} из {t}',
+        doneFull: 'Одеяло готово!', doneStuck: 'Больше ни одна плитка не подходит', scoreL: 'Очки', filledL: 'Пришито клеток', patchesL: 'Закрыто лоскутов', bigL: 'Самый большой лоскут',
+        bestScoreN: 'Новый рекорд: {n}', qlNew: 'Новое одеяло', starsN: 'Звёзды: {s} из 3',
+        kPick: 'Выбрать плитку', kTurn: 'Повернуть плитку', kMove: 'Двигаться по одеялу', kPlace: 'Пришить в клетку', kSwap: 'Заменить плитку', kNew: 'Новое одеяло',
+        rules: 'Каждая плитка — квадрат, который диагонали делят на четыре цветных треугольника. Коснитесь одной из трёх плиток на подносе, чтобы выбрать её, и клетки, куда она подходит, подсветятся; коснитесь ещё раз, чтобы повернуть на четверть оборота. Затем коснитесь пустой клетки, чтобы пришить плитку. Каждая сторона, касающаяся другой плитки, должна быть одного цвета с обеих сторон; первая плитка и любая клетка без соседей принимают любую плитку. Клетка с пунктиром подходит после поворота, и касание поворачивает плитку за вас. Треугольники одного цвета с общей стороной образуют лоскут. Лоскут, ни один треугольник которого не смотрит на пустую клетку, закрывается и даёт очко за треугольник, а от десяти треугольников — два. У каждого цвета есть и свой знак: у оранжевого точка, у синего черта, у жёлтого кольцо. Игра заканчивается, когда одеяло заполнено или ни одна плитка с подноса не подходит; до трёх раз можно заменить застрявшую плитку следующей. Девять десятых одеяла дают три звезды, три четверти — две. Одеяло дня — 6×6, с одинаковыми плитками для всех.',
+        tutTitle0: 'Выберите плитку', tutText0: 'Сначала коснитесь плитки на подносе. Клетки, куда она подходит, подсветятся; коснитесь ещё раз, чтобы повернуть.',
+        tutTitle1: 'Совместите края', tutText1: 'Коснитесь подсвеченной клетки, чтобы пришить плитку. Каждая сторона, касающаяся другой плитки, должна быть одного цвета с обеих сторон.',
+        tutTitle2: 'Закройте лоскут', tutText2: 'Соприкасающиеся треугольники одного цвета образуют лоскут. Когда рядом не остаётся пустых клеток, он закрывается и приносит очки.',
+        tutTitle3: 'Заполните одеяло', tutText3: 'Игра заканчивается, когда одеяло заполнено или ничего не подходит. Застрявшую плитку можно заменить до трёх раз.'
+      },
+      zh: {
+        board: '百衲被', sizeN: '{n}×{n}', dailyQl: '每日百衲被', scoreN: '得分：{n}', leftN: '袋中：{n}', swapsN: '换牌：{n}',
+        pickTile: '从托盘里选一块', fitsN: '可放在 {n} 格', fitsTurnN: '可放在 {n} 格；转一下还能放 {m} 格', onlyTurnN: '转一下就能放在 {m} 格',
+        noFit: '这一块暂时哪里都放不下', turnedFit: '已转到能放的方向：再点一次缝上', notHere: '这里放不下', stuckSwap: '都放不下：换掉一块（还剩 {n} 次）',
+        closedN: '补丁合上：+{n}', turnBtn: '旋转', swapBtn: '换掉', tileN: '第 {n} 块：{c}，从上方顺时针', emptySlot: '空',
+        col0: '橙色', col1: '蓝色', col2: '黄色', cellAt: '第 {r} 行第 {c} 列', boardN: '百衲被，已缝 {p} / {t} 格',
+        doneFull: '百衲被缝好了！', doneStuck: '再也放不下任何一块', scoreL: '得分', filledL: '已缝格子', patchesL: '合上的补丁', bigL: '最大补丁',
+        bestScoreN: '新纪录：{n}', qlNew: '新百衲被', starsN: '{s} / 3 星',
+        kPick: '选一块', kTurn: '旋转这一块', kMove: '在被面上移动', kPlace: '缝进格子', kSwap: '换掉这一块', kNew: '新百衲被',
+        rules: '每一块都是被两条对角线分成四个彩色三角形的方块。点托盘里三块中的一块来选它，能放的格子会亮起来；再点一次让它转四分之一圈。然后点一个空格把它缝上。每条挨着别的块的边，两侧颜色必须相同；第一块以及没有邻居的空格可以放任何一块。虚线格转一下就能放，点它会自动帮你转好。同色并共用一条边的三角形连成一块补丁。一块补丁没有任何三角形朝向空格时就合上了，每个三角形得一分，十个及以上每个得两分。每种颜色还有自己的记号：橙色是圆点，蓝色是短线，黄色是圆圈。百衲被缝满，或托盘里没有一块放得下时，游戏结束；最多三次可以把卡住的一块换成下一块。缝满九成得三星，四分之三得两星。每日百衲被是 6×6，所有人的块都一样。',
+        tutTitle0: '选一块', tutText0: '先点托盘里的一块。能放的格子会亮起来；再点一次让它旋转。',
+        tutTitle1: '对齐边缘', tutText1: '点亮起的格子把这一块缝上。每条挨着别的块的边，两侧颜色必须相同。',
+        tutTitle2: '合上补丁', tutText2: '相连的同色三角形组成补丁。旁边不再有空格时，它就合上并得分。',
+        tutTitle3: '缝满被面', tutText3: '被面缝满或都放不下时游戏结束。卡住的块最多可以换三次。'
+      },
+      de: {
+        board: 'Die Decke', sizeN: '{n}×{n}', dailyQl: 'Decke des Tages', scoreN: 'Punkte: {n}', leftN: 'Beutel: {n}', swapsN: 'Tausch: {n}',
+        pickTile: 'Wähle ein Teil aus der Ablage', fitsN: 'Passt in {n} Felder', fitsTurnN: 'Passt in {n} Felder; gedreht in {m} weitere', onlyTurnN: 'Dreh es, dann passt es in {m} Felder',
+        noFit: 'Dieses Teil passt noch nirgends', turnedFit: 'Passend gedreht: tipp noch einmal zum Annähen', notHere: 'Hier passt es nicht', stuckSwap: 'Nichts passt: tausche ein Teil ({n} übrig)',
+        closedN: 'Flicken geschlossen: +{n}', turnBtn: 'Drehen', swapBtn: 'Tauschen', tileN: 'Teil {n}: {c}, im Uhrzeigersinn von oben', emptySlot: 'Leer',
+        col0: 'orange', col1: 'blau', col2: 'gelb', cellAt: 'Reihe {r}, Spalte {c}', boardN: 'Die Decke, {p} von {t} Feldern genäht',
+        doneFull: 'Die Decke ist fertig!', doneStuck: 'Kein Teil passt mehr', scoreL: 'Punkte', filledL: 'Genähte Felder', patchesL: 'Geschlossene Flicken', bigL: 'Größter Flicken',
+        bestScoreN: 'Neuer Bestwert: {n}', qlNew: 'Neue Decke', starsN: '{s} von 3 Sternen',
+        kPick: 'Teil wählen', kTurn: 'Teil drehen', kMove: 'Auf der Decke bewegen', kPlace: 'Ins Feld nähen', kSwap: 'Teil tauschen', kNew: 'Neue Decke',
+        rules: 'Jedes Teil ist ein Quadrat, das seine Diagonalen in vier farbige Dreiecke teilen. Tipp auf eines der drei Teile in der Ablage, um es zu wählen, dann leuchten die Felder auf, in die es passt; tipp noch einmal, um es eine Vierteldrehung zu drehen. Dann tipp auf ein leeres Feld, um es anzunähen. Jede Seite, die ein anderes Teil berührt, muss auf beiden Seiten dieselbe Farbe haben; das erste Teil und jedes Feld ohne Nachbarn nimmt jedes Teil. Ein gestricheltes Feld passt nach einer Drehung, und ein Tipp darauf dreht das Teil für dich. Dreiecke einer Farbe mit gemeinsamer Seite bilden einen Flicken. Ein Flicken, dessen Dreiecke kein leeres Feld mehr berühren, ist geschlossen und bringt einen Punkt je Dreieck, ab zehn Dreiecken zwei. Jede Farbe hat auch ihr eigenes Zeichen: Orange einen Punkt, Blau einen Strich, Gelb einen Ring. Das Spiel endet, wenn die Decke voll ist oder kein Teil der Ablage mehr passt; bis zu dreimal kannst du ein festsitzendes Teil gegen das nächste tauschen. Neun Zehntel der Decke bringen drei Sterne, drei Viertel zwei. Die Decke des Tages ist 6×6, mit denselben Teilen für alle.',
+        tutTitle0: 'Teil wählen', tutText0: 'Tipp zuerst auf ein Teil in der Ablage. Die Felder, in die es passt, leuchten auf; tipp noch einmal, um es zu drehen.',
+        tutTitle1: 'Kanten anpassen', tutText1: 'Tipp auf ein leuchtendes Feld, um das Teil anzunähen. Jede Seite, die ein anderes Teil berührt, braucht auf beiden Seiten dieselbe Farbe.',
+        tutTitle2: 'Flicken schließen', tutText2: 'Sich berührende Dreiecke einer Farbe bilden einen Flicken. Liegt kein leeres Feld mehr daneben, schließt er sich und zählt.',
+        tutTitle3: 'Decke füllen', tutText3: 'Das Spiel endet, wenn die Decke voll ist oder nichts mehr passt. Ein festsitzendes Teil kannst du bis zu dreimal tauschen.'
+      },
+      es: {
+        board: 'La colcha', sizeN: '{n}×{n}', dailyQl: 'Colcha del día', scoreN: 'Puntos: {n}', leftN: 'Bolsa: {n}', swapsN: 'Cambios: {n}',
+        pickTile: 'Elige una pieza de la bandeja', fitsN: 'Cabe en {n} casillas', fitsTurnN: 'Cabe en {n} casillas; girándola, en {m} más', onlyTurnN: 'Gírala para que quepa en {m} casillas',
+        noFit: 'Esta pieza aún no cabe en ningún sitio', turnedFit: 'Girada para que quepa: toca otra vez para coserla', notHere: 'Aquí no cabe', stuckSwap: 'No cabe nada: cambia una pieza (quedan {n})',
+        closedN: 'Retal cerrado: +{n}', turnBtn: 'Girar', swapBtn: 'Cambiar', tileN: 'Pieza {n}: {c}, en sentido horario desde arriba', emptySlot: 'Vacío',
+        col0: 'naranja', col1: 'azul', col2: 'amarillo', cellAt: 'Fila {r}, columna {c}', boardN: 'La colcha, {p} de {t} casillas cosidas',
+        doneFull: '¡La colcha está completa!', doneStuck: 'Ya no cabe ninguna pieza', scoreL: 'Puntos', filledL: 'Casillas cosidas', patchesL: 'Retales cerrados', bigL: 'Retal más grande',
+        bestScoreN: 'Nuevo récord: {n}', qlNew: 'Colcha nueva', starsN: '{s} de 3 estrellas',
+        kPick: 'Elegir pieza', kTurn: 'Girar la pieza', kMove: 'Moverse por la colcha', kPlace: 'Coser en la casilla', kSwap: 'Cambiar la pieza', kNew: 'Colcha nueva',
+        rules: 'Cada pieza es un cuadrado que sus diagonales dividen en cuatro triángulos de colores. Toca una de las tres piezas de la bandeja para elegirla y se iluminan las casillas donde cabe; tócala otra vez para girarla un cuarto de vuelta. Luego toca una casilla vacía para coserla. Cada lado que toca otra pieza debe tener el mismo color a ambos lados; la primera pieza, y cualquier casilla sin vecinas, acepta cualquier pieza. Una casilla punteada cabe tras un giro, y al tocarla la pieza gira sola. Los triángulos de un color que comparten un lado forman un retal. Un retal sin ningún triángulo frente a una casilla vacía se cierra y da un punto por triángulo, dos a partir de diez. Cada color tiene además su marca: el naranja un punto, el azul una raya, el amarillo un aro. La partida termina cuando la colcha está llena o ninguna pieza de la bandeja cabe; hasta tres veces puedes cambiar una pieza atascada por la siguiente. Nueve décimos de la colcha dan tres estrellas, tres cuartos dos. La colcha del día es de 6×6 con las mismas piezas para todos.',
+        tutTitle0: 'Elige una pieza', tutText0: 'Primero toca una pieza de la bandeja. Se iluminan las casillas donde cabe; tócala otra vez para girarla.',
+        tutTitle1: 'Empareja los bordes', tutText1: 'Toca una casilla iluminada para coser la pieza. Cada lado que toca otra pieza debe tener el mismo color a ambos lados.',
+        tutTitle2: 'Cierra un retal', tutText2: 'Los triángulos de un color que se tocan forman un retal. Cuando ya no queda ninguna casilla vacía a su lado, se cierra y puntúa.',
+        tutTitle3: 'Llena la colcha', tutText3: 'La partida termina cuando la colcha está llena o no cabe nada. Puedes cambiar una pieza atascada hasta tres veces.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || E.SIZES.indexOf(prefs.n) < 0) prefs = { n: 6 };
+
+  // The three cloth colours: orange, blue and yellow from the Okabe–Ito set, chosen to
+  // stay apart for the common kinds of colour blindness, and each with its own mark
+  // (dot, bar, ring) so no one has to tell them apart by colour alone.
+  var CLOTH = ['#D55E00', '#0072B2', '#F0E442'];
+  var MARK = ['rgba(255,255,255,0.85)', 'rgba(255,255,255,0.85)', 'rgba(60,40,0,0.62)'];
+
+  // S is the saved game: seed and moves. G (the bag) and st (the board) are rebuilt from it.
+  var S = null, G = null, st = null, ended = false, startedAt = 0;
+  var sel = -1, turns = [0, 0, 0], cursor = -1, closedNow = null, flashAt = 0;
+
+  var cv = el('canvas', { tabindex: '0', role: 'img', 'aria-label': C.t('board') });
+  var box = el('div', { class: 'ql-box' }, [cv]);
+  var top = el('div', { class: 'ql-top ch-above' });
+  var status = el('div', { class: 'ql-status' });
+  var hint = el('div', { class: 'ql-hint', role: 'status', 'aria-live': 'polite' });
+  var tray = el('div', { class: 'ql-tray' });
+  var slots = [0, 1, 2].map(function (k) {
+    var b = el('button', { class: 'ql-tile', type: 'button', 'aria-pressed': 'false' });
+    b.addEventListener('click', function () { tapTray(k); });
+    tray.appendChild(b);
+    return b;
+  });
+  var turnBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button' }, [C.icon('rotate', 18), el('span', { text: C.t('turnBtn') })]);
+  var swapBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button' }, [C.icon('refresh', 18), el('span', { text: C.t('swapBtn') })]);
+  turnBtn.addEventListener('click', function () { if (sel >= 0) turnSel(); else say(C.t('pickTile')); });
+  swapBtn.addEventListener('click', doSwap);
+  var acts = el('div', { class: 'ql-acts' }, [turnBtn, swapBtn]);
+  var wrap = el('div', { class: 'ql-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side ql-side' }, [top, status, hint, tray, acts])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  if (!dailyDate) ctx.button({ icon: 'refresh', label: C.t('qlNew'), onClick: askNew });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- game */
+
+  function build() {
+    G = E.generate(S.n, C.rng(S.seed));
+    st = E.replay(S.n, G.bag, S.moves);
+    return !!st;
+  }
+  function newQuilt(n) {
+    // the daily quilt comes from the day's seed, so its bag is the same for everyone
+    var seed = dailyDate ? C.daily('quilt', dailyDate).seed : 1 + Math.floor(Math.random() * 4294967294);
+    S = { n: n, seed: seed >>> 0 || 1, moves: [], daily: dailyDate || null, elapsed: 0 };
+    ended = false; startedAt = 0; sel = -1; turns = [0, 0, 0]; cursor = -1; closedNow = null;
+    build(); render(); save();
+    say(C.t('pickTile'));
+  }
+  function elapsed() { return startedAt ? Date.now() - startedAt : S.elapsed || 0; }
+  function askNew() {
+    if (S && S.moves.length && !ended) C.ui.confirm({ title: C.t('qlNew'), body: C.t('resetWarn'), onOk: function () { newQuilt(prefs.n); } });
+    else newQuilt(prefs.n);
+  }
+  function setSize(n) {
+    if (n === S.n) return;
+    var go = function () { prefs.n = n; ctx.store.set('prefs', prefs); newQuilt(n); };
+    if (S.moves.length && !ended) C.ui.confirm({ title: C.t('qlNew'), body: C.t('resetWarn'), onOk: go, onCancel: render });
+    else go();
+  }
+  function cur() { return sel >= 0 && st.tray[sel] ? E.rotN(st.tray[sel], turns[sel]) : null; }
+  function say(t) { hint.textContent = t || ''; }
+
+  function tapTray(k) {
+    if (ended || !st.tray[k]) return;
+    if (sel === k) { turnSel(); return; }
+    sel = k; C.feedback('select');
+    render(); explain();
+  }
+  function turnSel() {
+    if (ended || sel < 0) return;
+    turns[sel] = (turns[sel] + 1) % 4;
+    C.feedback('tap');
+    var svg = slots[sel].firstChild;
+    render(); explain();
+    // a quarter turn shown as one, from where it was; nothing moves under reduced motion
+    svg = slots[sel].firstChild;
+    if (svg && svg.animate && !C.ui.reduceMotion()) svg.animate([{ transform: 'rotate(-90deg)' }, { transform: 'rotate(0)' }], { duration: 160, easing: 'ease-out' });
+  }
+  // what the selected tile can do right now, in words
+  function explain() {
+    if (ended) return;
+    if (E.stuck(st)) { say(E.canSwap(st, G.bag) ? C.t('stuckSwap', { n: C.num(st.swaps) }) : ''); return; }
+    var t = cur();
+    if (!t) { say(C.t('pickTile')); return; }
+    var P = E.spots(st.board, st.n, t);
+    if (P.now.length && P.turn.length) say(C.t('fitsTurnN', { n: C.num(P.now.length), m: C.num(P.turn.length) }));
+    else if (P.now.length) say(C.t('fitsN', { n: C.num(P.now.length) }));
+    else if (P.turn.length) say(C.t('onlyTurnN', { m: C.num(P.turn.length) }));
+    else say(C.t('noFit'));
+  }
+
+  function tapCell(i) {
+    if (ended || i < 0) return;
+    if (sel < 0 || !st.tray[sel]) { say(C.t('pickTile')); C.ui.shake(tray); return; }
+    if (st.board[i]) return;
+    var k = E.turnsTo(st.board, st.n, i, cur());
+    if (k < 0) { say(C.t('notHere')); C.feedback('bad'); return; }
+    // a dashed cell: turn the tile to fit it and wait for a second tap, so a tile is
+    // never sewn in a way the player did not see first
+    if (k > 0) { turns[sel] = (turns[sel] + k) % 4; C.feedback('tap'); render(); say(C.t('turnedFit')); return; }
+    sew(sel, i);
+  }
+  function sew(k, i) {
+    if (!startedAt) startedAt = Date.now() - (S.elapsed || 0);
+    var done = E.move(st, G.bag, k, i, turns[k]);
+    if (!done) return;
+    S.moves.push([k, i, turns[k]]);
+    turns[k] = 0;
+    if (!st.tray[k]) sel = -1;
+    var gained = 0;
+    for (var q = 0; q < done.length; q++) gained += done[q].points;
+    if (done.length) {
+      closedNow = done; flashAt = Date.now();
+      C.feedback('good');
+      for (var p = 0; p < done.length; p++) celebrate(done[p]);
+      if (done.some(function (R) { return R.tris.length >= 20; })) C.achievements.unlock('ql-big');
+    } else C.feedback('place');
+    render();
+    if (E.over(st, G.bag)) { finish(); return; }
+    save();
+    if (gained) say(C.t('closedN', { n: C.num(gained) })); else explain();
+  }
+  function doSwap() {
+    if (ended) return;
+    if (sel < 0 || !st.tray[sel]) { say(C.t('pickTile')); C.ui.shake(tray); return; }
+    if (!E.canSwap(st, G.bag)) { C.feedback('bad'); return; }
+    var k = sel;
+    if (!E.swap(st, G.bag, k)) return;
+    S.moves.push([k, -1, 0]);
+    turns[k] = 0;
+    if (!st.tray[k]) sel = -1;
+    C.feedback('tap');
+    render();
+    if (E.over(st, G.bag)) { finish(); return; }
+    save(); explain();
+  }
+  // a short burst of the patch's own colour over its middle, nothing under reduced motion
+  function celebrate(R) {
+    if (C.ui.reduceMotion() || !drawn.k) return;
+    var sx = 0, sy = 0;
+    for (var q = 0; q < R.tris.length; q++) { var c = triMid(R.tris[q]); sx += c.x; sy += c.y; }
+    var r = cv.getBoundingClientRect();
+    C.ui.burst({ x: r.left + sx / R.tris.length, y: r.top + sy / R.tris.length },
+      { colors: [CLOTH[R.color], '#FFFFFF', CLOTH[R.color]], count: Math.min(36, 10 + R.tris.length), ring: Math.min(60, 14 + R.tris.length * 2), ringColor: CLOTH[R.color] });
+  }
+
+  function finish() {
+    ended = true; sel = -1;
+    var ms = elapsed(), stars = E.stars(st), full = E.full(st), note = null;
+    var base = { 5: [2, 8], 6: [3, 12] }[st.n], k = stars === 3 ? 1 : stars === 2 ? 0.7 : 0.4;
+    var coins = Math.max(1, Math.round(base[0] * k + st.score / 60)), points = Math.max(1, Math.round(base[1] * k + st.score / 12));
+    if (stars === 3) C.achievements.unlock('ql-win');
+    if (full) C.achievements.unlock('ql-full');
+    if (S.daily) {
+      if (!C.stats.daily('quilt', S.daily, { label: C.t('scoreN', { n: C.num(st.score) }), win: stars >= 2, stars: stars, score: st.score, timeMs: ms })) { coins = Math.max(1, Math.round(coins * 0.2)); points = Math.max(1, Math.round(points * 0.2)); }
+      C.achievements.unlock('ql-daily');
+    } else if (C.stats.best('quilt', 'score' + st.n, st.score) && st.score > 0) note = C.t('bestScoreN', { n: C.num(st.score) });
+    ctx.clearSave();
+    render(); say('');
+    var fin = { daily: S.daily, n: st.n, board: st.board.slice(), score: st.score, patches: st.patches, best: st.best, filled: E.placed(st.board) };
+    setTimeout(function () {
+      ctx.finish({
+        won: stars >= 2, title: full ? C.t('doneFull') : C.t('doneStuck'), note: note, stars: stars, timeMs: ms, coins: coins, points: points,
+        lines: (fin.daily ? [{ label: C.t('daily'), value: C.num(fin.daily) }] : []).concat([
+          { label: C.t('scoreL'), value: C.num(fin.score) },
+          { label: C.t('filledL'), value: C.num(fin.filled) + ' / ' + C.num(fin.n * fin.n) },
+          { label: C.t('patchesL'), value: C.num(fin.patches) },
+          { label: C.t('bigL'), value: C.num(fin.best) }
+        ]),
+        shareText: 'چوگان · چهل‌تکه' + (fin.daily ? ('\nروزانه ' + fin.daily) : ('\n' + fin.n + '×' + fin.n)) + '\n' + '★'.repeat(stars) + ' ' + fin.score,
+        paint: function (g, w, h) {
+          var side = Math.min(w, h), kk = side / fin.n, P = palette();
+          paintQuilt(g, (w - side) / 2, (h - side) / 2, kk, fin.n, fin.board, closedSet(fin.board, fin.n), P);
+        },
+        againLabel: fin.daily ? null : C.t('qlNew'),
+        onAgain: fin.daily ? null : function () { newQuilt(prefs.n); }
+      });
+    }, C.ui.reduceMotion() ? 200 : 700);
+  }
+
+  /* --------------------------------------------------------------- view */
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  // the board's own cloth colours; the tiles keep theirs in both themes
+  function palette() {
+    return dark()
+      ? { frame: '#2E1F23', empty: '#251A1D', dot: 'rgba(232,150,170,0.30)', seam: 'rgba(0,0,0,0.30)', stitch: 'rgba(255,255,255,0.9)', hi: '#EE9CAE', hiBg: 'rgba(238,156,174,0.20)', open: 'rgba(20,12,16,0.22)' }
+      : { frame: '#F2DEE2', empty: '#FCF4F5', dot: 'rgba(180,60,87,0.30)', seam: 'rgba(40,20,30,0.28)', stitch: 'rgba(255,255,255,0.95)', hi: ACCENT, hiBg: 'rgba(180,60,87,0.14)', open: 'rgba(255,255,255,0.30)' };
+  }
+
+  // the triangle's corners: the two ends of its outer side, then the tile's centre
+  function triPts(x, y, k, d) {
+    var cx = x + k / 2, cy = y + k / 2;
+    return [[[x, y], [x + k, y]], [[x + k, y], [x + k, y + k]], [[x + k, y + k], [x, y + k]], [[x, y + k], [x, y]]][d].concat([[cx, cy]]);
+  }
+  function mark(g, x, y, k, d, c) {
+    // the mark sits between the centre and the outer side's middle
+    var mx = [0.5, 0.79, 0.5, 0.21][d], my = [0.21, 0.5, 0.79, 0.5][d], px = x + mx * k, py = y + my * k, s = k * 0.075;
+    g.fillStyle = MARK[c]; g.strokeStyle = MARK[c];
+    if (c === 0) { g.beginPath(); g.arc(px, py, s, 0, Math.PI * 2); g.fill(); }
+    else if (c === 1) {
+      g.lineWidth = Math.max(1.5, s * 0.8); g.lineCap = 'round'; g.beginPath();
+      if (d % 2 === 0) { g.moveTo(px - s * 1.6, py); g.lineTo(px + s * 1.6, py); } else { g.moveTo(px, py - s * 1.6); g.lineTo(px, py + s * 1.6); }
+      g.stroke();
+    } else { g.lineWidth = Math.max(1.2, s * 0.55); g.beginPath(); g.arc(px, py, s * 1.05, 0, Math.PI * 2); g.stroke(); }
+  }
+  // which triangles are in closed patches: they are drawn full and stitched, open ones paler
+  function closedSet(B, n) {
+    var set = {}, R = E.regions(B, n);
+    for (var q = 0; q < R.length; q++) if (R[q].closed) for (var z = 0; z < R[q].tris.length; z++) set[R[q].tris[z]] = true;
+    return set;
+  }
+  function paintQuilt(g, ox, oy, k, n, B, closed, P) {
+    var i, d;
+    for (i = 0; i < n * n; i++) {
+      var x = ox + (i % n) * k, y = oy + Math.floor(i / n) * k, t = B[i];
+      if (!t) {
+        g.fillStyle = P.empty; g.fillRect(x + 1, y + 1, k - 2, k - 2);
+        g.fillStyle = P.dot; g.beginPath(); g.arc(x + k / 2, y + k / 2, Math.max(1.5, k * 0.04), 0, Math.PI * 2); g.fill();
+        continue;
+      }
+      for (d = 0; d < 4; d++) {
+        var p = triPts(x, y, k, d);
+        g.fillStyle = CLOTH[t[d]];
+        g.beginPath(); g.moveTo(p[0][0], p[0][1]); g.lineTo(p[1][0], p[1][1]); g.lineTo(p[2][0], p[2][1]); g.closePath(); g.fill();
+        // a triangle still open is washed out a little, so a closed patch stands out
+        if (!closed[i * 4 + d]) { g.fillStyle = P.open; g.fill(); }
+        mark(g, x, y, k, d, t[d]);
+      }
+      // seams: the tile's edge, and a diagonal half wherever two colours meet
+      g.strokeStyle = P.seam; g.lineWidth = Math.max(1, k * 0.02); g.beginPath();
+      g.rect(x + 0.5, y + 0.5, k - 1, k - 1);
+      var cx = x + k / 2, cy = y + k / 2, cs = [[x, y], [x + k, y], [x + k, y + k], [x, y + k]];
+      for (d = 0; d < 4; d++) if (t[d] !== t[(d + 1) % 4]) { g.moveTo(cs[(d + 1) % 4][0], cs[(d + 1) % 4][1]); g.lineTo(cx, cy); }
+      g.stroke();
+    }
+    // running stitches along every closed patch's border: the diagonal halves between two
+    // colours and the quilt's outer edge
+    g.save(); g.setLineDash([Math.max(2, k * 0.07), Math.max(2, k * 0.06)]); g.strokeStyle = P.stitch; g.lineWidth = Math.max(1.2, k * 0.028); g.beginPath();
+    for (i = 0; i < n * n; i++) {
+      var tt = B[i];
+      if (!tt) continue;
+      var x0 = ox + (i % n) * k, y0 = oy + Math.floor(i / n) * k, c0 = [[x0, y0], [x0 + k, y0], [x0 + k, y0 + k], [x0, y0 + k]], mx = x0 + k / 2, my = y0 + k / 2;
+      for (d = 0; d < 4; d++) {
+        var a = (d + 1) % 4;
+        if (tt[d] !== tt[a] && (closed[i * 4 + d] || closed[i * 4 + a])) { g.moveTo(c0[a][0], c0[a][1]); g.lineTo(mx, my); }
+        if (E.nb(n, i, d) < 0 && closed[i * 4 + d]) {
+          var in1 = k * 0.08, q0 = c0[d], q1 = c0[(d + 1) % 4];
+          // inset a little from the outer edge so the stitches are not lost on the frame
+          g.moveTo(q0[0] + (d === 3 ? in1 : d === 1 ? -in1 : 0), q0[1] + (d === 0 ? in1 : d === 2 ? -in1 : 0));
+          g.lineTo(q1[0] + (d === 3 ? in1 : d === 1 ? -in1 : 0), q1[1] + (d === 0 ? in1 : d === 2 ? -in1 : 0));
+        }
+      }
+    }
+    g.stroke(); g.restore();
+  }
+
+  // the view last drawn: a touch is read against what the player saw (Bowling lesson)
+  var drawn = { k: 0, ox: 0, oy: 0, w: 0, h: 0 };
+  function size() {
+    var r = box.getBoundingClientRect();
+    return { w: Math.max(80, Math.floor(r.width) || 0), h: Math.max(80, Math.floor(r.height) || 0) };
+  }
+  function triMid(x) {
+    var i = x >> 2, d = x & 3, n = st.n, k = drawn.k;
+    var mx = [0.5, 0.79, 0.5, 0.21][d], my = [0.21, 0.5, 0.79, 0.5][d];
+    return { x: drawn.ox + (i % n + mx) * k, y: drawn.oy + (Math.floor(i / n) + my) * k };
+  }
+
+  function draw() {
+    if (!st) return;
+    var Z = size(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
+    var n = st.n, side = Math.min(Z.w, Z.h), pad = Math.max(6, side * 0.025), k = (side - 2 * pad) / n;
+    var ox = (Z.w - k * n) / 2, oy = (Z.h - k * n) / 2, P = palette();
+    drawn = { k: k, ox: ox, oy: oy, w: Z.w, h: Z.h };
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, Z.w, Z.h);
+    var fr = Math.max(6, pad * 1.4), fx0 = ox - pad, fy0 = oy - pad, fw = k * n + 2 * pad;
+    g.fillStyle = P.frame; g.beginPath();
+    g.moveTo(fx0 + fr, fy0); g.arcTo(fx0 + fw, fy0, fx0 + fw, fy0 + fw, fr); g.arcTo(fx0 + fw, fy0 + fw, fx0, fy0 + fw, fr);
+    g.arcTo(fx0, fy0 + fw, fx0, fy0, fr); g.arcTo(fx0, fy0, fx0 + fw, fy0, fr); g.closePath(); g.fill();
+    paintQuilt(g, ox, oy, k, n, st.board, closedSet(st.board, n), P);
+
+    // where the selected tile goes: solid for its current turn, dashed after a turn
+    var t = cur();
+    if (t && !ended) {
+      var Sp = E.spots(st.board, n, t), lw = Math.max(2, k * 0.05);
+      g.lineWidth = lw; g.strokeStyle = P.hi;
+      Sp.now.forEach(function (i) {
+        var x = ox + (i % n) * k, y = oy + Math.floor(i / n) * k;
+        g.fillStyle = P.hiBg; g.fillRect(x + 1, y + 1, k - 2, k - 2);
+        g.setLineDash([]); g.strokeRect(x + lw, y + lw, k - 2 * lw, k - 2 * lw);
+      });
+      Sp.turn.forEach(function (i) {
+        var x = ox + (i % n) * k, y = oy + Math.floor(i / n) * k;
+        g.setLineDash([Math.max(3, k * 0.09), Math.max(3, k * 0.07)]); g.strokeRect(x + lw, y + lw, k - 2 * lw, k - 2 * lw);
+      });
+      g.setLineDash([]);
+    }
+    // the keyboard cursor
+    if (cursor >= 0 && document.activeElement === cv) {
+      var cxp = ox + (cursor % n) * k, cyp = oy + Math.floor(cursor / n) * k;
+      g.strokeStyle = dark() ? '#FFFFFF' : '#2A1A22'; g.lineWidth = 3; g.strokeRect(cxp + 1.5, cyp + 1.5, k - 3, k - 3);
+    }
+  }
+
+  function tileSvg(t) {
+    var s = '<svg viewBox="0 0 40 40" aria-hidden="true">', P = [['0,0 40,0 20,20'], ['40,0 40,40 20,20'], ['40,40 0,40 20,20'], ['0,40 0,0 20,20']];
+    var mk = [[20, 7], [33, 20], [20, 33], [7, 20]];
+    for (var d = 0; d < 4; d++) {
+      s += '<polygon points="' + P[d][0] + '" fill="' + CLOTH[t[d]] + '"/>';
+      var m = mk[d], c = t[d];
+      if (c === 0) s += '<circle cx="' + m[0] + '" cy="' + m[1] + '" r="3" fill="' + MARK[0] + '"/>';
+      else if (c === 1) s += d % 2 === 0 ? '<path d="M' + (m[0] - 5) + ' ' + m[1] + 'h10" stroke="' + MARK[1] + '" stroke-width="2.6" stroke-linecap="round"/>' : '<path d="M' + m[0] + ' ' + (m[1] - 5) + 'v10" stroke="' + MARK[1] + '" stroke-width="2.6" stroke-linecap="round"/>';
+      else s += '<circle cx="' + m[0] + '" cy="' + m[1] + '" r="3.2" fill="none" stroke="' + MARK[2] + '" stroke-width="1.8"/>';
+    }
+    var cs = [[0, 0], [40, 0], [40, 40], [0, 40]];
+    for (d = 0; d < 4; d++) if (t[d] !== t[(d + 1) % 4]) s += '<path d="M' + cs[(d + 1) % 4][0] + ' ' + cs[(d + 1) % 4][1] + 'L20 20" stroke="rgba(40,20,30,0.3)" stroke-width="1"/>';
+    return s + '<rect x=".5" y=".5" width="39" height="39" fill="none" stroke="rgba(40,20,30,0.3)"/></svg>';
+  }
+
+  function render() {
+    if (!st) return;
+    top.innerHTML = '';
+    if (S.daily) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyQl') + ' — ' + C.num(S.daily) })]));
+    else top.appendChild(C.ui.segmented(E.SIZES.map(function (n) { return { value: n, label: C.t('sizeN', { n: C.num(n) }) }; }), S.n, setSize));
+    // separate parts with a gap, not a middle dot: beside Persian digits a dot reads as ٠
+    status.innerHTML = '';
+    [C.t('scoreN', { n: C.num(st.score) }), C.t('leftN', { n: C.num(G.bag.length - st.next) }), C.t('swapsN', { n: C.num(st.swaps) })]
+      .forEach(function (x) { status.appendChild(el('span', { text: x })); });
+    for (var k = 0; k < 3; k++) {
+      var t = st.tray[k], b = slots[k];
+      b.innerHTML = '';
+      b.disabled = !t || ended;
+      b.setAttribute('aria-pressed', sel === k ? 'true' : 'false');
+      if (t) {
+        var tt = E.rotN(t, turns[k]);
+        b.innerHTML = tileSvg(tt);
+        b.setAttribute('aria-label', C.t('tileN', { n: C.num(k + 1), c: tt.map(function (c) { return C.t('col' + c); }).join(', ') }));
+      } else b.setAttribute('aria-label', C.t('emptySlot'));
+    }
+    turnBtn.disabled = ended || sel < 0;
+    swapBtn.disabled = ended || sel < 0 || !E.canSwap(st, G.bag);
+    cv.setAttribute('aria-label', C.t('boardN', { p: C.num(E.placed(st.board)), t: C.num(st.n * st.n) }) + (cursor >= 0 ? ' · ' + C.t('cellAt', { r: C.num(Math.floor(cursor / st.n) + 1), c: C.num(cursor % st.n + 1) }) : ''));
+    draw();
+  }
+
+  /* -------------------------------------------------------------- input */
+
+  function cellAt(e) {
+    var r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    var c = Math.floor((x - drawn.ox) / drawn.k), rr = Math.floor((y - drawn.oy) / drawn.k);
+    return c < 0 || rr < 0 || c >= st.n || rr >= st.n ? -1 : rr * st.n + c;
+  }
+  cv.addEventListener('click', function (e) { if (st && drawn.k) { cursor = -1; tapCell(cellAt(e)); } });
+  cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  cv.addEventListener('blur', function () { draw(); });
+
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || !st) return;
+    if (C.keyIs(e, 'n') && !dailyDate) { askNew(); e.preventDefault(); return; }
+    if (ended) return;
+    if (/^[1-3]$/.test(e.key)) { var k = +e.key - 1; if (st.tray[k]) { if (sel !== k) tapTray(k); } e.preventDefault(); return; }
+    if (C.keyIs(e, 'r')) { turnSel(); e.preventDefault(); return; }
+    if (C.keyIs(e, 's')) { doSwap(); e.preventDefault(); return; }
+    var dir = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[e.key];
+    if (dir) {
+      // a focused size button or tray tile keeps its own keys
+      if (top.contains(document.activeElement)) return;
+      e.preventDefault();
+      if (document.activeElement !== cv) cv.focus();
+      var n = st.n, c0 = cursor < 0 ? Math.floor(n / 2) * n + Math.floor(n / 2) : cursor;
+      var r = Math.min(n - 1, Math.max(0, Math.floor(c0 / n) + dir[0])), c = Math.min(n - 1, Math.max(0, c0 % n + dir[1]));
+      cursor = cursor < 0 ? c0 : r * n + c;
+      render(); return;
+    }
+    if ((e.key === 'Enter' || e.key === ' ') && document.activeElement === cv && cursor >= 0) { e.preventDefault(); tapCell(cursor); }
+  });
+
+  /* ------------------------------------------------------------ dialogs */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', dir: 'ltr', text: k })]); }
+  function showHelp() {
+    var keys = [kb('1 2 3', C.t('kPick')), kb('R', C.t('kTurn')), kb('← ↑ → ↓', C.t('kMove')), kb('Enter', C.t('kPlace')), kb('S', C.t('kSwap'))];
+    if (!dailyDate) keys.push(kb('N', C.t('kNew')));
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, keys)
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  // Tutorial pictures: small hand-made quilts in literal light-theme colours. A tile is
+  // its four colours [N, E, S, W], the same as the engine's.
+  function tTile(x, y, k, t) {
+    var s = '', P = [[x, y, x + k, y], [x + k, y, x + k, y + k], [x + k, y + k, x, y + k], [x, y + k, x, y]], cx = x + k / 2, cy = y + k / 2;
+    for (var d = 0; d < 4; d++) s += '<polygon points="' + P[d][0] + ',' + P[d][1] + ' ' + P[d][2] + ',' + P[d][3] + ' ' + cx + ',' + cy + '" fill="' + CLOTH[t[d]] + '"/>';
+    // the same marks as on the board, so the pictures do not lean on colour alone
+    var u = k / 40, mk = [[20, 7], [33, 20], [20, 33], [7, 20]];
+    for (d = 0; d < 4; d++) {
+      var mx = x + mk[d][0] * u, my = y + mk[d][1] * u, c = t[d];
+      if (c === 0) s += '<circle cx="' + mx + '" cy="' + my + '" r="' + 3 * u + '" fill="' + MARK[0] + '"/>';
+      else if (c === 1) s += '<path d="M' + (d % 2 ? mx + ' ' + (my - 5 * u) + 'v' + 10 * u : (mx - 5 * u) + ' ' + my + 'h' + 10 * u) + '" stroke="' + MARK[1] + '" stroke-width="' + 2.4 * u + '" stroke-linecap="round"/>';
+      else s += '<circle cx="' + mx + '" cy="' + my + '" r="' + 3.2 * u + '" fill="none" stroke="' + MARK[2] + '" stroke-width="' + 1.7 * u + '"/>';
+    }
+    return s + '<rect x="' + x + '" y="' + y + '" width="' + k + '" height="' + k + '" fill="none" stroke="rgba(40,20,30,0.3)"/>';
+  }
+  function tCell(x, y, k, how) {
+    var s = '<rect x="' + x + '" y="' + y + '" width="' + k + '" height="' + k + '" fill="#FCF4F5" stroke="#F2DEE2"/>';
+    if (how === 'lit') s += '<rect x="' + (x + 2) + '" y="' + (y + 2) + '" width="' + (k - 4) + '" height="' + (k - 4) + '" fill="rgba(180,60,87,0.14)" stroke="' + ACCENT + '" stroke-width="2"/>';
+    if (how === 'dash') s += '<rect x="' + (x + 2) + '" y="' + (y + 2) + '" width="' + (k - 4) + '" height="' + (k - 4) + '" fill="none" stroke="' + ACCENT + '" stroke-width="2" stroke-dasharray="4 3"/>';
+    return s;
+  }
+  function tFinger(x, y) {
+    return '<circle cx="' + x + '" cy="' + y + '" r="9" fill="rgba(42,26,34,0.18)" stroke="#2A1A22" stroke-width="1.5"/>';
+  }
+  var TT = { a: [1, 0, 1, 2], b: [0, 0, 2, 2], c: [2, 1, 1, 1], d: [1, 1, 0, 0] };
+  var TUT_ART = [
+    // the tray: the middle tile picked and raised, a finger on it
+    '<svg viewBox="0 0 200 110" width="100%">' +
+      '<rect x="22" y="40" width="44" height="44" rx="7" fill="#FFFFFF" stroke="#E7D2D6" stroke-width="2"/>' + tTile(27, 45, 34, TT.a) +
+      '<rect x="78" y="32" width="44" height="44" rx="7" fill="#FFFFFF" stroke="' + ACCENT + '" stroke-width="2.5"/>' + tTile(83, 37, 34, TT.b) +
+      '<rect x="134" y="40" width="44" height="44" rx="7" fill="#FFFFFF" stroke="#E7D2D6" stroke-width="2"/>' + tTile(139, 45, 34, TT.c) +
+      tFinger(108, 66) + '<path d="M86 22A15 9 0 0 1 113 21" fill="none" stroke="' + ACCENT + '" stroke-width="2.5" stroke-linecap="round"/><path d="M107 16l6 5-7 3" fill="none" stroke="' + ACCENT + '" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '</svg>',
+    // matching: the new tile sits in the lit cell, blue meeting blue across the shared side
+    '<svg viewBox="0 0 200 100" width="100%"><rect x="36" y="6" width="128" height="88" rx="8" fill="#F2DEE2"/>' +
+      tTile(40, 10, 40, [2, 1, 0, 2]) + tCell(80, 10, 40, 'lit') + tCell(120, 10, 40, '') +
+      tCell(40, 50, 40, '') + tCell(80, 50, 40, '') + tCell(120, 50, 40, '') +
+      tTile(84, 14, 32, [1, 0, 0, 1]) +
+      '<path d="M80 12v36" stroke="#FFFFFF" stroke-width="2.5" stroke-dasharray="3 3"/>' + tFinger(114, 50) +
+    '</svg>',
+    // a closed patch: an orange diamond stitched round, with its score
+    '<svg viewBox="0 0 200 110" width="100%"><rect x="48" y="7" width="96" height="96" rx="8" fill="#F2DEE2"/>' +
+      tTile(56, 15, 40, [1, 0, 0, 1]) + tTile(96, 15, 40, [1, 1, 0, 0]) + tTile(56, 55, 40, [0, 0, 1, 1]) + tTile(96, 55, 40, [0, 1, 1, 0]) +
+      '<path d="M96 17L134 55L96 93L58 55Z" stroke="#FFFFFF" stroke-width="2" stroke-dasharray="4 3" fill="none"/>' +
+      '<text x="168" y="60" text-anchor="middle" font-size="20" font-weight="800" fill="' + ACCENT + '">+8</text>' +
+    '</svg>',
+    // a full quilt and three stars
+    '<svg viewBox="0 0 200 110" width="100%"><rect x="28" y="7" width="96" height="96" rx="8" fill="#F2DEE2"/>' +
+      tTile(36, 15, 27, [2, 2, 1, 2]) + tTile(63, 15, 27, [2, 0, 1, 2]) + tTile(90, 15, 27, [2, 2, 0, 0]) +
+      tTile(36, 42, 27, [1, 1, 1, 0]) + tTile(63, 42, 27, [1, 0, 0, 1]) + tTile(90, 42, 27, [0, 1, 0, 0]) +
+      tTile(36, 69, 27, [1, 2, 2, 1]) + tTile(63, 69, 27, [0, 0, 2, 2]) + tTile(90, 69, 27, [0, 0, 0, 0]) +
+      '<text x="164" y="64" text-anchor="middle" font-size="22" fill="' + ACCENT + '">★★★</text>' +
+    '</svg>'
+  ];
+  var TUT = [
+    { title: C.t('tutTitle0'), text: C.t('tutText0'), art: TUT_ART[0] },
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: TUT_ART[1] },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: TUT_ART[2] },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: TUT_ART[3] }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // the moves are saved after each one; the daily quilt has its own slot
+  ctx.autosave(function () {
+    if (!S || ended) return { inProgress: false };
+    return { n: S.n, seed: S.seed, moves: S.moves, daily: S.daily, elapsed: elapsed() };
+  });
+  function save() { ctx.save(); }
+  C.onPause(function () { if (S && !ended) { S.elapsed = elapsed(); startedAt = 0; ctx.save(); } });
+  var saved = ctx.loadSave();
+  var resumed = false;
+  if (saved && E.SIZES.indexOf(saved.n) >= 0 && typeof saved.seed === 'number' && saved.seed >= 1 && saved.seed <= 4294967295 &&
+      Array.isArray(saved.moves) && (saved.daily || null) === (dailyDate || null)) {
+    S = { n: saved.n, seed: saved.seed >>> 0, moves: saved.moves.slice(), daily: saved.daily || null, elapsed: +saved.elapsed || 0 };
+    resumed = build() && !E.over(st, G.bag);
+    if (resumed) { render(); explain(); }
+  }
+  if (!resumed) newQuilt(dailyDate ? E.DAILY_N : prefs.n);
+  if (dailyDate && C.stats.dailyDone('quilt', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).quilt;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  // the board is redrawn whenever its box changes (rotation, side rows) and once the
+  // web font has arrived and moved the layout (Bowling lesson)
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { draw(); });
+  if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { draw(); }); } catch (er) { /* old WebViews */ } }
+  new MutationObserver(function () { draw(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
