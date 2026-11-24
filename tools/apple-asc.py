@@ -117,6 +117,10 @@ def main():
             print("registered bundle id not read back")
             sys.exit(1)
     print("bundle id present:", BUNDLE in ids)
+    s, d = call("GET", "/v1/builds?limit=20&sort=-uploadedDate")
+    show("builds", s, d)
+    if s == 200:
+        print("builds:", [(b["attributes"]["version"], b["attributes"]["processingState"]) for b in d["data"]])
 
 
 main()

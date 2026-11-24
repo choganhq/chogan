@@ -97,6 +97,6 @@ cat > "$WORK/ExportOptions.plist" <<PL
 PL
 xcodebuild -exportArchive -archivePath "$WORK/App.xcarchive" -exportPath "$WORK/out" \
   -exportOptionsPlist "$WORK/ExportOptions.plist" ${AUTH[@]+"${AUTH[@]}"}
-ls -la "$WORK/out"
+[ "$MODE" = upload ] || ls -la "$WORK/out"
 [ "$MODE" = upload ] || [ -s "$WORK/out/App.ipa" ] || { echo "no ipa produced"; exit 1; }
 echo "ios-build done: $MODE"
