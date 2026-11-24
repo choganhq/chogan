@@ -63,7 +63,8 @@ security unlock-keychain -p ci "$KC"
 security import "$SIGN/dist.p12" -k "$KC" -P ci -T /usr/bin/codesign -T /usr/bin/security
 security set-key-partition-list -S apple-tool:,apple: -s -k ci "$KC" >/dev/null
 security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
-PROF_UUID="$(security cms -D -i "$SIGN/app.mobileprovision" | /usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin)"
+security cms -D -i "$SIGN/app.mobileprovision" > "$SIGN/profile.plist"
+PROF_UUID="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$SIGN/profile.plist")"
 PROF_NAME="$(python3 -c "import json;print(json.load(open('$SIGN/ids.json'))['name'])")"
 mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
 cp "$SIGN/app.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$PROF_UUID.mobileprovision"
