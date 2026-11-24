@@ -43,7 +43,10 @@ module.exports = function (T) {
     const notApp = appAwards.filter((d) => game(d.id) !== null).map((d) => d.id + '→' + game(d.id));
     ok(!notApp.length, 'awards no game page unlocks are for the whole app (null)' + (notApp.length ? ' (' + notApp.join(', ') + ')' : ''));
     ok(game('dt-180') === 'darts' && game('dt-win') === 'dots', 'Darts\' 180 keeps Dots\' prefix and still maps to Darts');
-    const awardless = games.filter((g) => !gameAwards.some((d) => usedBy[d.id][0] === g.id)).map((g) => g.id);
+    // Wheel is a party tool, not a game, and has no awards by the owner's decision (#1106)
+    const NO_AWARDS = ['spinner'];
+    ok(NO_AWARDS.every((id) => games.some((g) => g.id === id) && !gameAwards.some((d) => usedBy[d.id][0] === id)), 'the tools without awards (' + NO_AWARDS.join(', ') + ') are listed and really have none');
+    const awardless = games.filter((g) => !NO_AWARDS.includes(g.id) && !gameAwards.some((d) => usedBy[d.id][0] === g.id)).map((g) => g.id);
     ok(!awardless.length, 'every game in the catalogue has awards on the screen' + (awardless.length ? ' (' + awardless.join(', ') + ')' : ''));
 
     // 2. The screen's own ordering, run on invented awards

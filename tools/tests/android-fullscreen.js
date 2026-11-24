@@ -53,5 +53,12 @@ module.exports = function (T) {
     ok(/void reapply\(\) \{[^}]*if \(immersive\) applyImmersive\(\);/.test(bars), 'a configuration change keeps fullscreen');
     ok(/public void onWindowFocusChanged\(boolean hasFocus\) \{\s*super\.onWindowFocusChanged\(hasFocus\);[\s\S]{0,200}if \(hasFocus && bars != null\) bars\.reapply\(\);/.test(main), 'coming back to the app hides the bars again');
   }
-  return { testAndroidFullscreen };
+  // #1129: with the bars hidden, the default cutout mode left a black strip beside the camera
+  function testFullscreenCutout() {
+    head('Android app: fullscreen draws under the camera cutout (#1129)');
+    const j = fs.readFileSync(path.join(ROOT, 'android/app/src/main/java/io/github/choganhq/chogan/BarsBridge.java'), 'utf8');
+    ok(/layoutInDisplayCutoutMode\s*=\s*immersive\s*\?\s*WindowManager\.LayoutParams\.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES/.test(j), 'immersive uses SHORT_EDGES');
+    ok(/LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT/.test(j), 'leaving fullscreen goes back to the default');
+  }
+  return { testAndroidFullscreen, testFullscreenCutout };
 };

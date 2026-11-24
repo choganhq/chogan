@@ -22,8 +22,12 @@ module.exports = function (T) {
     ok(E.WHITES.length === 22 && ms.filter((m) => E.isBlack(m)).length === 15, '22 white and 15 black keys');
 
     // layout: what a finger touches is the key drawn there
-    const L8 = E.layout(390, 200, 4), L22 = E.layout(1280, 260, 4), Lt = E.layout(390, 200, 5);
+    const L8 = E.layout(390, 200, 4), L22 = E.layout(1320, 200, 4), Lt = E.layout(390, 200, 5);
     ok(E.whitesFor(300) === 8 && E.whitesFor(390) === 8 && E.whitesFor(844) === 19 && E.whitesFor(1280) === 22, 'a narrow phone shows 8 white keys, a wide screen all 22');
+    // a phone held sideways (#1114): the keys were 45 px wide and 4 times as tall; a key is now at least a quarter of its height wide
+    const Ls = E.layout(891, 249, 4);
+    ok(Ls.ww >= 249 / 4 - 0.01 && Ls.whites.length >= 8 && E.whitesFor(366, 320) === 8 && E.whitesFor(1256, 463) >= 15, 'a sideways phone gets wider keys (' + Ls.whites.length + ' at ' + Ls.ww.toFixed(0) + ' px), an upright one still 8, a desktop still both octaves of the computer keyboard');
+    ok(/@media \(orientation: landscape\) and \(max-height: 540px\) \{[^@]*\.pn-head \{ display: flex/.test(html) && /el\('div', \{ class: 'pn-head' \}, \[bar, status\]\)/.test(html), 'on a sideways phone the buttons and the status line share one row, so the keys get the height');
     ok(L8.lo === 60 && L8.hi === 72 && L22.lo === 48 && L22.hi === 84 && Lt.hi === 84 && Lt.lo === 72, 'the window starts on the chosen C and never runs past C6');
     let hitsOk = 0, hitsAll = 0;
     for (const L of [L8, L22, E.layout(844, 180, 3)]) {
@@ -194,6 +198,17 @@ module.exports = function (T) {
     const used = [...new Set([...html.matchAll(/C\.t\('(pn[A-Za-z0-9]+)'/g)].map((m) => m[1]))];
     ok(used.length > 25 && used.every((k) => faKeys.includes(k)), 'every string the page asks for is defined (' + used.length + ')');
     ok(LOCALE_CODES.every((l) => { const m = blockOf(l).match(/pnNames: '([^']+)'/); return m && m[1].split(' ').length === 7; }), 'the seven note names are given in every language');
+
+    // #1104: a recording is stored and read back, so what comes back is cleaned
+    const clean = E.recClean || (() => ['recClean is missing']);
+    const good = [{ m: 60, t: 0, d: 400 }, { m: 64, t: 500, d: 300 }];
+    ok(same(clean(good), good) && E.recSpan && E.recSpan(good) === 800, 'a recording keeps its notes and its length is where the last note ends');
+    ok(same(clean(null), []) && same(clean('x'), []) && same(clean([null, 5, {}, { m: 60 }]), []), 'anything stored that is not a list of notes gives an empty recording');
+    ok(clean([{ m: 10, t: 0, d: 100 }, { m: 60, t: -5, d: 100 }, { m: 60, t: 0, d: 0 }, { m: 60, t: 1e9, d: 100 }]).length === 0, 'a note outside the keys, before the start, without length or past the time limit is dropped');
+    ok(same(clean([{ m: 62, t: 900, d: 100 }, { m: 60, t: 100, d: 100 }]).map((n) => n.m), [60, 62]), 'notes come back in time order');
+    const many = Array.from({ length: 1500 }, (_, i) => ({ m: 60, t: i, d: 50 }));
+    ok(E.REC_MAX_NOTES === 1000 && clean(many).length === 1000, 'a recording keeps at most 1000 notes');
+    ok(/recBtn/.test(html) && /ctx\.store\.set\('rec'/.test(html) && /C\.t\('pnRecSaved'/.test(html) && /rt0/.test(html), 'the page has a record button, saves the recording and survives a note ending after the recording');
     // CI runs about three times slower than the laptop; keep local time under a third
     const took = Date.now() - t0;
     ok(took < 1500, 'the Piano tests finish in under 1.5 s (' + took + ' ms)');
