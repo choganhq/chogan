@@ -239,6 +239,7 @@
     sfx: true,
     music: true,
     haptics: true,
+    keepAwake: true,     // keep the screen on while a game is open (#1137)
     cardBack: 'carpet',  // carpet | termeh, shared by every card game (#181)
     cardSpeed: 'normal', // slow | normal | fast: the pace of every card game (#425)
     pinned: [],          // game ids pinned to the top of the menu, in pin order (#193)
@@ -370,7 +371,7 @@
       language: 'زبان', theme: 'تم', themeAuto: 'خودکار', themeLight: 'روشن', themeDark: 'تاریک', motion: 'انیمیشن', motionAuto: 'خودکار', motionOn: 'روشن', motionOff: 'خاموش',
       colors: 'رنگ‌بندی', colorsDefault: 'پیش‌فرض', colorsPaper: 'کاغذ کاهی', colorsSlate: 'خاکستری سرد', colorsForest: 'جنگل', colorsRose: 'گلبهی', colorsContrast: 'کنتراست بالا',
       pattern: 'پس‌زمینه‌ی منو', patternNone: 'ساده', patternDots: 'نقطه‌ها', patternStripes: 'راه‌راه', patternLattice: 'شبکه‌ی مورب', patternGrid: 'شطرنجی', patternWaves: 'موج', patternRings: 'حلقه‌ها',
-      sfx: 'افکت صوتی', music: 'موسیقی', haptics: 'لرزش',
+      sfx: 'افکت صوتی', music: 'موسیقی', haptics: 'لرزش', keepAwake: 'روشن ماندن صفحه',
       resetGame: 'بازنشانی داده‌ی بازی', resetAsk: 'داده‌ی این بازی کامل پاک شود؟',
       resetWarn: 'این کار برگشت ندارد.', resetDone: 'پاک شد',
       about: 'درباره', version: 'نسخه', commitHash: 'کامیت', source: 'کد منبع', license: 'مجوز',
@@ -420,7 +421,7 @@
       language: 'Language', theme: 'Theme', themeAuto: 'Auto', themeLight: 'Light', themeDark: 'Dark', motion: 'Animations', motionAuto: 'Auto', motionOn: 'On', motionOff: 'Off',
       colors: 'Colours', colorsDefault: 'Default', colorsPaper: 'Warm paper', colorsSlate: 'Cool slate', colorsForest: 'Forest', colorsRose: 'Rose', colorsContrast: 'High contrast',
       pattern: 'Menu background', patternNone: 'Plain', patternDots: 'Dots', patternStripes: 'Stripes', patternLattice: 'Lattice', patternGrid: 'Grid', patternWaves: 'Waves', patternRings: 'Rings',
-      sfx: 'Sound effects', music: 'Music', haptics: 'Vibration',
+      sfx: 'Sound effects', music: 'Music', haptics: 'Vibration', keepAwake: 'Keep screen on',
       resetGame: 'Reset game data', resetAsk: 'Erase all data for this game?',
       resetWarn: 'This cannot be undone.', resetDone: 'Erased',
       about: 'About', version: 'Version', source: 'Source code', commitHash: 'commit', license: 'License',
@@ -470,7 +471,7 @@
       language: 'Język', theme: 'Motyw', themeAuto: 'Automatyczny', themeLight: 'Jasny', themeDark: 'Ciemny', motion: 'Animacje', motionAuto: 'Auto', motionOn: 'Włączone', motionOff: 'Wyłączone',
       colors: 'Kolorystyka', colorsDefault: 'Domyślny', colorsPaper: 'Ciepły papier', colorsSlate: 'Chłodny łupek', colorsForest: 'Las', colorsRose: 'Róż', colorsContrast: 'Wysoki kontrast',
       pattern: 'Tło menu', patternNone: 'Gładkie', patternDots: 'Kropki', patternStripes: 'Paski', patternLattice: 'Kratka ukośna', patternGrid: 'Siatka', patternWaves: 'Fale', patternRings: 'Kółka',
-      sfx: 'Efekty dźwiękowe', music: 'Muzyka', haptics: 'Wibracje',
+      sfx: 'Efekty dźwiękowe', music: 'Muzyka', haptics: 'Wibracje', keepAwake: 'Nie wygaszaj ekranu',
       resetGame: 'Resetuj dane gry', resetAsk: 'Usunąć wszystkie dane tej gry?',
       resetWarn: 'Tej operacji nie można cofnąć.', resetDone: 'Usunięto',
       about: 'O aplikacji', version: 'Wersja', source: 'Kod źródłowy', commitHash: 'commit', license: 'Licencja',
@@ -520,7 +521,7 @@
       language: 'Langue', theme: 'Thème', themeAuto: 'Auto', themeLight: 'Clair', themeDark: 'Sombre', motion: 'Animations', motionAuto: 'Auto', motionOn: 'Activées', motionOff: 'Désactivées',
       colors: 'Couleurs', colorsDefault: 'Par défaut', colorsPaper: 'Papier chaud', colorsSlate: 'Ardoise', colorsForest: 'Forêt', colorsRose: 'Rose', colorsContrast: 'Contraste élevé',
       pattern: 'Fond du menu', patternNone: 'Uni', patternDots: 'Points', patternStripes: 'Rayures', patternLattice: 'Treillis', patternGrid: 'Quadrillage', patternWaves: 'Vagues', patternRings: 'Anneaux',
-      sfx: 'Effets sonores', music: 'Musique', haptics: 'Vibrations',
+      sfx: 'Effets sonores', music: 'Musique', haptics: 'Vibrations', keepAwake: 'Garder l\'écran allumé',
       resetGame: 'Effacer les données du jeu', resetAsk: 'Effacer toutes les données de ce jeu ?',
       resetWarn: 'Impossible de revenir en arrière.', resetDone: 'Effacé',
       about: 'À propos', version: 'Version', source: 'Code source', commitHash: 'commit', license: 'Licence',
@@ -570,7 +571,7 @@
       language: 'اللغة', theme: 'المظهر', themeAuto: 'تلقائي', themeLight: 'فاتح', themeDark: 'داكن', motion: 'الحركة', motionAuto: 'تلقائي', motionOn: 'تشغيل', motionOff: 'إيقاف',
       colors: 'الألوان', colorsDefault: 'افتراضي', colorsPaper: 'ورق دافئ', colorsSlate: 'أردوازي بارد', colorsForest: 'غابة', colorsRose: 'وردي', colorsContrast: 'تباين عالٍ',
       pattern: 'خلفية القائمة', patternNone: 'سادة', patternDots: 'نقاط', patternStripes: 'خطوط', patternLattice: 'شبكة مائلة', patternGrid: 'مربعات', patternWaves: 'أمواج', patternRings: 'حلقات',
-      sfx: 'المؤثرات الصوتية', music: 'الموسيقى', haptics: 'الاهتزاز',
+      sfx: 'المؤثرات الصوتية', music: 'الموسيقى', haptics: 'الاهتزاز', keepAwake: 'إبقاء الشاشة مضاءة',
       resetGame: 'مسح بيانات اللعبة', resetAsk: 'أتمسح كل بيانات هذه اللعبة؟',
       resetWarn: 'لا يمكن التراجع عن هذا.', resetDone: 'مُسحت',
       about: 'حول', version: 'الإصدار', source: 'الشيفرة المصدرية', commitHash: 'commit', license: 'الرخصة',
@@ -620,7 +621,7 @@
       language: 'भाषा', theme: 'थीम', themeAuto: 'अपने-आप', themeLight: 'हल्की', themeDark: 'गहरी', motion: 'एनिमेशन', motionAuto: 'अपने-आप', motionOn: 'चालू', motionOff: 'बंद',
       colors: 'रंग-योजना', colorsDefault: 'सामान्य', colorsPaper: 'गर्म काग़ज़', colorsSlate: 'ठंडा स्लेटी', colorsForest: 'जंगल', colorsRose: 'गुलाबी', colorsContrast: 'उच्च कंट्रास्ट',
       pattern: 'मेनू की पृष्ठभूमि', patternNone: 'सादा', patternDots: 'बिंदु', patternStripes: 'धारियाँ', patternLattice: 'तिरछी जाली', patternGrid: 'चौखाना', patternWaves: 'लहरें', patternRings: 'छल्ले',
-      sfx: 'ध्वनि प्रभाव', music: 'संगीत', haptics: 'कंपन',
+      sfx: 'ध्वनि प्रभाव', music: 'संगीत', haptics: 'कंपन', keepAwake: 'स्क्रीन चालू रखें',
       resetGame: 'खेल का डेटा मिटाएँ', resetAsk: 'इस खेल का सारा डेटा मिटा दें?',
       resetWarn: 'यह वापस नहीं हो सकता।', resetDone: 'मिटा दिया',
       about: 'परिचय', version: 'संस्करण', source: 'सोर्स कोड', commitHash: 'कमिट', license: 'लाइसेंस',
@@ -670,7 +671,7 @@
       language: 'Язык', theme: 'Тема', themeAuto: 'Авто', themeLight: 'Светлая', themeDark: 'Тёмная', motion: 'Анимация', motionAuto: 'Авто', motionOn: 'Вкл', motionOff: 'Выкл',
       colors: 'Цвета', colorsDefault: 'Стандарт', colorsPaper: 'Тёплая бумага', colorsSlate: 'Холодный сланец', colorsForest: 'Лес', colorsRose: 'Роза', colorsContrast: 'Высокий контраст',
       pattern: 'Фон меню', patternNone: 'Без узора', patternDots: 'Точки', patternStripes: 'Полосы', patternLattice: 'Решётка', patternGrid: 'Сетка', patternWaves: 'Волны', patternRings: 'Кольца',
-      sfx: 'Звуки', music: 'Музыка', haptics: 'Вибрация',
+      sfx: 'Звуки', music: 'Музыка', haptics: 'Вибрация', keepAwake: 'Не гасить экран',
       resetGame: 'Сбросить данные игры', resetAsk: 'Стереть все данные этой игры?',
       resetWarn: 'Это нельзя отменить.', resetDone: 'Стёрто',
       about: 'О приложении', version: 'Версия', source: 'Исходный код', commitHash: 'коммит', license: 'Лицензия',
@@ -720,7 +721,7 @@
       language: '语言', theme: '主题', themeAuto: '自动', themeLight: '浅色', themeDark: '深色', motion: '动画', motionAuto: '自动', motionOn: '开', motionOff: '关',
       colors: '配色', colorsDefault: '默认', colorsPaper: '暖纸', colorsSlate: '冷石板', colorsForest: '森林', colorsRose: '玫瑰', colorsContrast: '高对比度',
       pattern: '菜单背景', patternNone: '纯色', patternDots: '圆点', patternStripes: '条纹', patternLattice: '斜格', patternGrid: '方格', patternWaves: '波浪', patternRings: '圆环',
-      sfx: '音效', music: '音乐', haptics: '振动',
+      sfx: '音效', music: '音乐', haptics: '振动', keepAwake: '保持屏幕常亮',
       resetGame: '重置游戏数据', resetAsk: '确定清除这个游戏的全部数据？',
       resetWarn: '此操作无法撤销。', resetDone: '已清除',
       about: '关于', version: '版本', commitHash: '提交', source: '源代码', license: '许可协议',
@@ -770,7 +771,7 @@
       language: 'Sprache', theme: 'Design', themeAuto: 'Auto', themeLight: 'Hell', themeDark: 'Dunkel', motion: 'Animationen', motionAuto: 'Auto', motionOn: 'An', motionOff: 'Aus',
       colors: 'Farbschema', colorsDefault: 'Standard', colorsPaper: 'Warmes Papier', colorsSlate: 'Kühler Schiefer', colorsForest: 'Wald', colorsRose: 'Rosé', colorsContrast: 'Hoher Kontrast',
       pattern: 'Menühintergrund', patternNone: 'Schlicht', patternDots: 'Punkte', patternStripes: 'Streifen', patternLattice: 'Gitter schräg', patternGrid: 'Karo', patternWaves: 'Wellen', patternRings: 'Ringe',
-      sfx: 'Soundeffekte', music: 'Musik', haptics: 'Vibration',
+      sfx: 'Soundeffekte', music: 'Musik', haptics: 'Vibration', keepAwake: 'Bildschirm anlassen',
       resetGame: 'Spieldaten zurücksetzen', resetAsk: 'Alle Daten dieses Spiels löschen?',
       resetWarn: 'Das lässt sich nicht rückgängig machen.', resetDone: 'Gelöscht',
       about: 'Über', version: 'Version', source: 'Quellcode', commitHash: 'Commit', license: 'Lizenz',
@@ -820,7 +821,7 @@
       language: 'Idioma', theme: 'Tema', themeAuto: 'Auto', themeLight: 'Claro', themeDark: 'Oscuro', motion: 'Animaciones', motionAuto: 'Auto', motionOn: 'Activadas', motionOff: 'Desactivadas',
       colors: 'Colores', colorsDefault: 'Predeterminado', colorsPaper: 'Papel cálido', colorsSlate: 'Pizarra fría', colorsForest: 'Bosque', colorsRose: 'Rosa', colorsContrast: 'Alto contraste',
       pattern: 'Fondo del menú', patternNone: 'Liso', patternDots: 'Puntos', patternStripes: 'Rayas', patternLattice: 'Celosía', patternGrid: 'Cuadrícula', patternWaves: 'Ondas', patternRings: 'Anillos',
-      sfx: 'Efectos de sonido', music: 'Música', haptics: 'Vibración',
+      sfx: 'Efectos de sonido', music: 'Música', haptics: 'Vibración', keepAwake: 'Mantener la pantalla encendida',
       resetGame: 'Borrar datos del juego', resetAsk: '¿Borrar todos los datos de este juego?',
       resetWarn: 'No se puede deshacer.', resetDone: 'Borrado',
       about: 'Acerca de', version: 'Versión', commitHash: 'commit', source: 'Código fuente', license: 'Licencia',
@@ -2593,6 +2594,37 @@
     minus: 'M5 12h14'
   };
 
+  /* Keep the screen on while a game is open (#1137): a puzzle that takes a minute to think
+     over let the phone dim and lock. Web: Screen Wake Lock, which the browser drops when the
+     tab hides, so it is asked for again on return. Android app: the bridge sets
+     FLAG_KEEP_SCREEN_ON on the window, which outlives a page, so the menu releases it. */
+  Chogan.keepAwake = (function () {
+    var lock = null, wanted = false;
+    function enabled() { return state.settings.keepAwake !== false; }
+    function native() { var b = global.ChoganBars; return b && typeof b.setKeepAwake === 'function' ? b : null; }
+    function ask() {
+      var nav = global.navigator;
+      if (!wanted || !enabled() || lock || !nav || !nav.wakeLock || document.hidden) return;
+      nav.wakeLock.request('screen').then(function (l) {
+        lock = l;
+        l.addEventListener('release', function () { lock = null; });
+      }, function () { /* denied or unsupported: the screen just times out as before */ });
+    }
+    function drop() { if (lock) { try { lock.release(); } catch (e) { /* already gone */ } lock = null; } }
+    function apply() {
+      var n = native();
+      if (n) { try { n.setKeepAwake(!!(wanted && enabled())); } catch (e) { /* older app */ } }
+      if (wanted && enabled()) ask(); else drop();
+    }
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) apply(); });
+    return {
+      hold: function () { wanted = true; apply(); },
+      release: function () { wanted = false; apply(); },
+      refresh: apply,
+      active: function () { return wanted && enabled(); }
+    };
+  })();
+
   /* ------------------------------------------------------ تمام‌صفحه */
   // اپ چندصفحه‌ای است و هر بازی سند خودش را دارد، پس مرورگر با هر ناوبری از
   // تمام‌صفحه بیرون می‌آید. دکمه هم در منو و هم در نوار بازی می‌نشیند تا
@@ -3879,6 +3911,7 @@
   global.addEventListener('pageshow', function (e) {
     if (!e.persisted) return;
     Chogan.reloadState();
+    Chogan.keepAwake.refresh();
     if (Chogan.onRestore) Chogan.onRestore();
   });
 
@@ -3887,6 +3920,7 @@
   Chogan.game = function (cfg) {
     var store = Chogan.storage(cfg.id);
     Chogan.recent.touch(cfg.id);
+    Chogan.keepAwake.hold();
     if (cfg.strings) Chogan.strings(cfg.strings);
     // a card game opts in, so its flights follow the card speed setting (#425)
     if (cfg.cardSpeed) Chogan.cards.paced = true;
