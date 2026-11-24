@@ -4,7 +4,7 @@ environment, never prints them. Exit 0 ok, 1 a request failed, 2 cannot test."""
 import json, os, sys, time, urllib.request, urllib.error
 import jwt
 
-BUNDLE = "io.github.choganhq.chogan"
+BUNDLE = os.environ.get("IOS_BUNDLE_ID", "io.github.choganhq.chogan.ios")
 API = "https://api.appstoreconnect.apple.com"
 
 
