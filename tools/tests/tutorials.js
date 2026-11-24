@@ -31,5 +31,14 @@ module.exports = function (T) {
       ok(/var TUT = \[\s*\{ title: C\.t\('tutTitle0'\), text: C\.t\('tutText0'\)/.test(html), g + ': it is the first card shown');
     }
   }
-  return { testGoTutorialStart, testFirstMoveTutorials, testFirstMoveTutorialsRound3 };
+  // #1060 round 4: Backgammon, Senet and Fourfold opened on rules, not on the first action.
+  function testFirstMoveTutorialsRound4() {
+    head('Backgammon, Senet, Fourfold tutorials start with the first move (#1060)');
+    for (const g of ['backgammon', 'senet', 'fourfold']) {
+      const html = fs.readFileSync(path.join(ROOT, 'www/games', g, 'index.html'), 'utf8');
+      ok((html.match(/tutTitle0: '[^']+', tutText0: '[^']+'/g) || []).length === CODES.length, g + ': the first card exists in every language');
+      ok(/var TUT = \[\s*\{ title: C\.t\('tutTitle0'\), text: C\.t\('tutText0'\)/.test(html), g + ': it is the first card shown');
+    }
+  }
+  return { testGoTutorialStart, testFirstMoveTutorials, testFirstMoveTutorialsRound3, testFirstMoveTutorialsRound4 };
 };
