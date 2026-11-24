@@ -47,10 +47,12 @@ printf '%s' "$APPLE_KEY_P8" > "$KEYFILE"
 
 # Signing assets: made through the API for this run and deleted at the end (see apple-asc.py).
 export KEY_ID="$APPLE_KEY_ID" ISSUER_ID="$APPLE_ISSUER_ID" KEY_P8="$APPLE_KEY_P8" IOS_BUNDLE_ID="$BUNDLE"
-python3 -m pip install --quiet pyjwt cryptography
+python3 -m venv "$WORK/venv"
+"$WORK/venv/bin/pip" install --quiet pyjwt cryptography
+PY="$WORK/venv/bin/python"
 SIGN="$WORK/sign"
-python3 "$ROOT/tools/apple-asc.py" sign "$SIGN"
-cleanup() { python3 "$ROOT/tools/apple-asc.py" unsign "$SIGN" || echo "could not delete the temporary certificate"; security delete-keychain "$WORK/ci.keychain-db" 2>/dev/null || true; rm -f "$KEYFILE"; }
+"$PY" "$ROOT/tools/apple-asc.py" sign "$SIGN"
+cleanup() { "$PY" "$ROOT/tools/apple-asc.py" unsign "$SIGN" || echo "could not delete the temporary certificate"; security delete-keychain "$WORK/ci.keychain-db" 2>/dev/null || true; rm -f "$KEYFILE"; }
 trap cleanup EXIT
 openssl x509 -inform DER -in "$SIGN/dist.cer" -out "$SIGN/dist.pem"
 openssl pkcs12 -export -inkey "$SIGN/key.pem" -in "$SIGN/dist.pem" -out "$SIGN/dist.p12" -passout pass:ci
