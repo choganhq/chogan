@@ -3,6 +3,7 @@ package io.github.choganhq.chogan;
 import android.app.Activity;
 import android.os.Build;
 import android.view.Window;
+import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 
 import androidx.core.view.WindowCompat;
@@ -65,6 +66,15 @@ public class BarsBridge {
     private void applyImmersive() {
         Window window = activity.getWindow();
         WindowInsetsControllerCompat bars = WindowCompat.getInsetsController(window, window.getDecorView());
+        // With the bars hidden, the default cutout mode keeps a black strip beside the camera
+        // hole (Nokia X20, Android 14, #1129). SHORT_EDGES draws under it; the page already
+        // pads by env(safe-area-inset-*), so nothing is hidden behind the camera.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.getAttributes().layoutInDisplayCutoutMode = immersive
+                ? WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                : WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
+            window.setAttributes(window.getAttributes());
+        }
         if (immersive) {
             // A swipe from the edge shows the bars for a moment; they hide again by themselves
             bars.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
