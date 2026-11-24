@@ -1470,8 +1470,12 @@
     env.gain.setValueAtTime(0.0001, t0);
     env.gain.exponentialRampToValueAtTime(peak, t0 + 0.006);
     env.gain.exponentialRampToValueAtTime(peak * 0.6, t0 + 0.3);
-    env.gain.exponentialRampToValueAtTime(peak * 0.2, t0 + life);
-    env.gain.exponentialRampToValueAtTime(0.0001, t0 + life + 0.3);
+    // #1114: the old tail held a fifth of the strike for seconds and then dropped to silence in
+    // 0.3 s, which a held note heard as "lower, then it just stops". Each stage now keeps
+    // falling and the last one is a slow fade, so no stretch is flat and no step is a cliff.
+    env.gain.exponentialRampToValueAtTime(peak * 0.3, t0 + life * 0.6);
+    env.gain.exponentialRampToValueAtTime(peak * 0.1, t0 + life);
+    env.gain.exponentialRampToValueAtTime(0.0001, t0 + life + 0.8);
     // the release lives on its own gain so lifting a key never has to read back where the
     // decay had got to, which an AudioParam cannot report reliably
     rel.gain.setValueAtTime(1, t0);
@@ -1486,7 +1490,7 @@
       g.gain.setValueAtTime(p[2], t0);
       o.connect(g); g.connect(lp);
       o.start(t0);
-      o.stop(t0 + life + 0.35);
+      o.stop(t0 + life + 0.85);
       return o;
     });
     lp.connect(env); env.connect(rel); rel.connect(pianoOut());
