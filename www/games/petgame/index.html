@@ -309,6 +309,37 @@ if (typeof module !== 'undefined') module.exports = PetEngineFactory;
   ctx.loadSave();
   var pops = parseInt(ctx.store.get('pops', 0), 10) || 0;
 
+
+  /* Real recorded clips (CC0, see audio/SOURCES.md). They are not in the app's first download:
+     the page fetches them when the game opens (the service worker then keeps them for offline) and
+     until they arrive, or if they cannot be fetched, the synthesized pop plays instead. The Android
+     app has no network permission and ships the same files inside the package. */
+  var CLIPS = { mouse: ['mouse1', 'mouse2', 'mouse3'], butterfly: ['bird1', 'bird2', 'bird3'], bug: ['cricket1', 'cricket2'] };
+  var clipUrls = {};
+  function loadClips() {
+    if (!window.fetch || !window.URL || !URL.createObjectURL) return;
+    Object.keys(CLIPS).forEach(function (k) {
+      CLIPS[k].forEach(function (n) {
+        fetch('audio/' + n + '.mp3').then(function (r) { if (!r.ok) throw new Error(r.status); return r.blob(); })
+          .then(function (b) { clipUrls[n] = URL.createObjectURL(b); })
+          .catch(function () { /* offline and never cached: the synthesized pop stays */ });
+      });
+    });
+  }
+  function popSound(kind) {
+    if (!prefs.sound) return;
+    var list = (CLIPS[kind] || []).filter(function (n) { return clipUrls[n]; });
+    if (list.length && C.audio.sfxOn()) {
+      try {
+        var a = new Audio(clipUrls[list[Math.floor(Math.random() * list.length)]]);
+        a.volume = 0.8; var pr = a.play(); if (pr && pr.catch) pr.catch(function () {});
+        return;
+      } catch (e) { /* fall through to the synthesized pop */ }
+    }
+    C.audio.sfx('pgPop' + Math.floor(Math.random() * 3));
+  }
+  loadClips();
+
   var cv = el('canvas', { class: 'pg-canvas', role: 'img', 'aria-label': C.t('pgScene') });
   var stage = el('div', { class: 'pg-stage' }, [cv]);
   ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
@@ -484,7 +515,7 @@ if (typeof module !== 'undefined') module.exports = PetEngineFactory;
     var c = E.hit(S, p.x, p.y, 0);
     if (!c) return;
     E.pop(S, c, Math.random);
-    if (prefs.sound) C.audio.sfx('pgPop' + Math.floor(Math.random() * 3));
+    popSound(c.kind);
     if (!still()) C.haptic('tap');
     pops++; ctx.store.set('pops', pops);
     if (pops >= 100) C.achievements.unlock('pet-hundred');
@@ -516,7 +547,7 @@ if (typeof module !== 'undefined') module.exports = PetEngineFactory;
     e.stopImmediatePropagation(); e.preventDefault();
     if (e.repeat || !S) return;
     var c = E.popAny(S, Math.random);
-    if (c && prefs.sound) C.audio.sfx('pgPop' + Math.floor(Math.random() * 3));
+    if (c) popSound(c.kind);
     if (c) { pops++; ctx.store.set('pops', pops); if (pops >= 100) C.achievements.unlock('pet-hundred'); }
   }, true);
 
