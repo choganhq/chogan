@@ -36,10 +36,44 @@ module.exports = function (T) {
       ok(inside, k + ' at ' + sp + ': twenty seconds on, nothing leaves the field');
       ok(travelled > 20, k + ' at ' + sp + ': they actually move (' + travelled.toFixed(0) + ' px)');
     }));
-    // mixed fields show more than one kind
+    // #1135: a mixed field starts with one mouse only, and a visitor of another kind comes later
     const mix = E.newField(W, H, 'mixed', 'normal'), rm = rng(3);
-    for (let i = 0; i < 12; i++) E.spawn(mix, rm);
-    ok(new Set(mix.critters.map((c) => c.kind)).size >= 3, 'a mixed field has at least three kinds');
+    E.fill(mix, rm);
+    ok(mix.critters.length === 1 && mix.critters[0].kind === 'mouse', 'a mixed field starts with a single mouse');
+    for (let i = 0; i < 10 * 100; i++) E.step(mix, 1 / 10, rm);
+    ok(mix.critters.length === 1 && mix.critters[0].kind === 'mouse', 'nothing else comes in the first 100 seconds');
+    const seenKinds = new Set(), stays = [];
+    let visitStart = null, lastVisitor = false;
+    for (let i = 0; i < 10 * 3600; i++) {
+      E.step(mix, 1 / 10, rm);
+      const v = mix.critters.find((c) => c.visitor);
+      if (v) { seenKinds.add(v.kind); if (!lastVisitor) visitStart = i; }
+      if (!v && lastVisitor) stays.push((i - visitStart) / 10);
+      lastVisitor = !!v;
+    }
+    ok(seenKinds.has('butterfly') && seenKinds.has('bug') && seenKinds.has('light'), 'in an hour the bird, the bug and the light have each visited');
+    ok(stays.length >= 8 && stays.every((s) => s > 20 && s < 90), 'every visitor stays for a while and then leaves (' + stays.length + ' visits, ' + Math.min(...stays).toFixed(0) + '-' + Math.max(...stays).toFixed(0) + ' s)');
+    const first = E.newField(W, H, 'mixed', 'normal'), rf = rng(4); E.fill(first, rf);
+    let firstAt = -1;
+    for (let i = 0; i < 10 * 400 && firstAt < 0; i++) { E.step(first, 1 / 10, rf); if (first.critters.some((c) => c.visitor)) firstAt = i / 10; }
+    ok(firstAt >= 100 && firstAt <= 200 && first.critters.find((c) => c.visitor).kind === 'butterfly', 'the first visitor is the bird, after a couple of minutes (' + firstAt.toFixed(0) + ' s)');
+    const gone = E.newField(W, H, 'mixed', 'normal'); E.fill(gone, rf);
+    const vis = E.visit(gone, rf); E.pop(gone, vis, rf);
+    ok(gone.queue.length === 0, 'a popped visitor is not replaced');
+    // ambient sounds: the mouse squeaks on its own now and then, not only when touched
+    const amb = E.newField(W, H, 'mixed', 'normal'), ra = rng(5); E.fill(amb, ra);
+    const squeaks = [];
+    for (let i = 0; i < 10 * 300; i++) { E.step(amb, 1 / 10, ra); while (amb.sounds.length) { const k = amb.sounds.shift(); if (k === 'mouse') squeaks.push(i / 10); } }
+    const gaps = squeaks.slice(1).map((t, i) => t - squeaks[i]);
+    ok(squeaks.length >= 25 && squeaks.length <= 75, 'the mouse squeaks every few seconds on its own (' + squeaks.length + ' in five minutes)');
+    ok(gaps.every((g) => g >= E.SOUND_GAP.mouse[0] - 0.1 && g <= E.SOUND_GAP.mouse[1] + 0.1), 'with gaps of four to nine seconds, never a continuous sound');
+    const birds = E.newField(W, H, 'butterfly', 'normal'), rb = rng(6); E.fill(birds, rb);
+    let chirps = 0;
+    for (let i = 0; i < 10 * 60; i++) { E.step(birds, 1 / 10, rb); while (birds.sounds.length) { if (birds.sounds.shift() === 'butterfly') chirps++; } }
+    ok(chirps >= 8, 'a bird on the field chirps by itself (' + chirps + ' in a minute)');
+    const quiet = E.newField(W, H, 'light', 'normal'), rl = rng(7); E.fill(quiet, rl);
+    for (let i = 0; i < 10 * 120; i++) E.step(quiet, 1 / 10, rl);
+    ok(quiet.sounds.length === 0, 'a light makes no sound');
     ok(E.newField(W, H, 'nonsense', 'normal').mode === 'mixed' && E.newField(W, H, 'mouse', 'nonsense').speed === 1, 'unknown mode or speed fall back to mixed and normal');
 
     // a speed setting scales the pace
@@ -79,7 +113,7 @@ module.exports = function (T) {
     // a field never runs dry however fast it is played
     const hammer = E.newField(W, H, 'mixed', 'normal'); E.fill(hammer, rq);
     let always = true;
-    for (let i = 0; i < 300; i++) { E.popAny(hammer, rq); E.step(hammer, 1 / 30, rq); if (hammer.critters.length + hammer.queue.length < E.wanted(W, H)) always = false; }
+    for (let i = 0; i < 300; i++) { E.popAny(hammer, rq); E.step(hammer, 1 / 30, rq); if (hammer.critters.length + hammer.queue.length < E.residents(hammer)) always = false; }
     ok(always, 'popping as fast as possible never leaves the field short of critters');
     // changing kind and resizing
     const sw = E.newField(W, H, 'mixed', 'normal'); E.fill(sw, rq); E.setMode(sw, 'light', rq);
@@ -119,6 +153,7 @@ module.exports = function (T) {
     ok(/C\.back\(\)/.test(html) && /cornersHeld/.test(html), 'holding the corners calls the back action');
     ok(!/<(img|link)[^>]+(https?:)?\/\/(?!www)/.test(html.replace(/xmlns="[^"]*"/g, '')) && !/https?:\/\//.test(html.replace(/xmlns="[^"]*"/g, '').replace(/<!--[\s\S]*?-->/g, '')), 'no external resource');
 
+    ok(/S\.sounds\.length[\s\S]{0,80}popSound\(S\.sounds\.shift\(\), 0\.3\)/.test(html), 'the page plays the scene\'s own sounds quietly');
     // strings: nine languages, every key present in each
     const m = html.match(/strings:\s*\{([\s\S]*?)\n\s{4}\}\n\s{2}\}\);/);
     ok(!!m, 'the string table was found');
