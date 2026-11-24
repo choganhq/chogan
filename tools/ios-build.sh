@@ -22,7 +22,7 @@ cat > capacitor.config.json <<JSON
   "ios": { "contentInset": "never", "limitsNavigationsToAppBoundDomains": false } }
 JSON
 npm init -y >/dev/null
-npm i --silent @capacitor/core@7 @capacitor/cli@7 @capacitor/ios@7
+npm i --silent @capacitor/core@8 @capacitor/cli@8 @capacitor/ios@8
 npx cap add ios
 npx cap sync ios
 
@@ -44,15 +44,42 @@ PLIST=ios/App/App/Info.plist
 
 KEYFILE="$WORK/AuthKey_${APPLE_KEY_ID}.p8"
 printf '%s' "$APPLE_KEY_P8" > "$KEYFILE"
-AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEYFILE"
-      -authenticationKeyID "$APPLE_KEY_ID" -authenticationKeyIssuerID "$APPLE_ISSUER_ID")
 
+# Signing assets: made through the API for this run and deleted at the end (see apple-asc.py).
+export KEY_ID="$APPLE_KEY_ID" ISSUER_ID="$APPLE_ISSUER_ID" KEY_P8="$APPLE_KEY_P8" IOS_BUNDLE_ID="$BUNDLE"
+python3 -m venv "$WORK/venv"
+"$WORK/venv/bin/pip" install --quiet pyjwt cryptography
+PY="$WORK/venv/bin/python"
+SIGN="$WORK/sign"
+"$PY" "$ROOT/tools/apple-asc.py" sign "$SIGN"
+cleanup() { "$PY" "$ROOT/tools/apple-asc.py" unsign "$SIGN" || echo "could not delete the temporary certificate"; security delete-keychain "$WORK/ci.keychain-db" 2>/dev/null || true; rm -f "$KEYFILE"; }
+trap cleanup EXIT
+openssl x509 -inform DER -in "$SIGN/dist.cer" -out "$SIGN/dist.pem"
+openssl pkcs12 -export -inkey "$SIGN/key.pem" -in "$SIGN/dist.pem" -out "$SIGN/dist.p12" -passout pass:ci -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1
+KC="$WORK/ci.keychain-db"
+security create-keychain -p ci "$KC"
+security set-keychain-settings -lut 3600 "$KC"
+security unlock-keychain -p ci "$KC"
+security import "$SIGN/dist.p12" -k "$KC" -P ci -T /usr/bin/codesign -T /usr/bin/security
+security set-key-partition-list -S apple-tool:,apple: -s -k ci "$KC" >/dev/null
+security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+security cms -D -i "$SIGN/app.mobileprovision" > "$SIGN/profile.plist"
+PROF_UUID="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$SIGN/profile.plist")"
+PROF_NAME="$(python3 -c "import json;print(json.load(open('$SIGN/ids.json'))['name'])")"
+mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+cp "$SIGN/app.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$PROF_UUID.mobileprovision"
+AUTH=()
+[ "$MODE" = upload ] && AUTH=(-authenticationKeyPath "$KEYFILE" -authenticationKeyID "$APPLE_KEY_ID" -authenticationKeyIssuerID "$APPLE_ISSUER_ID")
+
+# The archive is built unsigned: signing it here asks for a development profile, which needs a
+# registered device. The export step below signs it for the store with a cloud-managed
+# distribution certificate and profile.
 cd ios/App
 xcodebuild -project App.xcodeproj -scheme App -configuration Release -sdk iphoneos \
   -archivePath "$WORK/App.xcarchive" archive \
   PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
   MARKETING_VERSION="$VER" CURRENT_PROJECT_VERSION="$CODE" \
-  CODE_SIGN_STYLE=Automatic "${AUTH[@]}"
+  CODE_SIGNING_ALLOWED=NO
 
 DEST=export
 [ "$MODE" = upload ] && DEST=upload
@@ -63,12 +90,13 @@ cat > "$WORK/ExportOptions.plist" <<PL
 <key>method</key><string>app-store-connect</string>
 <key>teamID</key><string>$APPLE_TEAM_ID</string>
 <key>destination</key><string>$DEST</string>
-<key>signingStyle</key><string>automatic</string>
+<key>signingStyle</key><string>manual</string>
+<key>signingCertificate</key><string>Apple Distribution</string>
+<key>provisioningProfiles</key><dict><key>$BUNDLE</key><string>$PROF_NAME</string></dict>
 </dict></plist>
 PL
 xcodebuild -exportArchive -archivePath "$WORK/App.xcarchive" -exportPath "$WORK/out" \
-  -exportOptionsPlist "$WORK/ExportOptions.plist" "${AUTH[@]}"
-rm -f "$KEYFILE"
+  -exportOptionsPlist "$WORK/ExportOptions.plist" ${AUTH[@]+"${AUTH[@]}"}
 ls -la "$WORK/out"
 [ "$MODE" = upload ] || [ -s "$WORK/out/App.ipa" ] || { echo "no ipa produced"; exit 1; }
 echo "ios-build done: $MODE"
