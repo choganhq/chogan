@@ -26,6 +26,15 @@
   .pn-len { display: flex; gap: 3px; justify-content: center; align-items: center; height: 14px; min-height: 14px; direction: ltr; }
   .pn-len i { display: block; height: 10px; border-radius: 5px; background: var(--game); opacity: .55; }
   .pn-status { width: 100%; max-width: 560px; min-height: 3em; line-height: 1.5; text-align: center; margin: 0; font-size: var(--fs-sm); }
+  /* the buttons and the line under them took 110 px of a sideways phone's 412, leaving the keys
+     187 px; there they share one row (#1114). Elsewhere .pn-head adds no box. */
+  .pn-head { display: contents; }
+  @media (orientation: landscape) and (max-height: 540px) {
+    .pn-wrap { gap: var(--s-2); }
+    .pn-head { display: flex; align-items: center; justify-content: center; gap: var(--s-3); width: 100%; }
+    .pn-head > .pn-bar { width: auto; flex: none; flex-wrap: nowrap; }
+    .pn-head > .pn-status { flex: 0 1 auto; width: auto; min-height: 0; text-align: start; }
+  }
   .pn-tunes { display: grid; gap: var(--s-2); }
   .pn-tune { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); width: 100%; text-align: start; }
 </style>
@@ -43,6 +52,8 @@ function PianoEngineFactory() {
   var KEY_MIN = 44;                 // the narrowest white key a finger can hit
   var MIN_WHITES = 8;               // one octave and its top C, even on the smallest phone
   var TALL = 7;                     // a white key is at most this many times as tall as wide (5.2 until #1114: taller keys, as a player asked)
+  var SQUAT = 4;                    // and at least a quarter of its height wide: a phone held sideways showed 20 keys 45 px wide and 187 px tall (#1114)
+  var KEY_WIDE = 64;                // but no wider than this, so a desktop keeps more than two octaves
   var STEPS = [0, 2, 4, 5, 7, 9, 11];
   var LETTERS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 
@@ -72,12 +83,15 @@ function PianoEngineFactory() {
 
   /* -------------------------------------------------------- layout */
 
-  function whitesFor(width) { return Math.max(MIN_WHITES, Math.min(WHITES.length, Math.floor(width / KEY_MIN))); }
+  function whitesFor(width, height) {
+    var key = height ? Math.max(KEY_MIN, Math.min(KEY_WIDE, height / SQUAT)) : KEY_MIN;
+    return Math.max(MIN_WHITES, Math.min(WHITES.length, Math.floor(width / key)));
+  }
   // The window starts on the C of the chosen octave when it can, and slides left near the
   // top so it never shows past C6.
   function windowStart(count, base) { return Math.max(0, Math.min(7 * (base - 3), WHITES.length - count)); }
   function layout(W, H, base) {
-    var count = whitesFor(W), start = windowStart(count, base), ww = W / count;
+    var count = whitesFor(W, H), start = windowStart(count, base), ww = W / count;
     var bw = ww * 0.6, bh = H * 0.62, whites = [], blacks = [];
     for (var i = 0; i < count; i++) {
       var m = WHITES[start + i];
@@ -190,7 +204,7 @@ function PianoEngineFactory() {
   }
 
   return {
-    LOW: LOW, HIGH: HIGH, BASES: BASES, KEY_MIN: KEY_MIN, MIN_WHITES: MIN_WHITES, TALL: TALL, WHITES: WHITES, KEYS: KEYS, TUNES: TUNES, BEAT_MS: BEAT_MS,
+    LOW: LOW, HIGH: HIGH, BASES: BASES, KEY_MIN: KEY_MIN, KEY_WIDE: KEY_WIDE, SQUAT: SQUAT, MIN_WHITES: MIN_WHITES, TALL: TALL, WHITES: WHITES, KEYS: KEYS, TUNES: TUNES, BEAT_MS: BEAT_MS,
     freq: freq, isBlack: isBlack, octave: octave, step: step, name: name, parse: parse,
     whitesFor: whitesFor, windowStart: windowStart, layout: layout, hit: hit, shown: shown,
     keyNote: keyNote, keyFor: keyFor, shift: shift,
@@ -382,16 +396,16 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
   var octLabel = el('b', { 'aria-live': 'polite' });
   var tunesBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button' }, [C.icon('music', 18), el('span', { text: C.t('pnTunes') })]);
   var listenBtn = el('button', { class: 'ch-btn ch-btn--primary', type: 'button', hidden: true });
-  var bar = el('div', { class: 'pn-bar' }, [el('div', { class: 'pn-oct' }, [lowBtn, octLabel, highBtn]), tunesBtn, listenBtn]);
+  // Record and its play button share the bar: a second row cost a sideways phone the keys' height
+  // (#1114). Deleting the recording lives in the settings.
   var recBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button' });
-  var playRecBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button', hidden: true });
-  var delRecBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button', hidden: true });
-  var recBar = el('div', { class: 'pn-bar' }, [recBtn, playRecBtn, delRecBtn]);
+  var playRecBtn = el('button', { class: 'ch-btn ch-btn--soft ch-btn--icon', type: 'button', hidden: true });
+  var bar = el('div', { class: 'pn-bar' }, [el('div', { class: 'pn-oct' }, [lowBtn, octLabel, highBtn]), tunesBtn, recBtn, playRecBtn, listenBtn]);
   var status = el('p', { class: 'pn-status ch-dim', 'aria-live': 'polite' });
   // the length of the note to play, as one cell per beat (a short last cell for a half): it shows
   // how long a note lasts without forcing the hold, so a player who knows the tune can switch the hold off
   var lenRow = el('div', { class: 'pn-len', 'aria-hidden': 'true' });
-  var wrap = el('div', { class: 'pn-wrap' }, [bar, recBar, status, lenRow, fit]);
+  var wrap = el('div', { class: 'pn-wrap' }, [el('div', { class: 'pn-head' }, [bar, status]), lenRow, fit]);
   ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
   ctx.button({ icon: 'gear', label: C.t('settings'), onClick: showSettings });
   ctx.main.appendChild(wrap);
@@ -422,7 +436,7 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
     fit.style.setProperty('--fit-ar', '0.25');
     var r = fit.getBoundingClientRect();
     if (r.width < 40 || r.height < 40) return;
-    var ar = Math.max(r.width / r.height, E.whitesFor(r.width) / E.TALL);
+    var ar = Math.max(r.width / r.height, E.whitesFor(r.width, r.height) / E.TALL);
     fit.style.setProperty('--fit-ar', ar.toFixed(4));
   }
   function size() { return { w: Math.max(40, cv.clientWidth), h: Math.max(40, cv.clientHeight) }; }
@@ -529,9 +543,9 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
     recBtn.textContent = recording ? C.t('pnRecStop') : C.t('pnRec');
     recBtn.className = 'ch-btn ' + (recording ? 'ch-btn--primary' : 'ch-btn--soft');
     playRecBtn.hidden = !recorded.length || recording;
-    delRecBtn.hidden = !recorded.length || recording;
-    playRecBtn.textContent = replay ? C.t('pnStop') : C.t('pnRecPlay');
-    delRecBtn.textContent = C.t('pnRecDel');
+    playRecBtn.textContent = '';
+    playRecBtn.appendChild(C.icon(replay ? 'pause' : 'play', 20));
+    playRecBtn.setAttribute('aria-label', replay ? C.t('pnStop') : C.t('pnRecPlay'));
   }
 
   /* ------------------------------------------------------------ notes */
@@ -775,11 +789,11 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
   }
   recBtn.addEventListener('click', function () { if (recording) finishRec(); else startRec(); });
   playRecBtn.addEventListener('click', function () { if (replay) stopReplay(); else playRec(); });
-  delRecBtn.addEventListener('click', function () {
+  function deleteRec() {
     stopReplay();
     recorded = []; ctx.store.set('rec', recorded); msg = '';
     showStatus();
-  });
+  }
 
   function showTunes() {
     var m = null, list = el('div', { class: 'pn-tunes' });
@@ -810,9 +824,15 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
       prefs.hold = v; savePrefs(); endHold(); showStatus(); draw();
     });
     hseg.classList.add('ch-seg--wrap');
+    var items = [el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('pnLabels') }), seg]), el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('pnHold') }), hseg])];
+    if (recorded.length) {
+      var delBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button', text: C.t('pnRecDel') });
+      delBtn.addEventListener('click', function () { deleteRec(); delBtn.disabled = true; });
+      items.push(el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('pnRec') }), delBtn]));
+    }
     C.ui.modal({
       title: C.t('settings'), closeButton: true,
-      body: [el('div', { class: 'ch-list' }, [el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('pnLabels') }), seg]), el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: C.t('pnHold') }), hseg])])],
+      body: [el('div', { class: 'ch-list' }, items)],
       actions: [{ label: C.t('done'), kind: 'primary' }]
     });
   }
