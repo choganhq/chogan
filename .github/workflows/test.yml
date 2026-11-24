@@ -157,7 +157,7 @@ jobs:
       cancel-in-progress: true
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}
 
     steps:
       - name: Check out
@@ -211,9 +211,23 @@ jobs:
         with:
           path: www
 
+      # deploy-pages sometimes asks for the artifact before GitHub lists it ("Found 0
+      # artifact(s)"; five failures, #1116), and re-running only this job uploads a second
+      # artifact and fails differently. The artifact is already uploaded, so the same
+      # deploy is simply asked for again once after a wait.
       - name: Deploy
         id: deployment
+        continue-on-error: true
         if: steps.changed.outputs.deploy == 'true' && steps.pages.outputs.enabled == 'true'
+        uses: actions/deploy-pages@v5
+
+      - name: Wait before the deploy retry
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 45
+
+      - name: Deploy (retry)
+        id: deployment_retry
+        if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v5
 
       # The comparison is against the expected values, not against what this build
@@ -223,7 +237,7 @@ jobs:
         if: steps.changed.outputs.deploy == 'true' && steps.pages.outputs.enabled == 'true'
         run: >-
           bash tools/verify-deploy.sh
-          "${{ steps.deployment.outputs.page_url }}version.js"
+          "${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}version.js"
           "$GITHUB_SHA" production "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
   # The staging web app (#762): the staging branch, on its own origin, so it never
