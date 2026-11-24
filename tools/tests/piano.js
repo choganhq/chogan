@@ -126,6 +126,22 @@ module.exports = function (T) {
     };
     const lv = { strike: level(220, 0.006), a3: level(220, 1), c6: level(1046.5, 0.6) };
     ok(lv.strike >= 0.8 && lv.a3 >= 0.3 && lv.c6 >= 0.2, 'a key strikes loud and stays audible while held (strike ' + lv.strike.toFixed(2) + ' ≥ 0.8, A3 after 1 s ' + lv.a3.toFixed(2) + ' ≥ 0.3, C6 after 0.6 s ' + lv.c6.toFixed(2) + ' ≥ 0.2)');
+    // #1114: a held key fades all the way down instead of sitting flat and then stopping. Read
+    // the envelope's own stages: after the strike every stage falls, none falls faster than
+    // 100 dB a second, and the last one (to silence) lasts at least half a second.
+    {
+      const start = log.length;
+      AC.currentTime = 20;
+      sb.audioApi.piano(220);
+      const mine = log.slice(start), lp = mine.find((n) => n.kind === 'filter'), env = lp && lp.out[0];
+      const pts = env.gain.sets.filter((s) => s[0] === 'set' || s[0] === 'exp');
+      const seg = [];
+      for (let i = 2; i < pts.length; i++) seg.push({ db: 20 * Math.log10(pts[i - 1][1] / pts[i][1]), dt: pts[i][2] - pts[i - 1][2] });
+      ok(seg.length >= 3 && seg.every((x) => x.db > 0), 'a held note falls through every stage after the strike (' + seg.map((x) => x.db.toFixed(1) + ' dB').join(', ') + ')');
+      ok(seg.every((x) => x.db / x.dt <= 100), 'and no stage drops faster than 100 dB a second (' + seg.map((x) => (x.db / x.dt).toFixed(0)).join(', ') + ')');
+      ok(seg[seg.length - 1].dt >= 0.5, 'the last stage to silence is a fade of at least half a second (' + seg[seg.length - 1].dt.toFixed(2) + ' s)');
+    }
+    ok(E.TALL >= 7, 'a white key may be up to 7 key widths tall (' + E.TALL + ')');
     const comp = log.filter((n) => n.kind === 'comp');
     ok(comp.length === 1 && comp[0].out.includes(sb.sfxBus) && log.filter((n) => n.kind === 'gain' && n.out.includes(comp[0])).length >= 3, 'every note goes through one shared compressor, so a loud chord does not clip');
     ok(/C\.audio\.piano\(E\.freq\(m\)\)/.test(html) && !/\.(mp3|ogg|wav)\b/.test(html) && !/^\s*mood:/m.test(html), 'the page plays the synthesized voice, no audio files and no background music');
