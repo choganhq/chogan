@@ -1422,6 +1422,7 @@
       music.playing = false;
       if (music.timer) { clearInterval(music.timer); music.timer = null; }
     },
+    sfxOn: function () { return !!state.settings.sfx; },
     setSfx: function (on) { state.settings.sfx = !!on; saveSettings(); },
     setMusic: function (on) {
       state.settings.music = !!on;
