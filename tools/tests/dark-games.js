@@ -50,6 +50,9 @@ module.exports = function (T) {
     const chosen = /:root\[data-theme="dark"\] img\[src\$="icon\.svg"\][^}]*brightness\(\.[0-9]+\)/.test(css);
     ok(sys, 'dark icons: the system dark block dims game icons');
     ok(chosen, 'dark icons: the chosen dark theme dims game icons');
+    // Tutorial pictures are inline SVGs with an opaque light background: dim them like the icons.
+    ok(/prefers-color-scheme: dark\)[^{]*\{[^}]*:root:not\(\[data-theme="light"\]\) \.ch-tut__art[^}]*brightness\(\.[0-9]+\)/.test(css), 'dark tutorials: the system dark block dims tutorial art');
+    ok(/:root\[data-theme="dark"\] \.ch-tut__art[^}]*brightness\(\.[0-9]+\)/.test(css), 'dark tutorials: the chosen dark theme dims tutorial art');
   }
   return { testDarkGames };
 };
