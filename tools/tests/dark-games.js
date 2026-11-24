@@ -43,6 +43,13 @@ module.exports = function (T) {
     ok(!!sf && lum(sf) < 0.06, 'carrom: the dark playing surface is a dark wood (' + sf + ')');
     const jg = fs.readFileSync(path.join(ROOT, 'www/games/jigsaw/index.html'), 'utf8');
     ok(/dkGrid \? 'rgba\(255, 255, 255, \.38\)'/.test(jg), 'jigsaw: the cut lines turn light in the dark theme');
+    // Game icons are opaque pastel tiles, so a backing cannot darken them; the dark theme
+    // dims the image itself. Both dark blocks must carry the rule (system and chosen).
+    const css = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8');
+    const sys = /prefers-color-scheme: dark\)[^{]*\{\s*:root:not\(\[data-theme="light"\]\) img\[src\$="icon\.svg"\][^}]*brightness\(\.[0-9]+\)/.test(css);
+    const chosen = /:root\[data-theme="dark"\] img\[src\$="icon\.svg"\][^}]*brightness\(\.[0-9]+\)/.test(css);
+    ok(sys, 'dark icons: the system dark block dims game icons');
+    ok(chosen, 'dark icons: the chosen dark theme dims game icons');
   }
   return { testDarkGames };
 };
