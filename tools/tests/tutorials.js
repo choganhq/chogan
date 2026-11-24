@@ -21,5 +21,15 @@ module.exports = function (T) {
       ok(/var TUT = \[\s*\{ title: C\.t\('tutTitle0'\), text: C\.t\('tutText0'\)/.test(html), g + ': it is the first card shown');
     }
   }
-  return { testGoTutorialStart, testFirstMoveTutorials };
+  // #1060 round 3: Apiary, Shogi and Hillside explained pieces and goals, but not the
+  // tap-a-piece-then-a-marked-cell flow a first-time player needs before anything else.
+  function testFirstMoveTutorialsRound3() {
+    head('Apiary, Shogi, Hillside tutorials start with the first move (#1060)');
+    for (const g of ['apiary', 'shogi', 'hillside']) {
+      const html = fs.readFileSync(path.join(ROOT, 'www/games', g, 'index.html'), 'utf8');
+      ok((html.match(/tutTitle0: '[^']+', tutText0: '[^']+'/g) || []).length === CODES.length, g + ': the first card exists in every language');
+      ok(/var TUT = \[\s*\{ title: C\.t\('tutTitle0'\), text: C\.t\('tutText0'\)/.test(html), g + ': it is the first card shown');
+    }
+  }
+  return { testGoTutorialStart, testFirstMoveTutorials, testFirstMoveTutorialsRound3 };
 };
