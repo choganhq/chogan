@@ -23,7 +23,7 @@ cat > capacitor.config.json <<JSON
 JSON
 npm init -y >/dev/null
 npm i --silent @capacitor/core@7 @capacitor/cli@7 @capacitor/ios@7
-npx cap add ios
+npx cap add ios --packagemanager SPM
 npx cap sync ios
 
 # App icon: the 512px launcher image enlarged and flattened (the store refuses an alpha channel).
