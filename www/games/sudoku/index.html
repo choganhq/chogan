@@ -600,6 +600,13 @@ function SudokuEngineFactory() {
     rate: rate, makePuzzle: makePuzzle, TARGET: TARGET,
     KILLER: KILLER, COMBOS: COMBOS, cageMask: cageMask, makeCages: makeCages, makeKiller: makeKiller,
     killerCount: killerCount, killerSolve: killerSolve, killerConflicts: killerConflicts,
+    // #1119: a digit that clashes with no peer can still be wrong; the grid then never completes
+    // and nothing says why. Givens are never wrong.
+    wrongCells: function (grid, puzzle, solution) {
+      var bad = {};
+      for (var c = 0; c < 81; c++) if (grid[c] && !puzzle[c] && grid[c] !== solution[c]) bad[c] = 1;
+      return bad;
+    },
     conflicts: function (grid) {
       var bad = {};
       var units = ROWS.concat(COLS, BOXES);
@@ -1016,6 +1023,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngi
 
   function paint() {
     var bad = prefs.showErrors ? E.conflicts(S.grid) : {};
+    if (prefs.showErrors) Object.assign(bad, E.wrongCells(S.grid, S.puzzle, S.solution));
     var kill = isKiller(S);
     if (kill && prefs.showErrors) Object.assign(bad, E.killerConflicts(S.grid, S.cages));
     var selVal = selected >= 0 ? S.grid[selected] : 0;
