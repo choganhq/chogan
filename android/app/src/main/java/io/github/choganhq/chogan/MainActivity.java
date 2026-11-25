@@ -41,6 +41,10 @@ public class MainActivity extends BridgeActivity {
         openShortcut(getIntent());
 
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            // the page answers later: a second press meanwhile would find the tips already
+            // closed and leave the game
+            private boolean asking;
+
             @Override
             public void handleOnBackPressed() {
                 WebView webView = getBridge() != null ? getBridge().getWebView() : null;
@@ -49,7 +53,10 @@ public class MainActivity extends BridgeActivity {
                     return;
                 }
                 // An open dialog or the game's tips take the press instead of the page (#1158)
+                if (asking) return;
+                asking = true;
                 webView.evaluateJavascript("!!(window.Chogan && Chogan.dismissTop && Chogan.dismissTop())", closed -> {
+                    asking = false;
                     if ("true".equals(closed)) return;
                     if (webView.canGoBack()) webView.goBack();
                     else leave();

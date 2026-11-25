@@ -60,6 +60,16 @@ module.exports = function (T) {
     locked.close();
     ui.modal({ dismissable: false });
     ok(watchers.length === n, 'and asks for no CloseWatcher');
+
+    // a locked box over a closable one must not let the gesture close the hidden one
+    let hidden = 0;
+    ui.modal({ closeButton: true, onClose: () => { hidden++; } });
+    const under = watchers.length;
+    ui.modal({ dismissable: false });
+    watchers[under - 1].onclose();
+    ok(hidden === 0 && watchers.length === under + 1, 'a gesture under a locked box closes nothing and keeps listening');
+    ok(/e\.key === 'Escape' && backStack\[backStack\.length - 1\] === entry/.test(core), 'Escape reaches the top dialog only');
+    ok(/if \(asking\) return;\s*asking = true;[\s\S]*?asking = false;/.test(java), 'a second back press waits for the first answer');
   }
   return { testBackDismiss };
 };

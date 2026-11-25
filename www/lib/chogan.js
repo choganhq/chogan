@@ -3359,7 +3359,8 @@
     function onKey(e) {
       // ضربدر که باشد، Escape هم باید کار کند حتی وقتی کلیک بیرون بسته است
       // preventDefault: otherwise the same Escape also reaches the next dialog's CloseWatcher
-      if (e.key === 'Escape' && (o.dismissable !== false || o.closeButton)) { e.preventDefault(); close('escape'); }
+      // only the top dialog takes it: one Escape used to close the whole pile, locked or not
+      if (e.key === 'Escape' && backStack[backStack.length - 1] === entry && (o.dismissable !== false || o.closeButton)) { e.preventDefault(); close('escape'); }
       // Tab walked out of the dialog onto the buttons of the page behind it (#335),
       // so it wraps around inside the topmost dialog instead
       if (e.key === 'Tab') {
@@ -3383,12 +3384,18 @@
     scrim.appendChild(box);
     document.body.appendChild(scrim);
     backStack.push(entry);
-    if (entry.run && global.CloseWatcher) {
+    function watch() {
       try {
         watcher = new global.CloseWatcher();
-        watcher.onclose = function () { entry.run(); };
+        watcher.onclose = function () {
+          // a locked dialog on top has no watcher, so the gesture lands here: do not close
+          // the hidden dialog underneath, and listen again (a used watcher is dead)
+          if (backStack[backStack.length - 1] !== entry) watch();
+          else entry.run();
+        };
       } catch (e) { watcher = null; /* refused: the button still closes it */ }
     }
+    if (entry.run && global.CloseWatcher) watch();
     // ضربدر اولین دکمه‌ی جعبه است ولی تمرکز باید روی خود کنش‌ها بنشیند
     // focusPrimary: the game-over dialog focused Share, so Enter shared instead
     // of playing again (#210). It is opt-in because a confirm's primary button
