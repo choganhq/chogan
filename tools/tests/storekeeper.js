@@ -24,6 +24,15 @@ module.exports = function (T) {
     ok(E.step(L, S3, 1) === 'blocked' && E.step(L, E.start(L), 3) === 'wall', 'a crate against a wall cannot be pushed, and a wall stops the keeper');
     const C2 = { size: 'small', w: 5, h: 4, map: '#####' + '#   #' + '#  .#' + '#####', goals: [13], boxes: [6], player: 12, best: 1 };
     ok(E.stuck(C2, { boxes: [6] }, 6) && !E.stuck(C2, { boxes: [7] }, 7) && !E.stuck(C2, { boxes: [13] }, 13), 'a crate in a corner off a mark is stuck; one by a single wall or on a mark is not');
+    // #1176: two crates side by side against a wall hold each other, as in the report
+    // (7 wide: the left crate has walls above and below, the right one a wall below)
+    const F = { size: 'small', w: 7, h: 5, map: '#######' + '#  # .#' + '#     #' + '#  ##.#' + '#######', goals: [12, 26], boxes: [17, 18], player: 16, best: 1 };
+    ok(E.stuck(F, { boxes: [17, 18] }, 17) && E.stuck(F, { boxes: [17, 18] }, 18), 'two crates side by side along a wall, off the marks, are both stuck (#1176)');
+    ok(!E.stuck(F, { boxes: [17] }, 17) && !E.stuck(F, { boxes: [18] }, 18), 'either crate alone there can still move');
+    const O = { size: 'small', w: 6, h: 5, map: '######' + '#    #' + '#    #' + '#  ..#' + '######', goals: [21, 22], boxes: [14, 15], player: 13, best: 1 };
+    ok(!E.stuck(O, { boxes: [14, 15] }, 14) && !E.stuck(O, { boxes: [14, 15] }, 15), 'two crates side by side in open floor are not stuck');
+    const G = { size: 'small', w: 6, h: 4, map: '######' + '#  . #' + '#    #' + '######', goals: [9], boxes: [8, 9], player: 13, best: 1 };
+    ok(!E.stuck(G, { boxes: [8, 9] }, 9) && E.stuck(G, { boxes: [8, 9] }, 8), 'along the top wall, the crate on a mark is fine and its frozen neighbour is stuck');
     ok(E.stars(10, 10) === 3 && E.stars(12, 10) === 2 && E.stars(13, 10) === 1 && E.stars(24, 20) === 2 && E.stars(25, 20) === 1, 'three stars at the fewest pushes, two within a fifth more (at least two), one otherwise: never a loss');
     const W = E.walk(L, [10], 8, 9);
     ok(Array.isArray(W) && W.join() === '1' && E.walk(L, [10], 8, 12) === null, 'a tap walks the shortest way around crates, and not through them');
@@ -31,7 +40,7 @@ module.exports = function (T) {
     // generator's count, and a bot playing only step() solves each with that many pushes.
     // Large levels get 8 seeds, not 14: they were 1.1 s of the group's 1.7 s, and CI ran
     // the group past its 3 s limit (#678).
-    let gen = 0, made = 0, agree = 0, played = 0, deep = 0, slow = 0, worst = 0;
+    let gen = 0, made = 0, agree = 0, played = 0, deep = 0, slow = 0, worst = 0, falseAlarm = 0;
     for (const size of E.ORDER) for (let k = 1; k <= (size === 'large' ? 8 : 14); k++) {
       gen++;
       const s = Date.now(), lv = E.generate(size, rng(k * 7919 + size.length));
@@ -45,11 +54,15 @@ module.exports = function (T) {
       agree++;
       const st = E.start(lv);
       let fine = true;
+      // a winning line never passes a state the hint calls stuck (no false alarm, #1176)
+      const noAlarm = () => st.boxes.every((x) => !E.stuck(lv, st, x));
+      if (!noAlarm()) fine = false;
       for (const [b, d] of sol.path) {
         const route = E.walk(lv, st.boxes, st.player, b - E.off(lv, d));
         if (!route) { fine = false; break; }
         for (const r of route) if (E.step(lv, st, r) !== 'move') fine = false;
         if (E.step(lv, st, d) !== 'push') fine = false;
+        if (!noAlarm()) { fine = false; falseAlarm++; }
         if (!fine) break;
       }
       if (fine && E.won(lv, st) && st.pushes === lv.best) played++;
@@ -58,6 +71,7 @@ module.exports = function (T) {
     ok(deep === gen, 'no level is shorter than its size\'s floor of pushes (' + deep + '/' + gen + ')');
     ok(agree === gen, 'the forward solver finds each level\'s answer in the generator\'s count of pushes (' + agree + '/' + gen + ')');
     ok(played === gen, 'a bot playing only the real steps solves every level in the fewest pushes (' + played + '/' + gen + ')');
+    ok(falseAlarm === 0, 'no crate is called stuck on any winning line (' + falseAlarm + ' false alarms over ' + played + ' solved levels)');
     ok(slow === 0, 'no level takes over 400 ms to make (worst ' + worst + ' ms)');
     const a = E.generate('medium', rng(5)), b = E.generate('medium', rng(5));
     ok(a && b && a.map === b.map && a.boxes.join() === b.boxes.join() && a.player === b.player, 'the same seed gives the same level, so the daily is the same for everyone');
