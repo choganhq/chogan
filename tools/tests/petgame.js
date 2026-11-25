@@ -36,30 +36,22 @@ module.exports = function (T) {
       ok(inside, k + ' at ' + sp + ': twenty seconds on, nothing leaves the field');
       ok(travelled > 20, k + ' at ' + sp + ': they actually move (' + travelled.toFixed(0) + ' px)');
     }));
-    // #1135: a mixed field starts with one mouse only, and a visitor of another kind comes later
+    // #1135, #1156: a mixed field starts with one mouse, then about once a minute another kind walks in
+    // and stays. Before #1156 the first one took 150 s and left again, so a player saw only mice.
     const mix = E.newField(W, H, 'mixed', 'normal'), rm = rng(3);
     E.fill(mix, rm);
     ok(mix.critters.length === 1 && mix.critters[0].kind === 'mouse', 'a mixed field starts with a single mouse');
-    for (let i = 0; i < 10 * 100; i++) E.step(mix, 1 / 10, rm);
-    ok(mix.critters.length === 1 && mix.critters[0].kind === 'mouse', 'nothing else comes in the first 100 seconds');
-    const seenKinds = new Set(), stays = [];
-    let visitStart = null, lastVisitor = false;
-    for (let i = 0; i < 10 * 3600; i++) {
-      E.step(mix, 1 / 10, rm);
-      const v = mix.critters.find((c) => c.visitor);
-      if (v) { seenKinds.add(v.kind); if (!lastVisitor) visitStart = i; }
-      if (!v && lastVisitor) stays.push((i - visitStart) / 10);
-      lastVisitor = !!v;
-    }
-    ok(seenKinds.has('butterfly') && seenKinds.has('bug') && seenKinds.has('light'), 'in an hour the bird, the bug and the light have each visited');
-    ok(stays.length >= 8 && stays.every((s) => s > 20 && s < 90), 'every visitor stays for a while and then leaves (' + stays.length + ' visits, ' + Math.min(...stays).toFixed(0) + '-' + Math.max(...stays).toFixed(0) + ' s)');
-    const first = E.newField(W, H, 'mixed', 'normal'), rf = rng(4); E.fill(first, rf);
-    let firstAt = -1;
-    for (let i = 0; i < 10 * 400 && firstAt < 0; i++) { E.step(first, 1 / 10, rf); if (first.critters.some((c) => c.visitor)) firstAt = i / 10; }
-    ok(firstAt >= 100 && firstAt <= 200 && first.critters.find((c) => c.visitor).kind === 'butterfly', 'the first visitor is the bird, after a couple of minutes (' + firstAt.toFixed(0) + ' s)');
-    const gone = E.newField(W, H, 'mixed', 'normal'); E.fill(gone, rf);
-    const vis = E.visit(gone, rf); E.pop(gone, vis, rf);
-    ok(gone.queue.length === 0, 'a popped visitor is not replaced');
+    const kindsNow = () => mix.critters.map((c) => c.kind).sort().join();
+    const run = (s) => { for (let i = 0; i < 10 * s; i++) E.step(mix, 1 / 10, rm); };
+    run(55); ok(kindsNow() === 'mouse', 'nothing else comes in the first 55 seconds');
+    run(10); ok(kindsNow() === 'butterfly,mouse', 'the bird has walked in after a minute');
+    run(75); ok(kindsNow() === 'bug,butterfly,mouse', 'a bug joins about a minute later, and the bird is still there');
+    run(75); ok(kindsNow() === 'bug,butterfly,light,mouse', 'then a light, so all four kinds are together');
+    run(3600); ok(kindsNow() === 'bug,butterfly,light,mouse', 'they stay, one of each, however long it runs');
+    mix.critters.slice().forEach((c) => E.pop(mix, c, rm));
+    run(2); ok(kindsNow() === 'bug,butterfly,light,mouse', 'a popped animal is replaced by one of its own kind');
+    E.setMode(mix, 'mixed', rm); ok(kindsNow() === 'mouse', 'choosing mixed again starts from the single mouse');
+    run(65); ok(kindsNow() === 'butterfly,mouse', 'and the others arrive again from the bird');
     // ambient sounds: the mouse squeaks on its own now and then, not only when touched
     const amb = E.newField(W, H, 'mixed', 'normal'), ra = rng(5); E.fill(amb, ra);
     const squeaks = [];
