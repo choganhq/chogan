@@ -40,5 +40,15 @@ module.exports = function (T) {
       ok(/var TUT = \[\s*\{ title: C\.t\('tutTitle0'\), text: C\.t\('tutText0'\)/.test(html), g + ': it is the first card shown');
     }
   }
-  return { testGoTutorialStart, testFirstMoveTutorials, testFirstMoveTutorialsRound3, testFirstMoveTutorialsRound4 };
+  // #1060 round 5: Hokm, Shelem and Nonogram opened on teams, bidding and what the numbers
+  // mean; none of them said what to tap first.
+  function testFirstMoveTutorialsRound5() {
+    head('Hokm, Shelem, Nonogram tutorials start with the first move (#1060)');
+    for (const g of ['hokm', 'shelem', 'nonogram']) {
+      const html = fs.readFileSync(path.join(ROOT, 'www/games', g, 'index.html'), 'utf8');
+      ok((html.match(/tutTitle0: '(?:[^'\\]|\\.)+', tutText0: '(?:[^'\\]|\\.)+'/g) || []).length === CODES.length, g + ': the first card exists in every language');
+      ok(/var TUT = \[\s*\{ title: C\.t\('tutTitle0'\), text: C\.t\('tutText0'\)/.test(html), g + ': it is the first card shown');
+    }
+  }
+  return { testFirstMoveTutorialsRound5, testGoTutorialStart, testFirstMoveTutorials, testFirstMoveTutorialsRound3, testFirstMoveTutorialsRound4 };
 };
