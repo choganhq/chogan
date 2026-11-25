@@ -517,8 +517,21 @@
     return C.t('winsN', { n: C.num(s.wins || 0) });
   }
 
+  // #1168: a game opened from the Daily tab came back to the games tab, because the menu
+  // a game returns to is often a fresh load and every load started at home. The tab a game
+  // is opened from is kept for this window only and read back once by the next load.
+  var TAB_KEY = 'chogan.menuTab';
+  function takeSavedTab() {
+    try {
+      var t = sessionStorage.getItem(TAB_KEY);
+      sessionStorage.removeItem(TAB_KEY);
+      return t;
+    } catch (e) { return null; }
+  }
+
   function goGame(g, daily) {
     C.markNav();
+    try { sessionStorage.setItem(TAB_KEY, tab); } catch (e) { /* private mode: start at home */ }
     C.feedback('tap');
     var url = g.path + (daily ? ('?daily=' + daily) : '');
     setTimeout(function () { location.href = url; }, 90);
@@ -2106,6 +2119,8 @@
     { id: 'ach', icon: 'medal', label: 'achievements', view: viewAchievements },
     { id: 'profile', icon: 'user', label: 'profile', view: viewProfile }
   ];
+  var tabBack = takeSavedTab();
+  if (TABS.some(function (t) { return t.id === tabBack; })) tab = tabBack;
 
   function drawNav() {
     navIn.innerHTML = '';
@@ -2194,7 +2209,8 @@
   applyPalette();
   C.onLangChange = function () { applyPalette(); };
   // برگشت از bfcache: سکه و رکوردی که داخل بازی عوض شده باید دیده شود
-  C.onRestore = function () { applyPalette(); if (gamesLoaded) render(); };
+  // a page restored from the cache still has its tab; a stale key would move a later reload
+  C.onRestore = function () { takeSavedTab(); applyPalette(); if (gamesLoaded) render(); };
 
   // A first run fills the country from the device's time zone (#977): the zone name is
   // read on the device and looked up in this table (Asia/Tehran → IR), never online.
