@@ -218,6 +218,8 @@ module.exports = function (T) {
     ok(/\.ch-swatch \{[^}]*min-height: 44px/.test(css) && /\.ch-swatch \{[^}]*min-width: 44px/.test(css), 'a swatch is at least 44px each way');
     // #1154: both rows are one strip that scrolls sideways, and start at the chosen tile
     ok(/\.ch-swatches \{[^}]*display: flex[^}]*overflow-x: auto/.test(css), 'themes and backgrounds scroll sideways');
+    ok(/@media \(hover: hover\) and \(pointer: fine\) \{ \.ch-swatches \{ flex-wrap: wrap;/.test(css), 'with a mouse every tile is in view');
+    ok(/\.ch-swatches \{[^}]*padding: 6px/.test(css), 'the focus ring has room inside the strip');
     ok(/keepStrip\(row, 'colors'\)/.test(idx) && /keepStrip\(row, 'pattern'\)/.test(idx), 'both strips keep the chosen tile in sight');
   }
 
