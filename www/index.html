@@ -1499,7 +1499,7 @@
     // The pill of the section in view is lit. The page is not in the document yet while
     // the view is built, so the listener drops itself only after it has seen the page
     // attached and then gone (#1070: it first removed itself on the very first call).
-    var jumpSeen = false;
+    var jumpSeen = false, jumpLit = 0;
     var litJump = function () {
       if (page.isConnected) jumpSeen = true;
       else if (jumpSeen) { document.removeEventListener('scroll', litJump, true); return; }
@@ -1509,10 +1509,21 @@
       var de = document.documentElement;
       if (de.scrollTop + de.clientHeight >= de.scrollHeight - 2 && de.scrollTop > 0) cur = JUMPS.length - 1;
       jumpBtns.forEach(function (b, n) { if (n === cur) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current'); });
+      if (cur !== jumpLit && page.isConnected) { jumpLit = cur; showPill(jump, jumpBtns[cur]); }
     };
     document.addEventListener('scroll', litJump, { passive: true, capture: true });
     litJump();
     return page;
+  }
+
+  // The lit pill was often off the side of the row, so the row follows the page (#1153).
+  // Only the row is scrolled: scrollIntoView would also move the page and cut short the
+  // smooth jump a tap started. A measured delta works in both writing directions.
+  function showPill(row, pill) {
+    var r = row.getBoundingClientRect(), b = pill.getBoundingClientRect();
+    var delta = (b.left + b.width / 2) - (r.left + r.width / 2);
+    var calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    row.scrollBy({ left: delta, behavior: calm ? 'auto' : 'smooth' });
   }
 
   // A game's sheet from the profile list (#292): what it is, how far you got, how to
