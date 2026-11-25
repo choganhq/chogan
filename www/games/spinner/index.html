@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>گردونه — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  /* A column on a tall screen (wheel above, scores below) and a row on a wide one. Sized
+     with a viewport media query and pixel sizes set from JS, not container units, so the
+     WebViews before Chrome 105 that drop cq units still get a round wheel (#611). */
+  .sw-wrap { width: 100%; height: 100%; min-height: 0; display: flex; flex-direction: column; align-items: stretch; gap: var(--s-3); }
+  .sw-wheelcol { flex: 1 1 52%; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: var(--s-2); }
+  .sw-wheelbox { flex: 1 1 auto; min-height: 120px; width: 100%; display: flex; align-items: center; justify-content: center; }
+  /* both sizes are set in pixels from JS: a canvas given no CSS size is drawn at its
+     backing-store size, double on a phone with a pixel ratio above 1 (Goose Race, #919) */
+  .sw-canvas { display: block; touch-action: manipulation; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .sw-row { display: flex; align-items: center; justify-content: center; gap: var(--s-3); flex-wrap: wrap; min-height: 48px; }
+  /* the line keeps its room while empty, so the wheel does not jump when a name appears */
+  .sw-status { margin: 0; min-height: 1.6em; font-weight: 700; font-size: 1.15rem; text-align: center; color: var(--c-text); }
+  .sw-status.sw-dim { font-weight: 400; font-size: 1rem; color: var(--c-text-dim); }
+  .sw-panel { flex: 1 1 48%; min-height: 0; width: 100%; max-width: 560px; align-self: center; overflow-y: auto; overscroll-behavior: contain;
+    display: flex; flex-direction: column; gap: var(--s-2); }
+  .sw-tablewrap { overflow-x: auto; overscroll-behavior-x: contain; border-radius: var(--r-md); background: var(--c-surface); box-shadow: var(--sh-1); }
+  .sw-table { border-collapse: separate; border-spacing: 0; width: 100%; font-variant-numeric: tabular-nums; }
+  .sw-table th, .sw-table td { padding: 4px; text-align: center; border-bottom: 1px solid var(--c-line); white-space: nowrap; }
+  .sw-table tr:last-child th, .sw-table tr:last-child td { border-bottom: 0; }
+  .sw-table thead th { font-size: .85rem; font-weight: 600; color: var(--c-text-dim); }
+  /* the names stay in view while the rounds scroll sideways */
+  .sw-table .sw-namecell { position: sticky; inset-inline-start: 0; z-index: 1; background: var(--c-surface); text-align: start; }
+  .sw-name { display: flex; align-items: center; gap: 8px; min-height: 44px; max-width: 7.5em; padding: 0 8px; border: 0; border-radius: var(--r-sm);
+    background: transparent; color: var(--c-text); font: inherit; font-weight: 600; cursor: pointer; text-align: start; }
+  .sw-name span { overflow: hidden; text-overflow: ellipsis; }
+  .sw-name i { flex: 0 0 auto; width: 12px; height: 12px; border-radius: 50%; }
+  .sw-name:focus-visible { outline: 2px solid var(--c-accent); }
+  .sw-cell { width: 3.6em; height: 40px; padding: 0 4px; text-align: center; font: inherit; font-variant-numeric: tabular-nums;
+    border: 1px solid var(--c-line); border-radius: var(--r-sm); background: var(--c-surface-2); color: var(--c-text); }
+  .sw-cell:focus { outline: 2px solid var(--c-accent); outline-offset: 0; }
+  .sw-cell.sw-bad { border-color: var(--c-danger, #C0392B); }
+  .sw-total { font-weight: 700; min-width: 3em; direction: ltr; }
+  /* the leader's total in a filled pill: a coloured digit alone read dimmer than the rest in the dark theme */
+  .sw-total.sw-lead span { display: inline-block; min-width: 2em; padding: 2px 8px; border-radius: 999px; background: var(--game); color: #fff; }
+  .sw-tools { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: center; }
+  .sw-hint { margin: 0; text-align: center; font-size: .9rem; }
+  @media (min-aspect-ratio: 5/4) {
+    .sw-wrap { flex-direction: row; }
+    .sw-wheelcol { flex: 1 1 55%; height: 100%; }
+    .sw-panel { flex: 0 1 400px; height: auto; max-height: 100%; align-self: center; }
+  }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+
+<script>
+/* ==== ENGINE START ==== */
+/* «گردونه» / Wheel (#1106): a party tool, not a game. Names on a wheel that picks one at
+   random, and a score sheet by rounds with running totals. No rules are enforced: any
+   number goes in any cell. */
+function SpinnerEngineFactory() {
+  'use strict';
+  var TAU = Math.PI * 2;
+  var MAX_PLAYERS = 20, MAX_NAME = 24, MAX_ROUNDS = 200, MAX_ABS = 999999;
+  // at least this many whole turns, so every spin looks like a real one
+  var MIN_TURNS = 4;
+
+  function cleanName(s) {
+    return String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, MAX_NAME);
+  }
+  function fresh(names) {
+    var S = { players: [], rounds: [], next: 1, last: -1, rot: 0 };
+    (names || []).forEach(function (n) { addPlayer(S, n); });
+    return S;
+  }
+  // The sheet is read back from storage, so anything that is not a clean sheet is dropped
+  // piece by piece rather than thrown away whole.
+  function clean(raw) {
+    var S = fresh();
+    if (!raw || typeof raw !== 'object') return S;
+    var seen = {}, maxId = 0;
+    (Array.isArray(raw.players) ? raw.players : []).forEach(function (p) {
+      if (!p || S.players.length >= MAX_PLAYERS) return;
+      var id = p.id, name = cleanName(p.name);
+      if (typeof id !== 'number' || id !== Math.floor(id) || id < 1 || seen[id] || !name) return;
+      seen[id] = 1; maxId = Math.max(maxId, id);
+      S.players.push({ id: id, name: name });
+    });
+    (Array.isArray(raw.rounds) ? raw.rounds : []).slice(0, MAX_ROUNDS).forEach(function (r) {
+      var o = {};
+      if (r && typeof r === 'object') {
+        for (var k in r) {
+          var v = r[k];
+          if (seen[k] && typeof v === 'number' && isFinite(v) && Math.abs(v) <= MAX_ABS) o[k] = v;
+        }
+      }
+      S.rounds.push(o);
+    });
+    S.next = Math.max(maxId + 1, typeof raw.next === 'number' && raw.next === Math.floor(raw.next) && raw.next > maxId ? raw.next : 1);
+    S.last = seen[raw.last] ? raw.last : -1;
+    S.rot = typeof raw.rot === 'number' && isFinite(raw.rot) ? ((raw.rot % TAU) + TAU) % TAU : 0;
+    return S;
+  }
+  function find(S, id) {
+    for (var i = 0; i < S.players.length; i++) if (S.players[i].id === id) return i;
+    return -1;
+  }
+  function addPlayer(S, name) {
+    name = cleanName(name);
+    if (!name || S.players.length >= MAX_PLAYERS) return null;
+    var p = { id: S.next++, name: name };
+    S.players.push(p);
+    return p;
+  }
+  function renamePlayer(S, id, name) {
+    var i = find(S, id);
+    name = cleanName(name);
+    if (i < 0 || !name) return false;
+    S.players[i].name = name;
+    return true;
+  }
+  // a removed player takes their scores along, and is no longer the last one picked
+  function removePlayer(S, id) {
+    var i = find(S, id);
+    if (i < 0) return false;
+    S.players.splice(i, 1);
+    S.rounds.forEach(function (r) { delete r[id]; });
+    if (S.last === id) S.last = -1;
+    return true;
+  }
+  function addRound(S) {
+    if (S.rounds.length >= MAX_ROUNDS) return false;
+    S.rounds.push({});
+    return true;
+  }
+  function clearScores(S) { S.rounds = []; }
+  // null empties the cell
+  function setScore(S, r, id, v) {
+    if (r < 0 || r >= S.rounds.length || find(S, id) < 0) return false;
+    if (v === null) { delete S.rounds[r][id]; return true; }
+    if (typeof v !== 'number' || !isFinite(v) || Math.abs(v) > MAX_ABS) return false;
+    S.rounds[r][id] = v;
+    return true;
+  }
+  function totals(S) {
+    var t = {};
+    S.players.forEach(function (p) {
+      var s = 0;
+      S.rounds.forEach(function (r) { if (typeof r[p.id] === 'number') s += r[p.id]; });
+      t[p.id] = Math.round(s * 100) / 100;
+    });
+    return t;
+  }
+  // the ids with the highest total, only once any score is in and someone is ahead
+  function leaders(S) {
+    var t = totals(S), best = -Infinity, ids = [], any = false;
+    S.rounds.forEach(function (r) { for (var k in r) any = true; });
+    if (!any) return [];
+    S.players.forEach(function (p) {
+      if (t[p.id] > best) { best = t[p.id]; ids = [p.id]; } else if (t[p.id] === best) ids.push(p.id);
+    });
+    return ids.length === S.players.length ? [] : ids;
+  }
+  // What a player types into a cell: Persian, Arabic-Indic or Latin digits, an optional
+  // minus sign of any kind and a decimal point or comma. '' is an empty cell (null);
+  // anything else is NaN.
+  function parseNum(str) {
+    var s = String(str == null ? '' : str).trim();
+    if (!s) return null;
+    s = s.replace(/[۰-۹]/g, function (d) { return String(d.charCodeAt(0) - 0x06F0); })
+      .replace(/[٠-٩]/g, function (d) { return String(d.charCodeAt(0) - 0x0660); })
+      .replace(/[−‒–—﹣－]/g, '-').replace(/^\+/, '').replace(/[٫,]/g, '.').replace(/\s+/g, '');
+    if (!/^-?(\d+(\.\d+)?|\.\d+)$/.test(s)) return NaN;
+    var v = +s;
+    return Math.abs(v) > MAX_ABS ? NaN : v;
+  }
+
+  /* ---------------------------------------------------------- the wheel */
+  // Segment i spans [i, i + 1) * TAU / n, clockwise from the pointer at the top, on a wheel
+  // turned clockwise by rot. The point under the pointer is at -rot on the wheel.
+  function indexAt(rot, n) {
+    if (n < 1) return -1;
+    var a = ((-rot % TAU) + TAU) % TAU;
+    return Math.min(n - 1, Math.floor(a / (TAU / n)));
+  }
+  function pick(rnd, n) { return n < 1 ? -1 : Math.min(n - 1, Math.floor(rnd() * n)); }
+  // Where a spin from `from` stops so that segment i lands under the pointer: at least
+  // MIN_TURNS whole turns on, never near a segment's edge, where a reader could doubt it.
+  function target(from, n, i, rnd) {
+    var s = TAU / n;
+    var want = (i + 0.5 + (rnd() - 0.5) * 0.7) * s;
+    var t = -want, base = from + MIN_TURNS * TAU;
+    t += Math.ceil((base - t) / TAU) * TAU;
+    return t + Math.floor(rnd() * 2) * TAU;
+  }
+  // fast at first, slowing to a stop
+  function ease(t) { return t <= 0 ? 0 : (t >= 1 ? 1 : 1 - Math.pow(1 - t, 3)); }
+
+  var api = { TAU: TAU, MAX_PLAYERS: MAX_PLAYERS, MAX_NAME: MAX_NAME, MAX_ROUNDS: MAX_ROUNDS, MAX_ABS: MAX_ABS, MIN_TURNS: MIN_TURNS,
+    cleanName: cleanName, fresh: fresh, clean: clean, addPlayer: addPlayer, renamePlayer: renamePlayer, removePlayer: removePlayer,
+    addRound: addRound, clearScores: clearScores, setScore: setScore, totals: totals, leaders: leaders, parseNum: parseNum,
+    indexAt: indexAt, pick: pick, target: target, ease: ease };
+  if (typeof self !== 'undefined') self.SpinnerEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = SpinnerEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = SpinnerEngineFactory();
+  var ACCENT = '#846C78';
+  // Segment colours: all dark enough for white names, in light and dark themes alike.
+  var SEG = ['#846C78', '#C2662D', '#3F7FA0', '#B4474F', '#5B8C46', '#8A63B0', '#2F8C84', '#A8741A', '#5A6FB8', '#A2527F', '#47804F', '#7C6A3A'];
+
+  C.boot({});
+  // no mood: a party tool sits beside other games and talk, not over music
+  var ctx = C.game({
+    id: 'spinner',
+    name: { fa: 'گردونه', en: 'Wheel', pl: 'Koło', fr: 'Roue', ar: 'العجلة', hi: 'पहिया', ru: 'Колесо', zh: '转盘', de: 'Drehrad', es: 'Rueda' },
+    accent: ACCENT,
+    strings: {
+      fa: {
+        swSpin: 'بچرخان', swTurn: 'نوبتِ {name}', swNeedTwo: 'دست‌کم دو اسم بنویس تا گردونه بچرخد.', swPlayer: 'نفر', swAddPlayer: 'اسم تازه',
+        swAddRound: 'دور تازه', swTotal: 'جمع', swName: 'اسم', swRemove: 'حذف', swEditName: 'ویرایش اسم', swFull: 'بیشتر از {n} اسم جا نمی‌شود.',
+        swWheel: 'گردونه‌ی اسم‌ها', swScoreFor: 'امتیاز {name} در دور {n}', swClear: 'پاک کردن امتیازها', swClearQ: 'امتیاز همه‌ی دورها پاک شود؟ اسم‌ها می‌مانند.',
+        swNoRounds: 'برای ثبت امتیاز «دور تازه» را بزن.',
+        swRules: 'گردونه ابزار کوچکی برای دورهمی است، نه بازی: قاعده‌ای ندارد و چیزی را اجبار نمی‌کند. اسم‌ها را بنویس و بچرخان تا یکی شانسی انتخاب شود، مثلاً برای اینکه نوبت کیست. برای هر دور «دور تازه» را بزن و امتیاز هر نفر را بنویس؛ جمع هر نفر کنارش است. با زدن روی هر اسم می‌توانی عوضش یا حذفش کنی.',
+        swKSpace: 'چرخاندن گردونه',
+        swTutTitle1: 'اسم‌ها و چرخاندن', swTutText1: 'اسم کسانی که هستند را بنویس و گردونه را بچرخان تا یکی شانسی انتخاب شود.',
+        swTutTitle2: 'امتیازها', swTutText2: 'برای هر دور «دور تازه» را بزن و امتیازها را بنویس. جمع هر نفر خودش حساب می‌شود.'
+      },
+      en: {
+        swSpin: 'Spin', swTurn: '{name}’s turn', swNeedTwo: 'Write at least two names to spin the wheel.', swPlayer: 'Player', swAddPlayer: 'Add name',
+        swAddRound: 'New round', swTotal: 'Total', swName: 'Name', swRemove: 'Remove', swEditName: 'Edit name', swFull: 'No room for more than {n} names.',
+        swWheel: 'Wheel of names', swScoreFor: '{name}, round {n}', swClear: 'Clear scores', swClearQ: 'Clear the scores of every round? The names stay.',
+        swNoRounds: 'Tap New round to note scores.',
+        swRules: 'The wheel is a small party tool, not a game: it has no rules and enforces nothing. Write the names and spin to pick one at random, for example to see whose turn it is. Tap New round for each round and write everyone’s score; each total is beside the name. Tap a name to change or remove it.',
+        swKSpace: 'Spin the wheel',
+        swTutTitle1: 'Names and spinning', swTutText1: 'Write the names of everyone playing and spin the wheel to pick one at random.',
+        swTutTitle2: 'Scores', swTutText2: 'Tap New round for each round and write the scores. Each total adds itself up.'
+      },
+      pl: {
+        swSpin: 'Zakręć', swTurn: 'Kolej: {name}', swNeedTwo: 'Wpisz co najmniej dwa imiona, aby zakręcić kołem.', swPlayer: 'Gracz', swAddPlayer: 'Dodaj imię',
+        swAddRound: 'Nowa runda', swTotal: 'Suma', swName: 'Imię', swRemove: 'Usuń', swEditName: 'Zmień imię', swFull: 'Nie zmieści się więcej niż {n} imion.',
+        swWheel: 'Koło z imionami', swScoreFor: '{name}, runda {n}', swClear: 'Wyczyść punkty', swClearQ: 'Wyczyścić punkty ze wszystkich rund? Imiona zostaną.',
+        swNoRounds: 'Dotknij „Nowa runda”, aby zapisać punkty.',
+        swRules: 'Koło to małe narzędzie na spotkania, a nie gra: nie ma zasad i niczego nie wymusza. Wpisz imiona i zakręć, aby wylosować jedno, na przykład czyja kolej. Dla każdej rundy dotknij „Nowa runda” i wpisz punkty każdego; suma jest obok imienia. Dotknij imienia, aby je zmienić lub usunąć.',
+        swKSpace: 'Zakręć kołem',
+        swTutTitle1: 'Imiona i kręcenie', swTutText1: 'Wpisz imiona wszystkich graczy i zakręć kołem, aby wylosować jedno.',
+        swTutTitle2: 'Punkty', swTutText2: 'Dla każdej rundy dotknij „Nowa runda” i wpisz punkty. Sumy liczą się same.'
+      },
+      fr: {
+        swSpin: 'Tourner', swTurn: 'À {name} de jouer', swNeedTwo: 'Écris au moins deux prénoms pour faire tourner la roue.', swPlayer: 'Joueur', swAddPlayer: 'Ajouter un prénom',
+        swAddRound: 'Nouvelle manche', swTotal: 'Total', swName: 'Prénom', swRemove: 'Retirer', swEditName: 'Modifier le prénom', swFull: 'Pas de place pour plus de {n} prénoms.',
+        swWheel: 'Roue des prénoms', swScoreFor: '{name}, manche {n}', swClear: 'Effacer les points', swClearQ: 'Effacer les points de toutes les manches ? Les prénoms restent.',
+        swNoRounds: 'Touche « Nouvelle manche » pour noter les points.',
+        swRules: 'La roue est un petit outil pour les soirées, pas un jeu : elle n’a pas de règles et n’impose rien. Écris les prénoms et fais tourner pour en tirer un au sort, par exemple pour savoir à qui c’est le tour. Touche « Nouvelle manche » à chaque manche et note les points de chacun ; chaque total est à côté du prénom. Touche un prénom pour le modifier ou le retirer.',
+        swKSpace: 'Faire tourner la roue',
+        swTutTitle1: 'Prénoms et tirage', swTutText1: 'Écris les prénoms de tous les joueurs et fais tourner la roue pour en tirer un au sort.',
+        swTutTitle2: 'Points', swTutText2: 'Touche « Nouvelle manche » à chaque manche et note les points. Les totaux se font tout seuls.'
+      },
+      ar: {
+        swSpin: 'أدِر', swTurn: 'الدور على {name}', swNeedTwo: 'اكتب اسمين على الأقل لتدور العجلة.', swPlayer: 'لاعب', swAddPlayer: 'أضف اسمًا',
+        swAddRound: 'جولة جديدة', swTotal: 'المجموع', swName: 'الاسم', swRemove: 'احذف', swEditName: 'عدّل الاسم', swFull: 'لا مكان لأكثر من {n} اسمًا.',
+        swWheel: 'عجلة الأسماء', swScoreFor: '{name}، الجولة {n}', swClear: 'امسح النقاط', swClearQ: 'هل تمسح نقاط كل الجولات؟ الأسماء تبقى.',
+        swNoRounds: 'اضغط «جولة جديدة» لتسجيل النقاط.',
+        swRules: 'العجلة أداة صغيرة للسهرات وليست لعبة: لا قواعد لها ولا تفرض شيئًا. اكتب الأسماء وأدِرها لتختار واحدًا عشوائيًا، مثلًا لمعرفة على من الدور. اضغط «جولة جديدة» في كل جولة واكتب نقاط كل لاعب؛ المجموع بجانب الاسم. اضغط على اسم لتعدّله أو تحذفه.',
+        swKSpace: 'أدِر العجلة',
+        swTutTitle1: 'الأسماء والتدوير', swTutText1: 'اكتب أسماء كل اللاعبين وأدِر العجلة لتختار واحدًا عشوائيًا.',
+        swTutTitle2: 'النقاط', swTutText2: 'اضغط «جولة جديدة» في كل جولة واكتب النقاط. المجموع يُحسب وحده.'
+      },
+      hi: {
+        swSpin: 'घुमाएँ', swTurn: '{name} की बारी', swNeedTwo: 'पहिया घुमाने के लिए कम से कम दो नाम लिखें.', swPlayer: 'खिलाड़ी', swAddPlayer: 'नाम जोड़ें',
+        swAddRound: 'नया दौर', swTotal: 'जोड़', swName: 'नाम', swRemove: 'हटाएँ', swEditName: 'नाम बदलें', swFull: '{n} से ज़्यादा नामों की जगह नहीं है.',
+        swWheel: 'नामों का पहिया', swScoreFor: '{name}, दौर {n}', swClear: 'अंक मिटाएँ', swClearQ: 'सभी दौरों के अंक मिटा दें? नाम बने रहेंगे.',
+        swNoRounds: 'अंक लिखने के लिए “नया दौर” दबाएँ.',
+        swRules: 'पहिया महफ़िल का छोटा औज़ार है, खेल नहीं: इसके कोई नियम नहीं और यह कुछ थोपता नहीं. नाम लिखें और घुमाएँ ताकि कोई एक संयोग से चुना जाए, जैसे यह देखने के लिए कि बारी किसकी है. हर दौर के लिए “नया दौर” दबाएँ और सबके अंक लिखें; हर नाम के पास उसका जोड़ है. किसी नाम को बदलने या हटाने के लिए उसे दबाएँ.',
+        swKSpace: 'पहिया घुमाएँ',
+        swTutTitle1: 'नाम और घुमाना', swTutText1: 'सब खिलाड़ियों के नाम लिखें और पहिया घुमाकर किसी एक को संयोग से चुनें.',
+        swTutTitle2: 'अंक', swTutText2: 'हर दौर के लिए “नया दौर” दबाएँ और अंक लिखें. जोड़ अपने आप होता है.'
+      },
+      ru: {
+        swSpin: 'Крутить', swTurn: 'Ход: {name}', swNeedTwo: 'Впишите хотя бы два имени, чтобы крутить колесо.', swPlayer: 'Игрок', swAddPlayer: 'Добавить имя',
+        swAddRound: 'Новый раунд', swTotal: 'Итог', swName: 'Имя', swRemove: 'Удалить', swEditName: 'Изменить имя', swFull: 'Больше {n} имён не поместится.',
+        swWheel: 'Колесо имён', swScoreFor: '{name}, раунд {n}', swClear: 'Стереть очки', swClearQ: 'Стереть очки всех раундов? Имена останутся.',
+        swNoRounds: 'Нажмите «Новый раунд», чтобы записать очки.',
+        swRules: 'Колесо — маленький помощник для компании, а не игра: у него нет правил и оно ничего не навязывает. Впишите имена и крутите, чтобы выбрать одно случайно, например, чей ход. В каждом раунде нажмите «Новый раунд» и запишите очки каждого; итог стоит рядом с именем. Нажмите на имя, чтобы изменить или удалить его.',
+        swKSpace: 'Крутить колесо',
+        swTutTitle1: 'Имена и вращение', swTutText1: 'Впишите имена всех игроков и крутите колесо, чтобы случайно выбрать одного.',
+        swTutTitle2: 'Очки', swTutText2: 'В каждом раунде нажмите «Новый раунд» и запишите очки. Итог считается сам.'
+      },
+      zh: {
+        swSpin: '转动', swTurn: '轮到{name}', swNeedTwo: '至少写两个名字才能转动转盘。', swPlayer: '玩家', swAddPlayer: '添加名字',
+        swAddRound: '新一轮', swTotal: '总分', swName: '名字', swRemove: '删除', swEditName: '修改名字', swFull: '最多只能放{n}个名字。',
+        swWheel: '名字转盘', swScoreFor: '{name}，第{n}轮', swClear: '清除分数', swClearQ: '清除所有轮次的分数吗？名字会保留。',
+        swNoRounds: '点“新一轮”来记分。',
+        swRules: '转盘是聚会用的小工具，不是游戏：没有规则，也不强制任何事。写下名字并转动，随机选出一个人，比如看看轮到谁。每一轮点“新一轮”，写下每个人的分数；总分显示在名字旁边。点一个名字可以修改或删除它。',
+        swKSpace: '转动转盘',
+        swTutTitle1: '名字和转动', swTutText1: '写下所有玩家的名字，转动转盘随机选出一个人。',
+        swTutTitle2: '分数', swTutText2: '每一轮点“新一轮”并写下分数。总分会自动算好。'
+      },
+      de: {
+        swSpin: 'Drehen', swTurn: '{name} ist dran', swNeedTwo: 'Trag mindestens zwei Namen ein, um das Rad zu drehen.', swPlayer: 'Person', swAddPlayer: 'Name dazu',
+        swAddRound: 'Neue Runde', swTotal: 'Summe', swName: 'Name', swRemove: 'Entfernen', swEditName: 'Namen ändern', swFull: 'Mehr als {n} Namen passen nicht.',
+        swWheel: 'Namensrad', swScoreFor: '{name}, Runde {n}', swClear: 'Punkte löschen', swClearQ: 'Die Punkte aller Runden löschen? Die Namen bleiben.',
+        swNoRounds: 'Tipp auf „Neue Runde“, um Punkte zu notieren.',
+        swRules: 'Das Rad ist ein kleines Werkzeug für Spieleabende, kein Spiel: Es hat keine Regeln und erzwingt nichts. Trag die Namen ein und dreh, um einen zufällig auszulosen, etwa wer dran ist. Tipp in jeder Runde auf „Neue Runde“ und trag die Punkte ein; die Summe steht neben dem Namen. Tipp auf einen Namen, um ihn zu ändern oder zu entfernen.',
+        swKSpace: 'Rad drehen',
+        swTutTitle1: 'Namen und Drehen', swTutText1: 'Trag die Namen aller Mitspielenden ein und dreh das Rad, um einen auszulosen.',
+        swTutTitle2: 'Punkte', swTutText2: 'Tipp in jeder Runde auf „Neue Runde“ und trag die Punkte ein. Die Summen rechnen sich selbst.'
+      },
+      es: {
+        swSpin: 'Girar', swTurn: 'Le toca a {name}', swNeedTwo: 'Escribe al menos dos nombres para girar la rueda.', swPlayer: 'Jugador', swAddPlayer: 'Añadir nombre',
+        swAddRound: 'Nueva ronda', swTotal: 'Total', swName: 'Nombre', swRemove: 'Quitar', swEditName: 'Editar nombre', swFull: 'No caben más de {n} nombres.',
+        swWheel: 'Rueda de nombres', swScoreFor: '{name}, ronda {n}', swClear: 'Borrar puntos', swClearQ: '¿Borrar los puntos de todas las rondas? Los nombres se quedan.',
+        swNoRounds: 'Toca «Nueva ronda» para anotar puntos.',
+        swRules: 'La rueda es una pequeña herramienta para reuniones, no un juego: no tiene reglas ni impone nada. Escribe los nombres y gírala para elegir uno al azar, por ejemplo a quién le toca. Toca «Nueva ronda» en cada ronda y anota los puntos de cada uno; el total está junto al nombre. Toca un nombre para cambiarlo o quitarlo.',
+        swKSpace: 'Girar la rueda',
+        swTutTitle1: 'Nombres y giro', swTutText1: 'Escribe los nombres de todos y gira la rueda para elegir uno al azar.',
+        swTutTitle2: 'Puntos', swTutText2: 'Toca «Nueva ronda» en cada ronda y anota los puntos. Los totales se suman solos.'
+      }
+    }
+  });
+
+  // No daily and nothing to finish: the sheet is kept as it is. The call keeps the core's
+  // daily-resume guard satisfied and ignores any stray save.
+  ctx.loadSave();
+  var raw = ctx.store.get('sheet', null);
+  // a first visit gets two numbered names to rename; a sheet the player emptied stays empty
+  var S = raw ? E.clean(raw) : E.fresh([C.t('swPlayer') + ' ' + C.num(1), C.t('swPlayer') + ' ' + C.num(2)]);
+  function save() { ctx.store.set('sheet', S); }
+
+  /* ------------------------------------------------------------ page */
+
+  var cv = el('canvas', { class: 'sw-canvas', role: 'button', tabindex: '0', 'aria-label': C.t('swWheel') });
+  var wheelBox = el('div', { class: 'sw-wheelbox' }, [cv]);
+  var spinBtn = el('button', { class: 'ch-btn ch-btn--primary', type: 'button' }, [C.icon('refresh', 18), el('span', { text: C.t('swSpin') })]);
+  var status = el('p', { class: 'sw-status', 'aria-live': 'polite' });
+  var wheelCol = el('div', { class: 'sw-wheelcol' }, [wheelBox, el('div', { class: 'sw-row' }, [spinBtn]), status]);
+  var tableWrap = el('div', { class: 'sw-tablewrap' });
+  var hint = el('p', { class: 'sw-hint ch-dim' });
+  var addNameBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button' }, [C.icon('plus', 18), el('span', { text: C.t('swAddPlayer') })]);
+  var addRoundBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button' }, [C.icon('plus', 18), el('span', { text: C.t('swAddRound') })]);
+  var clearBtn = el('button', { class: 'ch-btn ch-btn--soft ch-btn--icon', type: 'button', 'aria-label': C.t('swClear'), title: C.t('swClear') }, [C.icon('trash', 20)]);
+  var panel = el('div', { class: 'sw-panel' }, [tableWrap, hint, el('div', { class: 'sw-tools' }, [addNameBtn, addRoundBtn, clearBtn])]);
+  var wrap = el('div', { class: 'sw-wrap' }, [wheelCol, panel]);
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  var spin = null;          // { from, to, t0, ms, pick } while the wheel turns
+  var rot = S.rot;          // the angle drawn
+  var lastTick = -1, lastTickAt = 0;
+  var drawnSize = 0;
+
+  function colorOf(i, n) {
+    var c = i % SEG.length;
+    // with more names than colours, the last segment must not match the first beside it
+    if (n > SEG.length && i === n - 1 && c === 0) c = 6;
+    return SEG[c];
+  }
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return !!(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+  }
+
+  /* ----------------------------------------------------------- sizing */
+
+  function size() {
+    var w = wheelBox.clientWidth, h = wheelBox.clientHeight;
+    var d = Math.max(100, Math.floor(Math.min(w, h, 560)));
+    if (d !== drawnSize) {
+      drawnSize = d;
+      cv.style.width = d + 'px';
+      cv.style.height = d + 'px';
+    }
+    draw();
+  }
+
+  /* ---------------------------------------------------------- drawing */
+
+  function fitText(g, s, max) {
+    if (g.measureText(s).width <= max) return s;
+    var t = s;
+    while (t.length > 1 && g.measureText(t + '…').width > max) t = t.slice(0, -1);
+    return t + '…';
+  }
+  function draw() {
+    var d = drawnSize || 200, dpr = Math.min(3, window.devicePixelRatio || 1);
+    var px = Math.round(d * dpr);
+    if (cv.width !== px || cv.height !== px) { cv.width = px; cv.height = px; }
+    var g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, d, d);
+    var dk = dark(), n = S.players.length;
+    var cx = d / 2, cy = d / 2 + d * 0.03, R = d * 0.44;
+    var rim = dk ? '#3A3036' : '#5E4C55';
+    var font = getComputedStyle(document.body).fontFamily;
+    g.beginPath(); g.arc(cx, cy, R + Math.max(4, d * 0.02), 0, E.TAU); g.fillStyle = rim; g.fill();
+    var picked = !spin && S.last >= 0 ? S.players.map(function (p) { return p.id; }).indexOf(S.last) : -1;
+    if (n === 0) {
+      g.beginPath(); g.arc(cx, cy, R, 0, E.TAU); g.fillStyle = dk ? '#2A2428' : '#EDE6EA'; g.fill();
+    } else {
+      var s = E.TAU / n;
+      for (var i = 0; i < n; i++) {
+        var a0 = -Math.PI / 2 + rot + i * s;
+        g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, R, a0, a0 + s); g.closePath();
+        g.fillStyle = colorOf(i, n); g.fill();
+        // after a pick the other names step back, so the chosen one reads at a glance
+        if (picked >= 0 && i !== picked) { g.fillStyle = dk ? 'rgba(0,0,0,.45)' : 'rgba(255,255,255,.45)'; g.fill(); }
+        if (n > 1) { g.strokeStyle = 'rgba(255,255,255,.55)'; g.lineWidth = 1.5; g.stroke(); }
+        // the name along the middle of its segment, read from the rim inward
+        var mid = a0 + s / 2, fsz = Math.max(10, Math.min(d * 0.065, R * s * 0.42, 22));
+        g.save(); g.translate(cx, cy); g.rotate(mid);
+        g.font = '700 ' + fsz.toFixed(1) + 'px ' + font;
+        g.fillStyle = '#FFFFFF'; g.textBaseline = 'middle';
+        // turned text on the left half would read upside down, so it is flipped there
+        var flip = Math.cos(mid) < -0.0001;
+        var txt = fitText(g, S.players[i].name, R * 0.72);
+        if (flip) { g.rotate(Math.PI); g.textAlign = 'left'; g.fillText(txt, -R + R * 0.1, 0); }
+        else { g.textAlign = 'right'; g.fillText(txt, R - R * 0.1, 0); }
+        g.restore();
+      }
+    }
+    // the hub
+    g.beginPath(); g.arc(cx, cy, Math.max(8, R * 0.13), 0, E.TAU); g.fillStyle = dk ? '#E9E2E6' : '#FFFFFF'; g.fill();
+    g.lineWidth = Math.max(2, d * 0.008); g.strokeStyle = rim; g.stroke();
+    // the pointer at the top, over the rim
+    var pw = Math.max(10, d * 0.05), ph = Math.max(14, d * 0.075), top = cy - R - Math.max(4, d * 0.02) - ph * 0.35;
+    g.beginPath(); g.moveTo(cx - pw, top); g.lineTo(cx + pw, top); g.lineTo(cx, top + ph); g.closePath();
+    g.fillStyle = dk ? '#F2ECEF' : rim; g.fill();
+    g.lineWidth = 2; g.strokeStyle = dk ? rim : '#FFFFFF'; g.stroke();
+  }
+
+  /* --------------------------------------------------------- spinning */
+
+  function canSpin() { return !spin && S.players.length >= 2; }
+  function startSpin() {
+    if (spin) return;
+    if (S.players.length < 2) { showStatus(); C.ui.shake(spinBtn); C.feedback('bad'); return; }
+    var n = S.players.length, i = E.pick(Math.random, n);
+    var to = E.target(rot, n, i, Math.random);
+    spin = { from: rot, to: to, t0: performance.now(), ms: C.ui.reduceMotion() ? 700 : 4200 + Math.random() * 800, pick: S.players[i].id };
+    S.last = -1;
+    lastTick = E.indexAt(rot, n);
+    C.feedback('tap');
+    setBusy(true);
+    status.textContent = ' ';
+    requestAnimationFrame(frame);
+  }
+  function frame(now) {
+    if (!spin) return;
+    var t = Math.min(1, (now - spin.t0) / spin.ms);
+    rot = spin.from + (spin.to - spin.from) * E.ease(t);
+    var at = E.indexAt(rot, S.players.length);
+    if (at !== lastTick) {
+      lastTick = at;
+      // one click per segment passing the pointer, but never a buzz at full speed
+      if (now - lastTickAt > 55) { lastTickAt = now; C.audio.sfx('tick'); }
+    }
+    draw();
+    if (t < 1) requestAnimationFrame(frame);
+    else endSpin();
+  }
+  function endSpin() {
+    if (!spin) return;
+    rot = spin.to;
+    var n = S.players.length, id = S.players[E.indexAt(rot, n)].id;
+    spin = null;
+    rot = ((rot % E.TAU) + E.TAU) % E.TAU;
+    S.rot = rot;
+    S.last = id;
+    save();
+    setBusy(false);
+    draw();
+    showStatus();
+    C.feedback('good');
+  }
+  function setBusy(b) {
+    spinBtn.disabled = b;
+    addNameBtn.disabled = b;
+    Array.prototype.forEach.call(tableWrap.querySelectorAll('.sw-name'), function (x) { x.disabled = b; });
+  }
+  function showStatus() {
+    var p = null;
+    S.players.forEach(function (q) { if (q.id === S.last) p = q; });
+    if (S.players.length < 2) { status.className = 'sw-status sw-dim'; status.textContent = C.t('swNeedTwo'); }
+    else if (p) { status.className = 'sw-status'; status.textContent = C.t('swTurn', { name: p.name }); }
+    else { status.className = 'sw-status'; status.textContent = ' '; }
+  }
+
+  /* ------------------------------------------------------- score sheet */
+
+  function fmt(v) { return typeof v === 'number' ? C.num(v) : ''; }
+  // The sheet is rebuilt only when its shape changes (a name or a round added or removed).
+  // Typing a score writes that cell and the totals in place: a rebuild under a finger
+  // eats the tap (#750).
+  function buildSheet() {
+    var nR = S.rounds.length;
+    // the total sits next to the name, so on a phone it stays in view while the rounds scroll
+    var head = el('tr', {}, [el('th', { class: 'sw-namecell', scope: 'col', text: C.t('swName') }), el('th', { scope: 'col', text: C.t('swTotal') })]);
+    for (var r = 0; r < nR; r++) head.appendChild(el('th', { scope: 'col', text: C.num(r + 1) }));
+    var body = el('tbody');
+    S.players.forEach(function (p, i) {
+      var nameBtn = el('button', { class: 'sw-name', type: 'button', 'aria-label': C.t('swEditName') + ': ' + p.name },
+        [el('i', { style: { background: colorOf(i, S.players.length) } }), el('span', { text: p.name })]);
+      nameBtn.disabled = !!spin;
+      nameBtn.addEventListener('click', function () { editName(p.id); });
+      var tr = el('tr', {}, [el('th', { class: 'sw-namecell', scope: 'row' }, [nameBtn]), el('td', { class: 'sw-total', 'data-total': p.id })]);
+      for (var r = 0; r < nR; r++) {
+        var inp = el('input', { class: 'sw-cell', type: 'text', dir: 'ltr', inputmode: 'decimal', autocomplete: 'off', enterkeyhint: 'next',
+          'aria-label': C.t('swScoreFor', { name: p.name, n: C.num(r + 1) }), value: fmt(S.rounds[r][p.id]) });
+        inp.dataset.r = r; inp.dataset.id = p.id;
+        tr.appendChild(el('td', {}, [inp]));
+      }
+      body.appendChild(tr);
+    });
+    tableWrap.textContent = '';
+    tableWrap.hidden = !S.players.length;
+    tableWrap.appendChild(el('table', { class: 'sw-table' }, [el('thead', {}, [head]), body]));
+    hint.textContent = S.players.length && !nR ? C.t('swNoRounds') : '';
+    hint.hidden = !hint.textContent;
+    clearBtn.disabled = !nR;
+    addRoundBtn.disabled = !S.players.length || nR >= E.MAX_ROUNDS;
+    updateTotals();
+  }
+  function updateTotals() {
+    var t = E.totals(S), lead = E.leaders(S);
+    Array.prototype.forEach.call(tableWrap.querySelectorAll('[data-total]'), function (td) {
+      var id = +td.getAttribute('data-total');
+      td.textContent = '';
+      td.appendChild(el('span', { text: C.num(t[id]) }));
+      td.classList.toggle('sw-lead', lead.indexOf(id) >= 0);
+    });
+  }
+  tableWrap.addEventListener('input', function (e) {
+    var inp = e.target;
+    if (!inp.classList || !inp.classList.contains('sw-cell')) return;
+    var v = E.parseNum(inp.value);
+    if (v !== v) { inp.classList.add('sw-bad'); return; }   // NaN: leave the stored number until it reads as one
+    inp.classList.remove('sw-bad');
+    E.setScore(S, +inp.dataset.r, +inp.dataset.id, v);
+    save();
+    updateTotals();
+  });
+  tableWrap.addEventListener('change', function (e) {
+    var inp = e.target;
+    if (!inp.classList || !inp.classList.contains('sw-cell')) return;
+    var v = S.rounds[+inp.dataset.r] ? S.rounds[+inp.dataset.r][+inp.dataset.id] : undefined;
+    inp.value = fmt(v);
+    inp.classList.remove('sw-bad');
+  });
+  // Enter moves down the round's column, then on to the next round's first cell
+  tableWrap.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' || !e.target.classList || !e.target.classList.contains('sw-cell')) return;
+    e.preventDefault();
+    var cells = Array.prototype.slice.call(tableWrap.querySelectorAll('.sw-cell'));
+    var r = +e.target.dataset.r, id = +e.target.dataset.id;
+    var col = cells.filter(function (c) { return +c.dataset.r === r; });
+    var k = col.map(function (c) { return +c.dataset.id; }).indexOf(id);
+    var next = col[k + 1] || cells.filter(function (c) { return +c.dataset.r === r + 1; })[0];
+    if (next) next.focus(); else e.target.blur();
+  });
+
+  function nameDialog(title, value, onOk, extra) {
+    var input = el('input', { class: 'ch-field', type: 'text', maxlength: String(E.MAX_NAME), autocomplete: 'off', enterkeyhint: 'done', value: value || '',
+      'aria-label': C.t('swName') });
+    var m;
+    function ok() { var v = E.cleanName(input.value); if (!v) { C.ui.shake(input); return; } m.close(); onOk(v); }
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); ok(); } });
+    var actions = [{ label: C.t('cancel') }];
+    if (extra) actions.push(extra);
+    actions.push({ label: C.t('done'), kind: 'primary', keepOpen: true, onClick: ok });
+    m = C.ui.modal({ title: title, closeButton: true, body: [input], actions: actions });
+    setTimeout(function () { input.focus(); input.select(); }, 60);
+  }
+  function addName() {
+    if (spin) return;
+    if (S.players.length >= E.MAX_PLAYERS) { C.ui.toast({ title: C.t('swFull', { n: C.num(E.MAX_PLAYERS) }) }); return; }
+    nameDialog(C.t('swAddPlayer'), '', function (v) {
+      if (spin || !E.addPlayer(S, v)) return;
+      save(); buildSheet(); showStatus(); draw();
+    });
+  }
+  function editName(id) {
+    if (spin) return;
+    var p = null;
+    S.players.forEach(function (q) { if (q.id === id) p = q; });
+    if (!p) return;
+    nameDialog(C.t('swEditName'), p.name, function (v) {
+      if (spin) return;
+      E.renamePlayer(S, id, v); save(); buildSheet(); showStatus(); draw();
+    }, { label: C.t('swRemove'), kind: 'danger', onClick: function () {
+      if (spin) return;
+      E.removePlayer(S, id); save(); buildSheet(); showStatus(); draw();
+    } });
+  }
+  function newRound() {
+    if (!S.players.length || !E.addRound(S)) return;
+    save(); buildSheet();
+    var first = tableWrap.querySelector('.sw-cell[data-r="' + (S.rounds.length - 1) + '"]');
+    if (first) { first.scrollIntoView({ block: 'nearest', inline: 'nearest' }); first.focus({ preventScroll: true }); }
+  }
+  function clearAll() {
+    if (!S.rounds.length) return;
+    C.ui.confirm({ title: C.t('swClear'), body: C.t('swClearQ'), okLabel: C.t('swClear'), danger: true, onOk: function () {
+      E.clearScores(S); save(); buildSheet();
+    } });
+  }
+
+  spinBtn.addEventListener('click', startSpin);
+  cv.addEventListener('click', startSpin);
+  addNameBtn.addEventListener('click', addName);
+  addRoundBtn.addEventListener('click', newRound);
+  clearBtn.addEventListener('click', clearAll);
+  document.addEventListener('keydown', function (e) {
+    var t = e.target, tag = t && t.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || document.querySelector('.ch-scrim')) return;
+    // Space on a focused button presses that button; anywhere else it spins
+    if ((e.key === ' ' || e.code === 'Space') && tag !== 'BUTTON') { e.preventDefault(); startSpin(); }
+    else if (e.key === 'Enter' && t === cv) { e.preventDefault(); startSpin(); }
+  });
+
+  /* ------------------------------------------------------------ help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('swRules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('Space', C.t('swKSpace'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 110" width="100%"><rect width="200" height="110" rx="10" fill="#F2ECEF"/>';
+    if (kind === 1) {
+      var cols = ['#846C78', '#C2662D', '#3F7FA0', '#B4474F', '#5B8C46'], cx = 100, cy = 60, r = 40;
+      s += '<circle cx="100" cy="60" r="43" fill="#5E4C55"/>';
+      for (var i = 0; i < 5; i++) {
+        var a0 = -Math.PI / 2 + i * 2 * Math.PI / 5 + 0.2, a1 = a0 + 2 * Math.PI / 5;
+        s += '<path d="M' + cx + ' ' + cy + 'L' + (cx + r * Math.cos(a0)).toFixed(1) + ' ' + (cy + r * Math.sin(a0)).toFixed(1) + 'A' + r + ' ' + r + ' 0 0 1 ' +
+          (cx + r * Math.cos(a1)).toFixed(1) + ' ' + (cy + r * Math.sin(a1)).toFixed(1) + 'Z" fill="' + cols[i] + '"/>';
+      }
+      s += '<circle cx="100" cy="60" r="6" fill="#fff" stroke="#5E4C55" stroke-width="2"/><path d="M93 8h14l-7 12z" fill="#5E4C55"/>';
+    } else {
+      var rows = [['#846C78', '5', '3', '8'], ['#C2662D', '2', '6', '8'], ['#3F7FA0', '4', '7', '11']];
+      s += '<rect x="20" y="12" width="160" height="86" rx="8" fill="#fff"/>';
+      rows.forEach(function (row, k) {
+        var y = 34 + k * 26;
+        s += '<circle cx="38" cy="' + y + '" r="7" fill="' + row[0] + '"/>';
+        s += '<rect x="66" y="' + (y - 9) + '" width="30" height="18" rx="4" fill="#F2ECEF"/><rect x="104" y="' + (y - 9) + '" width="30" height="18" rx="4" fill="#F2ECEF"/>';
+        s += '<text x="81" y="' + (y + 5) + '" font-size="13" text-anchor="middle" fill="#3A3036">' + row[1] + '</text><text x="119" y="' + (y + 5) + '" font-size="13" text-anchor="middle" fill="#3A3036">' + row[2] + '</text>';
+        s += '<text x="160" y="' + (y + 5) + '" font-size="14" font-weight="700" text-anchor="middle" fill="' + (k === 2 ? ACCENT : '#3A3036') + '">' + row[3] + '</text>';
+      });
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('swTutTitle1'), text: C.t('swTutText1'), art: tArt(1) },
+    { title: C.t('swTutTitle2'), text: C.t('swTutText2'), art: tArt(2) }
+  ];
+
+  /* ----------------------------------------------------------- start */
+
+  // leaving mid-spin settles it at once, so coming back never shows a frozen half-turn
+  C.onPause(function () { if (spin) endSpin(); });
+  window.addEventListener('pageshow', function (e) { if (e.persisted) { size(); showStatus(); } });
+  if (window.ResizeObserver) new ResizeObserver(size).observe(wheelBox);
+  else window.addEventListener('resize', size);
+  // the web font arriving changes the names' widths
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(size);
+  var mq = window.matchMedia && matchMedia('(prefers-color-scheme: dark)');
+  if (mq && mq.addEventListener) mq.addEventListener('change', draw);
+
+  buildSheet();
+  showStatus();
+  size();
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
