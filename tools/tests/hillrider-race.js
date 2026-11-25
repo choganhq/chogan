@@ -18,10 +18,11 @@ module.exports = function (T) {
     ok(E.levelOf('nope') === 'medium' && E.levelOf(undefined) === 'medium', 'an unknown level is medium');
 
     // the solo run is unchanged: the steady driver on the same seed ends where it did before
-    // the race (recorded on staging at d2c79d6, 2026-11-12), and the daily course seeds too
+    // the race (recorded on staging at d2c79d6, 2026-11-12; recorded again on the harder
+    // start of #1180, 2026-11-25), and the daily course seeds too
     const solo = E.newGame(763, 0);
     for (let i = 0; i < 1200; i++) E.step(solo, E.botControl(solo));
-    ok(solo.x.toFixed(6) === '284.690788' && solo.fuel.toFixed(6) === '0.674747', 'a solo run drives exactly as before the race (' + solo.x.toFixed(6) + ' m, fuel ' + solo.fuel.toFixed(6) + ')');
+    ok(solo.x.toFixed(6) === '275.061013' && solo.fuel.toFixed(6) === '0.689697', 'a solo run drives exactly as before the race (' + solo.x.toFixed(6) + ' m, fuel ' + solo.fuel.toFixed(6) + ')');
     const daily = [0, 1, 2].map((k) => E.courseSeed((k * 104729 + 20261112) >>> 0, 1000));
     ok(JSON.stringify(daily) === '[20261112,20365841,20470570]', 'the daily course seeds are the same as before (' + daily.join(', ') + ')');
 

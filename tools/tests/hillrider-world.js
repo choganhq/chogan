@@ -37,7 +37,9 @@ module.exports = function (T) {
     ok(bad === 0 && minGap > 60, 'no bump on a slope over ' + E.BUMP_FLAT + ', within ' + E.BUMP_CAN + ' m of a can or in the first 40 m, and two are never closer than 60 m (' + bad + ' bad, closest ' + minGap + ' m)');
 
     // a jolt, not a wall: rolling over the first bump throws the wheel up and the run goes on
-    const J = E.newGame(806, 0), first = E.bumps(J, 0, 400)[0];
+    // (on seed 807: since the start got its hills (#1180), 806's car is in the air over its
+    // first rock, so no wheel meets it)
+    const J = E.newGame(807, 0), first = E.bumps(J, 0, 400)[0];
     let jolted = false, vyUp = 0, before = 0;
     for (let i = 0; i < 3000 && !J.over && J.x < first.x + 6; i++) {
       const v0 = J.wh[1].vy, ev = E.step(J, E.botControl(J));
