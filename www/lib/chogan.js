@@ -1455,6 +1455,21 @@
     pianoBusOf = AC;
     return pianoBus;
   }
+  // #1159: on Android, fast playing crackled and cut out. Each note ran three oscillators,
+  // three gains and its own filter, and held notes piled up past a hundred oscillators. A
+  // note is now one oscillator whose wave carries the partials, and only the newest few ring.
+  var PIANO_VOICES = 8;
+  var pianoRinging = [];
+  var pianoWave = null, pianoWaveOf = null;
+  function pianoTimbre() {
+    if (pianoWave && pianoWaveOf === AC) return pianoWave;
+    // sine amplitudes of harmonics 1-5: the old triangle, plus its 2nd at 0.6 and 3rd at
+    // 0.3 (strong upper partials, as a phone speaker hardly plays the low fundamentals)
+    var imag = new Float32Array([0, 0.81, 0.6, 0.21, 0, 0.032]);
+    pianoWave = AC.createPeriodicWave(new Float32Array(imag.length), imag, { disableNormalization: true });
+    pianoWaveOf = AC;
+    return pianoWave;
+  }
   audioApi.piano = function (freq) {
     if (!state.settings.sfx || !(freq > 0)) return null;
     // The first key is pressed before the document's unlock listener has run (the canvas
@@ -1470,7 +1485,7 @@
     // a second old, so a Nokia X20 needed full volume to hear it. It now strikes harder and
     // fades to a fifth of the strike over the note's life, and only then to silence.
     var peak = 0.5;
-    var env = AC.createGain(), rel = AC.createGain(), lp = AC.createBiquadFilter();
+    var env = AC.createGain(), rel = AC.createGain();
     env.gain.setValueAtTime(0.0001, t0);
     env.gain.exponentialRampToValueAtTime(peak, t0 + 0.006);
     env.gain.exponentialRampToValueAtTime(peak * 0.6, t0 + 0.3);
@@ -1483,34 +1498,37 @@
     // the release lives on its own gain so lifting a key never has to read back where the
     // decay had got to, which an AudioParam cannot report reliably
     rel.gain.setValueAtTime(1, t0);
-    lp.type = 'lowpass';
-    lp.frequency.setValueAtTime(Math.min(9000, freq * 7), t0);
-    // stronger upper partials: a phone speaker hardly plays the fundamental of the low keys
-    var parts = [[1, 'triangle', 1], [2, 'sine', 0.6], [3, 'sine', 0.3]];
-    var oscs = parts.map(function (p) {
-      var o = AC.createOscillator(), g = AC.createGain();
-      o.type = p[1];
-      o.frequency.setValueAtTime(freq * p[0], t0);
-      g.gain.setValueAtTime(p[2], t0);
-      o.connect(g); g.connect(lp);
-      o.start(t0);
-      o.stop(t0 + life + 0.85);
-      return o;
-    });
-    lp.connect(env); env.connect(rel); rel.connect(pianoOut());
+    var osc = AC.createOscillator();
+    osc.setPeriodicWave(pianoTimbre());
+    osc.frequency.setValueAtTime(freq, t0);
+    osc.start(t0);
+    osc.stop(t0 + life + 0.85);
+    osc.connect(env); env.connect(rel); rel.connect(pianoOut());
+    var ends = t0 + life + 0.85;
+    var voice = {
+      // fade this note over about 'tau' and stop it 'after' seconds from now
+      cut: function (tau, after) {
+        var t = now();
+        if (t + after >= ends) return;
+        ends = t + after;
+        try {
+          rel.gain.cancelScheduledValues(t);
+          rel.gain.setTargetAtTime(0.0001, t, tau);
+          osc.stop(ends);
+        } catch (e) { /* a note that already ended has nothing to release */ }
+      },
+      live: function () { return ends > now(); }
+    };
+    pianoRinging = pianoRinging.filter(function (x) { return x.live(); });
+    pianoRinging.push(voice);
+    while (pianoRinging.length > PIANO_VOICES) pianoRinging.shift().cut(0.008, 0.05);
     var done = false;
     return {
       freq: freq,
       stop: function () {
         if (done) return;
         done = true;
-        var t = now();
-        try {
-          rel.gain.cancelScheduledValues(t);
-          rel.gain.setValueAtTime(1, t);
-          rel.gain.setTargetAtTime(0.0001, t, 0.07);
-          oscs.forEach(function (o) { o.stop(t + 0.5); });
-        } catch (e) { /* a note that already ended has nothing to release */ }
+        voice.cut(0.06, 0.4);
       }
     };
   };
