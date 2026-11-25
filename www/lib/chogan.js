@@ -3292,6 +3292,18 @@
     return node;
   };
 
+  // "Back" with the tips or a dialog open left the game (#1158). Every open dialog is listed
+  // here, top last, with what "back" does to it (null: nothing, back works as before). The
+  // Android app asks Chogan.dismissTop() before its own back; browsers with CloseWatcher
+  // send the phone's back gesture, and Escape, to the same function.
+  var backStack = [];
+  Chogan.dismissTop = function () {
+    var top = backStack[backStack.length - 1];
+    if (!top || !top.run) return false;
+    top.run();
+    return true;
+  };
+
   ui.modal = function (o) {
     var scrim = el('div', { class: 'ch-scrim', role: 'dialog', 'aria-modal': 'true' });
     var box = el('div', { class: 'ch-modal' });
@@ -3311,9 +3323,13 @@
       list.forEach(function (b) { box.appendChild(typeof b === 'string' ? el('p', { class: 'ch-dim', text: b }) : b); });
     }
     var closed = false;
+    var watcher = null;
+    var entry = { run: o.onBack || ((o.dismissable !== false || o.closeButton) ? function () { close('escape'); } : null) };
     var close = function (via) {
       if (closed) return;
       closed = true;
+      backStack.splice(backStack.indexOf(entry), 1);
+      if (watcher) watcher.destroy();
       // پنجره ۱۱۰ میلی‌ثانیه محو می‌شود و تا وقتی در DOM است کلیک می‌گیرد.
       // بدون این، دو ضربه‌ی پشت سر هم روی «تأیید» دو بار سکه خرج می‌کرد.
       scrim.style.pointerEvents = 'none';
@@ -3342,7 +3358,9 @@
     }
     function onKey(e) {
       // ضربدر که باشد، Escape هم باید کار کند حتی وقتی کلیک بیرون بسته است
-      if (e.key === 'Escape' && (o.dismissable !== false || o.closeButton)) close('escape');
+      // preventDefault: otherwise the same Escape also reaches the next dialog's CloseWatcher
+      // only the top dialog takes it: one Escape used to close the whole pile, locked or not
+      if (e.key === 'Escape' && backStack[backStack.length - 1] === entry && (o.dismissable !== false || o.closeButton)) { e.preventDefault(); close('escape'); }
       // Tab walked out of the dialog onto the buttons of the page behind it (#335),
       // so it wraps around inside the topmost dialog instead
       if (e.key === 'Tab') {
@@ -3365,6 +3383,19 @@
     }
     scrim.appendChild(box);
     document.body.appendChild(scrim);
+    backStack.push(entry);
+    function watch() {
+      try {
+        watcher = new global.CloseWatcher();
+        watcher.onclose = function () {
+          // a locked dialog on top has no watcher, so the gesture lands here: do not close
+          // the hidden dialog underneath, and listen again (a used watcher is dead)
+          if (backStack[backStack.length - 1] !== entry) watch();
+          else entry.run();
+        };
+      } catch (e) { watcher = null; /* refused: the button still closes it */ }
+    }
+    if (entry.run && global.CloseWatcher) watch();
     // ضربدر اولین دکمه‌ی جعبه است ولی تمرکز باید روی خود کنش‌ها بنشیند
     // focusPrimary: the game-over dialog focused Share, so Enter shared instead
     // of playing again (#210). It is opt-in because a confirm's primary button
@@ -3723,7 +3754,9 @@
         { label: Chogan.t('skip'), keepOpen: true, onClick: function () { if (i > 0) go(-1); else done(); } },
         { label: Chogan.t('next'), kind: 'primary', keepOpen: true, onClick: function () { go(1); } }
       ],
-      dismissable: false
+      dismissable: false,
+      // back skips the tips, as the Skip button on the first card does
+      onBack: done
     });
     var btns = m.box.querySelectorAll('.ch-modal__actions .ch-btn');
     leftBtn = btns[0]; nextBtn = btns[1];
