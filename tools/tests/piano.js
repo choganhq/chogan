@@ -81,19 +81,20 @@ module.exports = function (T) {
     const node = (kind) => { const n = { kind, out: [], connect(x) { this.out.push(x); } }; log.push(n); return n; };
     const AC = {
       state: 'running', currentTime: 3,
-      createOscillator() { const o = node('osc'); o.frequency = param('f'); o.start = (t) => { o.started = t; }; o.stop = (t) => { o.stops = (o.stops || []).concat(t); }; return o; },
+      createOscillator() { const o = node('osc'); o.frequency = param('f'); o.start = (t) => { o.started = t; }; o.stop = (t) => { o.stops = (o.stops || []).concat(t); }; o.setPeriodicWave = (w) => { o.wave = w; }; return o; },
+      createPeriodicWave(real, imag) { return { imag }; },
       createGain() { const g = node('gain'); g.gain = param('g'); return g; },
       createBiquadFilter() { const f = node('filter'); f.frequency = param('f'); return f; },
       createDynamicsCompressor() { const c = node('comp'); ['threshold', 'knee', 'ratio', 'attack', 'release'].forEach((k) => { c[k] = param(k); }); return c; },
       resume() { this.resumed = true; }
     };
-    const sb = { state: { settings: { sfx: true } }, AC, sfxBus: { kind: 'bus' }, audioApi: {}, ensureAudio() {}, now() { return AC.currentTime; }, Math };
+    const sb = { state: { settings: { sfx: true } }, AC, sfxBus: { kind: 'bus' }, audioApi: {}, ensureAudio() {}, now() { return AC.currentTime; }, Math, Float32Array };
     vm.createContext(sb);
     vm.runInContext(core.slice(a, b), sb);
     const h = sb.audioApi.piano(E.freq(57));
     const oscs = log.filter((n) => n.kind === 'osc');
-    const fs0 = oscs.map((o) => o.frequency.sets[0][1]);
-    ok(!!h && oscs.length === 3 && Math.abs(fs0[0] - 220) < 1e-9 && Math.abs(fs0[1] - 440) < 1e-9 && Math.abs(fs0[2] - 660) < 1e-9 && oscs.every((o) => o.started === 3), 'A3 sounds at 220 Hz with partials at 440 and 660, started at once');
+    const w = oscs.length && oscs[0].wave ? Array.from(oscs[0].wave.imag) : [];
+    ok(!!h && oscs.length === 1 && Math.abs(oscs[0].frequency.sets[0][1] - 220) < 1e-9 && w[1] > 0 && w[2] > 0.5 && w[3] > 0.1 && oscs[0].started === 3, 'A3 is one oscillator at 220 Hz carrying the upper partials, started at once');
     const toBus = (n) => n.out.includes(sb.sfxBus) || n.out.some((x) => x.kind === 'comp' && x.out.includes(sb.sfxBus));
     const rel = log.filter((n) => n.kind === 'gain' && toBus(n));
     ok(rel.length === 1, 'the note goes out through the sound-effects bus, so the sound setting governs it');
@@ -114,8 +115,9 @@ module.exports = function (T) {
       AC.currentTime = 10;
       sb.audioApi.piano(freq);
       const mine = log.slice(start);
-      const lp = mine.find((n) => n.kind === 'filter'), env = lp && lp.out[0];
-      const sum = mine.filter((n) => n.kind === 'osc').reduce((s, o) => s + o.out[0].gain.sets[0][1], 0);
+      const osc = mine.find((n) => n.kind === 'osc'), env = osc && osc.out[0];
+      // the wave's amplitudes are the partials' gains (unnormalised)
+      const sum = osc && osc.wave ? osc.wave.imag.reduce((s, x) => s + x, 0) : 0;
       if (!env || !env.gain) return 0;
       const pts = env.gain.sets.filter((s) => s[0] === 'set' || s[0] === 'exp');
       const t = 10 + at;
@@ -137,7 +139,7 @@ module.exports = function (T) {
       const start = log.length;
       AC.currentTime = 20;
       sb.audioApi.piano(220);
-      const mine = log.slice(start), lp = mine.find((n) => n.kind === 'filter'), env = lp && lp.out[0];
+      const mine = log.slice(start), env = mine.find((n) => n.kind === 'osc').out[0];
       const pts = env.gain.sets.filter((s) => s[0] === 'set' || s[0] === 'exp');
       const seg = [];
       for (let i = 2; i < pts.length; i++) seg.push({ db: 20 * Math.log10(pts[i - 1][1] / pts[i][1]), dt: pts[i][2] - pts[i - 1][2] });
@@ -145,9 +147,37 @@ module.exports = function (T) {
       ok(seg.every((x) => x.db / x.dt <= 100), 'and no stage drops faster than 100 dB a second (' + seg.map((x) => (x.db / x.dt).toFixed(0)).join(', ') + ')');
       ok(seg[seg.length - 1].dt >= 0.5, 'the last stage to silence is a fade of at least half a second (' + seg[seg.length - 1].dt.toFixed(2) + ' s)');
     }
+    {
+      // #1159: only ten ring. A fast run must not silence a key that is still held down.
+      const strike = () => {
+        const start = log.length;
+        const handle = sb.audioApi.piano(220);
+        return { handle, osc: log.slice(start).find((n) => n.kind === 'osc') };
+      };
+      const dropped = (v) => v.osc.stops[v.osc.stops.length - 1] <= AC.currentTime + 0.06;
+      AC.currentTime = 100;
+      const held = strike();
+      for (let i = 0; i < 30; i++) { AC.currentTime += 0.04; strike().handle.stop(); }
+      ok(!dropped(held) && held.osc.stops.length === 1, 'a held note survives a fast run of thirty others');
+      held.handle.stop();
+      AC.currentTime = 200;
+      const chord = [];
+      for (let i = 0; i < 10; i++) chord.push(strike());
+      ok(chord.every((v) => v.osc.stops.length === 1), 'a ten-finger chord keeps all its notes');
+      const eleventh = strike();
+      ok(dropped(chord[0]) && chord.slice(1).every((v) => v.osc.stops.length === 1) && eleventh.osc.stops.length === 1, 'with every key down, the oldest one gives way');
+    }
     ok(E.TALL >= 7, 'a white key may be up to 7 key widths tall (' + E.TALL + ')');
     const comp = log.filter((n) => n.kind === 'comp');
     ok(comp.length === 1 && comp[0].out.includes(sb.sfxBus) && log.filter((n) => n.kind === 'gain' && n.out.includes(comp[0])).length >= 3, 'every note goes through one shared compressor, so a loud chord does not clip');
+    // #1159: fast playing crackled on Android; held notes piled up without limit
+    {
+      AC.currentTime = 100;
+      const start = log.length;
+      for (let i = 0; i < 30; i++) { AC.currentTime = 100 + i * 0.06; sb.audioApi.piano(220 + i); }
+      const ringing = log.slice(start).filter((n) => n.kind === 'osc' && n.stops[n.stops.length - 1] > 100 + 30 * 0.06 + 0.05);
+      ok(ringing.length === 10, 'thirty fast held notes leave only the newest ten ringing (' + ringing.length + ')');
+    }
     ok(/C\.audio\.piano\(E\.freq\(m\)\)/.test(html) && !/\.(mp3|ogg|wav)\b/.test(html) && !/^\s*mood:/m.test(html), 'the page plays the synthesized voice, no audio files and no background music');
 
     // the page and its listing
