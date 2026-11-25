@@ -14,8 +14,8 @@ module.exports = function (T) {
     ok(E.WAVES === 8 && E.LIVES === 5 && JSON.stringify(E.LEVELS) === '["easy","medium","hard"]', 'eight waves, five flowers, three speeds');
 
     // keyboards and word lists: every word typable on its own keyboard, 3 to 9 letters
-    const ALPHAS = ['fa', 'en', 'de', 'es', 'pl', 'fr', 'ru', 'ar'];
-    ok(JSON.stringify(Object.keys(E.KB).sort()) === JSON.stringify(ALPHAS.slice().sort()), 'a keyboard for each of the eight alphabets');
+    const ALPHAS = ['fa', 'en', 'de', 'es', 'pl', 'fr', 'ru', 'ar', 'pt'];
+    ok(JSON.stringify(Object.keys(E.KB).sort()) === JSON.stringify(ALPHAS.slice().sort()), 'a keyboard for each of the nine alphabets');
     ok(E.alpha('zh') === 'en' && E.alpha('hi') === 'en' && E.alpha('xx') === 'en', 'Chinese and Hindi (and anything unknown) play the English words');
     const listBad = [];
     for (const a of ALPHAS) {
@@ -37,7 +37,7 @@ module.exports = function (T) {
     ok(['fa', 'ru'].every((a) => E.KB[a].every((row, r) => row.length === E.CODES[r].length)) &&
       E.KB.ar[0].length === E.CODES[0].length && E.KB.ar[1].length === E.CODES[1].length && E.KB.ar[2].length === E.CODES3.ar.length,
       'the Persian, Russian and Arabic rows match their physical key positions one for one');
-    ok(E.fold('fa', 'ي') === 'ی' && E.fold('fa', 'ك') === 'ک' && E.fold('ru', 'ё') === 'е' && E.fold('pl', 'ł') === 'l' && E.fold('en', 'Q') === 'q' && E.foldWord('fr', 'été') === 'ete',
+    ok(E.fold('fa', 'ي') === 'ی' && E.fold('fa', 'ك') === 'ک' && E.fold('ru', 'ё') === 'е' && E.fold('pl', 'ł') === 'l' && E.fold('en', 'Q') === 'q' && E.foldWord('fr', 'été') === 'ete' && E.foldWord('pt', 'avião') === 'aviao' && E.fold('pt', 'ç') === 'ç',
       'Arabic yeh and kaf type as the Persian keys, accents as their plain letter, capitals as small');
 
     // engine rules on a fixed run

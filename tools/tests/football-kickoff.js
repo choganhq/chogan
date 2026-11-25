@@ -1,6 +1,6 @@
 'use strict';
 module.exports = function (T) {
-  const { ok, head, fs, path, vm, ROOT } = T;
+  const { ok, head, fs, path, vm, ROOT, LOCALE_CODES } = T;
   // A friend's report: from the kick-off line-up one flick at a good angle is a goal almost
   // every time, so a match ended after five flicks without a duel. The kick-off flick's goal
   // is now disallowed and the other team kicks off.
@@ -48,7 +48,7 @@ module.exports = function (T) {
     }
     ok(played === 9 && wasted <= 3, 'the bot rarely aims a kick-off flick into the goal (' + wasted + ' of ' + played + ')');
     // #939: a disallowed kick-off goal shows its own banner, in every language
-    ok((html.match(/fbNoGoalBanner: '/g) || []).length === 10 && /bannerKey = 'fbNoGoalBanner'/.test(html), 'a disallowed kick-off goal has a no-goal banner in all ten languages');
+    ok((html.match(/fbNoGoalBanner: '/g) || []).length === LOCALE_CODES.length && /bannerKey = 'fbNoGoalBanner'/.test(html), 'a disallowed kick-off goal has a no-goal banner in every language');
   }
   return { testFootballKickoff };
 };

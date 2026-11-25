@@ -1,7 +1,7 @@
 'use strict';
 module.exports = function (T) {
   const { ok, head, fs, path, vm, ROOT } = T;
-  const CODES = ['fa', 'en', 'zh', 'de', 'es', 'pl', 'fr', 'ar', 'hi', 'ru'];
+  const CODES = ['fa', 'en', 'zh', 'de', 'es', 'pl', 'fr', 'ar', 'hi', 'ru', 'pt'];
 
   // #1023: the Android apps showed no update row (it needs a service worker) and, in
   // Chogan Plus, the games' version instead of the app's own. The app now reports its
