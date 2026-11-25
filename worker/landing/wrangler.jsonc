@@ -3,10 +3,35 @@
 // playchogan.com/games/chess/ still open the app. The web app itself stays on
 // choganhq.github.io: players' progress lives in that origin's localStorage.
 // The Worker keeps its name `playchogan-redirect` so the two existing routes stay bound to it.
+//
+// It also serves the report form at /report/ (#757). This is the only config with this name:
+// a second one replaced the whole Worker on each deploy and took the form down (#1173).
+// Deployed by hand to the Hossein account; nothing in CI deploys it.
 {
   "name": "playchogan-redirect",
-  "main": "index.js",
-  "compatibility_date": "2026-10-20",
+  "main": "main.js",
+  "compatibility_date": "2026-11-01",
+  "routes": [
+    { "pattern": "playchogan.com/*", "zone_name": "playchogan.com" },
+    { "pattern": "www.playchogan.com/*", "zone_name": "playchogan.com" }
+  ],
+  // Deletes inbox releases older than three days (the second deletion guarantee).
+  "triggers": { "crons": ["17 3 * * *"] },
+  // Per-address limit on starting a report. The binding counts per Cloudflare
+  // location and only over 10 or 60 seconds; the daily caps are counted from the
+  // inbox releases instead. namespace_id is any number unique to this account.
+  "ratelimits": [
+    { "name": "REPORT_LIMIT", "namespace_id": "7571", "simple": { "limit": 3, "period": 60 } }
+  ],
+  "vars": {
+    "INBOX_REPO": "choganhq/inbox",
+    "ISSUE_REPO": "choganhq/chogan",
+    "DAILY_CAP": "30",
+    "IP_DAILY_CAP": "5"
+  },
+  // Secret, set with `wrangler secret put GITHUB_TOKEN`: a fine-grained token,
+  // resource owner choganhq, repositories chogan and inbox only, with
+  // Issues: Read and write and Contents: Read and write (Metadata: Read is implied).
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",

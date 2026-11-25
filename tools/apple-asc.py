@@ -91,12 +91,53 @@ def unsign(outdir):
         show("delete " + kind, s, d)
 
 
+def testflight():
+    """Why a TestFlight link refuses testers. Read only. The Actions log of this repository is
+    public, so it prints states and which fields are filled, never the link or any contact."""
+    def get(path):
+        s, d = call("GET", path)
+        if s != 200:
+            show(path.split("?")[0], s, d)
+            sys.exit(1)
+        return d
+    apps = get("/v1/apps?filter[bundleId]=" + BUNDLE)["data"]
+    if not apps:
+        print("no app record for", BUNDLE)
+        sys.exit(1)
+    app = apps[0]["id"]
+    d = get("/v1/builds?limit=10&sort=-uploadedDate&filter[app]=%s&include=buildBetaDetail,betaAppReviewSubmission" % app)
+    inc = {(i["type"], i["id"]): i["attributes"] for i in d.get("included", [])}
+    def rel(b, name, kind):
+        ref = (b["relationships"].get(name) or {}).get("data")
+        return inc.get((kind, ref["id"]), {}) if ref else {}
+    for b in d["data"]:
+        det = rel(b, "buildBetaDetail", "buildBetaDetails")
+        sub_ = rel(b, "betaAppReviewSubmission", "betaAppReviewSubmissions")
+        print("build", b["attributes"]["version"], b["attributes"]["processingState"],
+              "expired=%s" % b["attributes"].get("expired"),
+              "internal=%s external=%s" % (det.get("internalBuildState"), det.get("externalBuildState")),
+              "review=%s" % sub_.get("betaReviewState"))
+    for g in get("/v1/betaGroups?filter[app]=" + app)["data"]:
+        a = g["attributes"]
+        builds = get("/v1/betaGroups/%s/builds?limit=20" % g["id"])["data"]
+        print("group internal=%s publicLinkEnabled=%s limitEnabled=%s limit=%s builds=%s" % (
+            a.get("isInternalGroup"), a.get("publicLinkEnabled"), a.get("publicLinkLimitEnabled"),
+            a.get("publicLinkLimit"), [b["attributes"]["version"] for b in builds]))
+    detail = get("/v1/apps/%s/betaAppReviewDetail" % app)["data"]["attributes"]
+    print("review contact filled:", sorted(k for k, v in detail.items() if v not in (None, "")))
+    for loc in get("/v1/apps/%s/betaAppLocalizations" % app)["data"]:
+        a = loc["attributes"]
+        print("test info", a.get("locale"), "filled:", sorted(k for k, v in a.items() if v not in (None, "")))
+
+
 def main():
     if len(sys.argv) > 2 and sys.argv[1] == "sign":
         return sign(sys.argv[2])
     if len(sys.argv) > 2 and sys.argv[1] == "unsign":
         return unsign(sys.argv[2])
     mode = sys.argv[1] if len(sys.argv) > 1 else "check"
+    if mode == "testflight":
+        return testflight()
     s, d = call("GET", "/v1/apps?limit=200")
     show("apps", s, d)
     if s != 200:

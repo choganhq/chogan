@@ -332,8 +332,9 @@ module.exports = function (T) {
     ok(tableAt > 0 && en.split(',').length > 20, 'the page has a string table (' + en.split(',').length + ' English keys)');
     for (const code of ['fa', 'zh', 'de', 'es', 'pl']) ok(keysOf(code) === en, 'the form has every string in ' + code);
 
-    const cfg = read('worker/report/wrangler.jsonc');
-    ok(/"name": "playchogan-redirect"/.test(cfg), 'the Worker keeps the old name, so a deploy replaces the redirect');
+    // the config is the landing Worker's: one Worker serves both (#1173)
+    const cfg = read('worker/landing/wrangler.jsonc');
+    ok(/"name": "playchogan-redirect"/.test(cfg), 'the Worker keeps the old name, so a deploy replaces it in place');
     ok(/"playchogan\.com\/\*"/.test(cfg) && /"www\.playchogan\.com\/\*"/.test(cfg), 'same routes as the redirect');
     ok(/"crons": \["[^"]+"\]/.test(cfg) && /"REPORT_LIMIT"/.test(cfg), 'a daily cron and the rate limit binding');
     ok(!/kv_namespaces|d1_databases|r2_buckets|durable_objects/.test(cfg), 'no KV, D1, R2 or Durable Objects');

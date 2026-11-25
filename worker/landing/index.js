@@ -57,8 +57,27 @@ async function route(request, env) {
   return redirect(APP + p + url.search);
 }
 
-export default {
+const landing = {
   async fetch(request, env) {
     return finish(await route(request, env), new URL(request.url).pathname);
   },
 };
+
+export default landing;
+
+// One Worker serves both the landing page and the report form (#1173): they were two projects
+// under one Worker name, so deploying the landing page on 2026-11-22 silently removed the form
+// and its daily cleanup. The report module is passed in because its page is an .html import
+// that only the bundler understands.
+export function withReport(report) {
+  return {
+    fetch(request, env, ctx) {
+      const p = new URL(request.url).pathname;
+      if (p === '/report' || p.startsWith('/report/')) return report.fetch(request, env, ctx);
+      return landing.fetch(request, env);
+    },
+    scheduled(event, env, ctx) {
+      return report.scheduled(event, env, ctx);
+    },
+  };
+}

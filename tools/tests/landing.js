@@ -21,6 +21,32 @@ module.exports = function (T) {
     const get = (p, host) => mod.default.fetch(new Request('https://' + (host || 'playchogan.com') + p), env);
     const loc = (r) => r.headers.get('Location');
 
+    // --- the report form lives in the same Worker (#1173)
+    const named = fs.readdirSync(path.join(ROOT, 'worker')).map((d) => path.join(ROOT, 'worker', d, 'wrangler.jsonc'))
+      .filter((f) => fs.existsSync(f) && /"name": "playchogan-redirect"/.test(fs.readFileSync(f, 'utf8')));
+    ok(named.length === 1, 'exactly one wrangler config deploys playchogan-redirect (' + named.length + ')');
+    ok(/"main": "main\.js"/.test(fs.readFileSync(path.join(dir, 'wrangler.jsonc'), 'utf8')) &&
+      fs.existsSync(path.join(dir, 'main.js')) && /withReport\(report\)/.test(fs.readFileSync(path.join(dir, 'main.js'), 'utf8')),
+      'the deployed entry composes the landing page with the report form');
+    ok(typeof mod.withReport === 'function', 'the landing module can compose the report form');
+    if (typeof mod.withReport === 'function') {
+      const seen = [];
+      const both = mod.withReport({
+        fetch: async (req) => { seen.push(new URL(req.url).pathname); return new Response('report'); },
+        scheduled: async () => { seen.push('cron'); },
+      });
+      const via = (p) => both.fetch(new Request('https://playchogan.com' + p), env);
+      for (const p of ['/report', '/report/', '/report/api/start']) ok(await (await via(p)).text() === 'report', p + ' goes to the report form');
+      ok((await via('/reports')).status === 301, '/reports is not the form');
+      ok((await via('/')).status === 200, 'the root is still the landing page');
+      await both.scheduled({}, env, {});
+      ok(seen.includes('cron'), 'the daily cleanup reaches the report module');
+    }
+
+    // `wrangler dev` leaves state and request traces beside the config; `git add -A` took them once
+    const tracked = require('child_process').execFileSync('git', ['-C', ROOT, 'ls-files'], { encoding: 'utf8', maxBuffer: 1 << 26 }).split('\n');
+    ok(tracked.length > 100 && !tracked.some((f) => /(^|\/)\.wrangler\//.test(f)), 'no wrangler local state is tracked');
+
     // --- routes (#1039 item 1)
     let r = await get('/');
     let body = await r.text();
