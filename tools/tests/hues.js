@@ -195,6 +195,8 @@ module.exports = function (T) {
     ok(/ArrowRight/.test(html) && /Enter/.test(html) && /C\.keyIs\(e, 'd'\)/.test(html), 'the arrows pick a card, Enter plays it and D draws');
     ok(/cardSpeed: true/.test(html) && /C\.cards\.speedRow\(\)/.test(html) && /C\.ui\.reduceMotion\(\)/.test(html) && /C\.ui\.fly\(/.test(html),
       'the speed setting is the core\'s, and cards fly unless the system asks for less motion');
+    ok(/\[probe, top, bots, table, status, hand, actions, me\]/.test(html) && /function renderMe\(\)[\s\S]{0,400}M\.daily \? '' : ' · ' \+ C\.num\(M\.scores\[0\]\)/.test(html) && /function render\(\) \{\s+var R = M\.R;\s+renderMe\(\);/.test(html),
+      'the player\'s match score stands under the hand and is repainted with the table, except in the daily game (#1160)');
     const shapes = ['circle', 'triangle', 'square', 'diamond'];
     ok(shapes.every((s) => html.indexOf("shape: '" + s + "'") > 0), 'every colour has its own shape, so the cards read without colour');
     const sm = html.match(/strings: \{\n([\s\S]*?)\n {4}\}\n {2}\}\);/);
