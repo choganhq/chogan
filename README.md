@@ -28,7 +28,7 @@ Ways to play:
 
 Every game, with a line about each: [GAMES.md](GAMES.md#english).
 
-Around the games: search by name, pinned and recently played games and a row of new ones at the top of the menu, long-press shortcuts to games on the app icon, a daily challenge that is identical on every device with no server at all, a weekly offline league with five tiers, over 150 awards, a shared coin that is only ever spent on hints and cosmetics, stats and a profile, and a Persian, English, Simplified Chinese, German, Spanish, Polish, French, Arabic, Hindi and Russian interface with light and dark themes.
+Around the games: search by name, pinned and recently played games and a row of new ones at the top of the menu, long-press shortcuts to games on the app icon, a daily challenge that is identical on every device with no server at all, a weekly offline league with five tiers, over 150 awards, a shared coin that is only ever spent on hints and cosmetics, stats and a profile, and a Persian, English, Simplified Chinese, German, Spanish, Polish, French, Arabic, Hindi, Russian and Brazilian Portuguese interface with light and dark themes.
 
 ### Why Chogan
 
@@ -104,7 +104,7 @@ MIT, see [LICENSE](LICENSE). The Vazirmatn font, the Latin and Cyrillic subsets 
 
 همه‌ی بازی‌ها، هر کدام با یک خط توضیح: [GAMES.md](GAMES.md#فارسی).
 
-بیرون از بازی‌ها: جست‌وجوی بازی با نام، بازی‌های سنجاق‌شده، اخیراً بازی‌شده و ردیف بازی‌های تازه بالای منو، میان‌بر بازی‌ها با نگه داشتن آیکون اپ، چالش روزانه‌ی مشترک برای همه‌ی دستگاه‌ها بدون هیچ سروری، لیگ هفتگی آفلاین با پنج رده، بیش از ۱۵۰ دستاورد، سکه‌ی مشترک که فقط خرج راهنمایی و تزئینات می‌شود، آمار و پروفایل، و رابط فارسی، انگلیسی، چینی ساده‌شده، آلمانی، اسپانیایی، لهستانی، فرانسوی، عربی، هندی و روسی با تم روشن و تاریک.
+بیرون از بازی‌ها: جست‌وجوی بازی با نام، بازی‌های سنجاق‌شده، اخیراً بازی‌شده و ردیف بازی‌های تازه بالای منو، میان‌بر بازی‌ها با نگه داشتن آیکون اپ، چالش روزانه‌ی مشترک برای همه‌ی دستگاه‌ها بدون هیچ سروری، لیگ هفتگی آفلاین با پنج رده، بیش از ۱۵۰ دستاورد، سکه‌ی مشترک که فقط خرج راهنمایی و تزئینات می‌شود، آمار و پروفایل، و رابط فارسی، انگلیسی، چینی ساده‌شده، آلمانی، اسپانیایی، لهستانی، فرانسوی، عربی، هندی، روسی و پرتغالی برزیل با تم روشن و تاریک.
 
 ### چرا چوگان
 
