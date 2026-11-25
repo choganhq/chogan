@@ -10,13 +10,23 @@
 <script src="../../lib/early.js"></script>
 <style>
   /* cards grow with the game area (#359) */
-  .hu-wrap { --cw: clamp(44px, min(14cqw, (100cqh - 330px) / 2.6), 104px); margin-block: auto; width: 100%; max-width: max(560px, calc(var(--cw) * 8)); display: flex; flex-direction: column; align-items: center; gap: var(--s-3); }
+  .hu-wrap { --cw: clamp(44px, min(14cqw, (100cqh - 390px) / 2.6), 104px); margin-block: auto; width: 100%; max-width: max(560px, calc(var(--cw) * 8)); display: flex; flex-direction: column; align-items: center; gap: var(--s-3); }
+  /* no room for one more row (a short phone): your box shares the buttons' row, so it does not end up below the fold */
+  @container game (max-height: 600px) {
+    .hu-wrap .hu-foot { flex-direction: row; flex-wrap: wrap; justify-content: center; align-items: center; }
+    .hu-wrap .hu-me { min-width: 0; padding: 2px var(--s-3); gap: 0; }
+  }
   /* a phone on its side left the hand below the fold (844x390): the table goes left, the hand right */
   @container game (min-aspect-ratio: 4 / 3) and (max-height: 560px) {
     .hu-wrap { --cw: clamp(44px, min(8.5cqw, (100cqh - 200px) / 1.5), 96px); max-width: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
-      grid-template-areas: 'top hand' 'bots hand' 'table hand' 'status hand' 'acts hand'; align-items: center; justify-items: center; column-gap: var(--s-4); row-gap: var(--s-2); }
+      grid-template-areas: 'top hand' 'bots hand' 'table hand' 'status me' 'acts me'; align-items: center; justify-items: center; column-gap: var(--s-4); row-gap: var(--s-2); }
     .hu-top { grid-area: top; } .hu-bots { grid-area: bots; } .hu-table { grid-area: table; margin-bottom: 20px; } .hu-status { grid-area: status; }
-    .hu-actions { grid-area: acts; } .hu-hand { grid-area: hand; align-self: center; }
+    .hu-actions { grid-area: acts; } .hu-me { grid-area: me; } .hu-hand { grid-area: hand; align-self: center; }
+    /* the left column ran past the foot of the screen and cut the status line */
+    .hu-bots .hu-bot { gap: 0; padding-block: 2px; } .hu-fan { height: 20px; } .hu-status { line-height: 1.3; }
+    /* on its side the left column is full, so your box goes under the hand, in the free column */
+    .hu-wrap .hu-foot { display: contents; }
+    .hu-wrap .hu-me { flex-direction: row; gap: var(--s-3); padding-block: 4px; }
   }
   .hu-probe { position: absolute; width: var(--cw); height: 0; visibility: hidden; pointer-events: none; }
   .hu-top { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; align-items: center; }
@@ -24,6 +34,8 @@
   .hu-bot { flex: 1; max-width: 200px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 8px;
     background: var(--c-surface); border-radius: var(--r-md); box-shadow: var(--sh-1); border: 2px solid transparent; font-size: var(--fs-sm); font-weight: 700; color: var(--c-text-dim); }
   .hu-bot--on { border-color: var(--game); }
+  /* the player's own box under the hand: the match score was only visible between rounds (#1160) */
+  .hu-me { flex: 0 0 auto; min-width: 140px; padding-inline: var(--s-4); }
   .hu-fan { direction: ltr; display: flex; height: 26px; align-items: center; }
   .hu-fan .ch-pback { width: 16px; border-width: 1px; border-radius: 3px; margin-inline-start: -10px; box-shadow: none; }
   .hu-fan .ch-pback:first-child { margin-inline-start: 0; }
@@ -60,6 +72,7 @@
   .hu-hand .hu-no { cursor: default; }
   .hu-hand .hu-no::after { content: ''; position: absolute; top: 0; right: 0; bottom: 0; left: 0; border-radius: inherit; background: rgba(20, 16, 28, .34); pointer-events: none; }
   .hu-hand .hu-kf { outline: 3px solid var(--game); outline-offset: 2px; }
+  .hu-foot { display: flex; flex-direction: column; align-items: center; gap: var(--s-3); }
   .hu-actions { display: flex; gap: var(--s-2); justify-content: center; min-height: 44px; }
   .hu-pick { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--s-2); }
   .hu-pick button { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 64px; border: 0; border-radius: var(--r-md); font: inherit; font-weight: 800; font-size: var(--fs-md, 17px); cursor: pointer; }
@@ -311,7 +324,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HuesEngine
         tutTitle3: 'همه‌رنگ', tutText3: 'همه‌رنگ روی هر کارتی می‌نشیند و رنگ بعدی را تو انتخاب می‌کنی. هر کس زودتر دستش خالی شود امتیاز کارت‌های بقیه را می‌گیرد.'
       },
       en: {
-        youName: 'You', rivalN: 'Rival {n}', cardsN: '{n} cards', roundN: 'Round {n}', toN: 'To {n} points', dailyHu: 'Daily Hues',
+        youName: 'You', rivalN: 'Rival {n}', cardsN: 'Cards: {n}', roundN: 'Round {n}', toN: 'To {n} points', dailyHu: 'Daily Hues',
         yourTurn: 'Your turn: match the colour or the symbol, or play a wild', mustDraw: 'Nothing fits; draw from the deck', playDrawn: 'The new card fits; play it or pass',
         canPlayFirst: 'You have a card that fits', pickColour: 'Choose the next colour', colourNow: 'Colour', passTurn: 'Pass', thinking: '{n} is thinking…',
         drewN: '{n} drew a card', passedN: '{n} passed', changedN: '{n} chose {s}', skippedN: 'Skipped: {n}', reversed: 'The direction is reversed',
@@ -343,7 +356,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HuesEngine
         tutTitle3: 'Dzikie karty', tutText3: 'Dzika karta pasuje do wszystkiego i wybierasz następny kolor. Kto pierwszy pozbędzie się kart, dostaje punkty za karty innych.'
       },
       fr: {
-        youName: 'Toi', rivalN: 'Rival {n}', cardsN: '{n} cartes', roundN: 'Manche {n}', toN: 'En {n} points', dailyHu: 'Nuances du jour',
+        youName: 'Toi', rivalN: 'Rival {n}', cardsN: 'Cartes : {n}', roundN: 'Manche {n}', toN: 'En {n} points', dailyHu: 'Nuances du jour',
         yourTurn: 'À toi : même couleur ou même symbole, ou un joker', mustDraw: 'Rien ne va ; pioche', playDrawn: 'La nouvelle carte va ; joue-la ou passe',
         canPlayFirst: 'Tu as une carte qui va', pickColour: 'Choisis la couleur suivante', colourNow: 'Couleur', passTurn: 'Passer', thinking: '{n} réfléchit…',
         drewN: '{n} a pioché une carte', passedN: '{n} a passé', changedN: '{n} a choisi {s}', skippedN: 'Tour passé : {n}', reversed: 'Le sens du jeu s\'inverse',
@@ -439,7 +452,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HuesEngine
         tutTitle3: '万能牌', tutText3: '万能牌可以压任何牌，由你指定下一个颜色。先出完的人得到其他人手中牌的分数。'
       },
       de: {
-        youName: 'Du', rivalN: 'Gegner {n}', cardsN: '{n} Karten', roundN: 'Runde {n}', toN: 'Bis {n} Punkte', dailyHu: 'Tägliches Farbenspiel',
+        youName: 'Du', rivalN: 'Gegner {n}', cardsN: 'Karten: {n}', roundN: 'Runde {n}', toN: 'Bis {n} Punkte', dailyHu: 'Tägliches Farbenspiel',
         yourTurn: 'Du bist dran: gleiche Farbe oder gleiches Zeichen, oder ein Joker', mustDraw: 'Nichts passt; zieh vom Stapel', playDrawn: 'Die neue Karte passt; spiel sie oder pass',
         canPlayFirst: 'Du hast eine passende Karte', pickColour: 'Wähle die nächste Farbe', colourNow: 'Farbe', passTurn: 'Passen', thinking: 'Am Zug: {n}…',
         drewN: 'Karte gezogen: {n}', passedN: 'Gepasst: {n}', changedN: 'Neue Farbe {s} von {n}', skippedN: 'Ausgesetzt: {n}', reversed: 'Die Richtung wechselt',
@@ -455,7 +468,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HuesEngine
         tutTitle3: 'Joker', tutText3: 'Ein Joker geht auf alles, und du wählst die nächste Farbe. Wer zuerst fertig ist, bekommt die Punkte der Karten der anderen.'
       },
       es: {
-        youName: 'Tú', rivalN: 'Rival {n}', cardsN: '{n} cartas', roundN: 'Ronda {n}', toN: 'A {n} puntos', dailyHu: 'Matices diario',
+        youName: 'Tú', rivalN: 'Rival {n}', cardsN: 'Cartas: {n}', roundN: 'Ronda {n}', toN: 'A {n} puntos', dailyHu: 'Matices diario',
         yourTurn: 'Tu turno: mismo color o mismo símbolo, o un comodín', mustDraw: 'No tienes jugada; roba del mazo', playDrawn: 'La carta nueva sirve; juégala o pasa',
         canPlayFirst: 'Tienes una carta que sirve', pickColour: 'Elige el siguiente color', colourNow: 'Color', passTurn: 'Pasar', thinking: '{n} está pensando…',
         drewN: '{n} robó una carta', passedN: '{n} pasó', changedN: '{n} eligió {s}', skippedN: 'Turno perdido: {n}', reversed: 'Cambia el sentido',
@@ -502,8 +515,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HuesEngine
   var status = el('div', { class: 'hu-status', role: 'status', 'aria-live': 'polite' });
   var hand = el('div', { class: 'hu-hand' });
   var actions = el('div', { class: 'hu-actions' });
+  var me = el('div', { class: 'hu-bot hu-me' });
   var probe = el('div', { class: 'hu-probe', 'aria-hidden': 'true' });
-  var wrap = el('div', { class: 'hu-wrap' }, [probe, top, bots, table, status, hand, actions]);
+  var wrap = el('div', { class: 'hu-wrap' }, [probe, top, bots, table, status, hand, el('div', { class: 'hu-foot' }, [actions, me])]);
   stockBtn.addEventListener('click', function () { humanDraw(); });
 
   ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
@@ -645,8 +659,17 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HuesEngine
     }
   }
 
+  function renderMe() {
+    var k = M.R.hands[0].length;
+    me.className = 'hu-bot hu-me' + (human() ? ' hu-bot--on' : '');
+    me.innerHTML = '';
+    me.appendChild(el('span', { text: pname(0) }));
+    me.appendChild(el('span', { class: 'hu-count', text: C.t('cardsN', { n: C.num(k) }) + (M.daily ? '' : ' · ' + C.num(M.scores[0])) }));
+  }
+
   function render() {
     var R = M.R;
+    renderMe();
     renderTop();
     renderBots();
     stockBtn.innerHTML = '';

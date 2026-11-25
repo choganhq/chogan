@@ -9800,27 +9800,6 @@ function testCardEdgeDark() {
   ok(cr >= 3, 'a card edge stands out from its face at ' + cr.toFixed(2) + ':1 (3:1 is the bar for the edge of a control)');
 }
 
-// #488: the web app had long-press shortcuts to single games; the Android app had none
-function testAndroidShortcuts() {
-  head('Android: launcher shortcuts to games (#488)');
-  const A = (f) => fs.readFileSync(path.join(ROOT, 'android/app/src/main', f), 'utf8');
-  const xml = A('res/xml/shortcuts.xml'), man = A('AndroidManifest.xml'), act = A('java/io/github/choganhq/chogan/MainActivity.java');
-  const en = A('res/values/strings.xml'), fa = A('res/values-fa/strings.xml');
-  const ids = [...xml.matchAll(/android:shortcutId="([a-z0-9-]+)"/g)].map((m) => m[1]);
-  const pwa = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/manifest.webmanifest'), 'utf8')).shortcuts.map((x) => /games\/([a-z0-9-]+)\//.exec(x.url)[1]);
-  const games = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games;
-  ok(ids.length >= 1 && ids.length <= 4 && ids.join() === pwa.slice(0, ids.length).join(), 'the shortcuts are the first four of the web app\'s (' + ids.join(', ') + ')');
-  const each = ids.filter((id) => {
-    const r = id.replace(/-/g, '_'), g = games.find((x) => x.id === id);
-    return g && new RegExp('android:data="chogan://game/' + id + '"').test(xml) && fs.existsSync(path.join(ROOT, 'android/app/src/main/res/drawable-nodpi/shortcut_' + r + '.png')) &&
-      en.indexOf('<string name="shortcut_' + r + '">' + g.name.en.replace(/\u00ad/g, '') + '</string>') > 0 && fa.indexOf('<string name="shortcut_' + r + '">' + g.name.fa + '</string>') > 0;
-  });
-  ok(each.length === ids.length, 'each opens its game by id, with its own icon and its name in English and Persian (' + each.length + '/' + ids.length + ')');
-  ok(/<meta-data android:name="android\.app\.shortcuts" android:resource="@xml\/shortcuts" \/>/.test(man) && (man.match(/<uses-permission /g) || []).length === 1, 'the launcher activity declares them, and still only one permission');
-  ok(/openShortcut\(getIntent\(\)\);/.test(act) && /protected void onNewIntent\(Intent intent\) \{[\s\S]*?openShortcut\(intent\);/.test(act), 'a shortcut opens its game whether the app was closed or already open');
-  ok(/if \(id == null \|\| !id\.matches\("\[a-z0-9-\]\{1,32\}"\)\) return;/.test(act) && /getBridge\(\)\.getLocalUrl\(\) \+ "\/games\/" \+ id \+ "\/index\.html\?from=shortcut"/.test(act), 'only a plain game id is accepted, and only a page of the app itself is loaded');
-}
-
 // #519: Sudoku's box lines were only a wider gap in --c-line, which in the dark theme is
 // almost the cells' own colour, so a player could not find the 3x3 boxes; the lines and
 // the frame now have their own colour in the dark theme, checked here against the core's

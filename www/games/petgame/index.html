@@ -34,10 +34,11 @@ function PetEngineFactory() {
   var RESPAWN_S = 0.45;    // a popped critter is replaced this long after
   var HIT_K = 1.35;        // a poke counts this many radii from a critter's centre: small paws and fingers miss a lot
 
-  // Mixed play is a calm scene (owner, #1135): one mouse, squeaking now and then, and every few
-  // minutes a visitor (a bird, then a bug, then a light) comes in, stays a while and leaves.
+  // Mixed play is a calm scene (owner, #1135): one mouse first, squeaking now and then, and about
+  // once a minute another animal (a bird, then a bug, then a light) walks in and stays. A first
+  // visitor after 150 s that left again read as "only mice, nothing ever comes" (#1156).
   var VISITORS = ['butterfly', 'bug', 'light'];
-  var VISIT_FIRST_S = 150, VISIT_GAP_S = [120, 240], VISIT_STAY_S = [30, 55];
+  var VISIT_FIRST_S = 60, VISIT_GAP_S = [60, 70];
   // seconds between ambient sounds of a kind that is on the field; a light is silent
   var SOUND_GAP = { mouse: [4, 9], butterfly: [2.5, 6], bug: [5, 10] };
 
@@ -66,14 +67,16 @@ function PetEngineFactory() {
     c.tx = m + rnd() * Math.max(1, S.W - 2 * m);
     c.ty = m + rnd() * Math.max(1, S.H - 2 * m);
   }
-  function pickKind(S, rnd) { return S.mode === 'mixed' ? 'mouse' : S.mode; }
-  function residents(S) { return S.mode === 'mixed' ? 1 : wanted(S.W, S.H); }
+  function pickKind(S) { return S.mode === 'mixed' ? 'mouse' : S.mode; }
+  // in mixed play: the mouse and every animal that has arrived so far
+  function company(S) { return ['mouse'].concat(VISITORS.slice(0, S.visits)); }
+  function residents(S) { return S.mode === 'mixed' ? company(S).length : wanted(S.W, S.H); }
   function between(rnd, r) { return r[0] + rnd() * (r[1] - r[0]); }
 
   function spawn(S, rnd, kind) {
     var r = radius(S.W, S.H);
     var c = {
-      id: S.nextId++, kind: kind || pickKind(S, rnd), r: r,
+      id: S.nextId++, kind: kind || pickKind(S), r: r,
       x: r + rnd() * Math.max(1, S.W - 2 * r), y: r + rnd() * Math.max(1, S.H - 2 * r),
       a: rnd() * 2 * Math.PI, v: 0, tx: 0, ty: 0, wait: 0, phase: rnd() * 6.28, wob: rnd() * 6.28, age: 0,
       variant: Math.floor(rnd() * 3), turn: 0, turnT: 0
@@ -83,9 +86,14 @@ function PetEngineFactory() {
     return c;
   }
   function fill(S, rnd) {
-    var n = residents(S);
-    var have = S.critters.filter(function (c) { return !c.visitor; }).length;
-    while (have + S.queue.length < n) { spawn(S, rnd); have++; }
+    if (S.mode === 'mixed') {
+      // one of each kind that has arrived, counting those still on their way back
+      var has = function (list, kind) { return list.some(function (x) { return x.kind === kind; }); };
+      company(S).forEach(function (kind) { if (!has(S.critters, kind) && !has(S.queue, kind)) spawn(S, rnd, kind); });
+      return;
+    }
+    var have = S.critters.length;
+    while (have + S.queue.length < wanted(S.W, S.H)) { spawn(S, rnd); have++; }
   }
   function resize(S, W, H) {
     S.W = W; S.H = H;
@@ -101,11 +109,12 @@ function PetEngineFactory() {
   function setMode(S, mode, rnd) {
     S.mode = MODES.indexOf(mode) < 0 ? 'mixed' : mode;
     S.critters = []; S.queue = [];
+    S.visits = 0; S.nextVisit = S.time + VISIT_FIRST_S;
     fill(S, rnd);
   }
   function setSpeed(S, name) { S.speed = SPEEDS[name] || 1; }
 
-  // a visitor walks in from an edge, stays for a while and walks out again
+  // the next animal walks in from an edge, and stays
   function visit(S, rnd) {
     var kind = VISITORS[S.visits % VISITORS.length];
     S.visits++;
@@ -114,19 +123,13 @@ function PetEngineFactory() {
     else if (side === 1) { c.x = S.W + r; c.y = r + rnd() * (S.H - 2 * r); c.enterA = Math.PI; }
     else if (side === 2) { c.y = -r; c.x = r + rnd() * (S.W - 2 * r); c.enterA = Math.PI / 2; }
     else { c.y = S.H + r; c.x = r + rnd() * (S.W - 2 * r); c.enterA = -Math.PI / 2; }
-    c.a = c.enterA; c.visitor = true; c.entering = true; c.ttl = between(rnd, VISIT_STAY_S);
+    c.a = c.enterA; c.entering = true;
     return c;
   }
-  function leave(S, c) {
-    // the way out is the nearest edge
-    var d = [c.x, S.W - c.x, c.y, S.H - c.y], m = Math.min.apply(null, d), i = d.indexOf(m);
-    c.leaving = true; c.leaveA = [Math.PI, 0, -Math.PI / 2, Math.PI / 2][i];
-  }
-
   function step(S, dt, rnd) {
     S.time += dt;
     var U = unit(S.W, S.H), k = S.speed;
-    if (S.mode === 'mixed' && S.time >= S.nextVisit && !S.critters.some(function (c) { return c.visitor; })) {
+    if (S.mode === 'mixed' && S.time >= S.nextVisit && S.visits < VISITORS.length) {
       visit(S, rnd);
       S.nextVisit = S.time + between(rnd, VISIT_GAP_S);
     }
@@ -162,12 +165,7 @@ function PetEngineFactory() {
         c.v = Math.min(d * 5, 1.7 * U * k);
         c.phase += dt * 6;
       }
-      if (c.visitor) {
-        c.ttl -= dt;
-        if (c.ttl <= 0 && !c.leaving && !c.entering) leave(S, c);
-        if (c.entering) { c.a = c.enterA; c.v = Math.max(c.v, 0.2 * U * k); }
-        else if (c.leaving) { c.a = c.leaveA; c.v = Math.max(c.v, 0.2 * U * k); }
-      }
+      if (c.entering) { c.a = c.enterA; c.v = Math.max(c.v, 0.2 * U * k); }
       c.x += Math.cos(c.a) * c.v * dt;
       c.y += Math.sin(c.a) * c.v * dt;
       var m = c.r * 0.6;
@@ -175,29 +173,24 @@ function PetEngineFactory() {
         if (c.x >= m && c.x <= S.W - m && c.y >= m && c.y <= S.H - m) c.entering = false;
         return;
       }
-      if (c.leaving) return;
       if (c.x < m) { c.x = m; c.a = Math.PI - c.a; }
       if (c.x > S.W - m) { c.x = S.W - m; c.a = Math.PI - c.a; }
       if (c.y < m) { c.y = m; c.a = -c.a; }
       if (c.y > S.H - m) { c.y = S.H - m; c.a = -c.a; }
     });
-    // a visitor that has walked out is gone for good
-    for (var v = S.critters.length - 1; v >= 0; v--) {
-      var vc = S.critters[v];
-      if (vc.leaving && (vc.x < -vc.r || vc.x > S.W + vc.r || vc.y < -vc.r || vc.y > S.H + vc.r)) S.critters.splice(v, 1);
-    }
     // ambient sounds: each kind that is on the field makes its own small noise every few seconds
     // without being touched; the page plays what is queued here
     Object.keys(SOUND_GAP).forEach(function (kind) {
-      var here = S.critters.some(function (c) { return c.kind === kind && !c.entering && !c.leaving; });
+      var here = S.critters.some(function (c) { return c.kind === kind && !c.entering; });
       if (!here) { S.snd[kind] = Math.max(S.snd[kind], 0.8 + rnd() * 1.5); return; }
       S.snd[kind] -= dt;
       if (S.snd[kind] <= 0) { S.sounds.push(kind); S.snd[kind] = between(rnd, SOUND_GAP[kind]); }
     });
     // replacements arrive on their own, and a field that is short of critters is topped up
     for (var i = S.queue.length - 1; i >= 0; i--) {
-      S.queue[i] -= dt;
-      if (S.queue[i] <= 0) { S.queue.splice(i, 1); spawn(S, rnd); }
+      var w = S.queue[i];
+      w.t -= dt;
+      if (w.t <= 0) { S.queue.splice(i, 1); spawn(S, rnd, w.kind); }
     }
     fill(S, rnd);
     for (var j = S.bits.length - 1; j >= 0; j--) {
@@ -225,7 +218,7 @@ function PetEngineFactory() {
     if (i < 0) return false;
     S.critters.splice(i, 1);
     S.popped++;
-    if (!c.visitor) S.queue.push(RESPAWN_S);
+    S.queue.push({ t: RESPAWN_S, kind: c.kind });
     for (var n = 0; n < 14; n++) {
       var a = (n / 14) * 2 * Math.PI + rnd() * 0.4, sp = 120 + rnd() * 220;
       S.bits.push({ x: c.x, y: c.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 60, life: 0.45 + rnd() * 0.4, max: 0.85, size: 3 + rnd() * 4, kind: c.kind, variant: c.variant, tone: n % 3 });

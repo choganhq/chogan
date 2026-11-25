@@ -36,21 +36,41 @@ public class MainActivity extends BridgeActivity {
             getBridge().getWebView().addJavascriptInterface(bars, "ChoganBars");
             // Which build this is and where its store page is (#1023)
             getBridge().getWebView().addJavascriptInterface(new AppInfoBridge(this), "ChoganApp");
+            // The icon's long-press shortcuts follow the pinned games (#1150)
+            getBridge().getWebView().addJavascriptInterface(new ShortcutsBridge(this), "ChoganShortcuts");
         }
 
         openShortcut(getIntent());
 
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            // the page answers later: a second press meanwhile would find the tips already
+            // closed and leave the game
+            private boolean asking;
+
             @Override
             public void handleOnBackPressed() {
                 WebView webView = getBridge() != null ? getBridge().getWebView() : null;
-                if (webView != null && webView.canGoBack()) {
-                    webView.goBack();
-                } else {
-                    // آخرین صفحه: کالبک را خاموش می‌کنیم تا رفتار پیش‌فرض اجرا شود
-                    setEnabled(false);
-                    getOnBackPressedDispatcher().onBackPressed();
+                if (webView == null) {
+                    leave();
+                    return;
                 }
+                // An open dialog or the game's tips take the press instead of the page (#1158)
+                if (asking) return;
+                asking = true;
+                webView.evaluateJavascript("!!(window.Chogan && Chogan.dismissTop && Chogan.dismissTop())", closed -> {
+                    asking = false;
+                    if ("true".equals(closed)) return;
+                    if (webView.canGoBack()) webView.goBack();
+                    else leave();
+                });
+            }
+
+            private void leave() {
+                // آخرین صفحه: کالبک را خاموش می‌کنیم تا رفتار پیش‌فرض اجرا شود
+                setEnabled(false);
+                getOnBackPressedDispatcher().onBackPressed();
+                // a press that did not close the app must find the callback again
+                setEnabled(true);
             }
         });
     }
@@ -63,7 +83,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     /**
-     * A launcher shortcut (res/xml/shortcuts.xml) opens chogan://game/<id> (#488): load
+     * A launcher shortcut (ShortcutsBridge) opens chogan://game/<id> (#488): load
      * that game's page over the menu, so back still returns to the menu. The activity is
      * exported, so any app could send any data here: only a plain game id is accepted, and
      * only a page inside the app's own assets is ever loaded.
