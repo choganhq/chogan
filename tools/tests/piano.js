@@ -147,6 +147,26 @@ module.exports = function (T) {
       ok(seg.every((x) => x.db / x.dt <= 100), 'and no stage drops faster than 100 dB a second (' + seg.map((x) => (x.db / x.dt).toFixed(0)).join(', ') + ')');
       ok(seg[seg.length - 1].dt >= 0.5, 'the last stage to silence is a fade of at least half a second (' + seg[seg.length - 1].dt.toFixed(2) + ' s)');
     }
+    {
+      // #1159: only ten ring. A fast run must not silence a key that is still held down.
+      const strike = () => {
+        const start = log.length;
+        const handle = sb.audioApi.piano(220);
+        return { handle, osc: log.slice(start).find((n) => n.kind === 'osc') };
+      };
+      const dropped = (v) => v.osc.stops[v.osc.stops.length - 1] <= AC.currentTime + 0.06;
+      AC.currentTime = 100;
+      const held = strike();
+      for (let i = 0; i < 30; i++) { AC.currentTime += 0.04; strike().handle.stop(); }
+      ok(!dropped(held) && held.osc.stops.length === 1, 'a held note survives a fast run of thirty others');
+      held.handle.stop();
+      AC.currentTime = 200;
+      const chord = [];
+      for (let i = 0; i < 10; i++) chord.push(strike());
+      ok(chord.every((v) => v.osc.stops.length === 1), 'a ten-finger chord keeps all its notes');
+      const eleventh = strike();
+      ok(dropped(chord[0]) && chord.slice(1).every((v) => v.osc.stops.length === 1) && eleventh.osc.stops.length === 1, 'with every key down, the oldest one gives way');
+    }
     ok(E.TALL >= 7, 'a white key may be up to 7 key widths tall (' + E.TALL + ')');
     const comp = log.filter((n) => n.kind === 'comp');
     ok(comp.length === 1 && comp[0].out.includes(sb.sfxBus) && log.filter((n) => n.kind === 'gain' && n.out.includes(comp[0])).length >= 3, 'every note goes through one shared compressor, so a loud chord does not clip');
@@ -156,7 +176,7 @@ module.exports = function (T) {
       const start = log.length;
       for (let i = 0; i < 30; i++) { AC.currentTime = 100 + i * 0.06; sb.audioApi.piano(220 + i); }
       const ringing = log.slice(start).filter((n) => n.kind === 'osc' && n.stops[n.stops.length - 1] > 100 + 30 * 0.06 + 0.05);
-      ok(ringing.length === 8, 'thirty fast held notes leave only the newest eight ringing (' + ringing.length + ')');
+      ok(ringing.length === 10, 'thirty fast held notes leave only the newest ten ringing (' + ringing.length + ')');
     }
     ok(/C\.audio\.piano\(E\.freq\(m\)\)/.test(html) && !/\.(mp3|ogg|wav)\b/.test(html) && !/^\s*mood:/m.test(html), 'the page plays the synthesized voice, no audio files and no background music');
 

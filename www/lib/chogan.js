@@ -1457,8 +1457,10 @@
   }
   // #1159: on Android, fast playing crackled and cut out. Each note ran three oscillators,
   // three gains and its own filter, and held notes piled up past a hundred oscillators. A
-  // note is now one oscillator whose wave carries the partials, and only the newest few ring.
-  var PIANO_VOICES = 8;
+  // note is now one oscillator whose wave carries the partials, and only a few ring. Ten,
+  // one per finger; a note already let go is dropped before one whose key is still down,
+  // or a held bass note went silent under a fast run.
+  var PIANO_VOICES = 10;
   var pianoRinging = [];
   var pianoWave = null, pianoWaveOf = null;
   function pianoTimbre() {
@@ -1521,13 +1523,17 @@
     };
     pianoRinging = pianoRinging.filter(function (x) { return x.live(); });
     pianoRinging.push(voice);
-    while (pianoRinging.length > PIANO_VOICES) pianoRinging.shift().cut(0.008, 0.05);
+    while (pianoRinging.length > PIANO_VOICES) {
+      var let_go = pianoRinging.findIndex(function (x) { return x.released; });
+      pianoRinging.splice(Math.max(0, let_go), 1)[0].cut(0.008, 0.05);
+    }
     var done = false;
     return {
       freq: freq,
       stop: function () {
         if (done) return;
         done = true;
+        voice.released = true;
         voice.cut(0.06, 0.4);
       }
     };
