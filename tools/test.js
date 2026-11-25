@@ -8129,12 +8129,11 @@ function testShortcuts() {
   ok(sc.length === firstTen.length, 'ده بازی اول منو میان‌بر دارند (' + sc.length + ' از ' + firstTen.length + ')');
   const want = firstTen.map((g) => ({
     name: g.name.en,
-    name_localized: {
-      fa: { value: g.name.fa, lang: 'fa', dir: 'rtl' },
-      'zh-Hans': { value: g.name.zh, lang: 'zh-Hans', dir: 'ltr' },
-      de: { value: g.name.de, lang: 'de', dir: 'ltr' },
-      es: { value: g.name.es, lang: 'es', dir: 'ltr' }
-    },
+    // every language of the app, not the first four: the list had stayed at fa/zh/de/es
+    name_localized: Object.fromEntries(['fa', 'zh', 'de', 'es'].concat(LOCALE_CODES.filter((c) => !['en', 'fa', 'zh', 'de', 'es'].includes(c))).map((c) => {
+      const tag = { zh: 'zh-Hans', pt: 'pt-BR' }[c] || c;
+      return [tag, { value: g.name[c], lang: tag, dir: c === 'fa' || c === 'ar' ? 'rtl' : 'ltr' }];
+    })),
     url: g.path + '?from=shortcut',
     icons: [{ src: 'games/' + g.id + '/icon-192.png', sizes: '192x192', type: 'image/png' }]
   }));

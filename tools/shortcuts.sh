@@ -39,14 +39,13 @@ python3 -I - <<'PY'
 import json
 games = json.load(open('www/games.json', encoding='utf-8'))['games'][:10]
 path = 'www/manifest.webmanifest'
+# (games.json code, manifest language tag, direction); English is the plain `name`
+LANGS = [('fa', 'fa', 'rtl'), ('zh', 'zh-Hans', 'ltr'), ('de', 'de', 'ltr'), ('es', 'es', 'ltr'),
+         ('pl', 'pl', 'ltr'), ('fr', 'fr', 'ltr'), ('ar', 'ar', 'rtl'), ('hi', 'hi', 'ltr'),
+         ('ru', 'ru', 'ltr'), ('pt', 'pt-BR', 'ltr')]
 shortcuts = [{
     'name': g['name']['en'],
-    'name_localized': {
-        'fa': {'value': g['name']['fa'], 'lang': 'fa', 'dir': 'rtl'},
-        'zh-Hans': {'value': g['name']['zh'], 'lang': 'zh-Hans', 'dir': 'ltr'},
-        'de': {'value': g['name']['de'], 'lang': 'de', 'dir': 'ltr'},
-        'es': {'value': g['name']['es'], 'lang': 'es', 'dir': 'ltr'},
-    },
+    'name_localized': {tag: {'value': g['name'][code], 'lang': tag, 'dir': d} for code, tag, d in LANGS},
     # The game hides its back button when opened this way (#214)
     'url': g['path'] + '?from=shortcut',
     'icons': [{'src': 'games/%s/icon-192.png' % g['id'], 'sizes': '192x192', 'type': 'image/png'}],
