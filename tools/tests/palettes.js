@@ -216,6 +216,9 @@ module.exports = function (T) {
     ok(/colorSwatches\(/.test(block(idx, /function settingsCard\(\)[\s\S]*?\n  \}/)), 'the row sits in the settings card under the theme choice');
     const css = read('www/lib/chogan.css');
     ok(/\.ch-swatch \{[^}]*min-height: 44px/.test(css) && /\.ch-swatch \{[^}]*min-width: 44px/.test(css), 'a swatch is at least 44px each way');
+    // #1154: both rows are one strip that scrolls sideways, and start at the chosen tile
+    ok(/\.ch-swatches \{[^}]*display: flex[^}]*overflow-x: auto/.test(css), 'themes and backgrounds scroll sideways');
+    ok(/keepStrip\(row, 'colors'\)/.test(idx) && /keepStrip\(row, 'pattern'\)/.test(idx), 'both strips keep the chosen tile in sight');
   }
 
   return { testColorThemeContrast, testColorThemeApplied };

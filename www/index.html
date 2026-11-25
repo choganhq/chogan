@@ -1684,6 +1684,26 @@
     });
   }
 
+  // Choosing rebuilds the page, so each strip remembers where it was; the first time it
+  // is shown it starts at the chosen tile, which may be past the edge (#1154).
+  var stripAt = {};
+  function keepStrip(row, key) {
+    // a pending scroll event still fires after the rebuild, and a detached row reads 0
+    var save = function () { if (row.isConnected) stripAt[key] = row.scrollLeft; };
+    row.addEventListener('scroll', save, { passive: true });
+    // read the place at the tap too, before the choice rebuilds the page
+    row.addEventListener('click', save, true);
+    requestAnimationFrame(function () {
+      if (!row.isConnected) return;
+      if (key in stripAt) { row.scrollLeft = stripAt[key]; return; }
+      var on = row.querySelector('[aria-pressed="true"]');
+      if (!on) return;
+      var r = row.getBoundingClientRect(), b = on.getBoundingClientRect();
+      row.scrollLeft += (b.left + b.width / 2) - (r.left + r.width / 2);
+    });
+    return row;
+  }
+
   // The app's colour theme (#875). Each button carries data-colors, so chogan.css draws
   // it in that palette's own light or dark colours whatever the current one is. Keys are
   // literal so the string check in tools/test.js can see them.
@@ -1719,7 +1739,7 @@
         el('span', { class: 'ch-swatch__name', text: C.t(o.key) })
       ]));
     });
-    return row;
+    return keepStrip(row, 'pattern');
   }
 
   function colorSwatches(value) {
@@ -1743,7 +1763,7 @@
         el('span', { class: 'ch-swatch__name', text: C.t(o.key) })
       ]));
     });
-    return row;
+    return keepStrip(row, 'colors');
   }
 
   function settingsCard() {
