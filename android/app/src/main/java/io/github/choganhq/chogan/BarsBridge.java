@@ -49,6 +49,17 @@ public class BarsBridge {
         activity.runOnUiThread(this::applyImmersive);
     }
 
+    // Keeps the screen on while a game is open (#1137). The flag needs no permission and
+    // belongs to the window, so the menu page clears it again.
+    @JavascriptInterface
+    public void setKeepAwake(boolean on) {
+        activity.runOnUiThread(() -> {
+            Window w = activity.getWindow();
+            if (on) w.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            else w.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        });
+    }
+
     @JavascriptInterface
     public boolean isImmersive() {
         return immersive;

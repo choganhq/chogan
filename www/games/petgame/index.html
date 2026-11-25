@@ -34,6 +34,13 @@ function PetEngineFactory() {
   var RESPAWN_S = 0.45;    // a popped critter is replaced this long after
   var HIT_K = 1.35;        // a poke counts this many radii from a critter's centre: small paws and fingers miss a lot
 
+  // Mixed play is a calm scene (owner, #1135): one mouse, squeaking now and then, and every few
+  // minutes a visitor (a bird, then a bug, then a light) comes in, stays a while and leaves.
+  var VISITORS = ['butterfly', 'bug', 'light'];
+  var VISIT_FIRST_S = 150, VISIT_GAP_S = [120, 240], VISIT_STAY_S = [30, 55];
+  // seconds between ambient sounds of a kind that is on the field; a light is silent
+  var SOUND_GAP = { mouse: [4, 9], butterfly: [2.5, 6], bug: [5, 10] };
+
   function unit(W, H) { return Math.min(W, H); }
   function radius(W, H) { return Math.max(26, Math.min(64, unit(W, H) * 0.085)); }
   // more critters on a bigger field, never fewer than three or more than seven
@@ -42,7 +49,8 @@ function PetEngineFactory() {
   function newField(W, H, mode, speed) {
     return {
       W: W, H: H, mode: MODES.indexOf(mode) < 0 ? 'mixed' : mode, speed: SPEEDS[speed] || 1,
-      critters: [], bits: [], rings: [], queue: [], popped: 0, time: 0, nextId: 1, hold: 0
+      critters: [], bits: [], rings: [], queue: [], popped: 0, time: 0, nextId: 1, hold: 0,
+      sounds: [], snd: { mouse: 2, butterfly: 1, bug: 1 }, nextVisit: VISIT_FIRST_S, visits: 0
     };
   }
 
@@ -50,7 +58,7 @@ function PetEngineFactory() {
   function turnToward(a, want, maxStep) {
     var d = wrap(want - a);
     if (Math.abs(d) <= maxStep) return want;
-    return a + (d > 0 ? maxStep : -maxStep);
+    return wrap(a + (d > 0 ? maxStep : -maxStep));
   }
 
   function retarget(S, c, rnd) {
@@ -58,7 +66,9 @@ function PetEngineFactory() {
     c.tx = m + rnd() * Math.max(1, S.W - 2 * m);
     c.ty = m + rnd() * Math.max(1, S.H - 2 * m);
   }
-  function pickKind(S, rnd) { return S.mode === 'mixed' ? KINDS[Math.floor(rnd() * KINDS.length) % KINDS.length] : S.mode; }
+  function pickKind(S, rnd) { return S.mode === 'mixed' ? 'mouse' : S.mode; }
+  function residents(S) { return S.mode === 'mixed' ? 1 : wanted(S.W, S.H); }
+  function between(rnd, r) { return r[0] + rnd() * (r[1] - r[0]); }
 
   function spawn(S, rnd, kind) {
     var r = radius(S.W, S.H);
@@ -73,8 +83,9 @@ function PetEngineFactory() {
     return c;
   }
   function fill(S, rnd) {
-    var n = wanted(S.W, S.H);
-    while (S.critters.length + S.queue.length < n) spawn(S, rnd);
+    var n = residents(S);
+    var have = S.critters.filter(function (c) { return !c.visitor; }).length;
+    while (have + S.queue.length < n) { spawn(S, rnd); have++; }
   }
   function resize(S, W, H) {
     S.W = W; S.H = H;
@@ -94,9 +105,31 @@ function PetEngineFactory() {
   }
   function setSpeed(S, name) { S.speed = SPEEDS[name] || 1; }
 
+  // a visitor walks in from an edge, stays for a while and walks out again
+  function visit(S, rnd) {
+    var kind = VISITORS[S.visits % VISITORS.length];
+    S.visits++;
+    var c = spawn(S, rnd, kind), r = c.r, side = Math.floor(rnd() * 4);
+    if (side === 0) { c.x = -r; c.y = r + rnd() * (S.H - 2 * r); c.enterA = 0; }
+    else if (side === 1) { c.x = S.W + r; c.y = r + rnd() * (S.H - 2 * r); c.enterA = Math.PI; }
+    else if (side === 2) { c.y = -r; c.x = r + rnd() * (S.W - 2 * r); c.enterA = Math.PI / 2; }
+    else { c.y = S.H + r; c.x = r + rnd() * (S.W - 2 * r); c.enterA = -Math.PI / 2; }
+    c.a = c.enterA; c.visitor = true; c.entering = true; c.ttl = between(rnd, VISIT_STAY_S);
+    return c;
+  }
+  function leave(S, c) {
+    // the way out is the nearest edge
+    var d = [c.x, S.W - c.x, c.y, S.H - c.y], m = Math.min.apply(null, d), i = d.indexOf(m);
+    c.leaving = true; c.leaveA = [Math.PI, 0, -Math.PI / 2, Math.PI / 2][i];
+  }
+
   function step(S, dt, rnd) {
     S.time += dt;
     var U = unit(S.W, S.H), k = S.speed;
+    if (S.mode === 'mixed' && S.time >= S.nextVisit && !S.critters.some(function (c) { return c.visitor; })) {
+      visit(S, rnd);
+      S.nextVisit = S.time + between(rnd, VISIT_GAP_S);
+    }
     S.critters.forEach(function (c) {
       c.age += dt; c.wob += dt;
       if (c.kind === 'mouse') {
@@ -129,13 +162,37 @@ function PetEngineFactory() {
         c.v = Math.min(d * 5, 1.7 * U * k);
         c.phase += dt * 6;
       }
+      if (c.visitor) {
+        c.ttl -= dt;
+        if (c.ttl <= 0 && !c.leaving && !c.entering) leave(S, c);
+        if (c.entering) { c.a = c.enterA; c.v = Math.max(c.v, 0.2 * U * k); }
+        else if (c.leaving) { c.a = c.leaveA; c.v = Math.max(c.v, 0.2 * U * k); }
+      }
       c.x += Math.cos(c.a) * c.v * dt;
       c.y += Math.sin(c.a) * c.v * dt;
       var m = c.r * 0.6;
+      if (c.entering) {
+        if (c.x >= m && c.x <= S.W - m && c.y >= m && c.y <= S.H - m) c.entering = false;
+        return;
+      }
+      if (c.leaving) return;
       if (c.x < m) { c.x = m; c.a = Math.PI - c.a; }
       if (c.x > S.W - m) { c.x = S.W - m; c.a = Math.PI - c.a; }
       if (c.y < m) { c.y = m; c.a = -c.a; }
       if (c.y > S.H - m) { c.y = S.H - m; c.a = -c.a; }
+    });
+    // a visitor that has walked out is gone for good
+    for (var v = S.critters.length - 1; v >= 0; v--) {
+      var vc = S.critters[v];
+      if (vc.leaving && (vc.x < -vc.r || vc.x > S.W + vc.r || vc.y < -vc.r || vc.y > S.H + vc.r)) S.critters.splice(v, 1);
+    }
+    // ambient sounds: each kind that is on the field makes its own small noise every few seconds
+    // without being touched; the page plays what is queued here
+    Object.keys(SOUND_GAP).forEach(function (kind) {
+      var here = S.critters.some(function (c) { return c.kind === kind && !c.entering && !c.leaving; });
+      if (!here) { S.snd[kind] = Math.max(S.snd[kind], 0.8 + rnd() * 1.5); return; }
+      S.snd[kind] -= dt;
+      if (S.snd[kind] <= 0) { S.sounds.push(kind); S.snd[kind] = between(rnd, SOUND_GAP[kind]); }
     });
     // replacements arrive on their own, and a field that is short of critters is topped up
     for (var i = S.queue.length - 1; i >= 0; i--) {
@@ -168,7 +225,7 @@ function PetEngineFactory() {
     if (i < 0) return false;
     S.critters.splice(i, 1);
     S.popped++;
-    S.queue.push(RESPAWN_S);
+    if (!c.visitor) S.queue.push(RESPAWN_S);
     for (var n = 0; n < 14; n++) {
       var a = (n / 14) * 2 * Math.PI + rnd() * 0.4, sp = 120 + rnd() * 220;
       S.bits.push({ x: c.x, y: c.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 60, life: 0.45 + rnd() * 0.4, max: 0.85, size: 3 + rnd() * 4, kind: c.kind, variant: c.variant, tone: n % 3 });
@@ -207,6 +264,7 @@ function PetEngineFactory() {
 
   return {
     KINDS: KINDS, MODES: MODES, SPEEDS: SPEEDS, HOLD_S: HOLD_S, RESPAWN_S: RESPAWN_S, HIT_K: HIT_K,
+    visit: visit, residents: residents, VISIT_FIRST_S: VISIT_FIRST_S, SOUND_GAP: SOUND_GAP,
     radius: radius, wanted: wanted, newField: newField, spawn: spawn, fill: fill, resize: resize, setMode: setMode, setSpeed: setSpeed,
     step: step, hit: hit, pop: pop, popAny: popAny, zoneSize: zoneSize, zones: zones, cornersHeld: cornersHeld, holdStep: holdStep
   };
@@ -326,17 +384,17 @@ if (typeof module !== 'undefined') module.exports = PetEngineFactory;
       });
     });
   }
-  function popSound(kind) {
+  function popSound(kind, vol) {
     if (!prefs.sound) return;
     var list = (CLIPS[kind] || []).filter(function (n) { return clipUrls[n]; });
     if (list.length && C.audio.sfxOn()) {
       try {
         var a = new Audio(clipUrls[list[Math.floor(Math.random() * list.length)]]);
-        a.volume = 0.8; var pr = a.play(); if (pr && pr.catch) pr.catch(function () {});
+        a.volume = vol || 0.8; var pr = a.play(); if (pr && pr.catch) pr.catch(function () {});
         return;
       } catch (e) { /* fall through to the synthesized pop */ }
     }
-    C.audio.sfx('pgPop' + Math.floor(Math.random() * 3));
+    if (!vol) C.audio.sfx('pgPop' + Math.floor(Math.random() * 3));
   }
   loadClips();
 
@@ -498,6 +556,8 @@ if (typeof module !== 'undefined') module.exports = PetEngineFactory;
     last = ts;
     if (S) {
       E.step(S, dt, Math.random);
+      // the scene's own small noises, quieter than a pop; a missing clip stays silent
+      while (S.sounds.length) popSound(S.sounds.shift(), 0.3);
       var pts = [];
       for (var id in touches) pts.push(touches[id]);
       if (E.holdStep(S, E.cornersHeld(pts, S.W, S.H), dt)) { left = true; C.haptic('success'); C.back(); return; }
