@@ -2945,10 +2945,9 @@ function testFiles() {
   const langCss = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   const langPad = +((langCss.match(/\.ch-seg\.ch-langs button \{[^}]*padding-inline: (\d+)px/) || [])[1] || 99);
   ok(/function langPicker[\s\S]{0,250}classList\.add\([^)]*'ch-langs'/.test(menu) && langPad <= 6, 'the language picker uses narrow buttons so five languages fit one phone row (padding ' + langPad + ')');
-  // A sixth language sat alone on a full-width second row (#542): the picker is a grid of
-  // two rows on a phone and one row on a wide screen, whatever the count (seven since #794)
-  const langCols = Math.ceil(LOCALE_CODES.length / 2);
-  ok(new RegExp('\\.ch-seg\\.ch-langs \\{[^}]*display: grid;[^}]*grid-template-columns: repeat\\(' + langCols + ', 1fr\\)').test(langCss), 'the language picker is two rows of ' + langCols + ' on a phone (' + LOCALE_CODES.length + ' languages)');
+  // A sixth language sat alone on a full-width second row (#542); the fixed column count
+  // that fixed it overflowed with eleven (#1152), so tools/tests/lang-picker.js now checks
+  // that the grid makes as many columns as fit at the widest label.
   ok(!/ch-langs \{ grid-template-columns: repeat\(/.test(langCss.split("\n").filter((l) => /@media/.test(l)).join("\n")), "no wide-window rule puts every language on one row: ten names overflowed the Profile dialog on a desktop (#1065)");
 
   // The show-welcome button was labelled with 'play' and read «بازی» (#295)
