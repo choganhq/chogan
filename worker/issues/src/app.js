@@ -26,7 +26,7 @@ const CACHE_HOST = 'https://issues-cache.invalid/';
 export const LANGS = [
   ['fa', 'فارسی', 'rtl', 'fa-IR'], ['en', 'English', 'ltr', 'en-GB'], ['zh', '中文', 'ltr', 'zh-Hans'],
   ['de', 'Deutsch', 'ltr', 'de-DE'], ['es', 'Español', 'ltr', 'es-ES'], ['pl', 'Polski', 'ltr', 'pl-PL'],
-  ['fr', 'Français', 'ltr', 'fr-FR'], ['ar', 'العربية', 'rtl', 'ar-u-nu-latn'], ['hi', 'हिन्दी', 'ltr', 'hi-IN'], ['ru', 'Русский', 'ltr', 'ru-RU'],
+  ['fr', 'Français', 'ltr', 'fr-FR'], ['ar', 'العربية', 'rtl', 'ar-u-nu-latn'], ['hi', 'हिन्दी', 'ltr', 'hi-IN'], ['ru', 'Русский', 'ltr', 'ru-RU'], ['pt', 'Português', 'ltr', 'pt-BR'],
 ];
 
 export const S = {
@@ -149,6 +149,18 @@ export const S = {
     refresh: 'Список обновляется каждые пять минут. Текст обращений показан так, как его написали.',
     theme: 'Тема (авто, светлая, тёмная)', langGo: 'Перейти', back: 'Назад в Chogan', page: 'Страница {n}',
     filter: 'Статус', labels: 'Метки',
+  },
+  pt: {
+    title: 'Relatos do Chogan', lead: 'Uma cópia somente leitura dos relatos e sugestões públicos do Chogan.',
+    report: 'Relatar um problema ou ideia', all: 'Todos', open: 'Abertos', closed: 'Fechados',
+    stOpen: 'Aberto', stDone: 'Feito', stNotPlanned: 'Não planejado',
+    opened: 'Aberto em {d}', closedOn: 'Fechado em {d}', noBody: '(sem descrição)',
+    allOnGithub: 'Todos os relatos no GitHub', newer: 'Mais novos', older: 'Mais antigos', empty: 'Nenhum relato.',
+    error: 'Não foi possível carregar a lista do GitHub. Tente de novo em alguns minutos.',
+    stale: 'O GitHub não respondeu; esta é a última cópia salva.',
+    refresh: 'A lista é atualizada a cada cinco minutos. O texto dos relatos aparece como foi escrito.',
+    theme: 'Tema (automático, claro, escuro)', langGo: 'Ir', back: 'Voltar ao Chogan', page: 'Página {n}',
+    filter: 'Status', labels: 'Etiquetas',
   },
 };
 

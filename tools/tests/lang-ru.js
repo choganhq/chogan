@@ -85,7 +85,7 @@ module.exports = function (T) {
 
     const ach = core.split('\n').filter((l) => /^\s*\{ id: '[^']+',.*den: '/.test(l));
     ok(ach.length > 200, 'awards read (' + ach.length + ')');
-    const noHi = ach.filter((l) => !/ ru: '[^']*[А-яЁё][^']*', dru: '[^']*[А-яЁё][^']*' \},?$/.test(l)).map((l) => l.match(/id: '([^']+)'/)[1]);
+    const noHi = ach.filter((l) => !/ ru: '[^']*[А-яЁё][^']*', dru: '[^']*[А-яЁё][^']*'(, pt: '[^']*', dpt: '[^']*')? \},?$/.test(l)).map((l) => l.match(/id: '([^']+)'/)[1]);
     ok(!noHi.length, 'every award has a Russian title and description' + (noHi.length ? ' (' + noHi.slice(0, 8).join(',') + ')' : ''));
 
     // Store listing, Play's locale ru-RU. Play counts characters, combining vowel signs too.

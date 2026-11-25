@@ -136,5 +136,22 @@ ru: {
 'Dozens of games in one app: puzzles, board games, card games and games of skill. Sudoku, nonograms, chess, backgammon, Hokm, Pasur and many more. A session lasts five to fifteen minutes, so you feel you finished something. There is a new daily challenge every day, and new games keep arriving. The interface is in Persian, English and several other languages.': 'Десятки игр в одном приложении: головоломки, настольные, карточные игры и игры на ловкость. Судоку, японские кроссворды, шахматы, нарды, Хокм, Пасур и многое другое. Одна партия длится от пяти до пятнадцати минут — остаётся чувство, что вы что-то завершили. Каждый день — новое ежедневное испытание, и новые игры продолжают появляться. Интерфейс доступен на персидском, английском и ещё нескольких языках.',
 'X (Twitter)': 'X (Twitter)', 'Bluesky': 'Bluesky', 'Mastodon': 'Mastodon', 'More places': 'Где ещё найти', 'News channel': 'Канал новостей', 'Report a bug or idea': 'Сообщить об ошибке или идее', 'Privacy': 'Конфиденциальность',
 'Chogan is built by Hossein as a hobby. Nothing is sent to a server.': 'Chogan делает Хоссейн в качестве хобби. Ничего не отправляется на сервер.'
+},
+pt: {
+'Light': 'Claro', 'Dark': 'Escuro',
+'The Chogan menu': 'O menu do Chogan', 'Screenshots': 'Capturas de tela', 'Language': 'Idioma', 'Some of the games': 'Alguns dos jogos',
+'Small games you can finish. No nonsense.': 'Jogos pequenos que dá para terminar. Sem enrolação.',
+'Play in the browser': 'Jogar no navegador',
+'GET IT ON': 'DISPONÍVEL NO', 'OPEN IN': 'ABRIR NO', 'DIRECT DOWNLOAD': 'DOWNLOAD DIRETO',
+'Telegram Mini App': 'Mini App do Telegram', 'APK file': 'Arquivo APK',
+'The web version installs from your browser. It also opens inside Telegram.': 'A versão web se instala pelo navegador. Ela também abre dentro do Telegram.',
+'Free, no ads': 'Grátis, sem anúncios', 'No in-app purchases, no analytics, no trackers.': 'Sem compras no app, sem análises, sem rastreadores.',
+'Offline': 'Offline', 'Every game works without a connection.': 'Todos os jogos funcionam sem internet.',
+'Open source': 'Código aberto', 'All code is on GitHub under the MIT licence.': 'Todo o código está no GitHub sob a licença MIT.',
+'Your progress is yours': 'Seu progresso é seu', 'Saved on your device. No account.': 'Fica salvo no seu aparelho. Sem conta.',
+'What is inside?': 'O que tem dentro?',
+'Dozens of games in one app: puzzles, board games, card games and games of skill. Sudoku, nonograms, chess, backgammon, Hokm, Pasur and many more. A session lasts five to fifteen minutes, so you feel you finished something. There is a new daily challenge every day, and new games keep arriving. The interface is in Persian, English and several other languages.': 'Dezenas de jogos em um só app: quebra-cabeças, jogos de tabuleiro, de cartas e de habilidade. Sudoku, nonogramas, xadrez, gamão, Hokm, Pasur e muito mais. Uma partida dura de cinco a quinze minutos, para você sentir que terminou alguma coisa. Todo dia tem um desafio diário novo, e jogos novos continuam chegando. A interface está em persa, inglês e vários outros idiomas.',
+'X (Twitter)': 'X (Twitter)', 'Bluesky': 'Bluesky', 'Mastodon': 'Mastodon', 'More places': 'Mais lugares', 'News channel': 'Canal de novidades', 'Report a bug or idea': 'Relatar um problema ou ideia', 'Privacy': 'Privacidade',
+'Chogan is built by Hossein as a hobby. Nothing is sent to a server.': 'O Chogan é feito pelo Hossein como hobby. Nada é enviado a um servidor.'
 }
 };

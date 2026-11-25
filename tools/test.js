@@ -14,7 +14,7 @@ const { Worker, isMainThread, workerData } = require('worker_threads');
 
 const ROOT = path.join(__dirname, '..');
 // زبان‌های اپ، به همان ترتیب جدول LOCALES در هسته
-const LOCALE_CODES = ['fa', 'en', 'zh', 'de', 'es', 'pl', 'fr', 'ar', 'hi', 'ru'];
+const LOCALE_CODES = ['fa', 'en', 'zh', 'de', 'es', 'pl', 'fr', 'ar', 'hi', 'ru', 'pt'];
 let failures = 0;
 let checks = 0;
 // A floor for the whole run: if a group lost most of its checks, the total would still
@@ -1658,7 +1658,7 @@ function testBackgammon() {
   ok(title('Sara', 1) === '<starts:Sara>', 'با نام پروفایل: «{n} شروع می‌کند»');
   ok(title('', 2) === '<starts:<rival> · <hard>>', 'حریف: سوم‌شخص می‌ماند');
   const str = (lang, key) => { const m = bgHtml.match(new RegExp(key + ": '([^']*)'", 'g')); return m ? m.map((x) => x.split(": '")[1].slice(0, -1)) : []; };
-  ok(JSON.stringify(str('', 'youStart')) === JSON.stringify(['تو شروع می‌کنی', 'You start', 'Zaczynasz', 'Tu commences', 'أنت تبدأ', 'आप शुरू करेंगे', 'Ты начинаешь', '你先走', 'Du fängst an', 'Empiezas tú']), 'youStart reads right in every language');
+  ok(JSON.stringify(str('', 'youStart')) === JSON.stringify(['تو شروع می‌کنی', 'You start', 'Zaczynasz', 'Tu commences', 'أنت تبدأ', 'आप शुरू करेंगे', 'Ты начинаешь', 'Você começa', '你先走', 'Du fängst an', 'Empiezas tú']), 'youStart reads right in every language');
 
   // Rotating the board (#378): the page's own geometry and mapping. Every point's centre, the bar
   // and each tray, carried to the screen and back in each quarter turn, must hit the same target.
@@ -2945,10 +2945,9 @@ function testFiles() {
   const langCss = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   const langPad = +((langCss.match(/\.ch-seg\.ch-langs button \{[^}]*padding-inline: (\d+)px/) || [])[1] || 99);
   ok(/function langPicker[\s\S]{0,250}classList\.add\([^)]*'ch-langs'/.test(menu) && langPad <= 6, 'the language picker uses narrow buttons so five languages fit one phone row (padding ' + langPad + ')');
-  // A sixth language sat alone on a full-width second row (#542): the picker is a grid of
-  // two rows on a phone and one row on a wide screen, whatever the count (seven since #794)
-  const langCols = Math.ceil(LOCALE_CODES.length / 2);
-  ok(new RegExp('\\.ch-seg\\.ch-langs \\{[^}]*display: grid;[^}]*grid-template-columns: repeat\\(' + langCols + ', 1fr\\)').test(langCss), 'the language picker is two rows of ' + langCols + ' on a phone (' + LOCALE_CODES.length + ' languages)');
+  // A sixth language sat alone on a full-width second row (#542); the fixed column count
+  // that fixed it overflowed with eleven (#1152), so tools/tests/lang-picker.js now checks
+  // that the grid makes as many columns as fit at the widest label.
   ok(!/ch-langs \{ grid-template-columns: repeat\(/.test(langCss.split("\n").filter((l) => /@media/.test(l)).join("\n")), "no wide-window rule puts every language on one row: ten names overflowed the Profile dialog on a desktop (#1065)");
 
   // The show-welcome button was labelled with 'play' and read «بازی» (#295)
@@ -3060,7 +3059,7 @@ function testFiles() {
     ok(man[k] && man[k].fa, 'منیفست ' + k + ' فارسی دارد');
   }
   // An installed app's description follows the device language; Spanish was missing until #256
-  const manLang = { fa: 'fa', zh: 'zh-Hans', de: 'de', es: 'es', pl: 'pl', fr: 'fr', ar: 'ar', hi: 'hi', ru: 'ru' };
+  const manLang = { fa: 'fa', zh: 'zh-Hans', de: 'de', es: 'es', pl: 'pl', fr: 'fr', ar: 'ar', hi: 'hi', ru: 'ru', pt: 'pt-BR' };
   ok(LOCALE_CODES.filter((c) => c !== 'en').every((c) => man.description_localized[manLang[c]] && man.description_localized[manLang[c]].value), 'the manifest describes the app in every language');
   ok(man.name_localized.fa.value === 'چوگان', 'نام فارسی در منیفست درست است');
   // Chrome on Android installed a WebAPK beside the Play app; the owner chose to send people to Play (#550)
@@ -3483,6 +3482,7 @@ function testLocales() {
     ['ar', 'ar'], ['ar-SA', 'ar'], ['ar-EG', 'ar'],
     ['hi-IN', 'hi'], ['hi', 'hi'],
     ['ru-RU', 'ru'], ['ru', 'ru'], ['ru-UA', 'ru'],
+    ['pt-BR', 'pt'], ['pt', 'pt'], ['pt-PT', 'pt'],
     ['en-GB', 'en'], ['da-DK', 'en'], ['', 'en']
   ];
   ok(cases.length > 0, 'فهرست حالت‌های زبان دستگاه خالی نیست');
@@ -3873,7 +3873,7 @@ function testWayOut() {
   ok(['make', 'tap', 'restart', 'carryOn', 'useHint', 'levelDone', 'chain', 'pick', 'generate', 'restore'].every((f) => typeof E[f] === 'function'), 'the engine has its API');
   // People who know the genre as "arrow puzzle" did not recognise Way Out (#326); the name stays, the summary says it
   const woMeta = JSON.parse(fs.readFileSync(path.join(ROOT, 'www/games.json'), 'utf8')).games.find((g) => g.id === 'wayout');
-  const woWord = { fa: 'پازل پیکانی', en: 'arrow puzzle', zh: '箭头谜题', de: 'Pfeil-Puzzle', es: 'puzle de flechas', pl: 'łamigłówka ze strzałkami', fr: 'puzzle de flèches', ar: 'لغز أسهم', hi: 'तीर पहेली', ru: 'головоломка со стрелками' };
+  const woWord = { fa: 'پازل پیکانی', en: 'arrow puzzle', zh: '箭头谜题', de: 'Pfeil-Puzzle', es: 'puzle de flechas', pl: 'łamigłówka ze strzałkami', fr: 'puzzle de flèches', ar: 'لغز أسهم', hi: 'तीर पहेली', ru: 'головоломка со стрелками', pt: 'quebra-cabeça de setas' };
   ok(woMeta && LOCALE_CODES.every((c) => woWord[c]), 'Way Out is listed and every language has a genre word');
   ok(woMeta && LOCALE_CODES.every((c) => woMeta.summary[c].toLowerCase().includes(woWord[c].toLowerCase())), 'its summary names the genre in every language');
   ok(woMeta && woMeta.name.fa === 'راه دررو' && woMeta.name.en === 'Way Out', 'the name stays Way Out / راه دررو');
@@ -7935,7 +7935,7 @@ function testCommunityFiles() {
     if (rel === 'CONTRIBUTING.md') continue;
     ok(!/[؀-ۿ]/.test(read(rel).replace(/«\?»/g, '')), rel + ': English only');
   }
-  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven'];
   ok(read('CONTRIBUTING.md').includes('all ' + words[LOCALE_CODES.length] + ' languages'), 'CONTRIBUTING names ' + LOCALE_CODES.length + ' languages');
 }
 
@@ -8129,12 +8129,11 @@ function testShortcuts() {
   ok(sc.length === firstTen.length, 'ده بازی اول منو میان‌بر دارند (' + sc.length + ' از ' + firstTen.length + ')');
   const want = firstTen.map((g) => ({
     name: g.name.en,
-    name_localized: {
-      fa: { value: g.name.fa, lang: 'fa', dir: 'rtl' },
-      'zh-Hans': { value: g.name.zh, lang: 'zh-Hans', dir: 'ltr' },
-      de: { value: g.name.de, lang: 'de', dir: 'ltr' },
-      es: { value: g.name.es, lang: 'es', dir: 'ltr' }
-    },
+    // every language of the app, not the first four: the list had stayed at fa/zh/de/es
+    name_localized: Object.fromEntries(['fa', 'zh', 'de', 'es'].concat(LOCALE_CODES.filter((c) => !['en', 'fa', 'zh', 'de', 'es'].includes(c))).map((c) => {
+      const tag = { zh: 'zh-Hans', pt: 'pt-BR' }[c] || c;
+      return [tag, { value: g.name[c], lang: tag, dir: c === 'fa' || c === 'ar' ? 'rtl' : 'ltr' }];
+    })),
     url: g.path + '?from=shortcut',
     icons: [{ src: 'games/' + g.id + '/icon-192.png', sizes: '192x192', type: 'image/png' }]
   }));
@@ -11418,7 +11417,7 @@ function testFootball() {
   ok(/C\.daily\('football', G\.daily \+ '\|t' \+ G\.M\.turns\)\.rng/.test(html) && /level: daily \? 'medium' : o\.level/.test(html) && /winTo: daily \? 3 : o\.winTo/.test(html), 'the daily match is against the medium bot, to three goals, its dice seeded by the day and the turn');
   const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
   const ids = ['fb-win', 'fb-hard', 'fb-shut'];
-  ok(ids.every((id) => (core.match(new RegExp("\\{ id: '" + id + "'[^\\n]*", 'g')) || []).length === 1 && /dfr: '[^']+', ar: '[^']+', dar: '[^']+', hi: '[^']+', dhi: '[^']+', ru: '[^']+', dru: '[^']+' \}/.test(core.match(new RegExp("\\{ id: '" + id + "'[^\\n]*"))[0]) && html.indexOf("unlock('" + id + "')") > 0), 'the three Button Football awards exist once, in every language, and are unlocked');
+  ok(ids.every((id) => (core.match(new RegExp("\\{ id: '" + id + "'[^\\n]*", 'g')) || []).length === 1 && /dfr: '[^']+', ar: '[^']+', dar: '[^']+', hi: '[^']+', dhi: '[^']+', ru: '[^']+', dru: '[^']+', pt: '[^']+', dpt: '[^']+' \}/.test(core.match(new RegExp("\\{ id: '" + id + "'[^\\n]*"))[0]) && html.indexOf("unlock('" + id + "')") > 0), 'the three Button Football awards exist once, in every language, and are unlocked');
   ok(/<script src="\.\.\/\.\.\/lib\/cue\.js"><\/script>/.test(html) && !/function tick\(|rollA \* |\(1 \+ T\.ball\)/.test(m[1]), 'the page loads lib/cue.js and keeps no copy of its physics');
   ok(/ctx\.autosave\(/.test(html) && /ctx\.tutorialIfNew\(TUT\)/.test(html) && (html.match(/tArt\(\d\)/g) || []).length === 3, 'the match saves between flicks and the three-page tutorial shows once');
   ok(!/[\s{,]again: '/.test(html), 'the page leaves the core\'s "again" label alone');
@@ -12445,7 +12444,7 @@ function testXiangqi() {
   const lum = (x) => rgb(x).map((c) => c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)).reduce((a, c, i) => a + c * [0.2126, 0.7152, 0.0722][i], 0);
   const near = games.filter((g) => g.id !== 'xiangqi').map((g) => [g.id, dE(g.color, gm.color)]).sort((x, y) => x[1] - y[1])[0];
   ok(near[1] >= 15 && 1.05 / (lum(gm.color) + 0.05) >= 4.5, 'the accent differs from every other game by ΔE ≥ 15 (nearest ' + near[0] + ', ' + near[1].toFixed(1) + ') and keeps white text at 4.5:1');
-  ok(/name: \{ fa: 'شطرنج چینی', en: 'Chinese chess', zh: '中国象棋', de: 'Chinesisches Schach', es: 'Ajedrez chino', pl: 'Szachy chińskie', fr: 'Échecs chinois', ar: 'الشطرنج الصيني', hi: 'चीनी शतरंज', ru: 'Китайские шахматы' \}/.test(html), 'the names match games.json in every language');
+  ok(/name: \{ fa: 'شطرنج چینی', en: 'Chinese chess', zh: '中国象棋', de: 'Chinesisches Schach', es: 'Ajedrez chino', pl: 'Szachy chińskie', fr: 'Échecs chinois', ar: 'الشطرنج الصيني', hi: 'चीनी शतरंज', ru: 'Китайские шахматы', pt: 'Xadrez Chinês' \}/.test(html), 'the names match games.json in every language');
   ok(/newGame\(\{ daily: dailyDate, level: 2, mode: 'ai' \}\)/.test(html) && /C\.stats\.daily\('xiangqi', S\.daily/.test(html), 'the daily game uses the same deterministic AI for everyone');
   ok(/kb\('U \/ Ctrl\+Z'/.test(html) && /if \(C\.undoKey\(e\)\) \{ undo\(\);/.test(html), 'the undo key is labelled and handled');
   ok(/E\.validState\(saved\.s\)/.test(html) && /ctx\.autosave\(function/.test(html), 'the game saves and restores a checked state');
