@@ -44,13 +44,24 @@ public class MainActivity extends BridgeActivity {
             @Override
             public void handleOnBackPressed() {
                 WebView webView = getBridge() != null ? getBridge().getWebView() : null;
-                if (webView != null && webView.canGoBack()) {
-                    webView.goBack();
-                } else {
-                    // آخرین صفحه: کالبک را خاموش می‌کنیم تا رفتار پیش‌فرض اجرا شود
-                    setEnabled(false);
-                    getOnBackPressedDispatcher().onBackPressed();
+                if (webView == null) {
+                    leave();
+                    return;
                 }
+                // An open dialog or the game's tips take the press instead of the page (#1158)
+                webView.evaluateJavascript("!!(window.Chogan && Chogan.dismissTop && Chogan.dismissTop())", closed -> {
+                    if ("true".equals(closed)) return;
+                    if (webView.canGoBack()) webView.goBack();
+                    else leave();
+                });
+            }
+
+            private void leave() {
+                // آخرین صفحه: کالبک را خاموش می‌کنیم تا رفتار پیش‌فرض اجرا شود
+                setEnabled(false);
+                getOnBackPressedDispatcher().onBackPressed();
+                // a press that did not close the app must find the callback again
+                setEnabled(true);
             }
         });
     }
