@@ -1428,7 +1428,9 @@
     setMusic: function (on) {
       state.settings.music = !!on;
       saveSettings();
-      if (on) audioApi.music(music.moodName || 'menu'); else audioApi.stopMusic(0.25);
+      // #1140: a page that never asked for music (Piano) must stay silent; the old 'menu' fallback
+      // started the menu tune under the keys when the switch was turned on.
+      if (on) { if (music.moodName) audioApi.music(music.moodName); } else audioApi.stopMusic(0.25);
     }
   };
   Chogan.audio = audioApi;
@@ -3905,7 +3907,7 @@
 
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) { firePause(); audioApi.stopMusic(0.25); }
-    else { fireResume(); if (state.settings.music && audioReady) audioApi.music(music.moodName || 'menu'); }
+    else { fireResume(); if (state.settings.music && audioReady && music.moodName) audioApi.music(music.moodName); }
   });
   global.addEventListener('pagehide', firePause);
   global.addEventListener('pageshow', function (e) {
