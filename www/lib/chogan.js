@@ -1412,6 +1412,11 @@
       music.timer = setInterval(scheduleMusic, 120);
       scheduleMusic();
     },
+    // #1140: Piano and Pet start no mood, so a return to the tab or the music switch must not
+    // fall back to the menu's tune; only a game that asked for music gets it back.
+    resume: function () {
+      if (music.moodName) audioApi.music(music.moodName);
+    },
     stopMusic: function (fade) {
       if (!AC || !music.playing) { music.playing = false; return; }
       var d = fade === undefined ? 0.6 : fade;
@@ -1428,7 +1433,7 @@
     setMusic: function (on) {
       state.settings.music = !!on;
       saveSettings();
-      if (on) audioApi.music(music.moodName || 'menu'); else audioApi.stopMusic(0.25);
+      if (on) audioApi.resume(); else audioApi.stopMusic(0.25);
     }
   };
   Chogan.audio = audioApi;
@@ -3905,7 +3910,7 @@
 
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) { firePause(); audioApi.stopMusic(0.25); }
-    else { fireResume(); if (state.settings.music && audioReady) audioApi.music(music.moodName || 'menu'); }
+    else { fireResume(); if (state.settings.music && audioReady) audioApi.resume(); }
   });
   global.addEventListener('pagehide', firePause);
   global.addEventListener('pageshow', function (e) {
