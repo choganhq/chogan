@@ -36,6 +36,8 @@ public class MainActivity extends BridgeActivity {
             getBridge().getWebView().addJavascriptInterface(bars, "ChoganBars");
             // Which build this is and where its store page is (#1023)
             getBridge().getWebView().addJavascriptInterface(new AppInfoBridge(this), "ChoganApp");
+            // The icon's long-press shortcuts follow the pinned games (#1150)
+            getBridge().getWebView().addJavascriptInterface(new ShortcutsBridge(this), "ChoganShortcuts");
         }
 
         openShortcut(getIntent());
@@ -63,7 +65,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     /**
-     * A launcher shortcut (res/xml/shortcuts.xml) opens chogan://game/<id> (#488): load
+     * A launcher shortcut (ShortcutsBridge) opens chogan://game/<id> (#488): load
      * that game's page over the menu, so back still returns to the menu. The activity is
      * exported, so any app could send any data here: only a plain game id is accepted, and
      * only a page inside the app's own assets is ever loaded.
