@@ -264,11 +264,24 @@ function StorekeeperEngineFactory() {
     for (var k = 0; k < S.boxes.length; k++) if (!isGoal(L, S.boxes[k])) return false;
     return true;
   }
-  // a crate that can never move again off a goal: stuck in a corner, for a hint
+  // A crate that can never move again off a goal, for a hint. A corner was the only case
+  // seen until #1176: two crates side by side along a wall hold each other, and the game
+  // said nothing. A crate is frozen when it is blocked both across and along: by a wall on
+  // either side, or by a neighbouring crate that is frozen itself, the crates already
+  // being looked at counting as walls (the usual freeze test, ended by the crate count).
+  function frozen(L, S, b, seen) {
+    var s2 = {}, k;
+    for (k in seen) s2[k] = 1;
+    s2[b] = 1;
+    function blocked(o) {
+      var a = b - o, c = b + o;
+      if (!isFloor(L, a) || !isFloor(L, c) || s2[a] || s2[c]) return true;
+      return (has(S.boxes, a) && frozen(L, S, a, s2)) || (has(S.boxes, c) && frozen(L, S, c, s2));
+    }
+    return blocked(1) && blocked(L.w);
+  }
   function stuck(L, S, b) {
-    if (isGoal(L, b)) return false;
-    var u = !isFloor(L, b - L.w), dn = !isFloor(L, b + L.w), l = !isFloor(L, b - 1), r = !isFloor(L, b + 1);
-    return (u || dn) && (l || r);
+    return !isGoal(L, b) && frozen(L, S, b, {});
   }
   // Three stars at the solver's best, two within a fifth more (at least two pushes),
   // one otherwise: never a loss
@@ -543,7 +556,8 @@ if (typeof module !== 'undefined') module.exports = StorekeeperEngineFactory;
     if (r === 'push') C.feedback(E.isGoal(S.lv, st.boxes[k]) ? 'select' : 'place');
     anim = { t0: performance.now(), dur: C.ui.reduceMotion() ? 0 : STEP_MS, p0: p0, k: k, b0: k >= 0 ? before[k] : -1 };
     render(); save();
-    if (k >= 0 && !stuckSaid && E.stuck(S.lv, st, st.boxes[k])) { stuckSaid = true; C.ui.toast({ icon: 'info', title: C.t('skStuck') }); }
+    // any crate: a push can freeze the crate it lands beside rather than itself (#1176)
+    if (k >= 0 && !stuckSaid && st.boxes.some(function (b) { return E.stuck(S.lv, st, b); })) { stuckSaid = true; C.ui.toast({ icon: 'info', title: C.t('skStuck') }); }
     tick();
   }
   function tick() {
