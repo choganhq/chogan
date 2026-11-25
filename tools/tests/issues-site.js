@@ -218,7 +218,7 @@ module.exports = function (T) {
     const app = read('worker/issues/src/app.js');
     ok(!/ghp_|github_pat_|gho_/.test(cfg + app), 'no token in the files');
     ok(/export const REPO = 'choganhq\/chogan';/.test(app), 'the repository is a constant');
-    const report = read('worker/report/wrangler.jsonc');
+    const report = read('worker/landing/wrangler.jsonc');
     ok(/"playchogan\.com\/\*"/.test(report) && /'\/report\/'/.test(read('worker/report/src/app.js')), 'the report form stays at playchogan.com/report/');
 
     // Six languages, the same keys in each.
