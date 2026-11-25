@@ -43,6 +43,10 @@ module.exports = function (T) {
       ok(seen.includes('cron'), 'the daily cleanup reaches the report module');
     }
 
+    // `wrangler dev` leaves state and request traces beside the config; `git add -A` took them once
+    const tracked = require('child_process').execFileSync('git', ['-C', ROOT, 'ls-files'], { encoding: 'utf8', maxBuffer: 1 << 26 }).split('\n');
+    ok(tracked.length > 100 && !tracked.some((f) => /(^|\/)\.wrangler\//.test(f)), 'no wrangler local state is tracked');
+
     // --- routes (#1039 item 1)
     let r = await get('/');
     let body = await r.text();
