@@ -22,6 +22,10 @@ module.exports = function (T) {
     // #1153: the row has to scroll to the lit pill, without scrolling the page
     const show = html.match(/function showPill\(row, pill\) \{[\s\S]*?\n  \}/);
     ok(!!show && /showPill\(jump, jumpBtns\[cur\]\)/.test(html), 'the row follows the section in view');
+    ok(/else return;\s*var cur = 0;/.test(html) && /requestAnimationFrame\(litJump\)/.test(html), 'nothing is measured before the page is attached');
+    const from = html.indexOf('function patternSwatches'), to = html.indexOf("label: C.t('keepAwake')");
+    const settings = html.slice(from, to);
+    ok(from > 0 && to > from && (settings.match(/render\(true\)/g) || []).length >= 5 && !/\brender\(\)/.test(settings), 'choosing a setting keeps the place on the page');
     if (!show) return;
     ok(!/\.scrollIntoView\(/.test(show[0]), 'following does not scroll the page');
     [[300, 100], [-200, 100]].forEach(function (c) {

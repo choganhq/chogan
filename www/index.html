@@ -375,6 +375,45 @@
   function gname(g) { return g.name[lang()] || g.name.en || g.name.fa; }
   function gsum(g) { return g.summary[lang()] || g.summary.en || g.summary.fa; }
 
+  // The Android icon's long-press shortcuts were four fixed games (#1150): now the
+  // first four pinned ones, and those same four while nothing is pinned.
+  var SHORTCUT_DEFAULTS = ['tower-defence', 'sudoku', 'minesweeper', 'dots'];
+  function shortcutGames(pins, games) {
+    function find(id) { return games.filter(function (g) { return g.id === id; })[0]; }
+    var mine = pins.map(find).filter(Boolean);
+    return (mine.length ? mine : SHORTCUT_DEFAULTS.map(find).filter(Boolean)).slice(0, 4);
+  }
+  // Android takes a bitmap, not the menu's SVG, so the page draws each icon itself
+  function iconPng(src) {
+    return new Promise(function (resolve) {
+      var img = new Image();
+      img.onload = function () {
+        var cv = document.createElement('canvas');
+        cv.width = cv.height = 192;
+        cv.getContext('2d').drawImage(img, 0, 0, 192, 192);
+        resolve(cv.toDataURL('image/png').split(',')[1]);
+      };
+      img.onerror = function () { resolve(''); };
+      img.src = src;
+    });
+  }
+  var shortcutsSent = '';
+  function syncShortcuts() {
+    var bridge = window.ChoganShortcuts;
+    if (!bridge || typeof bridge.set !== 'function') return; // web, or an older app shell
+    var games = shortcutGames(C.pins.list(), GAMES);
+    var key = games.map(function (g) { return g.id + ':' + gname(g); }).join('|');
+    if (!games.length || key === shortcutsSent) return;
+    shortcutsSent = key;
+    Promise.all(games.map(function (g) { return iconPng(g.icon); })).then(function (icons) {
+      // a later pin has already replaced this list
+      if (key !== shortcutsSent) return;
+      bridge.set(JSON.stringify(games.map(function (g, i) {
+        return { id: g.id, label: gname(g).replace(/\u00ad/g, ''), icon: icons[i] };
+      })));
+    });
+  }
+
   // The two ends of a banner that carries white text. Every part of it must
   // keep 4.5:1 for white: the daily banner's end, lightened by a fixed .38,
   // and the Silver league banner read near 2.5:1 (#1076). The colour is
@@ -1503,6 +1542,8 @@
     var litJump = function () {
       if (page.isConnected) jumpSeen = true;
       else if (jumpSeen) { document.removeEventListener('scroll', litJump, true); return; }
+      // not attached yet: every rect is zero, which lit the last pill, off the side of the row
+      else return;
       var cur = 0;
       JUMPS.forEach(function (j, n) { var t = page.querySelector('#' + j[0]); if (t && t.getBoundingClientRect().top <= 120) cur = n; });
       // At the very end the last section cannot reach the top, so it is the one in view
@@ -1512,7 +1553,8 @@
       if (cur !== jumpLit && page.isConnected) { jumpLit = cur; showPill(jump, jumpBtns[cur]); }
     };
     document.addEventListener('scroll', litJump, { passive: true, capture: true });
-    litJump();
+    jumpBtns[0].setAttribute('aria-current', 'true');
+    requestAnimationFrame(litJump);
     return page;
   }
 
@@ -1658,7 +1700,7 @@
       C.store.set('settings', C.state.settings);
       applyPalette();
       C.feedback('select');
-      render();
+      render(true);
       return;
     }
     if (!C.coins.can(def.cost)) {
@@ -1679,7 +1721,7 @@
         C.store.set('settings', C.state.settings);
         applyPalette();
         C.feedback('coin');
-        render();
+        render(true);
       }
     });
   }
@@ -1732,7 +1774,7 @@
           if (o.id === cur) return;
           C.setPattern(o.id);
           C.feedback('tap');
-          render();
+          render(true);
         }
       }, [
         el('span', { class: 'ch-swatch__chip ch-patsw__chip', 'aria-hidden': 'true' }),
@@ -1753,7 +1795,7 @@
           if (o.id === cur) return;
           C.setColors(o.id);
           C.feedback('tap');
-          render();
+          render(true);
         }
       }, [
         el('span', { class: 'ch-swatch__chip', 'aria-hidden': 'true' }, [
@@ -1773,7 +1815,7 @@
     card.appendChild(el('div', { class: 'ch-item' }, [
       C.icon('globe', 20),
       el('div', { class: 'ch-item__label', text: C.t('language') }),
-      langPicker(s.lang, function (v) { C.setLang(v); render(); })
+      langPicker(s.lang, function (v) { C.setLang(v); render(true); })
     ]));
 
     card.appendChild(el('div', { class: 'ch-item' }, [
@@ -1783,7 +1825,7 @@
         { value: 'auto', label: C.t('themeAuto') },
         { value: 'light', label: C.t('themeLight') },
         { value: 'dark', label: C.t('themeDark') }
-      ], s.theme, function (v) { C.setTheme(v); render(); })
+      ], s.theme, function (v) { C.setTheme(v); render(true); })
     ]));
 
     card.appendChild(el('div', { class: 'ch-item' }, [
@@ -1805,7 +1847,7 @@
         { value: 'auto', label: C.t('motionAuto') },
         { value: 'on', label: C.t('motionOn') },
         { value: 'off', label: C.t('motionOff') }
-      ], s.motion || 'auto', function (v) { C.setMotion(v); render(); })
+      ], s.motion || 'auto', function (v) { C.setMotion(v); render(true); })
     ]));
 
     [
@@ -2060,6 +2102,7 @@
     drawNav();
     C.ui.refreshCoins();
     window.scrollTo(0, keep ? y : 0);
+    syncShortcuts(); // pins and the language both end in a render
   }
 
   // The game cards were plain divs, so a keyboard could not reach them at all,
