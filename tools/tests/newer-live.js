@@ -21,7 +21,7 @@ module.exports = function (T) {
       ok(run(older, newer) === 'superseded=true', 'an older commit is not deployed when a newer one is live');
       ok(run(newer, older) === 'superseded=false', 'a newer commit is deployed over an older one');
       ok(run(newer, newer) === 'superseded=false', 'the live commit can be deployed again');
-      ok(run(older, newer, 'workflow_dispatch') === 'superseded=false', 'a manual run always deploys');
+      ok(run(older, newer, 'workflow_dispatch') === 'superseded=true', 'a manual run overtaken by a merge does not deploy either');
       ok(run(older, '0'.repeat(40)) === 'superseded=false', 'an unknown live commit does not stop a deploy');
       git('update-ref', 'refs/remotes/origin/staging', older);
       ok(run(older, newer) === 'superseded=false', 'after the branch is reset, the commit left behind is replaced');
@@ -33,6 +33,7 @@ module.exports = function (T) {
       const j = job(name);
       ok(/run: bash tools\/newer-live\.sh /.test(j) && /steps\.newer\.outputs\.superseded != 'true'/.test(j), name + ' asks before it deploys');
       ok(/cancel-in-progress: false/.test(j), name + ': a later job waits instead of cancelling a deploy that may be newer');
+      ok(/queue: max/.test(j), name + ': waiting deploys are not replaced by a later-queued, older one');
       ok(/fetch-depth: 0/.test(j), name + ' has the history the comparison needs');
     }
   }

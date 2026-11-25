@@ -6,7 +6,8 @@
 #
 # Stdout is exactly one line, superseded=true or superseded=false; explanations go
 # to stderr. Only a proven newer commit that is still on the branch skips the
-# deploy; whenever that cannot be shown it deploys. A manual run always deploys.
+# deploy; whenever that cannot be shown it deploys. A manual run is held to the same
+# rule: it builds the head of its dispatch time, and a merge can overtake it too.
 set -uo pipefail
 
 url="${1:-}"
@@ -17,7 +18,6 @@ no() { say "$1"; echo "superseded=false"; exit 0; }
 
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { say "invalid deploy commit: '$sha'"; exit 2; }
 [ -n "$url" ] && [ -n "$branch" ] || { say "need the version.js URL and GITHUB_REF_NAME"; exit 2; }
-[ "${GITHUB_EVENT_NAME:-}" = "workflow_dispatch" ] && no "manual run; deploying"
 
 # a random parameter so an edge cache cannot answer with the old file
 case "$url" in http*) url="${url}?newer=${RANDOM}" ;; esac
