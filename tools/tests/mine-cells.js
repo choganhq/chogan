@@ -17,8 +17,8 @@ module.exports = function (T) {
     const accent = (game.match(/accent: '(#[0-9A-Fa-f]{6})'/) || [])[1];
     const mix = game.match(/--ms-closed: color-mix\(in srgb, var\(--game\) var\(--ms-share\), var\(--c-([a-z0-9-]+)\)\)/);
     const shares = [...game.matchAll(/--ms-share: (\d+)%/g)].map((m) => Number(m[1]) / 100);
-    const flagShare = (game.match(/\.ms-cell--flag \{ color: color-mix\(in srgb, var\(--c-bad\) (\d+)%, var\(--c-text\)\)/) || [])[1];
-    const openTok = (game.match(/\.ms-cell--open \{ background: var\(--c-([a-z0-9-]+)\)/) || [])[1];
+    const flagShare = (game.match(/\.ms-cell--flag \{ color: var\(--ms-flag, color-mix\(in srgb, var\(--c-bad\) (\d+)%, var\(--c-text\)\)/) || [])[1];
+    const openTok = (game.match(/\.ms-cell--open \{ background: var\(--ms-open, var\(--c-([a-z0-9-]+)\)/) || [])[1];
     // without a mix, measure the plain tone the cell is painted with, so the old pair of
     // surfaces is judged by the same ratio
     const plain = (game.match(/\.ms-cell \{[\s\S]*?background: var\(--c-([a-z0-9-]+)\)/) || [])[1];
