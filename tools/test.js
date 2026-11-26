@@ -5277,10 +5277,25 @@ function testPasur() {
     caps: [[], []], surs: [0, 0], turn: 0, first: 0, lastCap: -1, log: [], done: false });
   const fix = (S) => { if (S.deck.length === 1 && S.deck[0] < 0) S.deck = []; return S; };
 
-  let S = fix(mk('4C 6D', 'AS', 'KH'));
+  let S = fix(mk('4C 6D', 'AS', 'KH', '2H 3H'));
   let info = E.play(S, E.parse('AS'), null);
   ok(info && info.sur && S.surs[0] === 1 && !S.table.length, 'خالی کردن میز با کارت عددی سور است');
-  S = fix(mk('4C 6D', 'JS', 'KH'));
+  // After the last four cards are dealt a cleared table is not a sur (#1185)
+  S = fix(mk('4C 6D', 'AS', 'KH'));
+  info = E.play(S, E.parse('AS'), null);
+  ok(info && !info.sur && S.surs[0] === 0 && !S.table.length && S.caps[0].length === 3, 'no sur in the last deal');
+  // The play that empties both hands before the next deal is not in the last deal yet
+  S = fix(mk('4C 6D', 'AS', '', '2H 3H 4H 5H 6H 7H 8H 9H'));
+  S.hands[1] = [];
+  info = E.play(S, E.parse('AS'), null);
+  ok(info && info.sur && info.dealt && !S.deck.length, 'the last card before the final deal can still score a sur');
+  // The bot neither counts nor fears a sur that cannot be scored
+  const gain = (deck) => {
+    const G = fix(mk('4C 6D', 'AS 9H', 'KH QH', deck));
+    return E.evalMove(G, { card: E.parse('AS'), set: P('4C 6D') }, 0, 'easy');
+  };
+  ok(gain('2H 3H') - gain('') === 5, 'the bot does not count five points for a last-deal sur');
+  S = fix(mk('4C 6D', 'JS', 'KH', '2H 3H'));
   info = E.play(S, E.parse('JS'), null);
   ok(info && !info.sur && S.surs[0] === 0 && !S.table.length, 'خالی کردن میز با سرباز سور نیست');
   S = fix(mk('3C 3D 8H 5S', '8C 2D', 'KH'));
@@ -5316,13 +5331,13 @@ function testPasur() {
 
 
   // حریف متوسط و سخت میزی نمی‌گذارند که با یک کارت سور شود
-  S = fix(mk('3C 4D', '2H KC', 'QS QH'));
+  S = fix(mk('3C 4D', '2H KC', 'QS QH', '5H 6H 7H 8H'));
   const mMed = E.aiMove(S, 'medium', () => 0.5);
   ok(mMed && E.name(mMed.card) === 'KC', 'متوسط: به‌جای ۲ (که میز را ۹ می‌کرد) شاه را گذاشت');
   // سخت با نمونه‌گیری تصمیم می‌گیرد؛ یک بذر تنها می‌توانست شانسی رد یا قبول شود
   let kc = 0;
   for (let sd = 1; sd <= 8; sd++) {
-    const m = E.aiMove(fix(mk('3C 4D', '2H KC', 'QS QH')), 'hard', rng(sd * 97));
+    const m = E.aiMove(fix(mk('3C 4D', '2H KC', 'QS QH', '5H 6H 7H 8H')), 'hard', rng(sd * 97));
     if (m && E.name(m.card) === 'KC') kc++;
   }
   ok(kc >= 6, 'سخت: در دست‌کم ۶ از ۸ بذر شاه را گذاشت (' + kc + ')');

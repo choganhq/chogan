@@ -113,8 +113,13 @@ function HillriderEngineFactory() {
 
   /* ------------------------------------------------------------ terrain */
 
-  // How hard the hills are at a distance: 0 at the start, 1 from 2,000 m on
-  function hard(x) { return clamp(x / 2000, 0, 1); }
+  // How hard the hills are at a distance: never under a quarter, then growing to 1 at
+  // 2,000 m. It began at 0, and a player wrote that it was hard to die (#1180): a driver
+  // holding the gas flipped at about 540 m on the test courses. With the quarter from the
+  // start that is about 190 m, while from 500 m on the hills are as before, so the steady
+  // test driver still reaches every daily flag.
+  var HILLS = 2;
+  function hard(x) { return clamp(Math.max(x / 2000, 0.25), 0, 1); }
   function noise(seed, o, t) {
     var i = Math.floor(t), f = t - i, a = hash(seed + o * 7919, i) * 2 - 1, b = hash(seed + o * 7919, i + 1) * 2 - 1;
     return a + (b - a) * smooth(f);
@@ -154,7 +159,7 @@ function HillriderEngineFactory() {
 
   /* ----------------------------------------------------------- pickups */
 
-  // Fuel cans: the first at about 110 m, then the gap grows from about 160 m to 420 m with the distance; coins come in rows
+  // Fuel cans: the first at about 110 m, then the gap grows from about 225 m to 420 m with the distance; coins come in rows
   // of five between them. Both follow from the seed, so only what was taken is saved.
   function fuelAt(S, n) {
     var F = S.fx;
@@ -405,13 +410,15 @@ function HillriderEngineFactory() {
 
   var KEEP = ['x', 'y', 'a', 'vx', 'vy', 'w', 'fuel', 'coins', 'cans', 'best', 't', 'air', 'airBest', 'flips', 'spin', 'still', 'finish', 'seed'];
   function snapshot(S) {
-    var o = { wh: S.wh.map(function (W) { return { x: W.x, y: W.y, vx: W.vx, vy: W.vy, sp: W.sp, rot: W.rot }; }), got: Object.keys(S.got), fuelOut: !!S.fuelOut, touch: S.touch.slice(), scene: S.scene, car: S.car };
+    var o = { wh: S.wh.map(function (W) { return { x: W.x, y: W.y, vx: W.vx, vy: W.vy, sp: W.sp, rot: W.rot }; }), got: Object.keys(S.got), fuelOut: !!S.fuelOut, touch: S.touch.slice(), scene: S.scene, car: S.car, hills: HILLS };
     KEEP.forEach(function (k) { o[k] = S[k]; });
     return o;
   }
   function restore(v) {
     if (!v || !Array.isArray(v.wh) || v.wh.length !== 2 || !Array.isArray(v.got) || KEEP.some(function (k) { return typeof v[k] !== 'number' || !isFinite(v[k]); })) return null;
     if (v.fuel < 0 || v.fuel > 1 || v.seed < 0 || v.seed > 4294967295 || v.finish < 0) return null;
+    // a run saved on the old hills (#1180) would put the car inside the new ground
+    if (v.hills !== HILLS) return null;
     var S = { ter: { c: [], p: [] }, fx: [], bx: [], got: {}, over: false, won: false, cause: '', fuelOut: !!v.fuelOut, touch: Array.isArray(v.touch) ? [!!v.touch[0], !!v.touch[1]] : [false, false] };
     KEEP.forEach(function (k) { S[k] = v[k]; });
     // a save from before the scenes (#805) drives on in the sun
@@ -546,7 +553,7 @@ function HillriderEngineFactory() {
   };
   function look(scene, dark) { return LOOKS[sceneOf(scene)][dark ? 'dark' : 'light']; }
 
-  return { LEVEL_IDS: LEVEL_IDS, levelOf: levelOf, RACE: RACE, CAR_IDS: CAR_IDS, car: car, carOf: carOf, SCENE_IDS: SCENE_IDS, sceneOf: sceneOf, grip: grip, look: look, DT: DT, courseSeed: courseSeed, WR: WR, START: START, HEAD: HEAD, HEAD_R: HEAD_R, ANCH: ANCH, newGame: newGame, step: step, ground: ground, height: height, pickups: pickups, fuelAt: fuelAt, world: world, headPos: headPos, snapshot: snapshot, restore: restore, metres: metres, speedOf: speedOf, FUEL_PRICE: FUEL_PRICE, FUEL_BUY: FUEL_BUY, FUEL_LOW: FUEL_LOW, fuelOffered: fuelOffered, refuel: refuel, hudLayout: hudLayout, dialFrac: dialFrac, botControl: botControl, hard: hard, maxSlope: maxSlope, bumps: bumps, scenery: scenery, animals: animals, animalAt: animalAt, BUMP_GAP: BUMP_GAP, BUMP_FLAT: BUMP_FLAT, BUMP_CAN: BUMP_CAN };
+  return { LEVEL_IDS: LEVEL_IDS, levelOf: levelOf, RACE: RACE, CAR_IDS: CAR_IDS, car: car, carOf: carOf, SCENE_IDS: SCENE_IDS, sceneOf: sceneOf, grip: grip, look: look, DT: DT, courseSeed: courseSeed, WR: WR, START: START, HEAD: HEAD, HEAD_R: HEAD_R, ANCH: ANCH, newGame: newGame, step: step, ground: ground, height: height, pickups: pickups, fuelAt: fuelAt, world: world, headPos: headPos, snapshot: snapshot, restore: restore, metres: metres, speedOf: speedOf, FUEL_PRICE: FUEL_PRICE, FUEL_BUY: FUEL_BUY, FUEL_LOW: FUEL_LOW, fuelOffered: fuelOffered, refuel: refuel, hudLayout: hudLayout, dialFrac: dialFrac, botControl: botControl, HILLS: HILLS, hard: hard, maxSlope: maxSlope, bumps: bumps, scenery: scenery, animals: animals, animalAt: animalAt, BUMP_GAP: BUMP_GAP, BUMP_FLAT: BUMP_FLAT, BUMP_CAN: BUMP_CAN };
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = HillriderEngineFactory;
 /* ==== ENGINE END ==== */
