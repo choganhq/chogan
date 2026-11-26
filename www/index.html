@@ -2275,14 +2275,33 @@
   // #1102: a desktop player reached for Ctrl+F to find a game and got the browser's page find,
   // which cannot see past the tiles already drawn. On the games tab it focuses the menu's own
   // search (Cmd+F on a Mac); on any other tab the browser keeps its find.
-  function isFindKey(e) { return (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && C.keyIs(e, 'f'); }
+  // F3 and / do the same (#1216); a slash typed into a field stays text.
+  function isFindKey(e) {
+    if (e.altKey) return false;
+    if (e.ctrlKey || e.metaKey) return !e.shiftKey && C.keyIs(e, 'f');
+    if (e.key === 'F3') return !e.shiftKey;
+    return e.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || '');
+  }
+  // Ctrl+1..5 open the tabs (#1216), by the key so a Persian layout counts too
+  function tabKey(e) {
+    var m = /^Digit([1-5])$/.exec(e.code || '');
+    return m && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey ? m[1] - 1 : -1;
+  }
+  // a dialog or the welcome screen covers the menu: its keys must not act behind it (#1216)
+  function covered() { return !!(wHost || document.querySelector('.ch-scrim')); }
   document.addEventListener('keydown', function (e) {
-    if (isFindKey(e) && !document.querySelector('.ch-scrim')) {
+    if (isFindKey(e) && !covered()) {
       var find = app.querySelector('.ch-search__input');
       if (find && find.getClientRects().length) { e.preventDefault(); find.focus(); find.select(); }
       return;
     }
-    if (e.ctrlKey || e.metaKey || e.altKey || document.querySelector('.ch-scrim')) return;
+    var n = tabKey(e);
+    if (n >= 0 && gamesLoaded && !covered()) {
+      e.preventDefault();
+      if (TABS[n].id !== tab) { tab = TABS[n].id; C.feedback('select'); render(); }
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey || covered()) return;
     var cur = document.activeElement;
     var onItem = cur && cur.classList && cur.classList.contains('ch-kbnav') && app.contains(cur);
     if ((e.key === 'Enter' || e.key === ' ') && onItem && cur.tagName !== 'BUTTON') {
