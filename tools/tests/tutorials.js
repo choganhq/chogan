@@ -76,5 +76,15 @@ module.exports = function (T) {
       ok((html.match(/title: C\.t\('tutTitle\d'\)/) || [''])[0].includes('tutTitle0'), g + ': it is the first card shown');
     }
   }
-  return { testFirstMoveTutorialsRound7, testFirstMoveTutorialsRound6, testFirstMoveTutorialsRound5, testGoTutorialStart, testFirstMoveTutorials, testFirstMoveTutorialsRound3, testFirstMoveTutorialsRound4 };
+  // #1060 round 8: FreeCell, Klondike and Spider opened on the goal and only said what a
+  // tap does on the last card; a first-time player was left looking at a full table.
+  function testFirstMoveTutorialsRound8() {
+    head('FreeCell, Klondike, Spider tutorials start with the first move (#1060)');
+    for (const g of ['freecell', 'klondike', 'spider']) {
+      const html = fs.readFileSync(path.join(ROOT, 'www/games', g, 'index.html'), 'utf8');
+      ok((html.match(/tutTitle0: '(?:[^'\\]|\\.)+', tutText0: '(?:[^'\\]|\\.)+'/g) || []).length === CODES.length, g + ': the first card exists in every language');
+      ok(/var TUT = \[\s*\{ title: C\.t\('tutTitle0'\), text: C\.t\('tutText0'\)/.test(html), g + ': it is the first card shown');
+    }
+  }
+  return { testFirstMoveTutorialsRound8, testFirstMoveTutorialsRound7, testFirstMoveTutorialsRound6, testFirstMoveTutorialsRound5, testGoTutorialStart, testFirstMoveTutorials, testFirstMoveTutorialsRound3, testFirstMoveTutorialsRound4 };
 };
