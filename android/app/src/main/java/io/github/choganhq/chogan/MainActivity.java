@@ -44,6 +44,8 @@ public class MainActivity extends BridgeActivity {
             getBridge().getWebView().addJavascriptInterface(new AppInfoBridge(this), "ChoganApp");
             // The icon's long-press shortcuts follow the pinned games (#1150)
             getBridge().getWebView().addJavascriptInterface(new ShortcutsBridge(this), "ChoganShortcuts");
+            // The progress file of "Export progress" (#1211)
+            getBridge().getWebView().addJavascriptInterface(new FileBridge(this), "ChoganFiles");
         }
 
         openShortcut(getIntent());

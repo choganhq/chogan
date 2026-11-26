@@ -22,7 +22,7 @@ module.exports = function (T) {
         state: { settings: { music: false } }, saveSettings() {}, SFX: {},
         AC: { state: 'running', resume() {} }, ensureAudio() { return ctx.AC; }, audioReady: true,
         now: () => 0, musBus: { gain }, scheduleMusic() {}, setInterval: () => 1, clearInterval() {},
-        fireResume() {}, firePause() {},
+        fireResume() {}, firePause() {}, restoredElsewhere: () => false, global: { location: { reload() {} } },
         document: { hidden: false, addEventListener: (n, f) => { listeners[n] = f; } }
       };
       vm.createContext(ctx);
