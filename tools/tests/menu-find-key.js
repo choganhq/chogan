@@ -32,7 +32,7 @@ module.exports = function (T) {
     }
     // the shortcut must run before the handler returns on any modifier, and only reach a
     // visible search field, so on other tabs the browser keeps its find
-    const h = html.match(/document\.addEventListener\('keydown', function \(e\) \{\n {4}if \(isFindKey\(e\) && !document\.querySelector\('\.ch-scrim'\)\) \{\n {6}var find = app\.querySelector\('\.ch-search__input'\);\n {6}if \(find && find\.getClientRects\(\)\.length\) \{ e\.preventDefault\(\); find\.focus\(\); find\.select\(\); \}\n {6}return;\n {4}\}\n {4}var n = tabKey\(e\);/);
+    const h = html.match(/document\.addEventListener\('keydown', function \(e\) \{\n {4}if \(isFindKey\(e\) && !covered\(\)\) \{\n {6}var find = app\.querySelector\('\.ch-search__input'\);\n {6}if \(find && find\.getClientRects\(\)\.length\) \{ e\.preventDefault\(\); find\.focus\(\); find\.select\(\); \}\n {6}return;\n {4}\}\n {4}var n = tabKey\(e\);/);
     ok(!!h, 'the menu key handler checks Ctrl+F first and focuses only a shown search field');
   }
   // #1216: Ctrl+1..5 (Cmd on a Mac) open the five tabs
@@ -51,7 +51,8 @@ module.exports = function (T) {
       ok(k({ ctrlKey: true, code: 'Digit6' }) === -1 && k({ code: 'Digit1' }) === -1, 'Ctrl+6 and a plain 1 are nothing');
       ok(k({ ctrlKey: true, altKey: true, code: 'Digit2' }) === -1 && k({ ctrlKey: true, shiftKey: true, code: 'Digit2' }) === -1, 'AltGr and Shift are left alone');
     }
-    ok(/var n = tabKey\(e\);\n {4}if \(n >= 0 && gamesLoaded && !document\.querySelector\('\.ch-scrim'\)\) \{\n {6}e\.preventDefault\(\);/.test(html), 'the handler takes the key only on the menu itself');
+    ok(/var n = tabKey\(e\);\n {4}if \(n >= 0 && gamesLoaded && !covered\(\)\) \{\n {6}e\.preventDefault\(\);/.test(html), 'the handler takes the key only on the menu itself');
+    ok(/function covered\(\) \{ return !!\(wHost \|\| document\.querySelector\('\.ch-scrim'\)\); \}/.test(html), 'the welcome screen covers the menu as a dialog does');
   }
   return { testMenuFindKey, testMenuTabKeys };
 };

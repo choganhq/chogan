@@ -2287,19 +2287,21 @@
     var m = /^Digit([1-5])$/.exec(e.code || '');
     return m && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey ? m[1] - 1 : -1;
   }
+  // a dialog or the welcome screen covers the menu: its keys must not act behind it (#1216)
+  function covered() { return !!(wHost || document.querySelector('.ch-scrim')); }
   document.addEventListener('keydown', function (e) {
-    if (isFindKey(e) && !document.querySelector('.ch-scrim')) {
+    if (isFindKey(e) && !covered()) {
       var find = app.querySelector('.ch-search__input');
       if (find && find.getClientRects().length) { e.preventDefault(); find.focus(); find.select(); }
       return;
     }
     var n = tabKey(e);
-    if (n >= 0 && gamesLoaded && !document.querySelector('.ch-scrim')) {
+    if (n >= 0 && gamesLoaded && !covered()) {
       e.preventDefault();
       if (TABS[n].id !== tab) { tab = TABS[n].id; C.feedback('select'); render(); }
       return;
     }
-    if (e.ctrlKey || e.metaKey || e.altKey || document.querySelector('.ch-scrim')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || covered()) return;
     var cur = document.activeElement;
     var onItem = cur && cur.classList && cur.classList.contains('ch-kbnav') && app.contains(cur);
     if ((e.key === 'Enter' || e.key === ' ') && onItem && cur.tagName !== 'BUTTON') {
