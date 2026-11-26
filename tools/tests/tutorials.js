@@ -65,5 +65,16 @@ module.exports = function (T) {
     const cards = (ce.match(/var TUT = \[([\s\S]*?)\n  \];/) || ['', ''])[1].match(/C\.t\('tutTitle\d'\)/g) || [];
     ok(!!at && cards[Number(at[1])] === "C.t('tutTitle2')", 'crazyeights: the Iranian card replaces the eights card, not another');
   }
-  return { testFirstMoveTutorialsRound6, testFirstMoveTutorialsRound5, testGoTutorialStart, testFirstMoveTutorials, testFirstMoveTutorialsRound3, testFirstMoveTutorialsRound4 };
+  // #1060 round 7: Xiangqi opened on the river and palaces, Gin Rummy on melds and Durak on
+  // the beating rule; none said what to tap.
+  function testFirstMoveTutorialsRound7() {
+    head('Xiangqi, Gin Rummy, Durak tutorials start with the first move (#1060)');
+    for (const g of ['xiangqi', 'ginrummy', 'durak']) {
+      const html = fs.readFileSync(path.join(ROOT, 'www/games', g, 'index.html'), 'utf8');
+      ok((html.match(/tutTitle0: '(?:[^'\\]|\\.)+', tutText0: '(?:[^'\\]|\\.)+'/g) || []).length === CODES.length, g + ': the first card exists in every language');
+      // Durak builds its cards in a function, so look at which card comes first either way
+      ok((html.match(/title: C\.t\('tutTitle\d'\)/) || [''])[0].includes('tutTitle0'), g + ': it is the first card shown');
+    }
+  }
+  return { testFirstMoveTutorialsRound7, testFirstMoveTutorialsRound6, testFirstMoveTutorialsRound5, testGoTutorialStart, testFirstMoveTutorials, testFirstMoveTutorialsRound3, testFirstMoveTutorialsRound4 };
 };
