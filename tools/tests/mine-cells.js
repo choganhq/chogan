@@ -15,7 +15,9 @@ module.exports = function (T) {
     const game = read('www/games/minesweeper/index.html');
     const css = read('www/lib/chogan.css').replace(/\/\*[\s\S]*?\*\//g, '');
     const accent = (game.match(/accent: '(#[0-9A-Fa-f]{6})'/) || [])[1];
-    const mix = game.match(/--ms-closed: color-mix\(in srgb, var\(--game\) (\d+)%, var\(--c-([a-z0-9-]+)\)\)/);
+    const mix = game.match(/--ms-closed: color-mix\(in srgb, var\(--game\) var\(--ms-share\), var\(--c-([a-z0-9-]+)\)\)/);
+    const shares = [...game.matchAll(/--ms-share: (\d+)%/g)].map((m) => Number(m[1]) / 100);
+    const flagShare = (game.match(/\.ms-cell--flag \{ color: color-mix\(in srgb, var\(--c-bad\) (\d+)%, var\(--c-text\)\)/) || [])[1];
     const openTok = (game.match(/\.ms-cell--open \{ background: var\(--c-([a-z0-9-]+)\)/) || [])[1];
     // without a mix, measure the plain tone the cell is painted with, so the old pair of
     // surfaces is judged by the same ratio
@@ -29,12 +31,26 @@ module.exports = function (T) {
     }
     ok(themes.length >= 18, 'every palette block was found, light and dark (' + themes.length + ')');
     if (!(accent && openTok && (mix || plain))) return ok(false, 'cannot measure without the colours');
-    const p = mix ? Number(mix[1]) / 100 : 0;
-    const weak = themes.filter(({ t }) => {
-      const closed = rgb(accent).map((v, i) => Math.round(v * p + rgb(t[mix ? mix[2] : plain])[i] * (1 - p)));
-      return cr(closed, rgb(t[openTok])) < 1.4;
-    });
+    const mixed = (a, b, p) => a.map((v, i) => Math.round(v * p + b[i] * (1 - p)));
+    // the light share comes first in the game, then the dark theme's
+    const closedOf = (t) => (mix ? mixed(rgb(accent), rgb(t[mix[1]]), shares[lum(rgb(t.bg)) < 0.2 ? 1 : 0]) : rgb(t[plain]));
+    const weak = themes.filter(({ t }) => cr(closedOf(t), rgb(t[openTok])) < 1.4);
     ok(!weak.length, 'closed against opened is at least 1.4:1 in all ' + themes.length + ' blocks' + (weak.length ? '; not in ' + weak.map((w) => w.sel).join(' | ') : ''));
+    // a palette block without its own red inherits the default one for its theme
+    const reds = [...css.matchAll(/--c-bad:\s*(#[0-9A-Fa-f]{6})/g)].map((m) => m[1]);
+    const faint = themes.filter(({ t }) => {
+      const bad = rgb(t.bad || reds[lum(rgb(t.bg)) < 0.2 ? 1 : 0]);
+      const flag = flagShare ? mixed(bad, rgb(t.text), Number(flagShare) / 100) : bad;
+      return cr(flag, closedOf(t)) < 3;
+    });
+    ok(!faint.length, 'the flag is at least 3:1 on a closed cell' + (faint.length ? '; not in ' + faint.map((w) => w.sel).join(' | ') : ''));
+    // one stray closing brace swallowed the board's grid rule and left a one-column board
+    const style = (game.match(/<style>([\s\S]*?)<\/style>/) || ['', ''])[1].replace(/\/\*[\s\S]*?\*\/|'[^']*'/g, '');
+    let depth = 0, low = 0;
+    for (const c of style) { if (c === '{') depth++; if (c === '}') depth--; low = Math.min(low, depth); }
+    ok(style.length > 0 && depth === 0 && low === 0, 'the braces of the game style are balanced');
+    const tut = game.slice(game.indexOf('var TUT = ['), game.indexOf("C.t('tutTitle3')"));
+    ok(tut.includes('var(--ms-closed)') && !tut.includes('surface-3'), 'the tutorial pictures use the colours of the board');
   }
   return { testMineCells };
 };
