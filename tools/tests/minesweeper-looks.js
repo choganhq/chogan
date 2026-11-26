@@ -14,7 +14,7 @@ module.exports = function (T) {
     const html = fs.readFileSync(path.join(ROOT, 'www/games/minesweeper/index.html'), 'utf8');
     ok(/var look = ctx\.store\.get\('look', 'classic'\);/.test(html), 'the classic look is the default and the choice is read back');
     ok(/ctx\.store\.set\('look', v\);/.test(html), 'the choice is saved');
-    ok(/gearBtn\.addEventListener\('click', function \(\) \{ showSettings\(\); \}\);/.test(html) && /tools\.appendChild\(gearBtn\);/.test(html), 'the looks are chosen behind a gear among the tools');
+    ok(/var gearBtn = tool\('gear', 'settings', function \(\) \{ showSettings\(\); \}\);/.test(html), 'the looks are chosen behind a gear among the tools, a named tile as in Sudoku');
     ok(!/ctx\.button\(\{ icon: 'gear'/.test(html), 'not in the game bar, where it cut the name on a phone');
     ['garden', 'sea', 'neon', 'retro'].forEach((name) => {
       const body = (html.match(new RegExp('\\[data-skin="' + name + '"\\] \\.ms-board, \\[data-skin="' + name + '"\\] \\.ms-swatch \\{([^}]*)\\}')) || [])[1];
@@ -29,8 +29,14 @@ module.exports = function (T) {
       ok(!!flag && closed.every((c) => ratio(flag, c) >= 3), name + ': the flag is at least 3:1 on a closed tile');
       const low = [];
       for (let n = 1; n <= 8; n++) { const c = all(body, 'n' + n); if (!c || !open.every((o) => ratio(c, o) >= 3)) low.push(n); }
+      // the hint outlines a cell it has just opened; the cursor can sit on any cell
+      const face = (body.match(/--ms-face: ([^;]+);/) || ['', ''])[1].match(/#[0-9a-f]{6}/gi) || [];
+      const hint = all(body, 'hint'), cursor = all(body, 'cursor');
+      ok(!!hint && open.every((o) => ratio(hint, o) >= 3), name + ': the hint outline is at least 3:1 on an opened tile');
+      ok(!!cursor && closed.concat(face, open).every((c) => ratio(cursor, c) >= 3), name + ': the keyboard cursor is at least 3:1 on closed and opened tiles');
       ok(!low.length, name + ': all eight numbers are at least 3:1 on an opened tile' + (low.length ? '; not: ' + low.join(' ') : ''));
     });
+    ok(/row\(C\.t\('look'\), C\.t\('settings'\)\)/.test(html), 'help says where the looks are');
     LOCALE_CODES.forEach((code) => {
       const block = (html.match(new RegExp('\\n      ' + code + ': \\{[\\s\\S]*?\\n      \\}')) || [''])[0];
       ok(['look', 'lookClassic', 'lookGarden', 'lookSea', 'lookNeon', 'lookRetro'].every((k) => new RegExp('\\b' + k + ": '").test(block)), code + ': the names of the looks');

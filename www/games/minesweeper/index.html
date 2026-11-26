@@ -103,7 +103,7 @@
   .ms-frame[data-skin="sea"] { --ms-gap: #174a63; --ms-arrow: #fff; }
   [data-skin="sea"] .ms-board, [data-skin="sea"] .ms-swatch {
     --ms-closed: #1f6f95; --ms-face: linear-gradient(160deg, #2b7fa6, #1b6288); --ms-open: #e6f4f6; --ms-radius: 8px;
-    --ms-shadow: inset 0 1px 0 #7cc3dc; --ms-flag: #fff; --ms-hint: #ffd34d; --ms-cursor: #f08a00;
+    --ms-shadow: inset 0 1px 0 #7cc3dc; --ms-flag: #fff; --ms-hint: #8a4b00; --ms-cursor: #000000;
     --ms-n1: #244f8a; --ms-n2: #275c35; --ms-n3: #9c2f24; --ms-n4: #4b3180; --ms-n5: #7a420f; --ms-n6: #0f5860; --ms-n7: #3f3f3f; --ms-n8: #701b1b;
   }
   .ms-frame[data-skin="neon"] { --ms-gap: #0d1020; --ms-arrow: #fff; }
@@ -112,6 +112,7 @@
     --ms-flag: #ff6b8b; --ms-hint: #6dffa0; --ms-cursor: #fff;
     --ms-n1: #5ed3ff; --ms-n2: #6dffa0; --ms-n3: #ff8a8a; --ms-n4: #c79bff; --ms-n5: #ffb55e; --ms-n6: #5ef0e0; --ms-n7: #e8e8f0; --ms-n8: #ff9ccd;
   }
+  [data-skin="neon"] .ms-cell--wrong { background: #7a2b3a; color: #ffe3e8; }
   .ms-frame[data-skin="retro"] { --ms-gap: #808080; --ms-arrow: #fff; }
   [data-skin="retro"] .ms-board, [data-skin="retro"] .ms-swatch {
     --ms-closed: #c0c0c0; --ms-open: #bdbdbd; --ms-radius: 0px; --ms-open-shadow: inset 0 0 0 1px #8a8a8a;
@@ -132,8 +133,21 @@
   [data-skin="neon"] .ms-swatch { background: #0d1020; }
   [data-skin="retro"] .ms-swatch { background: #808080; }
   .ms-swatch .ms-cell { --cs: 30px; cursor: pointer; }
-  .ms-tools { display: flex; gap: var(--s-2); align-items: center; justify-content: center; flex-wrap: wrap; }
-  .ms-flagbtn { min-width: 120px; }
+  /* one row of tiles, icon over name, as Sudoku's tools are: the gear is one of them */
+  .ms-tools { display: grid; grid-template-columns: repeat(5, auto); gap: 5px; width: 100%; max-width: 440px; margin-inline: auto; }
+  .ms-tool {
+    border: 0; background: var(--c-surface); border-radius: var(--r-sm); box-shadow: var(--sh-1);
+    font: inherit; font-size: min(11px, 2.7vw); font-weight: 700; line-height: 1.3; text-align: center; color: var(--c-text-dim); cursor: pointer;
+    padding: 7px 2px; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    min-width: 0; min-height: 52px; transition: transform var(--t-fast) var(--ease); touch-action: manipulation;
+  }
+  .ms-tool > span { max-width: 100%; overflow-wrap: anywhere; }
+  .ms-tool:active { transform: scale(.94); }
+  .ms-tool[disabled] { opacity: .35; cursor: default; }
+  .ms-tool[aria-pressed="true"] { background: var(--game); color: var(--c-accent-ink); }
+  .ms-tool svg { width: 20px; height: 20px; }
+  .ms-tool b { font-size: 9px; color: var(--c-gold); font-weight: 800; display: inline-flex; align-items: center; gap: 2px; }
+  .ms-tool b svg { width: 10px; height: 10px; }
   .ms-custom { display: grid; grid-template-columns: 1fr auto; gap: var(--s-2); align-items: center; }
   .ms-custom input {
     font: inherit; width: 92px; text-align: center; padding: 9px; border-radius: var(--r-md);
@@ -600,34 +614,26 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
   var wrap = el('div', { class: 'ms-wrap' }, [top, frame, tools]);
   frame.setAttribute('data-skin', look);
 
-  var flagBtn = el('button', { class: 'ch-btn ch-btn--soft ms-flagbtn', type: 'button' },
-    [C.icon('flag', 20), el('span', { text: C.t('flagMode') })]);
-  flagBtn.setAttribute('aria-pressed', 'false');
-  flagBtn.addEventListener('click', function () {
+  function tool(icon, labelKey, onClick, extra) {
+    var b = el('button', { class: 'ms-tool', type: 'button' }, [
+      C.icon(icon, 20), el('span', { text: C.t(labelKey) }), extra || null
+    ]);
+    b.addEventListener('click', function () { onClick(b); });
+    tools.appendChild(b);
+    return b;
+  }
+  var flagBtn = tool('flag', 'flagMode', function (b) {
     flagMode = !flagMode;
-    flagBtn.setAttribute('aria-pressed', flagMode ? 'true' : 'false');
-    flagBtn.className = 'ch-btn ms-flagbtn ' + (flagMode ? 'ch-btn--primary' : 'ch-btn--soft');
+    b.setAttribute('aria-pressed', flagMode ? 'true' : 'false');
     C.feedback('select');
   });
-  var hintBtn = el('button', { class: 'ch-btn ch-btn--soft', type: 'button' },
-    [C.icon('bulb', 20), el('span', { text: C.t('hint') }), el('span', { class: 'ch-badge ch-badge--gold', text: C.num(HINT_COST) })]);
-  hintBtn.addEventListener('click', function () { hint(); });
+  flagBtn.setAttribute('aria-pressed', 'false');
+  tool('bulb', 'hint', function () { hint(); }, el('b', null, [C.icon('coin', 10), el('span', { text: C.num(HINT_COST) })]));
   // Buttons as well as the pinch: a player who finds a pinch hard can still zoom (#850)
-  var zoomOutBtn = el('button', { class: 'ch-btn ch-btn--soft ms-zoombtn', type: 'button', 'aria-label': C.t('zoomOut'), title: C.t('zoomOut') },
-    [C.icon('minus', 20)]);
-  var zoomInBtn = el('button', { class: 'ch-btn ch-btn--soft ms-zoombtn', type: 'button', 'aria-label': C.t('zoomIn'), title: C.t('zoomIn') },
-    [C.icon('plus', 20)]);
-  zoomOutBtn.addEventListener('click', function () { zoomBy(-1); });
-  zoomInBtn.addEventListener('click', function () { zoomBy(1); });
-  tools.appendChild(flagBtn);
-  tools.appendChild(hintBtn);
-  tools.appendChild(zoomOutBtn);
-  tools.appendChild(zoomInBtn);
-  // a tool, not a third button in the game bar: there it cut the game's name on a phone
-  var gearBtn = el('button', { class: 'ch-btn ch-btn--soft ms-zoombtn', type: 'button', 'aria-label': C.t('settings'), title: C.t('settings') },
-    [C.icon('gear', 20)]);
-  gearBtn.addEventListener('click', function () { showSettings(); });
-  tools.appendChild(gearBtn);
+  var zoomOutBtn = tool('minus', 'zoomOut', function () { zoomBy(-1); });
+  var zoomInBtn = tool('plus', 'zoomIn', function () { zoomBy(1); });
+  // among the tools: as a third button in the game bar it cut the game's name on a phone
+  var gearBtn = tool('gear', 'settings', function () { showSettings(); });
 
   ctx.stat('mines', C.t('minesLeft'));
   ctx.stat('time', C.t('time'));
@@ -1291,7 +1297,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
         el('div', { class: 'ch-list' }, [
           row(C.t('longPress'), C.t('flagMode')),
           row(C.t('chordHint'), ''),
-          row(C.t('pinchZoom'), '')
+          row(C.t('pinchZoom'), ''),
+          row(C.t('look'), C.t('settings'))
         ]),
         el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
         el('div', { class: 'ch-list' }, [
