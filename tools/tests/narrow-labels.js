@@ -34,6 +34,8 @@ module.exports = function (T) {
     const td = read('tower-defence');
     ok(/\.td-bottom \{[^}]*flex-wrap: wrap[^}]*container-type: inline-size/.test(td) && /@container \(max-width: 420px\) \{ \.td-preview \{ flex-basis: 100%; \} \}/.test(td),
       'tower defence: on a narrow row the next-wave preview gets its own line');
+    ok(/@supports not \(container-type: inline-size\) \{ @media \(max-width: 452px\) \{ \.td-preview \{ flex-basis: 100%; \} \} \}/.test(td),
+      'tower defence: a WebView without container queries gets the same line from the screen width (#1190)');
   }
   return { testNarrowLabels };
 };
