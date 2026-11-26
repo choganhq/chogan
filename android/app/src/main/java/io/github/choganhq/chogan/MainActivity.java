@@ -3,9 +3,13 @@ package io.github.choganhq.chogan;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.net.Uri;
+import android.graphics.Outline;
 import android.os.Bundle;
+import android.view.View;
+import android.view.ViewOutlineProvider;
 import android.webkit.WebView;
 
+import androidx.activity.BackEventCompat;
 import androidx.activity.OnBackPressedCallback;
 
 import com.getcapacitor.BridgeActivity;
@@ -34,10 +38,14 @@ public class MainActivity extends BridgeActivity {
             // System bars in the page's theme, not the device's (#402)
             bars = new BarsBridge(this);
             getBridge().getWebView().addJavascriptInterface(bars, "ChoganBars");
+            // Draw under the status bar, navigation bar and camera; the page pads itself (#1205)
+            bars.install(getBridge().getWebView());
             // Which build this is and where its store page is (#1023)
             getBridge().getWebView().addJavascriptInterface(new AppInfoBridge(this), "ChoganApp");
             // The icon's long-press shortcuts follow the pinned games (#1150)
             getBridge().getWebView().addJavascriptInterface(new ShortcutsBridge(this), "ChoganShortcuts");
+            // The progress file of "Export progress" (#1211)
+            getBridge().getWebView().addJavascriptInterface(new FileBridge(this), "ChoganFiles");
         }
 
         openShortcut(getIntent());
@@ -47,8 +55,22 @@ public class MainActivity extends BridgeActivity {
             // closed and leave the game
             private boolean asking;
 
+            // Predictive back (#1208): the page follows the finger, as in the installed web app.
+            // The system animates only between activities, and every game is a page of this one.
+            @Override
+            public void handleOnBackProgressed(BackEventCompat event) {
+                WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+                if (webView != null) follow(webView, event.getProgress(), event.getSwipeEdge() == BackEventCompat.EDGE_LEFT);
+            }
+
+            @Override
+            public void handleOnBackCancelled() {
+                settle();
+            }
+
             @Override
             public void handleOnBackPressed() {
+                settle();
                 WebView webView = getBridge() != null ? getBridge().getWebView() : null;
                 if (webView == null) {
                     leave();
@@ -72,6 +94,36 @@ public class MainActivity extends BridgeActivity {
                 // a press that did not close the app must find the callback again
                 setEnabled(true);
             }
+        });
+    }
+
+    private void follow(WebView view, float progress, boolean fromLeft) {
+        float density = getResources().getDisplayMetrics().density;
+        view.animate().cancel();
+        // rounded and raised while it moves: its colour is the window's, so the edge would not show
+        if (!view.getClipToOutline()) {
+            view.setOutlineProvider(new ViewOutlineProvider() {
+                @Override
+                public void getOutline(View v, Outline outline) {
+                    outline.setRoundRect(0, 0, v.getWidth(), v.getHeight(), 24 * density);
+                }
+            });
+            view.setClipToOutline(true);
+            view.setElevation(8 * density);
+        }
+        view.setScaleX(1 - 0.1f * progress);
+        view.setScaleY(1 - 0.1f * progress);
+        view.setTranslationX((fromLeft ? 1 : -1) * 48 * density * progress);
+    }
+
+    /** Puts the page back, after a cancelled gesture and after a completed one alike. */
+    private void settle() {
+        WebView view = getBridge() != null ? getBridge().getWebView() : null;
+        if (view == null || !view.getClipToOutline()) return;
+        view.animate().scaleX(1).scaleY(1).translationX(0).setDuration(150).withEndAction(() -> {
+            view.setClipToOutline(false);
+            view.setOutlineProvider(ViewOutlineProvider.BACKGROUND);
+            view.setElevation(0);
         });
     }
 
