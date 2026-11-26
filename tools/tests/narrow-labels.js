@@ -39,6 +39,10 @@ module.exports = function (T) {
       'tower defence: a WebView without container queries gets the same line from the screen width (#1190)');
     ok(/\.ch-gamemain\.ch-wide \.td-preview \{ flex-basis: 100%; \}/.test(old),
       'tower defence: and in landscape beside the board, where only the side column is narrow (#1190)');
+    const css = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8');
+    const side = css.match(/\.ch-split > \.ch-side \{\n\s*display: flex;[^}]*\}/g) || [];
+    ok(side.length === 2 && side.every((r) => !/justify-content/.test(r)),
+      'a side column taller than the screen scrolls from its top, in both layouts (#1195; ' + side.length + ' rules)');
   }
   return { testNarrowLabels };
 };
