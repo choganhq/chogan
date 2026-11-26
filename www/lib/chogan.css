@@ -155,10 +155,11 @@
   --w-page: 560px;
   --w-wide: 900px;
   --nav-h: 72px;
-  --safe-t: env(safe-area-inset-top, 0px);
-  --safe-b: env(safe-area-inset-bottom, 0px);
-  --safe-l: env(safe-area-inset-left, 0px);
-  --safe-r: env(safe-area-inset-right, 0px);
+  /* --ch-inset-* come from the Android app (#1205, www/lib/early.js); unset on the web */
+  --safe-t: max(env(safe-area-inset-top, 0px), var(--ch-inset-t, 0px));
+  --safe-b: max(env(safe-area-inset-bottom, 0px), var(--ch-inset-b, 0px));
+  --safe-l: max(env(safe-area-inset-left, 0px), var(--ch-inset-l, 0px));
+  --safe-r: max(env(safe-area-inset-right, 0px), var(--ch-inset-r, 0px));
 }
 
 :root[data-theme="dark"],
@@ -779,6 +780,25 @@ button.ch-card { font-family: inherit; }
   .ch-update { bottom: calc(var(--s-3) + var(--safe-b)); inset-inline-start: calc(var(--nav-w) + var(--s-3) + max(var(--safe-l), var(--safe-r))); }
 }
 
+/* Edge to edge in the Android app (#1205): the menu and the privacy page scroll under
+   the status bar, the camera and the navigation bar, which Android no longer paints. A
+   translucent strip of the page colour under each bar keeps the clock and the buttons
+   readable over passing game tiles. Games need none: the game bar fills the top strip
+   and the board is padded clear of the bottom one. Below the bottom bar (40) and every
+   dialog, above the page. Not on the web: html.ch-edge is set only by the app's
+   ChoganBars bridge. */
+html.ch-edge body:not(.ch-noscroll)::after {
+  content: '';
+  position: fixed;
+  top: 0; right: 0; bottom: 0; left: 0;
+  z-index: 35;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--ch-scrim), var(--ch-scrim)) top / 100% var(--ch-inset-t, 0px) no-repeat,
+    linear-gradient(var(--ch-scrim), var(--ch-scrim)) bottom / 100% var(--ch-inset-b, 0px) no-repeat;
+  --ch-scrim: color-mix(in srgb, var(--c-bg) 86%, transparent);
+}
+
 /* ------------------------------------------------- سربرگ داخل بازی‌ها */
 .ch-gamebar {
   display: flex;
@@ -874,7 +894,7 @@ button.ch-card { font-family: inherit; }
    floating over the bottom of the finished board */
 .ch-afterbar {
   position: fixed; z-index: 20; left: 0; right: 0; margin-inline: auto; width: max-content; max-width: calc(100% - 32px);
-  bottom: calc(var(--s-4) + env(safe-area-inset-bottom, 0px)); display: flex; gap: var(--s-2);
+  bottom: calc(var(--s-4) + var(--safe-b)); display: flex; gap: var(--s-2);
   padding: var(--s-2); border-radius: var(--r-pill); background: var(--c-surface); box-shadow: var(--sh-3, var(--sh-2));
   animation: ch-rise var(--t-mid) var(--ease) both;
 }

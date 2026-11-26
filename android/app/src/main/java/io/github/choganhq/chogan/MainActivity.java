@@ -38,6 +38,8 @@ public class MainActivity extends BridgeActivity {
             // System bars in the page's theme, not the device's (#402)
             bars = new BarsBridge(this);
             getBridge().getWebView().addJavascriptInterface(bars, "ChoganBars");
+            // Draw under the status bar, navigation bar and camera; the page pads itself (#1205)
+            bars.install(getBridge().getWebView());
             // Which build this is and where its store page is (#1023)
             getBridge().getWebView().addJavascriptInterface(new AppInfoBridge(this), "ChoganApp");
             // The icon's long-press shortcuts follow the pinned games (#1150)
