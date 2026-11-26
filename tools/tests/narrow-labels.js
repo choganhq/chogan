@@ -34,6 +34,10 @@ module.exports = function (T) {
     const td = read('tower-defence');
     ok(/\.td-bottom \{[^}]*flex-wrap: wrap[^}]*container-type: inline-size/.test(td) && /@container \(max-width: 420px\) \{ \.td-preview \{ flex-basis: 100%; \} \}/.test(td),
       'tower defence: on a narrow row the next-wave preview gets its own line');
+    const css = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8');
+    const side = css.match(/\.ch-split > \.ch-side \{\n\s*display: flex;[^}]*\}/g) || [];
+    ok(side.length === 2 && side.every((r) => /justify-content: center; justify-content: safe center;/.test(r)),
+      'a side column taller than the screen scrolls from its top, in both layouts (#1195; ' + side.length + ' rules)');
   }
   return { testNarrowLabels };
 };
