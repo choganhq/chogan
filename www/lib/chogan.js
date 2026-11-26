@@ -4694,6 +4694,138 @@
     Chogan.cloud.ready.then(function () { Chogan.cloud.score(Chogan.league.state().points); });
   }
 
+  /* ------------------------------------------------ export and import */
+
+  // A player moving to a new phone lost everything, because progress lives only in this
+  // browser's localStorage and there is no account or server to carry it (#1211). The
+  // export is every chogan.* key as the exact string stored, so no game's own shape has to
+  // be known here, plus the schema stamp, so an older file goes through MIGRATIONS on the
+  // way in. The file is untrusted on import: anyone can hand a player a crafted one.
+  var BACKUP_FORMAT = 1;
+  // localStorage holds about 5 million characters per origin; JSON escaping can grow that,
+  // and nothing legitimate comes near 16 MB
+  var BACKUP_MAX = 16 * 1024 * 1024;
+  var BACKUP_MAX_KEYS = 20000;
+  // game id, then the game's own key; a daily session key carries the date from the URL
+  var BACKUP_KEY_RE = /^chogan\.[A-Za-z0-9_-]{1,64}\.[!-~]{1,200}$/;
+  // About this browser, not the player: whether the web install bar was dismissed here
+  // (#557). A phone that never offered install should not inherit "dismissed".
+  var BACKUP_LOCAL = [NS + '.' + APP + '.installNo'];
+  function backupLocal(k) { return BACKUP_LOCAL.indexOf(k) >= 0; }
+
+  function backupBuild(io, now) {
+    var keys = {}, list = io.keys().slice().sort();
+    for (var i = 0; i < list.length; i++) {
+      var k = list[i];
+      // the same rule parse applies, or one odd key would make the whole file unreadable
+      if (!k || !BACKUP_KEY_RE.test(k) || k === SCHEMA_KEY || backupLocal(k)) continue;
+      var v = io.get(k);
+      if (typeof v === 'string') keys[k] = v;
+    }
+    var sc = parseInt(io.get(SCHEMA_KEY), 10);
+    return JSON.stringify({
+      app: 'chogan', kind: 'progress', format: BACKUP_FORMAT,
+      schema: sc >= 0 ? sc : SCHEMA, version: Chogan.version,
+      exported: new Date(now == null ? Date.now() : now).toISOString(), keys: keys
+    });
+  }
+
+  // { ok: true, data } or { ok: false, error: 'size' | 'bad' | 'newer' | 'empty' }
+  function backupParse(text) {
+    if (typeof text !== 'string' || text.length > BACKUP_MAX) return { ok: false, error: 'size' };
+    var o;
+    try { o = JSON.parse(text); } catch (e) { return { ok: false, error: 'bad' }; }
+    if (!o || typeof o !== 'object' || Array.isArray(o) || o.app !== 'chogan' || o.kind !== 'progress') return { ok: false, error: 'bad' };
+    if (typeof o.format !== 'number' || o.format !== Math.floor(o.format) || o.format < 1) return { ok: false, error: 'bad' };
+    if (typeof o.schema !== 'number' || o.schema !== Math.floor(o.schema) || o.schema < 0) return { ok: false, error: 'bad' };
+    // a newer app may have reshaped keys this one cannot read back or migrate down
+    if (o.format > BACKUP_FORMAT || o.schema > SCHEMA) return { ok: false, error: 'newer' };
+    var src = o.keys;
+    if (!src || typeof src !== 'object' || Array.isArray(src)) return { ok: false, error: 'bad' };
+    var names = Object.keys(src);
+    if (names.length > BACKUP_MAX_KEYS) return { ok: false, error: 'bad' };
+    var keys = Object.create(null), n = 0;
+    for (var i = 0; i < names.length; i++) {
+      var k = names[i], v = src[k];
+      // one bad entry means the file was edited or damaged; half a profile is worse than none
+      if (!BACKUP_KEY_RE.test(k) || typeof v !== 'string') return { ok: false, error: 'bad' };
+      if (k === SCHEMA_KEY || backupLocal(k)) continue;
+      keys[k] = v; n++;
+    }
+    if (!n) return { ok: false, error: 'empty' };
+    return { ok: true, data: {
+      format: o.format, schema: o.schema, count: n, keys: keys,
+      version: typeof o.version === 'string' && /^\d+\.\d+\.\d+$/.test(o.version) ? o.version : '',
+      exported: typeof o.exported === 'string' && o.exported.length <= 40 ? o.exported : ''
+    } };
+  }
+
+  // What the confirm dialog shows, read defensively: the values are still the file's
+  function backupSummary(data) {
+    function json(k) { try { return JSON.parse(data.keys[k]); } catch (e) { return null; } }
+    var coins = json(NS + '.app.coins'), ach = json(NS + '.app.achievements');
+    return {
+      coins: typeof coins === 'number' && isFinite(coins) ? Math.max(0, Math.floor(coins)) : 0,
+      awards: ach && typeof ach === 'object' && !Array.isArray(ach) ? Object.keys(ach).length : 0,
+      exported: data.exported
+    };
+  }
+
+  // Replaces this device's progress with the file's. The file is migrated in memory first,
+  // so a failing migration writes nothing; then every write is checked, and on any failure
+  // (storage full, a private window) the keys from before are put back exactly.
+  // io.set must throw on failure, unlike rawSet.
+  function backupRestore(data, io) {
+    var mem = Object.create(null);
+    for (var k in data.keys) mem[k] = data.keys[k];
+    mem[SCHEMA_KEY] = String(data.schema);
+    var r = migrateSaves({
+      get: function (x) { return x in mem ? mem[x] : null; },
+      set: function (x, v) { mem[x] = String(v); },
+      del: function (x) { delete mem[x]; },
+      keys: function () { return Object.keys(mem); }
+    }, SCHEMA, MIGRATIONS);
+    if (r.status === 'failed' || r.status === 'newer') return { ok: false, error: 'migrate' };
+    var before = {}, list = io.keys();
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && list[i].indexOf(NS + '.') === 0) before[list[i]] = io.get(list[i]);
+    }
+    function ours(x) { return x.indexOf(NS + '.') === 0 && !backupLocal(x); }
+    try {
+      for (var b in before) if (ours(b)) io.del(b);
+      for (var m in mem) {
+        if (!ours(m)) continue;
+        io.set(m, mem[m]);
+        if (io.get(m) !== mem[m]) throw new Error('not kept: ' + m);
+      }
+    } catch (e) {
+      var now = io.keys();
+      for (var j = 0; j < now.length; j++) if (now[j] && ours(now[j])) { try { io.del(now[j]); } catch (e2) { /* keep going */ } }
+      for (var p in before) { try { io.set(p, before[p]); } catch (e3) { /* it fitted before */ } }
+      return { ok: false, error: 'storage' };
+    }
+    return { ok: true, count: Object.keys(mem).length };
+  }
+
+  var strictIo = {
+    keys: lsKeys,
+    get: function (k) { return global.localStorage.getItem(k); },
+    set: function (k, v) { global.localStorage.setItem(k, v); },
+    del: function (k) { global.localStorage.removeItem(k); }
+  };
+  Chogan.backup = {
+    format: BACKUP_FORMAT, maxBytes: BACKUP_MAX,
+    build: function (now) { return backupBuild({ keys: lsKeys, get: rawGet }, now); },
+    parse: backupParse,
+    summary: backupSummary,
+    // without localStorage nothing written now would survive the reload that follows
+    restore: function (data, io) {
+      if (!io && !lsOk) return { ok: false, error: 'storage' };
+      return backupRestore(data, io || strictIo);
+    },
+    fileName: function (d) { return 'chogan-progress-' + dateKey(d) + '.json'; }
+  };
+
   /* ------------------------------------------------------- کمکی‌ها */
 
   Chogan.flag = function (cc) {
