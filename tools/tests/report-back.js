@@ -20,6 +20,8 @@ module.exports = function (T) {
     const backs = html.match(/[ ,{]back: '[^']+'/g) || [];
     ok(LOCALE_CODES.length > 0 && backs.length === LOCALE_CODES.length, 'the "back" words exist in all ' + LOCALE_CODES.length + ' languages (' + backs.length + ')');
     ok(/id="backLink"/.test(html), 'the link at the bottom stays');
+    const label = (/\.back span \{([^}]*)\}/.exec(html) || [])[1];
+    ok(label !== undefined && !/nowrap|ellipsis/.test(label), 'on a narrow phone the words wrap, they are not cut to "Back to Cho…" (' + label + ')');
 
     // the click, for real
     const at = html.indexOf('  var BACK_FROM = ');
