@@ -1,0 +1,994 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>گل‌واژه — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  .wp-wrap > .ch-fit { --fit-ar: 1.45; }
+  .ch-fit > .wp-box { width: 100%; height: 100%; position: relative; }
+  /* a canvas is a replaced element: without its own width and height it keeps the
+     backing-store size times the pixel ratio (#919) */
+  .wp-box canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; border-radius: var(--r-md);
+    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .wp-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2) var(--s-3); flex-wrap: wrap;
+    font-weight: 700; color: var(--c-text-dim); font-variant-numeric: tabular-nums; min-height: 36px; }
+  .wp-top > span { white-space: nowrap; }
+  .wp-dots { display: inline-flex; gap: 5px; align-items: center; }
+  .wp-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--c-line); box-sizing: border-box; }
+  .wp-dot.wp-got { background: var(--game, var(--c-accent)); border-color: var(--game, var(--c-accent)); }
+  .wp-dot.wp-now { border-color: var(--game, var(--c-accent)); }
+  .wp-dot.wp-miss { background: var(--c-line); }
+  .wp-cat { text-align: center; min-height: 1.5em; color: var(--game-text, var(--c-text-dim)); font-weight: 700; font-size: .95rem; }
+  /* one box a letter; the row shrinks its boxes before it ever wraps a word */
+  .wp-word { display: flex; justify-content: center; gap: 4px; --n: 5; padding: var(--s-1) 0; }
+  .wp-slot { flex: 0 1 calc((100% - (var(--n) - 1) * 4px) / var(--n)); max-width: 46px; min-width: 0; height: 52px;
+    display: flex; align-items: center; justify-content: center; border-bottom: 3px solid var(--c-line);
+    font-size: 1.5rem; font-size: min(1.6rem, calc(150cqw / var(--n) / 2.2)); font-weight: 800; color: var(--c-text); line-height: 1; }
+  .wp-slot.wp-open { border-color: var(--game, var(--c-accent)); }
+  .wp-slot.wp-gave { color: var(--c-text-dim); border-color: var(--c-line); }
+  .wp-slot.wp-pop { animation: wp-pop .28s ease-out; }
+  .wp-slot.wp-gap { flex: 0 0 6px; border: 0; }
+  @keyframes wp-pop { 0% { transform: scale(.6); } 70% { transform: scale(1.12); } 100% { transform: none; } }
+  @media (prefers-reduced-motion: reduce) { :root:not([data-motion="on"]) .wp-slot.wp-pop { animation: none; } }
+  /* the line under the word keeps its room, so the keys never move under a finger */
+  .wp-msg { display: flex; justify-content: center; align-items: center; gap: var(--s-2); min-height: 44px; text-align: center; flex-wrap: wrap; }
+  .wp-msg > span { font-weight: 700; color: var(--c-text-dim); }
+  /* the row's min-height already keeps the button's room, so a hidden button need not hold space
+     and push the message off centre */
+  .wp-msg .ch-btn { display: none; }
+  .wp-msg.wp-over .ch-btn { display: inline-flex; }
+  .wp-kb { direction: ltr; display: flex; flex-direction: column; gap: 5px; user-select: none; -webkit-user-select: none;
+    touch-action: manipulation; --gap: 4px; }
+  .wp-row { display: flex; justify-content: center; gap: var(--gap); }
+  .wp-key { flex: 0 1 calc((100% - (var(--cols) - 1) * var(--gap)) / var(--cols)); min-width: 0; padding: 0;
+    height: 44px; height: clamp(40px, 7.5cqh, 54px); border: 0; border-radius: 8px; font: inherit; font-size: 1.15rem; font-weight: 700;
+    background: var(--c-surface-2, var(--c-surface)); color: var(--c-text); box-shadow: 0 2px 0 var(--c-line);
+    cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background-color .12s, opacity .12s; }
+  .wp-key.wp-in { background: var(--game, var(--c-accent)); color: var(--game-ink, #fff); box-shadow: none; }
+  .wp-key.wp-out { opacity: .32; box-shadow: none; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .wp-key.wp-in { color: var(--game-ink-dark, #111); } }
+  :root[data-theme="dark"] .wp-key.wp-in { color: var(--game-ink-dark, #111); }
+  @container game (min-aspect-ratio: 5 / 4) {
+    .wp-wrap.ch-split { --side-w: clamp(300px, 46cqw, 560px); }
+    .wp-wrap > .ch-fit { --fit-ar: 0.95; }
+    /* a phone on its side was 18px short: plain centring cut off the top row where it could
+       not be scrolled to, so the column packs tighter and centres only when it fits */
+    .wp-wrap.ch-split > .ch-side { justify-content: safe center; gap: var(--s-2); }
+    .wp-wrap .wp-word { padding: 0; }
+    .wp-wrap .wp-slot { height: 40px; }
+  }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function PetalsEngineFactory() {
+  'use strict';
+
+  var PER = 5, NEED = 3, LEVELS = ['easy', 'medium', 'hard'];
+  // petals on each flower: the chances a word gives before it is shown
+  var PETALS = { easy: 9, medium: 7, hard: 5 };
+  var CATS = ['animals', 'food', 'nature', 'home'];
+
+  // The keyboard of each alphabet, row by row. Chinese words are guessed as pinyin, so
+  // Chinese uses the Latin rows; Hindi guesses consonants (vowel signs come with them).
+  var KB = {
+    fa: ['ضصثقفغعهخحجچ', 'شسیبلاتنمکگ', 'ظطزرذدپوژ'],
+    ar: ['ضصثقفغعهخحجد', 'شسيبلاتنمكط', 'ئءؤرىةوزظذ'],
+    ru: ['йцукенгшщзхъ', 'фывапролджэ', 'ячсмитьбю'],
+    en: ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'],
+    zh: ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'],
+    pl: ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'],
+    fr: ['azertyuiop', 'qsdfghjklm', 'wxcvbn'],
+    de: ['qwertzuiopü', 'asdfghjklöä', 'yxcvbnmß'],
+    es: ['qwertyuiop', 'asdfghjklñ', 'zxcvbnm'],
+    pt: ['qwertyuiop', 'asdfghjklç', 'zxcvbnm'],
+    hi: ['कखगघङचछजझञट', 'ठडढणतथदधनपफ', 'बभमयरलवशषसह']
+  };
+  // Where those keys sit on a keyboard without the layout installed (e.code)
+  var CODES = [
+    ['KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyT', 'KeyY', 'KeyU', 'KeyI', 'KeyO', 'KeyP', 'BracketLeft', 'BracketRight'],
+    ['KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH', 'KeyJ', 'KeyK', 'KeyL', 'Semicolon', 'Quote'],
+    ['KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB', 'KeyN', 'KeyM', 'Comma', 'Period']
+  ];
+  var CODES3 = { ar: ['KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyN', 'KeyM', 'Comma', 'Period', 'Slash', 'Backquote'] };
+  // Letters written in more than one way count as the key they share: guessing the plain
+  // letter shows its accented, hatted or Arabic-coded forms too.
+  // Quoted keys: a bare `en: {` here would be read as the page's string table by tools/test.js
+  var FOLD = {
+    'fa': { 'ي': 'ی', 'ى': 'ی', 'ك': 'ک', 'آ': 'ا', 'أ': 'ا', 'إ': 'ا', 'ۀ': 'ه', 'ة': 'ه' },
+    'ar': { 'أ': 'ا', 'إ': 'ا', 'آ': 'ا', 'ٱ': 'ا' },
+    'ru': { 'ё': 'е' },
+    'pl': { 'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z' },
+    'fr': { 'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e', 'à': 'a', 'â': 'a', 'ç': 'c', 'î': 'i', 'ï': 'i', 'ô': 'o', 'ù': 'u', 'û': 'u', 'ü': 'u' },
+    'es': { 'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u', 'ü': 'u' },
+    'pt': { 'á': 'a', 'à': 'a', 'â': 'a', 'ã': 'a', 'é': 'e', 'ê': 'e', 'í': 'i', 'ó': 'o', 'ô': 'o', 'õ': 'o', 'ú': 'u', 'ü': 'u' },
+    'en': {}, 'zh': {}, 'de': {}, 'hi': {}
+  };
+
+  // Common, family-friendly words written for this game, in four kinds. Persian `+` is the
+  // zero-width non-joiner, written visibly here so an editor never loses it. Chinese
+  // entries are characters:pinyin without tones; the pinyin is what the player guesses.
+  var WORDS = {
+    'fa': {
+      'animals': 'گربه موش اسب گوسفند پلنگ روباه خرگوش لاک+پشت میمون طوطی نهنگ کوسه عقاب اردک مرغ دلفین زرافه فیل سنجاب جوجه+تیغی زنبور کبوتر گنجشک شتر پروانه آهو ماهی قورباغه خرس طاووس',
+      'food': 'سیب انگور لیمو خربزه عسل پنیر کلوچه هویج سیب+زمینی گوجه موز گیلاس پرتقال کدو برنج سالاد بادام گردو پسته پیاز توت+فرنگی گلابی هندوانه ماست شیرینی خرما انار زردآلو آلبالو کشمش',
+      'nature': 'رودخانه ابر طوفان رنگین+کمان جنگل جزیره کوه دره چمنزار بیابان اقیانوس ساحل نسیم سنگ باغ آتشفشان دریاچه تپه ستاره ماه باران برف آسمان برگ درخت موج آبشار شکوفه خورشید رعد',
+      'home': 'پنجره مداد سبد شمع کاپشن نردبان پتو آشپزخانه تابلو بالش آینه قوری قاشق میز صندلی ساعت چراغ سطل فرش پرده کشو مبل چتر دفتر قیچی کوله+پشتی کتری بشقاب لیوان جارو'
+    },
+    'en': {
+      'animals': 'rabbit turtle monkey parrot tiger zebra horse sheep mouse camel whale shark eagle goose donkey kitten puppy dolphin penguin giraffe squirrel hedgehog elephant octopus beaver panda koala lizard butterfly',
+      'food': 'apple grape lemon melon bread honey cheese butter cookie carrot potato tomato banana cherry orange pumpkin pancake noodles yogurt peanut walnut almond pepper onion salad pizza muffin biscuit sandwich',
+      'nature': 'river cloud storm rainbow thunder forest island mountain valley meadow desert ocean beach sunset breeze pebble flower garden canyon glacier volcano lagoon puddle sunrise blossom acorn maple willow snowflake',
+      'home': 'window pencil basket candle jacket ladder blanket kitchen picture pillow mirror teapot spoon table chair clock lamp bucket carpet curtain drawer kettle sofa umbrella notebook scissors toaster backpack'
+    },
+    'pl': {
+      'animals': 'pies owca tygrys królik żółw małpa papuga wieloryb rekin orzeł kaczka osioł kura delfin pingwin żyrafa słoń wiewiórka zebra wielbłąd ośmiornica pszczoła sowa żaba niedźwiedź motyl kogut',
+      'food': 'jabłko winogrono cytryna melon chleb miód ciastko marchewka ziemniak pomidor banan wiśnia pomarańcza dynia zupa sałatka migdał orzech papryka cebula truskawka gruszka arbuz jogurt masło pierogi naleśnik',
+      'nature': 'rzeka chmura burza tęcza grzmot wyspa góra dolina łąka pustynia ocean plaża wiatr kamień kwiat ogród wulkan jezioro wzgórze gwiazda księżyc deszcz śnieg niebo liść drzewo fala słońce',
+      'home': 'okno ołówek koszyk świeca kurtka drabina kuchnia obraz poduszka lustro czajnik łyżka stół krzesło zegar lampa wiadro dywan zasłona szuflada kanapa parasol zeszyt nożyczki plecak talerz kubek'
+    },
+    'fr': {
+      'animals': 'chat chien souris cheval mouton tigre renard lapin tortue singe perroquet baleine requin aigle canard poule dauphin pingouin girafe éléphant écureuil hérisson zèbre chameau pieuvre abeille hibou grenouille',
+      'food': 'pomme raisin citron melon pain miel fromage beurre biscuit carotte tomate banane cerise orange citrouille crêpe soupe salade amande noix poivron oignon fraise poire ananas yaourt gâteau confiture',
+      'nature': 'rivière nuage orage tonnerre forêt montagne vallée prairie désert océan plage brise caillou fleur jardin volcan étoile lune pluie neige vent ciel feuille arbre vague colline soleil',
+      'home': 'fenêtre crayon panier bougie veste échelle couverture cuisine tableau oreiller miroir théière cuillère table chaise horloge lampe seau tapis rideau tiroir canapé parapluie cahier ciseaux cartable'
+    },
+    'ar': {
+      'animals': 'قطة كلب فأر حصان خروف نمر ثعلب أرنب سلحفاة قرد ببغاء حوت قرش نسر بطة حمار دجاجة دلفين بطريق زرافة فيل سنجاب قنفذ جمل أخطبوط نحلة بومة ضفدع غزال فراشة',
+      'food': 'تفاح عنب ليمون بطيخ خبز عسل جبن بسكويت جزر بطاطا طماطم موز كرز برتقال يقطين أرز حساء سلطة لوز جوز زيتون بصل فراولة كمثرى زبادي زبدة تمر رمان خيار',
+      'nature': 'نهر سحابة عاصفة رعد غابة جزيرة جبل وادي مرج صحراء محيط شاطئ نسيم حجر زهرة حديقة بركان بحيرة تلة نجمة قمر مطر ثلج سماء ورقة شجرة موجة شلال شمس',
+      'home': 'نافذة قلم سلة شمعة سترة سلم بطانية مطبخ لوحة وسادة مرآة إبريق ملعقة طاولة كرسي ساعة مصباح دلو سجادة ستارة درج أريكة مظلة دفتر مقص حقيبة صحن كوب'
+    },
+    'hi': {
+      'animals': 'बिल्ली कुत्ता चूहा घोड़ा भेड़ बाघ लोमड़ी खरगोश कछुआ बंदर कोयल गरुड़ बत्तख गधा मुर्गी हाथी गिलहरी भैंस मोर हिरन मछली मेंढक भालू शेर तितली मधुमक्खी गाय बकरी',
+      'food': 'सेब अंगूर नींबू खरबूजा रोटी शहद पनीर मक्खन गाजर मटर टमाटर केला संतरा कद्दू चावल दाल सलाद बादाम अखरोट मिर्च प्याज़ नाशपाती तरबूज़ दही खीर लड्डू समोसा जलेबी',
+      'nature': 'नदी बादल तूफ़ान इंद्रधनुष बिजली जंगल टापू पहाड़ घाटी मैदान रेगिस्तान समुद्र किनारा हवा पत्थर फूल बगीचा ज्वालामुखी झील पहाड़ी तारा चाँद बारिश बर्फ़ आसमान पत्ता पेड़ लहर झरना सूरज',
+      'home': 'खिड़की पेंसिल टोकरी मोमबत्ती जैकेट सीढ़ी कंबल रसोई तस्वीर तकिया दरवाज़ा केतली चम्मच मेज़ कुर्सी घड़ी दीया बाल्टी कालीन पर्दा दराज़ सोफ़ा छाता कॉपी कैंची थैला थाली कटोरी'
+    },
+    'ru': {
+      'animals': 'кошка собака мышь лошадь овца тигр лиса кролик черепаха обезьяна попугай акула орёл утка осёл курица дельфин пингвин жираф слон белка зебра верблюд осьминог пчела сова лягушка медведь',
+      'food': 'яблоко виноград лимон дыня хлеб печенье морковь картошка помидор банан вишня апельсин тыква салат орех перец клубника груша арбуз йогурт масло блины каша малина пирог',
+      'nature': 'река облако гроза радуга гром остров гора долина пустыня океан пляж ветер камень цветок вулкан озеро холм звезда луна дождь снег небо лист дерево волна солнце ручей',
+      'home': 'окно карандаш корзина свеча куртка лестница одеяло кухня картина подушка зеркало чайник ложка стол стул часы лампа ведро ковёр штора ящик диван зонтик тетрадь ножницы рюкзак тарелка'
+    },
+    'pt': {
+      'animals': 'gato cachorro rato cavalo ovelha tigre raposa coelho tartaruga macaco papagaio baleia tubarão águia pato burro galinha golfinho pinguim girafa elefante esquilo zebra camelo polvo abelha coruja sapo',
+      'food': 'maçã limão melão queijo biscoito cenoura batata tomate banana cereja laranja abóbora arroz sopa salada amêndoa pimentão cebola morango pera abacaxi melancia iogurte bolo pipoca feijão goiaba',
+      'nature': 'nuvem tempestade trovão floresta ilha montanha vale campo deserto oceano praia brisa pedra flor jardim vulcão lago colina estrela chuva neve vento folha árvore onda cachoeira',
+      'home': 'janela lápis cesta vela jaqueta escada cobertor cozinha quadro espelho chaleira colher mesa cadeira relógio lâmpada balde tapete cortina gaveta sofá caderno tesoura mochila prato copo'
+    },
+    'zh': {
+      'animals': '熊猫:xiongmao 老虎:laohu 兔子:tuzi 猴子:houzi 大象:daxiang 长颈鹿:changjinglu 狮子:shizi 海豚:haitun 鹦鹉:yingwu 乌龟:wugui 蝴蝶:hudie 松鼠:songshu 刺猬:ciwei 骆驼:luotuo 斑马:banma 孔雀:kongque 青蛙:qingwa 蜜蜂:mifeng 老鹰:laoying 鸭子:yazi 绵羊:mianyang 小狗:xiaogou 小猫:xiaomao 狐狸:huli 鲸鱼:jingyu 公鸡:gongji 袋鼠:daishu 章鱼:zhangyu',
+      'food': '苹果:pingguo 香蕉:xiangjiao 葡萄:putao 西瓜:xigua 草莓:caomei 橙子:chengzi 柠檬:ningmeng 面包:mianbao 米饭:mifan 面条:miantiao 饺子:jiaozi 包子:baozi 馒头:mantou 鸡蛋:jidan 牛奶:niunai 豆腐:doufu 蛋糕:dangao 饼干:binggan 蜂蜜:fengmi 土豆:tudou 西红柿:xihongshi 胡萝卜:huluobo 南瓜:nangua 樱桃:yingtao 桃子:taozi 花生:huasheng 核桃:hetao 月饼:yuebing 汤圆:tangyuan 黄瓜:huanggua',
+      'nature': '太阳:taiyang 月亮:yueliang 星星:xingxing 白云:baiyun 彩虹:caihong 大海:dahai 河流:heliu 森林:senlin 高山:gaoshan 草原:caoyuan 沙漠:shamo 瀑布:pubu 小溪:xiaoxi 火山:huoshan 雪花:xuehua 微风:weifeng 树叶:shuye 花朵:huaduo 石头:shitou 山谷:shangu 海浪:hailang 天空:tiankong 闪电:shandian 春天:chuntian 秋天:qiutian 竹子:zhuzi 岛屿:daoyu',
+      'home': '桌子:zhuozi 椅子:yizi 窗户:chuanghu 铅笔:qianbi 篮子:lanzi 蜡烛:lazhu 梯子:tizi 毯子:tanzi 厨房:chufang 枕头:zhentou 镜子:jingzi 茶壶:chahu 勺子:shaozi 时钟:shizhong 台灯:taideng 水桶:shuitong 地毯:ditan 窗帘:chuanglian 抽屉:chouti 沙发:shafa 雨伞:yusan 剪刀:jiandao 书包:shubao 杯子:beizi 筷子:kuaizi 盘子:panzi 冰箱:bingxiang 钥匙:yaoshi 毛巾:maojin'
+    },
+    'de': {
+      'animals': 'katze hund maus pferd schaf löwe tiger fuchs biene vogel fisch ente hase igel eule esel ziege adler delfin pinguin giraffe elefant affe zebra frosch schnecke schwan papagei krokodil hamster strauß',
+      'food': 'apfel birne milch käse suppe honig gurke brot butter kuchen tomate kartoffel banane kirsche zitrone erdbeere möhre nudeln pizza salat keks zwiebel walnuss pfirsich melone pflaume joghurt brezel',
+      'nature': 'sonne stern regen wolke blume fluss insel wiese schnee wald berg meer himmel gewitter regenbogen nebel quelle strand wüste vulkan felsen garten blatt tanne eiche welle hügel donner',
+      'home': 'tisch stuhl lampe schuh jacke kerze gabel löffel teller tasse fenster kissen spiegel decke teppich schrank koffer schere besen eimer regal sessel sofa vorhang wecker kanne'
+    },
+    'es': {
+      'animals': 'gato perro ratón caballo oveja tigre zorro conejo tortuga mono loro ballena tiburón águila pato burro gallina delfín pingüino jirafa elefante ardilla erizo cebra camello pulpo abeja búho rana',
+      'food': 'manzana limón melón miel queso galleta zanahoria patata tomate plátano cereza naranja calabaza arroz sopa ensalada almendra nuez pimiento cebolla fresa pera piña sandía yogur tortilla',
+      'nature': 'nube tormenta arcoíris trueno bosque isla montaña valle pradera desierto océano playa brisa piedra flor jardín volcán lago colina estrella luna lluvia nieve viento cielo hoja árbol',
+      'home': 'ventana lápiz cesta vela chaqueta escalera manta cocina cuadro almohada espejo tetera cuchara mesa silla reloj lámpara cubo alfombra cortina cajón sofá paraguas cuaderno tijeras mochila'
+    }
+  };
+
+  function alpha(lang) { return KB[lang] ? lang : 'en'; }
+  var SETS = {};
+  Object.keys(KB).forEach(function (a) { var s = {}; KB[a].join('').split('').forEach(function (c) { s[c] = true; }); SETS[a] = s; });
+  function fold(a, ch) { var c = String(ch).toLowerCase(); return (FOLD[alpha(a)] && FOLD[alpha(a)][c]) || c; }
+  function isLetter(a, ch) { return !!SETS[alpha(a)][ch]; }
+
+  // every word of a language, with its kind (and the characters, for Chinese)
+  var LISTS = {};
+  function list(a) {
+    a = alpha(a);
+    if (LISTS[a]) return LISTS[a];
+    var out = [];
+    CATS.forEach(function (c) {
+      WORDS[a][c].split(' ').filter(Boolean).forEach(function (x) {
+        if (a === 'zh') { var p = x.split(':'); out.push({ w: p[1], h: p[0], c: c }); }
+        else out.push({ w: a === 'fa' ? x.replace(/\+/g, '‌') : x, c: c });
+      });
+    });
+    return (LISTS[a] = out);
+  }
+
+  // Hindi is guessed by consonant. A box is one written syllable (akshara): consonants
+  // joined by a virama share it, vowel signs and marks ride along for free, and a vowel
+  // standing alone needs no guess. NFC splits the nukta letters (ड़, ज़…) into their
+  // base and the nukta, so ड shows ड़ as well.
+  function hiUnits(word) {
+    var w = word.normalize ? word.normalize('NFC') : word, out = [], cur = null;
+    for (var i = 0; i < w.length; i++) {
+      var ch = w[i], c = ch.charCodeAt(0);
+      var cons = c >= 0x915 && c <= 0x939;
+      var mark = c === 0x93C || (c >= 0x93E && c <= 0x94D) || (c >= 0x900 && c <= 0x903) || c === 0x962 || c === 0x963 || (c >= 0x951 && c <= 0x957);
+      if (cons) {
+        if (cur && cur.t.charCodeAt(cur.t.length - 1) === 0x94D) { cur.t += ch; if (cur.need.indexOf(ch) < 0) cur.need.push(ch); }
+        else { cur = { t: ch, need: [ch] }; out.push(cur); }
+      } else if (mark && cur) cur.t += ch;
+      else { cur = { t: ch, need: [] }; out.push(cur); }
+    }
+    return out;
+  }
+  // The boxes of a word: what each shows once open and the letters it needs
+  function units(a, word) {
+    a = alpha(a);
+    if (a === 'hi') return hiUnits(word);
+    return Array.from(word).map(function (ch) {
+      if (ch === '‌') return { t: '', need: [], gap: true };
+      return { t: ch, need: [fold(a, ch)] };
+    });
+  }
+  function letters(a, word) {
+    var s = [];
+    units(a, word).forEach(function (u) { u.need.forEach(function (l) { if (s.indexOf(l) < 0) s.push(l); }); });
+    return s;
+  }
+
+  function rng(seed) {
+    var r = (seed >>> 0) || 1;
+    return function () {
+      r = (r + 0x6D2B79F5) >>> 0;
+      var t = r;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  // n words not seen lately, from different kinds where it can
+  function pick(a, rnd, n, seen) {
+    var all = list(a), pool = all.filter(function (o) { return !seen || seen.indexOf(o.w) < 0; });
+    if (pool.length < n * 2) pool = all.slice();
+    for (var i = pool.length - 1; i > 0; i--) { var j = Math.floor(rnd() * (i + 1)), t = pool[i]; pool[i] = pool[j]; pool[j] = t; }
+    var out = [];
+    for (var k = 0; k < pool.length && out.length < n; k++) {
+      var prev = out[out.length - 1];
+      if (prev && prev.c === pool[k].c && k < pool.length - n) continue;
+      out.push(pool[k]);
+    }
+    for (var m = 0; out.length < n; m++) if (out.indexOf(pool[m]) < 0) out.push(pool[m]);
+    return out.map(function (o) { var x = { w: o.w, c: o.c }; if (o.h) x.h = o.h; return x; });
+  }
+
+  function newGame(o) {
+    var a = alpha(o.lang), lv = LEVELS.indexOf(o.level) >= 0 ? o.level : 'medium';
+    return {
+      v: 1, lang: a, level: lv, petals: PETALS[lv], words: pick(a, rng(o.seed), PER, o.seen || []),
+      i: 0, got: [], wrong: 0, over: null, found: [], kept: [], status: 'play'
+    };
+  }
+  function current(S) { return S.words[S.i]; }
+  function open(S) {
+    var g = S.got;
+    return units(S.lang, current(S).w).map(function (u) { return u.need.every(function (l) { return g.indexOf(l) >= 0; }); });
+  }
+  function solved(S) { return open(S).every(Boolean); }
+
+  // One guess. 'hit' and 'miss' leave the word in play; 'solved' and 'out' end it, and
+  // next() then moves on.
+  function guess(S, ch) {
+    if (!S || S.status !== 'play' || S.over || !isLetter(S.lang, ch)) return { type: 'none' };
+    if (S.got.indexOf(ch) >= 0) return { type: 'dup' };
+    S.got.push(ch);
+    if (letters(S.lang, current(S).w).indexOf(ch) >= 0) {
+      if (solved(S)) { S.over = 'won'; S.found.push(true); S.kept.push(S.petals - S.wrong); return { type: 'solved' }; }
+      return { type: 'hit' };
+    }
+    S.wrong++;
+    if (S.wrong >= S.petals) { S.over = 'lost'; S.found.push(false); S.kept.push(0); return { type: 'out' }; }
+    return { type: 'miss' };
+  }
+  function next(S) {
+    if (!S || !S.over) return false;
+    S.i++; S.got = []; S.wrong = 0; S.over = null;
+    if (S.i >= PER) { S.i = PER - 1; S.status = 'done'; }
+    return true;
+  }
+
+  function result(S) {
+    var found = S.found.filter(Boolean).length, kept = S.kept.reduce(function (s, k) { return s + k; }, 0), all = S.petals * PER;
+    var stars = found >= PER ? (kept >= all * 0.7 ? 3 : 2) : found === PER - 1 ? 2 : found >= NEED ? 1 : 0;
+    return { won: found >= NEED, found: found, kept: kept, all: all, stars: stars };
+  }
+
+  function typeable(a, w) { return letters(a, w).every(function (l) { return isLetter(a, l); }); }
+  function valid(S) {
+    if (!S || S.v !== 1 || !KB[S.lang] || LEVELS.indexOf(S.level) < 0 || S.petals !== PETALS[S.level] || S.status !== 'play') return false;
+    if (!Array.isArray(S.words) || S.words.length !== PER || !Array.isArray(S.got) || !Array.isArray(S.found) || !Array.isArray(S.kept)) return false;
+    if (!S.words.every(function (o) { return o && typeof o.w === 'string' && o.w && CATS.indexOf(o.c) >= 0 && typeable(S.lang, o.w); })) return false;
+    if (typeof S.i !== 'number' || Math.floor(S.i) !== S.i || S.i < 0 || S.i >= PER) return false;
+    if (typeof S.wrong !== 'number' || S.wrong < 0 || S.wrong > S.petals || [null, 'won', 'lost'].indexOf(S.over) < 0) return false;
+    if (S.found.length !== S.i + (S.over ? 1 : 0) || S.kept.length !== S.found.length) return false;
+    return S.got.every(function (l) { return isLetter(S.lang, l); });
+  }
+
+  return {
+    PER: PER, NEED: NEED, LEVELS: LEVELS, PETALS: PETALS, CATS: CATS, KB: KB, CODES: CODES, CODES3: CODES3, WORDS: WORDS,
+    alpha: alpha, fold: fold, isLetter: isLetter, list: list, units: units, letters: letters, rng: rng, pick: pick,
+    newGame: newGame, current: current, open: open, solved: solved, guess: guess, next: next, result: result,
+    typeable: typeable, valid: valid
+  };
+}
+if (typeof module !== 'undefined') module.exports = PetalsEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = PetalsEngineFactory();
+  var ACCENT = '#AA5A74';
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'petals',
+    name: { fa: 'گل‌واژه', en: 'Word Petals', zh: '猜词花', de: 'Wortblüte', es: 'Palabra en flor', pl: 'Płatki słów', fr: 'Mot en fleur', ar: 'زهرة الكلمات', hi: 'शब्दों का फूल', ru: 'Лепестки слов', pt: 'Palavra em Flor' },
+    accent: ACCENT,
+    mood: 'menu',
+    strings: {
+      fa: {
+        board: 'گل', wpWord: 'واژه‌ی {n} از {m}', wpAnimals: 'جانوران', wpFood: 'خوراکی', wpNature: 'طبیعت', wpHome: 'در خانه',
+        wpMiss: 'این حرف در واژه نیست', wpDup: 'این حرف را زده‌ای', wpSolved: 'پیدایش کردی!', wpOut: 'واژه «{w}» بود', wpNextWord: 'واژه‌ی بعد', wpEnd: 'دیدن نتیجه',
+        wpNew: 'بازی تازه', wpPetals: 'گلبرگ‌ها', wpPetalsN: '{n} گلبرگ', wpLeft: '{n} گلبرگ مانده', wpHint: 'نشان دادن دسته‌ی واژه', wpOn: 'روشن', wpOff: 'خاموش',
+        wpWon: 'یک دسته گل واژه!', wpLost: 'گل‌ها باز شکوفه می‌دهند', wpFound: 'واژه‌های پیداشده', wpKept: 'گلبرگ‌های مانده', wpDaily: 'دسته‌گل روزانه', wpAllNote: 'هر پنج واژه را پیدا کردی!',
+        wpHowZh: 'در چینی حروف پین‌یین واژه را بی‌نشانه‌ی آهنگ حدس می‌زنی و نویسه‌ها پایان واژه پیدا می‌شوند.',
+        wpHowHi: 'در هندی هم‌خوان‌ها را حدس می‌زنی؛ نشانه‌ی واکه‌ها همراهشان می‌آیند و واکه‌ی تنها از اول پیداست.',
+        kGuess: 'حدس زدن یک حرف', kNext: 'واژه‌ی بعد',
+        rules: 'واژه‌ی پنهان را حرف به حرف حدس بزن. حرفی که در واژه باشد در همه‌ی جاهایش پیدا می‌شود. حرفی که نباشد یک گلبرگ را آرام از گل جدا می‌کند. پیش از افتادن آخرین گلبرگ واژه را پیدا کن. حرف «ا» «آ» را هم نشان می‌دهد. هر بازی پنج واژه است و هر واژه گل تازه‌ای دارد؛ با پیدا کردن دست‌کم سه واژه می‌بری. ستاره‌ها از واژه‌های پیداشده و گلبرگ‌های مانده می‌آیند. با چرخ‌دنده شمار گلبرگ‌ها (آسان ۹، متوسط ۷، سخت ۵) را عوض کن یا نشان دادن دسته‌ی واژه را روشن و خاموش کن. دسته‌گل روزانه هفت گلبرگ دارد و واژه‌هایش برای همه‌ی هم‌زبان‌ها یکی است.',
+        tutTitle1: 'واژه‌ی پنهان', tutText1: 'هر خانه یک حرف از واژه است. نوشته‌ی بالا می‌گوید واژه از چه دسته‌ای است.',
+        tutTitle2: 'حرف حدس بزن', tutText2: 'روی یک حرف بزن. اگر در واژه باشد، همه‌ی خانه‌هایش پر می‌شوند.',
+        tutTitle3: 'گلبرگ‌ها را نگه دار', tutText3: 'حرف نادرست یک گلبرگ را می‌برد. پیش از آنکه گل بی‌گلبرگ شود واژه را پیدا کن.'
+      },
+      en: {
+        board: 'Flower', wpWord: 'Word {n} of {m}', wpAnimals: 'Animals', wpFood: 'Food', wpNature: 'Nature', wpHome: 'At home',
+        wpMiss: 'Not in this word', wpDup: 'You tried that letter', wpSolved: 'You found it!', wpOut: 'The word was {w}', wpNextWord: 'Next word', wpEnd: 'See the result',
+        wpNew: 'New game', wpPetals: 'Petals', wpPetalsN: '{n} petals', wpLeft: '{n} petals left', wpHint: 'Show the kind of word', wpOn: 'On', wpOff: 'Off',
+        wpWon: 'A bouquet of words!', wpLost: 'The flowers will bloom again', wpFound: 'Words found', wpKept: 'Petals kept', wpDaily: 'Daily bouquet', wpAllNote: 'All five words found!',
+        wpHowZh: 'In Chinese you guess the letters of the word’s pinyin, without tones, and the characters appear when the word is done.',
+        wpHowHi: 'In Hindi you guess the consonants; vowel signs come with them, and a vowel standing alone is shown from the start.',
+        kGuess: 'Guess a letter', kNext: 'Next word',
+        rules: 'Guess the hidden word one letter at a time. A letter in the word shows up in every place it appears. A letter that is not in it makes one petal drift off the flower. Find the word before the last petal falls. A game is five words, each with a fresh flower; find at least three to win. Stars come from the words found and the petals kept. The gear sets the number of petals (easy 9, medium 7, hard 5) and turns the kind-of-word hint on or off. The daily bouquet has seven petals and the same words for everyone in your language.',
+        tutTitle1: 'A hidden word', tutText1: 'Each box is one letter of a word. The line above tells you what kind of word it is.',
+        tutTitle2: 'Guess letters', tutText2: 'Tap a letter. If it is in the word, it fills every box where it belongs.',
+        tutTitle3: 'Keep the petals', tutText3: 'A wrong letter makes a petal drift away. Find the word before the flower is bare.'
+      },
+      pl: {
+        board: 'Kwiat', wpWord: 'Słowo {n} z {m}', wpAnimals: 'Zwierzęta', wpFood: 'Jedzenie', wpNature: 'Przyroda', wpHome: 'W domu',
+        wpMiss: 'Nie ma jej w tym słowie', wpDup: 'Ta litera już była', wpSolved: 'Znalezione!', wpOut: 'To było słowo {w}', wpNextWord: 'Następne słowo', wpEnd: 'Zobacz wynik',
+        wpNew: 'Nowa gra', wpPetals: 'Płatki', wpPetalsN: 'Płatki: {n}', wpLeft: 'Zostało płatków: {n}', wpHint: 'Pokazuj rodzaj słowa', wpOn: 'Wł.', wpOff: 'Wył.',
+        wpWon: 'Bukiet słów!', wpLost: 'Kwiaty jeszcze zakwitną', wpFound: 'Znalezione słowa', wpKept: 'Zachowane płatki', wpDaily: 'Bukiet dnia', wpAllNote: 'Wszystkie pięć słów znalezione!',
+        wpHowZh: 'Po chińsku zgadujesz litery pinyinu słowa, bez tonów, a znaki pojawiają się na końcu słowa.',
+        wpHowHi: 'W hindi zgadujesz spółgłoski; znaki samogłosek przychodzą z nimi, a samodzielna samogłoska jest widoczna od początku.',
+        kGuess: 'Zgadnij literę', kNext: 'Następne słowo',
+        rules: 'Zgaduj ukryte słowo litera po literze. Litera, która jest w słowie, pojawia się we wszystkich swoich miejscach. Litera, której nie ma, sprawia, że jeden płatek łagodnie odpada od kwiatu. Znajdź słowo, zanim spadnie ostatni płatek. Litera bez ogonka odkrywa też swoje wersje z ogonkiem lub kreską (a pokazuje ą, l pokazuje ł). Gra to pięć słów, każde z nowym kwiatem; znajdź co najmniej trzy, aby wygrać. Gwiazdki zależą od znalezionych słów i zachowanych płatków. Zębatka ustawia liczbę płatków (łatwy 9, średni 7, trudny 5) i włącza lub wyłącza podpowiedź rodzaju słowa. Bukiet dnia ma siedem płatków i te same słowa dla wszystkich w twoim języku.',
+        tutTitle1: 'Ukryte słowo', tutText1: 'Każde pole to jedna litera słowa. Napis nad nim mówi, jakiego rodzaju to słowo.',
+        tutTitle2: 'Zgaduj litery', tutText2: 'Stuknij literę. Jeśli jest w słowie, wypełni wszystkie swoje pola.',
+        tutTitle3: 'Chroń płatki', tutText3: 'Zła litera sprawia, że płatek odlatuje. Znajdź słowo, zanim kwiat zostanie bez płatków.'
+      },
+      fr: {
+        board: 'Fleur', wpWord: 'Mot {n} sur {m}', wpAnimals: 'Animaux', wpFood: 'À manger', wpNature: 'Nature', wpHome: 'À la maison',
+        wpMiss: 'Pas dans ce mot', wpDup: 'Lettre déjà essayée', wpSolved: 'Trouvé !', wpOut: 'Le mot était {w}', wpNextWord: 'Mot suivant', wpEnd: 'Voir le résultat',
+        wpNew: 'Nouvelle partie', wpPetals: 'Pétales', wpPetalsN: '{n} pétales', wpLeft: '{n} pétales restants', wpHint: 'Montrer le genre de mot', wpOn: 'Oui', wpOff: 'Non',
+        wpWon: 'Un bouquet de mots !', wpLost: 'Les fleurs refleuriront', wpFound: 'Mots trouvés', wpKept: 'Pétales gardés', wpDaily: 'Bouquet du jour', wpAllNote: 'Les cinq mots trouvés !',
+        wpHowZh: 'En chinois, tu devines les lettres du pinyin du mot, sans les tons, et les caractères apparaissent à la fin du mot.',
+        wpHowHi: 'En hindi, tu devines les consonnes ; les signes de voyelle viennent avec elles, et une voyelle seule est visible dès le début.',
+        kGuess: 'Proposer une lettre', kNext: 'Mot suivant',
+        rules: 'Devine le mot caché lettre par lettre. Une lettre du mot apparaît à toutes ses places. Une lettre qui n’y est pas fait doucement tomber un pétale de la fleur. Trouve le mot avant la chute du dernier pétale. Une lettre montre aussi ses formes accentuées (e montre é, è et ê). Une partie compte cinq mots, chacun avec une fleur neuve ; trouves-en au moins trois pour gagner. Les étoiles viennent des mots trouvés et des pétales gardés. La roue dentée règle le nombre de pétales (facile 9, moyen 7, difficile 5) et affiche ou cache le genre de mot. Le bouquet du jour a sept pétales et les mêmes mots pour tous dans ta langue.',
+        tutTitle1: 'Un mot caché', tutText1: 'Chaque case est une lettre du mot. La ligne au-dessus dit de quel genre de mot il s’agit.',
+        tutTitle2: 'Devine des lettres', tutText2: 'Touche une lettre. Si elle est dans le mot, elle remplit toutes ses cases.',
+        tutTitle3: 'Garde les pétales', tutText3: 'Une mauvaise lettre fait s’envoler un pétale. Trouve le mot avant que la fleur soit nue.'
+      },
+      ar: {
+        board: 'زهرة', wpWord: 'الكلمة {n} من {m}', wpAnimals: 'حيوانات', wpFood: 'طعام', wpNature: 'طبيعة', wpHome: 'في البيت',
+        wpMiss: 'ليس في هذه الكلمة', wpDup: 'جرّبت هذا الحرف', wpSolved: 'وجدتها!', wpOut: 'الكلمة كانت «{w}»', wpNextWord: 'الكلمة التالية', wpEnd: 'عرض النتيجة',
+        wpNew: 'لعبة جديدة', wpPetals: 'البتلات', wpPetalsN: '{n} بتلات', wpLeft: 'البتلات الباقية: {n}', wpHint: 'إظهار نوع الكلمة', wpOn: 'تشغيل', wpOff: 'إيقاف',
+        wpWon: 'باقة من الكلمات!', wpLost: 'ستتفتح الزهور من جديد', wpFound: 'الكلمات التي وجدتها', wpKept: 'البتلات الباقية', wpDaily: 'باقة اليوم', wpAllNote: 'وجدت الكلمات الخمس كلها!',
+        wpHowZh: 'في الصينية تخمّن حروف البينيين للكلمة بلا نغمات، وتظهر الرموز عند انتهاء الكلمة.',
+        wpHowHi: 'في الهندية تخمّن الحروف الساكنة؛ وعلامات الحركات تأتي معها، والحرف الصائت المنفرد ظاهر من البداية.',
+        kGuess: 'خمّن حرفًا', kNext: 'الكلمة التالية',
+        rules: 'خمّن الكلمة المخفية حرفًا حرفًا. الحرف الموجود في الكلمة يظهر في كل أماكنه. والحرف غير الموجود يجعل بتلة تنفصل عن الزهرة بهدوء. اعثر على الكلمة قبل سقوط آخر بتلة. حرف «ا» يُظهر «أ» و«إ» و«آ» أيضًا. اللعبة خمس كلمات، لكل كلمة زهرة جديدة؛ اعثر على ثلاث على الأقل لتفوز. النجوم من الكلمات التي وجدتها والبتلات الباقية. الترس يضبط عدد البتلات (سهل 9، متوسط 7، صعب 5) ويُظهر نوع الكلمة أو يخفيه. باقة اليوم لها سبع بتلات والكلمات نفسها للجميع في لغتك.',
+        tutTitle1: 'كلمة مخفية', tutText1: 'كل خانة حرف من الكلمة. السطر أعلاها يخبرك بنوع الكلمة.',
+        tutTitle2: 'خمّن الحروف', tutText2: 'المس حرفًا. إن كان في الكلمة فسيملأ كل خاناته.',
+        tutTitle3: 'احفظ البتلات', tutText3: 'الحرف الخطأ يجعل بتلة تطير بعيدًا. اعثر على الكلمة قبل أن تبقى الزهرة بلا بتلات.'
+      },
+      hi: {
+        board: 'फूल', wpWord: 'शब्द {n} / {m}', wpAnimals: 'जानवर', wpFood: 'खाना', wpNature: 'प्रकृति', wpHome: 'घर में',
+        wpMiss: 'इस शब्द में नहीं है', wpDup: 'यह अक्षर आज़मा चुके', wpSolved: 'मिल गया!', wpOut: 'शब्द था {w}', wpNextWord: 'अगला शब्द', wpEnd: 'नतीजा देखें',
+        wpNew: 'नया खेल', wpPetals: 'पंखुड़ियाँ', wpPetalsN: '{n} पंखुड़ियाँ', wpLeft: '{n} पंखुड़ियाँ बचीं', wpHint: 'शब्द की श्रेणी दिखाएँ', wpOn: 'चालू', wpOff: 'बंद',
+        wpWon: 'शब्दों का गुलदस्ता!', wpLost: 'फूल फिर खिलेंगे', wpFound: 'मिले शब्द', wpKept: 'बची पंखुड़ियाँ', wpDaily: 'आज का गुलदस्ता', wpAllNote: 'पाँचों शब्द मिल गए!',
+        wpHowZh: 'चीनी में आप शब्द के पिनयिन के अक्षर बिना टोन के अनुमान लगाते हैं, और शब्द पूरा होने पर चीनी अक्षर दिखते हैं।',
+        wpHowHi: 'हिंदी में आप व्यंजन अनुमान लगाते हैं; मात्राएँ उनके साथ आती हैं, और अकेला स्वर शुरू से दिखता है।',
+        kGuess: 'एक अक्षर चुनें', kNext: 'अगला शब्द',
+        rules: 'छिपे शब्द को एक-एक अक्षर से पहचानें। हर खाना एक अक्षर (शब्दांश) है। आप व्यंजन चुनते हैं; मात्राएँ उनके साथ आती हैं और अकेला स्वर शुरू से दिखता है। शब्द में मौजूद व्यंजन अपनी हर जगह दिखता है। जो व्यंजन शब्द में नहीं है, उससे फूल की एक पंखुड़ी धीरे से उड़ जाती है। आख़िरी पंखुड़ी गिरने से पहले शब्द ढूँढें। ड चुनने पर ड़ भी दिखता है। एक खेल में पाँच शब्द होते हैं, हर शब्द के लिए नया फूल; जीतने के लिए कम से कम तीन ढूँढें। सितारे मिले शब्दों और बची पंखुड़ियों से मिलते हैं। गियर से पंखुड़ियों की गिनती (आसान 9, मध्यम 7, कठिन 5) बदलें या शब्द की श्रेणी दिखाना चालू-बंद करें। आज के गुलदस्ते में सात पंखुड़ियाँ हैं और आपकी भाषा में सबके लिए वही शब्द हैं।',
+        tutTitle1: 'छिपा शब्द', tutText1: 'हर खाना शब्द का एक अक्षर है। ऊपर की पंक्ति बताती है कि शब्द किस तरह का है।',
+        tutTitle2: 'अक्षर चुनें', tutText2: 'कोई व्यंजन दबाएँ। अगर वह शब्द में है, तो उसके सारे खाने भर जाते हैं।',
+        tutTitle3: 'पंखुड़ियाँ बचाएँ', tutText3: 'गलत अक्षर से एक पंखुड़ी उड़ जाती है। फूल खाली होने से पहले शब्द ढूँढें।'
+      },
+      ru: {
+        board: 'Цветок', wpWord: 'Слово {n} из {m}', wpAnimals: 'Животные', wpFood: 'Еда', wpNature: 'Природа', wpHome: 'Дома',
+        wpMiss: 'Такой буквы нет', wpDup: 'Эта буква уже была', wpSolved: 'Угадано!', wpOut: 'Это было слово {w}', wpNextWord: 'Следующее слово', wpEnd: 'Посмотреть итог',
+        wpNew: 'Новая игра', wpPetals: 'Лепестки', wpPetalsN: 'Лепестков: {n}', wpLeft: 'Осталось лепестков: {n}', wpHint: 'Показывать тему слова', wpOn: 'Вкл.', wpOff: 'Выкл.',
+        wpWon: 'Букет слов!', wpLost: 'Цветы ещё расцветут', wpFound: 'Угаданные слова', wpKept: 'Сохранённые лепестки', wpDaily: 'Букет дня', wpAllNote: 'Все пять слов угаданы!',
+        wpHowZh: 'На китайском вы угадываете буквы пиньиня слова без тонов, а иероглифы появляются в конце слова.',
+        wpHowHi: 'На хинди вы угадываете согласные; знаки гласных приходят вместе с ними, а отдельная гласная видна с самого начала.',
+        kGuess: 'Назвать букву', kNext: 'Следующее слово',
+        rules: 'Угадывайте спрятанное слово по одной букве. Буква из слова открывается во всех своих местах. Буква, которой в слове нет, заставляет один лепесток тихо слететь с цветка. Найдите слово, пока не упал последний лепесток. Буква Е открывает и Ё. Игра — это пять слов, у каждого свой новый цветок; угадайте хотя бы три, чтобы победить. Звёзды зависят от угаданных слов и сохранённых лепестков. Шестерёнка задаёт число лепестков (легко 9, средне 7, сложно 5) и включает или выключает подсказку темы. В букете дня семь лепестков и одни и те же слова для всех на вашем языке.',
+        tutTitle1: 'Спрятанное слово', tutText1: 'Каждая клетка — одна буква слова. Строка сверху подсказывает тему слова.',
+        tutTitle2: 'Угадывайте буквы', tutText2: 'Нажмите букву. Если она есть в слове, она заполнит все свои клетки.',
+        tutTitle3: 'Берегите лепестки', tutText3: 'Неверная буква уносит лепесток. Найдите слово, пока цветок не облетел.'
+      },
+      pt: {
+        board: 'Flor', wpWord: 'Palavra {n} de {m}', wpAnimals: 'Animais', wpFood: 'Comida', wpNature: 'Natureza', wpHome: 'Em casa',
+        wpMiss: 'Não está nesta palavra', wpDup: 'Você já tentou essa letra', wpSolved: 'Achou!', wpOut: 'A palavra era {w}', wpNextWord: 'Próxima palavra', wpEnd: 'Ver o resultado',
+        wpNew: 'Novo jogo', wpPetals: 'Pétalas', wpPetalsN: '{n} pétalas', wpLeft: '{n} pétalas restantes', wpHint: 'Mostrar o tipo de palavra', wpOn: 'Sim', wpOff: 'Não',
+        wpWon: 'Um buquê de palavras!', wpLost: 'As flores vão florescer de novo', wpFound: 'Palavras achadas', wpKept: 'Pétalas guardadas', wpDaily: 'Buquê do dia', wpAllNote: 'As cinco palavras achadas!',
+        wpHowZh: 'Em chinês, você adivinha as letras do pinyin da palavra, sem tons, e os caracteres aparecem no fim da palavra.',
+        wpHowHi: 'Em híndi, você adivinha as consoantes; os sinais de vogal vêm com elas, e uma vogal sozinha aparece desde o início.',
+        kGuess: 'Chutar uma letra', kNext: 'Próxima palavra',
+        rules: 'Adivinhe a palavra escondida uma letra por vez. Uma letra da palavra aparece em todos os seus lugares. Uma letra que não está nela faz uma pétala se soltar da flor devagar. Ache a palavra antes que caia a última pétala. Uma letra também mostra suas formas com acento (a mostra á, â e ã). Um jogo tem cinco palavras, cada uma com uma flor nova; ache pelo menos três para vencer. As estrelas vêm das palavras achadas e das pétalas guardadas. A engrenagem define o número de pétalas (fácil 9, médio 7, difícil 5) e liga ou desliga a dica do tipo de palavra. O buquê do dia tem sete pétalas e as mesmas palavras para todos no seu idioma.',
+        tutTitle1: 'Uma palavra escondida', tutText1: 'Cada casa é uma letra da palavra. A linha acima diz que tipo de palavra ela é.',
+        tutTitle2: 'Adivinhe letras', tutText2: 'Toque numa letra. Se ela estiver na palavra, preenche todas as suas casas.',
+        tutTitle3: 'Guarde as pétalas', tutText3: 'Uma letra errada faz uma pétala voar. Ache a palavra antes que a flor fique sem pétalas.'
+      },
+      zh: {
+        board: '花', wpWord: '第 {n} / {m} 个词', wpAnimals: '动物', wpFood: '食物', wpNature: '自然', wpHome: '家里',
+        wpMiss: '这个词里没有', wpDup: '这个字母试过了', wpSolved: '猜中了！', wpOut: '答案是 {w}', wpNextWord: '下一个词', wpEnd: '查看结果',
+        wpNew: '新一局', wpPetals: '花瓣', wpPetalsN: '{n} 片花瓣', wpLeft: '还剩 {n} 片花瓣', wpHint: '显示词的类别', wpOn: '开', wpOff: '关',
+        wpWon: '一束词语花！', wpLost: '花儿还会再开', wpFound: '猜中的词', wpKept: '留下的花瓣', wpDaily: '每日花束', wpAllNote: '五个词全部猜中！',
+        wpHowZh: '中文版猜的是词语拼音的字母，不带声调；猜完后会显示汉字。',
+        wpHowHi: '印地语版猜的是辅音；元音符号随辅音一起出现，单独的元音一开始就显示。',
+        kGuess: '猜一个字母', kNext: '下一个词',
+        rules: '一个字母一个字母地猜出隐藏的词。中文版猜的是拼音字母，不带声调，猜完后会显示汉字。词里有的字母会在所有位置出现。词里没有的字母会让一片花瓣轻轻飘落。在最后一片花瓣落下之前猜出这个词。每局五个词，每个词都有一朵新花；猜中至少三个就获胜。星星取决于猜中的词和留下的花瓣。齿轮可以设置花瓣数量（简单 9，中等 7，困难 5），以及是否显示词的类别。每日花束有七片花瓣，同一语言的所有人词语相同。',
+        tutTitle1: '隐藏的词', tutText1: '每个格子是拼音的一个字母。上面一行告诉你这是哪类词。',
+        tutTitle2: '猜字母', tutText2: '点一个字母。如果词里有，它会填进所有对应的格子。',
+        tutTitle3: '留住花瓣', tutText3: '猜错一个字母，就有一片花瓣飘走。在花瓣落光之前猜出这个词。'
+      },
+      de: {
+        board: 'Blume', wpWord: 'Wort {n} von {m}', wpAnimals: 'Tiere', wpFood: 'Essen', wpNature: 'Natur', wpHome: 'Zu Hause',
+        wpMiss: 'Nicht in diesem Wort', wpDup: 'Den Buchstaben hattest du schon', wpSolved: 'Gefunden!', wpOut: 'Das Wort war {w}', wpNextWord: 'Nächstes Wort', wpEnd: 'Ergebnis ansehen',
+        wpNew: 'Neues Spiel', wpPetals: 'Blütenblätter', wpPetalsN: '{n} Blütenblätter', wpLeft: '{n} Blütenblätter übrig', wpHint: 'Art des Wortes zeigen', wpOn: 'An', wpOff: 'Aus',
+        wpWon: 'Ein Strauß aus Wörtern!', wpLost: 'Die Blumen blühen wieder', wpFound: 'Gefundene Wörter', wpKept: 'Behaltene Blütenblätter', wpDaily: 'Strauß des Tages', wpAllNote: 'Alle fünf Wörter gefunden!',
+        wpHowZh: 'Auf Chinesisch rätst du die Buchstaben des Pinyin ohne Töne, und die Schriftzeichen erscheinen am Ende des Wortes.',
+        wpHowHi: 'Auf Hindi rätst du die Konsonanten; Vokalzeichen kommen mit ihnen, und ein alleinstehender Vokal ist von Anfang an zu sehen.',
+        kGuess: 'Einen Buchstaben raten', kNext: 'Nächstes Wort',
+        rules: 'Errate das versteckte Wort Buchstabe für Buchstabe. Ein Buchstabe aus dem Wort erscheint an allen seinen Stellen. Ein Buchstabe, der nicht darin ist, lässt ein Blütenblatt sanft von der Blume schweben. Finde das Wort, bevor das letzte Blütenblatt fällt. Ä, Ö, Ü und ß haben eigene Tasten. Ein Spiel hat fünf Wörter, jedes mit einer neuen Blume; finde mindestens drei, um zu gewinnen. Die Sterne kommen von den gefundenen Wörtern und den behaltenen Blütenblättern. Das Zahnrad stellt die Zahl der Blütenblätter ein (leicht 9, mittel 7, schwer 5) und schaltet den Hinweis auf die Art des Wortes ein oder aus. Der Strauß des Tages hat sieben Blütenblätter und für alle in deiner Sprache dieselben Wörter.',
+        tutTitle1: 'Ein verstecktes Wort', tutText1: 'Jedes Feld ist ein Buchstabe des Wortes. Die Zeile darüber sagt, welche Art Wort es ist.',
+        tutTitle2: 'Buchstaben raten', tutText2: 'Tipp einen Buchstaben an. Ist er im Wort, füllt er alle seine Felder.',
+        tutTitle3: 'Behalte die Blätter', tutText3: 'Ein falscher Buchstabe lässt ein Blütenblatt davonschweben. Finde das Wort, bevor die Blume kahl ist.'
+      },
+      es: {
+        board: 'Flor', wpWord: 'Palabra {n} de {m}', wpAnimals: 'Animales', wpFood: 'Comida', wpNature: 'Naturaleza', wpHome: 'En casa',
+        wpMiss: 'No está en esta palabra', wpDup: 'Ya probaste esa letra', wpSolved: '¡La encontraste!', wpOut: 'La palabra era {w}', wpNextWord: 'Siguiente palabra', wpEnd: 'Ver el resultado',
+        wpNew: 'Partida nueva', wpPetals: 'Pétalos', wpPetalsN: '{n} pétalos', wpLeft: 'Quedan {n} pétalos', wpHint: 'Mostrar el tipo de palabra', wpOn: 'Sí', wpOff: 'No',
+        wpWon: '¡Un ramo de palabras!', wpLost: 'Las flores volverán a abrirse', wpFound: 'Palabras encontradas', wpKept: 'Pétalos guardados', wpDaily: 'Ramo del día', wpAllNote: '¡Las cinco palabras encontradas!',
+        wpHowZh: 'En chino adivinas las letras del pinyin de la palabra, sin tonos, y los caracteres aparecen al terminar la palabra.',
+        wpHowHi: 'En hindi adivinas las consonantes; los signos vocálicos llegan con ellas y una vocal sola se ve desde el principio.',
+        kGuess: 'Probar una letra', kNext: 'Siguiente palabra',
+        rules: 'Adivina la palabra oculta letra a letra. Una letra de la palabra aparece en todos sus lugares. Una letra que no está hace que un pétalo se suelte despacio de la flor. Encuentra la palabra antes de que caiga el último pétalo. Una letra muestra también sus formas con tilde (a muestra á); la ñ tiene su propia tecla. Una partida son cinco palabras, cada una con una flor nueva; encuentra al menos tres para ganar. Las estrellas salen de las palabras encontradas y los pétalos guardados. El engranaje fija el número de pétalos (fácil 9, medio 7, difícil 5) y muestra u oculta el tipo de palabra. El ramo del día tiene siete pétalos y las mismas palabras para todos en tu idioma.',
+        tutTitle1: 'Una palabra oculta', tutText1: 'Cada casilla es una letra de la palabra. La línea de arriba te dice qué tipo de palabra es.',
+        tutTitle2: 'Adivina letras', tutText2: 'Toca una letra. Si está en la palabra, llena todas sus casillas.',
+        tutTitle3: 'Guarda los pétalos', tutText3: 'Una letra equivocada hace volar un pétalo. Encuentra la palabra antes de que la flor se quede sin pétalos.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var LEVEL_COINS = { easy: [3, 10], medium: [5, 16], hard: [8, 24] };
+  var prefs = ctx.store.get('prefs', null);
+  if (!prefs || E.LEVELS.indexOf(prefs.level) < 0) prefs = { level: 'medium', hint: true };
+  var seenAll = ctx.store.get('seen', null);
+  if (!seenAll || typeof seenAll !== 'object') seenAll = {};
+
+  // literal keys, so the string check in tools/test.js can see them (#143)
+  function levelName(l) { return { easy: C.t('easy'), medium: C.t('medium'), hard: C.t('hard') }[l]; }
+  function catName(c) { return { animals: C.t('wpAnimals'), food: C.t('wpFood'), nature: C.t('wpNature'), home: C.t('wpHome') }[c]; }
+  function hintOn() { return prefs.hint !== false; }
+  function appAlpha() { return E.alpha(C.state.settings.lang); }
+  function rtlAlpha(a) { return a === 'fa' || a === 'ar'; }
+  // Latin and Cyrillic boxes and keys show capitals; ß has no everyday capital
+  function up(ch) { return ch === 'ß' ? ch : ch.toUpperCase(); }
+  function shown(o) { return o.h ? o.h + ' · ' + o.w : (S.lang === 'hi' || rtlAlpha(S.lang) ? o.w : Array.from(o.w).map(up).join('')); }
+
+  var S = null, daily = null, ended = false, startedAt = 0, elapsed0 = 0;
+  // petals on their way down: index on the flower and start time; and the bloom of a found word
+  var falling = [], bloomAt = 0, raf = 0;
+
+  var cv = el('canvas', { role: 'img', 'aria-label': C.t('board') });
+  var box = el('div', { class: 'wp-box' }, [cv]);
+  var top = el('div', { class: 'wp-top ch-above' });
+  var tBadge = el('span'), tWord = el('span'), tDots = el('span', { class: 'wp-dots', 'aria-hidden': 'true' });
+  top.appendChild(tBadge); top.appendChild(tWord); top.appendChild(tDots);
+  var cat = el('div', { class: 'wp-cat' });
+  var word = el('div', { class: 'wp-word', role: 'group' });
+  var msgText = el('span', { role: 'status', 'aria-live': 'polite' });
+  var nextBtn = el('button', { class: 'ch-btn ch-btn--primary', type: 'button', onclick: function () { goNext(); } }, C.t('wpNextWord'));
+  var msg = el('div', { class: 'wp-msg' }, [msgText, nextBtn]);
+  var kbBox = el('div', { class: 'wp-kb', role: 'group', 'aria-label': C.t('keyboard') });
+  var wrap = el('div', { class: 'wp-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, cat, word, msg, kbBox])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  if (!dailyDate) {
+    ctx.button({ icon: 'gear', label: C.t('settings'), onClick: showSettings });
+    ctx.button({ icon: 'refresh', label: C.t('wpNew'), onClick: askNew });
+  }
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* --------------------------------------------------------------- game */
+
+  function newGame() {
+    var a = appAlpha(), seen = Array.isArray(seenAll[a]) ? seenAll[a] : [];
+    // the daily bouquet comes from the day's seed, so it is the same for everyone in a language
+    var seed = dailyDate ? C.daily('petals', dailyDate).seed : 1 + Math.floor(Math.random() * 4294967294);
+    S = E.newGame({ seed: seed, lang: a, level: dailyDate ? 'medium' : prefs.level, seen: dailyDate ? [] : seen });
+    daily = dailyDate || null;
+    if (!daily) {
+      // the last words played are kept out of the next games until most of the list has had a turn
+      seen = seen.concat(S.words.map(function (o) { return o.w; }));
+      if (seen.length > E.list(a).length - E.PER * 2) seen = S.words.map(function (o) { return o.w; });
+      seenAll[a] = seen; ctx.store.set('seen', seenAll);
+    }
+    ended = false; startedAt = Date.now(); elapsed0 = 0; falling = []; bloomAt = 0;
+    buildKeys(); paintAll(); save();
+  }
+  function started() { return S && !ended && (S.i > 0 || S.got.length > 0); }
+  function askNew() {
+    if (started()) C.ui.confirm({ title: C.t('wpNew'), body: C.t('resetWarn'), onOk: newGame });
+    else newGame();
+  }
+  function elapsed() { return elapsed0 + (startedAt ? Date.now() - startedAt : 0); }
+
+  function press(ch) {
+    if (!S || ended) return;
+    if (S.over) { if (ch === '\n') goNext(); return; }
+    var wrongBefore = S.wrong, r = E.guess(S, ch);
+    if (r.type === 'none') return;
+    if (r.type === 'dup') { C.feedback('tap'); say(C.t('wpDup')); return; }
+    if (r.type === 'miss' || r.type === 'out') {
+      C.feedback('bad');
+      dropPetal(wrongBefore);
+      say(r.type === 'out' ? C.t('wpOut', { w: shown(E.current(S)) }) : C.t('wpMiss'));
+    } else {
+      C.audio.sfx('pop');
+      if (r.type === 'solved') { C.feedback('good'); bloom(); say(C.t('wpSolved') + (E.current(S).h ? ' ' + shown(E.current(S)) : '')); }
+      else say('');
+    }
+    paintKeys(); paintWord(true); paintTop(); paintMsg(); draw(); save();
+    if (S.over) setTimeout(function () { if (S && S.over && document.activeElement !== nextBtn) try { nextBtn.focus({ preventScroll: true }); } catch (er) { /* old WebViews */ } }, 60);
+  }
+  function goNext() {
+    if (!S || ended || !S.over) return;
+    E.next(S);
+    if (S.status === 'done') { finish(); return; }
+    falling = []; bloomAt = 0;
+    say(''); paintAll(); save();
+  }
+
+  function finish() {
+    if (ended) return;
+    ended = true;
+    var R = E.result(S), ms = elapsed(), lv = S.level, note = null;
+    var base = LEVEL_COINS[lv];
+    var coins = R.won ? base[0] : Math.max(1, Math.min(base[0] - 1, R.found));
+    var points = R.won ? base[1] : Math.max(1, R.found * 2);
+    if (R.won) {
+      C.achievements.unlock('wp-win');
+      if (lv === 'hard' && !daily) C.achievements.unlock('wp-hard');
+      if (daily) C.achievements.unlock('wp-daily');
+    }
+    if (R.found === E.PER) { C.achievements.unlock('wp-all'); note = C.t('wpAllNote'); }
+    if (daily && !C.stats.daily('petals', daily, { label: C.t('wpFound') + ' ' + C.num(R.found) + ' / ' + C.num(E.PER), win: R.won, stars: R.stars })) {
+      coins = Math.max(1, Math.round(coins * 0.2)); points = Math.max(1, Math.round(points * 0.2));
+    }
+    ctx.clearSave();
+    var marks = S.found.map(function (f) { return f ? '✿' : '·'; }).join('');
+    var fin = { daily: daily };
+    ctx.finish({
+      won: R.won, title: R.won ? C.t('wpWon') : C.t('wpLost'), note: note, stars: R.won ? R.stars : null, timeMs: ms, coins: coins, points: points,
+      lines: (fin.daily ? [{ label: C.t('daily'), value: C.num(fin.daily) }] : []).concat([
+        { label: C.t('wpFound'), value: C.num(R.found) + ' / ' + C.num(E.PER) },
+        { label: C.t('wpKept'), value: C.num(R.kept) + ' / ' + C.num(R.all) }
+      ]),
+      shareText: 'چوگان · گل‌واژه' + (fin.daily ? ('\nروزانه ' + fin.daily) : '') + '\n' + marks + (R.won ? '\n' + '★'.repeat(R.stars) : ''),
+      againLabel: C.t('wpNew'),
+      onAgain: function () { newGame(); }
+    });
+  }
+
+  /* --------------------------------------------------------------- view */
+
+  function say(t) { msgText.textContent = t; }
+  function paintAll() { paintTop(); paintWord(false); paintKeys(); paintMsg(); draw(); }
+  function paintTop() {
+    if (!S) return;
+    tBadge.innerHTML = '';
+    if (daily) tBadge.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('wpDaily') })]));
+    else tBadge.appendChild(el('span', { class: 'ch-badge', text: levelName(S.level) }));
+    tWord.textContent = C.t('wpWord', { n: C.num(S.i + 1), m: C.num(E.PER) });
+    tDots.innerHTML = '';
+    for (var i = 0; i < E.PER; i++) {
+      var d = el('span', { class: 'wp-dot' });
+      if (S.found[i]) d.classList.add('wp-got');
+      else if (i === S.i && !S.over) d.classList.add('wp-now');
+      // a missed word looked like one not yet played, so the row could not tell the score
+      else if (i < S.i || (i === S.i && S.over)) d.classList.add('wp-miss');
+      tDots.appendChild(d);
+    }
+    cat.textContent = hintOn() ? catName(E.current(S).c) : '';
+    cv.setAttribute('aria-label', C.t('board') + ' · ' + C.t('wpLeft', { n: C.num(S.petals - S.wrong) }));
+  }
+  // The boxes are rebuilt only when the word changes; a guess just fills them, so a
+  // box never vanishes under a finger (#750)
+  var slotEls = [], slotWord = null;
+  function paintWord(pop) {
+    if (!S) return;
+    var o = E.current(S), us = E.units(S.lang, o.w), key = S.lang + '|' + S.i + '|' + o.w;
+    if (slotWord !== key) {
+      slotWord = key; slotEls = [];
+      word.innerHTML = '';
+      word.setAttribute('dir', rtlAlpha(S.lang) ? 'rtl' : 'ltr');
+      word.setAttribute('lang', S.lang);
+      word.style.setProperty('--n', Math.max(5, us.length));
+      us.forEach(function (u) {
+        var s = el('span', { class: 'wp-slot' + (u.gap ? ' wp-gap' : '') });
+        slotEls.push(s); word.appendChild(s);
+      });
+    }
+    var op = E.open(S), lost = S.over === 'lost';
+    us.forEach(function (u, i) {
+      var s = slotEls[i];
+      if (!s || u.gap) return;
+      var show = op[i] || lost, txt = show ? (S.lang === 'hi' || rtlAlpha(S.lang) ? u.t : up(u.t)) : '';
+      if (s.textContent !== txt) {
+        s.textContent = txt;
+        if (pop && op[i] && !C.ui.reduceMotion()) { s.classList.remove('wp-pop'); void s.offsetWidth; s.classList.add('wp-pop'); }
+      }
+      s.classList.toggle('wp-open', !!op[i]);
+      s.classList.toggle('wp-gave', lost && !op[i]);
+    });
+    word.setAttribute('aria-label', us.map(function (u, i) { return u.gap ? ' ' : (op[i] || lost ? u.t : '_'); }).join(''));
+  }
+  function paintMsg() {
+    msg.classList.toggle('wp-over', !!(S && S.over));
+    nextBtn.textContent = S && S.i >= E.PER - 1 ? C.t('wpEnd') : C.t('wpNextWord');
+  }
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  // a quiet meadow; each word gets its own flower colour
+  var PETAL = ['#E58FAE', '#F2A65A', '#B48FE0', '#7FB3E8', '#EFC24A'];
+  function palette() {
+    return dark()
+      ? { bg0: '#231A22', bg1: '#16131A', hill: '#22382A', hill2: '#2C4835', stem: '#6FBF84', leaf: '#4E9A66', heart: '#F2C14E', dot: '#B9862A', halo: 'rgba(242,193,78,0.16)', bud: '#5FA36F' }
+      : { bg0: '#FBEFF3', bg1: '#FFF9F1', hill: '#CFE5C1', hill2: '#B6D7A4', stem: '#4F9A63', leaf: '#6DB37E', heart: '#F2C14E', dot: '#C99227', halo: 'rgba(242,193,78,0.28)', bud: '#6DB37E' };
+  }
+  var drawn = { w: 0, h: 0 };
+  function size() {
+    var r = box.getBoundingClientRect();
+    return { w: Math.max(120, Math.floor(r.width) || 0), h: Math.max(100, Math.floor(r.height) || 0) };
+  }
+  // the order petals leave in, spread around the flower rather than one by one
+  function order(n) { var step = Math.ceil(n / 2), out = []; for (var i = 0; i < n; i++) out.push((i * step) % n); return out; }
+  function petal(g, x, y, ang, len, wid, col, alpha) {
+    g.save(); g.translate(x, y); g.rotate(ang); g.globalAlpha = alpha == null ? 1 : alpha;
+    var gr = g.createLinearGradient(0, 0, len, 0);
+    gr.addColorStop(0, col); gr.addColorStop(1, shade(col, 0.18));
+    g.fillStyle = gr;
+    g.beginPath(); g.moveTo(0, 0);
+    g.bezierCurveTo(len * 0.3, -wid, len * 0.85, -wid * 0.9, len, 0);
+    g.bezierCurveTo(len * 0.85, wid * 0.9, len * 0.3, wid, 0, 0);
+    g.fill();
+    g.restore();
+  }
+  function shade(hex, k) {
+    var n = parseInt(hex.slice(1), 16), r = n >> 16, gg = (n >> 8) & 255, b = n & 255;
+    function m(c) { return Math.round(c + (255 - c) * k); }
+    return 'rgb(' + m(r) + ',' + m(gg) + ',' + m(b) + ')';
+  }
+
+  function draw(now) {
+    if (!S) return;
+    now = now || performance.now();
+    var Z = size(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
+    drawn = { w: Z.w, h: Z.h };
+    var P = palette(), g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var bg = g.createLinearGradient(0, 0, 0, Z.h);
+    bg.addColorStop(0, P.bg0); bg.addColorStop(1, P.bg1);
+    g.fillStyle = bg; g.fillRect(0, 0, Z.w, Z.h);
+
+    var groundY = Z.h * 0.86;
+    g.fillStyle = P.hill2;
+    g.beginPath(); g.moveTo(0, groundY + Z.h * 0.03); g.quadraticCurveTo(Z.w * 0.5, groundY - Z.h * 0.06, Z.w, groundY + Z.h * 0.03); g.lineTo(Z.w, Z.h); g.lineTo(0, Z.h); g.closePath(); g.fill();
+    g.fillStyle = P.hill;
+    g.beginPath(); g.moveTo(0, groundY + Z.h * 0.08); g.quadraticCurveTo(Z.w * 0.35, groundY, Z.w, groundY + Z.h * 0.1); g.lineTo(Z.w, Z.h); g.lineTo(0, Z.h); g.closePath(); g.fill();
+
+    var R = Math.min(Z.w * 0.2, Z.h * 0.24), cx = Z.w / 2, cy = Z.h * 0.4;
+    // the stem and two leaves
+    g.strokeStyle = P.stem; g.lineWidth = Math.max(3, R * 0.09); g.lineCap = 'round';
+    g.beginPath(); g.moveTo(cx, cy); g.bezierCurveTo(cx - R * 0.25, cy + R * 1.0, cx + R * 0.25, groundY - R * 0.6, cx, groundY + 2); g.stroke();
+    g.fillStyle = P.leaf;
+    [[-1, 0.62], [1, 0.82]].forEach(function (lf) {
+      var ly = cy + (groundY - cy) * lf[1], lx = cx + lf[0] * 2;
+      g.beginPath(); g.moveTo(lx, ly);
+      g.quadraticCurveTo(lx + lf[0] * R * 0.55, ly - R * 0.45, lx + lf[0] * R * 0.85, ly - R * 0.1);
+      g.quadraticCurveTo(lx + lf[0] * R * 0.45, ly + R * 0.12, lx, ly);
+      g.fill();
+    });
+
+    var n = S.petals, col = PETAL[S.i % PETAL.length], ord = order(n);
+    var gone = {}, inAir = {};
+    for (var k = 0; k < S.wrong; k++) gone[ord[k]] = k;
+    falling.forEach(function (f) { inAir[f.i] = f; });
+    var wid = Math.min(R * 0.36, Math.PI * R * 0.62 / n * 1.25);
+    var blooming = bloomAt ? Math.min(1, (now - bloomAt) / 700) : 0;
+    var grow = S.over === 'won' ? 1 + 0.12 * Math.sin(Math.min(1, blooming) * Math.PI / 2) : 1;
+
+    // petals already down rest on the grass
+    for (var q = 0; q < S.wrong; q++) {
+      var pi = ord[q];
+      if (inAir[pi]) continue;
+      var spot = restSpot(q, Z, groundY);
+      petal(g, spot.x, spot.y, spot.a, R * 0.62, wid * 0.8, col, 0.85);
+    }
+    if (S.over === 'won') {
+      g.fillStyle = P.halo; g.beginPath(); g.arc(cx, cy, R * 1.55 * grow, 0, Math.PI * 2); g.fill();
+    }
+    if (S.over === 'lost' && !falling.length) {
+      // a new bud waits on the stem: next time it blooms
+      g.fillStyle = col; g.beginPath(); g.ellipse(cx, cy - R * 0.28, R * 0.2, R * 0.32, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = P.bud;
+      g.beginPath(); g.moveTo(cx - R * 0.26, cy - R * 0.05); g.quadraticCurveTo(cx - R * 0.22, cy - R * 0.42, cx - R * 0.02, cy - R * 0.5); g.quadraticCurveTo(cx - R * 0.06, cy - R * 0.15, cx, cy + R * 0.05); g.fill();
+      g.beginPath(); g.moveTo(cx + R * 0.26, cy - R * 0.05); g.quadraticCurveTo(cx + R * 0.22, cy - R * 0.42, cx + R * 0.02, cy - R * 0.5); g.quadraticCurveTo(cx + R * 0.06, cy - R * 0.15, cx, cy + R * 0.05); g.fill();
+      g.beginPath(); g.ellipse(cx, cy + R * 0.02, R * 0.24, R * 0.12, 0, 0, Math.PI * 2); g.fill();
+    } else {
+      for (var i = 0; i < n; i++) {
+        if (gone[i] != null) continue;
+        var a = -Math.PI / 2 + i * Math.PI * 2 / n;
+        petal(g, cx, cy, a, R * grow, wid * grow, col);
+      }
+      g.fillStyle = P.heart; g.beginPath(); g.arc(cx, cy, R * 0.3, 0, Math.PI * 2); g.fill();
+      g.fillStyle = P.dot;
+      for (var d = 0; d < 7; d++) { var da = d * 2.4, dr = R * 0.15 * Math.sqrt((d + 1) / 7); g.beginPath(); g.arc(cx + Math.cos(da) * dr, cy + Math.sin(da) * dr, Math.max(1, R * 0.03), 0, Math.PI * 2); g.fill(); }
+    }
+
+    // petals on their way down sway like a leaf
+    falling.forEach(function (f) {
+      var t = Math.min(1, (now - f.t0) / 1500), a0 = -Math.PI / 2 + f.i * Math.PI * 2 / n;
+      var sx = cx + Math.cos(a0) * R * 0.5, sy = cy + Math.sin(a0) * R * 0.5, end = restSpot(f.k, Z, groundY);
+      var e = t * t * (3 - 2 * t);
+      var x = sx + (end.x - sx) * e + Math.sin(t * Math.PI * 3) * R * 0.35 * (1 - t);
+      var y = sy + (end.y - sy) * e;
+      petal(g, x, y, a0 + (end.a - a0) * e + Math.sin(t * 9) * 0.4 * (1 - t), R * (1 - 0.38 * e), wid * (1 - 0.2 * e), col, 1 - 0.15 * e);
+    });
+  }
+  function restSpot(k, Z, groundY) {
+    var side = k % 2 ? 1 : -1, step = Math.floor(k / 2);
+    var x = Z.w / 2 + side * (Z.w * 0.12 + step * Z.w * 0.075) + ((k * 37) % 9 - 4) * 1.5;
+    return { x: Math.max(8, Math.min(Z.w - 8, x)), y: groundY + Z.h * 0.04 + ((k * 13) % 5) * Z.h * 0.012, a: side > 0 ? 0.25 + (k % 3) * 0.3 : Math.PI - 0.25 - (k % 3) * 0.3 };
+  }
+  function animate() {
+    if (raf) return;
+    raf = requestAnimationFrame(function step(t) {
+      raf = 0;
+      falling = falling.filter(function (f) { return t - f.t0 < 1500; });
+      draw(t);
+      if (falling.length || (bloomAt && t - bloomAt < 750)) raf = requestAnimationFrame(step);
+    });
+  }
+  function dropPetal(k) {
+    if (C.ui.reduceMotion()) return;
+    falling.push({ i: order(S.petals)[k], k: k, t0: performance.now() });
+    animate();
+  }
+  function bloom() {
+    if (C.ui.reduceMotion()) { bloomAt = 1; return; }
+    bloomAt = performance.now();
+    animate();
+    var r = cv.getBoundingClientRect();
+    var col = PETAL[S.i % PETAL.length];
+    C.ui.burst({ x: r.left + r.width / 2, y: r.top + r.height * 0.4 }, { colors: [col, '#FFF1C9', '#F2C14E'], count: 22, ring: Math.min(70, r.height * 0.3), ringColor: col, gravity: 120, speed: 180 });
+  }
+
+  /* ----------------------------------------------------------- keyboard */
+
+  // The keys are built once per alphabet. During play only classes change, so a key
+  // under the finger is never replaced between press and release (#750).
+  var keyEls = {}, kbAlpha = null;
+  function buildKeys() {
+    if (!S || kbAlpha === S.lang) { paintKeys(); return; }
+    kbAlpha = S.lang; keyEls = {};
+    kbBox.innerHTML = '';
+    var rows = E.KB[S.lang], cols = Math.max.apply(null, rows.map(function (r) { return r.length; }));
+    kbBox.style.setProperty('--cols', cols);
+    rows.forEach(function (row) {
+      var line = el('div', { class: 'wp-row' });
+      row.split('').forEach(function (ch) {
+        var b = el('button', { class: 'wp-key', type: 'button', text: S.lang === 'hi' || rtlAlpha(S.lang) ? ch : up(ch), lang: S.lang });
+        b.addEventListener('pointerdown', function (e) { e.preventDefault(); press(ch); });
+        // a key reached by Tab and pressed with Enter or Space has no pointer
+        b.addEventListener('click', function (e) { if (e.detail === 0) press(ch); });
+        keyEls[ch] = b; line.appendChild(b);
+      });
+      kbBox.appendChild(line);
+    });
+    paintKeys();
+  }
+  function paintKeys() {
+    if (!S) return;
+    var inWord = E.letters(S.lang, E.current(S).w);
+    Object.keys(keyEls).forEach(function (ch) {
+      var tried = S.got.indexOf(ch) >= 0, b = keyEls[ch];
+      b.classList.toggle('wp-in', tried && inWord.indexOf(ch) >= 0);
+      b.classList.toggle('wp-out', tried && inWord.indexOf(ch) < 0);
+      b.setAttribute('aria-pressed', tried ? 'true' : 'false');
+    });
+  }
+
+  // A physical key: the character it types if the alphabet has it, otherwise where it
+  // sits. Persian, Arabic and Russian map by position for a keyboard without that
+  // layout; Latin alphabets use the core's letter match, which also works on the
+  // Persian layout (#341).
+  function keyChar(e) {
+    var a = S.lang;
+    if (e.key && e.key.length === 1) {
+      var c = E.fold(a, e.key);
+      if (E.isLetter(a, c)) return c;
+    }
+    if (a === 'fa' || a === 'ar' || a === 'ru') {
+      for (var r = 0; r < 3; r++) {
+        var codes = r === 2 && E.CODES3[a] ? E.CODES3[a] : E.CODES[r], i = codes.indexOf(e.code);
+        if (i >= 0 && i < E.KB[a][r].length) return E.KB[a][r][i];
+      }
+      return null;
+    }
+    if (a === 'hi') return null;
+    var all = E.KB[a].join('');
+    for (var j = 0; j < all.length; j++) if (/[a-z]/.test(all[j]) && C.keyIs(e, all[j])) return all[j];
+    return null;
+  }
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || !S || ended) return;
+    if (e.key === 'Enter') {
+      // Enter on a focused button keeps its own meaning
+      if (document.activeElement && document.activeElement.tagName === 'BUTTON') return;
+      if (S.over) { e.preventDefault(); goNext(); }
+      return;
+    }
+    if (e.key === ' ' && document.activeElement && document.activeElement.tagName === 'BUTTON') return;
+    var ch = keyChar(e);
+    if (!ch) return;
+    e.preventDefault();
+    press(ch);
+  });
+  cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  /* ------------------------------------------------------------ dialogs */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    var body = [el('p', { class: 'ch-dim', text: C.t('rules') })];
+    var lang = C.state.settings.lang;
+    if (lang === 'zh') body.push(el('p', { class: 'ch-dim', text: C.t('wpHowZh') }));
+    if (lang === 'hi') body.push(el('p', { class: 'ch-dim', text: C.t('wpHowHi') }));
+    body.push(el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }));
+    body.push(el('div', { class: 'ch-list' }, [kb(lang === 'hi' ? 'क–ह' : 'A–Z', C.t('kGuess')), kb('Enter', C.t('kNext'))]));
+    C.ui.modal({
+      title: C.t('help'), body: body,
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  // A change of petals starts a new game; one already under way asks first
+  function apply(change) {
+    if (started()) C.ui.confirm({ title: C.t('wpNew'), body: C.t('resetWarn'), onOk: function () { change(); newGame(); } });
+    else { change(); newGame(); }
+  }
+  function showSettings() {
+    var m = null;
+    m = C.ui.modal({
+      title: C.t('settings'), closeButton: true,
+      body: [
+        el('h3', { text: C.t('wpPetals') }),
+        C.ui.segmented(E.LEVELS.map(function (l) { return { value: l, label: levelName(l) + ' · ' + C.num(E.PETALS[l]) }; }), prefs.level, function (l) {
+          if (l === prefs.level) return;
+          m.close();
+          apply(function () { prefs.level = l; ctx.store.set('prefs', prefs); });
+        }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('wpHint') }),
+        // the hint only helps the guess, so switching it keeps the game going
+        C.ui.segmented([{ value: true, label: C.t('wpOn') }, { value: false, label: C.t('wpOff') }], hintOn(), function (v) {
+          prefs.hint = v; ctx.store.set('prefs', prefs); paintTop();
+        })
+      ],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  // Tutorial pictures: the flower, the boxes and a falling petal, in the light theme's
+  // literal colours, so they read the same in every language
+  function tArt(step) {
+    var s = '<svg viewBox="0 0 200 110" width="100%"><rect x="20" y="2" width="160" height="106" rx="10" fill="#FBEFF3"/>' +
+      '<path d="M20 92q80-12 160 2v6a8 8 0 0 1-8 8H28a8 8 0 0 1-8-8z" fill="#CFE5C1"/>' +
+      '<path d="M100 44c-6 18 6 30 0 50" stroke="#4F9A63" stroke-width="3" fill="none" stroke-linecap="round"/>';
+    var n = 7, gone = step === 3 ? 2 : 0;
+    for (var i = 0; i < n; i++) {
+      if (i === 0 && gone) continue;
+      if (i === 4 && gone) continue;
+      var a = -90 + i * 360 / n;
+      s += '<ellipse cx="100" cy="30" rx="5.5" ry="13" fill="#E58FAE" transform="rotate(' + (a + 90).toFixed(1) + ' 100 44) translate(0 0)"/>';
+    }
+    s += '<circle cx="100" cy="44" r="7" fill="#F2C14E"/>';
+    if (step === 3) s += '<ellipse cx="132" cy="80" rx="5" ry="11" fill="#E58FAE" transform="rotate(60 132 80)"/><path d="M118 56q10 6 6 14" stroke="#AA5A74" stroke-width="1.5" fill="none" stroke-dasharray="2 3"/><ellipse cx="66" cy="98" rx="4.5" ry="10" fill="#E58FAE" opacity=".8" transform="rotate(-70 66 98)"/>';
+    // the boxes, with one letter found in step 2
+    var bx = step === 1 ? '' : '<rect x="40" y="68" width="14" height="16" rx="3" fill="#AA5A74"/>';
+    for (var b = 0; b < 5; b++) s += '<path d="M' + (36 + b * 10) + ' 88h7" stroke="' + (step === 2 && (b === 1 || b === 3) ? '#AA5A74' : '#6B5560') + '" stroke-width="2" stroke-linecap="round" transform="translate(-16 0)"/>';
+    if (step === 2) s += '<circle cx="34" cy="83" r="2.6" fill="#AA5A74"/><circle cx="54" cy="83" r="2.6" fill="#AA5A74"/>' + bx;
+    if (step === 1) s += '<rect x="134" y="14" width="34" height="8" rx="4" fill="#AA5A74" opacity=".35"/>';
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // the game is saved after every guess and when the app goes away; the daily game has its own slot
+  ctx.autosave(function () {
+    if (!S || ended) return { inProgress: false };
+    return { game: S, daily: daily, elapsed: elapsed() };
+  });
+  function save() { ctx.save(); }
+  C.onPause(function () { elapsed0 = elapsed(); startedAt = 0; ctx.save(); });
+  C.onResume(function () { if (!startedAt) startedAt = Date.now(); draw(); });
+  document.addEventListener('visibilitychange', function () { if (document.hidden) ctx.save(); else draw(); });
+  // back from the back/forward cache, the page runs on without a load (#385)
+  window.addEventListener('pageshow', function (e) { if (e.persisted) { if (!startedAt) startedAt = Date.now(); draw(); } });
+
+  var saved = ctx.loadSave();
+  if (saved && saved.game && E.valid(saved.game) && saved.game.lang === appAlpha() && (saved.daily || null) === (dailyDate || null)) {
+    S = saved.game; daily = saved.daily || null; elapsed0 = +saved.elapsed || 0; startedAt = Date.now();
+    ended = false;
+    if (S.over === 'won') bloomAt = 1;
+    buildKeys(); paintAll();
+    if (S.over) say(S.over === 'won' ? C.t('wpSolved') : C.t('wpOut', { w: shown(E.current(S)) }));
+  } else newGame();
+  if (dailyDate && C.stats.dailyDone('petals', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).petals;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  // the flower is redrawn whenever its box changes (rotation, side rows) and once the
+  // web font has arrived and moved the layout (Bowling lesson)
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { draw(); });
+  if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { draw(); }); } catch (er) { /* old WebViews */ } }
+  new MutationObserver(function () { draw(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
