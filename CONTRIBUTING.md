@@ -5,6 +5,7 @@ Thank you for helping. Chogan is a set of small, finishable games in one free, o
 ## Before you start
 
 - **Open an issue first**, or comment on one, for a new game or a large change. A new game's name, rules and look are decided with the owner; a pull request for a game nobody has agreed to may be closed even if it is good.
+- **A new game's pull request goes into the `staging` branch**, not `main`. It moves to `main` after it has been tried on staging; CI fails a pull request into `main` that adds a game `staging` does not have. Fixes and changes to existing games go to `main`.
 - **New games** follow [NEW_GAME.md](NEW_GAME.md) (Persian): a folder from `template/game/` under `www/games/`, an entry in `www/games.json`, its awards in `www/lib/chogan.js`, a row in each table of `GAMES.md`, a line in every store description under `fastlane/metadata/android/`, and a test group in a file of its own under `tools/tests/`.
 - **No new dependencies, servers or permissions.** Plain JavaScript on a canvas or the DOM, everything inside the package. Network access, even on a local network, is out of scope (#185).
 
