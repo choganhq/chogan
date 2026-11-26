@@ -65,6 +65,11 @@ module.exports = function (T) {
     ok(time.easy > time.medium + 10 && time.medium > time.hard + 8,
       'easy is slower than medium and medium slower than hard: ' + lv.map((l) => l + ' ' + time[l].toFixed(1) + ' s').join(', '));
     // and in a slippery scene with a bought car: the hard bot on snow in the racer
+    // #1191: from seed 360537290 the first snow course the easy bot finishes is the 14th, past
+    // the daily's 12 tries. Only that course is driven here: walking all 14 takes seconds.
+    const lb = E.newGame((360537290 + 13 * 7919) >>> 0, E.RACE, 'snow', 'buggy');
+    while (!lb.over && !lb.won && lb.t < 600) E.step(lb, E.botControl(lb, 'easy'));
+    ok(lb.won && E.RACE_TRIES >= 40, 'a race looks far enough to find a finishable snow course (the 14th here; ' + E.RACE_TRIES + ' tries)');
     const sn = E.newGame(E.courseSeed(80711, E.RACE, 12, 'snow', 'racer', 'hard'), E.RACE, 'snow', 'racer');
     while (!sn.over && !sn.won && sn.t < 600) E.step(sn, E.botControl(sn, 'hard'));
     ok(sn.won, 'the hard bot finishes a snowy race in the racer (' + sn.t.toFixed(1) + ' s)');
@@ -76,7 +81,7 @@ module.exports = function (T) {
     const help = (html.match(/function showHelp\(\) \{[\s\S]*?\n {2}\}/) || [''])[0];
     ok(help.length > 0 && /C\.t\('rcRule'\)/.test(help) && !/segmented/.test(help), 'the help explains the race and holds no options');
     ok(/race = !dailyDate && prefs\.mode === 'race'/.test(html) && /B = race \? E\.newGame\(S\.seed, E\.RACE, S\.scene, S\.car\) : null/.test(html), 'the daily road has no bot; a race puts the bot on the player\'s seed, car and weather');
-    ok(/E\.courseSeed\(Math\.floor\(Math\.random\(\) \* 4294967296\), E\.RACE, 12, prefs\.scene, prefs\.car, raceLv\)/.test(html), 'a race course is one the bot at its level finishes');
+    ok(/E\.courseSeed\(Math\.floor\(Math\.random\(\) \* 4294967296\), E\.RACE, E\.RACE_TRIES, prefs\.scene, prefs\.car, raceLv\)/.test(html), 'a race course is one the bot at its level finishes');
     ok(/ev = ev\.concat\(E\.step\(S, control\(\), false, canBuy\(\)\)\);\s*\/\/[^\n]*\n\s*if \(B\) \{ prevB = pose\(B\); E\.step\(B, E\.botControl\(B, raceLv\)\); \}/.test(html), 'the bot takes a step with every step of the player');
     ok(/while \(!B\.won && !B\.over && B\.t < 600\) E\.step\(B, E\.botControl\(B, raceLv\)\)/.test(html) && /var won = mine !== null && \(bots === null \|\| mine < bots\)/.test(html), 'at the end the bot drives on to its flag and the first by the clock wins');
     ok(/roadside\(g, P, x0, x1\);\s*\/\/[^\n]*\n\s*if \(B\) ghost\(g, P, dpr\)/.test(html) && /g\.globalAlpha = 0\.5; g\.drawImage\(ghostCv, 0, 0\)/.test(html), 'the bot is drawn as a see-through ghost');
