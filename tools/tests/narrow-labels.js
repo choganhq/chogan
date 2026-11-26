@@ -36,7 +36,7 @@ module.exports = function (T) {
       'tower defence: on a narrow row the next-wave preview gets its own line');
     const css = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.css'), 'utf8');
     const side = css.match(/\.ch-split > \.ch-side \{\n\s*display: flex;[^}]*\}/g) || [];
-    ok(side.length === 2 && side.every((r) => /justify-content: center; justify-content: safe center;/.test(r)),
+    ok(side.length === 2 && side.every((r) => !/justify-content/.test(r)),
       'a side column taller than the screen scrolls from its top, in both layouts (#1195; ' + side.length + ' rules)');
   }
   return { testNarrowLabels };
