@@ -35,10 +35,17 @@
     touch-action: pan-x pan-y;
   }
   /* as wide as its cells, not its frame: zoom keeps the point under the fingers by the board's box (#850) */
+  /* #1204: closed cells carry the game's colour and opened ones the page background. The two
+     neutral surfaces used before were nearly the same, so an empty opened cell looked
+     closed. The plain colour first is for WebViews without color-mix. */
+  .ms-board { --ms-closed: var(--c-surface-3); }
+  @supports (background: color-mix(in srgb, red 50%, blue)) {
+    .ms-board { --ms-closed: color-mix(in srgb, var(--game) 45%, var(--c-surface-3)); }
+  }
   .ms-board { display: grid; grid-template-columns: repeat(var(--cols), var(--cs)); gap: 2px; width: max-content; }
   .ms-cell {
     width: var(--cs); height: var(--cs); border: 0; padding: 0; cursor: pointer;
-    background: var(--c-surface-3); border-radius: 4px;
+    background: var(--ms-closed); border-radius: 4px;
     font: inherit; font-weight: 800; font-size: calc(var(--cs) * .56);
     display: grid; place-items: center; color: var(--c-text);
     box-shadow: var(--sh-inset);
@@ -47,7 +54,7 @@
     -webkit-touch-callout: none;
     font-variant-numeric: tabular-nums;
   }
-  .ms-cell--open { background: var(--c-surface-2); box-shadow: none; }
+  .ms-cell--open { background: var(--c-bg); box-shadow: none; }
   .ms-cell--open.ms-pop { animation: ms-open var(--t-mid) var(--ease) backwards; }
   @keyframes ms-open { from { transform: scale(.6); opacity: .2; } }
   /* #398: a flag drops in; after a loss the other mines go off one by one, and
@@ -55,15 +62,18 @@
   .ms-cell--flag.ms-flagin svg { animation: ch-dropin 340ms var(--ease) backwards; animation-delay: inherit; }
   .ms-cell--mine.ms-blow { animation: ms-blow 280ms var(--ease-back) backwards; }
   .ms-cell--mine.ms-blow svg { animation: ms-blow-icon 280ms var(--ease-back) backwards; animation-delay: inherit; }
-  @keyframes ms-blow { from { background-color: var(--c-surface-3); transform: scale(.7); } }
+  @keyframes ms-blow { from { background-color: var(--ms-closed); transform: scale(.7); } }
   @keyframes ms-blow-icon { from { transform: scale(0); } }
   .ms-cell.ms-wave { animation: ms-wave 420ms var(--ease); }
   @keyframes ms-wave { 40% { transform: scale(1.12); filter: brightness(1.12); } }
   .ms-cell--flag { color: var(--c-bad); }
+  /* plain red faded into the tinted tile; pulled towards the text colour it is dark on the
+     light tile and pale on the dark one (#1204) */
+  @supports (color: color-mix(in srgb, red 50%, blue)) { .ms-cell--flag { color: color-mix(in srgb, var(--c-bad) 55%, var(--c-text)); } }
   .ms-cell--mine { background: var(--c-bad); color: #fff; }
   .ms-cell--wrong { background: var(--c-bad-soft); color: var(--c-bad); }
   .ms-cell--hint { outline: 3px solid var(--c-good); outline-offset: -3px; }
-  .ms-cell--cursor { outline: 3px solid var(--game); outline-offset: -3px; }
+  .ms-cell--cursor { outline: 3px solid var(--c-text); outline-offset: -3px; }
   /* the press lands on the button itself, so nothing inside it can be swapped out from under
      a finger: Chrome sends no click when the element a press began on has gone (#750) */
   .ms-cell svg { width: 68%; height: 68%; pointer-events: none; }
