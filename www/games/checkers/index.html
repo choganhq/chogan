@@ -359,10 +359,12 @@ function CheckersEngineFactory() {
     return best;
   }
 
-  // Search depth and how much noise picks among moves: easy looks one move
-  // ahead and often misjudges, medium three, hard seven (six in Huevo, where
-  // every landing of a chain is a move of its own).
-  var LEVELS = { easy: { d: 1, noise: 70 }, medium: { d: 3, noise: 12 }, hard: { d: 7, noise: 1 } };
+  // Search depth and how much noise picks among moves. Easy looks at its own
+  // move only, so it walks into replies, and now and then plays any move at all:
+  // looking one reply ahead it never gave a piece away, and a beginner lost
+  // every game (#1214). Medium looks three ahead, hard seven (six in Huevo,
+  // where every landing of a chain is a move of its own).
+  var LEVELS = { easy: { d: 0, noise: 70, slip: 0.3 }, medium: { d: 3, noise: 12 }, hard: { d: 7, noise: 1 } };
 
   function aiMove(board, p, level, rnd, rules, free, st) {
     rnd = rnd || Math.random;
@@ -370,10 +372,14 @@ function CheckersEngineFactory() {
     if (!ms.length) return null;
     if (ms.length === 1) return ms[0];
     var L = LEVELS[level] || LEVELS.medium, b = board.slice(), d = rules === 'huevo' && L.d > 6 ? 6 : L.d;
+    // a Queen that can be taken is always taken: missing that reads as a fault
+    if (L.slip && rnd() < L.slip && !(rules === 'huevo' && ms.some(function (m) { return m.caps.some(function (j) { return isRoyal(b[j]); }); }))) {
+      return ms[Math.floor(rnd() * ms.length)];
+    }
     var best = ms[0], bestScore = -Infinity;
     for (var k = 0; k < ms.length; k++) {
       var u = play(b, ms[k]);
-      var v = -negamax(b, 3 - p, d - 1, -Infinity, Infinity, 1, rules, free);
+      var v = L.d === 0 ? evaluate(b, p) : -negamax(b, 3 - p, d - 1, -Infinity, Infinity, 1, rules, free);
       if (rules === 'huevo' && u.took.some(isRoyal)) v = WIN;
       unplay(b, ms[k], u);
       var sv = v + rnd() * L.noise;
