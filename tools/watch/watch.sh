@@ -36,6 +36,17 @@ flock -n 9 || { echo "another watcher run is still going"; exit 0; }
 
 log() { echo "[$(date -Is)] $*" | tee -a "$LOG"; }
 
+# One momentary "error connecting to api.github.com" used to fail the whole hourly run, so every
+# gh call (all of them only read) is tried a few times. Output of a failed try is dropped.
+gh() {
+  local try out
+  for try in 1 2 3 4; do
+    if out=$(command gh "$@"); then printf '%s\n' "$out"; return 0; fi
+    [ "$try" = 4 ] || sleep "${GH_RETRY_WAIT:-30}"
+  done
+  return 1
+}
+
 # Never work over the owner's own session. Since 2026-11-20 this runs in the container
 # `services`, while interactive sessions work on `claude`, so the local checkout says nothing
 # about them. GitHub does: an open pull request (Dependabot's aside) or a push in the last 15
@@ -64,7 +75,7 @@ if [ "$open_prs" -gt 0 ] || [ "$recent_pushes" -gt 0 ]; then
   exit 0
 fi
 # This clone is only the watcher's: bring it to the current main before looking at anything
-git -C "$REPO" fetch -q origin && git -C "$REPO" merge -q --ff-only origin/main || { log "could not fast-forward main"; exit 1; }
+git -C "$REPO" fetch -q origin || { sleep "${GH_RETRY_WAIT:-30}"; git -C "$REPO" fetch -q origin; } && git -C "$REPO" merge -q --ff-only origin/main || { log "could not fast-forward main"; exit 1; }
 
 since=$(cat "$STAMP" 2>/dev/null || date -u -d '-2 hours 15 minutes' +%FT%TZ)
 now=$(date -u +%FT%TZ)
