@@ -25,7 +25,7 @@ module.exports = function (T) {
     const per100 = count.map((c, i) => c / courses / ((bands[i][1] - bands[i][0]) / 100));
     const shown = per100.map((v, i) => bands[i].join('–') + ' m: ' + v.toFixed(2)).join(', ');
     ok(courses === 40 && draws > 0, 'forty courses were grown (' + courses + ')');
-    ok(per100[0] > 0.8, 'springs near the start stay as they were, about one per 100 m (' + shown + ')');
+    ok(per100[0] > 0.8, 'springs near the start: about one per 100 m, as before (' + shown + ')');
     ok(per100.every((v) => v >= per100[0] * 0.75), 'springs per 100 m never fall below three quarters of the start (' + shown + ')');
   }
   return { testHopSprings };
