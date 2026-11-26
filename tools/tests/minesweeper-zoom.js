@@ -95,7 +95,7 @@ module.exports = function (T) {
     const src = read('www/games/minesweeper/index.html');
     ok(/C\.ui\.pinch\(scroll,/.test(src), 'the board\'s frame listens for a pinch');
     ok(/E\.fit\(roomW\(\), roomH\(\), sp\.rows, sp\.cols, zoom\)/.test(src), 'the cells are sized with the zoom');
-    ok(/'aria-label': C\.t\('zoomIn'\)/.test(src) && /'aria-label': C\.t\('zoomOut'\)/.test(src), 'zoom in and zoom out buttons, named for screen readers');
+    ok(/tool\('plus', 'zoomIn',/.test(src) && /tool\('minus', 'zoomOut',/.test(src) && /el\('span', \{ text: C\.t\(labelKey\) \}\)/.test(src), 'zoom in and zoom out buttons, named for screen readers');
     ok(!/store\.set\([^)]*zoom/.test(src) && !/zoom:\s*zoom/.test(src), 'the zoom is not saved');
     for (const key of ['zoomIn', 'zoomOut', 'pinchZoom']) {
       const n = (src.match(new RegExp('\\b' + key + ": '[^']+'", 'g')) || []).length;
