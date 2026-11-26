@@ -53,12 +53,14 @@ module.exports = function (T) {
     ok(/void reapply\(\) \{[^}]*if \(immersive\) applyImmersive\(\);/.test(bars), 'a configuration change keeps fullscreen');
     ok(/public void onWindowFocusChanged\(boolean hasFocus\) \{\s*super\.onWindowFocusChanged\(hasFocus\);[\s\S]{0,200}if \(hasFocus && bars != null\) bars\.reapply\(\);/.test(main), 'coming back to the app hides the bars again');
   }
-  // #1129: with the bars hidden, the default cutout mode left a black strip beside the camera
+  // #1129: with the bars hidden, the default cutout mode left a black strip beside the camera.
+  // Since #1205 the page is drawn under the camera with the bars shown too, so SHORT_EDGES is
+  // set once for the whole activity (tools/tests/edge-to-edge.js checks the rest).
   function testFullscreenCutout() {
     head('Android app: fullscreen draws under the camera cutout (#1129)');
     const j = fs.readFileSync(path.join(ROOT, 'android/app/src/main/java/io/github/choganhq/chogan/BarsBridge.java'), 'utf8');
-    ok(/layoutInDisplayCutoutMode\s*=\s*immersive\s*\?\s*WindowManager\.LayoutParams\.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES/.test(j), 'immersive uses SHORT_EDGES');
-    ok(/LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT/.test(j), 'leaving fullscreen goes back to the default');
+    ok(/layoutInDisplayCutoutMode\s*=\s*WindowManager\.LayoutParams\.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;/.test(j), 'the window draws under the cutout (SHORT_EDGES)');
+    ok(!/LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT/.test(j), 'leaving fullscreen does not bring the default mode and its black strip back');
   }
   return { testAndroidFullscreen, testFullscreenCutout };
 };
