@@ -69,8 +69,9 @@ public class BarsBridge {
             window.setAttributes(window.getAttributes());
         }
         View decor = window.getDecorView();
-        float density = activity.getResources().getDisplayMetrics().density;
         ViewCompat.setOnApplyWindowInsetsListener(decor, (v, all) -> {
+            // read on every pass: a display-size change keeps the activity alive (configChanges)
+            float density = activity.getResources().getDisplayMetrics().density;
             int types = WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout();
             Insets bars = all.getInsets(types);
             boolean keyboard = all.isVisible(WindowInsetsCompat.Type.ime());
