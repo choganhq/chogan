@@ -50,5 +50,20 @@ module.exports = function (T) {
       ok(/var TUT = \[\s*\{ title: C\.t\('tutTitle0'\), text: C\.t\('tutText0'\)/.test(html), g + ': it is the first card shown');
     }
   }
-  return { testFirstMoveTutorialsRound5, testGoTutorialStart, testFirstMoveTutorials, testFirstMoveTutorialsRound3, testFirstMoveTutorialsRound4 };
+  // #1060 round 6: Dominoes, Pasur and Crazy Eights gave the matching rule first and never
+  // said what to tap. Crazy Eights swaps its eights card for the Iranian one by index, so an
+  // added first card must move that index too, or the new card is the one overwritten.
+  function testFirstMoveTutorialsRound6() {
+    head('Dominoes, Pasur, Crazy Eights tutorials start with the first move (#1060)');
+    for (const g of ['dominoes', 'pasur', 'crazyeights']) {
+      const html = fs.readFileSync(path.join(ROOT, 'www/games', g, 'index.html'), 'utf8');
+      ok((html.match(/tutTitle0: '(?:[^'\\]|\\.)+', tutText0: '(?:[^'\\]|\\.)+'/g) || []).length === CODES.length, g + ': the first card exists in every language');
+      ok(/var TUT = \[\s*\{ title: C\.t\('tutTitle0'\), text: C\.t\('tutText0'\)/.test(html), g + ': it is the first card shown');
+    }
+    const ce = fs.readFileSync(path.join(ROOT, 'www/games/crazyeights/index.html'), 'utf8');
+    const at = ce.match(/if \(iranNow\(\)\) t\[(\d+)\] =/);
+    const cards = (ce.match(/var TUT = \[([\s\S]*?)\n  \];/) || ['', ''])[1].match(/C\.t\('tutTitle\d'\)/g) || [];
+    ok(!!at && cards[Number(at[1])] === "C.t('tutTitle2')", 'crazyeights: the Iranian card replaces the eights card, not another');
+  }
+  return { testFirstMoveTutorialsRound6, testFirstMoveTutorialsRound5, testGoTutorialStart, testFirstMoveTutorials, testFirstMoveTutorialsRound3, testFirstMoveTutorialsRound4 };
 };
