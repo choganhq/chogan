@@ -130,13 +130,68 @@
     try { return lsOk ? global.localStorage.getItem(key) : (memFallback[key] || null); }
     catch (e) { return memFallback[key] || null; }
   }
+  // An import of a progress file (#1211) replaces every chogan.* key, but a tab or game
+  // page opened before it still holds the old state in memory, and its next stats.record,
+  // league point or pause autosave wrote that over the imported data (review of #1226).
+  // The import stamps RESTORE_MARK last; a page that sees the stamp change under it stops
+  // writing for good and reloads. RESTORE_UNDO is the journal of a running import: the
+  // keys from before, removed once every new key is written, so a page killed half way
+  // is put back at the next start instead of keeping half of each profile.
+  var RESTORE_MARK = NS + '.' + APP + '.restored';
+  var RESTORE_UNDO = NS + '.' + APP + '.restoreUndo';
+  // keys about this browser, not the player; never exported, never replaced by an import
+  var DEVICE_KEYS = [NS + '.' + APP + '.installNo', RESTORE_MARK, RESTORE_UNDO];
+  function deviceKey(k) { return DEVICE_KEYS.indexOf(k) >= 0; }
+  var frozen = false;
+
+  function restoreUndo() {
+    if (!lsOk) return 'none';
+    var ls = global.localStorage, raw, j = null;
+    try { raw = ls.getItem(RESTORE_UNDO); } catch (e) { return 'none'; }
+    if (raw === null) return 'none';
+    try { j = JSON.parse(raw); } catch (e) { j = null; }
+    try {
+      if (j && j.keys && typeof j.keys === 'object') {
+        var now = [];
+        for (var i = 0; i < ls.length; i++) now.push(ls.key(i));
+        for (var a = 0; a < now.length; a++) {
+          if (now[a] && now[a].indexOf(NS + '.') === 0 && !deviceKey(now[a])) ls.removeItem(now[a]);
+        }
+        for (var k in j.keys) {
+          if (k.indexOf(NS + '.') === 0 && !deviceKey(k) && typeof j.keys[k] === 'string') ls.setItem(k, j.keys[k]);
+        }
+      }
+      ls.removeItem(RESTORE_UNDO);
+      return j ? 'undone' : 'dropped';
+    } catch (e) { return 'failed'; /* the journal stays, so the next start tries again */ }
+  }
+  var restoreRecovery = restoreUndo();
+  var seenMark = (function () { try { return lsOk ? global.localStorage.getItem(RESTORE_MARK) : null; } catch (e) { return null; } })();
+  // true once another page imported a file after this one loaded; reading the stamp on
+  // every write covers the moment before the storage event arrives
+  function restoredElsewhere() {
+    if (frozen) return true;
+    if (!lsOk) return false;
+    var m;
+    try { m = global.localStorage.getItem(RESTORE_MARK); } catch (e) { return false; }
+    if (m !== seenMark) frozen = true;
+    return frozen;
+  }
+
   function rawSet(key, val) {
+    if (restoredElsewhere()) return;
     memFallback[key] = val;
     try { if (lsOk) global.localStorage.setItem(key, val); } catch (e) { /* پر یا خصوصی */ }
   }
   function rawDel(key) {
+    if (restoredElsewhere()) return;
     delete memFallback[key];
     try { if (lsOk) global.localStorage.removeItem(key); } catch (e) { /* بی‌خیال */ }
+  }
+  if (global.addEventListener) {
+    global.addEventListener('storage', function (e) {
+      if (e && e.key === RESTORE_MARK && restoredElsewhere()) global.location.reload();
+    });
   }
 
   // هر بازی فقط از راه این پوشش به ذخیره‌سازی دست می‌زند.
@@ -280,6 +335,51 @@
     league: appStore.get('league', null),
     counters: appStore.get('counters', {})
   };
+  // Every value here comes from storage, and since #1211 from a file anyone can craft:
+  // a league tier of "x" crashed the league page through TIERS[tier - 1], and a stats
+  // object without byGame crashed the menu (review of #1226). Wrong shapes fall back to
+  // the default here, once, instead of being guarded at every place that reads them.
+  function isObj(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }
+  function isNum(v) { return typeof v === 'number' && isFinite(v); }
+  function tidyState() {
+    if (!isObj(state.settings)) state.settings = Object.assign({}, DEFAULT_SETTINGS);
+    if (!Array.isArray(state.settings.pinned)) state.settings.pinned = [];
+    // LOCALES is defined below; an unknown two-letter code already falls back in localeOf
+    if (typeof state.settings.lang !== 'string' || !/^[a-z]{2}$/.test(state.settings.lang)) state.settings.lang = DEFAULT_SETTINGS.lang;
+    if (typeof state.settings.mascot !== 'string') delete state.settings.mascot;
+    // settings name entries of lookup tables (MASCOT, PALETTES, SPEEDS...); "toString"
+    // found Object.prototype's function there and the menu threw
+    for (var sk in state.settings) {
+      var sv = state.settings[sk];
+      if (typeof sv === 'string' && sv in Object.prototype) {
+        if (Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, sk)) state.settings[sk] = DEFAULT_SETTINGS[sk];
+        else delete state.settings[sk];
+      }
+    }
+    if (!isObj(state.profile)) state.profile = { name: '', country: '', uid: '' };
+    ['name', 'country', 'uid'].forEach(function (k) { if (typeof state.profile[k] !== 'string') state.profile[k] = ''; });
+    if (!isNum(state.coins)) state.coins = 0;
+    if (!Array.isArray(state.unlocks)) state.unlocks = [];
+    if (!isObj(state.achievements)) state.achievements = {};
+    if (!isObj(state.counters)) state.counters = {};
+    var st = state.stats;
+    if (!isObj(st)) st = state.stats = {};
+    if (!isNum(st.plays)) st.plays = 0;
+    if (!isNum(st.timeMs)) st.timeMs = 0;
+    if (!isObj(st.byGame)) st.byGame = {};
+    if (!isObj(st.daily)) st.daily = {};
+    if (st.days !== undefined && !isObj(st.days)) delete st.days;
+    if (!isObj(st.streak)) st.streak = { count: 0, best: 0, last: '' };
+    var lg = state.league;
+    if (lg !== null && !isObj(lg)) lg = state.league = null;
+    if (lg) {
+      if (!(lg.tier >= 1 && lg.tier <= 5 && lg.tier === Math.floor(lg.tier))) lg.tier = 1;
+      if (!isNum(lg.points)) lg.points = 0;
+      if (!Array.isArray(lg.history)) lg.history = [];
+      if (typeof lg.season !== 'string') lg.season = '';
+    }
+  }
+  tidyState();
   if (!state.profile.uid) { state.profile.uid = randomId(); appStore.set('profile', state.profile); }
   Chogan.state = state;
 
@@ -295,13 +395,15 @@
     state.stats = appStore.get('stats', state.stats);
     state.league = appStore.get('league', state.league);
     state.counters = appStore.get('counters', {});
+    tidyState();
   };
 
   // قبل از هر تغییر روی داده‌ی مشترک، دوباره از حافظه می‌خوانیم تا تب یا
   // صفحه‌ی دیگری که هم‌زمان باز است نوشته‌اش پاک نشود.
   function mutate(key, fn) {
     var fresh = appStore.get(key, null);
-    if (fresh !== null && typeof fresh === typeof state[key]) state[key] = fresh;
+    // an array where an object belongs (a crafted file, #1226) must not replace the clean value
+    if (fresh !== null && typeof fresh === typeof state[key] && Array.isArray(fresh) === Array.isArray(state[key])) state[key] = fresh;
     var out = fn(state[key]);
     if (out !== undefined) state[key] = out;
     appStore.set(key, state[key]);
@@ -3210,7 +3312,8 @@
       '<path d="M60 74v4M54 82c2 2.6 10 2.6 12 0" stroke="#22301F" stroke-width="3" fill="none" stroke-linecap="round"/></svg>'
   };
   Chogan.mascot = function (name, size) {
-    var m = MASCOT[name] || MASCOT.fox;
+    // own keys only: a saved name of "toString" found Object.prototype's function
+    var m = Object.prototype.hasOwnProperty.call(MASCOT, name) ? MASCOT[name] : MASCOT.fox;
     return m.split('{S}').join(size || 120);
   };
   Chogan.mascotNames = Object.keys(MASCOT);
@@ -4022,16 +4125,20 @@
   Chogan.onPause = function (fn) { pauseHooks.push(fn); };
   Chogan.onResume = function (fn) { resumeHooks.push(fn); };
 
-  function firePause() { for (var i = 0; i < pauseHooks.length; i++) { try { pauseHooks[i](); } catch (e) { /* یکی خراب بود بقیه بمانند */ } } }
+  // a page whose data was replaced by an import must not autosave its old game over it
+  function firePause() { if (restoredElsewhere()) return; for (var i = 0; i < pauseHooks.length; i++) { try { pauseHooks[i](); } catch (e) { /* یکی خراب بود بقیه بمانند */ } } }
   function fireResume() { for (var i = 0; i < resumeHooks.length; i++) { try { resumeHooks[i](); } catch (e) { /* همان */ } } }
 
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) { firePause(); audioApi.stopMusic(0.25); }
+    else if (restoredElsewhere()) global.location.reload();
     else { fireResume(); if (state.settings.music && audioReady && music.moodName) audioApi.music(music.moodName); }
   });
   global.addEventListener('pagehide', firePause);
   global.addEventListener('pageshow', function (e) {
     if (!e.persisted) return;
+    // back from the cache after an import elsewhere: its scripts hold the old profile
+    if (restoredElsewhere()) { global.location.reload(); return; }
     Chogan.reloadState();
     Chogan.keepAwake.refresh();
     if (Chogan.onRestore) Chogan.onRestore();
@@ -4710,8 +4817,8 @@
   var BACKUP_KEY_RE = /^chogan\.[A-Za-z0-9_-]{1,64}\.[!-~]{1,200}$/;
   // About this browser, not the player: whether the web install bar was dismissed here
   // (#557). A phone that never offered install should not inherit "dismissed".
-  var BACKUP_LOCAL = [NS + '.' + APP + '.installNo'];
-  function backupLocal(k) { return BACKUP_LOCAL.indexOf(k) >= 0; }
+  // The import's own stamp and journal are about this browser too (DEVICE_KEYS).
+  function backupLocal(k) { return deviceKey(k); }
 
   function backupBuild(io, now) {
     var keys = {}, list = io.keys().slice().sort();
@@ -4791,6 +4898,11 @@
       if (list[i] && list[i].indexOf(NS + '.') === 0) before[list[i]] = io.get(list[i]);
     }
     function ours(x) { return x.indexOf(NS + '.') === 0 && !backupLocal(x); }
+    var undo = {};
+    for (var u in before) if (ours(u)) undo[u] = before[u];
+    // without room for the journal nothing is touched; a kill after this is undone at start
+    try { io.set(RESTORE_UNDO, JSON.stringify({ at: Date.now(), keys: undo })); }
+    catch (e) { try { io.del(RESTORE_UNDO); } catch (e4) { /* it was never written */ } return { ok: false, error: 'storage' }; }
     try {
       for (var b in before) if (ours(b)) io.del(b);
       for (var m in mem) {
@@ -4801,9 +4913,13 @@
     } catch (e) {
       var now = io.keys();
       for (var j = 0; j < now.length; j++) if (now[j] && ours(now[j])) { try { io.del(now[j]); } catch (e2) { /* keep going */ } }
-      for (var p in before) { try { io.set(p, before[p]); } catch (e3) { /* it fitted before */ } }
+      for (var p in undo) { try { io.set(p, undo[p]); } catch (e3) { /* it fitted before */ } }
+      try { io.del(RESTORE_UNDO); } catch (e5) { /* the next start puts the same keys back */ }
       return { ok: false, error: 'storage' };
     }
+    io.del(RESTORE_UNDO);
+    // last, so other pages hear of it only once the new data is complete
+    try { io.set(RESTORE_MARK, Date.now() + '-' + randomId()); } catch (e6) { /* the import stands */ }
     return { ok: true, count: Object.keys(mem).length };
   }
 
@@ -4815,14 +4931,20 @@
   };
   Chogan.backup = {
     format: BACKUP_FORMAT, maxBytes: BACKUP_MAX,
-    build: function (now) { return backupBuild({ keys: lsKeys, get: rawGet }, now); },
+    // null without localStorage: the file would hold nothing, and a player would keep an
+    // empty "backup" thinking it was their progress
+    build: function (now) { return lsOk ? backupBuild({ keys: lsKeys, get: rawGet }, now) : null; },
     parse: backupParse,
     summary: backupSummary,
     // without localStorage nothing written now would survive the reload that follows
     restore: function (data, io) {
       if (!io && !lsOk) return { ok: false, error: 'storage' };
-      return backupRestore(data, io || strictIo);
+      var r = backupRestore(data, io || strictIo);
+      // this page's memory is the old profile too, until the reload the caller does next
+      if (r.ok && !io) frozen = true;
+      return r;
     },
+    recovery: restoreRecovery,
     fileName: function (d) { return 'chogan-progress-' + dateKey(d) + '.json'; }
   };
 

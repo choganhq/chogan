@@ -9,9 +9,11 @@ module.exports = function (T) {
 
   // a localStorage with a size limit like a browser's: keys plus values, in characters
   const used = (ls) => Object.keys(ls).reduce((n, k) => n + k.length + ls[k].length, 0);
+  // opts.tab: another boot() whose storage this one shares, like a second tab of the app
   function boot(pre, opts) {
-    const ls = Object.assign({}, pre);
     const o = opts || {};
+    if (o.tab) return start(o.tab.ls, o.tab.store, o);
+    const ls = Object.assign({}, pre);
     const store = {
       cap: Infinity,
       getItem: (k) => (Object.prototype.hasOwnProperty.call(ls, k) ? ls[k] : null),
@@ -23,13 +25,19 @@ module.exports = function (T) {
       removeItem: (k) => { delete ls[k]; }, key: (i) => Object.keys(ls)[i] || null,
       get length() { return Object.keys(ls).length; }
     };
+    if (o.broken) store.setItem = () => { throw new Error('SecurityError'); };
+    return start(ls, store, o);
+  }
+  function start(ls, store, o) {
+    const ev = {};
+    let reloads = 0;
     const el = () => new Proxy(function () {}, {
       get: (t, p) => (p === 'length' ? 0 : el()), apply: () => el(), set: () => true
     });
     const win = {
       localStorage: store, document: el(), navigator: { language: 'en', languages: ['en'] },
-      location: { search: '', hash: '', href: 'http://x/', pathname: '/' },
-      addEventListener() {}, removeEventListener() {},
+      location: { search: '', hash: '', href: 'http://x/', pathname: '/', reload: () => { reloads++; } },
+      addEventListener(t, f) { (ev[t] = ev[t] || []).push(f); }, removeEventListener() {},
       matchMedia: () => ({ matches: false, addEventListener() {}, addListener() {} }),
       setTimeout, clearTimeout, setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0,
       history: { replaceState() {}, pushState() {} }, getComputedStyle: () => ({ getPropertyValue: () => '' }),
@@ -38,7 +46,8 @@ module.exports = function (T) {
     win.window = win; win.self = win; win.globalThis = win;
     vm.createContext(win);
     vm.runInContext(fs.readFileSync(CORE, 'utf8'), win, { filename: 'chogan.js' });
-    return { C: win.Chogan, ls, store };
+    const fire = (t, e) => (ev[t] || []).forEach((f) => f(e || {}));
+    return { C: win.Chogan, ls, store, fire, reloads: () => reloads };
   }
   const snap = (ls) => JSON.stringify(Object.keys(ls).sort().map((k) => [k, ls[k]]));
 
@@ -193,9 +202,20 @@ module.exports = function (T) {
       ok(!res.ok && res.error === 'storage', room + ' free characters of ' + need + ' needed: restore reports the failure (' + JSON.stringify(res) + ')');
       ok(snap(d.ls) === before, room + ' free: every old key is back exactly and no new one is left');
     }
+    // the journal of the old keys (review of #1226, L1) needs room beside the new data
+    const tight = boot(pre);
+    const tightBefore = snap(tight.ls);
+    tight.store.cap = used(tight.ls) + need;
+    const tr = tight.C.backup.restore(tight.C.backup.parse(text).data);
+    ok(!tr.ok && tr.error === 'storage' && snap(tight.ls) === tightBefore,
+      'room for the data but not for the journal: refused, and nothing changed');
     const fits = boot(pre);
-    fits.store.cap = used(fits.ls) + need;
-    ok(fits.C.backup.restore(fits.C.backup.parse(text).data).ok, 'with just enough room the same file imports (the old data is removed first)');
+    const oldOurs = {};
+    for (const k of Object.keys(fits.ls)) if (k.indexOf('chogan.') === 0) oldOurs[k] = fits.ls[k];
+    const journal = 'chogan.app.restoreUndo'.length + JSON.stringify({ at: Date.now(), keys: oldOurs }).length;
+    fits.store.cap = used(fits.ls) + need + journal + 16;
+    ok(fits.C.backup.restore(fits.C.backup.parse(text).data).ok, 'with room for the data and the journal the same file imports (the old data is removed first)');
+    ok(!('chogan.app.restoreUndo' in fits.ls), 'a finished import leaves no journal behind');
     // a write that "succeeds" but reads back different is a failure too
     const d = boot({ 'chogan.app.coins': '3' });
     const before = snap(d.ls);
@@ -217,7 +237,7 @@ module.exports = function (T) {
     ok(/C\.backup\.parse\(/.test(ui) && /C\.backup\.restore\(/.test(ui) && /C\.ui\.confirm\(/.test(ui), 'import parses, asks first, then restores');
     ok(/f\.size > C\.backup\.maxBytes/.test(ui), 'the file size is checked before it is read');
     ok(/window\.ChoganFiles/.test(ui) && /download: name/.test(ui), 'export uses the Android bridge in the app and a download on the web');
-    const keys = ['backupTitle', 'backupHint', 'exportLabel', 'exportBtn', 'importLabel', 'importBtn', 'exportTitle', 'exportShare', 'exportSave', 'exportSaved', 'exportDownloaded', 'importAsk', 'importBody', 'importOk', 'importDone', 'importBad', 'importNewer', 'importFail'];
+    const keys = ['backupTitle', 'backupHint', 'exportLabel', 'exportBtn', 'importLabel', 'importBtn', 'exportTitle', 'exportShare', 'exportSave', 'exportSaved', 'exportDownloaded', 'importAsk', 'importBody', 'importOk', 'importDone', 'importBad', 'importNewer', 'importFail', 'exportFail'];
     const used = [...ui.matchAll(/C\.t\('([A-Za-z]+)'/g)].map((m) => m[1]).concat([...ui.matchAll(/say\('([A-Za-z]+)'\)/g)].map((m) => m[1]));
     ok(used.length > 10 && used.every((k) => keys.indexOf(k) >= 0 || k === 'done'), 'every string the card uses is one of its own keys (' + [...new Set(used)].join(', ') + ')');
     ok(LOCALE_CODES.length >= 11, 'there are ' + LOCALE_CODES.length + ' languages');
@@ -246,5 +266,150 @@ module.exports = function (T) {
     ok((paths.match(/<[a-z-]+-path /g) || []).length === 1 && /cache-path name="share" path="share\/"/.test(paths), 'the FileProvider still exposes only cache/share/');
   }
 
-  return { testExportImportRoundTrip, testExportImportOldFile, testExportImportHostile, testExportImportRollback, testExportImportUi };
+  // a played old phone and its file, and a new phone with its own progress
+  function fileAndPhone() {
+    const src = boot({});
+    src.C.coins.add(777);
+    src.C.storage('sudoku').set('session', { inProgress: true, puzzle: 'OLD-PHONE' });
+    for (let i = 0; i < 3; i++) src.C.stats.record({ gameId: 'minesweeper', won: true, timeMs: 1000, points: 10 });
+    for (let i = 0; i < 6; i++) src.C.storage('g' + i).set('best', i);
+    const text = src.C.backup.build();
+    const pre = { 'chogan.app.coins': '5', 'chogan.tetris.best': '1800', 'chogan.sudoku.session': '{"puzzle":"NEW-PHONE"}' };
+    return { text, pre };
+  }
+
+  function testExportImportOtherPages() {
+    head('Export and import: pages opened before an import do not write over it (review of #1226, M1)');
+    const { text, pre } = fileAndPhone();
+    const menu = boot(pre);
+    const game = boot(null, { tab: menu });
+    const cached = boot(null, { tab: menu });
+    if (!menu.C.backup) { ok(false, 'Chogan.backup exists'); return; }
+    // the game page autosaves its in-memory game whenever it is hidden or left
+    game.C.onPause(() => game.C.storage('sudoku').set('session', { puzzle: 'STALE-TAB' }));
+    const res = menu.C.backup.restore(menu.C.backup.parse(text).data);
+    ok(res.ok, 'the import succeeds (' + JSON.stringify(res) + ')');
+    const after = snap(menu.ls);
+    ok(!!menu.ls['chogan.app.restored'], 'the import stamps chogan.app.restored last');
+    // before the storage event reaches the game page, it finishes a round and is hidden
+    let threw = null;
+    try {
+      game.C.stats.record({ gameId: 'sudoku', won: true, timeMs: 1000, points: 5 });
+      game.C.coins.add(50);
+      game.C.store.set('settings', { sfx: false });
+      game.fire('pagehide');
+    } catch (e) { threw = e; }
+    ok(!threw, 'the old page keeps running without errors' + (threw ? ': ' + threw.message : ''));
+    ok(snap(menu.ls) === after, 'stats, league, coins, settings and the pause autosave of the old page wrote nothing');
+    ok(JSON.parse(menu.ls['chogan.app.coins']) === 777 && /OLD-PHONE/.test(menu.ls['chogan.sudoku.session']),
+      'the imported coins (777) and the imported Sudoku game are still there');
+    game.fire('storage', { key: 'chogan.app.restored', newValue: menu.ls['chogan.app.restored'] });
+    ok(game.reloads() === 1, 'the storage event for the stamp reloads the old page');
+    game.fire('storage', { key: 'chogan.app.coins', newValue: '1' });
+    ok(game.reloads() === 1, 'other storage events do not reload');
+    // a page kept in the back/forward cache, never told by a storage event
+    cached.fire('pageshow', { persisted: true });
+    ok(cached.reloads() === 1 && snap(menu.ls) === after, 'a page restored from the bfcache after the import reloads and writes nothing');
+    // the importing page itself holds the old profile until its own reload
+    menu.C.coins.add(9);
+    menu.fire('pagehide');
+    ok(snap(menu.ls) === after, 'the importing page writes nothing more before its reload');
+    // a page opened after the import is a normal page
+    const fresh = boot(null, { tab: menu });
+    fresh.C.coins.add(1);
+    ok(JSON.parse(menu.ls['chogan.app.coins']) === 778 && fresh.C.state.coins === 778, 'a page loaded after the import reads it and saves normally (777 + 1)');
+    fresh.fire('pageshow', { persisted: true });
+    ok(fresh.reloads() === 0, 'and is not reloaded for an import it already saw');
+    // a refused import tells nobody
+    const p2 = boot(pre), g2 = boot(null, { tab: p2 });
+    p2.store.cap = used(p2.ls) + 10;
+    const bad = p2.C.backup.restore(p2.C.backup.parse(text).data);
+    p2.store.cap = Infinity;
+    g2.C.coins.add(1);
+    ok(!bad.ok && !('chogan.app.restored' in p2.ls) && p2.ls['chogan.app.coins'] === '6', 'a failed import stamps nothing and other pages keep saving (5 + 1)');
+  }
+
+  function testExportImportJournal() {
+    head('Export and import: an import killed half way is undone at the next start (review of #1226, L1)');
+    const { text, pre } = fileAndPhone();
+    const d = boot(pre);
+    if (!d.C.backup) { ok(false, 'Chogan.backup exists'); return; }
+    const before = snap(d.ls);
+    // the phone kills the app after the third key of the file is written
+    let writes = 0, atKill = null;
+    const set = d.store.setItem;
+    d.store.setItem = (k, v) => {
+      set(k, v);
+      if (k.indexOf('chogan.g') === 0 && ++writes === 3) { atKill = Object.assign({}, d.ls); throw new Error('killed'); }
+    };
+    d.C.backup.restore(d.C.backup.parse(text).data);
+    ok(!!atKill, 'the kill happened half way through the import');
+    if (!atKill) return;
+    ok(Object.keys(atKill).some((k) => /^chogan\.g\d\./.test(k)) && atKill['chogan.tetris.best'] === undefined,
+      'at the kill the storage holds part of the file and none of the old keys');
+    ok('chogan.app.restoreUndo' in atKill, 'and a journal of the old keys');
+    const next = boot(atKill);
+    ok(next.C.backup && next.C.backup.recovery === 'undone', 'the next start reports the import undone (' + (next.C.backup && next.C.backup.recovery) + ')');
+    ok(snap(next.ls) === before, 'every old key is back exactly, nothing of the file and no journal is left');
+    ok(next.C.state.coins === 5, 'the state read at start is the old one (5 coins), not a mix');
+    // a damaged journal is dropped without touching the progress
+    const dmg = Object.assign({}, pre, { 'chogan.app.restoreUndo': '{nope' });
+    const dd = boot(dmg);
+    ok(!('chogan.app.restoreUndo' in dd.ls) && dd.ls['chogan.tetris.best'] === '1800' && dd.C.backup.recovery === 'dropped',
+      'a journal that is not JSON is removed and the progress is left as it is');
+    const clean = boot(pre);
+    ok(clean.C.backup.recovery === 'none', 'a normal start has nothing to undo');
+  }
+
+  function testExportImportCraftedState() {
+    head('Export and import: crafted values cannot break the app (review of #1226, L2)');
+    const evil = {
+      'chogan.app.settings': JSON.stringify({ mascot: 'toString', cardSpeed: 'constructor', palette: '__proto__', lang: 'toString', pinned: 'chess', theme: 'hasOwnProperty' }),
+      'chogan.app.league': JSON.stringify({ season: 5, tier: 'x', points: 'lots', history: 3 }),
+      'chogan.app.stats': '"plays"',
+      'chogan.app.coins': '"many"', 'chogan.app.unlocks': '{}', 'chogan.app.achievements': '[1]',
+      'chogan.app.profile': JSON.stringify({ name: { a: 1 }, uid: 7 })
+    };
+    let d = null, threw = null;
+    try { d = boot(evil); } catch (e) { threw = e; }
+    ok(!threw && d && d.C, 'the core starts on crafted state' + (threw ? ': ' + threw.message : ''));
+    if (!d || !d.C) return;
+    const C = d.C, s = C.state.settings;
+    const run = (name, fn) => { let e = null, out; try { out = fn(); } catch (x) { e = x; } ok(!e, name + (e ? ': ' + e.message : '')); return out; };
+    const m = run('the menu mascot draws for a saved "toString"', () => C.mascot(s.mascot, 40));
+    ok(typeof m === 'string' && m.indexOf('<svg') === 0, 'and falls back to the default one');
+    ok(s.cardSpeed === 'normal' && s.palette === undefined && s.theme === 'auto' && s.lang !== 'toString' && Array.isArray(s.pinned),
+      'settings naming Object.prototype members fall back to the defaults');
+    const t = run('the league tier reads for a tier of "x"', () => C.league.tier());
+    ok(t && typeof t.color === 'string', 'and is a real tier');
+    run('the league table builds', () => C.league.table ? C.league.table() : C.league.state());
+    run('a round is recorded on a stats value that was a string', () => C.stats.record({ gameId: 'sudoku', won: true, timeMs: 5, points: 3 }));
+    run('coins add up from a coins value that was a string', () => C.coins.add(2));
+    ok(C.state.coins === 2 && C.state.stats.plays === 1 && Array.isArray(C.state.unlocks) && !Array.isArray(C.state.achievements),
+      'the wrong shapes became defaults (coins 2, plays 1)');
+    ok(typeof C.state.profile.name === 'string' && typeof C.state.profile.uid === 'string', 'profile fields are strings');
+    // reloadState (bfcache, and the import itself) applies the same cleaning
+    d.ls['chogan.app.league'] = JSON.stringify({ tier: 99 });
+    C.reloadState();
+    ok(C.state.league.tier === 1, 'reloadState cleans a tier of 99 too');
+  }
+
+  function testExportImportExportFail() {
+    head('Export and import: export without storage, and its own error (review of #1226, L3, L4)');
+    const d = boot({}, { broken: true });
+    ok(d.C.backup && d.C.backup.build() === null, 'without usable localStorage build() returns null, not an empty file');
+    const html = fs.readFileSync(path.join(ROOT, 'www/index.html'), 'utf8');
+    const a = html.indexOf('function backupCard()'), b = html.indexOf('function unlockShop()', a);
+    const ui = a > 0 && b > a ? html.slice(a, b) : '';
+    const exp = ui.slice(ui.indexOf('function doExport'), ui.indexOf('function doImport'));
+    ok(exp.length > 100 && /if \(!text\) \{ say\('exportFail'\); return; \}/.test(exp), 'the card shows exportFail when there is no file');
+    ok(!/importFail|importBad/.test(exp) && (exp.match(/say\('exportFail'\)/g) || []).length === 3, 'every export failure says exportFail, never an import message');
+    // "1 awards": no language puts a plural noun after a number it cannot decline
+    const en = html.slice(html.indexOf('\n    en: {'), html.indexOf('\n    },', html.indexOf('\n    en: {')));
+    const body = (en.match(/importBody: '([^']+)'/) || [])[1] || '';
+    ok(body && !/\{coins\} coins|\{awards\} awards/.test(body), 'English importBody puts the numbers after labels (' + body.slice(0, 50) + ')');
+  }
+
+  return { testExportImportRoundTrip, testExportImportOldFile, testExportImportHostile, testExportImportRollback, testExportImportUi,
+    testExportImportOtherPages, testExportImportJournal, testExportImportCraftedState, testExportImportExportFail };
 };
