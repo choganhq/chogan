@@ -67,7 +67,7 @@ The tests extract each game engine from the published HTML file itself, between 
 
 ### Adding a game
 
-See [NEW_GAME.md](NEW_GAME.md). In short: one folder under `www/games/`, one entry in `games.json`, bump the version.
+See [NEW_GAME.md](NEW_GAME.md). In short: one folder under `www/games/`, one entry in `games.json`. The version is bumped at release time.
 
 ### Both sources ship the same signed APK
 
@@ -162,7 +162,7 @@ tools/browser-check.sh    # منو و همه‌ی بازی‌ها در کروم 
 
 ### بازی جدید
 
-[NEW_GAME.md](NEW_GAME.md) را ببین. خلاصه‌اش: یک پوشه زیر `www/games/`، یک ورودی در `games.json`، بالا بردن نسخه.
+[NEW_GAME.md](NEW_GAME.md) را ببین. خلاصه‌اش: یک پوشه زیر `www/games/`، یک ورودی در `games.json`. نسخه موقع انتشار زده می‌شود.
 
 ### انتشار
 
