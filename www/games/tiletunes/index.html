@@ -1,0 +1,735 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>کاشی‌نوا — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  .tt-wrap > .ch-fit { --fit-ar: 0.62; }
+  .ch-fit > .tt-box { width: 100%; height: 100%; position: relative; }
+  /* a canvas is a replaced element: without its own width and height it keeps the
+     backing-store size times the pixel ratio (#919) */
+  .tt-box canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; border-radius: var(--r-md);
+    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+  .tt-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2) var(--s-3); flex-wrap: wrap;
+    font-weight: 700; color: var(--c-text-dim); font-variant-numeric: tabular-nums; min-height: 36px; }
+  .tt-top > span { white-space: nowrap; }
+  .tt-song { text-align: center; font-weight: 800; color: var(--c-text); font-size: 1.05rem; min-height: 1.5em; }
+  .tt-slips { display: inline-flex; gap: 5px; align-items: center; }
+  .tt-slip { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--c-line); box-sizing: border-box; }
+  .tt-slip.tt-gone { background: var(--c-line); }
+  .tt-bar { height: 6px; border-radius: 3px; background: var(--c-line); overflow: hidden; }
+  .tt-bar > i { display: block; height: 100%; width: 0; background: var(--game, var(--c-accent)); border-radius: 3px; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tt-bar > i { background: var(--game-text-dark, var(--game)); } }
+  :root[data-theme="dark"] .tt-bar > i { background: var(--game-text-dark, var(--game)); }
+  /* the prompt line keeps its room, so the board never moves under a finger */
+  .tt-msg { min-height: 1.6em; text-align: center; font-weight: 700; color: var(--c-text-dim); }
+  @container game (min-aspect-ratio: 5 / 4) {
+    .tt-wrap.ch-split { --side-w: clamp(220px, 34cqw, 420px); }
+    .tt-wrap > .ch-fit { --fit-ar: 0.8; }
+    .tt-wrap.ch-split > .ch-side { justify-content: safe center; gap: var(--s-2); }
+  }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function TileTunesEngineFactory() {
+  'use strict';
+
+  var LANES = 4;
+  var VIEW = 4;        // beats of music visible above the line
+  var LATE = 0.6;      // beats a tile may sink below the line before it counts as a slip
+  var LIVES = 3;       // slips that lose the song
+  var LEAD = 1.5;      // beats between the line and the next tile when the tune waits
+  var SPEEDS = { slow: 0.75, normal: 1, fast: 1.3 };
+  var SPEED_IDS = ['slow', 'normal', 'fast'];
+
+  // Every tune is out of copyright and written out here note by note; the page plays
+  // them with the core's piano voice, so the game carries no audio file. A token is a
+  // note name with its octave (F#4, Bb3) and an optional length in beats after a colon.
+  var SONGS = [
+    { id: 'twinkle', bpm: 100,
+      t: { fa: 'چشمک بزن ستاره', en: 'Twinkle, Little Star', pl: 'Mrugaj, gwiazdko', fr: 'Ah ! vous dirai-je, maman', ar: 'تلألئي يا نجمة', hi: 'टिमटिम तारा', ru: 'Мерцай, звёздочка', pt: 'Brilha, brilha, estrelinha', zh: '小星星', de: 'Funkel, funkel, kleiner Stern', es: 'Estrellita' },
+      n: 'C4 C4 G4 G4 A4 A4 G4:2 F4 F4 E4 E4 D4 D4 C4:2 G4 G4 F4 F4 E4 E4 D4:2 G4 G4 F4 F4 E4 E4 D4:2 C4 C4 G4 G4 A4 A4 G4:2 F4 F4 E4 E4 D4 D4 C4:2' },
+    { id: 'ode', bpm: 112,
+      t: { fa: 'سرود شادی', en: 'Ode to Joy', pl: 'Oda do radości', fr: 'Hymne à la joie', ar: 'نشيد الفرح', hi: 'आनंद गीत', ru: 'Ода к радости', pt: 'Hino à Alegria', zh: '欢乐颂', de: 'Ode an die Freude', es: 'Himno de la alegría' },
+      n: 'E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 E4:1.5 D4:0.5 D4:2 E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 D4:1.5 C4:0.5 C4:2 ' +
+        'D4 D4 E4 C4 D4 E4:0.5 F4:0.5 E4 C4 D4 E4:0.5 F4:0.5 E4 D4 C4 D4 G3:2 E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 D4:1.5 C4:0.5 C4:2' },
+    { id: 'lullaby', bpm: 104,
+      t: { fa: 'لالایی برامس', en: 'Brahms’ Lullaby', pl: 'Kołysanka Brahmsa', fr: 'Berceuse de Brahms', ar: 'تهويدة برامز', hi: 'ब्राम्स की लोरी', ru: 'Колыбельная Брамса', pt: 'Canção de ninar de Brahms', zh: '勃拉姆斯摇篮曲', de: 'Guten Abend, gut’ Nacht', es: 'Canción de cuna de Brahms' },
+      n: 'E4:0.5 E4:0.5 G4:2 E4:0.5 E4:0.5 G4:2 E4:0.5 G4:0.5 C5 B4:1.5 A4:0.5 A4 G4 D4:0.5 E4:0.5 F4 D4 D4:0.5 E4:0.5 F4:2 ' +
+        'D4:0.5 F4:0.5 B4:0.5 A4:0.5 G4 B4 C5:2 C4:0.5 C4:0.5 C5:2 A4:0.5 F4:0.5 G4:2 E4:0.5 C4:0.5 F4 G4 A4 G4:2 ' +
+        'C4:0.5 C4:0.5 C5:2 A4:0.5 F4:0.5 G4:2 E4:0.5 C4:0.5 F4 E4:0.5 D4:0.5 C4:2' },
+    { id: 'minuet', bpm: 132,
+      t: { fa: 'مینوئت در سل', en: 'Minuet in G', pl: 'Menuet G-dur', fr: 'Menuet en sol', ar: 'مينويت في صول', hi: 'मिनुएट इन जी', ru: 'Менуэт соль мажор', pt: 'Minueto em Sol', zh: 'G大调小步舞曲', de: 'Menuett in G', es: 'Minueto en sol' },
+      n: 'D5 G4:0.5 A4:0.5 B4:0.5 C5:0.5 D5 G4 G4 E5 C5:0.5 D5:0.5 E5:0.5 F#5:0.5 G5 G4 G4 C5 D5:0.5 C5:0.5 B4:0.5 A4:0.5 B4 C5:0.5 B4:0.5 A4:0.5 G4:0.5 F#4 G4:0.5 A4:0.5 B4:0.5 G4:0.5 A4:3 ' +
+        'D5 G4:0.5 A4:0.5 B4:0.5 C5:0.5 D5 G4 G4 E5 C5:0.5 D5:0.5 E5:0.5 F#5:0.5 G5 G4 G4 C5 D5:0.5 C5:0.5 B4:0.5 A4:0.5 B4 C5:0.5 B4:0.5 A4:0.5 G4:0.5 A4 B4:0.5 A4:0.5 G4:0.5 F#4:0.5 G4:3' },
+    { id: 'greensleeves', bpm: 150,
+      t: { fa: 'آستین‌سبز', en: 'Greensleeves', pl: 'Greensleeves', fr: 'Greensleeves', ar: 'الأكمام الخضراء', hi: 'ग्रीनस्लीव्स', ru: 'Зелёные рукава', pt: 'Greensleeves', zh: '绿袖子', de: 'Greensleeves', es: 'Greensleeves' },
+      n: 'A4 C5:2 D5 E5:1.5 F5:0.5 E5 D5:2 B4 G4:1.5 A4:0.5 B4 C5:2 A4 A4:1.5 G#4:0.5 A4 B4:2 G#4 E4:2 ' +
+        'A4 C5:2 D5 E5:1.5 F5:0.5 E5 D5:2 B4 G4:1.5 A4:0.5 B4 C5:1.5 B4:0.5 A4 G#4:1.5 F#4:0.5 G#4 A4:3' },
+    { id: 'elise', bpm: 160,
+      t: { fa: 'برای الیزه', en: 'Für Elise', pl: 'Dla Elizy', fr: 'La Lettre à Élise', ar: 'من أجل إليز', hi: 'फ़्यूर एलीज़े', ru: 'К Элизе', pt: 'Para Elisa', zh: '致爱丽丝', de: 'Für Elise', es: 'Para Elisa' },
+      n: 'E5 D#5 E5 D#5 E5 B4 D5 C5 A4:2 C4 E4 A4 B4:2 E4 G#4 B4 C5:2 E4 E5 D#5 E5 D#5 E5 B4 D5 C5 A4:2 C4 E4 A4 B4:2 E4 C5 B4 A4:3' },
+    { id: 'morning', bpm: 150,
+      t: { fa: 'حال‌وهوای صبح', en: 'Morning Mood', pl: 'Poranek', fr: 'Le Matin', ar: 'مزاج الصباح', hi: 'सुबह का मिज़ाज', ru: 'Утро', pt: 'A Manhã', zh: '晨景', de: 'Morgenstimmung', es: 'La mañana' },
+      n: 'G5 E5 D5 C5 D5 E5 G5 E5 D5 C5 D5:0.5 E5:0.5 D5:0.5 E5:0.5 G5 E5 G5 A5 E5 A5 G5 E5 D5 C5:3 ' +
+        'G5 E5 D5 C5 D5 E5 G5 E5 D5 C5 D5:0.5 E5:0.5 D5:0.5 E5:0.5 G5 E5 G5 A5 E5 A5 B5 G#5 F#5 E5:3' },
+    { id: 'cancan', bpm: 200,
+      t: { fa: 'کن‌کن', en: 'Can-can', pl: 'Kankan', fr: 'Galop infernal', ar: 'الكانكان', hi: 'कैन-कैन', ru: 'Канкан', pt: 'Can-can', zh: '康康舞曲', de: 'Cancan', es: 'Cancán' },
+      n: 'C4:2 D4 F4 E4 D4 G4:2 G4:2 G4 A4 E4 F4 D4:2 D4:2 D4 F4 E4 D4 C4 C5 B4 A4 G4 F4 E4 D4 ' +
+        'C4:2 D4 F4 E4 D4 G4:2 G4:2 G4 A4 E4 F4 D4:2 D4:2 D4 F4 E4 D4 C4 G4 D4 E4 C4:2' },
+    { id: 'mountain', bpm: 190,
+      t: { fa: 'در تالار پادشاه کوهستان', en: 'In the Hall of the Mountain King', pl: 'W grocie Króla Gór', fr: 'Dans l’antre du roi de la montagne', ar: 'في قاعة ملك الجبل', hi: 'पहाड़ के राजा के महल में', ru: 'В пещере горного короля', pt: 'Na Gruta do Rei da Montanha', zh: '山大王的宫殿', de: 'In der Halle des Bergkönigs', es: 'En la gruta del rey de la montaña' },
+      n: 'A3 B3 C4 D4 E4 C4 E4:2 D#4 B3 D#4:2 D4 Bb3 D4:2 A3 B3 C4 D4 E4 C4 E4 A4 G4 E4 C4 E4 G4:4 ' +
+        'E4 F#4 G#4 A4 B4 G#4 B4:2 C5 G#4 C5:2 B4 G#4 B4:2 E4 F#4 G#4 A4 B4 G#4 B4 E5 D5 B4 G#4 B4 D5:4' }
+  ];
+  var BY_ID = {};
+  SONGS.forEach(function (s) { BY_ID[s.id] = s; });
+
+  var STEP = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+  function parse(str) {
+    return String(str).trim().split(/\s+/).map(function (tok) {
+      var m = /^([A-G])([#b]?)(\d)(?::(\d+(?:\.\d+)?))?$/.exec(tok);
+      if (!m) throw new Error('bad note ' + tok);
+      var midi = (+m[3] + 1) * 12 + STEP[m[1]] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0);
+      return { m: midi, d: m[4] ? +m[4] : 1 };
+    });
+  }
+  function freq(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+
+  // The lane follows the tune: a higher note moves right, a lower one left, a leap of
+  // a fourth or more moves two, and a repeated note stays put. The edges turn back, so
+  // a long climb zigzags instead of piling up in the last lane.
+  function lanes(notes) {
+    var out = [], lane = 1;
+    notes.forEach(function (n, i) {
+      if (i) {
+        var d = n.m - notes[i - 1].m, step = Math.abs(d) >= 5 ? 2 : 1;
+        if (d > 0) lane = lane + step <= LANES - 1 ? lane + step : Math.max(0, lane - 1);
+        else if (d < 0) lane = lane - step >= 0 ? lane - step : Math.min(LANES - 1, lane + 1);
+      }
+      out.push(lane);
+    });
+    return out;
+  }
+  var charts = {};
+  function chart(id) {
+    if (charts[id]) return charts[id];
+    var s = BY_ID[id];
+    if (!s) return null;
+    var notes = parse(s.n), ln = lanes(notes), b = 0;
+    var c = notes.map(function (n, i) { var o = { m: n.m, b: b, d: n.d, lane: ln[i] }; b += n.d; return o; });
+    charts[id] = { notes: c, beats: b, bpm: s.bpm };
+    return charts[id];
+  }
+  function bps(S) { return chart(S.song).bpm / 60 * SPEEDS[S.speed]; }
+  function seconds(id, speed) { var c = chart(id); return c.beats / (c.bpm / 60 * SPEEDS[speed || 'normal']); }
+
+  function newGame(o) {
+    o = o || {};
+    var song = BY_ID[o.song] ? o.song : SONGS[0].id;
+    var speed = SPEEDS[o.speed] ? o.speed : 'normal';
+    // the first tile waits above the line; tapping it starts the tune
+    return { song: song, speed: speed, pos: -LEAD, i: 0, miss: 0, wait: true, over: null, t: 0 };
+  }
+  function next(S) { return chart(S.song).notes[S.i] || null; }
+  function visible(S, n) { return !!n && n.b < S.pos + VIEW; }
+
+  // A tap in the next tile's lane plays it, however early, as long as it is on screen.
+  // Any other tap while the tune runs is a slip; while the tune waits it is ignored, so
+  // a stray finger after a slip costs nothing more.
+  function tap(S, lane) {
+    if (!S || S.over) return { type: 'none' };
+    var n = next(S);
+    if (!n) return { type: 'none' };
+    if (lane === n.lane && visible(S, n)) {
+      S.i++;
+      S.wait = false;
+      if (S.i >= chart(S.song).notes.length) S.over = 'won';
+      return { type: 'hit', note: n, won: S.over === 'won' };
+    }
+    if (S.wait) return { type: 'none' };
+    S.miss++;
+    if (S.miss >= LIVES) S.over = 'lost';
+    return { type: 'wrong', lane: lane, lost: S.over === 'lost' };
+  }
+  // The music moves on in beats. A tile that sinks LATE beats under the line is a slip:
+  // the board winds back so it sits above the line again and waits for a tap.
+  function tick(S, sec) {
+    if (!S || S.over || S.wait || !(sec > 0)) return null;
+    S.t += sec;
+    S.pos += sec * bps(S);
+    var n = next(S);
+    if (n && S.pos > n.b + LATE) {
+      S.miss++;
+      S.pos = n.b - LEAD;
+      S.wait = true;
+      if (S.miss >= LIVES) S.over = 'lost';
+      return { type: 'late', note: n, lost: S.over === 'lost' };
+    }
+    return null;
+  }
+  // a paused tune waits for a tap too, so coming back never costs a slip
+  function pause(S) {
+    if (!S || S.over || S.wait) return;
+    var n = next(S);
+    S.wait = true;
+    if (n) S.pos = Math.min(S.pos, n.b - LEAD);
+  }
+  function result(S) {
+    var total = chart(S.song).notes.length, won = S.over === 'won';
+    return { won: won, stars: won ? Math.max(1, LIVES - S.miss) : 0, hits: S.i, total: total, miss: S.miss };
+  }
+  function valid(S) {
+    if (!S || typeof S !== 'object' || !BY_ID[S.song] || !SPEEDS[S.speed]) return false;
+    var len = chart(S.song).notes.length;
+    if (!(S.i === (S.i | 0) && S.i >= 0 && S.i <= len)) return false;
+    if (!(S.miss === (S.miss | 0) && S.miss >= 0 && S.miss <= LIVES)) return false;
+    if (!isFinite(S.pos) || !isFinite(S.t) || S.t < 0 || typeof S.wait !== 'boolean') return false;
+    if (S.over !== null && S.over !== 'won' && S.over !== 'lost') return false;
+    if (S.over === 'won' && S.i !== len) return false;
+    return true;
+  }
+  function title(id, lang) { var s = BY_ID[id]; return s ? (s.t[lang] || s.t.en) : ''; }
+
+  var api = { LANES: LANES, VIEW: VIEW, LATE: LATE, LIVES: LIVES, LEAD: LEAD, SPEEDS: SPEEDS, SPEED_IDS: SPEED_IDS, SONGS: SONGS,
+    parse: parse, freq: freq, lanes: lanes, chart: chart, bps: bps, seconds: seconds, newGame: newGame, next: next, visible: visible,
+    tap: tap, tick: tick, pause: pause, result: result, valid: valid, title: title };
+  if (typeof self !== 'undefined') self.TileTunesEngine = api;
+  return api;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = TileTunesEngineFactory();
+  var ACCENT = '#5C0092';
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'tiletunes',
+    name: { fa: 'کاشی‌نوا', en: 'Tile Tunes', pl: 'Kafelkowe melodie', fr: 'Tuiles en musique', ar: 'بلاط النغم', hi: 'धुन की टाइलें', ru: 'Музыкальные плитки', pt: 'Blocos Musicais', zh: '音乐方块', de: 'Melodiekacheln', es: 'Baldosas musicales' },
+    accent: ACCENT,
+    strings: {
+      fa: {
+        ttStart: 'شروع', ttGo: 'روی کاشی بزن تا ادامه بدهی', ttFirst: 'برای شروع روی کاشی پایین بزن', ttSongs: 'آهنگ‌ها', ttSpeed: 'سرعت',
+        ttSlips: 'لغزش', ttNotes: 'نت‌ها', ttWon: 'آهنگ تمام شد', ttLost: 'سه لغزش', ttNext: 'آهنگ بعدی', ttRetry: 'دوباره همین آهنگ',
+        ttNew: 'آهنگ را عوض کنیم؟', ttLanes: 'ستون‌ها', ttWrong: 'ستون خالی', ttLate: 'کاشی رد شد', ttAllNote: 'همه‌ی آهنگ‌ها را تمام کردی',
+        ttDaily: 'آهنگ روز', ttBoard: 'صفحه‌ی کاشی‌ها',
+        rules: 'کاشی‌ها را به ترتیب از پایین بزن تا آهنگ نواخته شود. ستون خالی یا کاشیِ ردشده یک لغزش است؛ با سه لغزش آهنگ را می‌بازی. هر چه لغزش کمتر، ستاره بیشتر. همه‌ی آهنگ‌ها قدیمی و آزادند و خود بازی آن‌ها را می‌نوازد.',
+        tutTitle1: 'روی کاشی‌ها بزن', tutText1: 'کاشی‌های رنگی پایین می‌آیند. روی پایین‌ترین کاشی بزن، پیش از آنکه از خط پایین رد شود.',
+        tutTitle2: 'هر کاشی یک نت', tutText2: 'هر ضربه نت بعدی آهنگ را می‌نوازد. کاشی بلند یعنی نت کشیده. آهنگ که تمام شود، کار تمام است.',
+        tutTitle3: 'سه لغزش', tutText3: 'زدن ستون خالی یا جا انداختن یک کاشی یک لغزش است. بعد از لغزش، آهنگ صبر می‌کند تا دوباره بزنی. با سه لغزش، آهنگ از نو شروع می‌شود.'
+      },
+      en: {
+        ttStart: 'Start', ttGo: 'Tap the tile to go on', ttFirst: 'Tap the bottom tile to start', ttSongs: 'Songs', ttSpeed: 'Speed',
+        ttSlips: 'Slips', ttNotes: 'Notes', ttWon: 'Song complete', ttLost: 'Three slips', ttNext: 'Next song', ttRetry: 'Play it again',
+        ttNew: 'Change the song?', ttLanes: 'Lanes', ttWrong: 'Empty lane', ttLate: 'The tile slipped by', ttAllNote: 'You have finished every song',
+        ttDaily: 'Song of the day', ttBoard: 'Tile board',
+        rules: 'Tap the tiles in order from the bottom to play the tune. An empty lane or a tile that slips past is a slip; three slips lose the song. Fewer slips give more stars. Every tune is old and free to use, and the game plays it itself.',
+        tutTitle1: 'Tap the tiles', tutText1: 'Coloured tiles slide down. Tap the lowest one before it passes the line at the bottom.',
+        tutTitle2: 'Each tile is a note', tutText2: 'Each tap plays the next note of the tune. A tall tile is a long note. When the tune ends, you are done.',
+        tutTitle3: 'Three slips', tutText3: 'Tapping an empty lane or letting a tile slip by is a slip. After a slip the tune waits for your next tap. Three slips and the song starts over.'
+      },
+      pl: {
+        ttStart: 'Start', ttGo: 'Dotknij kafelka, by grać dalej', ttFirst: 'Dotknij dolnego kafelka, by zacząć', ttSongs: 'Utwory', ttSpeed: 'Tempo',
+        ttSlips: 'Pomyłki', ttNotes: 'Nuty', ttWon: 'Utwór ukończony', ttLost: 'Trzy pomyłki', ttNext: 'Następny utwór', ttRetry: 'Zagraj jeszcze raz',
+        ttNew: 'Zmienić utwór?', ttLanes: 'Kolumny', ttWrong: 'Pusta kolumna', ttLate: 'Kafelek uciekł', ttAllNote: 'Ukończono wszystkie utwory',
+        ttDaily: 'Utwór dnia', ttBoard: 'Plansza z kafelkami',
+        rules: 'Dotykaj kafelków po kolei od dołu, aby zagrać melodię. Pusta kolumna albo kafelek, który ucieknie, to pomyłka; po trzech pomyłkach utwór przegrany. Im mniej pomyłek, tym więcej gwiazdek. Wszystkie melodie są stare i wolne, a gra sama je gra.',
+        tutTitle1: 'Dotykaj kafelków', tutText1: 'Kolorowe kafelki zjeżdżają w dół. Dotknij najniższego, zanim minie linię na dole.',
+        tutTitle2: 'Każdy kafelek to nuta', tutText2: 'Każde dotknięcie gra następną nutę melodii. Wysoki kafelek to długa nuta. Gdy melodia się skończy, gotowe.',
+        tutTitle3: 'Trzy pomyłki', tutText3: 'Dotknięcie pustej kolumny albo przepuszczony kafelek to pomyłka. Po pomyłce melodia czeka na twój ruch. Po trzech utwór zaczyna się od nowa.'
+      },
+      fr: {
+        ttStart: 'Départ', ttGo: 'Touche la tuile pour continuer', ttFirst: 'Touche la tuile du bas pour commencer', ttSongs: 'Morceaux', ttSpeed: 'Vitesse',
+        ttSlips: 'Faux pas', ttNotes: 'Notes', ttWon: 'Morceau terminé', ttLost: 'Trois faux pas', ttNext: 'Morceau suivant', ttRetry: 'Rejouer ce morceau',
+        ttNew: 'Changer de morceau ?', ttLanes: 'Colonnes', ttWrong: 'Colonne vide', ttLate: 'La tuile est passée', ttAllNote: 'Tu as terminé tous les morceaux',
+        ttDaily: 'Morceau du jour', ttBoard: 'Plateau de tuiles',
+        rules: 'Touche les tuiles dans l’ordre, depuis le bas, pour jouer l’air. Une colonne vide ou une tuile qui passe est un faux pas ; trois faux pas et le morceau est perdu. Moins de faux pas, plus d’étoiles. Tous les airs sont anciens et libres, et le jeu les joue lui-même.',
+        tutTitle1: 'Touche les tuiles', tutText1: 'Des tuiles colorées descendent. Touche la plus basse avant qu’elle ne passe la ligne du bas.',
+        tutTitle2: 'Une tuile, une note', tutText2: 'Chaque touche joue la note suivante de l’air. Une grande tuile est une note longue. Quand l’air est fini, c’est terminé.',
+        tutTitle3: 'Trois faux pas', tutText3: 'Toucher une colonne vide ou laisser passer une tuile est un faux pas. Après un faux pas, l’air attend ta prochaine touche. Au troisième, le morceau recommence.'
+      },
+      ar: {
+        ttStart: 'ابدأ', ttGo: 'المس البلاطة لتكمل', ttFirst: 'المس البلاطة السفلى لتبدأ', ttSongs: 'الألحان', ttSpeed: 'السرعة',
+        ttSlips: 'الهفوات', ttNotes: 'النغمات', ttWon: 'اكتمل اللحن', ttLost: 'ثلاث هفوات', ttNext: 'اللحن التالي', ttRetry: 'أعد هذا اللحن',
+        ttNew: 'تغيير اللحن؟', ttLanes: 'الأعمدة', ttWrong: 'عمود فارغ', ttLate: 'فاتتك البلاطة', ttAllNote: 'أنهيت كل الألحان',
+        ttDaily: 'لحن اليوم', ttBoard: 'لوحة البلاطات',
+        rules: 'المس البلاطات بالترتيب من الأسفل لتعزف اللحن. العمود الفارغ أو البلاطة التي تفوتك هفوة؛ ثلاث هفوات وتخسر اللحن. كلما قلّت الهفوات زادت النجوم. كل الألحان قديمة وحرة، واللعبة تعزفها بنفسها.',
+        tutTitle1: 'المس البلاطات', tutText1: 'تنزل بلاطات ملونة. المس أدناها قبل أن تعبر الخط في الأسفل.',
+        tutTitle2: 'كل بلاطة نغمة', tutText2: 'كل لمسة تعزف النغمة التالية من اللحن. البلاطة الطويلة نغمة ممدودة. حين ينتهي اللحن تكون قد أنهيت.',
+        tutTitle3: 'ثلاث هفوات', tutText3: 'لمس عمود فارغ أو ترك بلاطة تفوت هفوة. بعد الهفوة ينتظر اللحن لمستك التالية. بعد ثلاث هفوات يبدأ اللحن من جديد.'
+      },
+      hi: {
+        ttStart: 'शुरू', ttGo: 'आगे बढ़ने के लिए टाइल छुएँ', ttFirst: 'शुरू करने के लिए नीचे की टाइल छुएँ', ttSongs: 'धुनें', ttSpeed: 'रफ़्तार',
+        ttSlips: 'चूकें', ttNotes: 'सुर', ttWon: 'धुन पूरी हुई', ttLost: 'तीन चूकें', ttNext: 'अगली धुन', ttRetry: 'यही धुन फिर से',
+        ttNew: 'धुन बदलें?', ttLanes: 'कॉलम', ttWrong: 'खाली कॉलम', ttLate: 'टाइल निकल गई', ttAllNote: 'आपने सारी धुनें पूरी कर लीं',
+        ttDaily: 'आज की धुन', ttBoard: 'टाइलों का बोर्ड',
+        rules: 'धुन बजाने के लिए नीचे से क्रम में टाइलें छुएँ. खाली कॉलम या निकल गई टाइल एक चूक है; तीन चूकों पर धुन हार जाते हैं. जितनी कम चूकें, उतने ज़्यादा तारे. सारी धुनें पुरानी और मुक्त हैं, और खेल उन्हें खुद बजाता है.',
+        tutTitle1: 'टाइलें छुएँ', tutText1: 'रंगीन टाइलें नीचे सरकती हैं. सबसे निचली टाइल को नीचे की रेखा पार करने से पहले छुएँ.',
+        tutTitle2: 'हर टाइल एक सुर', tutText2: 'हर स्पर्श धुन का अगला सुर बजाता है. लंबी टाइल यानी लंबा सुर. धुन खत्म, तो खेल पूरा.',
+        tutTitle3: 'तीन चूकें', tutText3: 'खाली कॉलम छूना या टाइल को निकल जाने देना चूक है. चूक के बाद धुन आपके अगले स्पर्श का इंतज़ार करती है. तीन चूकों पर धुन फिर से शुरू होती है.'
+      },
+      ru: {
+        ttStart: 'Старт', ttGo: 'Коснитесь плитки, чтобы продолжить', ttFirst: 'Коснитесь нижней плитки, чтобы начать', ttSongs: 'Мелодии', ttSpeed: 'Темп',
+        ttSlips: 'Промахи', ttNotes: 'Ноты', ttWon: 'Мелодия сыграна', ttLost: 'Три промаха', ttNext: 'Следующая мелодия', ttRetry: 'Сыграть ещё раз',
+        ttNew: 'Сменить мелодию?', ttLanes: 'Дорожки', ttWrong: 'Пустая дорожка', ttLate: 'Плитка проскочила', ttAllNote: 'Вы сыграли все мелодии',
+        ttDaily: 'Мелодия дня', ttBoard: 'Поле с плитками',
+        rules: 'Касайтесь плиток по порядку снизу, чтобы сыграть мелодию. Пустая дорожка или проскочившая плитка — промах; после трёх промахов мелодия проиграна. Чем меньше промахов, тем больше звёзд. Все мелодии старинные и свободные, игра сама их играет.',
+        tutTitle1: 'Касайтесь плиток', tutText1: 'Цветные плитки ползут вниз. Коснитесь самой нижней, пока она не пересекла линию внизу.',
+        tutTitle2: 'Плитка — это нота', tutText2: 'Каждое касание играет следующую ноту мелодии. Высокая плитка — долгая нота. Мелодия закончилась — вы справились.',
+        tutTitle3: 'Три промаха', tutText3: 'Касание пустой дорожки или пропущенная плитка — промах. После промаха мелодия ждёт вашего касания. После трёх промахов мелодия начинается заново.'
+      },
+      pt: {
+        ttStart: 'Começar', ttGo: 'Toque no bloco para continuar', ttFirst: 'Toque no bloco de baixo para começar', ttSongs: 'Músicas', ttSpeed: 'Velocidade',
+        ttSlips: 'Deslizes', ttNotes: 'Notas', ttWon: 'Música concluída', ttLost: 'Três deslizes', ttNext: 'Próxima música', ttRetry: 'Tocar de novo',
+        ttNew: 'Trocar de música?', ttLanes: 'Colunas', ttWrong: 'Coluna vazia', ttLate: 'O bloco passou', ttAllNote: 'Você concluiu todas as músicas',
+        ttDaily: 'Música do dia', ttBoard: 'Tabuleiro de blocos',
+        rules: 'Toque nos blocos em ordem, de baixo para cima, para tocar a melodia. Uma coluna vazia ou um bloco que passa é um deslize; três deslizes e a música está perdida. Menos deslizes, mais estrelas. Todas as melodias são antigas e livres, e o próprio jogo as toca.',
+        tutTitle1: 'Toque nos blocos', tutText1: 'Blocos coloridos descem. Toque no mais baixo antes que ele passe a linha de baixo.',
+        tutTitle2: 'Cada bloco é uma nota', tutText2: 'Cada toque toca a próxima nota da melodia. Um bloco alto é uma nota longa. Quando a melodia acaba, você terminou.',
+        tutTitle3: 'Três deslizes', tutText3: 'Tocar uma coluna vazia ou deixar um bloco passar é um deslize. Depois de um deslize, a melodia espera o seu toque. Com três, a música recomeça.'
+      },
+      zh: {
+        ttStart: '开始', ttGo: '点方块继续', ttFirst: '点最下面的方块开始', ttSongs: '曲目', ttSpeed: '速度',
+        ttSlips: '失误', ttNotes: '音符', ttWon: '曲子弹完了', ttLost: '三次失误', ttNext: '下一首', ttRetry: '再弹一遍',
+        ttNew: '换一首曲子？', ttLanes: '列', ttWrong: '空列', ttLate: '方块漏掉了', ttAllNote: '你弹完了所有曲子',
+        ttDaily: '每日一曲', ttBoard: '方块面板',
+        rules: '从下往上按顺序点方块，弹出旋律。点到空列或漏掉方块算一次失误；三次失误这首曲子就输了。失误越少，星星越多。所有曲子都是古老的公版旋律，由游戏自己演奏。',
+        tutTitle1: '点方块', tutText1: '彩色方块向下滑。在最下面的方块越过底线之前点它。',
+        tutTitle2: '每块是一个音', tutText2: '每点一下，就弹出旋律的下一个音。长方块是长音。曲子弹完，就过关了。',
+        tutTitle3: '三次失误', tutText3: '点到空列或让方块漏过去算失误。失误后，旋律会等你再点。三次失误，曲子从头开始。'
+      },
+      de: {
+        ttStart: 'Start', ttGo: 'Tipp auf die Kachel, um weiterzuspielen', ttFirst: 'Tipp auf die unterste Kachel, um zu beginnen', ttSongs: 'Stücke', ttSpeed: 'Tempo',
+        ttSlips: 'Patzer', ttNotes: 'Noten', ttWon: 'Stück geschafft', ttLost: 'Drei Patzer', ttNext: 'Nächstes Stück', ttRetry: 'Noch einmal spielen',
+        ttNew: 'Stück wechseln?', ttLanes: 'Spalten', ttWrong: 'Leere Spalte', ttLate: 'Die Kachel ist durchgerutscht', ttAllNote: 'Du hast alle Stücke geschafft',
+        ttDaily: 'Stück des Tages', ttBoard: 'Kachelfeld',
+        rules: 'Tipp die Kacheln der Reihe nach von unten an, um die Melodie zu spielen. Eine leere Spalte oder eine durchgerutschte Kachel ist ein Patzer; nach drei Patzern ist das Stück verloren. Weniger Patzer, mehr Sterne. Alle Melodien sind alt und frei, das Spiel spielt sie selbst.',
+        tutTitle1: 'Tipp die Kacheln', tutText1: 'Farbige Kacheln gleiten nach unten. Tipp die unterste an, bevor sie die Linie unten passiert.',
+        tutTitle2: 'Jede Kachel ein Ton', tutText2: 'Jeder Tipp spielt den nächsten Ton der Melodie. Eine hohe Kachel ist ein langer Ton. Ist die Melodie zu Ende, hast du es geschafft.',
+        tutTitle3: 'Drei Patzer', tutText3: 'Eine leere Spalte antippen oder eine Kachel durchrutschen lassen ist ein Patzer. Danach wartet die Melodie auf deinen nächsten Tipp. Nach drei Patzern beginnt das Stück von vorn.'
+      },
+      es: {
+        ttStart: 'Empezar', ttGo: 'Toca la baldosa para seguir', ttFirst: 'Toca la baldosa de abajo para empezar', ttSongs: 'Canciones', ttSpeed: 'Velocidad',
+        ttSlips: 'Fallos', ttNotes: 'Notas', ttWon: 'Canción completada', ttLost: 'Tres fallos', ttNext: 'Siguiente canción', ttRetry: 'Tocar otra vez',
+        ttNew: '¿Cambiar de canción?', ttLanes: 'Columnas', ttWrong: 'Columna vacía', ttLate: 'Se pasó la baldosa', ttAllNote: 'Has completado todas las canciones',
+        ttDaily: 'Canción del día', ttBoard: 'Tablero de baldosas',
+        rules: 'Toca las baldosas en orden, desde abajo, para tocar la melodía. Una columna vacía o una baldosa que se pasa es un fallo; con tres fallos pierdes la canción. Menos fallos, más estrellas. Todas las melodías son antiguas y libres, y el propio juego las toca.',
+        tutTitle1: 'Toca las baldosas', tutText1: 'Bajan baldosas de colores. Toca la más baja antes de que cruce la línea de abajo.',
+        tutTitle2: 'Cada baldosa es una nota', tutText2: 'Cada toque suena la siguiente nota de la melodía. Una baldosa alta es una nota larga. Cuando acaba la melodía, terminaste.',
+        tutTitle3: 'Tres fallos', tutText3: 'Tocar una columna vacía o dejar pasar una baldosa es un fallo. Tras un fallo, la melodía espera tu próximo toque. Con tres, la canción vuelve a empezar.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+  var daily = null;
+  var prefs = ctx.store.get('prefs') || {};
+  if (!E.SPEEDS[prefs.speed]) prefs.speed = 'normal';
+  var best = ctx.store.get('best') || {};
+
+  var S = null, ended = false, paused = false;
+  var raf = 0, last = 0, fxUntil = 0, flashes = [], hitAt = {}, voice = null, voiceTimer = 0;
+
+  /* ---------------------------------------------------------------- page */
+
+  var cv = el('canvas', { role: 'img' });
+  var box = el('div', { class: 'tt-box' }, [cv]);
+  var songEl = el('div', { class: 'tt-song ch-above' });
+  var tBadge = el('span'), tNotes = el('span'), tSlips = el('span', { class: 'tt-slips' });
+  var top = el('div', { class: 'tt-top ch-above' }, [tBadge, tNotes, tSlips]);
+  var barFill = el('i');
+  var bar = el('div', { class: 'tt-bar ch-above' }, [barFill]);
+  var msg = el('div', { class: 'tt-msg', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'tt-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [songEl, top, bar, msg])]);
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  if (!dailyDate) ctx.button({ icon: 'gear', label: C.t('settings'), onClick: showSettings });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  function lang() { return C.state.settings.lang; }
+  function songTitle(id) { return E.title(id, lang()); }
+
+  /* ---------------------------------------------------------------- game */
+
+  function dailySong(date) {
+    var r = C.daily('tiletunes', date).rng;
+    return E.SONGS[Math.floor(r() * E.SONGS.length) % E.SONGS.length].id;
+  }
+  function firstOpen() {
+    var s = E.SONGS.find(function (x) { return !best[x.id]; });
+    return (s || E.SONGS[0]).id;
+  }
+  function start(song) {
+    stopVoice();
+    ended = false; flashes = []; hitAt = {};
+    daily = dailyDate || null;
+    S = daily ? E.newGame({ song: dailySong(daily), speed: 'normal' }) : E.newGame({ song: song || prefs.song || firstOpen(), speed: prefs.speed });
+    if (!daily) { prefs.song = S.song; ctx.store.set('prefs', prefs); }
+    say(C.t('ttFirst'));
+    paintAll();
+    ctx.save();
+  }
+  function started() { return !!S && !ended && (S.i > 0 || S.miss > 0); }
+
+  function stopVoice() {
+    if (voiceTimer) { clearTimeout(voiceTimer); voiceTimer = 0; }
+    if (voice) { try { voice.stop(); } catch (er) { /* the voice may already be gone */ } voice = null; }
+  }
+  // each tile rings for its own length, then lets go; the next hit cuts it short
+  function play(n) {
+    stopVoice();
+    voice = C.audio.piano ? C.audio.piano(E.freq(n.m)) : null;
+    var ms = Math.max(160, n.d / E.bps(S) * 1000 * 0.92);
+    voiceTimer = setTimeout(function () { voiceTimer = 0; if (voice) { voice.stop(); voice = null; } }, ms);
+  }
+
+  function press(lane, now) {
+    if (!S || ended || S.over) return;
+    var r = E.tap(S, lane);
+    if (r.type === 'none') return;
+    now = now || performance.now();
+    if (r.type === 'hit') {
+      play(r.note);
+      hitAt[S.i - 1] = now;
+      say('');
+    } else {
+      C.feedback('bad');
+      flashes.push({ lane: lane, at: now, kind: 'wrong' });
+      say(r.lost ? C.t('ttLost') : C.t('ttWrong'));
+    }
+    fxUntil = Math.max(fxUntil, now + 450);
+    paintTop();
+    if (S.over) { stopLoopSoon(); setTimeout(finish, S.over === 'won' ? 700 : 500); }
+    run();
+    ctx.save();
+  }
+
+  function onLate(r, now) {
+    C.feedback('bad');
+    flashes.push({ lane: r.note.lane, at: now, kind: 'late' });
+    fxUntil = Math.max(fxUntil, now + 600);
+    say(r.lost ? C.t('ttLost') : C.t('ttLate') + ' · ' + C.t('ttGo'));
+    paintTop();
+    ctx.save();
+    if (S.over) setTimeout(finish, 600);
+  }
+  function stopLoopSoon() { fxUntil = Math.max(fxUntil, performance.now() + 700); }
+
+  // One frame loop: it moves the music while the tune runs, and keeps drawing a moment
+  // longer while a flash fades. Time is capped per frame, so a stalled tab never jumps
+  // the board past several tiles at once.
+  function loop(t) {
+    raf = 0;
+    var moving = !!S && !ended && !S.wait && !S.over && !paused;
+    if (moving) {
+      var dt = last ? Math.min(0.1, (t - last) / 1000) : 0;
+      last = t;
+      var r = E.tick(S, dt);
+      if (r) onLate(r, t);
+    } else last = 0;
+    draw(t);
+    if ((S && !ended && !S.wait && !S.over && !paused) || t < fxUntil) raf = requestAnimationFrame(loop);
+  }
+  function run() { if (!raf) raf = requestAnimationFrame(loop); }
+
+  function finish() {
+    if (ended || !S || !S.over) return;
+    ended = true;
+    stopVoice();
+    var R = E.result(S), note = null;
+    var coins = R.won ? 3 + R.stars : 1, points = R.won ? 8 + R.stars * 4 : Math.max(1, Math.round(R.hits / R.total * 4));
+    if (R.won) {
+      if (!daily) { best[S.song] = Math.max(best[S.song] || 0, R.stars); ctx.store.set('best', best); }
+      C.achievements.unlock('tt-song');
+      if (R.miss === 0) C.achievements.unlock('tt-clean');
+      if (S.speed === 'fast' && !daily) C.achievements.unlock('tt-fast');
+      if (daily) C.achievements.unlock('tt-daily');
+      if (E.SONGS.every(function (s) { return best[s.id] > 0; })) { C.achievements.unlock('tt-all'); note = C.t('ttAllNote'); }
+    }
+    if (daily && !C.stats.daily('tiletunes', daily, { label: songTitle(S.song) + (R.won ? ' ' + '★'.repeat(R.stars) : ''), win: R.won, stars: R.stars })) {
+      coins = Math.max(1, Math.round(coins * 0.2)); points = Math.max(1, Math.round(points * 0.2));
+    }
+    var song = S.song, idx = E.SONGS.findIndex(function (s) { return s.id === song; });
+    var nextSong = E.SONGS[(idx + 1) % E.SONGS.length].id;
+    ctx.clearSave();
+    ctx.finish({
+      won: R.won, title: R.won ? C.t('ttWon') : C.t('ttLost'), note: note, stars: R.won ? R.stars : null, timeMs: Math.round(S.t * 1000), coins: coins, points: points,
+      lines: (daily ? [{ label: C.t('daily'), value: C.num(daily) }] : []).concat([
+        { label: C.t('ttSongs'), value: songTitle(song) },
+        { label: C.t('ttNotes'), value: C.num(R.hits) + ' / ' + C.num(R.total) },
+        { label: C.t('ttSlips'), value: C.num(R.miss) }
+      ]),
+      shareText: 'چوگان · کاشی‌نوا' + (daily ? '\nروزانه ' + daily : '') + '\n' + E.title(song, 'fa') + (R.won ? '\n' + '★'.repeat(R.stars) : ''),
+      againLabel: daily ? null : (R.won ? C.t('ttNext') : C.t('ttRetry')),
+      onAgain: daily ? null : function () { start(R.won ? nextSong : song); }
+    });
+  }
+
+  /* ---------------------------------------------------------------- view */
+
+  function say(t) { msg.textContent = t; }
+  function paintAll() { paintTop(); draw(); }
+  function paintTop() {
+    if (!S) return;
+    songEl.textContent = songTitle(S.song);
+    tBadge.innerHTML = '';
+    if (daily) tBadge.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('ttDaily') })]));
+    else tBadge.appendChild(el('span', { class: 'ch-badge', text: speedName(S.speed) }));
+    var total = E.chart(S.song).notes.length;
+    tNotes.textContent = C.t('ttNotes') + ' ' + C.num(S.i) + ' / ' + C.num(total);
+    tSlips.innerHTML = '';
+    tSlips.setAttribute('aria-label', C.t('ttSlips') + ' ' + C.num(S.miss) + ' / ' + C.num(E.LIVES));
+    for (var i = 0; i < E.LIVES; i++) tSlips.appendChild(el('span', { class: 'tt-slip' + (i < S.miss ? ' tt-gone' : '') }));
+    barFill.style.width = (100 * S.i / total).toFixed(1) + '%';
+    cv.setAttribute('aria-label', C.t('ttBoard') + ' · ' + songTitle(S.song));
+  }
+  function speedName(s) { return C.t(s === 'slow' ? 'speedSlow' : s === 'fast' ? 'speedFast' : 'speedNormal'); }
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  function palette() {
+    return dark()
+      ? { bg: '#18131D', lane: '#221A2A', sep: '#33283F', line: '#7C5FA0', tile: '#A57AD6', tile2: '#8C5EC2', ink: '#170B22', done: 'rgba(165,122,214,0.16)', bad: '#F0695E', glow: 'rgba(165,122,214,0.35)' }
+      : { bg: '#FBF8FD', lane: '#F3EDF8', sep: '#E3D8EC', line: '#9B7DB8', tile: '#5C0092', tile2: '#7A2BB0', ink: '#FFFFFF', done: 'rgba(92,0,146,0.12)', bad: '#D8443A', glow: 'rgba(92,0,146,0.22)' };
+  }
+  var drawn = { w: 0, h: 0 };
+  function size() {
+    var r = box.getBoundingClientRect();
+    return { w: Math.max(120, Math.floor(r.width) || 0), h: Math.max(160, Math.floor(r.height) || 0) };
+  }
+  function view(Z) {
+    var lineY = Z.h * 0.84;
+    return { lineY: lineY, ppb: lineY / E.VIEW, lw: Z.w / E.LANES };
+  }
+  function rr(g, x, y, w, h, r) {
+    r = Math.max(0, Math.min(r, w / 2, h / 2));
+    g.beginPath();
+    g.moveTo(x + r, y); g.lineTo(x + w - r, y); g.quadraticCurveTo(x + w, y, x + w, y + r);
+    g.lineTo(x + w, y + h - r); g.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    g.lineTo(x + r, y + h); g.quadraticCurveTo(x, y + h, x, y + h - r);
+    g.lineTo(x, y + r); g.quadraticCurveTo(x, y, x + r, y); g.closePath();
+  }
+  function draw(now) {
+    if (!S) return;
+    now = now || performance.now();
+    var Z = size(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(Z.w * dpr) || cv.height !== Math.round(Z.h * dpr)) { cv.width = Math.round(Z.w * dpr); cv.height = Math.round(Z.h * dpr); }
+    drawn = { w: Z.w, h: Z.h };
+    var P = palette(), V = view(Z), g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.fillStyle = P.bg; g.fillRect(0, 0, Z.w, Z.h);
+    for (var l = 0; l < E.LANES; l++) {
+      if (l % 2) { g.fillStyle = P.lane; g.fillRect(l * V.lw, 0, V.lw, Z.h); }
+      if (l) { g.fillStyle = P.sep; g.fillRect(Math.round(l * V.lw), 0, 1, Z.h); }
+    }
+    // flashes under the tiles: a red lane for a slip
+    flashes = flashes.filter(function (f) { return now - f.at < 600; });
+    flashes.forEach(function (f) {
+      g.globalAlpha = Math.max(0, 1 - (now - f.at) / 600) * 0.45;
+      g.fillStyle = P.bad; g.fillRect(f.lane * V.lw, 0, V.lw, Z.h);
+      g.globalAlpha = 1;
+    });
+    // the line the tiles are played at
+    g.fillStyle = P.line; g.fillRect(0, Math.round(V.lineY), Z.w, 2);
+
+    var notes = E.chart(S.song).notes, pad = Math.max(2, Math.round(V.lw * 0.04));
+    var from = Math.max(0, S.i - 8);
+    for (var i = from; i < notes.length; i++) {
+      var n = notes[i];
+      var yBot = V.lineY - (n.b - S.pos) * V.ppb, yTop = V.lineY - (n.b + n.d - S.pos) * V.ppb;
+      if (yBot < -4) break;
+      if (yTop > Z.h + 4) continue;
+      var x = n.lane * V.lw + pad, w = V.lw - pad * 2, h = Math.max(8, yBot - yTop - pad * 2), y = yTop + pad;
+      if (i < S.i) {
+        // a played tile fades where it was
+        var age = hitAt[i] ? Math.min(1, (now - hitAt[i]) / 260) : 1;
+        g.fillStyle = P.done; rr(g, x, y, w, h, 10); g.fill();
+        if (age < 1) { g.globalAlpha = 1 - age; g.fillStyle = P.tile; rr(g, x, y, w, h, 10); g.fill(); g.globalAlpha = 1; }
+        continue;
+      }
+      var isNext = i === S.i;
+      if (isNext) { g.fillStyle = P.glow; rr(g, x - 3, y - 3, w + 6, h + 6, 13); g.fill(); }
+      g.fillStyle = isNext ? P.tile : P.tile2; rr(g, x, y, w, h, 10); g.fill();
+      if (isNext && S.wait && !S.over) {
+        g.fillStyle = P.ink;
+        var fs = Math.max(12, Math.min(20, w * 0.2));
+        g.font = '800 ' + fs + 'px ' + (getComputedStyle(document.body).fontFamily || 'sans-serif');
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        // a tile shorter than the word shows a dot to tap instead
+        if (h > fs * 1.6) g.fillText(S.i === 0 ? C.t('ttStart') : '▶', x + w / 2, y + h / 2);
+        else { g.beginPath(); g.arc(x + w / 2, y + h / 2, Math.min(6, h / 3), 0, Math.PI * 2); g.fill(); }
+      }
+    }
+  }
+
+  /* --------------------------------------------------------------- input */
+
+  // the lane is read against the board as last drawn (Bowling lesson)
+  cv.addEventListener('pointerdown', function (e) {
+    if (!S || !drawn.w) return;
+    e.preventDefault();
+    var r = cv.getBoundingClientRect();
+    var x = (e.clientX - r.left) / (r.width || 1) * drawn.w;
+    var lane = Math.max(0, Math.min(E.LANES - 1, Math.floor(x / (drawn.w / E.LANES))));
+    press(lane);
+  });
+  cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  // D F J K or 1 2 3 4, left to right in every language: a canvas is drawn left to right
+  var KEYS = [['d', '1'], ['f', '2'], ['j', '3'], ['k', '4']];
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || !S || ended) return;
+    for (var l = 0; l < KEYS.length; l++) {
+      if (C.keyIs(e, KEYS[l][0]) || e.key === KEYS[l][1] || e.code === 'Digit' + KEYS[l][1] || e.code === 'Numpad' + KEYS[l][1]) {
+        e.preventDefault();
+        press(l);
+        return;
+      }
+    }
+  });
+
+  /* ------------------------------------------------------------- dialogs */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('D F J K', C.t('ttLanes')), kb('1 2 3 4', C.t('ttLanes'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // a change of song or speed starts the song again; one under way asks first
+  function apply(change) {
+    if (started()) C.ui.confirm({ title: C.t('ttNew'), body: C.t('resetWarn'), onOk: function () { change(); start(prefs.song); } });
+    else { change(); start(prefs.song); }
+  }
+  function showSettings() {
+    var m = null;
+    var list = el('div', { class: 'ch-list' }, E.SONGS.map(function (s) {
+      var b = best[s.id] || 0;
+      var row = el('button', { class: 'ch-item', type: 'button', style: { width: '100%', background: 'none', border: '0', 'border-bottom': '1px solid var(--c-line)', font: 'inherit', color: 'inherit', cursor: 'pointer', 'min-height': '44px', 'text-align': 'start' } }, [
+        el('div', { class: 'ch-item__label', text: (S && S.song === s.id ? '▶ ' : '') + songTitle(s.id) }),
+        el('span', { class: 'ch-dim', text: b ? '★'.repeat(b) : '·', 'aria-label': C.num(b) + ' ' + C.t('stars') })
+      ]);
+      row.addEventListener('click', function () {
+        m.close();
+        if (S && S.song === s.id && !ended) return;
+        apply(function () { prefs.song = s.id; ctx.store.set('prefs', prefs); });
+      });
+      return row;
+    }));
+    m = C.ui.modal({
+      title: C.t('settings'), closeButton: true,
+      body: [
+        el('h3', { text: C.t('ttSpeed') }),
+        C.ui.segmented(E.SPEED_IDS.map(function (v) { return { value: v, label: speedName(v) }; }), prefs.speed, function (v) {
+          if (v === prefs.speed) return;
+          m.close();
+          apply(function () { prefs.speed = v; ctx.store.set('prefs', prefs); });
+        }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('ttSongs') }),
+        list
+      ],
+      actions: [{ label: C.t('done'), kind: 'primary' }]
+    });
+  }
+
+  // Tutorial pictures: four lanes, tiles and a finger, in the light theme's literal colours
+  function tArt(step) {
+    // the lanes are clipped to the frame and its outline goes on top, so a lane never squares off a rounded corner
+    var clip = 'ttArt' + step;
+    var s = '<svg viewBox="0 0 200 110" width="100%" xmlns="http://www.w3.org/2000/svg"><defs><clipPath id="' + clip + '"><rect x="40" y="2" width="120" height="106" rx="8"/></clipPath></defs>';
+    s += '<g clip-path="url(#' + clip + ')"><rect x="40" y="2" width="120" height="106" fill="#FBF8FD"/>';
+    s += '<rect x="70" y="2" width="30" height="106" fill="#F3EDF8"/><rect x="130" y="2" width="30" height="106" fill="#F3EDF8"/>';
+    s += '<rect x="40" y="88" width="120" height="2" fill="#9B7DB8"/>';
+    if (step === 3) s += '<rect x="130" y="2" width="30" height="106" fill="#D8443A" opacity=".35"/>';
+    s += '</g><rect x="40" y="2" width="120" height="106" rx="8" fill="none" stroke="#E3D8EC"/>';
+    if (step === 1) {
+      s += '<rect x="103" y="10" width="24" height="22" rx="4" fill="#7A2BB0"/><rect x="73" y="40" width="24" height="44" rx="4" fill="#7A2BB0"/>';
+      s += '<rect x="43" y="66" width="24" height="20" rx="4" fill="#5C0092"/>';
+      s += '<circle cx="55" cy="78" r="9" fill="#F2C14E" opacity=".85"/>';
+    } else if (step === 2) {
+      s += '<rect x="43" y="92" width="24" height="14" rx="4" fill="rgba(92,0,146,0.14)"/><rect x="73" y="62" width="24" height="24" rx="4" fill="#5C0092"/><rect x="103" y="8" width="24" height="50" rx="4" fill="#7A2BB0"/>';
+      s += '<path d="M176 30v-16l12-3v16" stroke="#5C0092" stroke-width="2.5" fill="none"/><circle cx="173" cy="30" r="4" fill="#5C0092"/><circle cx="185" cy="27" r="4" fill="#5C0092"/>';
+      s += '<path d="M14 40v-14" stroke="#7A2BB0" stroke-width="2.5"/><circle cx="11" cy="40" r="4" fill="#7A2BB0"/>';
+    } else {
+      s += '<rect x="73" y="50" width="24" height="34" rx="4" fill="#5C0092"/>';
+      s += '<circle cx="145" cy="70" r="9" fill="#F2C14E" opacity=".85"/>';
+      s += '<circle cx="176" cy="50" r="5" fill="#C9B8D8"/><circle cx="176" cy="64" r="5" fill="none" stroke="#C9B8D8" stroke-width="2"/><circle cx="176" cy="78" r="5" fill="none" stroke="#C9B8D8" stroke-width="2"/>';
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) },
+    { title: C.t('tutTitle3'), text: C.t('tutText3'), art: tArt(3) }
+  ];
+
+  /* --------------------------------------------------------------- start */
+
+  // saved after every tap and when the app goes away; the daily song has its own slot
+  ctx.autosave(function () {
+    if (!S || ended || S.over) return { inProgress: false };
+    if (!S.i && !S.miss) return { inProgress: false };
+    return { game: S, daily: daily };
+  });
+  function halt() {
+    paused = true;
+    if (S && !ended) { E.pause(S); stopVoice(); if (!S.over && (S.i || S.miss)) say(C.t('ttGo')); }
+    ctx.save();
+    draw();
+  }
+  function resume() { paused = false; draw(); }
+  C.onPause(halt);
+  C.onResume(resume);
+  document.addEventListener('visibilitychange', function () { if (document.hidden) halt(); else resume(); });
+  // back from the back/forward cache, the page runs on without a load (#385)
+  window.addEventListener('pageshow', function (e) { if (e.persisted) resume(); });
+
+  var saved = ctx.loadSave();
+  if (saved && saved.game && E.valid(saved.game) && !saved.game.over && (saved.daily || null) === (dailyDate || null)) {
+    S = saved.game; daily = saved.daily || null; ended = false;
+    E.pause(S);
+    say(C.t('ttGo'));
+    paintAll();
+  } else start();
+  if (dailyDate && C.stats.dailyDone('tiletunes', dailyDate)) {
+    var rec = C.stats.dailyOf(dailyDate).tiletunes;
+    C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+  }
+  // the board is redrawn whenever its box changes (rotation, side rows) and once the
+  // web font has arrived and moved the layout (Bowling lesson)
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { draw(); });
+  if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { draw(); }); } catch (er) { /* old WebViews */ } }
+  new MutationObserver(function () { draw(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
