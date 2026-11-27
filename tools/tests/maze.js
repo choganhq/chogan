@@ -114,17 +114,27 @@ module.exports = function (T) {
     {
       // #1242: a tap the ball could reach only part of the way walked it into a side
       // passage and spent steps; now such a tap moves nothing, a reachable one walks all the way
-      let short = 0, full = 0, wrong = 0;
+      // A walk that ends on the exit counts as reaching: a tap past the exit still wins.
+      let short = 0, full = 0, past = 0, wrong = 0;
       for (let k = 0; k < 10; k++) {
         const M = E.generate(E.SIZES[k % 3], rng(124200 + k));
         for (let i = 0; i < M.n * M.n; i += 5) for (let t = 0; t < M.n * M.n; t += 7) {
           if (t === i) continue;
-          const q = E.toward(M, i, t), p = typeof E.tapPath === 'function' ? E.tapPath(M, i, t) : q;
-          if (q.length && q[q.length - 1] === t) { full++; if (p.join() !== q.join()) wrong++; }
+          const q = E.toward(M, i, t), p = typeof E.tapPath === 'function' ? E.tapPath(M, i, t) : q, last = q[q.length - 1];
+          if (q.length && (last === t || last === M.exit)) { full++; if (last !== t) past++; if (p.join() !== q.join()) wrong++; }
           else { short++; if (p.length) wrong++; }
         }
+        // the ball beside the exit, tapping every cell: some of those walks end on the exit
+        for (let i = 0; i < M.n * M.n; i++) {
+          if (Math.abs(i - M.exit) !== 1 && Math.abs(i - M.exit) !== M.n) continue;
+          for (let t = 0; t < M.n * M.n; t++) {
+            if (t === i || t === M.exit) continue;
+            const q = E.toward(M, i, t), p = typeof E.tapPath === 'function' ? E.tapPath(M, i, t) : q;
+            if (q.length && q[q.length - 1] === M.exit) { past++; if (p.join() !== q.join()) wrong++; }
+          }
+        }
       }
-      ok(short > 100 && full > 100 && wrong === 0, 'a tap walks the ball only when it can reach the tapped cell (' + full + ' reachable, ' + short + ' not, ' + wrong + ' wrong) (#1242)');
+      ok(short > 100 && full > 100 && past > 0 && wrong === 0, 'a tap walks the ball only when it can reach the tapped cell or the exit (' + full + ' reachable, ' + past + ' past the exit, ' + short + ' not, ' + wrong + ' wrong) (#1242)');
       ok(/E\.tapPath\(M, pos\(\), c\)/.test(html) && /C\.t\('mzCloser'\)/.test(html), 'a tap that cannot reach its cell shows the tap-closer hint instead of moving (#1242)');
     }
     {
