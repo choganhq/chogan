@@ -8652,8 +8652,9 @@ function testSudokuAutoNotes() {
   // It was a one-off "apply" button in the help sheet: tapped, it filled every
   // cell's notes and there was nothing to turn off.
   const page = fs.readFileSync(path.join(ROOT, 'www/games/sudoku/index.html'), 'utf8');
-  const fn = (page.match(/^  function notesOf\(c\) \{[\s\S]*?^  \}$/m) || [''])[0];
-  ok(fn.length > 0, 'notesOf found in Sudoku');
+  // since #1258 notesOf reads the live candidates through liveMask, shared with the strike tap
+  const fn = ['notesOf', 'liveMask'].map((n) => (page.match(new RegExp('^  function ' + n + '\\(([^)]*)\\) \\{[\\s\\S]*?^  \\}$', 'm')) || [''])[0]).join('\n');
+  ok(/function notesOf/.test(fn) && /function liveMask/.test(fn), 'notesOf and liveMask found in Sudoku');
   // a row with 1..8 placed leaves only 9 for cell 8; cell 9 (next row) has all but 1
   const grid = new Array(81).fill(0);
   for (let i = 0; i < 8; i++) grid[i] = i + 1;
@@ -9739,8 +9740,8 @@ function testSudokuClearNotes() {
   const code = ['pushUndo', 'undo', 'hasNotes', 'clearNotes'].map(grab);
   ok(code.every((x) => x.length > 0), 'clearNotes found in Sudoku');
   if (!code.every((x) => x.length > 0)) return;
-  const S = { done: false, grid: new Array(81).fill(0), hinted: [], mistakes: 0, undo: [], notes: [] };
-  for (let i = 0; i < 81; i++) S.notes.push(i % 3 ? [1, 4, 7] : []);
+  const S = { done: false, grid: new Array(81).fill(0), hinted: [], mistakes: 0, undo: [], notes: [], struck: [] };
+  for (let i = 0; i < 81; i++) { S.notes.push(i % 3 ? [1, 4, 7] : []); S.struck.push([]); }
   let saved = 0, painted = 0;
   const sb = { S, C: { feedback: () => {} }, paint: () => painted++, save: () => saved++, JSON };
   vm.runInNewContext(code.join('\n') + ';this.clearNotes = clearNotes; this.undo = undo;', sb);
