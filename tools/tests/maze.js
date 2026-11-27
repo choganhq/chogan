@@ -112,6 +112,22 @@ module.exports = function (T) {
     }
     ok(slides > 1000 && crossed === 0, 'a roll or a drag only ever moves through open sides (' + slides + ' tried, ' + crossed + ' through a wall)');
     {
+      // #1242: a tap the ball could reach only part of the way walked it into a side
+      // passage and spent steps; now such a tap moves nothing, a reachable one walks all the way
+      let short = 0, full = 0, wrong = 0;
+      for (let k = 0; k < 10; k++) {
+        const M = E.generate(E.SIZES[k % 3], rng(124200 + k));
+        for (let i = 0; i < M.n * M.n; i += 5) for (let t = 0; t < M.n * M.n; t += 7) {
+          if (t === i) continue;
+          const q = E.toward(M, i, t), p = typeof E.tapPath === 'function' ? E.tapPath(M, i, t) : q;
+          if (q.length && q[q.length - 1] === t) { full++; if (p.join() !== q.join()) wrong++; }
+          else { short++; if (p.length) wrong++; }
+        }
+      }
+      ok(short > 100 && full > 100 && wrong === 0, 'a tap walks the ball only when it can reach the tapped cell (' + full + ' reachable, ' + short + ' not, ' + wrong + ' wrong) (#1242)');
+      ok(/E\.tapPath\(M, pos\(\), c\)/.test(html) && /C\.t\('mzCloser'\)/.test(html), 'a tap that cannot reach its cell shows the tap-closer hint instead of moving (#1242)');
+    }
+    {
       const M = E.generate(16, rng(31337)), P = E.solve(M), trail = [0];
       let c = 0, steps = 0;
       for (let i = 1; i < P.length && c !== M.exit; i++) { const q = E.toward(M, c, P[i]); for (const j of q) { E.walk(trail, j); steps++; c = j; } }
