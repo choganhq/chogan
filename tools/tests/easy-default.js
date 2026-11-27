@@ -65,10 +65,17 @@ module.exports = function (T) {
     const st = { plays: 3, timeMs: 1, byGame: { reversi: { plays: 3, wins: 1, timeMs: 1, best: {} } }, daily: {}, streak: { count: 0, best: 0, last: '' } };
     ok(boot({ 'chogan.app.stats': JSON.stringify(st) }).newcomer('reversi') === false, 'plays in the stats with no game key: not a newcomer');
     ok(boot({ 'chogan.app.stats': JSON.stringify(st) }).newcomer('hex') === true, 'plays of another game do not count');
+    // The first visit saves a tutorial flag or a session but not the untouched level, so
+    // without a mark of its own the second visit would silently move the player to medium.
+    const first = boot({});
+    if (typeof first.startNewcomer === 'function') first.startNewcomer('reversi');
+    first.storage('reversi').set('tutSeen', true);
+    ok(first.newcomer('reversi') === true, 'a first-time player is still on easy at the second visit');
+    ok(/startNewcomer\(cfg\.id\)/.test(fs.readFileSync(CORE, 'utf8')), 'Chogan.game marks a first-time player');
     // read before Chogan.game or the game writes anything, or every player looks returning
     const core = fs.readFileSync(CORE, 'utf8');
     const g = core.indexOf('Chogan.game = function');
-    const n = core.indexOf('Chogan.newcomer(cfg.id)', g), t = core.indexOf('Chogan.recent.touch(cfg.id)', g);
+    const n = core.indexOf('Chogan.startNewcomer(cfg.id)', g), t = core.indexOf('Chogan.recent.touch(cfg.id)', g);
     ok(g > 0 && n > g && t > g && n < t, 'Chogan.game reads newcomer before its first write (recent.touch)');
     ok(/firstLevel:\s*function/.test(core) && /newcomer:\s*newcomer/.test(core), 'ctx carries newcomer and firstLevel');
   }

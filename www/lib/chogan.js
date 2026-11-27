@@ -2425,9 +2425,19 @@
   // so a default never changes under a player who is used to it. Read it before the game
   // writes anything: Chogan.game takes it once, as ctx.newcomer.
   Chogan.newcomer = function (id) {
+    if (Chogan.storage(id).get('startEasy', false)) return true;
     if (Chogan.storage(id).any()) return false;
     var g = state.stats.byGame[id];
     return !(g && (g.plays > 0 || g.wins > 0 || (g.best && Object.keys(g.best).length)));
+  };
+
+  // The first visit leaves other keys behind (tutorial seen, a session) but not the level
+  // nobody touched, so without this mark a child would meet the medium bot at the second
+  // visit. Returns what newcomer() said.
+  Chogan.startNewcomer = function (id) {
+    var yes = Chogan.newcomer(id);
+    if (yes) Chogan.storage(id).set('startEasy', true);
+    return yes;
   };
 
   /* ==================================== recently played and pinned (#193) */
@@ -4173,7 +4183,7 @@
   Chogan.game = function (cfg) {
     var store = Chogan.storage(cfg.id);
     // before anything below or in the game writes a key for it (#1248)
-    var newcomer = Chogan.newcomer(cfg.id);
+    var newcomer = Chogan.startNewcomer(cfg.id);
     Chogan.recent.touch(cfg.id);
     Chogan.keepAwake.hold();
     if (cfg.strings) Chogan.strings(cfg.strings);
