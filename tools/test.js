@@ -11771,8 +11771,8 @@ function testPeak() {
     'play3:3 beat1:5 draw1:17',
     'play0:4',
     'play1:5 beat0:4 draw0:16',
-    'clear2:3 play2:4 beat3:3 draw3:15',
-    'play3:7 beat1:5 beat2:4 draw1:14 draw2:13'
+    'clear2:3 clear3:3 play2:4', // #1257: West's 3 was joined to South's, so it goes through too
+    'play3:7 beat1:5 beat2:4 draw1:15 draw2:14'
   ];
   const bad = log.map((l, i) => l === want[i] ? '' : (i + 1) + ': ' + l).filter(Boolean);
   ok(!bad.length, 'the issue\'s worked example plays out step by step' + (bad.length ? ' (' + bad.join(' | ') + ')' : ''));

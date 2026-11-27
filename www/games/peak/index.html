@@ -218,9 +218,15 @@ function PeakEngineFactory() {
   // Measured on 600 four-player games against random players (#635): always playing the
   // lowest card wins 32%, the highest 22%. A beaten low card is swapped for a fresh one
   // from the pile, which is on average higher, so the high cards are worth keeping.
+  // Joining a card of the same number is worth a little too: partners go through together
+  // (#1257), and without this medium won no more than easy (1533 to 1486 in 3000 games).
   function lowBeat(S) {
     var L = legal(S), best = L[0], bs = -1e9;
-    L.forEach(function (f) { var s = -f + preview(S, f).beaten.length * 3; if (s > bs) { bs = s; best = f; } });
+    L.forEach(function (f) {
+      var join = S.table.indexOf(f) >= 0 ? 3 : 0; // the player to move has no card down
+      var s = -f + join + preview(S, f).beaten.length * 3;
+      if (s > bs) { bs = s; best = f; }
+    });
     return best;
   }
   // the hard bot plays each candidate out to the end many times, over the same guesses of
@@ -668,7 +674,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = PeakEngine
       animate(ev, rects, null);
       save();
       if (E.over(S)) { endGame(); return; }
-      botTimer = setTimeout(function () { botTimer = null; if (S === G && !E.over(S) && S.turn !== 0) botPlay(); }, C.cards.pace(450));
+      botTimer = setTimeout(function () { botTimer = null; if (S === G && !E.over(S) && S.turn !== 0) botPlay(); }, C.cards.pace(mine ? 1500 : 450)); // time to read that your card left
     }, C.cards.pace(C.ui.reduceMotion() ? 300 : BOT_MS));
   }
   function botPlay() {
