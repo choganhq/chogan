@@ -54,10 +54,10 @@ module.exports = function (T) {
     ok(E.TUNES.every((t) => same(E.tune(t.id).slice(0, firsts[t.id].length).map((n) => n.m), firsts[t.id])), 'each tune opens with its known notes (' + Object.keys(firsts).join(', ') + ')');
     ok(E.TUNES.every((t) => { const n = E.tune(t.id); return n.length >= 20 && n.every((x) => x.m >= 60 && x.m <= 72 && !E.isBlack(x.m) && x.beats > 0); }), 'every note of every tune is a white key between C4 and C5, so all of it fits the 8 keys of an upright phone');
     {
-      // #1243: "with my" in Oh! Susanna is a dotted C and a short D, filling the bar
-      // like "A-la-" (G 1.5, A 0.5); the C was half a beat, so that bar was a beat short
+      // #1243: the C and D of "with my" in Oh! Susanna are a beat each, as long as the E's
+      // after them; the C was half a beat, so that bar was a beat short
       const n = E.tune('susanna'), sum = (a) => a.reduce((t, x) => t + x.beats, 0);
-      ok(n[8].m === 60 && n[8].beats === 1.5 && n[9].beats === 0.5 && n[23].m === 60 && n[23].beats === 1.5 && sum(n.slice(2, 6)) === 4 && sum(n.slice(6, 10)) === 4 && sum(n) === 30, 'Oh! Susanna: each "with my" is a dotted C and a short D, every bar four beats, ' + sum(n) + ' beats in all (#1243)');
+      ok(n[8].m === 60 && n[8].beats === 1 && n[9].beats === 1 && n[23].m === 60 && n[23].beats === 1 && n[24].beats === 1 && sum(n.slice(2, 6)) === 4 && sum(n.slice(6, 10)) === 4 && sum(n) === 30, 'Oh! Susanna: each "with my" is a C and a D of one beat, as long as the E\'s, every bar four beats, ' + sum(n) + ' beats in all (#1243)');
     }
     let allRight = true;
     for (const t of E.TUNES) {
