@@ -18,6 +18,37 @@ module.exports = function (T) {
     ok(fa.landed && fb.landed && fa.t === fb.t && fa.fuel === fb.fuel && fa.x === fb.x, 'replaying the same buttons gives the same flight');
     ok(!same(E.newLevel(12346, 6).pts, A.pts), 'another seed gives other ground');
 
+    // #1247: a ship landed at a tilt froze at that tilt; it now tips onto both feet about
+    // the lower one, faster as it falls, and stands upright on the pad
+    {
+      let cases = 0, bad = [];
+      for (const tilt of [E.LIM.a, -E.LIM.a, 0.1, -0.05]) {
+        const S = land(E.newLevel(777, 3)), P = S.L.pad;
+        S.a = tilt;
+        const f0 = E.world(S, E.FEET[0]), f1 = E.world(S, E.FEET[1]);
+        S.y += P.y - Math.min(f0[1], f1[1]);
+        const lo = E.world(S, E.FEET[0])[1] <= E.world(S, E.FEET[1])[1] ? 0 : 1, pv = E.world(S, E.FEET[lo]);
+        cases++;
+        if (typeof E.settle !== 'function') { bad.push('no settle'); continue; }
+        const at = (t) => E.settle(S, t), foot = (q, i) => E.world(q, E.FEET[i]);
+        const start = at(0), end = at(5), steps = [];
+        if (Math.abs(start.a - tilt) > 1e-12) bad.push(tilt + ': starts turned');
+        if (end.a !== 0 || Math.abs(foot(end, 0)[1] - P.y) > 1e-9 || Math.abs(foot(end, 1)[1] - P.y) > 1e-9) bad.push(tilt + ': does not end upright on both feet');
+        if (!(foot(end, 0)[0] >= P.x0 && foot(end, 1)[0] <= P.x1)) bad.push(tilt + ': ends off the pad');
+        for (let t = 0; t <= 0.6; t += 0.02) {
+          const q = at(t), fp = foot(q, lo);
+          if (Math.hypot(fp[0] - pv[0], fp[1] - pv[1]) > 1e-9) { bad.push(tilt + ': the lower foot moved'); break; }
+          steps.push(Math.abs(q.a));
+        }
+        const d = steps.slice(1).map((v, i) => steps[i] - v), moving = d.filter((v) => v > 0);
+        if (d.some((v) => v < -1e-12)) bad.push(tilt + ': turns back');
+        if (!(moving.length >= 3 && moving.every((v, i) => i === 0 || v >= moving[i - 1] - 1e-12 || i === moving.length - 1))) bad.push(tilt + ': does not speed up as it falls');
+        if (at(0.5).a !== 0) bad.push(tilt + ': still tilted after half a second');
+      }
+      ok(cases === 4 && bad.length === 0, 'a ship landed at a tilt tips about its lower foot onto both feet within half a second (' + cases + ' tilts' + (bad.length ? '; ' + bad.join(', ') : '') + ') (#1247)');
+      ok(/if \(S\.landed\) return E\.settle\(S, /.test(html), 'the page draws a landed ship with E.settle (#1247)');
+    }
+
     // the pad is flat, inside the walls, and its edges are not sheer walls
     let padOk = 0, padN = 0;
     for (let lv = 1; lv <= 16; lv++) {

@@ -20,8 +20,10 @@
     position: relative;
   }
   /* لبه‌ای که ستون پنهان دارد محو می‌شود و پیکان می‌گیرد (#101) */
-  .ms-frame::before, .ms-frame::after {
+  .ms-frame::before, .ms-frame::after, .ms-edge {
     content: ''; position: absolute; top: 0; bottom: 0; width: 30px; z-index: 1;
+    /* ‹ and › are mirrored characters: in Persian each was drawn as the other (#1232) */
+    direction: ltr;
     pointer-events: none; opacity: 0; transition: opacity var(--t-fast) var(--ease);
     display: flex; align-items: center; justify-content: center;
     font-size: 26px; font-weight: 800; color: var(--ms-arrow, var(--game));
@@ -29,6 +31,12 @@
   .ms-frame::before { content: '‹'; left: 0; background: linear-gradient(to right, var(--ms-gap, var(--c-line)) 35%, transparent); }
   .ms-frame::after { content: '›'; right: 0; background: linear-gradient(to left, var(--ms-gap, var(--c-line)) 35%, transparent); }
   .ms-frame.ms-more-left::before, .ms-frame.ms-more-right::after { opacity: 1; }
+  /* rows hidden above or below get the same sign as hidden columns (#1232) */
+  .ms-edge-up, .ms-edge-down { left: 0; right: 0; width: auto; height: 30px; }
+  .ms-edge-up { bottom: auto; background: linear-gradient(to bottom, var(--ms-gap, var(--c-line)) 35%, transparent); }
+  .ms-edge-down { top: auto; background: linear-gradient(to top, var(--ms-gap, var(--c-line)) 35%, transparent); }
+  .ms-edge span { display: block; line-height: 1; transform: rotate(90deg); }
+  .ms-more-up .ms-edge-up, .ms-more-down .ms-edge-down { opacity: 1; }
   .ms-scroll {
     max-width: 100%; overflow: auto; overscroll-behavior: contain;
     background: var(--ms-gap, var(--c-line)); border-radius: var(--ms-inner-r);
@@ -608,7 +616,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
 
   var board = el('div', { class: 'ms-board', role: 'grid' });
   var scroll = el('div', { class: 'ms-scroll' }, [board]);
-  var frame = el('div', { class: 'ms-frame' }, [scroll]);
+  var frame = el('div', { class: 'ms-frame' }, [scroll,
+    el('div', { class: 'ms-edge ms-edge-up', 'aria-hidden': 'true' }, [el('span', { text: '‹' })]),
+    el('div', { class: 'ms-edge ms-edge-down', 'aria-hidden': 'true' }, [el('span', { text: '›' })])]);
   var top = el('div', { class: 'ms-top' });
   var tools = el('div', { class: 'ms-tools' });
   var wrap = el('div', { class: 'ms-wrap' }, [top, frame, tools]);
@@ -849,6 +859,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = MinesEngin
     var e = E.scrollEdges(scroll.scrollLeft, scroll.scrollWidth, scroll.clientWidth, rtl);
     frame.classList.toggle('ms-more-left', e.left);
     frame.classList.toggle('ms-more-right', e.right);
+    // the same rule read top to bottom: its left is up, its right is down
+    var v = E.scrollEdges(scroll.scrollTop, scroll.scrollHeight, scroll.clientHeight, false);
+    frame.classList.toggle('ms-more-up', v.left);
+    frame.classList.toggle('ms-more-down', v.right);
   }
   scroll.addEventListener('scroll', markEdges, { passive: true });
 

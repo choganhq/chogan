@@ -112,6 +112,32 @@ module.exports = function (T) {
     }
     ok(slides > 1000 && crossed === 0, 'a roll or a drag only ever moves through open sides (' + slides + ' tried, ' + crossed + ' through a wall)');
     {
+      // #1242: a tap the ball could reach only part of the way walked it into a side
+      // passage and spent steps; now such a tap moves nothing, a reachable one walks all the way
+      // A walk that ends on the exit counts as reaching: a tap past the exit still wins.
+      let short = 0, full = 0, past = 0, wrong = 0;
+      for (let k = 0; k < 10; k++) {
+        const M = E.generate(E.SIZES[k % 3], rng(124200 + k));
+        for (let i = 0; i < M.n * M.n; i += 5) for (let t = 0; t < M.n * M.n; t += 7) {
+          if (t === i) continue;
+          const q = E.toward(M, i, t), p = typeof E.tapPath === 'function' ? E.tapPath(M, i, t) : q, last = q[q.length - 1];
+          if (q.length && (last === t || last === M.exit)) { full++; if (last !== t) past++; if (p.join() !== q.join()) wrong++; }
+          else { short++; if (p.length) wrong++; }
+        }
+        // the ball beside the exit, tapping every cell: some of those walks end on the exit
+        for (let i = 0; i < M.n * M.n; i++) {
+          if (Math.abs(i - M.exit) !== 1 && Math.abs(i - M.exit) !== M.n) continue;
+          for (let t = 0; t < M.n * M.n; t++) {
+            if (t === i || t === M.exit) continue;
+            const q = E.toward(M, i, t), p = typeof E.tapPath === 'function' ? E.tapPath(M, i, t) : q;
+            if (q.length && q[q.length - 1] === M.exit) { past++; if (p.join() !== q.join()) wrong++; }
+          }
+        }
+      }
+      ok(short > 100 && full > 100 && past > 0 && wrong === 0, 'a tap walks the ball only when it can reach the tapped cell or the exit (' + full + ' reachable, ' + past + ' past the exit, ' + short + ' not, ' + wrong + ' wrong) (#1242)');
+      ok(/E\.tapPath\(M, pos\(\), c\)/.test(html) && /C\.t\('mzCloser'\)/.test(html), 'a tap that cannot reach its cell shows the tap-closer hint instead of moving (#1242)');
+    }
+    {
       const M = E.generate(16, rng(31337)), P = E.solve(M), trail = [0];
       let c = 0, steps = 0;
       for (let i = 1; i < P.length && c !== M.exit; i++) { const q = E.toward(M, c, P[i]); for (const j of q) { E.walk(trail, j); steps++; c = j; } }
@@ -137,6 +163,9 @@ module.exports = function (T) {
       ok(tr.length === 1 && tr[0] === 0, 'stepping back onto the cell before takes the last cell off the trail');
     }
     ok(E.stars(10, 10) === 3 && E.stars(12, 10) === 3 && E.stars(13, 10) === 2 && E.stars(20, 10) === 2 && E.stars(21, 10) === 1 && E.stars(9999, 10) === 1, 'three stars near par, two within twice par, then one: never a loss');
+    // #1241: a walk of exactly par steps was told "Almost the shortest way!"
+    ok(typeof E.verdict === 'function' && E.verdict(10, 10) === 'shortest' && E.verdict(11, 10) === 'almost' && E.verdict(12, 10) === 'almost' && E.verdict(13, 10) === null, 'the win note says the shortest way at par, almost it within three stars, nothing below (#1241)');
+    ok(/vd === 'shortest' \? C\.t\('shortestMz'\)/.test(html), 'the win screen shows the shortest-way note from the verdict (#1241)');
     {
       const M = E.generate(8, rng(77)), j = E.step(M, 0, E.open(M, 0, Ea) ? Ea : S);
       const good = { n: 8, seed: 77, trail: [0, j], steps: 1, daily: null };
