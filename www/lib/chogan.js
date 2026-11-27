@@ -213,6 +213,19 @@
       },
       remove: function (key) { rawDel(pre + key); },
       has: function (key) { return rawGet(pre + key) !== null; },
+      // whether this game has stored anything at all on this device (#1248)
+      any: function () {
+        try {
+          if (lsOk) {
+            for (var i = 0; i < global.localStorage.length; i++) {
+              var k = global.localStorage.key(i);
+              if (k && k.indexOf(pre) === 0) return true;
+            }
+          }
+        } catch (e) { /* unreadable storage: fall through to the memory copy */ }
+        for (var m in memFallback) if (m.indexOf(pre) === 0) return true;
+        return false;
+      },
       // پاک کردن کامل داده‌ی همین بازی. فقط از تنظیمات صدا زده می‌شود.
       wipe: function () {
         var keys = [];
@@ -2414,6 +2427,27 @@
   };
   Chogan.stats = statsApi;
 
+  // A first-time player of a game, for defaults that should differ for them (#1248: the bots
+  // start on Easy; a medium bot put children off at the first game). Anyone the game has
+  // seen before, even one who only played the daily or left a game unfinished, is not new,
+  // so a default never changes under a player who is used to it. Read it before the game
+  // writes anything: Chogan.game takes it once, as ctx.newcomer.
+  Chogan.newcomer = function (id) {
+    if (Chogan.storage(id).get('startEasy', false)) return true;
+    if (Chogan.storage(id).any()) return false;
+    var g = state.stats.byGame[id];
+    return !(g && (g.plays > 0 || g.wins > 0 || (g.best && Object.keys(g.best).length)));
+  };
+
+  // The first visit leaves other keys behind (tutorial seen, a session) but not the level
+  // nobody touched, so without this mark a child would meet the medium bot at the second
+  // visit. Returns what newcomer() said.
+  Chogan.startNewcomer = function (id) {
+    var yes = Chogan.newcomer(id);
+    if (yes) Chogan.storage(id).set('startEasy', true);
+    return yes;
+  };
+
   /* ==================================== recently played and pinned (#193) */
   // Stats only change when a round ends, so a game left half-played never looked
   // played. Recent is written when a game page opens; pins live in the settings.
@@ -4156,6 +4190,8 @@
 
   Chogan.game = function (cfg) {
     var store = Chogan.storage(cfg.id);
+    // before anything below or in the game writes a key for it (#1248)
+    var newcomer = Chogan.startNewcomer(cfg.id);
     Chogan.recent.touch(cfg.id);
     Chogan.keepAwake.hold();
     if (cfg.strings) Chogan.strings(cfg.strings);
@@ -4222,6 +4258,11 @@
     var ctx = {
       id: cfg.id,
       store: store,
+      newcomer: newcomer,
+      // The opponent level a game starts on when nothing is saved (#1248): Easy for a
+      // first-time player, the game's old default for everyone else. A saved choice and the
+      // daily challenge never come here. Levels named by number pass their easy value.
+      firstLevel: function (old, easy) { return newcomer ? (arguments.length > 1 ? easy : 'easy') : old; },
       root: root,
       bar: bar,
       main: main,
