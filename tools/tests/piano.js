@@ -53,6 +53,12 @@ module.exports = function (T) {
       frere: [60, 62, 64, 60, 60, 62, 64, 60], row: [60, 60, 60, 62, 64], macdonald: [60, 60, 60, 67, 69, 69, 67], buns: [64, 62, 60], saints: [60, 64, 65, 67], susanna: [60, 62, 64, 67, 67, 69, 67], lightly: [67, 64, 64, 65, 62, 62], deck: [72, 71, 69, 67, 65, 67, 69, 65], cucaracha: [60, 60, 60, 65, 69], itsy: [67, 60, 60, 60, 62, 64], canon: [72, 67, 69, 64, 65, 60, 65, 67] };
     ok(E.TUNES.every((t) => same(E.tune(t.id).slice(0, firsts[t.id].length).map((n) => n.m), firsts[t.id])), 'each tune opens with its known notes (' + Object.keys(firsts).join(', ') + ')');
     ok(E.TUNES.every((t) => { const n = E.tune(t.id); return n.length >= 20 && n.every((x) => x.m >= 60 && x.m <= 72 && !E.isBlack(x.m) && x.beats > 0); }), 'every note of every tune is a white key between C4 and C5, so all of it fits the 8 keys of an upright phone');
+    {
+      // #1243: the C and D of "with my" in Oh! Susanna are a beat each, as long as the E's
+      // after them; the C was half a beat, so that bar was a beat short
+      const n = E.tune('susanna'), sum = (a) => a.reduce((t, x) => t + x.beats, 0);
+      ok(n[8].m === 60 && n[8].beats === 1 && n[9].beats === 1 && n[23].m === 60 && n[23].beats === 1 && n[24].beats === 1 && sum(n.slice(2, 6)) === 4 && sum(n.slice(6, 10)) === 4 && sum(n) === 30, 'Oh! Susanna: each "with my" is a C and a D of one beat, as long as the E\'s, every bar four beats, ' + sum(n) + ' beats in all (#1243)');
+    }
     let allRight = true;
     for (const t of E.TUNES) {
       const P = E.practice(t.id), n = E.tune(t.id);
@@ -66,8 +72,17 @@ module.exports = function (T) {
       const Q = E.practice('london');   // opens with a 1.5-beat note, then a half beat, then whole beats
       const need = [];
       for (let k = 0; k < 4; k++) { need.push(E.need(Q)); E.press(Q, Q.notes[Q.i].m); E.advance(Q); }
-      ok(need[0] === Math.round(1.5 * E.BEAT_MS * E.HOLD) && need[1] === Math.round(0.5 * E.BEAT_MS * E.HOLD) && need[2] === Math.round(E.BEAT_MS * E.HOLD) && need[0] > need[2] && need[2] > need[1] && E.HOLD > 0.5 && E.HOLD < 1, 'a longer note has to be held longer (1.5 beats > 1 beat > half a beat), at most its own length: ' + need.join(', ') + ' ms');
-      ok(E.need(null) === 0 && E.need(E.practice('mary')) === Math.round(E.BEAT_MS * E.HOLD), 'free play needs no hold; a one-beat note needs ' + Math.round(E.BEAT_MS * E.HOLD) + ' ms');
+      ok(need[0] === Math.round((1.5 * E.BEAT_MS - E.GAP) * E.HOLD) && need[1] === Math.round((0.5 * E.BEAT_MS - E.GAP) * E.HOLD) && need[2] === Math.round((E.BEAT_MS - E.GAP) * E.HOLD) && need[0] > need[2] && need[2] > need[1] && E.HOLD > 0.5 && E.HOLD < 1, 'a longer note has to be held longer (1.5 beats > 1 beat > half a beat), at most its own length: ' + need.join(', ') + ' ms');
+      ok(E.need(null) === 0 && E.need(E.practice('mary')) === Math.round((E.BEAT_MS - E.GAP) * E.HOLD), 'free play needs no hold; a one-beat note needs ' + Math.round((E.BEAT_MS - E.GAP) * E.HOLD) + ' ms');
+      // #1244: a player copying Listen's pace must be fast enough. Listen sounds a note for
+      // its beats less the gap; the hold must be well under that for every note of every tune.
+      let over = [], notes = 0;
+      for (const t of E.TUNES) {
+        const P = E.practice(t.id);
+        for (let k = 0; k < P.notes.length; k++) { P.i = k; notes++; const sounds = P.notes[k].beats * E.BEAT_MS - E.GAP; if (E.need(P) > sounds * 0.75) over.push(t.id + '#' + k + ' ' + E.need(P) + '>' + Math.round(sounds * 0.75)); }
+      }
+      ok(notes > 300 && !over.length, 'every one of ' + notes + ' tune notes asks for at most three quarters of what Listen sounds (#1244)' + (over.length ? ': ' + over.slice(0, 5).join(', ') : ''));
+      ok(/setTimeout\(next, E\.GAP\); \}, len - E\.GAP\)/.test(html), 'Listen leaves the same GAP before each next note that the hold is measured from (#1244)');
     }
     E.tune('mary').slice(1).forEach((x) => { E.press(P, x.m); E.advance(P); });
     ok(E.expected(P) === -1 && E.press(P, 64) === 'hold' && P.i === 0 && E.press(null, 60) === 'free' && E.practice('nope') === null, 'after the end the next key starts the tune again; free play has no tune');
