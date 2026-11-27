@@ -9991,7 +9991,9 @@ function testCueAimDefault() {
     ok(!!get && !!norm, g + ': the prefs default and its check are found');
     if (!get || !norm) continue;
     // the store returns the saved object as it is, or the default when nothing is saved
-    const aimFor = (saved) => new Function('saved', 'var prefs = saved === undefined ? ' + get[1] + ' : saved;' + norm[1] + ' return prefs.aim;')(saved);
+    // the default's level comes from ctx.firstLevel since #1248; the aim does not depend on it
+    const ctx = { firstLevel: (old) => old };
+    const aimFor = (saved) => new Function('saved', 'ctx', 'var prefs = saved === undefined ? ' + get[1] + ' : saved;' + norm[1] + ' return prefs.aim;')(saved, ctx);
     ok(aimFor(undefined) === 'turn', g + ': with nothing saved the aim is turn (' + aimFor(undefined) + ')');
     ok(aimFor({ mode: 'ai', aim: 'point' }) === 'point', g + ': a saved point choice stays point');
     ok(aimFor({ mode: 'ai' }) === 'point', g + ': a save from before the setting existed stays point');
