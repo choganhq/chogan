@@ -98,6 +98,22 @@ module.exports = function (T) {
       const all = []; for (let t = 1; t <= 14; t++) all.push(B.face(t, false, { faces: 's', marks: false }));
       ok(new Set(all).size === 14, 'all fourteen Shogi faces differ with symbols');
     }
+    // the move list follows the choice too, or the letters come back beside symbol pieces
+    const mv = sh.match(/function note\(h\) \{[\s\S]*?\n {2}function moveNode[\s\S]*?\n {2}\}/);
+    ok(!!mv, 'Shogi builds its move list entries in moveNode()');
+    if (mv && Array.isArray(SY)) {
+      const node = () => ({ kids: [], textContent: '', innerHTML: '', appendChild(c) { this.kids.push(c); } });
+      const draw = (faces, p) => {
+        const box = { prefs: { faces }, SYMBOL: SY, LATIN: ['', 'P', 'L', 'N', 'S', 'G', 'B', 'R', 'K', '+P', '+L', '+N', '+S', '+B', '+R'], C: { pieceArt: A },
+          sqName: () => '7f', el: node, document: { createTextNode: (x) => ({ textContent: x, kids: [], innerHTML: '' }) } };
+        vm.createContext(box);
+        const n = vm.runInContext(mv[0] + ';moveNode(0, { s: 0, p: ' + p + ', t: 1 })', box);
+        return { text: n.textContent + n.kids.map((c) => c.textContent).join(''), art: n.kids.map((c) => c.innerHTML).join('') };
+      };
+      ok(draw('k', 1).text === '1. ▲P-7f' && !draw('k', 1).art, 'without symbols the move list is as before');
+      const sym = draw('s', 14);
+      ok(sym.text === '1. ▲-7f' && sym.art.indexOf(A('rook', 'var(--c-surface-2)', { star: true })) > 0, 'with symbols a move shows the drawn piece, no letters (' + sym.text + ')');
+    }
     ok(/value: 's', label: C\.t\('faceSymbols'\)/.test(sh), 'Shogi\'s gear offers the symbols beside Japanese and Letters');
     const ss = strings(sh);
     let miss = everyLang(ss, ['faceSymbols', 'symNote']);

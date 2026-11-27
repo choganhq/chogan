@@ -168,8 +168,12 @@
     background: var(--c-surface-2);
     border-radius: var(--r-sm);
     padding: 2px 7px;
+    padding: 2px 7px;
     color: var(--c-text-dim);
   }
+  .sg-move__sym { display: inline-block; width: 15px; height: 15px; vertical-align: -3px; margin: 0 1px; }
+  .sg-move__sym svg { width: 100%; height: 100%; display: block; }
+  .sg-move__sym--red { color: var(--sg-red); }
   .sg-help-row { display: flex; gap: 10px; align-items: center; margin: 6px 0; }
   .sg-help-row .sg-pc { position: relative; transform: none; flex: 0 0 auto; --sg-pc: 44px; }
   .sg-help-row p { margin: 0; }
@@ -1045,6 +1049,19 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ShogiEngin
     return (h.s ? '△' : '▲') + LATIN[h.p] + (h.d ? '*' : (h.cap ? 'x' : '-')) + sqName(h.t) + (h.pr ? '+' : '');
   }
 
+  // with symbols on, a letter in the move list would bring back what they replace (#1246)
+  function moveNode(i, h) {
+    var m = el('span', { class: 'sg-move' }), n = (i + 1) + '. ', t = note(h);
+    if (prefs.faces !== 's') { m.textContent = n + t; return m; }
+    var ic = el('span', { class: 'sg-move__sym' + (h.p > 8 ? ' sg-move__sym--red' : '') });
+    ic.innerHTML = '<svg viewBox="0 0 45 45" aria-hidden="true">' +
+      C.pieceArt(SYMBOL[h.p], 'var(--c-surface-2)', { star: h.p > 8 }) + '</svg>';
+    m.appendChild(document.createTextNode(n + t.charAt(0)));
+    m.appendChild(ic);
+    m.appendChild(document.createTextNode(t.slice(1 + LATIN[h.p].length)));
+    return m;
+  }
+
   function renderPieces() {
     layer.textContent = '';
     var i, xy, n, h = S.hist.length ? S.hist[S.hist.length - 1] : null;
@@ -1122,7 +1139,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = ShogiEngin
     statusEl.classList.toggle('sg-status--bad', !!(st.check && !st.over));
     movesEl.textContent = '';
     for (var i = Math.max(0, S.hist.length - 12); i < S.hist.length; i++) {
-      movesEl.appendChild(el('span', { class: 'sg-move', text: (i + 1) + '. ' + note(S.hist[i]) }));
+      movesEl.appendChild(moveNode(i, S.hist[i]));
     }
     movesEl.scrollTop = movesEl.scrollHeight;
   }
