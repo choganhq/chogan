@@ -72,8 +72,17 @@ module.exports = function (T) {
       const Q = E.practice('london');   // opens with a 1.5-beat note, then a half beat, then whole beats
       const need = [];
       for (let k = 0; k < 4; k++) { need.push(E.need(Q)); E.press(Q, Q.notes[Q.i].m); E.advance(Q); }
-      ok(need[0] === Math.round(1.5 * E.BEAT_MS * E.HOLD) && need[1] === Math.round(0.5 * E.BEAT_MS * E.HOLD) && need[2] === Math.round(E.BEAT_MS * E.HOLD) && need[0] > need[2] && need[2] > need[1] && E.HOLD > 0.5 && E.HOLD < 1, 'a longer note has to be held longer (1.5 beats > 1 beat > half a beat), at most its own length: ' + need.join(', ') + ' ms');
-      ok(E.need(null) === 0 && E.need(E.practice('mary')) === Math.round(E.BEAT_MS * E.HOLD), 'free play needs no hold; a one-beat note needs ' + Math.round(E.BEAT_MS * E.HOLD) + ' ms');
+      ok(need[0] === Math.round((1.5 * E.BEAT_MS - E.GAP) * E.HOLD) && need[1] === Math.round((0.5 * E.BEAT_MS - E.GAP) * E.HOLD) && need[2] === Math.round((E.BEAT_MS - E.GAP) * E.HOLD) && need[0] > need[2] && need[2] > need[1] && E.HOLD > 0.5 && E.HOLD < 1, 'a longer note has to be held longer (1.5 beats > 1 beat > half a beat), at most its own length: ' + need.join(', ') + ' ms');
+      ok(E.need(null) === 0 && E.need(E.practice('mary')) === Math.round((E.BEAT_MS - E.GAP) * E.HOLD), 'free play needs no hold; a one-beat note needs ' + Math.round((E.BEAT_MS - E.GAP) * E.HOLD) + ' ms');
+      // #1244: a player copying Listen's pace must be fast enough. Listen sounds a note for
+      // its beats less the gap; the hold must be well under that for every note of every tune.
+      let over = [], notes = 0;
+      for (const t of E.TUNES) {
+        const P = E.practice(t.id);
+        for (let k = 0; k < P.notes.length; k++) { P.i = k; notes++; const sounds = P.notes[k].beats * E.BEAT_MS - E.GAP; if (E.need(P) > sounds * 0.75) over.push(t.id + '#' + k + ' ' + E.need(P) + '>' + Math.round(sounds * 0.75)); }
+      }
+      ok(notes > 300 && !over.length, 'every one of ' + notes + ' tune notes asks for at most three quarters of what Listen sounds (#1244)' + (over.length ? ': ' + over.slice(0, 5).join(', ') : ''));
+      ok(/setTimeout\(next, E\.GAP\); \}, len - E\.GAP\)/.test(html), 'Listen leaves the same GAP before each next note that the hold is measured from (#1244)');
     }
     E.tune('mary').slice(1).forEach((x) => { E.press(P, x.m); E.advance(P); });
     ok(E.expected(P) === -1 && E.press(P, 64) === 'hold' && P.i === 0 && E.press(null, 60) === 'free' && E.practice('nope') === null, 'after the end the next key starts the tune again; free play has no tune');

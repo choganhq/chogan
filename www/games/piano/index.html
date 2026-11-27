@@ -170,14 +170,19 @@ function PianoEngineFactory() {
     if (m !== P.notes[P.i].m) return 'miss';
     return 'hold';
   }
-  function need(P) { return P && P.i < P.notes.length ? Math.max(120, Math.round(P.notes[P.i].beats * BEAT_MS * HOLD)) : 0; }
+  // HOLD is a share of what Listen actually sounds (the beat less the GAP before the next
+  // note), so a player who copies the demo's pace always holds long enough and may go
+  // faster (#1244: at 0.8 of the whole beat with a 120 ms floor, a half-beat note needed
+  // 208 ms while Listen sounded it for 190).
+  function need(P) { return P && P.i < P.notes.length ? Math.max(40, Math.round((P.notes[P.i].beats * BEAT_MS - GAP) * HOLD)) : 0; }
   // the held note was long enough: move on
   function advance(P) {
     P.i++;
     return P.i === P.notes.length ? 'done' : 'hit';
   }
   var BEAT_MS = 520;
-  var HOLD = 0.8;
+  var HOLD = 0.6;
+  var GAP = 70;
 
   /* ------------------------------------------------------- recording */
   // #1104: a recording is the notes played, each with its start and length in ms. It is read
@@ -214,7 +219,7 @@ function PianoEngineFactory() {
     freq: freq, isBlack: isBlack, octave: octave, step: step, name: name, parse: parse,
     whitesFor: whitesFor, windowStart: windowStart, layout: layout, hit: hit, shown: shown,
     keyNote: keyNote, keyFor: keyFor, shift: shift,
-    tune: tune, practice: practice, expected: expected, press: press, need: need, advance: advance, HOLD: HOLD,
+    tune: tune, practice: practice, expected: expected, press: press, need: need, advance: advance, HOLD: HOLD, GAP: GAP,
     REC_MAX_NOTES: REC_MAX_NOTES, REC_MAX_MS: REC_MAX_MS, recClean: recClean, recSpan: recSpan
   };
 }
@@ -772,7 +777,7 @@ if (typeof module !== 'undefined') module.exports = PianoEngineFactory;
       draw();
       var len = n.beats * E.BEAT_MS;
       // a short gap before the next note, so two of the same note are heard as two
-      demo.timer = setTimeout(function () { if (!demo) return; release(demo.h); demo.h = null; demoLit = -1; draw(); demo.timer = setTimeout(next, 70); }, len - 70);
+      demo.timer = setTimeout(function () { if (!demo) return; release(demo.h); demo.h = null; demoLit = -1; draw(); demo.timer = setTimeout(next, E.GAP); }, len - E.GAP);
     }
     showStatus();
     next();
