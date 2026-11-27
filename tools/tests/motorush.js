@@ -404,7 +404,7 @@ module.exports = function (T) {
     const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
     ok(strKeys.every((k) => (html.match(new RegExp('\\b' + k + ": '[^']+'", 'g')) || []).length === LOCALE_CODES.length), 'the new strings exist in every language');
     ok(strKeys.every((k) => !new RegExp('\\b' + k + ':').test(core)), 'none of them is named like a core string');
-    ok(/ctx\.button\(\{ icon: 'gear'/.test(html) && /C\.ui\.segmented\(DIFFS\.map/.test(html) && /ctx\.store\.set\('prefs', prefs\)/.test(html) && /prefs = \{ diff: 'medium' \}/.test(html), 'the difficulty is picked behind a gear, saved, Medium by default');
+    ok(/ctx\.button\(\{ icon: 'gear'/.test(html) && /C\.ui\.segmented\(DIFFS\.map/.test(html) && /ctx\.store\.set\('prefs', prefs\)/.test(html) && /prefs = \{ diff: ctx\.firstLevel\('medium'\) \}/.test(html), 'the difficulty is picked behind a gear, saved, Easy for a first-time player and Medium for a returning one (#1248)');
     const help = (html.match(/function showHelp\(\) \{[\s\S]*?\n {2}\}/) || [''])[0];
     ok(help.length > 0 && !/segmented|DIFFS|difficulty/.test(help), 'and never inside the help');
     ok(/E\.newGame\(rngFor\(seed\), !!dailyDate, prefs\.diff[,)]/.test(html) && /C\.t\('dailyMed'\)/.test(html), 'the daily ride says it is always Medium');
