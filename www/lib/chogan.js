@@ -2934,6 +2934,55 @@
     arm();
   })();
 
+  /* ======================================================= piece symbols */
+  // Drawn piece symbols for the Asian chess games (#1246). A player who cannot read
+  // the Chinese or Japanese characters, and for whom Shogi's Latin letters are not their
+  // own language's initials, could not tell the pieces apart. These are our own shapes,
+  // in the spirit of Western chess pieces (the usual chess sets are GPL), shared so Shogi
+  // and Xiangqi draw the same king, rook, knight and pawn. Each is a solid silhouette on a
+  // 45×45 box in currentColor, so a side's colour comes from the game's CSS; `cut` paints
+  // the details (eye, ear, tusk, hub) in the piece's face colour. Returns SVG markup
+  // without the <svg> element, for the game to place and scale.
+  /* ==== PIECE ART START ==== */
+  Chogan.pieceArt = (function () {
+    var BASE = '<path d="M11 34h23v4.5H11z"/>';
+    var ART = {
+      king: '<path d="M12.5 34l1.5-4c-4-2.5-6-7-3.5-11 3-4.5 9.5-2 12 2.5 2.5-4.5 9-7 12-2.5 2.5 4 .5 8.5-3.5 11l1.5 4z"/>' +
+        '<path d="M22.5 4v12M18 8.5h9" L/><path d="M15 26.5h15" C/>',
+      rook: '<path d="M14.5 34l1.5-14h13l1.5 14zM13 12h4.2v3.4h2.6V12h5.4v3.4h2.6V12H32v8H13z"/><path d="M17 25h11" C/>',
+      knight: '<path d="M12 34c.5-6 7.5-8.5 8-15l-3.5 3.5L12 21c1-6 5.5-10.5 12-10l4.5-3.5L28 14c3.5 5 5.2 11 5 20z"/><circle cx="20.5" cy="16.5" r="1.6" F/>',
+      bishop: '<path d="M16.5 34l1.5-6c-3.5-3-4.5-7-1.5-12l6-6 6 6c3 5 2 9-1.5 12l1.5 6z"/><circle cx="22.5" cy="7" r="2.8"/><path d="M22.5 14.5v8M18.5 18.5h8" C/>',
+      pawn: '<circle cx="22.5" cy="13.5" r="6"/><path d="M17.5 20.5h10l3 13.5h-16z"/>',
+      // the advisor is an official: a winged hat over a robe
+      advisor: '<path d="M15.5 34l3-11.5h8l3 11.5z"/><circle cx="22.5" cy="17" r="4.6"/><path d="M17.3 12.8a5.2 5.2 0 0 1 10.4 0z"/>' +
+        '<path d="M9 12.6h27" L/><path d="M19 28h7" C/>',
+      elephant: '<path d="M33 34C34 24 32 13 24 11C17.5 10 12 14 11 21L10 30.5C9.8 33 12.5 34 13.5 32L15 26.5C16 25.5 17.5 26 18 27.5L19 34z"/>' +
+        '<path d="M25 15.5c4 0 6.5 3 6 7.5-.4 3-3 4.2-5.2 3.6" C/><circle cx="18" cy="17.5" r="1.5" F/><path d="M17.2 24.6l-4.2 3.4" C/>',
+      cannon: '<path d="M12.5 28.5L33.5 16" L W/><path d="M28.4 15.4l3 5" C/><circle cx="20.5" cy="28" r="6.5"/><circle cx="20.5" cy="28" r="3.4" C/><circle cx="20.5" cy="28" r="1.3" F/>',
+      // Shogi's gold and silver generals are the alchemists' sun and moon
+      gold: '<circle cx="22.5" cy="18.5" r="7.5"/><circle cx="22.5" cy="18.5" r="2" F/>' +
+        '<path d="M22.5 5v3.5M22.5 28.5V32M9 18.5h3.5M32.5 18.5H36M13 9l2.5 2.5M29.5 25.5L32 28M32 9l-2.5 2.5M15.5 25.5L13 28" L/>',
+      silver: '<path d="M26 7.6A12 12 0 1 0 26 30.4A13 13 0 0 1 26 7.6z"/>',
+      lance: '<path d="M22.5 4l6.5 11h-13z"/><path d="M22.5 14v20" L W/><path d="M18 20h9" L/>'
+    };
+    // the five-pointed star a promoted Shogi piece wears in its corner
+    var STAR = '<path d="M39 1.6l1.5 3.3 3.6.4-2.7 2.4.8 3.5-3.2-1.8-3.2 1.8.8-3.5-2.7-2.4 3.6-.4z"/>';
+    function art(name, cut, o) {
+      var s = ART[name];
+      if (!s) return '';
+      cut = cut || '#fff';
+      s = s.replace(/ L W\/>/g, ' fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round"/>')
+        .replace(/ L\/>/g, ' fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"/>')
+        .replace(/ C\/>/g, ' fill="none" style="stroke:' + cut + '" stroke-width="1.9" stroke-linecap="round"/>')
+        .replace(/ F\/>/g, ' style="fill:' + cut + '"/>');
+      return '<g fill="currentColor">' + (name === 'cannon' ? BASE.replace('M11 34', 'M11 35').replace('v4.5', 'v3.5') : BASE) + s +
+        (o && o.star ? STAR : '') + '</g>';
+    }
+    art.names = Object.keys(ART);
+    return art;
+  })();
+  /* ==== PIECE ART END ==== */
+
   /* ======================================================= playing cards */
   // Shared by every card game (Pasur, Hokm): a game never draws its own deck (#178).
   // A card is rank << 2 | suit: rank 0 ace … 9 ten, 10 jack, 11 queen, 12 king;

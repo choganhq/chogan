@@ -5506,7 +5506,8 @@ function testChessFaceToFace() {
   ok(/@container game \(max-aspect-ratio: 5 \/ 4\) \{ \.cs-player--face \{ transform: rotate\(180deg\); \} \}/.test(cs), 'the row above the board turns too, only while it is above the board');
   const xq = fs.readFileSync(path.join(ROOT, 'www/games/xiangqi/index.html'), 'utf8');
   ok(/\.xq-face \.xq-piece--b \.xq-glyph \{ display: inline-block; transform: rotate\(180deg\); \}/.test(xq) && /board\.classList\.toggle\('xq-face', S\.mode === 'two' && prefs\.face\);/.test(xq), 'Chinese chess turns Black\'s characters face to face, with two players only');
-  ok((xq.match(/face: prefs\.face \}/g) || []).length >= 3 && /face: !!prefs\.face \}/.test(xq), 'Chinese chess remembers the choice wherever it saves its settings');
+  // since #1246 every save goes through storePrefs() -> normPrefs(), so one place must keep the choice
+  ok((xq.match(/ctx\.store\.set\('prefs'/g) || []).length === 1 && /ctx\.store\.set\('prefs', normPrefs\(prefs\)\)/.test(xq) && /function normPrefs\(p\) \{[\s\S]{0,300}?face: !!p\.face/.test(xq), 'Chinese chess remembers the choice wherever it saves its settings');
   const keys = ['faceToFace'].every((k) => (cs.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length === LOCALE_CODES.length && (xq.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length === LOCALE_CODES.length);
   ok(keys, 'the option is named in every language in both games');
 }
