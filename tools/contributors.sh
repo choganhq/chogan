@@ -19,12 +19,19 @@ REPO="choganhq/chogan"
 OWNER_LOGIN="margani"
 tag="${1:-}"
 
+# Offline means no network: a clone that has the tag has what it needs. Without this,
+# tools/test.js made two remote calls per release and a local run took over ten minutes.
 releases() {
-  { git tag -l 'v*'; git ls-remote --tags --refs origin 'v*' 2>/dev/null | sed 's#.*refs/tags/##'; } \
-    | grep -v -- '-test$' | sort -u -V
+  {
+    git tag -l 'v*'
+    if [ "${CONTRIBUTORS_OFFLINE:-0}" != "1" ] || ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+      git ls-remote --tags --refs origin 'v*' 2>/dev/null | sed 's#.*refs/tags/##'
+    fi
+  } | grep -v -- '-test$' | sort -u -V
 }
-releases | grep -qx -- "$tag" || { echo "Not a release tag: $tag" >&2; exit 2; }
-prev=$(releases | awk -v t="$tag" '$0 == t { print p; exit } { p = $0 }')
+all=$(releases)
+grep -qx -- "$tag" <<<"$all" || { echo "Not a release tag: $tag" >&2; exit 2; }
+prev=$(awk -v t="$tag" '$0 == t { print p; exit } { p = $0 }' <<<"$all")
 
 # A GitHub noreply address names its login; anything else is left out offline
 login_of_email() { sed -n 's/^\([0-9]*+\)\{0,1\}\([A-Za-z0-9-]*\(\[bot\]\)\{0,1\}\)@users\.noreply\.github\.com$/\2/p'; }
