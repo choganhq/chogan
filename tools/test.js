@@ -11773,8 +11773,8 @@ function testPeak() {
     'play3:3 beat1:5 draw1:17',
     'play0:4',
     'play1:5 beat0:4 draw0:16',
-    'clear2:3 play2:4 beat3:3 draw3:15',
-    'play3:7 beat1:5 beat2:4 draw1:14 draw2:13'
+    'clear2:3 clear3:3 play2:4', // #1257: West's 3 was joined to South's, so it goes through too
+    'play3:7 beat1:5 beat2:4 draw1:15 draw2:14'
   ];
   const bad = log.map((l, i) => l === want[i] ? '' : (i + 1) + ': ' + l).filter(Boolean);
   ok(!bad.length, 'the issue\'s worked example plays out step by step' + (bad.length ? ' (' + bad.join(' | ') + ')' : ''));
@@ -11806,7 +11806,7 @@ function testPeak() {
   const P3 = E.clone(P2);
   E.play(P2, 9); E.play(P3, 9);
   ok(P2.pile.join() === P3.pile.join(), 'the new pile is shuffled the same way from the same position, so the daily stays the same for everyone');
-  // a beaten player always draws, so nobody can empty their hand off-turn and nobody shares a win (#635)
+  // being beaten never empties a hand: the loser always draws (#635)
   const W = E.make([[9, 2], [], [], [2]], [], [0, 3, 4, 0]);
   const wv = E.play(W, 9);
   ok(!E.over(W) && W.hands[1].length === 1 && W.hands[2].length === 1 && !wv.some((e) => e.t === 'win'), 'a beaten player with no hand draws from the reshuffled discards instead of winning');
