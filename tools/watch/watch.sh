@@ -129,7 +129,7 @@ log "claude exited $rc"
   echo "- session: \`$sid\` (\`claude --resume $sid\` in /home/dev/projects/personal/chogan)"
   echo "- log: \`$LOG\`"
   echo
-  tail -c 4000 "$OUT"
+  tail -c 4000 "$OUT" | iconv -c -f utf-8 -t utf-8
   echo
 } >>"$HERE/runs.md"
 rm -f "$OUT"
