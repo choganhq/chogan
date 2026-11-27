@@ -137,6 +137,9 @@ module.exports = function (T) {
       ok(tr.length === 1 && tr[0] === 0, 'stepping back onto the cell before takes the last cell off the trail');
     }
     ok(E.stars(10, 10) === 3 && E.stars(12, 10) === 3 && E.stars(13, 10) === 2 && E.stars(20, 10) === 2 && E.stars(21, 10) === 1 && E.stars(9999, 10) === 1, 'three stars near par, two within twice par, then one: never a loss');
+    // #1241: a walk of exactly par steps was told "Almost the shortest way!"
+    ok(typeof E.verdict === 'function' && E.verdict(10, 10) === 'shortest' && E.verdict(11, 10) === 'almost' && E.verdict(12, 10) === 'almost' && E.verdict(13, 10) === null, 'the win note says the shortest way at par, almost it within three stars, nothing below (#1241)');
+    ok(/vd === 'shortest' \? C\.t\('shortestMz'\)/.test(html), 'the win screen shows the shortest-way note from the verdict (#1241)');
     {
       const M = E.generate(8, rng(77)), j = E.step(M, 0, E.open(M, 0, Ea) ? Ea : S);
       const good = { n: 8, seed: 77, trail: [0, j], steps: 1, daily: null };
