@@ -25,7 +25,8 @@ module.exports = function (T) {
     // put the hinted digit (and another) in notes of a row, a column and a box peer, and of a non-peer
     [1, 9, 10].forEach((p) => { notes[p] = [v, (v % 9) + 1]; });
     notes[80] = [v];
-    const S = { done: false, grid, solution, notes, hinted: {}, hints: 0, puzzle: new Array(81).fill(0), undo: [] };
+    const struck = []; for (let i = 0; i < 81; i++) struck.push([]);
+    const S = { done: false, grid, solution, notes, struck, hinted: {}, hints: 0, puzzle: new Array(81).fill(0), undo: [] };
     const box = {
       E, S, selected: -1, Math, console,
       C: { coins: { can: () => true, spend() {} }, feedback() {}, ui: { toast() {} }, t: (k) => k },

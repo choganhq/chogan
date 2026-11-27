@@ -819,13 +819,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngi
       puzzle: p.puzzle,
       solution: p.solution,
       grid: p.puzzle.slice(),
-      notes: [], hinted: {},
+      notes: [], hinted: {}, struck: [],
       undo: [],
       elapsed: 0, mistakes: 0, hints: 0,
       started: Date.now(), done: false
     };
     if (killer) { S.mode = 'killer'; S.cages = p.cages; }
-    for (var i = 0; i < 81; i++) S.notes.push([]);
+    for (var i = 0; i < 81; i++) { S.notes.push([]); S.struck.push([]); }
     selected = -1;
     render();
     save();
@@ -833,6 +833,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngi
 
   function restore(s) {
     S = s;
+    // saves from before #1258 have no struck lists
+    if (!Array.isArray(S.struck) || S.struck.length !== 81) { S.struck = []; for (var i = 0; i < 81; i++) S.struck.push([]); }
     selected = -1;
     render();
   }
@@ -1100,7 +1102,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngi
   }
 
   function pushUndo() {
-    S.undo.push({ grid: S.grid.slice(), notes: JSON.stringify(S.notes), hinted: JSON.stringify(S.hinted), mistakes: S.mistakes });
+    S.undo.push({ grid: S.grid.slice(), notes: JSON.stringify(S.notes), struck: JSON.stringify(S.struck), hinted: JSON.stringify(S.hinted), mistakes: S.mistakes });
     if (S.undo.length > 400) S.undo.shift();
   }
 
@@ -1109,6 +1111,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngi
     var u = S.undo.pop();
     S.grid = u.grid;
     S.notes = JSON.parse(u.notes);
+    if (u.struck) S.struck = JSON.parse(u.struck);
     S.hinted = JSON.parse(u.hinted);
     S.mistakes = u.mistakes;
     C.feedback('tap');
@@ -1119,12 +1122,28 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngi
   function enter(v) {
     if (!S || S.done || selected < 0) { C.feedback('bad'); return; }
     if (S.puzzle[selected]) { C.feedback('bad'); C.ui.shake(cells[selected]); return; }
+    if (v && noteMode && prefs.autoNotes) {
+      // only a digit the cell could hold can be struck; anything else would hide a strike
+      // that shows up later, when a peer is erased
+      var g0 = S.grid.slice(); g0[selected] = 0;
+      if (!(liveMask(g0, selected) & (1 << v)) && S.struck[selected].indexOf(v) < 0) { C.feedback('bad'); return; }
+    }
     pushUndo();
     if (v === 0) {
       S.grid[selected] = 0;
       S.notes[selected] = [];
+      S.struck[selected] = [];
       delete S.hinted[selected];
       C.feedback('tap');
+    } else if (noteMode && prefs.autoNotes) {
+      // #1258: the player's own notes are hidden under Auto notes, so a note tap
+      // used to change something nobody could see. It strikes the digit out of
+      // this cell's live candidates instead, and a second tap brings it back.
+      if (S.grid[selected]) S.grid[selected] = 0;
+      var st = S.struck[selected];
+      var sat = st.indexOf(v);
+      if (sat >= 0) st.splice(sat, 1); else st.push(v);
+      C.audio.sfx('tap');
     } else if (noteMode) {
       if (S.grid[selected]) S.grid[selected] = 0;
       var arr = S.notes[selected];
@@ -1134,6 +1153,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngi
     } else {
       S.grid[selected] = v;
       S.notes[selected] = [];
+      S.struck[selected] = [];
       delete S.hinted[selected];
       if (v !== S.solution[selected]) {
         S.mistakes++;
@@ -1199,6 +1219,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngi
     if (pickCell === undefined) return;
     S.grid[pickCell] = S.solution[pickCell];
     S.notes[pickCell] = [];
+    S.struck[pickCell] = [];
     dropPeerNotes(pickCell, S.solution[pickCell]);
     S.hinted[pickCell] = 1;
     S.hints++;
@@ -1402,11 +1423,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngi
   // #424: notes filled by the old one-off auto-notes button (before #409) stayed in
   // saves and looked like the player's own, and could only be erased cell by cell.
   // One action clears them all, as one undo step.
-  function hasNotes() { for (var i = 0; i < 81; i++) if (S.notes[i] && S.notes[i].length) return true; return false; }
+  function hasNotes() { for (var i = 0; i < 81; i++) if ((S.notes[i] && S.notes[i].length) || (S.struck[i] && S.struck[i].length)) return true; return false; }
   function clearNotes() {
     if (!S || S.done || !hasNotes()) { C.feedback('bad'); return false; }
     pushUndo();
-    for (var i = 0; i < 81; i++) S.notes[i] = [];
+    for (var i = 0; i < 81; i++) { S.notes[i] = []; S.struck[i] = []; }
     C.feedback('tap');
     paint();
     save();
@@ -1480,12 +1501,17 @@ if (typeof module !== 'undefined' && module.exports) module.exports = SudokuEngi
   // or erased; your own notes are kept underneath and come back when it is off.
   // It used to be a one-off "apply" that filled the notes and could not be undone
   // from where it was switched on.
+  function liveMask(grid, c) {
+    var m = E.candidates(grid, c);
+    // in Killer the cage's sum rules digits out as well (#851)
+    if (S.mode === 'killer' && S.cages) S.cages.forEach(function (cg) { if (cg.cells.indexOf(c) >= 0) m &= E.cageMask(grid, cg); });
+    return m;
+  }
   function notesOf(c) {
     if (!prefs.autoNotes || S.grid[c]) return S.notes[c] || [];
-    var m = E.candidates(S.grid, c), arr = [];
-    // in Killer the cage's sum rules digits out as well (#851)
-    if (S.mode === 'killer' && S.cages) S.cages.forEach(function (cg) { if (cg.cells.indexOf(c) >= 0) m &= E.cageMask(S.grid, cg); });
-    for (var v = 1; v <= 9; v++) if (m & (1 << v)) arr.push(v);
+    var m = liveMask(S.grid, c), arr = [];
+    var st = (S.struck && S.struck[c]) || [];
+    for (var v = 1; v <= 9; v++) if ((m & (1 << v)) && st.indexOf(v) < 0) arr.push(v);
     return arr;
   }
 
