@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FBF6EF">
+<title>دوقلو — چوگان</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../lib/chogan.css">
+<script src="../../lib/early.js"></script>
+<style>
+  .tl-wrap > .ch-fit { --fit-ar: calc(240 / 420); }
+  .ch-fit > .tl-box { position: relative; aspect-ratio: var(--fit-ar); }
+  /* a canvas does not stretch to its offsets; without a CSS size it shows at its backing
+     size times the pixel ratio (Goose, #919) */
+  .tl-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; touch-action: none; border-radius: var(--r-lg); direction: ltr; user-select: none; -webkit-user-select: none; }
+  .tl-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .tl-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; font-size: var(--fs-sm); }
+</style>
+</head>
+<body>
+<script src="../../version.js"></script>
+<script src="../../lib/chogan.js"></script>
+<script>
+/* ==== ENGINE START ==== */
+function TwinLanesEngineFactory() {
+  'use strict';
+
+  // Four lanes across the road: the left car keeps to lanes 0 and 1, the right car to
+  // 2 and 3. Distances run along the road in lane widths; the cars sit at S.dist.
+  var DT = 1 / 60, LANES = 4, STAGES = 5, LIVES = 3;
+  // lane widths a second, one speed a stage
+  var SPEED = [3.6, 4.3, 5.0, 5.7, 6.4];
+  // seconds of stars and barriers in a stage, quiet seconds after it, and how far ahead
+  // of the cars a stage's first object starts (off the screen)
+  var STAGE_S = 40, GAP_S = 2, LEAD = 7;
+  // The fewest seconds between two objects on one side. A lane change takes SWITCH
+  // ticks, so even the fifth stage leaves a thumb more than three times that.
+  var MIN_SAME = [0.9, 0.8, 0.7, 0.62, 0.55];
+  var STEP_LO = [0.55, 0.48, 0.42, 0.37, 0.33], STEP_HI = [0.85, 0.75, 0.65, 0.57, 0.5];
+  var SWITCH = 9, HIT_X = 0.6;
+
+  function mulberry(sd) {
+    var a = sd >>> 0;
+    return function () { a = (a + 0x6D2B79F5) >>> 0; var t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  function sideOf(lane) { return lane < 2 ? 0 : 1; }
+
+  // A whole course from one seed, so a saved run stores only the seed. Each event asks
+  // one side for one lane: a star in it, a barrier in the other lane, or both. The two
+  // sides take turns three times in four, and a side never gets two events closer
+  // than MIN_SAME, so every course can be driven without a mistake.
+  function makeCourse(seed) {
+    var rnd = mulberry(seed), objs = [], ends = [], starts = [], d0 = 0;
+    for (var s = 0; s < STAGES; s++) {
+      var v = SPEED[s], base = d0 + LEAD, t = 0, lastT = [-9, -9], side = rnd() < 0.5 ? 0 : 1;
+      starts.push(d0);
+      for (;;) {
+        t += STEP_LO[s] + rnd() * (STEP_HI[s] - STEP_LO[s]);
+        if (rnd() < 0.75) side = 1 - side;
+        var at = Math.max(t, lastT[side] + MIN_SAME[s]);
+        if (at > STAGE_S) break;
+        t = at; lastT[side] = at;
+        var need = side * 2 + (rnd() < 0.5 ? 0 : 1), other = side * 2 + (need === side * 2 ? 1 : 0), r = rnd();
+        var d = base + at * v;
+        if (r < 0.85) objs.push({ d: d, lane: need, kind: 'star' });
+        if (r >= 0.5) objs.push({ d: d, lane: other, kind: 'block' });
+      }
+      d0 = base + (STAGE_S + GAP_S) * v;
+      ends.push(d0);
+    }
+    return { objs: objs, ends: ends, starts: starts };
+  }
+
+  function fromSeed(seed) {
+    return {
+      seed: seed >>> 0, course: makeCourse(seed >>> 0), tick: 0, dist: 0, stage: 0, idx: 0,
+      lane: [0, 3], x: [0.5, 3.5], lives: LIVES, score: 0, stars: 0, lost: 0, stageLost: 0,
+      over: false, won: false, ev: []
+    };
+  }
+  function newGame(rnd) { return fromSeed(Math.floor(rnd() * 4294967296)); }
+
+  function lose(S, side, why, i) {
+    S.lives--; S.lost++; S.stageLost++;
+    S.ev.push({ t: why, side: side, i: i });
+    if (S.lives <= 0) { S.lives = 0; S.over = true; S.ev.push({ t: 'over' }); }
+  }
+  // An object is settled the moment it reaches the cars' line: a car still between its
+  // two lanes counts as in both, for a star and for a barrier alike.
+  function settle(S, o, i) {
+    var side = sideOf(o.lane), on = Math.abs(S.x[side] - (o.lane + 0.5)) < HIT_X;
+    if (o.kind === 'star') {
+      if (on) { S.stars++; S.score += 10; S.ev.push({ t: 'star', side: side, i: i }); }
+      else lose(S, side, 'miss', i);
+    } else if (on) lose(S, side, 'hit', i);
+  }
+
+  function step(S) {
+    if (S.over) return;
+    S.tick++;
+    for (var c = 0; c < 2; c++) {
+      var goal = S.lane[c] + 0.5, dx = goal - S.x[c], m = 1 / SWITCH;
+      S.x[c] = Math.abs(dx) <= m ? goal : S.x[c] + (dx > 0 ? m : -m);
+    }
+    S.dist += SPEED[S.stage] * DT;
+    var O = S.course.objs;
+    while (S.idx < O.length && O[S.idx].d <= S.dist) {
+      settle(S, O[S.idx], S.idx);
+      S.idx++;
+      if (S.over) return;
+    }
+    if (S.dist >= S.course.ends[S.stage]) {
+      S.score += 50 * (S.stage + 1);
+      S.ev.push({ t: 'stage', n: S.stage + 1, clean: S.stageLost === 0 });
+      if (S.stage + 1 >= STAGES) {
+        S.score += 100 * S.lives;
+        S.over = true; S.won = true;
+        S.ev.push({ t: 'win' });
+        return;
+      }
+      S.stage++; S.stageLost = 0;
+    }
+  }
+
+  // one tap: the car on that side goes to its other lane (back again if it was moving)
+  function toggle(S, side) {
+    if (S.over || (side !== 0 && side !== 1)) return false;
+    S.lane[side] = side * 2 + (S.lane[side] === side * 2 ? 1 : 0);
+    S.ev.push({ t: 'turn', side: side });
+    return true;
+  }
+
+  // objects from `back` lane widths behind the cars to `ahead` in front, for drawing
+  function near(S, back, ahead) {
+    var O = S.course.objs, out = [], i = S.idx;
+    while (i > 0 && O[i - 1].d > S.dist - back) i--;
+    for (; i < O.length && O[i].d < S.dist + ahead; i++) out.push({ i: i, rel: O[i].d - S.dist, lane: O[i].lane, kind: O[i].kind, done: i < S.idx });
+    return out;
+  }
+  // how far through the current stage the cars are, 0 to 1
+  function progress(S) {
+    var a = S.course.starts[S.stage], b = S.course.ends[S.stage];
+    return Math.max(0, Math.min(1, (S.dist - a) / (b - a)));
+  }
+
+  function drain(S) { var e = S.ev; S.ev = []; return e; }
+
+  var KEYS = ['tick', 'dist', 'stage', 'idx', 'lives', 'score', 'stars', 'lost', 'stageLost'];
+  function snapshot(S) {
+    var o = { seed: S.seed, lane: S.lane.slice(), x: S.x.slice(), over: S.over, won: S.won };
+    KEYS.forEach(function (k) { o[k] = S[k]; });
+    return o;
+  }
+  function restore(o) {
+    if (!o || typeof o.seed !== 'number' || !isFinite(o.seed)) return null;
+    if (!KEYS.every(function (k) { return typeof o[k] === 'number' && isFinite(o[k]); })) return null;
+    if (o.stage < 0 || o.stage >= STAGES || o.lives < 0 || o.lives > LIVES || o.idx < 0) return null;
+    if (!Array.isArray(o.lane) || o.lane.length !== 2 || sideOf(o.lane[0]) !== 0 || sideOf(o.lane[1]) !== 1 || o.lane[0] < 0 || o.lane[1] > 3) return null;
+    if (!Array.isArray(o.x) || o.x.length !== 2 || !o.x.every(function (v) { return typeof v === 'number' && v >= 0 && v <= LANES; })) return null;
+    var S = fromSeed(o.seed);
+    if (o.idx > S.course.objs.length) return null;
+    KEYS.forEach(function (k) { S[k] = o[k]; });
+    S.lane = o.lane.slice(); S.x = o.x.slice(); S.over = !!o.over; S.won = !!o.won;
+    return S;
+  }
+
+  return {
+    DT: DT, LANES: LANES, STAGES: STAGES, LIVES: LIVES, SPEED: SPEED, STAGE_S: STAGE_S, GAP_S: GAP_S, LEAD: LEAD,
+    MIN_SAME: MIN_SAME, SWITCH: SWITCH, HIT_X: HIT_X,
+    makeCourse: makeCourse, fromSeed: fromSeed, newGame: newGame, step: step, toggle: toggle,
+    near: near, progress: progress, drain: drain, snapshot: snapshot, restore: restore, sideOf: sideOf
+  };
+}
+if (typeof module !== 'undefined') module.exports = TwinLanesEngineFactory;
+/* ==== ENGINE END ==== */
+</script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Chogan, el = C.el;
+  var E = TwinLanesEngineFactory();
+  // the logical view: 60 units a lane, the cars' line 80 units above the bottom
+  var T = 60, VW = E.LANES * T, VH = 420, CAR_Y = VH - 80;
+  var ACCENT = '#032B33';
+
+  C.boot({});
+  var ctx = C.game({
+    id: 'twinlanes',
+    name: { fa: 'دوقلو', en: 'Twin Lanes', zh: '双车道', de: 'Zwillingsspur', es: 'Carriles gemelos', pl: 'Bliźniacze pasy', fr: 'Voies jumelles', ar: 'المساران التوأم', hi: 'जुड़वाँ लेन', ru: 'Двойная трасса', pt: 'Pistas gêmeas' },
+    accent: ACCENT,
+    mood: 'dots',
+    strings: {
+      fa: {
+        scene: 'دو ماشین روی جاده‌ای چهارخطه', hint: 'نیمه‌ی چپ صفحه ماشین چپ را جابه‌جا می‌کند، نیمه‌ی راست ماشین راست را.', tapGo: 'برای شروع صفحه را لمس کن.',
+        stageN: 'مرحله‌ی {n}', livesN: 'جان: {n}', ptsN: 'امتیاز: {n}', bestN: 'بهترین: {n}', dailyTl: 'دوقلوی روزانه', newRun: 'دور تازه',
+        gotHit: 'تصادف!', missed: 'ستاره جا ماند!', bothHome: 'هر دو به مقصد رسیدند!', outLives: 'جان‌ها تمام شد',
+        ptsL: 'امتیاز', stageL: 'مرحله', starsL: 'ستاره‌ها', tries: 'تلاش‌ها', kLeft: 'جابه‌جایی ماشین چپ', kRight: 'جابه‌جایی ماشین راست', kGo: 'شروع و ادامه', kAgain: 'دور تازه',
+        rules: 'دو ماشین هم‌زمان روی یک جاده‌ی چهارخطه می‌رانند: ماشین چپ در دو خط چپ و ماشین راست در دو خط راست. هر لمس روی نیمه‌ی چپ صفحه ماشین چپ را به خط دیگرش می‌برد و هر لمس روی نیمه‌ی راست ماشین راست را؛ با دو شست می‌شود هر دو را با هم جابه‌جا کرد. هر ستاره را با ماشین همان طرف بگیر و به مانع‌های راه‌راه نخور. ستاره‌ای که جا بماند یا مانعی که به آن بخوری یک جان می‌گیرد. سه جان داری. پنج مرحله‌ی چهل‌ثانیه‌ای هست و هر مرحله تندتر از قبلی است؛ پنجمی را که تمام کنی بردی. هر ستاره، هر مرحله و هر جانِ باقی‌مانده امتیاز دارد. دوقلوی روزانه برای همه یکسان است.',
+        tutTitle0: 'دو شست', tutText0: 'نیمه‌ی چپ صفحه را لمس کن تا ماشین چپ خط عوض کند، نیمه‌ی راست را برای ماشین راست. هر دو را می‌شود با هم زد.',
+        tutTitle1: 'ستاره بگیر', tutText1: 'هر ستاره را با ماشین همان طرف بگیر. ستاره‌ای که جا بماند یک جان می‌گیرد.',
+        tutTitle2: 'از مانع دوری کن', tutText2: 'به مانع‌های راه‌راه نخور. پنج مرحله را تمام کن تا ببری؛ هر مرحله تندتر است.'
+      },
+      en: {
+        scene: 'Two cars on a four-lane road', hint: 'Tap the left half to steer the left car, the right half for the right car.', tapGo: 'Tap to start.',
+        stageN: 'Stage {n}', livesN: 'Lives: {n}', ptsN: 'Score: {n}', bestN: 'Best: {n}', dailyTl: 'Daily twin run', newRun: 'New run',
+        gotHit: 'Crash!', missed: 'Missed a star!', bothHome: 'Both made it!', outLives: 'Out of lives',
+        ptsL: 'Score', stageL: 'Stage', starsL: 'Stars', tries: 'Tries', kLeft: 'Move the left car', kRight: 'Move the right car', kGo: 'Start or go on', kAgain: 'New run',
+        rules: 'Two cars drive at once on a four-lane road: the left car in the two left lanes, the right car in the two right lanes. Each tap on the left half of the screen moves the left car to its other lane, and each tap on the right half moves the right car; with two thumbs you can move both together. Catch every star with the car on its side and keep clear of the striped barriers. A star left behind or a barrier you hit costs a life. You have three lives. There are five stages of forty seconds, each faster than the last; finish the fifth to win. Every star, every stage and every life left scores. The daily twin run is the same for everyone.',
+        tutTitle0: 'Two thumbs', tutText0: 'Tap the left half of the screen to switch the left car’s lane, the right half for the right car. Both at once works too.',
+        tutTitle1: 'Catch the stars', tutText1: 'Catch each star with the car on its side. A star left behind costs a life.',
+        tutTitle2: 'Dodge the barriers', tutText2: 'Keep clear of the striped barriers. Finish five stages to win; each one is faster.'
+      },
+      pl: {
+        scene: 'Dwa auta na czteropasmowej drodze', hint: 'Stuknij lewą połowę, by sterować lewym autem, prawą – prawym.', tapGo: 'Stuknij, aby zacząć.',
+        stageN: 'Etap {n}', livesN: 'Życia: {n}', ptsN: 'Punkty: {n}', bestN: 'Najlepszy: {n}', dailyTl: 'Bliźniaki dnia', newRun: 'Nowa gra',
+        gotHit: 'Zderzenie!', missed: 'Gwiazdka umknęła!', bothHome: 'Oba dojechały!', outLives: 'Koniec żyć',
+        ptsL: 'Punkty', stageL: 'Etap', starsL: 'Gwiazdki', tries: 'Próby', kLeft: 'Przesuń lewe auto', kRight: 'Przesuń prawe auto', kGo: 'Start lub dalej', kAgain: 'Nowa gra',
+        rules: 'Dwa auta jadą naraz po czteropasmowej drodze: lewe po dwóch lewych pasach, prawe po dwóch prawych. Każde stuknięcie lewej połowy ekranu przenosi lewe auto na jego drugi pas, a stuknięcie prawej połowy – prawe auto; dwoma kciukami przesuniesz oba jednocześnie. Łap każdą gwiazdkę autem z jej strony i omijaj pasiaste bariery. Gwiazdka, która umknie, albo bariera, w którą wjedziesz, kosztuje życie. Masz trzy życia. Jest pięć etapów po czterdzieści sekund, każdy szybszy od poprzedniego; ukończ piąty, aby wygrać. Punkty dają gwiazdki, etapy i każde zachowane życie. Bliźniaki dnia są takie same dla wszystkich.',
+        tutTitle0: 'Dwa kciuki', tutText0: 'Stuknij lewą połowę ekranu, by lewe auto zmieniło pas, prawą – dla prawego. Można oba naraz.',
+        tutTitle1: 'Łap gwiazdki', tutText1: 'Łap każdą gwiazdkę autem z jej strony. Gwiazdka, która umknie, kosztuje życie.',
+        tutTitle2: 'Omijaj bariery', tutText2: 'Nie wjeżdżaj w pasiaste bariery. Ukończ pięć etapów, aby wygrać; każdy jest szybszy.'
+      },
+      fr: {
+        scene: 'Deux voitures sur une route à quatre voies', hint: 'Touche la moitié gauche pour la voiture de gauche, la droite pour celle de droite.', tapGo: 'Touche pour commencer.',
+        stageN: 'Étape {n}', livesN: 'Vies : {n}', ptsN: 'Score : {n}', bestN: 'Record : {n}', dailyTl: 'Jumelles du jour', newRun: 'Nouvelle partie',
+        gotHit: 'Collision !', missed: 'Étoile manquée !', bothHome: 'Toutes deux arrivées !', outLives: 'Plus de vies',
+        ptsL: 'Score', stageL: 'Étape', starsL: 'Étoiles', tries: 'Essais', kLeft: 'Déplacer la voiture de gauche', kRight: 'Déplacer la voiture de droite', kGo: 'Commencer ou reprendre', kAgain: 'Nouvelle partie',
+        rules: 'Deux voitures roulent en même temps sur une route à quatre voies : celle de gauche sur les deux voies de gauche, celle de droite sur les deux voies de droite. Chaque touche sur la moitié gauche de l’écran fait passer la voiture de gauche sur son autre voie, et chaque touche sur la moitié droite fait de même pour celle de droite ; avec deux pouces, tu peux déplacer les deux à la fois. Attrape chaque étoile avec la voiture de son côté et évite les barrières rayées. Une étoile manquée ou une barrière touchée coûte une vie. Tu as trois vies. Il y a cinq étapes de quarante secondes, chacune plus rapide que la précédente ; termine la cinquième pour gagner. Chaque étoile, chaque étape et chaque vie restante rapportent des points. Les jumelles du jour sont les mêmes pour tous.',
+        tutTitle0: 'Deux pouces', tutText0: 'Touche la moitié gauche de l’écran pour changer la voie de la voiture de gauche, la moitié droite pour celle de droite. Les deux à la fois, ça marche aussi.',
+        tutTitle1: 'Attrape les étoiles', tutText1: 'Attrape chaque étoile avec la voiture de son côté. Une étoile manquée coûte une vie.',
+        tutTitle2: 'Évite les barrières', tutText2: 'Évite les barrières rayées. Termine cinq étapes pour gagner ; chacune est plus rapide.'
+      },
+      ar: {
+        scene: 'سيارتان على طريق من أربعة مسارات', hint: 'انقر النصف الأيسر لتحريك السيارة اليسرى، والنصف الأيمن للسيارة اليمنى.', tapGo: 'انقر للبدء.',
+        stageN: 'المرحلة {n}', livesN: 'الأرواح: {n}', ptsN: 'النقاط: {n}', bestN: 'الأفضل: {n}', dailyTl: 'توأم اليوم', newRun: 'جولة جديدة',
+        gotHit: 'اصطدام!', missed: 'فاتتك نجمة!', bothHome: 'وصلت السيارتان!', outLives: 'نفدت الأرواح',
+        ptsL: 'النقاط', stageL: 'المرحلة', starsL: 'النجوم', tries: 'المحاولات', kLeft: 'حرّك السيارة اليسرى', kRight: 'حرّك السيارة اليمنى', kGo: 'ابدأ أو تابع', kAgain: 'جولة جديدة',
+        rules: 'تسير سيارتان معًا على طريق من أربعة مسارات: اليسرى في المسارين الأيسرين واليمنى في المسارين الأيمنين. كل نقرة على النصف الأيسر من الشاشة تنقل السيارة اليسرى إلى مسارها الآخر، وكل نقرة على النصف الأيمن تنقل اليمنى؛ وبإبهامين يمكنك تحريك الاثنتين معًا. التقط كل نجمة بالسيارة التي في جهتها وابتعد عن الحواجز المخططة. النجمة التي تفوتك أو الحاجز الذي تصطدم به يكلفك روحًا. لديك ثلاث أرواح. هناك خمس مراحل مدة كل منها أربعون ثانية، وكل مرحلة أسرع من سابقتها؛ أنهِ الخامسة لتفوز. كل نجمة وكل مرحلة وكل روح باقية تمنحك نقاطًا. توأم اليوم واحد للجميع.',
+        tutTitle0: 'إبهامان', tutText0: 'انقر النصف الأيسر من الشاشة لتغيّر السيارة اليسرى مسارها، والنصف الأيمن للسيارة اليمنى. يمكنك النقر على الاثنين معًا.',
+        tutTitle1: 'التقط النجوم', tutText1: 'التقط كل نجمة بالسيارة التي في جهتها. النجمة التي تفوتك تكلفك روحًا.',
+        tutTitle2: 'تجنّب الحواجز', tutText2: 'لا تصطدم بالحواجز المخططة. أنهِ خمس مراحل لتفوز؛ كل مرحلة أسرع.'
+      },
+      hi: {
+        scene: 'चार लेन की सड़क पर दो कारें', hint: 'बाईं कार के लिए स्क्रीन का बायाँ आधा छुएँ, दाईं कार के लिए दायाँ आधा।', tapGo: 'शुरू करने के लिए छुएँ।',
+        stageN: 'चरण {n}', livesN: 'जानें: {n}', ptsN: 'स्कोर: {n}', bestN: 'सर्वश्रेष्ठ: {n}', dailyTl: 'आज की जुड़वाँ दौड़', newRun: 'नया खेल',
+        gotHit: 'टक्कर!', missed: 'तारा छूट गया!', bothHome: 'दोनों पहुँच गईं!', outLives: 'जानें ख़त्म',
+        ptsL: 'स्कोर', stageL: 'चरण', starsL: 'तारे', tries: 'कोशिशें', kLeft: 'बाईं कार हटाएँ', kRight: 'दाईं कार हटाएँ', kGo: 'शुरू करें या आगे बढ़ें', kAgain: 'नया खेल',
+        rules: 'चार लेन की सड़क पर दो कारें एक साथ चलती हैं: बाईं कार बाईं दो लेनों में और दाईं कार दाईं दो लेनों में। स्क्रीन के बाएँ आधे पर हर टैप बाईं कार को उसकी दूसरी लेन में ले जाता है, और दाएँ आधे पर हर टैप दाईं कार को; दो अंगूठों से आप दोनों को एक साथ हटा सकते हैं। हर तारे को उसकी तरफ़ वाली कार से पकड़ें और धारीदार बैरियरों से बचें। छूटा हुआ तारा या टकराया बैरियर एक जान लेता है। आपके पास तीन जानें हैं। चालीस सेकंड के पाँच चरण हैं, हर चरण पिछले से तेज़; जीतने के लिए पाँचवाँ पूरा करें। हर तारे, हर चरण और बची हर जान पर अंक मिलते हैं। आज की जुड़वाँ दौड़ सबके लिए एक जैसी है।',
+        tutTitle0: 'दो अंगूठे', tutText0: 'बाईं कार की लेन बदलने के लिए स्क्रीन का बायाँ आधा छुएँ, दाईं कार के लिए दायाँ आधा। दोनों एक साथ भी छू सकते हैं।',
+        tutTitle1: 'तारे पकड़ें', tutText1: 'हर तारे को उसकी तरफ़ वाली कार से पकड़ें। छूटा हुआ तारा एक जान लेता है।',
+        tutTitle2: 'बैरियर से बचें', tutText2: 'धारीदार बैरियरों से न टकराएँ। जीतने के लिए पाँच चरण पूरे करें; हर चरण तेज़ है।'
+      },
+      ru: {
+        scene: 'Две машины на четырёхполосной дороге', hint: 'Левая половина экрана ведёт левую машину, правая — правую.', tapGo: 'Коснитесь, чтобы начать.',
+        stageN: 'Этап {n}', livesN: 'Жизни: {n}', ptsN: 'Очки: {n}', bestN: 'Рекорд: {n}', dailyTl: 'Двойная трасса дня', newRun: 'Новый заезд',
+        gotHit: 'Авария!', missed: 'Звезда упущена!', bothHome: 'Обе доехали!', outLives: 'Жизни кончились',
+        ptsL: 'Очки', stageL: 'Этап', starsL: 'Звёзды', tries: 'Попытки', kLeft: 'Сдвинуть левую машину', kRight: 'Сдвинуть правую машину', kGo: 'Старт или продолжить', kAgain: 'Новый заезд',
+        rules: 'Две машины едут одновременно по четырёхполосной дороге: левая — по двум левым полосам, правая — по двум правым. Каждое касание левой половины экрана переводит левую машину на её другую полосу, а касание правой половины — правую; двумя большими пальцами можно двигать обе сразу. Ловите каждую звезду машиной с её стороны и объезжайте полосатые барьеры. Упущенная звезда или задетый барьер стоят жизни. У вас три жизни. Пять этапов по сорок секунд, каждый быстрее предыдущего; пройдите пятый, чтобы победить. Очки дают звёзды, этапы и каждая оставшаяся жизнь. Двойная трасса дня одинакова для всех.',
+        tutTitle0: 'Два пальца', tutText0: 'Коснитесь левой половины экрана, чтобы левая машина сменила полосу, правой — для правой. Можно обе сразу.',
+        tutTitle1: 'Ловите звёзды', tutText1: 'Ловите каждую звезду машиной с её стороны. Упущенная звезда стоит жизни.',
+        tutTitle2: 'Объезжайте барьеры', tutText2: 'Не врезайтесь в полосатые барьеры. Пройдите пять этапов, чтобы победить; каждый быстрее.'
+      },
+      pt: {
+        scene: 'Dois carros numa estrada de quatro faixas', hint: 'Toque a metade esquerda para o carro da esquerda, a direita para o da direita.', tapGo: 'Toque para começar.',
+        stageN: 'Etapa {n}', livesN: 'Vidas: {n}', ptsN: 'Pontos: {n}', bestN: 'Recorde: {n}', dailyTl: 'Pistas gêmeas do dia', newRun: 'Nova partida',
+        gotHit: 'Batida!', missed: 'Perdeu uma estrela!', bothHome: 'Os dois chegaram!', outLives: 'Sem vidas',
+        ptsL: 'Pontos', stageL: 'Etapa', starsL: 'Estrelas', tries: 'Tentativas', kLeft: 'Mover o carro da esquerda', kRight: 'Mover o carro da direita', kGo: 'Começar ou continuar', kAgain: 'Nova partida',
+        rules: 'Dois carros andam ao mesmo tempo numa estrada de quatro faixas: o da esquerda nas duas faixas da esquerda e o da direita nas duas da direita. Cada toque na metade esquerda da tela leva o carro da esquerda para a outra faixa dele, e cada toque na metade direita faz o mesmo com o da direita; com dois polegares você move os dois juntos. Pegue cada estrela com o carro do lado dela e fique longe das barreiras listradas. Uma estrela que ficar para trás ou uma barreira atingida custa uma vida. Você tem três vidas. São cinco etapas de quarenta segundos, cada uma mais rápida que a anterior; termine a quinta para vencer. Cada estrela, cada etapa e cada vida que sobra dão pontos. As pistas gêmeas do dia são iguais para todos.',
+        tutTitle0: 'Dois polegares', tutText0: 'Toque a metade esquerda da tela para o carro da esquerda trocar de faixa, a direita para o da direita. Dá para tocar as duas juntas.',
+        tutTitle1: 'Pegue as estrelas', tutText1: 'Pegue cada estrela com o carro do lado dela. Uma estrela que ficar para trás custa uma vida.',
+        tutTitle2: 'Desvie das barreiras', tutText2: 'Não bata nas barreiras listradas. Termine cinco etapas para vencer; cada uma é mais rápida.'
+      },
+      zh: {
+        scene: '四车道上的两辆车', hint: '点屏幕左半边控制左车，右半边控制右车。', tapGo: '点一下开始。',
+        stageN: '第 {n} 段', livesN: '生命：{n}', ptsN: '得分：{n}', bestN: '最佳：{n}', dailyTl: '每日双车道', newRun: '新一局',
+        gotHit: '撞上了！', missed: '漏掉一颗星！', bothHome: '两辆车都到了！', outLives: '生命用完了',
+        ptsL: '得分', stageL: '路段', starsL: '星星', tries: '尝试次数', kLeft: '移动左车', kRight: '移动右车', kGo: '开始或继续', kAgain: '新一局',
+        rules: '两辆车同时在四车道上行驶：左车走左边两条车道，右车走右边两条车道。每点一下屏幕左半边，左车就换到另一条车道；每点一下右半边，右车也一样。用两个拇指可以同时移动两辆车。用同一侧的车接住每颗星星，避开条纹路障。漏掉一颗星或撞上路障都会失去一条生命。你有三条生命。共有五段，每段四十秒，一段比一段快；跑完第五段就赢了。每颗星、每一段和剩下的每条生命都有分数。每日双车道对所有人都一样。',
+        tutTitle0: '两个拇指', tutText0: '点屏幕左半边让左车换道，点右半边让右车换道。两边可以同时点。',
+        tutTitle1: '接星星', tutText1: '用同一侧的车接住每颗星星。漏掉一颗会失去一条生命。',
+        tutTitle2: '避开路障', tutText2: '别撞上条纹路障。跑完五段就赢了；每段都更快。'
+      },
+      de: {
+        scene: 'Zwei Autos auf einer vierspurigen Straße', hint: 'Tippe links für das linke Auto, rechts für das rechte.', tapGo: 'Tippe, um zu starten.',
+        stageN: 'Etappe {n}', livesN: 'Leben: {n}', ptsN: 'Punkte: {n}', bestN: 'Bestwert: {n}', dailyTl: 'Zwillingsspur des Tages', newRun: 'Neue Fahrt',
+        gotHit: 'Unfall!', missed: 'Stern verpasst!', bothHome: 'Beide sind angekommen!', outLives: 'Keine Leben mehr',
+        ptsL: 'Punkte', stageL: 'Etappe', starsL: 'Sterne', tries: 'Versuche', kLeft: 'Linkes Auto wechseln', kRight: 'Rechtes Auto wechseln', kGo: 'Starten oder weiter', kAgain: 'Neue Fahrt',
+        rules: 'Zwei Autos fahren gleichzeitig auf einer vierspurigen Straße: das linke auf den beiden linken Spuren, das rechte auf den beiden rechten. Jedes Tippen auf die linke Bildschirmhälfte bringt das linke Auto auf seine andere Spur, jedes Tippen auf die rechte Hälfte das rechte; mit zwei Daumen bewegst du beide zugleich. Fang jeden Stern mit dem Auto seiner Seite und weich den gestreiften Absperrungen aus. Ein verpasster Stern oder eine gerammte Absperrung kostet ein Leben. Du hast drei Leben. Es gibt fünf Etappen zu je vierzig Sekunden, jede schneller als die vorige; schaffe die fünfte, um zu gewinnen. Jeder Stern, jede Etappe und jedes übrige Leben bringen Punkte. Die Zwillingsspur des Tages ist für alle gleich.',
+        tutTitle0: 'Zwei Daumen', tutText0: 'Tippe auf die linke Bildschirmhälfte, damit das linke Auto die Spur wechselt, auf die rechte für das rechte. Beide zugleich geht auch.',
+        tutTitle1: 'Sterne fangen', tutText1: 'Fang jeden Stern mit dem Auto seiner Seite. Ein verpasster Stern kostet ein Leben.',
+        tutTitle2: 'Ausweichen', tutText2: 'Weich den gestreiften Absperrungen aus. Schaffe fünf Etappen, um zu gewinnen; jede ist schneller.'
+      },
+      es: {
+        scene: 'Dos coches en una carretera de cuatro carriles', hint: 'Toca la mitad izquierda para el coche izquierdo y la derecha para el derecho.', tapGo: 'Toca para empezar.',
+        stageN: 'Etapa {n}', livesN: 'Vidas: {n}', ptsN: 'Puntos: {n}', bestN: 'Mejor: {n}', dailyTl: 'Carriles del día', newRun: 'Partida nueva',
+        gotHit: '¡Choque!', missed: '¡Estrella perdida!', bothHome: '¡Llegaron los dos!', outLives: 'Sin vidas',
+        ptsL: 'Puntos', stageL: 'Etapa', starsL: 'Estrellas', tries: 'Intentos', kLeft: 'Mover el coche izquierdo', kRight: 'Mover el coche derecho', kGo: 'Empezar o seguir', kAgain: 'Partida nueva',
+        rules: 'Dos coches circulan a la vez por una carretera de cuatro carriles: el izquierdo por los dos carriles de la izquierda y el derecho por los dos de la derecha. Cada toque en la mitad izquierda de la pantalla pasa el coche izquierdo a su otro carril, y cada toque en la mitad derecha hace lo mismo con el derecho; con dos pulgares mueves los dos a la vez. Atrapa cada estrella con el coche de su lado y esquiva las barreras de rayas. Una estrella que se escapa o una barrera que golpeas cuesta una vida. Tienes tres vidas. Hay cinco etapas de cuarenta segundos, cada una más rápida que la anterior; termina la quinta para ganar. Cada estrella, cada etapa y cada vida que te quede dan puntos. Los carriles del día son iguales para todos.',
+        tutTitle0: 'Dos pulgares', tutText0: 'Toca la mitad izquierda de la pantalla para que el coche izquierdo cambie de carril, y la derecha para el derecho. También puedes tocar las dos a la vez.',
+        tutTitle1: 'Atrapa estrellas', tutText1: 'Atrapa cada estrella con el coche de su lado. Una estrella que se escapa cuesta una vida.',
+        tutTitle2: 'Esquiva barreras', tutText2: 'No choques con las barreras de rayas. Termina cinco etapas para ganar; cada una es más rápida.'
+      }
+    }
+  });
+
+  var params = new URLSearchParams(location.search);
+  var dailyDate = params.get('daily');
+
+  var S = null, raf = 0, last = 0, acc = 0, paused = false, waiting = true, ended = false, tries = 0, startedAt = 0, seed = 0;
+  // drawing state: the floating word, what became of each settled object (a caught star
+  // vanishes, a hit barrier flashes), the cars' red flash after a lost life
+  var pop = null, fate = {}, flash = [0, 0], sparks = [];
+
+  var cv = el('canvas', { class: 'tl-canvas', role: 'img', 'aria-label': C.t('scene') });
+  var box = el('div', { class: 'tl-box' }, [cv]);
+  var top = el('div', { class: 'tl-top ch-above' });
+  var status = el('div', { class: 'tl-status', role: 'status', 'aria-live': 'polite' });
+  var wrap = el('div', { class: 'tl-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]), el('div', { class: 'ch-side' }, [top, status])]);
+
+  ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
+  ctx.button({ icon: 'refresh', label: C.t('newRun'), onClick: function () { newRun(); } });
+  ctx.main.appendChild(wrap);
+  ctx.mount();
+
+  /* ------------------------------------------------------------- runs */
+
+  function seeded(sd) {
+    var a = sd >>> 0;
+    return function () { a = (a + 0x6D2B79F5) >>> 0; var t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  // the daily course comes from the day, the same for everyone
+  function rngFor(sd) { return dailyDate ? C.daily('twinlanes', dailyDate).rng : seeded(sd); }
+
+  // A run starts waiting for a tap: a reflex game must not begin before the thumbs are ready
+  function newRun() {
+    seed = Math.floor(Math.random() * 4294967296);
+    S = E.newGame(rngFor(seed));
+    tries++;
+    startedAt = Date.now();
+    ended = false; waiting = true; last = 0; acc = 0;
+    pop = { text: C.t('stageN', { n: C.num(1) }), t: 1.4 }; fate = {}; flash = [0, 0]; sparks = [];
+    ctx.clearSave();
+    renderTop(); renderStatus();
+    kick();
+  }
+
+  function blocked() { return paused || waiting || document.hidden || !!document.querySelector('.ch-scrim'); }
+  function tick(now) {
+    raf = 0;
+    if (!S) return;
+    var dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
+    last = now;
+    var run = !blocked() && !ended;
+    if (run) {
+      // a fixed step, so a run plays the same on every screen
+      acc += dt;
+      var n = 0;
+      while (acc >= E.DT && n < 8) {
+        E.step(S); acc -= E.DT; n++;
+        events();
+        if (ended) break;
+      }
+      if (n >= 8) acc = 0;
+      if (pop) { pop.t -= dt * 0.8; if (pop.t <= 0) pop = null; }
+      flash[0] = Math.max(0, flash[0] - dt * 2); flash[1] = Math.max(0, flash[1] - dt * 2);
+      sparks = sparks.filter(function (s) { s.t -= dt * 2.2; return s.t > 0; });
+    }
+    draw();
+    // the loop sleeps while the run waits; a tap or the app coming back wakes it
+    if (run || pop || sparks.length) raf = requestAnimationFrame(tick);
+  }
+  function kick() { if (!raf) { last = 0; raf = requestAnimationFrame(tick); } }
+
+  function steer(side) {
+    if (!S || ended || S.over) return;
+    if (waiting) { go(); return; }
+    if (blocked()) return;
+    E.toggle(S, side);
+    events();
+  }
+
+  function events() {
+    var ev = E.drain(S), save = false;
+    for (var i = 0; i < ev.length; i++) {
+      var e = ev[i];
+      if (e.t === 'turn') C.audio.sfx('tap');
+      else if (e.t === 'star') {
+        fate[e.i] = 'got';
+        sparks.push({ x: (S.course.objs[e.i].lane + 0.5) * T, side: e.side, t: 1 });
+        C.audio.sfx('coin');
+      } else if (e.t === 'miss' || e.t === 'hit') {
+        fate[e.i] = e.t;
+        flash[e.side] = 1;
+        C.feedback('bad'); C.haptic('error');
+        pop = { text: e.t === 'hit' ? C.t('gotHit') : C.t('missed'), t: 1 };
+        save = true;
+      } else if (e.t === 'stage') {
+        if (e.n < E.STAGES) { C.audio.sfx('win'); pop = { text: C.t('stageN', { n: C.num(e.n + 1) }), t: 1.4 }; }
+        save = true;
+      } else if (e.t === 'win' || e.t === 'over') {
+        ended = true;
+        if (e.t === 'win') { C.feedback('good'); C.haptic('success'); }
+        ctx.clearSave();
+        setTimeout(finish, C.ui.reduceMotion() ? 300 : 1100);
+      }
+    }
+    if (ev.length) renderTop();
+    if (save && !ended) ctx.save();
+  }
+
+  function finish() {
+    var won = S.won, sc = S.score, note = null;
+    var coins = won ? 30 : Math.min(24, 1 + S.stage * 5), points = won ? 120 : Math.min(100, 4 + S.stage * 20);
+    if (won) C.achievements.unlock('tl-win');
+    if (won && S.lost === 0) C.achievements.unlock('tl-clean');
+    var lines = [{ label: C.t('ptsL'), value: C.num(sc) }, { label: C.t('stageL'), value: C.num(S.stage + 1) }, { label: C.t('starsL'), value: C.num(S.stars) }];
+    if (dailyDate) {
+      if (won) C.achievements.unlock('tl-daily');
+      if (!C.stats.daily('twinlanes', dailyDate, { label: C.t('ptsN', { n: C.num(sc) }), win: won, tries: tries })) { coins = Math.max(1, Math.round(coins * 0.2)); points = Math.max(1, Math.round(points * 0.2)); }
+      lines.push({ label: C.t('tries'), value: C.num(tries) });
+    } else {
+      if (C.stats.best('twinlanes', 'score', sc) && sc > 0) note = C.t('bestN', { n: C.num(sc) });
+      lines.push({ label: C.t('best'), value: C.num(C.stats.getBest('twinlanes', 'score') || sc) });
+    }
+    ctx.finish({
+      won: won,
+      title: won ? C.t('bothHome') : C.t('outLives'),
+      note: note, timeMs: Date.now() - startedAt, coins: coins, points: points,
+      lines: lines,
+      shareText: 'چوگان · دوقلو' + (dailyDate ? ('\nروزانه ' + dailyDate) : '') + '\nامتیاز ' + sc,
+      paint: function (g, w, h) { paintShare(g, w, h); },
+      againLabel: C.t('newRun'),
+      onAgain: function () { newRun(); }
+    });
+  }
+
+  /* --------------------------------------------------------------- draw */
+
+  function dark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  // The road is a road in both themes; the dark theme only dims it. The two cars and
+  // everything on their side share one colour, so a glance tells which thumb it is for.
+  function palette(dk) {
+    return dk ? {
+      road: '#1E2629', road2: '#243034', line: 'rgba(255,255,255,.22)', mid: '#6FB7A8', edge: '#3C4A4E',
+      cars: ['#F08F52', '#46C7B4'], glass: 'rgba(210,235,240,.75)', tyre: '#0B0F10',
+      star: ['#FFC870', '#8FE3D3'], stripe: '#F2EDE4', bar: 'rgba(255,255,255,.12)', fill: '#6FB7A8',
+      text: 'rgba(244,238,228,.96)', shade: 'rgba(0,0,0,.6)', red: '#FF6B5E', veil: 'rgba(10,14,15,.55)'
+    } : {
+      road: '#3A474B', road2: '#425156', line: 'rgba(255,255,255,.42)', mid: '#9FE0D2', edge: '#6E7F83',
+      cars: ['#F07A3A', '#24B3A0'], glass: 'rgba(20,40,48,.6)', tyre: '#141B1D',
+      star: ['#FFBE4F', '#7FE0CE'], stripe: '#FFFFFF', bar: 'rgba(0,0,0,.14)', fill: ACCENT,
+      text: 'rgba(255,255,255,.97)', shade: 'rgba(0,0,0,.55)', red: '#FF5A4C', veil: 'rgba(20,30,33,.5)'
+    };
+  }
+
+  function rr(g, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    g.beginPath();
+    g.moveTo(x + r, y); g.lineTo(x + w - r, y); g.quadraticCurveTo(x + w, y, x + w, y + r);
+    g.lineTo(x + w, y + h - r); g.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    g.lineTo(x + r, y + h); g.quadraticCurveTo(x, y + h, x, y + h - r);
+    g.lineTo(x, y + r); g.quadraticCurveTo(x, y, x + r, y); g.closePath();
+  }
+  function starPath(g, cx, cy, R, rot) {
+    g.beginPath();
+    for (var k = 0; k < 10; k++) {
+      var a = rot + k * Math.PI / 5 - Math.PI / 2, rad = k % 2 ? R * 0.45 : R;
+      g.lineTo(cx + Math.cos(a) * rad, cy + Math.sin(a) * rad);
+    }
+    g.closePath();
+  }
+  function star(g, cx, cy, col, P, t, faded) {
+    g.globalAlpha = faded ? 0.3 : 1;
+    g.fillStyle = col;
+    starPath(g, cx, cy, 15, Math.sin(t * 3 + cx) * 0.18);
+    g.fill();
+    g.strokeStyle = 'rgba(0,0,0,.25)'; g.lineWidth = 1.5; g.stroke();
+    g.globalAlpha = 1;
+  }
+  // a roadworks barrier: a rounded bar striped in the side's colour, on two little feet
+  function barrier(g, cx, cy, col, P, lit) {
+    var w = 44, h = 18, x = cx - w / 2, y = cy - h / 2;
+    g.fillStyle = P.tyre; g.fillRect(x + 6, y + h - 2, 5, 6); g.fillRect(x + w - 11, y + h - 2, 5, 6);
+    g.save();
+    rr(g, x, y, w, h, 5); g.clip();
+    g.fillStyle = P.stripe; g.fillRect(x, y, w, h);
+    g.fillStyle = col;
+    for (var k = -2; k < 8; k++) { g.beginPath(); g.moveTo(x + k * 10, y + h); g.lineTo(x + k * 10 + 6, y + h); g.lineTo(x + k * 10 + 6 + h, y); g.lineTo(x + k * 10 + h, y); g.closePath(); g.fill(); }
+    g.restore();
+    g.strokeStyle = lit ? P.red : 'rgba(0,0,0,.35)'; g.lineWidth = lit ? 3 : 1.5;
+    rr(g, x, y, w, h, 5); g.stroke();
+  }
+  // a small round car from above, leaning into a lane change
+  function car(g, cx, cy, col, P, lean, hurt) {
+    g.save(); g.translate(cx, cy); g.rotate(lean * 0.35);
+    g.fillStyle = 'rgba(0,0,0,.22)'; rr(g, -15, -22, 32, 48, 12); g.fill();
+    g.fillStyle = P.tyre;
+    [[-17, -15], [11, -15], [-17, 7], [11, 7]].forEach(function (p) { rr(g, p[0], p[1], 6, 11, 2); g.fill(); });
+    g.fillStyle = col; rr(g, -14, -24, 28, 46, 12); g.fill();
+    g.fillStyle = P.glass; rr(g, -10, -14, 20, 10, 4); g.fill();
+    rr(g, -9, 8, 18, 6, 3); g.fill();
+    g.fillStyle = 'rgba(255,255,255,.35)'; rr(g, -4, -22, 8, 6, 3); g.fill();
+    g.fillStyle = '#FFF4C8'; g.beginPath(); g.arc(-8, -21, 2.4, 0, Math.PI * 2); g.arc(8, -21, 2.4, 0, Math.PI * 2); g.fill();
+    if (hurt > 0) { g.strokeStyle = P.red; g.globalAlpha = hurt; g.lineWidth = 4; rr(g, -18, -28, 36, 54, 14); g.stroke(); g.globalAlpha = 1; }
+    g.restore();
+  }
+
+  function scene(g, P, t) {
+    var i;
+    g.fillStyle = P.road; g.fillRect(0, 0, VW, VH);
+    // each side its own faint tint, so the two halves read as two roads
+    g.fillStyle = P.road2; g.fillRect(VW / 2, 0, VW / 2, VH);
+    g.fillStyle = P.edge; g.fillRect(0, 0, 3, VH); g.fillRect(VW - 3, 0, 3, VH);
+    var off = S ? (S.dist * T) % 40 : 0;
+    // dashes within each side scroll with the road; the middle is one solid double line
+    g.fillStyle = P.line;
+    [T, 3 * T].forEach(function (x) { for (i = -1; i < VH / 40 + 1; i++) g.fillRect(x - 1.5, i * 40 + off, 3, 22); });
+    g.fillStyle = P.mid; g.fillRect(VW / 2 - 4, 0, 2.5, VH); g.fillRect(VW / 2 + 1.5, 0, 2.5, VH);
+    if (!S) return;
+    var objs = E.near(S, VH / T, CAR_Y / T + 1);
+    for (i = 0; i < objs.length; i++) {
+      var o = objs[i], f = fate[o.i];
+      if (o.kind === 'star' && f === 'got') continue;
+      var side = E.sideOf(o.lane), cx = (o.lane + 0.5) * T, cy = CAR_Y - o.rel * T;
+      if (o.kind === 'star') star(g, cx, cy, P.star[side], P, t, f === 'miss');
+      else barrier(g, cx, cy, P.cars[side], P, f === 'hit');
+    }
+  }
+  function drawCars(g, P) {
+    for (var c = 0; c < 2; c++) {
+      var goal = S.lane[c] + 0.5, lean = Math.max(-1, Math.min(1, (goal - S.x[c]) * 2));
+      car(g, S.x[c] * T, CAR_Y, P.cars[c], P, lean, flash[c]);
+    }
+    sparks.forEach(function (s) {
+      g.strokeStyle = P.star[s.side]; g.globalAlpha = s.t; g.lineWidth = 3;
+      for (var k = 0; k < 6; k++) {
+        var a = k * Math.PI / 3, r1 = 14 + (1 - s.t) * 18, r2 = r1 + 7;
+        g.beginPath(); g.moveTo(s.x + Math.cos(a) * r1, CAR_Y - 6 + Math.sin(a) * r1); g.lineTo(s.x + Math.cos(a) * r2, CAR_Y - 6 + Math.sin(a) * r2); g.stroke();
+      }
+      g.globalAlpha = 1;
+    });
+  }
+
+  function font() { return getComputedStyle(document.body).fontFamily || 'sans-serif'; }
+  function label(g, P, text, y, size, alpha) {
+    g.globalAlpha = alpha;
+    g.font = '800 ' + size + 'px ' + font(); g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.lineWidth = 5; g.strokeStyle = P.shade; g.strokeText(text, VW / 2, y, VW - 16);
+    g.fillStyle = P.text; g.fillText(text, VW / 2, y, VW - 16);
+    g.globalAlpha = 1;
+  }
+
+  // reads the box as last laid out; the same size is used to map taps (#1019 bowling)
+  var view = { w: 0, h: 0 };
+  function draw() {
+    if (!S) return;
+    var r = box.getBoundingClientRect(), W = Math.max(60, Math.round(r.width)), H = Math.max(100, Math.round(r.height));
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    // both sides: a new canvas is 300×150 (#359)
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    view.w = W; view.h = H;
+    var g = cv.getContext('2d'), P = palette(dark()), t = S.tick * E.DT, k = Math.min(W / VW, H / VH);
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    g.translate((W - VW * k) / 2, (H - VH * k) / 2); g.scale(k, k);
+    g.save();
+    rr(g, 0, 0, VW, VH, 14); g.clip();
+    scene(g, P, t);
+    drawCars(g, P);
+    // how far through the stage: a thin bar along the top
+    g.fillStyle = P.bar; g.fillRect(0, 0, VW, 6);
+    g.fillStyle = P.mid; g.fillRect(0, 0, VW * E.progress(S), 6);
+    if (waiting && !ended) {
+      g.fillStyle = P.veil; g.fillRect(0, 0, VW, VH);
+      // a thumb mark in each half says where to tap
+      [VW / 4, 3 * VW / 4].forEach(function (x, c) {
+        g.strokeStyle = P.cars[c]; g.lineWidth = 4;
+        g.beginPath(); g.arc(x, CAR_Y - 110, 24, 0, Math.PI * 2); g.stroke();
+        g.globalAlpha = 0.35; g.fillStyle = P.cars[c]; g.beginPath(); g.arc(x, CAR_Y - 110, 24, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
+      });
+      label(g, P, C.t('tapGo'), VH * 0.32, 22, 1);
+    }
+    if (pop) label(g, P, pop.text, VH * 0.42 - (1 - Math.min(1, pop.t)) * 10, 26, Math.max(0, Math.min(1, pop.t * 2)));
+    g.restore();
+  }
+
+  // the share card: the road as the run ended
+  function paintShare(g, w, h) {
+    var P = palette(dark());
+    g.fillStyle = P.road; g.fillRect(0, 0, w, h);
+    var k = Math.min(w / VW, h / VH);
+    g.save();
+    g.translate((w - VW * k) / 2, (h - VH * k) / 2); g.scale(k, k);
+    scene(g, P, S.tick * E.DT);
+    drawCars(g, P);
+    g.restore();
+  }
+
+  /* ----------------------------------------------------------------- ui */
+
+  function renderTop() {
+    top.innerHTML = '';
+    if (dailyDate) top.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('dailyTl') + ' — ' + C.num(dailyDate) })]));
+    if (!S) return;
+    top.appendChild(el('span', { class: 'ch-badge', text: C.t('stageN', { n: C.num(Math.min(E.STAGES, S.stage + 1)) }) }));
+    top.appendChild(el('span', { class: 'ch-badge', text: C.t('livesN', { n: C.num(Math.max(0, S.lives)) }) }));
+    top.appendChild(el('span', { class: 'ch-badge', text: C.t('ptsN', { n: C.num(S.score) }) }));
+    var best = dailyDate ? 0 : C.stats.getBest('twinlanes', 'score');
+    if (best) top.appendChild(el('span', { class: 'ch-badge', text: C.t('bestN', { n: C.num(best) }) }));
+  }
+  function renderStatus() { status.textContent = waiting ? C.t('tapGo') : C.t('hint'); }
+  function go() { if (waiting) { waiting = false; last = 0; acc = 0; renderStatus(); kick(); } }
+
+  /* -------------------------------------------------------------- input */
+
+  // Every finger is its own tap, so two thumbs steer both cars at once. The side is set
+  // by the board's middle, wherever the finger lands in the game area: on a phone held
+  // sideways the thumbs rest beside the board, not on it. The board is drawn left to
+  // right in every language, so left is the left car in Persian too.
+  function sideAt(clientX) {
+    var r = box.getBoundingClientRect();
+    return clientX < r.left + r.width / 2 ? 0 : 1;
+  }
+  ctx.main.addEventListener('pointerdown', function (e) {
+    if (!S || (e.target.closest && e.target.closest('button, a, input, select'))) return;
+    if (e.button !== undefined && e.button > 0) return;
+    e.preventDefault();
+    C.audio.unlock();
+    steer(sideAt(e.clientX));
+  });
+  ctx.main.addEventListener('contextmenu', function (e) { if (e.target === cv) e.preventDefault(); });
+  ctx.main.style.touchAction = 'none';
+  window.addEventListener('keydown', function (e) {
+    if (document.querySelector('.ch-scrim') || e.repeat) return;
+    if (e.target && e.target.closest && e.target.closest('button') && (e.key === ' ' || e.key === 'Enter')) return;
+    var side = (e.key === 'ArrowLeft' || C.keyIs(e, 'a')) ? 0 : (e.key === 'ArrowRight' || C.keyIs(e, 'l')) ? 1 : -1;
+    if (side >= 0) { e.preventDefault(); steer(side); }
+    else if (e.key === ' ' || e.key === 'Enter') { if (waiting) { e.preventDefault(); go(); } }
+    else if (C.keyIs(e, 'r')) { e.preventDefault(); newRun(); }
+  });
+  // a run waits while the app is away, and comes back waiting for a tap
+  C.onPause(function () { paused = true; if (S && !ended) waiting = true; ctx.save(); renderStatus(); draw(); });
+  C.onResume(function () { paused = false; draw(); });
+  document.addEventListener('visibilitychange', function () { if (document.hidden) { if (S && !ended) { waiting = true; renderStatus(); } } else draw(); });
+  if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
+  if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw); } catch (er) { /* old WebViews */ } }
+  // the words on the board use the app's font, which may arrive after the first frame
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { draw(); });
+
+  /* --------------------------------------------------------------- help */
+
+  function kb(k, what) { return el('div', { class: 'ch-item' }, [el('div', { class: 'ch-item__label', text: what }), el('span', { class: 'ch-badge', text: k })]); }
+  function showHelp() {
+    C.ui.modal({
+      title: C.t('help'),
+      body: [
+        el('p', { class: 'ch-dim', text: C.t('rules') }),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('keyboard') }),
+        el('div', { class: 'ch-list' }, [kb('A / ←', C.t('kLeft')), kb('L / →', C.t('kRight')), kb('Space', C.t('kGo')), kb('R', C.t('kAgain'))])
+      ],
+      actions: [{ label: C.t('tutorial'), onClick: function () { ctx.showTutorial(TUT); } }, { label: C.t('done'), kind: 'primary' }]
+    });
+  }
+  // little pictures for the tutorial: the road, the two cars, a star and a barrier
+  var CAR_SVG = function (x, y, c) { return '<g transform="translate(' + x + ',' + y + ')"><rect x="-9" y="-15" width="18" height="30" rx="8" fill="' + c + '"/><rect x="-6" y="-9" width="12" height="6" rx="2" fill="#14282E" opacity=".6"/></g>'; };
+  var STAR_SVG = function (x, y, c) { var p = []; for (var k = 0; k < 10; k++) { var a = k * Math.PI / 5 - Math.PI / 2, r = k % 2 ? 4.5 : 10; p.push((x + Math.cos(a) * r).toFixed(1) + ',' + (y + Math.sin(a) * r).toFixed(1)); } return '<polygon points="' + p.join(' ') + '" fill="' + c + '"/>'; };
+  var BAR_SVG = function (x, y, c) { return '<g transform="translate(' + x + ',' + y + ')"><rect x="-16" y="-6" width="32" height="12" rx="3" fill="#fff"/><path d="M-12 6 l6 -12 h5 l-6 12z M0 6 l6 -12 h5 l-6 12z" fill="' + c + '"/></g>'; };
+  function tArt(kind) {
+    var s = '<svg viewBox="0 0 200 120" width="100%" direction="ltr"><rect width="200" height="120" rx="10" fill="#DDEDEE"/>' +
+      '<rect x="60" y="6" width="80" height="108" rx="6" fill="#3A474B"/><rect x="100" y="6" width="40" height="108" fill="#425156"/>' +
+      '<rect x="98" y="6" width="1.5" height="108" fill="#9FE0D2"/><rect x="101" y="6" width="1.5" height="108" fill="#9FE0D2"/>' +
+      '<path d="M80 10 v14 M80 34 v14 M80 58 v14 M80 82 v14 M120 10 v14 M120 34 v14 M120 58 v14 M120 82 v14" stroke="#fff" stroke-opacity=".45" stroke-width="2"/>';
+    if (kind === 0) {
+      s += CAR_SVG(70, 96, '#F07A3A') + CAR_SVG(130, 96, '#24B3A0') +
+        '<circle cx="28" cy="70" r="16" fill="#F07A3A" fill-opacity=".3" stroke="#F07A3A" stroke-width="3"/><circle cx="172" cy="70" r="16" fill="#24B3A0" fill-opacity=".3" stroke="#24B3A0" stroke-width="3"/>' +
+        '<path d="M74 78 q8 -8 14 0 M126 78 q-8 -8 -14 0" stroke="' + ACCENT + '" stroke-width="3" fill="none" stroke-linecap="round"/>';
+    } else if (kind === 1) {
+      s += STAR_SVG(70, 40, '#FFBE4F') + STAR_SVG(130, 62, '#7FE0CE') + CAR_SVG(70, 96, '#F07A3A') + CAR_SVG(130, 96, '#24B3A0');
+    } else {
+      s += BAR_SVG(90, 46, '#F07A3A') + BAR_SVG(110, 30, '#24B3A0') + CAR_SVG(70, 96, '#F07A3A') + CAR_SVG(130, 96, '#24B3A0') +
+        '<g fill="' + ACCENT + '">' + [0, 1, 2, 3, 4].map(function (i) { return '<circle cx="' + (24 + (i % 2) * 0) + '" cy="' + (20 + i * 20) + '" r="5"' + (i < 2 ? '' : ' fill-opacity=".3"') + '/>'; }).join('') + '</g>';
+    }
+    return s + '</svg>';
+  }
+  var TUT = [
+    { title: C.t('tutTitle0'), text: C.t('tutText0'), art: tArt(0) },
+    { title: C.t('tutTitle1'), text: C.t('tutText1'), art: tArt(1) },
+    { title: C.t('tutTitle2'), text: C.t('tutText2'), art: tArt(2) }
+  ];
+
+  /* -------------------------------------------------------------- start */
+
+  // A run in progress is saved after each lost life and each stage and when the app
+  // goes away; the daily run has its own slot
+  ctx.autosave(function () {
+    if (!S || S.over || ended) return { inProgress: false };
+    return { s: E.snapshot(S), seed: seed, tries: tries, daily: dailyDate || null, elapsed: Date.now() - startedAt };
+  });
+  function resumeRun(sv) {
+    var R = E.restore(sv.s);
+    if (!R || R.over) return false;
+    S = R; seed = sv.seed; tries = sv.tries || 1; startedAt = Date.now() - (sv.elapsed || 0);
+    ended = false; waiting = true; last = 0; acc = 0; pop = null; fate = {}; flash = [0, 0]; sparks = [];
+    renderTop(); renderStatus(); draw(); kick();
+    return true;
+  }
+  var saved = ctx.loadSave();
+  if (dailyDate) {
+    if (!(saved && saved.s && saved.daily === dailyDate && resumeRun(saved))) newRun();
+    if (C.stats.dailyDone('twinlanes', dailyDate)) {
+      var rec = C.stats.dailyOf(dailyDate).twinlanes;
+      C.ui.toast({ icon: 'check', title: C.t('dailyDone'), sub: rec && rec.label });
+    }
+  } else if (!(saved && saved.s && !saved.daily && resumeRun(saved))) {
+    newRun();
+  }
+  ctx.tutorialIfNew(TUT);
+})();
+</script>
+</body>
+</html>
