@@ -63,7 +63,8 @@ module.exports = function (T) {
     const i0 = sh.indexOf('var KANJI ='), i1 = sh.indexOf('function pieceNode(');
     ok(i0 > 0 && i1 > i0, 'Shogi has its piece tables and face() before pieceNode()');
     const run = (stored) => {
-      const box = { ctx: { store: { get: () => stored } }, E, C: { pieceArt: A }, Math, Object, Array };
+      // a returning player: firstLevel keeps the old default (#1248)
+      const box = { ctx: { store: { get: () => stored }, firstLevel: (old) => old }, E, C: { pieceArt: A }, Math, Object, Array };
       vm.createContext(box);
       vm.runInContext(sh.slice(i0, i1) + ';this.face = face; this.prefs = prefs; this.SYMBOL = typeof SYMBOL === "undefined" ? null : SYMBOL;', box);
       return box;
