@@ -11804,7 +11804,7 @@ function testPeak() {
   const P3 = E.clone(P2);
   E.play(P2, 9); E.play(P3, 9);
   ok(P2.pile.join() === P3.pile.join(), 'the new pile is shuffled the same way from the same position, so the daily stays the same for everyone');
-  // a beaten player always draws, so nobody can empty their hand off-turn and nobody shares a win (#635)
+  // being beaten never empties a hand: the loser always draws (#635)
   const W = E.make([[9, 2], [], [], [2]], [], [0, 3, 4, 0]);
   const wv = E.play(W, 9);
   ok(!E.over(W) && W.hands[1].length === 1 && W.hands[2].length === 1 && !wv.some((e) => e.t === 'win'), 'a beaten player with no hand draws from the reshuffled discards instead of winning');
