@@ -166,6 +166,19 @@ function LanderEngineFactory() {
     return ev;
   }
 
+  // How the ship is drawn t seconds after touching down. It used to freeze at its landing
+  // tilt (#1247); now it tips onto both feet, turning about the lower one with the speed
+  // growing as in a fall, and stands upright after about a third of a second. Display
+  // only: the landing was already judged on the tilt it came down with.
+  var SETTLE = 4;
+  function settle(S, t) {
+    if (!S.landed || !S.a) return { x: S.x, y: S.y, a: S.a };
+    var T = Math.sqrt(2 * Math.abs(S.a) / SETTLE), f = t >= T ? 1 : t <= 0 ? 0 : (t / T) * (t / T);
+    var a0 = world(S, FEET[0]), a1 = world(S, FEET[1]), lo = a0[1] <= a1[1] ? 0 : 1, pv = lo ? a1 : a0, p = FEET[lo];
+    var a = S.a * (1 - f), c = Math.cos(a), s = Math.sin(a);
+    return { x: pv[0] - (p[0] * c + p[1] * s), y: pv[1] - (-p[0] * s + p[1] * c), a: a };
+  }
+
   // the highest ground under the ship's width anywhere between two x's
   function highest(L, xa, xb) {
     var lo = Math.min(xa, xb) - 2.5, hi = Math.max(xa, xb) + 2.5, m = -1e9;
@@ -260,7 +273,7 @@ function LanderEngineFactory() {
 
   var api = {
     DT: DT, G: G, THRUST: THRUST, TURN: TURN, W: W, TOP: TOP, START_Y: START_Y, FLOOR: FLOOR, WALL: WALL, LIM: LIM, FEET: FEET, HULL: HULL, DAILY: DAILY,
-    rng: rng, params: params, terrain: terrain, height: height, windAt: windAt, ship: ship, world: world, step: step, bot: bot, fly: fly,
+    rng: rng, params: params, terrain: terrain, height: height, windAt: windAt, ship: ship, world: world, step: step, settle: settle, SETTLE: SETTLE, bot: bot, fly: fly,
     newLevel: newLevel, grade: grade, snapshot: snapshot, restore: restore
   };
   if (typeof self !== 'undefined') self.LanderEngine = api;
@@ -519,7 +532,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = LanderEngi
 
   // the ship is drawn between its last two steps, so its motion is even on any screen
   function pose() {
-    if (!prev || S.landed || S.over) return { x: S.x, y: S.y, a: S.a };
+    if (S.landed) return E.settle(S, C.ui.reduceMotion() ? Infinity : (performance.now() - landedAt) / 1000);
+    if (!prev || S.over) return { x: S.x, y: S.y, a: S.a };
     var f = Math.max(0, Math.min(1, acc / E.DT));
     return { x: prev.x + (S.x - prev.x) * f, y: prev.y + (S.y - prev.y) * f, a: prev.a + (S.a - prev.a) * f };
   }
