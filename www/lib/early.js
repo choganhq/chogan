@@ -17,6 +17,8 @@
     if (v.length === 4 && v.every(function (n) { return /^\d{1,4}$/.test(n); })) {
       var r = global.document.documentElement;
       r.classList.add('ch-edge');
+      // fullscreen lasts from page to page, so a new page must not draw the status strip
+      if (typeof bars.isImmersive === 'function' && bars.isImmersive()) r.classList.add('ch-immersive');
       ['t', 'r', 'b', 'l'].forEach(function (k, i) { r.style.setProperty('--ch-inset-' + k, v[i] + 'px'); });
     }
   } catch (e) { /* an older APK without insets(): the WebView padded as before */ }

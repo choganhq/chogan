@@ -93,6 +93,18 @@ module.exports = function (T) {
     ok(/position: fixed;/.test(scrim) && /pointer-events: none;/.test(scrim) && /z-index: 35;/.test(scrim) &&
       /top \/ 100% var\(--ch-inset-t, 0px\)/.test(scrim) && /bottom \/ 100% var\(--ch-inset-b, 0px\)/.test(scrim),
       'scrolling pages lay a see-through strip of the page colour under the status and navigation bars, in the app only, below the bottom bar (40)');
+    // #1205 again: in fullscreen the strip stayed behind as a ribbon at the camera
+    ok(/html\.ch-edge\.ch-immersive body:not\(\.ch-noscroll\)::after \{ content: none; \}/.test(css), 'no strip at all in fullscreen');
+    ok(/linear-gradient\(to bottom, color-mix\(in srgb, var\(--c-bg\) 75%, transparent\) 35%, transparent\) top/.test(scrim),
+      'otherwise the status strip is a shade that fades out, not a band with an edge');
+    const full = run({ insets: () => '31 0 0 0', isImmersive: () => true });
+    ok(!full.threw && full.classes.join() === 'ch-edge,ch-immersive', 'a page opened in fullscreen is marked before its first paint');
+    const bare = run({ insets: () => '31 0 48 0', isImmersive: () => false });
+    ok(!bare.threw && bare.classes.join() === 'ch-edge', 'and not marked with the bars shown');
+    const core = read('www/lib/chogan.js');
+    const mark = (core.match(/var mark = function \(\) \{ document\.documentElement\.classList\.toggle\('ch-immersive'[\s\S]{0,260}/) || [''])[0];
+    ok(/addEventListener\('fullscreenchange', mark\)/.test(mark) && /addEventListener\('pageshow', mark\)/.test(mark) && /\bmark\(\);/.test(mark),
+      'the mark follows the fullscreen button and a page restored from the cache');
     const scripts = ['www/index.html', 'www/privacy.html'].map(read);
     ok(scripts.every((h) => h.indexOf('lib/early.js') > 0 && h.indexOf('lib/early.js') < h.indexOf('<body')), 'the menu and the privacy page load early.js in their head');
   }
