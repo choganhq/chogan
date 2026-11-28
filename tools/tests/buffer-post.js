@@ -38,6 +38,12 @@ module.exports = function (T) {
       "print(m.length('a\\U0001F3AE'), m.length('\\u06F1\\u2014\\u4E2D'))",
     ].join('\n'), py], { encoding: 'utf8' });
     ok((weight.stdout || '').trim() === '3 4', 'the count follows X: an emoji or a Chinese character is two (' + (weight.stdout || '').trim() + ')');
+    const bare = spawnSync('python3', ['-I', '-c', [
+      'import importlib.util,sys',
+      "s=importlib.util.spec_from_file_location('b',sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m)",
+      "print(m.length('playchogan.com'), m.length('x.io/a b'), m.length('v1.1.0 e.g.'))",
+    ].join('\n'), py], { encoding: 'utf8' });
+    ok((bare.stdout || '').trim() === '23 25 11', 'a domain without https counts as a link, a version number does not (' + (bare.stdout || '').trim() + ')');
     const rel = fs.readFileSync(path.join(ROOT, '.github/workflows/release.yml'), 'utf8');
     ok(/social:[\s\S]*needs: apk[\s\S]*buffer-post\.py[^\n]*--send/.test(rel) && /BUFFER_API_KEY: \$\{\{ secrets\.BUFFER_API_KEY \}\}/.test(rel),
       'release.yml posts through Buffer in its own job after the APK, with the key from the secret');
