@@ -212,7 +212,10 @@ module.exports = function (T) {
     const mid = Object.assign({}, run, { wait: false });
     E.pause(mid);
     ok(E.valid(mid) && E.tap(mid, E.next(mid).lane).type === 'hit', 'a pause right after the song change leaves a first tile that can be tapped (#1293)');
-    run.wait = false;
+    const early = Object.assign({}, run, { wait: false });
+    ok(E.tap(early, E.next(early).lane).type === 'none' && early.miss === run.miss, 'a tap before the next song shows is not a slip (#1293)');
+    // bring the first tile on screen, then slip three times
+    run.wait = false; run.pos = E.next(run).b - E.LEAD;
     for (let i = 0; i < 3; i++) E.tap(run, (E.next(run).lane + 1) % 4);
     const rr = E.result(run);
     ok(run.over === 'lost' && rr.endless === true && rr.hits === len && rr.songs === 1, 'three slips end an endless run, which counts every note played');
