@@ -2146,6 +2146,7 @@
 
   function drawWelcome() {
     if (!wHost) return;
+    var held = wHost.contains(document.activeElement);
     wHost.innerHTML = '';
     wHost.appendChild(WELCOME_STEPS[wStep]());
     fitWelcomeHeads();
@@ -2175,25 +2176,34 @@
     var inner = wHost.querySelector('.ch-welcome__in');
     inner.appendChild(dots);
     inner.appendChild(foot);
+    // a redraw removes whatever had the focus; without this it fell to the menu behind (#1210)
+    if (held) next.focus();
   }
 
   function openWelcome() {
     if (wHost && wHost.parentNode) wHost.parentNode.removeChild(wHost);
     wStep = 0;
-    wHost = el('div', { class: 'ch-welcome', role: 'dialog', 'aria-modal': 'true' });
+    wHost = el('div', { class: 'ch-welcome', role: 'dialog', 'aria-modal': 'true', tabindex: '-1' });
     document.body.appendChild(wHost);
     // aria-modal تنها کافی نیست: بدون این، صفحه‌خوان و کلید Tab همچنان به
     // منو و نوار ناوبری پشت صفحه می‌رسند.
     app.setAttribute('aria-hidden', 'true');
     document.getElementById('nav').setAttribute('aria-hidden', 'true');
     drawWelcome();
+    wHost.focus();
     // بدون این، Tab به منوی پشت صفحه می‌رسید
     wHost.addEventListener('keydown', function (e) {
-      if (e.key !== 'Tab' || !wHost) return;
+      if (!wHost) return;
+      var onHost = document.activeElement === wHost;
+      var arrow = /^Arrow/.test(e.key);
+      if (e.key !== 'Tab' && !(onHost && (arrow || e.key === 'Enter'))) return;
       var f = wHost.querySelectorAll('button, input, [tabindex]:not([tabindex="-1"])');
       if (!f.length) return;
       var first = f[0], last = f[f.length - 1];
-      if (e.shiftKey && document.activeElement === first) { last.focus(); e.preventDefault(); }
+      // a TV remote has no Tab: its first press must land somewhere, and Enter on Next
+      if (arrow) { first.focus(); e.preventDefault(); }
+      else if (e.key === 'Enter') { last.focus(); e.preventDefault(); }
+      else if (e.shiftKey && (onHost || document.activeElement === first)) { last.focus(); e.preventDefault(); }
       else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
     });
   }
