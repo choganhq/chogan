@@ -207,7 +207,15 @@ module.exports = function (T) {
     let moved = 0;
     for (let i = 0; i < len; i++) { run.pos = E.next(run).b; if (E.tap(run, E.next(run).lane).moved) moved++; }
     ok(len > 0 && moved === 1 && run.over === null && run.song === songs[0].id && run.songs === 1 && run.i === 0 && E.total(run) === len, 'in endless play the last note of a song starts the next one, and the last song wraps to the first');
-    run.wait = false;
+    // #1293: the next song used to appear LEAD beats above the line on a moving board
+    ok(run.pos <= E.next(run).b - E.VIEW, 'the next song comes in from the top of the screen (#1293)');
+    const mid = Object.assign({}, run, { wait: false });
+    E.pause(mid);
+    ok(E.valid(mid) && E.tap(mid, E.next(mid).lane).type === 'hit', 'a pause right after the song change leaves a first tile that can be tapped (#1293)');
+    const early = Object.assign({}, run, { wait: false });
+    ok(E.tap(early, E.next(early).lane).type === 'none' && early.miss === run.miss, 'a tap before the next song shows is not a slip (#1293)');
+    // bring the first tile on screen, then slip three times
+    run.wait = false; run.pos = E.next(run).b - E.LEAD;
     for (let i = 0; i < 3; i++) E.tap(run, (E.next(run).lane + 1) % 4);
     const rr = E.result(run);
     ok(run.over === 'lost' && rr.endless === true && rr.hits === len && rr.songs === 1, 'three slips end an endless run, which counts every note played');
