@@ -104,6 +104,11 @@
     font-variant-numeric: tabular-nums; font-size: 1rem; line-height: 1; margin-top: 2px; }
   .nd-gain { position: absolute; left: 0; right: 0; top: 0; font-weight: 800; color: var(--game-text, var(--c-accent)); pointer-events: none; }
   .nd-top { display: flex; justify-content: center; }
+  /* one row: a second one for the way back was cut off on a phone held sideways */
+  .nd-player { display: flex; align-items: center; gap: var(--s-2); width: 100%; max-width: 360px; }
+  .nd-player[hidden] { display: none; }
+  .nd-player input { flex: 1 1 0; min-width: 0; min-height: 44px; accent-color: var(--game); }
+  .nd-step { flex: 0 0 auto; min-width: 44px; min-height: 44px; padding: 0; }
   .nd-status { min-height: 1.6em; font-weight: 700; color: var(--c-text-dim); text-align: center; }
 </style>
 </head>
@@ -144,7 +149,9 @@ function NumberDropEngineFactory() {
   }
 
   function newGame(seed) {
-    var S = { g: new Array(N).fill(0), cur: 2, next: 2, score: 0, drops: 0, seed: seed | 0, won: false };
+    // first and moves are the whole recording (#1275): the same seed and the same columns
+    // draw the same blocks again, so nothing else needs to be kept
+    var S = { g: new Array(N).fill(0), cur: 2, next: 2, score: 0, drops: 0, seed: seed | 0, won: false, first: seed | 0, moves: '' };
     S.cur = pick(S); S.next = pick(S);
     return S;
   }
@@ -224,6 +231,7 @@ function NumberDropEngineFactory() {
     var placed = S.g.slice();
     var res = resolve(S.g, at);
     S.score += res.gain; S.drops++;
+    if (typeof S.moves === 'string') S.moves += c;
     S.cur = S.next; S.next = pick(S);
     return { at: at, row: r, col: c, v: v, placed: placed, steps: res.steps, gain: res.gain,
       reached: !hadGoal && maxTile(S.g) >= GOAL, over: isOver(S.g) };
@@ -241,7 +249,20 @@ function NumberDropEngineFactory() {
       Number.isInteger(s.score) && s.score >= 0 && Number.isInteger(s.drops) && s.drops >= 0 && Number.isInteger(s.seed);
   }
 
-  return { COLS: COLS, ROWS: ROWS, GOAL: GOAL, rand: rand, pick: pick, capExp: capExp, newGame: newGame, landRow: landRow,
+  // The recording of a game, or null: a game saved before recording has no first seed,
+  // and a part of a game cannot be played back
+  function record(S) {
+    if (!S || !Number.isInteger(S.first) || typeof S.moves !== 'string' || !S.drops || S.moves.length !== S.drops) return null;
+    return /^[0-4]+$/.test(S.moves) ? { first: S.first, moves: S.moves } : null;
+  }
+  // the game as it stood after k drops, and what the last of them did
+  function replay(rec, k) {
+    var S = newGame(rec.first), t = null;
+    for (var i = 0; i < k && i < rec.moves.length; i++) t = drop(S, +rec.moves.charAt(i));
+    return { S: S, t: t };
+  }
+
+  return { record: record, replay: replay, COLS: COLS, ROWS: ROWS, GOAL: GOAL, rand: rand, pick: pick, capExp: capExp, newGame: newGame, landRow: landRow,
     gravity: gravity, resolve: resolve, drop: drop, isOver: isOver, maxTile: maxTile, packed: packed, valid: valid };
 }
 if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
@@ -266,7 +287,7 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
         keepGoing: 'ادامه بده', reachedT: 'به {g} رسیدی!', reachedNote: 'می‌توانی ادامه بدهی و رکورد امتیازت را بالا ببری.',
         overT: 'ستون‌ها پر شد', maxTileL: 'بزرگ‌ترین عدد', dropsL: 'بلوک', newBest: 'رکورد تازه!', goalN: 'هدف: عدد {g}', chaseN: 'حالا برای رکورد امتیاز',
         nextL: 'بعدی', fullCol: 'این ستون پر است', chainN: 'زنجیره‌ی {n}تایی!',
-        kMove: 'جابه‌جا کردن بلوک', kDrop: 'انداختن بلوک', kNew: 'بازی تازه',
+        kMove: 'جابه‌جا کردن بلوک', kDrop: 'انداختن بلوک', ndReplay: 'بازی آخر', ndNoReplay: 'هنوز بازی تمام‌شده‌ای نیست', ndMove: 'حرکت {n} از {m} · امتیاز {s}', ndPrev: 'حرکت قبل', ndNextMove: 'حرکت بعد', ndBack: 'برگشت به بازی', kNew: 'بازی تازه',
         rules: 'روی یک ستون بزن، یا انگشتت را روی ستون‌ها بکش و رها کن؛ بلوک تا پایین‌ترین خانه‌ی خالی آن ستون می‌افتد. بلوکی که فرود بیاید با همه‌ی همسایه‌های هم‌عددش در چپ و راست و بالا و پایین یکی می‌شود: یک همسایه عدد را دو برابر می‌کند، دو همسایه چهار برابر و سه همسایه هشت برابر. بعد بلوک‌ها پایین می‌افتند و اگر باز جفتی پیدا شود، زنجیره ادامه پیدا می‌کند. امتیاز، جمع عددهای ساخته‌شده است. بلوک بعدی را از پیش می‌بینی. به {g} برسی بُرده‌ای و می‌توانی برای رکورد ادامه بدهی. ستون پر بلوک نمی‌گیرد؛ وقتی همه‌ی ستون‌ها پر شوند، بازی تمام است. برگشت به عقب ندارد.',
         tutTitle1: 'یک ستون انتخاب کن', tutText1: 'روی ستون بزن یا بکش و رها کن؛ بلوک تا پایین می‌افتد.',
         tutTitle2: 'هم‌عددها یکی می‌شوند', tutText2: 'با یک همسایه‌ی هم‌عدد دو برابر، با دو همسایه چهار برابر. بعد زنجیره‌ها راه می‌افتند.',
@@ -277,7 +298,7 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
         keepGoing: 'Keep going', reachedT: 'You made {g}!', reachedNote: 'You can keep going and push your best score higher.',
         overT: 'The columns are full', maxTileL: 'Biggest number', dropsL: 'Blocks', newBest: 'New best!', goalN: 'Goal: make {g}', chaseN: 'Now going for a best score',
         nextL: 'Next', fullCol: 'That column is full', chainN: 'Chain of {n}!',
-        kMove: 'Move the block', kDrop: 'Drop the block', kNew: 'New game',
+        kMove: 'Move the block', kDrop: 'Drop the block', ndReplay: 'Last game', ndNoReplay: 'No finished game yet', ndMove: 'Move {n} of {m} · score {s}', ndPrev: 'Previous move', ndNextMove: 'Next move', ndBack: 'Back to the game', kNew: 'New game',
         rules: 'Tap a column, or drag across the columns and let go; the block falls to the lowest empty cell of that column. A block that lands merges with every neighbour of the same number to its left, right, above and below: one neighbour doubles it, two make it four times, three make it eight times. Then the blocks fall, and if a new pair meets, the chain goes on. Your score is the sum of the numbers you make. You can see the next block in advance. Make {g} to win, then keep going for a best score if you like. A full column takes no block; when every column is full, the game is over. There is no undo.',
         tutTitle1: 'Pick a column', tutText1: 'Tap a column, or drag and let go; the block falls to the bottom.',
         tutTitle2: 'Equal numbers merge', tutText2: 'One equal neighbour doubles it, two make it four times. Then chains set off.',
@@ -288,7 +309,7 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
         keepGoing: 'Graj dalej', reachedT: 'Masz {g}!', reachedNote: 'Możesz grać dalej i poprawić swój rekord.',
         overT: 'Kolumny są pełne', maxTileL: 'Największa liczba', dropsL: 'Klocki', newBest: 'Nowy rekord!', goalN: 'Cel: zrób {g}', chaseN: 'Teraz walka o rekord',
         nextL: 'Następny', fullCol: 'Ta kolumna jest pełna', chainN: 'Łańcuch {n}!',
-        kMove: 'Przesuń klocek', kDrop: 'Upuść klocek', kNew: 'Nowa gra',
+        kMove: 'Przesuń klocek', kDrop: 'Upuść klocek', ndReplay: 'Ostatnia gra', ndNoReplay: 'Nie ma jeszcze zakończonej gry', ndMove: 'Ruch {n} z {m} · wynik {s}', ndPrev: 'Poprzedni ruch', ndNextMove: 'Następny ruch', ndBack: 'Wróć do gry', kNew: 'Nowa gra',
         rules: 'Stuknij kolumnę albo przeciągnij palcem po kolumnach i puść; klocek spada na najniższe wolne pole tej kolumny. Klocek, który wyląduje, łączy się ze wszystkimi sąsiadami o tej samej liczbie po lewej, prawej, nad i pod nim: jeden sąsiad podwaja liczbę, dwóch daje cztery razy więcej, trzech osiem razy. Potem klocki opadają, a jeśli spotka się nowa para, łańcuch trwa dalej. Wynik to suma utworzonych liczb. Następny klocek widać z góry. Zrób {g}, aby wygrać, a potem możesz grać dalej o rekord. Pełna kolumna nie przyjmie klocka; gdy wszystkie kolumny są pełne, gra się kończy. Nie ma cofania.',
         tutTitle1: 'Wybierz kolumnę', tutText1: 'Stuknij kolumnę albo przeciągnij i puść; klocek spada na dół.',
         tutTitle2: 'Równe liczby się łączą', tutText2: 'Jeden równy sąsiad podwaja, dwóch daje cztery razy więcej. Potem ruszają łańcuchy.',
@@ -299,7 +320,7 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
         keepGoing: 'Continuer', reachedT: 'Tu as fait {g} !', reachedNote: 'Tu peux continuer et pousser ton record plus haut.',
         overT: 'Les colonnes sont pleines', maxTileL: 'Plus grand nombre', dropsL: 'Blocs', newBest: 'Nouveau record !', goalN: 'Objectif : faire {g}', chaseN: 'Maintenant, vise un record',
         nextL: 'Suivant', fullCol: 'Cette colonne est pleine', chainN: 'Chaîne de {n} !',
-        kMove: 'Déplacer le bloc', kDrop: 'Lâcher le bloc', kNew: 'Nouvelle partie',
+        kMove: 'Déplacer le bloc', kDrop: 'Lâcher le bloc', ndReplay: 'Dernière partie', ndNoReplay: 'Aucune partie terminée pour l’instant', ndMove: 'Coup {n} sur {m} · score {s}', ndPrev: 'Coup précédent', ndNextMove: 'Coup suivant', ndBack: 'Revenir au jeu', kNew: 'Nouvelle partie',
         rules: 'Touche une colonne, ou glisse sur les colonnes et relâche ; le bloc tombe dans la case vide la plus basse de cette colonne. Un bloc qui atterrit fusionne avec chaque voisin du même nombre à sa gauche, sa droite, au-dessus et en dessous : un voisin le double, deux le multiplient par quatre, trois par huit. Ensuite les blocs tombent, et si une nouvelle paire se forme, la chaîne continue. Ton score est la somme des nombres que tu crées. Tu vois le bloc suivant à l’avance. Fais {g} pour gagner, puis continue pour un record si tu veux. Une colonne pleine ne prend plus de bloc ; quand toutes les colonnes sont pleines, la partie est finie. Il n’y a pas d’annulation.',
         tutTitle1: 'Choisis une colonne', tutText1: 'Touche une colonne, ou glisse et relâche ; le bloc tombe en bas.',
         tutTitle2: 'Les nombres égaux fusionnent', tutText2: 'Un voisin égal le double, deux le multiplient par quatre. Puis les chaînes s’enchaînent.',
@@ -310,7 +331,7 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
         keepGoing: 'تابع', reachedT: 'صنعت {g}!', reachedNote: 'يمكنك أن تتابع وترفع أفضل نتيجة لك.',
         overT: 'امتلأت الأعمدة', maxTileL: 'أكبر رقم', dropsL: 'القطع', newBest: 'رقم قياسي جديد!', goalN: 'الهدف: اصنع {g}', chaseN: 'الآن نحو أفضل نتيجة',
         nextL: 'التالي', fullCol: 'هذا العمود ممتلئ', chainN: 'سلسلة من {n}!',
-        kMove: 'حرّك القطعة', kDrop: 'أسقط القطعة', kNew: 'لعبة جديدة',
+        kMove: 'حرّك القطعة', kDrop: 'أسقط القطعة', ndReplay: 'آخر لعبة', ndNoReplay: 'لا توجد لعبة منتهية بعد', ndMove: 'الحركة {n} من {m} · النقاط {s}', ndPrev: 'الحركة السابقة', ndNextMove: 'الحركة التالية', ndBack: 'العودة إلى اللعبة', kNew: 'لعبة جديدة',
         rules: 'انقر عمودًا، أو اسحب عبر الأعمدة ثم أفلت؛ تسقط القطعة إلى أدنى خانة فارغة في ذلك العمود. القطعة التي تهبط تندمج مع كل جار لها يحمل الرقم نفسه يسارها ويمينها وفوقها وتحتها: جار واحد يضاعفها، واثنان يجعلانها أربعة أضعاف، وثلاثة ثمانية أضعاف. ثم تسقط القطع، وإذا التقى زوج جديد تستمر السلسلة. نقاطك مجموع الأرقام التي تصنعها. ترى القطعة التالية مسبقًا. اصنع {g} لتفوز، ثم تابع نحو أفضل نتيجة إن شئت. العمود الممتلئ لا يقبل قطعة؛ وحين تمتلئ كل الأعمدة تنتهي اللعبة. لا يوجد تراجع.',
         tutTitle1: 'اختر عمودًا', tutText1: 'انقر عمودًا، أو اسحب ثم أفلت؛ تسقط القطعة إلى الأسفل.',
         tutTitle2: 'الأرقام المتساوية تندمج', tutText2: 'جار مساوٍ واحد يضاعفها، واثنان يجعلانها أربعة أضعاف. ثم تنطلق السلاسل.',
@@ -321,7 +342,7 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
         keepGoing: 'जारी रखें', reachedT: 'आपने {g} बनाया!', reachedNote: 'आप खेलते रह सकते हैं और अपना रिकॉर्ड और ऊँचा कर सकते हैं।',
         overT: 'कॉलम भर गए', maxTileL: 'सबसे बड़ी संख्या', dropsL: 'ब्लॉक', newBest: 'नया रिकॉर्ड!', goalN: 'लक्ष्य: {g} बनाएँ', chaseN: 'अब रिकॉर्ड की ओर',
         nextL: 'अगला', fullCol: 'यह कॉलम भरा है', chainN: '{n} की कड़ी!',
-        kMove: 'ब्लॉक खिसकाएँ', kDrop: 'ब्लॉक गिराएँ', kNew: 'नया खेल',
+        kMove: 'ब्लॉक खिसकाएँ', kDrop: 'ब्लॉक गिराएँ', ndReplay: 'पिछला खेल', ndNoReplay: 'अभी कोई खेल पूरा नहीं हुआ', ndMove: 'चाल {n} / {m} · स्कोर {s}', ndPrev: 'पिछली चाल', ndNextMove: 'अगली चाल', ndBack: 'खेल पर लौटें', kNew: 'नया खेल',
         rules: 'किसी कॉलम को छुएँ, या कॉलमों पर उँगली खींचकर छोड़ें; ब्लॉक उस कॉलम के सबसे नीचे वाले ख़ाली खाने तक गिरता है। गिरा ब्लॉक अपने बाएँ, दाएँ, ऊपर और नीचे की उसी संख्या वाले हर पड़ोसी से जुड़ जाता है: एक पड़ोसी हो तो संख्या दुगनी, दो हों तो चार गुनी, तीन हों तो आठ गुनी। फिर ब्लॉक नीचे गिरते हैं, और नई जोड़ी मिले तो कड़ी आगे चलती है। आपका स्कोर बनाई गई संख्याओं का जोड़ है। अगला ब्लॉक पहले से दिखता है। जीतने के लिए {g} बनाएँ, फिर चाहें तो रिकॉर्ड के लिए खेलते रहें। भरा कॉलम ब्लॉक नहीं लेता; जब सारे कॉलम भर जाएँ, खेल ख़त्म। वापस लेने की सुविधा नहीं है।',
         tutTitle1: 'कॉलम चुनें', tutText1: 'किसी कॉलम को छुएँ, या खींचकर छोड़ें; ब्लॉक नीचे तक गिरता है।',
         tutTitle2: 'बराबर संख्याएँ जुड़ती हैं', tutText2: 'एक बराबर पड़ोसी हो तो दुगनी, दो हों तो चार गुनी। फिर कड़ियाँ चल पड़ती हैं।',
@@ -332,7 +353,7 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
         keepGoing: 'Играть дальше', reachedT: 'Ты собрал {g}!', reachedNote: 'Можно играть дальше и улучшить свой рекорд.',
         overT: 'Столбцы заполнены', maxTileL: 'Наибольшее число', dropsL: 'Блоки', newBest: 'Новый рекорд!', goalN: 'Цель: собрать {g}', chaseN: 'Теперь — на рекорд',
         nextL: 'Далее', fullCol: 'Этот столбец заполнен', chainN: 'Цепочка ×{n}!',
-        kMove: 'Сдвинуть блок', kDrop: 'Бросить блок', kNew: 'Новая игра',
+        kMove: 'Сдвинуть блок', kDrop: 'Бросить блок', ndReplay: 'Прошлая игра', ndNoReplay: 'Законченной игры пока нет', ndMove: 'Ход {n} из {m} · счёт {s}', ndPrev: 'Предыдущий ход', ndNextMove: 'Следующий ход', ndBack: 'Вернуться к игре', kNew: 'Новая игра',
         rules: 'Нажми на столбец или проведи пальцем по столбцам и отпусти; блок упадёт в нижнюю свободную клетку этого столбца. Упавший блок сливается со всеми соседями с тем же числом слева, справа, сверху и снизу: один сосед удваивает его, два — увеличивают в четыре раза, три — в восемь. Затем блоки падают, и если встречается новая пара, цепочка продолжается. Очки — это сумма собранных чисел. Следующий блок виден заранее. Собери {g}, чтобы победить, а потом, если хочешь, играй дальше на рекорд. В заполненный столбец блок не помещается; когда заполнены все столбцы, игра окончена. Отмены хода нет.',
         tutTitle1: 'Выбери столбец', tutText1: 'Нажми на столбец или проведи пальцем и отпусти; блок упадёт вниз.',
         tutTitle2: 'Равные числа сливаются', tutText2: 'Один равный сосед удваивает число, два — увеличивают в четыре раза. Потом начинаются цепочки.',
@@ -343,7 +364,7 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
         keepGoing: 'Continuar', reachedT: 'Você fez {g}!', reachedNote: 'Você pode continuar e aumentar ainda mais o seu recorde.',
         overT: 'As colunas estão cheias', maxTileL: 'Maior número', dropsL: 'Blocos', newBest: 'Novo recorde!', goalN: 'Meta: fazer {g}', chaseN: 'Agora é pelo recorde',
         nextL: 'Próximo', fullCol: 'Essa coluna está cheia', chainN: 'Cadeia de {n}!',
-        kMove: 'Mover o bloco', kDrop: 'Soltar o bloco', kNew: 'Novo jogo',
+        kMove: 'Mover o bloco', kDrop: 'Soltar o bloco', ndReplay: 'Último jogo', ndNoReplay: 'Ainda não há jogo terminado', ndMove: 'Jogada {n} de {m} · pontos {s}', ndPrev: 'Jogada anterior', ndNextMove: 'Próxima jogada', ndBack: 'Voltar ao jogo', kNew: 'Novo jogo',
         rules: 'Toque em uma coluna, ou arraste pelas colunas e solte; o bloco cai até a casa vazia mais baixa daquela coluna. Um bloco que pousa se junta com todos os vizinhos de mesmo número à esquerda, à direita, acima e abaixo: um vizinho dobra o valor, dois o multiplicam por quatro, três por oito. Depois os blocos caem e, se um novo par se encontrar, a cadeia continua. Sua pontuação é a soma dos números que você forma. Você pode ver o próximo bloco com antecedência. Faça {g} para vencer e depois, se quiser, continue em busca do recorde. Uma coluna cheia não aceita blocos; quando todas estiverem cheias, o jogo acaba. Não há como desfazer.',
         tutTitle1: 'Escolha uma coluna', tutText1: 'Toque em uma coluna, ou arraste e solte; o bloco cai até o fundo.',
         tutTitle2: 'Números iguais se juntam', tutText2: 'Um vizinho igual dobra o valor, dois o multiplicam por quatro. E aí começam as cadeias.',
@@ -354,7 +375,7 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
         keepGoing: '继续', reachedT: '你合成了 {g}！', reachedNote: '你可以继续玩，刷新最高分。',
         overT: '所有列都满了', maxTileL: '最大数字', dropsL: '方块数', newBest: '新纪录！', goalN: '目标：合成 {g}', chaseN: '现在冲击最高分',
         nextL: '下一块', fullCol: '这一列满了', chainN: '{n} 连锁！',
-        kMove: '移动方块', kDrop: '放下方块', kNew: '新游戏',
+        kMove: '移动方块', kDrop: '放下方块', ndReplay: '上一局', ndNoReplay: '还没有结束的对局', ndMove: '第 {n} 步，共 {m} 步 · 得分 {s}', ndPrev: '上一步', ndNextMove: '下一步', ndBack: '返回游戏', kNew: '新游戏',
         rules: '点一列，或在各列上拖动后松开；方块会落到那一列最低的空格。落下的方块会和左、右、上、下所有相同数字的邻居一起合成：一个邻居让数字翻倍，两个变成四倍，三个变成八倍。然后方块下落，如果又有相同的碰到一起，连锁继续。分数是合成出的数字之和。下一块会提前显示。合成 {g} 就赢了，之后可以继续冲击最高分。满了的列放不进方块；所有列都满了，游戏结束。不能悔棋。',
         tutTitle1: '选一列', tutText1: '点一列，或拖动后松开；方块落到底部。',
         tutTitle2: '相同数字合成', tutText2: '一个相同邻居翻倍，两个变成四倍。然后连锁开始。',
@@ -365,7 +386,7 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
         keepGoing: 'Weiterspielen', reachedT: 'Du hast {g} geschafft!', reachedNote: 'Du kannst weiterspielen und deinen Rekord steigern.',
         overT: 'Die Spalten sind voll', maxTileL: 'Größte Zahl', dropsL: 'Blöcke', newBest: 'Neuer Rekord!', goalN: 'Ziel: {g} bilden', chaseN: 'Jetzt geht es um den Rekord',
         nextL: 'Nächster', fullCol: 'Diese Spalte ist voll', chainN: 'Kette aus {n}!',
-        kMove: 'Block verschieben', kDrop: 'Block fallen lassen', kNew: 'Neues Spiel',
+        kMove: 'Block verschieben', kDrop: 'Block fallen lassen', ndReplay: 'Letztes Spiel', ndNoReplay: 'Noch kein beendetes Spiel', ndMove: 'Zug {n} von {m} · Punkte {s}', ndPrev: 'Voriger Zug', ndNextMove: 'Nächster Zug', ndBack: 'Zurück zum Spiel', kNew: 'Neues Spiel',
         rules: 'Tippe auf eine Spalte oder zieh über die Spalten und lass los; der Block fällt auf das unterste freie Feld der Spalte. Ein gelandeter Block verschmilzt mit allen Nachbarn derselben Zahl links, rechts, oben und unten: ein Nachbar verdoppelt ihn, zwei vervierfachen, drei verachtfachen ihn. Danach fallen die Blöcke nach, und trifft sich ein neues Paar, geht die Kette weiter. Deine Punkte sind die Summe der gebildeten Zahlen. Den nächsten Block siehst du vorher. Mit {g} gewinnst du, danach kannst du um den Rekord weiterspielen. Eine volle Spalte nimmt keinen Block; sind alle Spalten voll, ist das Spiel vorbei. Rückgängig gibt es nicht.',
         tutTitle1: 'Wähl eine Spalte', tutText1: 'Tippe auf eine Spalte oder zieh und lass los; der Block fällt nach unten.',
         tutTitle2: 'Gleiche Zahlen verschmelzen', tutText2: 'Ein gleicher Nachbar verdoppelt, zwei vervierfachen. Dann laufen Ketten an.',
@@ -376,7 +397,7 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
         keepGoing: 'Seguir', reachedT: '¡Llegaste a {g}!', reachedNote: 'Puedes seguir jugando y subir tu récord.',
         overT: 'Las columnas están llenas', maxTileL: 'Número mayor', dropsL: 'Bloques', newBest: '¡Nuevo récord!', goalN: 'Meta: formar {g}', chaseN: 'Ahora a por el récord',
         nextL: 'Siguiente', fullCol: 'Esa columna está llena', chainN: '¡Cadena de {n}!',
-        kMove: 'Mover el bloque', kDrop: 'Soltar el bloque', kNew: 'Partida nueva',
+        kMove: 'Mover el bloque', kDrop: 'Soltar el bloque', ndReplay: 'Última partida', ndNoReplay: 'Aún no hay ninguna partida terminada', ndMove: 'Jugada {n} de {m} · puntos {s}', ndPrev: 'Jugada anterior', ndNextMove: 'Jugada siguiente', ndBack: 'Volver al juego', kNew: 'Partida nueva',
         rules: 'Toca una columna, o arrastra por las columnas y suelta; el bloque cae a la casilla libre más baja de esa columna. Un bloque que cae se une con todos los vecinos del mismo número a su izquierda, derecha, arriba y abajo: un vecino lo dobla, dos lo multiplican por cuatro, tres por ocho. Luego los bloques caen y, si se encuentra un par nuevo, la cadena sigue. Tus puntos son la suma de los números que formas. Ves el siguiente bloque de antemano. Forma {g} para ganar y, si quieres, sigue a por el récord. Una columna llena no admite bloques; cuando todas están llenas, la partida termina. No se puede deshacer.',
         tutTitle1: 'Elige una columna', tutText1: 'Toca una columna, o arrastra y suelta; el bloque cae hasta abajo.',
         tutTitle2: 'Los iguales se unen', tutText2: 'Un vecino igual lo dobla, dos lo multiplican por cuatro. Luego arrancan las cadenas.',
@@ -400,11 +421,20 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
   var nextChip = el('div', { class: 'nd-chip nd-v2', text: '2' });
   var nextBox = el('div', { class: 'nd-score nd-next' }, [el('div', { class: 'nd-score__l', text: C.t('nextL') }), nextChip]);
   var status = el('div', { class: 'nd-status', role: 'status', 'aria-live': 'polite' });
+  // playback of the last game (#1275); left to right in every language, like any player's controls
+  var playback = null;
+  var prevBtn = el('button', { class: 'ch-btn nd-step', type: 'button', 'aria-label': C.t('ndPrev'), onclick: function () { step(-1); } }, [C.icon('back', 20)]);
+  var nextBtn = el('button', { class: 'ch-btn nd-step', type: 'button', 'aria-label': C.t('ndNextMove'), onclick: function () { step(1); } }, [C.icon('forward', 20)]);
+  var slider = el('input', { type: 'range', min: '0', max: '0', value: '0', 'aria-label': C.t('ndReplay') });
+  slider.addEventListener('input', function () { show(+slider.value, false); });
+  var closeBtn = el('button', { class: 'ch-btn nd-step', type: 'button', 'aria-label': C.t('ndBack'), title: C.t('ndBack'), onclick: closeReplay }, [C.icon('close', 20)]);
+  var player = el('div', { class: 'nd-player', dir: 'ltr', hidden: 'hidden' }, [prevBtn, slider, nextBtn, closeBtn]);
   var wrap = el('div', { class: 'nd-wrap ch-split' }, [el('div', { class: 'ch-fit' }, [box]),
-    el('div', { class: 'ch-side nd-side' }, [top, el('div', { class: 'nd-scores' }, [scoreBox, nextBox, bestBox]), status])]);
+    el('div', { class: 'ch-side nd-side' }, [top, el('div', { class: 'nd-scores' }, [scoreBox, nextBox, bestBox]), status, player])]);
 
   ctx.button({ icon: 'help', label: C.t('help'), onClick: showHelp });
   if (!dailyDate) ctx.button({ icon: 'refresh', label: C.t('newGame'), onClick: askNew });
+  ctx.button({ icon: 'play', label: C.t('ndReplay'), onClick: function () { if (playback) closeReplay(); else openReplay(); } });
   ctx.main.appendChild(wrap);
   ctx.mount();
 
@@ -423,8 +453,15 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
     var r = dailyDate ? C.daily('numberdrop', dailyDate).rng : Math.random;
     return Math.floor(r() * 4294967296) | 0;
   }
+  // only the last game is kept: one that filled the board, or one given up for a new one
+  function keepLast() {
+    var rec = E.record(S);
+    if (rec) ctx.store.set('last', rec);
+  }
   function newGame() {
     stopAnim();
+    if (playback) closeReplay();
+    if (S && !ended) keepLast();
     S = E.newGame(seedFor());
     S.daily = dailyDate || null;
     startedAt = Date.now(); ended = false; paused = false; winScore = 0; wonAt = 0;
@@ -440,7 +477,7 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
   function best() { return C.stats.getBest('numberdrop', 'score') || 0; }
 
   function dropAt(c) {
-    if (!S || ended || paused) return;
+    if (!S || ended || paused || playback) return;
     // a new drop never waits for the last one's animation: it jumps to the end first
     stopAnim();
     var t = E.drop(S, c);
@@ -491,6 +528,7 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
 
   function over() {
     ended = true;
+    keepLast();
     var rw = rewards(), cont = S.won;
     if (cont) {
       // only what was earned after the goal
@@ -526,6 +564,46 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
     return 'چوگان · عددریز' + (S.daily ? '\nروزانه ' + S.daily : '') + '\n' + S.score + ' · ' + E.maxTile(S.g);
   }
 
+  /* ----------------------------------------------------------- playback */
+
+  function openReplay() {
+    var rec = ctx.store.get('last');
+    if (!rec || !/^[0-4]+$/.test(rec.moves) || !Number.isInteger(rec.first)) { C.ui.toast({ icon: 'play', title: C.t('ndNoReplay') }); return; }
+    stopAnim();
+    playback = { rec: rec, k: 0 };
+    player.removeAttribute('hidden');
+    slider.max = String(rec.moves.length);
+    curNode.style.visibility = 'hidden';
+    cols.forEach(function (n) { n.classList.remove('is-hover'); });
+    show(0, false);
+  }
+  function step(d) { if (playback) show(playback.k + d, d === 1); }
+  function show(k, animate) {
+    if (!playback) return;
+    stopAnim();
+    var n = playback.rec.moves.length;
+    k = Math.max(0, Math.min(n, k));
+    var r = E.replay(playback.rec, k);
+    playback.k = k;
+    if (animate && r.t) play(r.t, r.S.g); else paint(r.S.g);
+    scoreV.textContent = C.num(r.S.score);
+    nextChip.className = 'nd-chip ' + (r.S.next <= GOAL ? 'nd-v' + r.S.next : 'nd-vbig');
+    nextChip.textContent = C.num(r.S.next);
+    slider.value = String(k);
+    prevBtn.disabled = k === 0;
+    nextBtn.disabled = k === n;
+    status.textContent = C.t('ndMove', { n: C.num(k), m: C.num(n), s: C.num(r.S.score) });
+  }
+  function closeReplay() {
+    if (!playback) return;
+    stopAnim();
+    playback = null;
+    player.setAttribute('hidden', 'hidden');
+    setHover(hover);
+    paint(S.g);
+    render();
+  }
+
   /* --------------------------------------------------------------- view */
 
   function cls(v) { return 'nd-tile ' + (v <= GOAL ? 'nd-v' + v : 'nd-vbig') + (String(v).length > 2 ? ' nd-d' + String(v).length : ''); }
@@ -548,8 +626,8 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
     if (animEnd && S) { animEnd = 0; paint(S.g); }
   }
   function animLeft() { return Math.max(0, animEnd - Date.now()); }
-  function play(t) {
-    if (C.ui.reduceMotion()) { paint(S.g); return; }
+  function play(t, end) {
+    if (C.ui.reduceMotion()) { paint(end || S.g); return; }
     var step = unit() * 19.5;
     var fall = Math.round(70 + FALL_MS * (t.row + 1));
     var nodes = paint(t.placed);
@@ -600,6 +678,7 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
       .onfinish = function () { if (f.parentNode) f.parentNode.removeChild(f); };
   }
   function setHover(c) {
+    if (playback) return;
     hover = Math.max(0, Math.min(COLS - 1, c));
     cols.forEach(function (n, k) { n.classList.toggle('is-hover', k === hover); });
     curNode.style.setProperty('--c', hover);
@@ -661,6 +740,12 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
 
   window.addEventListener('keydown', function (e) {
     if (document.querySelector('.ch-scrim') || e.ctrlKey || e.metaKey || e.altKey || !S) return;
+    if (playback) {
+      if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
+      else if (e.key === 'Escape') { e.preventDefault(); closeReplay(); }
+      return;
+    }
     if (e.key === 'ArrowLeft' || C.keyIs(e, 'a')) { e.preventDefault(); if (!ended && !paused) setHover(hover - 1); return; }
     if (e.key === 'ArrowRight' || C.keyIs(e, 'd')) { e.preventDefault(); if (!ended && !paused) setHover(hover + 1); return; }
     if (e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowDown' || C.keyIs(e, 's')) { e.preventDefault(); if (!e.repeat) dropAt(hover); return; }
@@ -715,6 +800,7 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
   ctx.autosave(function () {
     if (!S || ended) return { inProgress: false };
     return { g: S.g, cur: S.cur, next: S.next, score: S.score, drops: S.drops, seed: S.seed, won: S.won, daily: S.daily,
+      first: S.first, moves: S.moves,
       winScore: winScore, elapsed: Date.now() - startedAt };
   });
   function save() { ctx.save(); }
@@ -722,7 +808,7 @@ if (typeof module !== 'undefined') module.exports = NumberDropEngineFactory;
   var saved = ctx.loadSave();
   if (saved && E.valid(saved) && (saved.daily || null) === (dailyDate || null)) {
     S = { g: saved.g.slice(), cur: saved.cur, next: saved.next, score: saved.score, drops: saved.drops, seed: saved.seed,
-      won: !!saved.won, daily: saved.daily || null };
+      won: !!saved.won, daily: saved.daily || null, first: saved.first, moves: saved.moves };
     winScore = saved.winScore || 0;
     startedAt = Date.now() - (saved.elapsed || 0);
     paint(S.g);

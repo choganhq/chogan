@@ -124,6 +124,19 @@ module.exports = function (T) {
     ok(sane === played, 'blocks are never lost or made up: the board sum grows by each dropped block and what merges add, the score by each merge, and columns stay packed');
     ok(best >= 256, 'a one-step greedy bot reaches at least 256 (best ' + best + ')');
     // saves
+    // #1275: the last game is kept as its first seed and its columns, and played back
+    const R = E.newGame(1275);
+    for (let i = 0; i < 40 && !E.isOver(R.g); i++) E.drop(R, (i * 3) % 5);
+    const rec = E.record(R);
+    ok(!!rec && rec.moves.length === R.drops && R.drops > 10, 'a game records one column for every drop (' + (rec && rec.moves.length) + ')');
+    const end = rec && E.replay(rec, rec.moves.length).S;
+    ok(!!end && end.g.join() === R.g.join() && end.score === R.score && end.cur === R.cur, 'playing the record back gives the same board, score and next block');
+    const mid = rec && E.replay(rec, 7);
+    ok(!!mid && mid.S.drops === 7 && !!mid.t && E.replay(rec, 0).S.drops === 0, 'any move of the game can be shown, from the empty board on');
+    const old = E.newGame(5); delete old.first; delete old.moves; E.drop(old, 0);
+    ok(E.record(old) === null && E.record(E.newGame(5)) === null && E.valid(old), 'a save from before recording still plays and offers no playback');
+    ok(/ctx\.store\.set\('last'/.test(html) && /ctx\.store\.get\('last'\)/.test(html), 'only one finished game is stored');
+    ok(LOCALE_CODES.every((l) => { const a = html.indexOf('\n      ' + l + ': {', html.indexOf('strings: {')); const blk = html.slice(a, html.indexOf('\n      }', a)); return ['ndReplay:', 'ndNoReplay:', 'ndMove:', 'ndPrev:', 'ndNextMove:', 'ndBack:'].every((k) => blk.includes(k)); }), 'playback is worded in every locale');
     const V = E.newGame(3);
     const gap = V.g.slice(); gap[0] = 2;
     ok(E.valid(V) && !E.valid(Object.assign({}, V, { g: V.g.slice(1) })) && !E.valid(Object.assign({}, V, { g: gap })) &&
