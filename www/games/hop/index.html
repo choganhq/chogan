@@ -604,19 +604,37 @@ if (typeof module !== 'undefined' && module.exports) module.exports = HopEngineF
   wrap.addEventListener('contextmenu', function (e) { e.preventDefault(); });
   wrap.style.touchAction = 'none';
 
+  // On a TV the climber barely moved left or right (#1210). A remote that sends a press as
+  // a down and an up at once, even while the button is held, steers for no time, so such a
+  // press counts for MIN_PRESS ms. No finger on a keyboard is that quick (under INSTANT ms),
+  // so a keyboard tap stays as short as it was.
+  var MIN_PRESS = 200, INSTANT = 40, since = { l: 0, r: 0 }, due = { l: 0, r: 0 };
+  function drop(side) { clearTimeout(due[side]); due[side] = 0; keys[side] = false; }
+  function press(side) {
+    drop(side === 'l' ? 'r' : 'l');  // turning round does not wait for the other key's minimum
+    clearTimeout(due[side]); due[side] = 0;
+    if (!keys[side]) since[side] = Date.now();
+    keys[side] = true;
+  }
+  function release(side) {
+    var down = Date.now() - since[side];
+    if (down < INSTANT && keys[side]) due[side] = setTimeout(function () { drop(side); }, MIN_PRESS - down);
+    else drop(side);
+  }
+
   window.addEventListener('keydown', function (e) {
     if (document.querySelector('.ch-scrim')) return;
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === ' ' || C.keyIs(e, 'a') || C.keyIs(e, 'd')) go();
-    if (e.key === 'ArrowLeft' || C.keyIs(e, 'a')) { keys.l = true; e.preventDefault(); }
-    else if (e.key === 'ArrowRight' || C.keyIs(e, 'd')) { keys.r = true; e.preventDefault(); }
+    if (e.key === 'ArrowLeft' || C.keyIs(e, 'a')) { press('l'); e.preventDefault(); }
+    else if (e.key === 'ArrowRight' || C.keyIs(e, 'd')) { press('r'); e.preventDefault(); }
     else if (C.keyIs(e, 'r')) { newRun(); e.preventDefault(); }
   });
   window.addEventListener('keyup', function (e) {
-    if (e.key === 'ArrowLeft' || C.keyIs(e, 'a')) keys.l = false;
-    else if (e.key === 'ArrowRight' || C.keyIs(e, 'd')) keys.r = false;
+    if (e.key === 'ArrowLeft' || C.keyIs(e, 'a')) release('l');
+    else if (e.key === 'ArrowRight' || C.keyIs(e, 'd')) release('r');
   });
   // a run waits while the app is away, and nothing is held when it comes back
-  C.onPause(function () { paused = true; keys.l = keys.r = false; touches = {}; syncHeld(); ctx.save(); });
+  C.onPause(function () { paused = true; drop('l'); drop('r'); touches = {}; syncHeld(); ctx.save(); });
   C.onResume(function () { paused = false; last = 0; kick(); });
   document.addEventListener('visibilitychange', function () { if (!document.hidden) { last = 0; kick(); } });
   if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(box);
