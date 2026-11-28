@@ -207,6 +207,11 @@ module.exports = function (T) {
     let moved = 0;
     for (let i = 0; i < len; i++) { run.pos = E.next(run).b; if (E.tap(run, E.next(run).lane).moved) moved++; }
     ok(len > 0 && moved === 1 && run.over === null && run.song === songs[0].id && run.songs === 1 && run.i === 0 && E.total(run) === len, 'in endless play the last note of a song starts the next one, and the last song wraps to the first');
+    // #1293: the next song used to appear LEAD beats above the line on a moving board
+    ok(run.pos <= E.next(run).b - E.VIEW, 'the next song comes in from the top of the screen (#1293)');
+    const mid = Object.assign({}, run, { wait: false });
+    E.pause(mid);
+    ok(E.valid(mid) && E.tap(mid, E.next(mid).lane).type === 'hit', 'a pause right after the song change leaves a first tile that can be tapped (#1293)');
     run.wait = false;
     for (let i = 0; i < 3; i++) E.tap(run, (E.next(run).lane + 1) % 4);
     const rr = E.result(run);

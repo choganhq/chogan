@@ -167,8 +167,9 @@ function TileTunesEngineFactory() {
       var moved = false;
       if (S.i >= chart(S.song).notes.length) {
         if (S.endless) {
-          // the slips and the speed carry over; the next tune's first tile comes down by itself
-          S.done += S.i; S.songs++; S.song = after(S.song); S.i = 0; S.pos = -LEAD; moved = true;
+          // the slips and the speed carry over. The board keeps moving, so the next tune's first
+          // tile starts a whole view up: LEAD beats left no time to react at Insane (#1293)
+          S.done += S.i; S.songs++; S.song = after(S.song); S.i = 0; S.pos = -VIEW; moved = true;
         } else S.over = 'won';
       }
       return { type: 'hit', note: n, won: S.over === 'won', moved: moved };
@@ -199,7 +200,8 @@ function TileTunesEngineFactory() {
     if (!S || S.over || S.wait) return;
     var n = next(S);
     S.wait = true;
-    if (n) S.pos = Math.min(S.pos, n.b - LEAD);
+    // also forwards: a tile still above the screen (#1293) could not be tapped while waiting
+    if (n) S.pos = n.b - LEAD;
   }
   function result(S) {
     var len = chart(S.song).notes.length, won = S.over === 'won';
