@@ -2920,6 +2920,17 @@
     }
   };
 
+  // The app's status strip is only for the status bar, so the page must know when the bridge
+  // has hidden it. pageshow: a menu restored from the back/forward cache missed the change (#1205).
+  (function () {
+    var b = Chogan.fullscreen.native();
+    if (!b) return;
+    var mark = function () { document.documentElement.classList.toggle('ch-immersive', Chogan.fullscreen.on()); };
+    document.addEventListener('fullscreenchange', mark);
+    global.addEventListener('pageshow', mark);
+    mark();
+  })();
+
   // Every page load leaves fullscreen and a browser only enters it again on a
   // tap, so opening a game from a fullscreen menu dropped back to the browser
   // window (#370). The choice is kept for this tab only (sessionStorage), and
