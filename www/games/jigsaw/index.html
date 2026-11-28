@@ -2468,7 +2468,10 @@ function JigsawPictures() {
   // Lays the frame and the row out for the space there is, and draws every piece afresh
   // The room the picture has, shared by the layout and the counts this screen offers
   function room() {
-    var r = E.room(ctx.main.clientWidth || window.innerWidth, ctx.main.clientHeight || window.innerHeight, TRAY_W, TRAY_H);
+    // the core pads the game area while its after-game bar floats over it; clientHeight counts
+    // that padding, so the finished picture ran under the header and the bar (#1274)
+    var kept = parseFloat(ctx.main.style.paddingBottom) || 0;
+    var r = E.room(ctx.main.clientWidth || window.innerWidth, (ctx.main.clientHeight || window.innerHeight) - kept, TRAY_W, TRAY_H);
     return [r.w, r.h, r.side];
   }
   // A count this screen does not offer, kept from a bigger window, falls back to the largest it does
@@ -2902,13 +2905,15 @@ function JigsawPictures() {
     pausedAt = 0;
   });
 
-  var resizeT = null, lastW = 0, lastH = 0;
+  var resizeT = null, lastW = 0, lastH = 0, lastKept = '';
   window.addEventListener('resize', function () {
     clearTimeout(resizeT);
     resizeT = setTimeout(function () {
       if (!S || drag) return;
       // a phone's address bar sliding in and out is not a new layout
-      if (Math.abs(window.innerWidth - lastW) < 2 && Math.abs(window.innerHeight - lastH) < 60) return;
+      var kept = ctx.main.style.paddingBottom;
+      if (kept === lastKept && Math.abs(window.innerWidth - lastW) < 2 && Math.abs(window.innerHeight - lastH) < 60) return;
+      lastKept = kept;
       lastW = window.innerWidth; lastH = window.innerHeight;
       layout();
       // a window made bigger or smaller can offer more or fewer counts
