@@ -21,6 +21,16 @@ module.exports = function (T) {
     ok(run.status === 0 && n > 20, 'the Buffer post was built from every English changelog (' + n + ' files)');
     ok(longest <= 280, 'no post is over 280 counted characters (longest ' + longest + ')');
     ok(links === 1, 'a post has exactly one link, the site, so the preview card is the app and not a contributor (' + links + ')');
+    // #1288: 1.1.0 had no new game and its post began with "Also:", referring to nothing
+    const heads = spawnSync('python3', ['-I', '-c', [
+      'import importlib.util,sys',
+      "s=importlib.util.spec_from_file_location('b',sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m)",
+      "print(m.build('1.0.0',[('Bug fixes',['one']),('Improvements',['two'])]).split('\\n')[2])",
+      "print(m.build('1.0.0',[('New games',['Hex']),('Bug fixes',['one'])]).split('\\n')[3])",
+    ].join('\n'), py], { encoding: 'utf8' });
+    const [alone, after] = (heads.stdout || '').trim().split('\n');
+    ok(heads.status === 0 && alone === "What's new: one; two", 'a post without new games does not begin with "Also" (' + alone + ')');
+    ok(after === 'Also: one', 'after the new games the other lines still follow as "Also" (' + after + ')');
     const rel = fs.readFileSync(path.join(ROOT, '.github/workflows/release.yml'), 'utf8');
     ok(/social:[\s\S]*needs: apk[\s\S]*buffer-post\.py[^\n]*--send/.test(rel) && /BUFFER_API_KEY: \$\{\{ secrets\.BUFFER_API_KEY \}\}/.test(rel),
       'release.yml posts through Buffer in its own job after the APK, with the key from the secret');
