@@ -18,6 +18,8 @@
   .tt-top { display: flex; justify-content: center; align-items: center; gap: var(--s-2) var(--s-3); flex-wrap: wrap;
     font-weight: 700; color: var(--c-text-dim); font-variant-numeric: tabular-nums; min-height: 36px; }
   .tt-top > span { white-space: nowrap; }
+  .tt-endless { flex-wrap: nowrap; }
+  .tt-endless .ch-item__label { flex: 1 1 0; min-width: 0; }
   .tt-song { text-align: center; font-weight: 800; color: var(--c-text); font-size: 1.05rem; min-height: 1.5em; }
   .tt-slips { display: inline-flex; gap: 5px; align-items: center; }
   .tt-slip { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--c-line); box-sizing: border-box; }
@@ -138,8 +140,17 @@ function TileTunesEngineFactory() {
     var song = BY_ID[o.song] ? o.song : SONGS[0].id;
     var speed = SPEEDS[o.speed] ? o.speed : 'normal';
     // the first tile waits above the line; tapping it starts the tune
-    return { song: song, speed: speed, pos: -LEAD, i: 0, miss: 0, wait: true, over: null, t: 0 };
+    var S = { song: song, speed: speed, pos: -LEAD, i: 0, miss: 0, wait: true, over: null, t: 0 };
+    // endless (#1272): one song follows another until the third slip; `done` counts the
+    // notes of the songs already finished, `songs` how many there were
+    if (o.endless) { S.endless = true; S.done = 0; S.songs = 0; }
+    return S;
   }
+  function after(id) {
+    for (var i = 0; i < SONGS.length; i++) if (SONGS[i].id === id) return SONGS[(i + 1) % SONGS.length].id;
+    return SONGS[0].id;
+  }
+  function total(S) { return (S.done || 0) + S.i; }
   function next(S) { return chart(S.song).notes[S.i] || null; }
   function visible(S, n) { return !!n && n.b < S.pos + VIEW; }
 
@@ -153,8 +164,14 @@ function TileTunesEngineFactory() {
     if (lane === n.lane && visible(S, n)) {
       S.i++;
       S.wait = false;
-      if (S.i >= chart(S.song).notes.length) S.over = 'won';
-      return { type: 'hit', note: n, won: S.over === 'won' };
+      var moved = false;
+      if (S.i >= chart(S.song).notes.length) {
+        if (S.endless) {
+          // the slips and the speed carry over; the next tune's first tile comes down by itself
+          S.done += S.i; S.songs++; S.song = after(S.song); S.i = 0; S.pos = -LEAD; moved = true;
+        } else S.over = 'won';
+      }
+      return { type: 'hit', note: n, won: S.over === 'won', moved: moved };
     }
     if (S.wait) return { type: 'none' };
     S.miss++;
@@ -185,8 +202,8 @@ function TileTunesEngineFactory() {
     if (n) S.pos = Math.min(S.pos, n.b - LEAD);
   }
   function result(S) {
-    var total = chart(S.song).notes.length, won = S.over === 'won';
-    return { won: won, stars: won ? Math.max(1, LIVES - S.miss) : 0, hits: S.i, total: total, miss: S.miss };
+    var len = chart(S.song).notes.length, won = S.over === 'won';
+    return { won: won, stars: won ? Math.max(1, LIVES - S.miss) : 0, hits: total(S), total: len, miss: S.miss, songs: S.songs || 0, endless: !!S.endless };
   }
   function valid(S) {
     if (!S || typeof S !== 'object' || !BY_ID[S.song] || !SPEEDS[S.speed]) return false;
@@ -196,13 +213,15 @@ function TileTunesEngineFactory() {
     if (!isFinite(S.pos) || !isFinite(S.t) || S.t < 0 || typeof S.wait !== 'boolean') return false;
     if (S.over !== null && S.over !== 'won' && S.over !== 'lost') return false;
     if (S.over === 'won' && S.i !== len) return false;
+    // a save from before endless play has none of the three
+    if (S.endless !== undefined && !(S.endless === true && S.done === (S.done | 0) && S.done >= 0 && S.songs === (S.songs | 0) && S.songs >= 0 && S.over !== 'won')) return false;
     return true;
   }
   function title(id, lang) { var s = BY_ID[id]; return s ? (s.t[lang] || s.t.en) : ''; }
 
   var api = { LANES: LANES, VIEW: VIEW, LATE: LATE, LIVES: LIVES, LEAD: LEAD, SPEEDS: SPEEDS, SPEED_IDS: SPEED_IDS, SONGS: SONGS,
     parse: parse, freq: freq, lanes: lanes, chart: chart, bps: bps, seconds: seconds, newGame: newGame, next: next, visible: visible,
-    tap: tap, tick: tick, pause: pause, result: result, valid: valid, title: title };
+    tap: tap, tick: tick, pause: pause, result: result, valid: valid, title: title, after: after, total: total };
   if (typeof self !== 'undefined') self.TileTunesEngine = api;
   return api;
 }
@@ -227,7 +246,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesE
         ttStart: 'شروع', ttGo: 'روی کاشی بزن تا ادامه بدهی', ttFirst: 'برای شروع روی کاشی پایین بزن', ttSongs: 'آهنگ‌ها', ttSpeed: 'سرعت',
         ttSlips: 'لغزش', ttNotes: 'نت‌ها', ttWon: 'آهنگ تمام شد', ttLost: 'سه لغزش', ttNext: 'آهنگ بعدی', ttRetry: 'دوباره همین آهنگ',
         ttNew: 'آهنگ را عوض کنیم؟', ttLanes: 'ستون‌ها', ttWrong: 'ستون خالی', ttLate: 'کاشی رد شد', ttAllNote: 'همه‌ی آهنگ‌ها را تمام کردی',
-        ttDaily: 'آهنگ روز', ttBoard: 'صفحه‌ی کاشی‌ها',
+        ttDaily: 'آهنگ روز', ttEndless: 'بی‌پایان', ttEndlessNote: 'آهنگ‌ها پشت سر هم می‌آیند تا سه لغزش', ttRecord: 'رکورد تازه', ttBoard: 'صفحه‌ی کاشی‌ها',
         rules: 'کاشی‌ها را به ترتیب از پایین بزن تا آهنگ نواخته شود. ستون خالی یا کاشیِ ردشده یک لغزش است؛ با سه لغزش آهنگ را می‌بازی. هر چه لغزش کمتر، ستاره بیشتر. همه‌ی آهنگ‌ها قدیمی و آزادند و خود بازی آن‌ها را می‌نوازد.',
         tutTitle1: 'روی کاشی‌ها بزن', tutText1: 'کاشی‌های رنگی پایین می‌آیند. روی پایین‌ترین کاشی بزن، پیش از آنکه از خط پایین رد شود.',
         tutTitle2: 'هر کاشی یک نت', tutText2: 'هر ضربه نت بعدی آهنگ را می‌نوازد. کاشی بلند یعنی نت کشیده. آهنگ که تمام شود، کار تمام است.',
@@ -237,7 +256,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesE
         ttStart: 'Start', ttGo: 'Tap the tile to go on', ttFirst: 'Tap the bottom tile to start', ttSongs: 'Songs', ttSpeed: 'Speed',
         ttSlips: 'Slips', ttNotes: 'Notes', ttWon: 'Song complete', ttLost: 'Three slips', ttNext: 'Next song', ttRetry: 'Play it again',
         ttNew: 'Change the song?', ttLanes: 'Lanes', ttWrong: 'Empty lane', ttLate: 'The tile slipped by', ttAllNote: 'You have finished every song',
-        ttDaily: 'Song of the day', ttBoard: 'Tile board',
+        ttDaily: 'Song of the day', ttEndless: 'Endless', ttEndlessNote: 'One song after another until three slips', ttRecord: 'New best', ttBoard: 'Tile board',
         rules: 'Tap the tiles in order from the bottom to play the tune. An empty lane or a tile that slips past is a slip; three slips lose the song. Fewer slips give more stars. Every tune is old and free to use, and the game plays it itself.',
         tutTitle1: 'Tap the tiles', tutText1: 'Coloured tiles slide down. Tap the lowest one before it passes the line at the bottom.',
         tutTitle2: 'Each tile is a note', tutText2: 'Each tap plays the next note of the tune. A tall tile is a long note. When the tune ends, you are done.',
@@ -247,7 +266,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesE
         ttStart: 'Start', ttGo: 'Dotknij kafelka, by grać dalej', ttFirst: 'Dotknij dolnego kafelka, by zacząć', ttSongs: 'Utwory', ttSpeed: 'Tempo',
         ttSlips: 'Pomyłki', ttNotes: 'Nuty', ttWon: 'Utwór ukończony', ttLost: 'Trzy pomyłki', ttNext: 'Następny utwór', ttRetry: 'Zagraj jeszcze raz',
         ttNew: 'Zmienić utwór?', ttLanes: 'Kolumny', ttWrong: 'Pusta kolumna', ttLate: 'Kafelek uciekł', ttAllNote: 'Ukończono wszystkie utwory',
-        ttDaily: 'Utwór dnia', ttBoard: 'Plansza z kafelkami',
+        ttDaily: 'Utwór dnia', ttEndless: 'Bez końca', ttEndlessNote: 'Utwór po utworze aż do trzech pomyłek', ttRecord: 'Nowy rekord', ttBoard: 'Plansza z kafelkami',
         rules: 'Dotykaj kafelków po kolei od dołu, aby zagrać melodię. Pusta kolumna albo kafelek, który ucieknie, to pomyłka; po trzech pomyłkach utwór przegrany. Im mniej pomyłek, tym więcej gwiazdek. Wszystkie melodie są stare i wolne, a gra sama je gra.',
         tutTitle1: 'Dotykaj kafelków', tutText1: 'Kolorowe kafelki zjeżdżają w dół. Dotknij najniższego, zanim minie linię na dole.',
         tutTitle2: 'Każdy kafelek to nuta', tutText2: 'Każde dotknięcie gra następną nutę melodii. Wysoki kafelek to długa nuta. Gdy melodia się skończy, gotowe.',
@@ -257,7 +276,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesE
         ttStart: 'Départ', ttGo: 'Touche la tuile pour continuer', ttFirst: 'Touche la tuile du bas pour commencer', ttSongs: 'Morceaux', ttSpeed: 'Vitesse',
         ttSlips: 'Faux pas', ttNotes: 'Notes', ttWon: 'Morceau terminé', ttLost: 'Trois faux pas', ttNext: 'Morceau suivant', ttRetry: 'Rejouer ce morceau',
         ttNew: 'Changer de morceau ?', ttLanes: 'Colonnes', ttWrong: 'Colonne vide', ttLate: 'La tuile est passée', ttAllNote: 'Tu as terminé tous les morceaux',
-        ttDaily: 'Morceau du jour', ttBoard: 'Plateau de tuiles',
+        ttDaily: 'Morceau du jour', ttEndless: 'Sans fin', ttEndlessNote: 'Les morceaux s’enchaînent jusqu’à trois faux pas', ttRecord: 'Nouveau record', ttBoard: 'Plateau de tuiles',
         rules: 'Touche les tuiles dans l’ordre, depuis le bas, pour jouer l’air. Une colonne vide ou une tuile qui passe est un faux pas ; trois faux pas et le morceau est perdu. Moins de faux pas, plus d’étoiles. Tous les airs sont anciens et libres, et le jeu les joue lui-même.',
         tutTitle1: 'Touche les tuiles', tutText1: 'Des tuiles colorées descendent. Touche la plus basse avant qu’elle ne passe la ligne du bas.',
         tutTitle2: 'Une tuile, une note', tutText2: 'Chaque touche joue la note suivante de l’air. Une grande tuile est une note longue. Quand l’air est fini, c’est terminé.',
@@ -267,7 +286,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesE
         ttStart: 'ابدأ', ttGo: 'المس البلاطة لتكمل', ttFirst: 'المس البلاطة السفلى لتبدأ', ttSongs: 'الألحان', ttSpeed: 'السرعة',
         ttSlips: 'الهفوات', ttNotes: 'النغمات', ttWon: 'اكتمل اللحن', ttLost: 'ثلاث هفوات', ttNext: 'اللحن التالي', ttRetry: 'أعد هذا اللحن',
         ttNew: 'تغيير اللحن؟', ttLanes: 'الأعمدة', ttWrong: 'عمود فارغ', ttLate: 'فاتتك البلاطة', ttAllNote: 'أنهيت كل الألحان',
-        ttDaily: 'لحن اليوم', ttBoard: 'لوحة البلاطات',
+        ttDaily: 'لحن اليوم', ttEndless: 'بلا نهاية', ttEndlessNote: 'لحن بعد لحن حتى ثلاث زلات', ttRecord: 'رقم قياسي جديد', ttBoard: 'لوحة البلاطات',
         rules: 'المس البلاطات بالترتيب من الأسفل لتعزف اللحن. العمود الفارغ أو البلاطة التي تفوتك هفوة؛ ثلاث هفوات وتخسر اللحن. كلما قلّت الهفوات زادت النجوم. كل الألحان قديمة وحرة، واللعبة تعزفها بنفسها.',
         tutTitle1: 'المس البلاطات', tutText1: 'تنزل بلاطات ملونة. المس أدناها قبل أن تعبر الخط في الأسفل.',
         tutTitle2: 'كل بلاطة نغمة', tutText2: 'كل لمسة تعزف النغمة التالية من اللحن. البلاطة الطويلة نغمة ممدودة. حين ينتهي اللحن تكون قد أنهيت.',
@@ -277,7 +296,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesE
         ttStart: 'शुरू', ttGo: 'आगे बढ़ने के लिए टाइल छुएँ', ttFirst: 'शुरू करने के लिए नीचे की टाइल छुएँ', ttSongs: 'धुनें', ttSpeed: 'रफ़्तार',
         ttSlips: 'चूकें', ttNotes: 'सुर', ttWon: 'धुन पूरी हुई', ttLost: 'तीन चूकें', ttNext: 'अगली धुन', ttRetry: 'यही धुन फिर से',
         ttNew: 'धुन बदलें?', ttLanes: 'कॉलम', ttWrong: 'खाली कॉलम', ttLate: 'टाइल निकल गई', ttAllNote: 'आपने सारी धुनें पूरी कर लीं',
-        ttDaily: 'आज की धुन', ttBoard: 'टाइलों का बोर्ड',
+        ttDaily: 'आज की धुन', ttEndless: 'अंतहीन', ttEndlessNote: 'तीन चूक तक एक के बाद एक धुन', ttRecord: 'नया रिकॉर्ड', ttBoard: 'टाइलों का बोर्ड',
         rules: 'धुन बजाने के लिए नीचे से क्रम में टाइलें छुएँ. खाली कॉलम या निकल गई टाइल एक चूक है; तीन चूकों पर धुन हार जाते हैं. जितनी कम चूकें, उतने ज़्यादा तारे. सारी धुनें पुरानी और मुक्त हैं, और खेल उन्हें खुद बजाता है.',
         tutTitle1: 'टाइलें छुएँ', tutText1: 'रंगीन टाइलें नीचे सरकती हैं. सबसे निचली टाइल को नीचे की रेखा पार करने से पहले छुएँ.',
         tutTitle2: 'हर टाइल एक सुर', tutText2: 'हर स्पर्श धुन का अगला सुर बजाता है. लंबी टाइल यानी लंबा सुर. धुन खत्म, तो खेल पूरा.',
@@ -287,7 +306,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesE
         ttStart: 'Старт', ttGo: 'Коснитесь плитки, чтобы продолжить', ttFirst: 'Коснитесь нижней плитки, чтобы начать', ttSongs: 'Мелодии', ttSpeed: 'Темп',
         ttSlips: 'Промахи', ttNotes: 'Ноты', ttWon: 'Мелодия сыграна', ttLost: 'Три промаха', ttNext: 'Следующая мелодия', ttRetry: 'Сыграть ещё раз',
         ttNew: 'Сменить мелодию?', ttLanes: 'Дорожки', ttWrong: 'Пустая дорожка', ttLate: 'Плитка проскочила', ttAllNote: 'Вы сыграли все мелодии',
-        ttDaily: 'Мелодия дня', ttBoard: 'Поле с плитками',
+        ttDaily: 'Мелодия дня', ttEndless: 'Без конца', ttEndlessNote: 'Мелодии идут одна за другой до трёх промахов', ttRecord: 'Новый рекорд', ttBoard: 'Поле с плитками',
         rules: 'Касайтесь плиток по порядку снизу, чтобы сыграть мелодию. Пустая дорожка или проскочившая плитка — промах; после трёх промахов мелодия проиграна. Чем меньше промахов, тем больше звёзд. Все мелодии старинные и свободные, игра сама их играет.',
         tutTitle1: 'Касайтесь плиток', tutText1: 'Цветные плитки ползут вниз. Коснитесь самой нижней, пока она не пересекла линию внизу.',
         tutTitle2: 'Плитка — это нота', tutText2: 'Каждое касание играет следующую ноту мелодии. Высокая плитка — долгая нота. Мелодия закончилась — вы справились.',
@@ -297,7 +316,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesE
         ttStart: 'Começar', ttGo: 'Toque no bloco para continuar', ttFirst: 'Toque no bloco de baixo para começar', ttSongs: 'Músicas', ttSpeed: 'Velocidade',
         ttSlips: 'Deslizes', ttNotes: 'Notas', ttWon: 'Música concluída', ttLost: 'Três deslizes', ttNext: 'Próxima música', ttRetry: 'Tocar de novo',
         ttNew: 'Trocar de música?', ttLanes: 'Colunas', ttWrong: 'Coluna vazia', ttLate: 'O bloco passou', ttAllNote: 'Você concluiu todas as músicas',
-        ttDaily: 'Música do dia', ttBoard: 'Tabuleiro de blocos',
+        ttDaily: 'Música do dia', ttEndless: 'Sem fim', ttEndlessNote: 'Uma música atrás da outra até três deslizes', ttRecord: 'Novo recorde', ttBoard: 'Tabuleiro de blocos',
         rules: 'Toque nos blocos em ordem, de baixo para cima, para tocar a melodia. Uma coluna vazia ou um bloco que passa é um deslize; três deslizes e a música está perdida. Menos deslizes, mais estrelas. Todas as melodias são antigas e livres, e o próprio jogo as toca.',
         tutTitle1: 'Toque nos blocos', tutText1: 'Blocos coloridos descem. Toque no mais baixo antes que ele passe a linha de baixo.',
         tutTitle2: 'Cada bloco é uma nota', tutText2: 'Cada toque toca a próxima nota da melodia. Um bloco alto é uma nota longa. Quando a melodia acaba, você terminou.',
@@ -307,7 +326,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesE
         ttStart: '开始', ttGo: '点方块继续', ttFirst: '点最下面的方块开始', ttSongs: '曲目', ttSpeed: '速度',
         ttSlips: '失误', ttNotes: '音符', ttWon: '曲子弹完了', ttLost: '三次失误', ttNext: '下一首', ttRetry: '再弹一遍',
         ttNew: '换一首曲子？', ttLanes: '列', ttWrong: '空列', ttLate: '方块漏掉了', ttAllNote: '你弹完了所有曲子',
-        ttDaily: '每日一曲', ttBoard: '方块面板',
+        ttDaily: '每日一曲', ttEndless: '无尽模式', ttEndlessNote: '一首接一首，直到失误三次', ttRecord: '新纪录', ttBoard: '方块面板',
         rules: '从下往上按顺序点方块，弹出旋律。点到空列或漏掉方块算一次失误；三次失误这首曲子就输了。失误越少，星星越多。所有曲子都是古老的公版旋律，由游戏自己演奏。',
         tutTitle1: '点方块', tutText1: '彩色方块向下滑。在最下面的方块越过底线之前点它。',
         tutTitle2: '每块是一个音', tutText2: '每点一下，就弹出旋律的下一个音。长方块是长音。曲子弹完，就过关了。',
@@ -317,7 +336,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesE
         ttStart: 'Start', ttGo: 'Tipp auf die Kachel, um weiterzuspielen', ttFirst: 'Tipp auf die unterste Kachel, um zu beginnen', ttSongs: 'Stücke', ttSpeed: 'Tempo',
         ttSlips: 'Patzer', ttNotes: 'Noten', ttWon: 'Stück geschafft', ttLost: 'Drei Patzer', ttNext: 'Nächstes Stück', ttRetry: 'Noch einmal spielen',
         ttNew: 'Stück wechseln?', ttLanes: 'Spalten', ttWrong: 'Leere Spalte', ttLate: 'Die Kachel ist durchgerutscht', ttAllNote: 'Du hast alle Stücke geschafft',
-        ttDaily: 'Stück des Tages', ttBoard: 'Kachelfeld',
+        ttDaily: 'Stück des Tages', ttEndless: 'Endlos', ttEndlessNote: 'Ein Stück nach dem anderen bis zu drei Patzern', ttRecord: 'Neuer Rekord', ttBoard: 'Kachelfeld',
         rules: 'Tipp die Kacheln der Reihe nach von unten an, um die Melodie zu spielen. Eine leere Spalte oder eine durchgerutschte Kachel ist ein Patzer; nach drei Patzern ist das Stück verloren. Weniger Patzer, mehr Sterne. Alle Melodien sind alt und frei, das Spiel spielt sie selbst.',
         tutTitle1: 'Tipp die Kacheln', tutText1: 'Farbige Kacheln gleiten nach unten. Tipp die unterste an, bevor sie die Linie unten passiert.',
         tutTitle2: 'Jede Kachel ein Ton', tutText2: 'Jeder Tipp spielt den nächsten Ton der Melodie. Eine hohe Kachel ist ein langer Ton. Ist die Melodie zu Ende, hast du es geschafft.',
@@ -327,7 +346,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesE
         ttStart: 'Empezar', ttGo: 'Toca la baldosa para seguir', ttFirst: 'Toca la baldosa de abajo para empezar', ttSongs: 'Canciones', ttSpeed: 'Velocidad',
         ttSlips: 'Fallos', ttNotes: 'Notas', ttWon: 'Canción completada', ttLost: 'Tres fallos', ttNext: 'Siguiente canción', ttRetry: 'Tocar otra vez',
         ttNew: '¿Cambiar de canción?', ttLanes: 'Columnas', ttWrong: 'Columna vacía', ttLate: 'Se pasó la baldosa', ttAllNote: 'Has completado todas las canciones',
-        ttDaily: 'Canción del día', ttBoard: 'Tablero de baldosas',
+        ttDaily: 'Canción del día', ttEndless: 'Sin fin', ttEndlessNote: 'Una canción tras otra hasta tres fallos', ttRecord: 'Nuevo récord', ttBoard: 'Tablero de baldosas',
         rules: 'Toca las baldosas en orden, desde abajo, para tocar la melodía. Una columna vacía o una baldosa que se pasa es un fallo; con tres fallos pierdes la canción. Menos fallos, más estrellas. Todas las melodías son antiguas y libres, y el propio juego las toca.',
         tutTitle1: 'Toca las baldosas', tutText1: 'Bajan baldosas de colores. Toca la más baja antes de que cruce la línea de abajo.',
         tutTitle2: 'Cada baldosa es una nota', tutText2: 'Cada toque suena la siguiente nota de la melodía. Una baldosa alta es una nota larga. Cuando acaba la melodía, terminaste.',
@@ -342,6 +361,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesE
   var prefs = ctx.store.get('prefs') || {};
   if (!E.SPEEDS[prefs.speed]) prefs.speed = 'normal';
   var best = ctx.store.get('best') || {};
+  // the most notes in one endless run, kept apart for each speed so a slow run never beats a fast one
+  var endlessBest = ctx.store.get('endless') || {};
 
   var S = null, ended = false, paused = false;
   var raf = 0, last = 0, fxUntil = 0, flashes = [], hitAt = {}, voice = null, voiceTimer = 0;
@@ -379,13 +400,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesE
     stopVoice();
     ended = false; flashes = []; hitAt = {};
     daily = dailyDate || null;
-    S = daily ? E.newGame({ song: dailySong(daily), speed: 'normal' }) : E.newGame({ song: song || prefs.song || firstOpen(), speed: prefs.speed });
+    S = daily ? E.newGame({ song: dailySong(daily), speed: 'normal' }) : E.newGame({ song: song || prefs.song || firstOpen(), speed: prefs.speed, endless: !!prefs.endless });
     if (!daily) { prefs.song = S.song; ctx.store.set('prefs', prefs); }
     say(C.t('ttFirst'));
     paintAll();
     ctx.save();
   }
-  function started() { return !!S && !ended && (S.i > 0 || S.miss > 0); }
+  function started() { return !!S && !ended && (E.total(S) > 0 || S.miss > 0); }
 
   function stopVoice() {
     if (voiceTimer) { clearTimeout(voiceTimer); voiceTimer = 0; }
@@ -406,7 +427,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesE
     now = now || performance.now();
     if (r.type === 'hit') {
       play(r.note);
-      hitAt[S.i - 1] = now;
+      // hit times are kept by place in the song, so a new song starts with none
+      if (r.moved) { hitAt = {}; C.achievements.unlock('tt-song'); }
+      else hitAt[S.i - 1] = now;
       say('');
     } else {
       C.feedback('bad');
@@ -453,6 +476,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesE
     ended = true;
     stopVoice();
     var R = E.result(S), note = null;
+    if (R.endless) { finishEndless(R); return; }
     var coins = R.won ? 3 + R.stars : 1, points = R.won ? 8 + R.stars * 4 : Math.max(1, Math.round(R.hits / R.total * 4));
     if (R.won) {
       if (!daily) { best[S.song] = Math.max(best[S.song] || 0, R.stars); ctx.store.set('best', best); }
@@ -481,6 +505,26 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesE
     });
   }
 
+  function finishEndless(R) {
+    var speed = S.speed, was = endlessBest[speed] || 0, record = R.hits > was;
+    if (record) { endlessBest[speed] = R.hits; ctx.store.set('endless', endlessBest); }
+    var first = prefs.song;
+    ctx.clearSave();
+    ctx.finish({
+      won: record, title: record ? C.t('ttRecord') : C.t('ttLost'), timeMs: Math.round(S.t * 1000),
+      coins: 1 + 3 * R.songs, points: Math.max(1, 8 * R.songs + Math.round(S.i / R.total * 4)),
+      lines: [
+        { label: C.t('ttEndless'), value: speedName(speed) },
+        { label: C.t('ttNotes'), value: C.num(R.hits) },
+        { label: C.t('ttSongs'), value: C.num(R.songs) },
+        { label: C.t('best'), value: C.num(endlessBest[speed] || 0) }
+      ],
+      shareText: 'چوگان · کاشی‌نوا\nبی‌پایان · ' + C.num(R.hits),
+      againLabel: C.t('again'),
+      onAgain: function () { start(first); }
+    });
+  }
+
   /* ---------------------------------------------------------------- view */
 
   function say(t) { msg.textContent = t; }
@@ -490,9 +534,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesE
     songEl.textContent = songTitle(S.song);
     tBadge.innerHTML = '';
     if (daily) tBadge.appendChild(el('span', { class: 'ch-badge ch-badge--accent' }, [C.icon('calendar', 14), el('span', { text: C.t('ttDaily') })]));
-    else tBadge.appendChild(el('span', { class: 'ch-badge', text: speedName(S.speed) }));
+    else tBadge.appendChild(el('span', { class: 'ch-badge', text: speedName(S.speed) + (S.endless ? ' ∞' : '') }));
     var total = E.chart(S.song).notes.length;
-    tNotes.textContent = C.t('ttNotes') + ' ' + C.num(S.i) + ' / ' + C.num(total);
+    tNotes.textContent = C.t('ttNotes') + ' ' + (S.endless ? C.num(E.total(S)) : C.num(S.i) + ' / ' + C.num(total));
     tSlips.innerHTML = '';
     tSlips.setAttribute('aria-label', C.t('ttSlips') + ' ' + C.num(S.miss) + ' / ' + C.num(E.LIVES));
     for (var i = 0; i < E.LIVES; i++) tSlips.appendChild(el('span', { class: 'tt-slip' + (i < S.miss ? ' tt-gone' : '') }));
@@ -646,7 +690,15 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesE
     m = C.ui.modal({
       title: C.t('settings'), closeButton: true,
       body: [
-        el('h3', { text: C.t('ttSpeed') }),
+        el('div', { class: 'ch-list' }, [el('div', { class: 'ch-item tt-endless' }, [
+          el('div', { class: 'ch-item__label' }, [el('div', { text: C.t('ttEndless') }), el('div', { class: 'ch-item__hint', text: C.t('ttEndlessNote') }),
+            endlessBest[prefs.speed] ? el('div', { class: 'ch-item__hint', text: C.t('best') + ' ' + C.num(endlessBest[prefs.speed]) }) : null]),
+          C.ui.switch(!!prefs.endless, function (v) {
+            m.close();
+            apply(function () { prefs.endless = v; ctx.store.set('prefs', prefs); });
+          })
+        ])]),
+        el('h3', { style: { 'margin-top': 'var(--s-4)' }, text: C.t('ttSpeed') }),
         C.ui.segmented(E.SPEED_IDS.map(function (v) { return { value: v, label: speedName(v) }; }), prefs.speed, function (v) {
           if (v === prefs.speed) return;
           m.close();
@@ -695,12 +747,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TileTunesE
   // saved after every tap and when the app goes away; the daily song has its own slot
   ctx.autosave(function () {
     if (!S || ended || S.over) return { inProgress: false };
-    if (!S.i && !S.miss) return { inProgress: false };
+    if (!started()) return { inProgress: false };
     return { game: S, daily: daily };
   });
   function halt() {
     paused = true;
-    if (S && !ended) { E.pause(S); stopVoice(); if (!S.over && (S.i || S.miss)) say(C.t('ttGo')); }
+    if (S && !ended) { E.pause(S); stopVoice(); if (!S.over && started()) say(C.t('ttGo')); }
     ctx.save();
     draw();
   }

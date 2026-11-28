@@ -128,7 +128,7 @@ module.exports = function (T) {
     // strings: every key the page uses is in every locale
     const strBlock = html.slice(html.indexOf('strings: {'), html.indexOf('\n  var params'));
     const keys = [...new Set([...html.matchAll(/C\.t\('([A-Za-z0-9]+)'/g)].map((m) => m[1]))];
-    const CORE_KEYS = ['help', 'keyboard', 'tutorial', 'done', 'daily', 'resetWarn', 'dailyDone', 'settings', 'stars', 'speedSlow', 'speedNormal', 'speedFast'];
+    const CORE_KEYS = ['help', 'keyboard', 'tutorial', 'done', 'daily', 'resetWarn', 'dailyDone', 'settings', 'stars', 'speedSlow', 'speedNormal', 'speedFast', 'best', 'again'];
     const own = keys.filter((k) => CORE_KEYS.indexOf(k) < 0);
     ok(own.length >= 20, 'the page names its own strings (' + own.length + ' keys)');
     // each locale's block runs from its `xx: {` line to the next one
@@ -201,6 +201,22 @@ module.exports = function (T) {
     const usedTokens = [...new Set([...html.matchAll(/var\((--c-[a-z0-9-]+)/g)].map((m) => m[1]))];
     const unknownTokens = usedTokens.filter((v) => coreCss.indexOf(v + ':') < 0);
     ok(usedTokens.length > 2 && unknownTokens.length === 0, 'every core colour token it uses exists in chogan.css (' + usedTokens.length + ' used' + (unknownTokens.length ? '; unknown: ' + unknownTokens.join(', ') : '') + ')');
+    // endless (#1272): songs follow one another until the third slip
+    const run = E.newGame({ song: songs[songs.length - 1].id, speed: 'normal', endless: true });
+    const len = E.chart(run.song).notes.length;
+    let moved = 0;
+    for (let i = 0; i < len; i++) { run.pos = E.next(run).b; if (E.tap(run, E.next(run).lane).moved) moved++; }
+    ok(len > 0 && moved === 1 && run.over === null && run.song === songs[0].id && run.songs === 1 && run.i === 0 && E.total(run) === len, 'in endless play the last note of a song starts the next one, and the last song wraps to the first');
+    run.wait = false;
+    for (let i = 0; i < 3; i++) E.tap(run, (E.next(run).lane + 1) % 4);
+    const rr = E.result(run);
+    ok(run.over === 'lost' && rr.endless === true && rr.hits === len && rr.songs === 1, 'three slips end an endless run, which counts every note played');
+    const one = E.newGame({ song: songs[0].id });
+    for (let i = 0; i < E.chart(one.song).notes.length; i++) { one.pos = E.next(one).b; E.tap(one, E.next(one).lane); }
+    ok(one.over === 'won' && one.endless === undefined, 'without endless play a finished song is still won');
+    ok(E.valid(run) && E.valid(E.newGame({ endless: true })) && E.valid(one) && !E.valid(Object.assign({}, run, { done: -1 })), 'endless runs and older saves are accepted, a damaged count is not');
+    ok(LOCALE_CODES.every((l) => { const i = html.indexOf('\n      ' + l + ': {', html.indexOf('strings: {')); const block = html.slice(i, html.indexOf('\n      }', i)); return ['ttEndless:', 'ttEndlessNote:', 'ttRecord:'].every((k) => block.includes(k)); }), 'endless play is worded in every locale');
+    ok(/prefs\.endless/.test(html) && /ctx\.store\.set\('endless'/.test(html) && /endless: !!prefs\.endless/.test(html), 'the gear holds the endless switch and its best score is kept apart from the song stars');
     ok(Date.now() - t0 < 3000, 'the Tile Tunes tests finish in under 3 s (' + (Date.now() - t0) + ' ms)');
   }
   return { testTileTunes };
