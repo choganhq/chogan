@@ -52,7 +52,9 @@ def build(version, sections):
     if games:
         lines.append('New games: ' + '; '.join(games))
     while True:
-        text = head + '\n'.join(lines + (['Also: ' + '; '.join(rest)] if rest else [])) + tail
+        # "Also" needs the games line above it; 1.1.0 had none and began with it (#1288)
+        intro = 'Also: ' if games else "What's new: "
+        text = head + '\n'.join(lines + ([intro + '; '.join(rest)] if rest else [])) + tail
         if length(text) <= LIMIT or not rest:
             break
         rest.pop()
