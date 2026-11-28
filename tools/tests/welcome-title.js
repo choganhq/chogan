@@ -37,5 +37,47 @@ module.exports = function (T) {
     sb.fit();
     ok(tiny[0].size() === 14, 'the size never drops below 14px');
   }
-  return { testWelcomeTitleFits };
+
+  // The welcome screen never took focus, so Tab (and an Android TV remote) walked the menu
+  // hidden behind it, and a TV user's first press went to the name box and its keyboard (#1210).
+  function testWelcomeFocus() {
+    head('Welcome screen: keyboard and TV remote stay on it (#1210)');
+    const page = fs.readFileSync(path.join(ROOT, 'www/index.html'), 'utf8');
+    const a = page.indexOf('  function drawWelcome() {');
+    const b = page.indexOf('  function closeWelcome() {');
+    ok(a > 0 && b > a, 'index.html has drawWelcome and openWelcome');
+    if (!(a > 0 && b > a)) return;
+    const doc = { activeElement: null, body: { appendChild() {} }, getElementById: () => ({ setAttribute() {} }) };
+    const el = (tag, at, kids) => {
+      const n = { tag, at: at || {}, kids: (kids || []).filter(Boolean), on: {} };
+      n.appendChild = (c) => n.kids.push(c);
+      n.addEventListener = (t, f) => { n.on[t] = f; };
+      n.focus = () => { doc.activeElement = n; };
+      n.contains = (x) => x === n || n.kids.some((k) => k.contains(x));
+      n.all = () => n.kids.reduce((r, k) => r.concat(k, k.all()), []);
+      n.querySelector = () => n.kids[0];
+      n.querySelectorAll = () => n.all().filter((k) => k.tag === 'button' || k.tag === 'input');
+      Object.defineProperty(n, 'innerHTML', { set: () => { n.kids = []; } });
+      return n;
+    };
+    const sb = { el, document: doc, app: { setAttribute() {} }, C: { t: (k) => k, feedback() {} },
+      fitWelcomeHeads() {}, closeWelcome() {}, wHost: null, wStep: 0 };
+    sb.WELCOME_STEPS = [0, 1, 2].map(() => () => el('div', {}, [el('input')]));
+    vm.createContext(sb);
+    vm.runInContext(page.slice(a, b) + '\nthis.open = openWelcome;', sb);
+    sb.open();
+    const host = () => sb.wHost;
+    const next = () => host().querySelectorAll().filter((k) => /primary/.test(k.at.class || ''))[0];
+    ok(doc.activeElement === host() && host().at.tabindex === '-1', 'opening it moves the focus onto it');
+    const key = (k, shift) => host().on.keydown && host().on.keydown({ key: k, shiftKey: !!shift, preventDefault() {} });
+    key('ArrowDown');
+    ok(doc.activeElement !== host() && host().contains(doc.activeElement), 'the first arrow press lands on a control inside it');
+    host().focus(); key('Enter');
+    ok(doc.activeElement === next(), 'Enter with nothing chosen lands on Next');
+    host().focus(); key('Tab', true);
+    ok(doc.activeElement === next(), 'Shift+Tab from the screen itself wraps inside it');
+    next().focus(); const before = next(); before.on.click();
+    ok(sb.wStep === 1 && next() !== before && doc.activeElement === next(), 'after Next the new Next has the focus');
+  }
+  return { testWelcomeTitleFits, testWelcomeFocus };
 };
