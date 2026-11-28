@@ -12855,7 +12855,8 @@ function testModalFocus() {
   const locales = [...core.matchAll(/result: '[^']+', seeBoard: '([^']+)'/g)].map((m) => m[1]);
   ok(locales.length === LOCALE_CODES.length && new Set(locales).size === LOCALE_CODES.length, 'See the board is translated in every language (' + locales.length + ')');
   ok(/\n    eye: 'M/.test(core), 'the eye icon exists');
-  ok(/function hideResultBtn\(\) \{\n[^\n]*resultBtn\.hidden = true;\n[^\n]*afterBar\.remove\(\)/.test(core), 'the bar goes away when a new round starts');
+  ok(/function hideResultBtn\(\) \{\n[^\n]*resultBtn\.hidden = true;\n[^\n]*dropAfterBar\(\)/.test(core) &&
+    /function dropAfterBar\(\) \{\n[^\n]*afterBar\.remove\(\); afterBar = null;/.test(core), 'the bar goes away when a new round starts');
   const relabel = games.filter((g) => /ch-modal__actions \.ch-btn--primary/.test(fs.readFileSync(path.join(ROOT, 'www', g.path), 'utf8'))).map((g) => g.id);
   ok(relabel.length === 0, 'no game rewrites the result button text after the fact; they pass againLabel (' + relabel.join(',') + ')');
   const confirmAt = core.indexOf('ui.confirm = function');

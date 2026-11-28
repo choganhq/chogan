@@ -4487,19 +4487,26 @@
     }
     function hideResultBtn() {
       if (resultBtn) resultBtn.hidden = true;
+      dropAfterBar();
+    }
+    // The bar floats over the bottom of the game, so the finished board's own score
+    // row sat under it (#1274, Number Drop). While it shows, the game area keeps its
+    // height free and the board shrinks to fit above it.
+    function dropAfterBar() {
       if (afterBar) { afterBar.remove(); afterBar = null; }
+      document.documentElement.classList.remove('ch-has-afterbar');
     }
     // Closing the result with X keeps the finished board in view, but in Way Out that
     // board is empty, so the page looked blank with no way to the next level (#306).
     // A bar under the board offers the result again and the round's main action.
     function showAfterBar(o) {
-      if (afterBar) afterBar.remove();
+      dropAfterBar();
       var go = o.onAgain ? { label: o.againLabel || Chogan.t('again'), fn: o.onAgain } :
         (standalone ? null : { label: Chogan.t('menu'), fn: function () { Chogan.back(); } });
       afterBar = el('div', { class: 'ch-afterbar' }, [
         el('button', { class: 'ch-btn', type: 'button', onclick: function () {
           Chogan.feedback('tap');
-          if (afterBar) { afterBar.remove(); afterBar = null; }
+          dropAfterBar();
           if (reopenResult) reopenResult();
         } }, [Chogan.icon('trophy', 18), el('span', { text: Chogan.t('result') })]),
         go ? el('button', { class: 'ch-btn ch-btn--primary', type: 'button', onclick: function () {
@@ -4509,6 +4516,8 @@
         } }, go.label) : null
       ]);
       document.body.appendChild(afterBar);
+      document.documentElement.style.setProperty('--afterbar-h', afterBar.offsetHeight + 'px');
+      document.documentElement.classList.add('ch-has-afterbar');
     }
 
     function starsRow(n) {
