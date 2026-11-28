@@ -31,6 +31,8 @@ module.exports = function (T) {
       'the WebView sees zero insets (the page pads itself), zeroed rather than consumed');
     ok(/Math\.ceil\(bars\.top \/ density\)/.test(inst) && /keyboard \? 0 : \(int\) Math\.ceil\(bars\.bottom \/ density\)/.test(inst),
       'the insets go to the page in CSS pixels, rounded up, with no bottom inset under the keyboard');
+    ok(/int buttons = keyboard \? 0 : [^;]*Type\.tappableElement\(\)\)\.bottom \/ density\);/.test(inst) && inst.indexOf("--ch-shade-b','%spx'") > 0,
+      'the bottom shade is as tall as the navigation buttons, which gesture navigation does not have (#1205)');
     ok(/classList\.add\('ch-edge'\)/.test(inst) && ['t', 'r', 'b', 'l'].every((k) => inst.indexOf("--ch-inset-" + k) > 0),
       'a change of insets is pushed to the open page as --ch-inset-t/r/b/l');
     ok(/@JavascriptInterface\s+public String insets\(\)/.test(bars), 'each new page can read the insets (ChoganBars.insets())');
@@ -59,15 +61,18 @@ module.exports = function (T) {
       try { vm.runInContext(early, sb); } catch (e) { return { threw: e.message, props, classes }; }
       return { props, classes };
     };
-    const app = run({ insets: () => '31 0 48 0' });
+    const app = run({ insets: () => '31 0 48 0 48' });
     ok(!app.threw && app.classes.join() === 'ch-edge', 'in the app the page is marked edge to edge');
     ok(app.props['--ch-inset-t'] === '31px' && app.props['--ch-inset-r'] === '0px' && app.props['--ch-inset-b'] === '48px' && app.props['--ch-inset-l'] === '0px',
       'and gets the four insets in pixels (' + JSON.stringify(app.props) + ')');
+    const gesture = run({ insets: () => '31 0 24 0 0' });
+    ok(app.props['--ch-shade-b'] === '48px' && gesture.props['--ch-shade-b'] === '0px' && gesture.props['--ch-inset-b'] === '24px',
+      'navigation buttons get a shade, the gesture pill none, and both keep their inset (#1205)');
     const web = run(null);
     ok(!web.threw && !web.classes.length && !Object.keys(web.props).length, 'on the web (no bridge) nothing is set');
     const old = run({ setDark() {} });
     ok(!old.threw && !old.classes.length, 'an older APK without insets() keeps its padded WebView and no mark');
-    const bad = ['', '1 2 3', 'a b c d', '1 2 3 4 5', '1;x 2 3 4', '-1 0 0 0'].map((s) => run({ insets: () => s }));
+    const bad = ['', '1 2 3', 'a b c d', '1 2 3 4', '1 2 3 4 5 6', '1;x 2 3 4', '-1 0 0 0'].map((s) => run({ insets: () => s }));
     ok(bad.every((r) => !r.threw && !r.classes.length && !Object.keys(r.props).length), 'a malformed answer sets nothing (' + bad.length + ' cases)');
     const thr = run({ insets: () => { throw new Error('gone'); } });
     ok(!thr.threw && !thr.classes.length, 'a bridge that throws breaks nothing');
@@ -91,15 +96,15 @@ module.exports = function (T) {
     ok(pages.length > 100 && !direct.length, 'no page or game reads env(safe-area-inset-*) itself, so all of them get the app\'s insets through --safe-* (' + pages.length + ' files' + (direct.length ? '; direct: ' + direct.join(', ') : '') + ')');
     const scrim = (css.match(/html\.ch-edge body:not\(\.ch-noscroll\)::after \{[\s\S]*?\n\}/) || [''])[0];
     ok(/position: fixed;/.test(scrim) && /pointer-events: none;/.test(scrim) && /z-index: 35;/.test(scrim) &&
-      /top \/ 100% var\(--ch-inset-t, 0px\)/.test(scrim) && /bottom \/ 100% var\(--ch-inset-b, 0px\)/.test(scrim),
+      /top \/ 100% var\(--ch-inset-t, 0px\)/.test(scrim) && /bottom \/ 100% var\(--ch-shade-b, 0px\)/.test(scrim),
       'scrolling pages lay a see-through strip of the page colour under the status and navigation bars, in the app only, below the bottom bar (40)');
     // #1205 again: in fullscreen the strip stayed behind as a ribbon at the camera
     ok(/html\.ch-edge\.ch-immersive body:not\(\.ch-noscroll\)::after \{ content: none; \}/.test(css), 'no strip at all in fullscreen');
     ok(/linear-gradient\(to bottom, color-mix\(in srgb, var\(--c-bg\) 75%, transparent\) 35%, transparent\) top/.test(scrim),
       'otherwise the status strip is a shade that fades out, not a band with an edge');
-    const full = run({ insets: () => '31 0 0 0', isImmersive: () => true });
+    const full = run({ insets: () => '31 0 0 0 0', isImmersive: () => true });
     ok(!full.threw && full.classes.join() === 'ch-edge,ch-immersive', 'a page opened in fullscreen is marked before its first paint');
-    const bare = run({ insets: () => '31 0 48 0', isImmersive: () => false });
+    const bare = run({ insets: () => '31 0 48 0 48', isImmersive: () => false });
     ok(!bare.threw && bare.classes.join() === 'ch-edge', 'and not marked with the bars shown');
     const core = read('www/lib/chogan.js');
     const mark = (core.match(/var mark = function \(\) \{ document\.documentElement\.classList\.toggle\('ch-immersive'[\s\S]{0,260}/) || [''])[0];

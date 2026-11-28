@@ -77,17 +77,21 @@ public class BarsBridge {
             boolean keyboard = all.isVisible(WindowInsetsCompat.Type.ime());
             // The window no longer shrinks for the keyboard once it draws behind the bars
             v.setPadding(0, 0, 0, keyboard ? all.getInsets(WindowInsetsCompat.Type.ime()).bottom : 0);
-            String now = String.format(Locale.US, "%d %d %d %d",
+            // What must stay tappable at the bottom: the three buttons' height, 0 with gesture
+            // navigation, where a shade behind the lone pill only hid the page (#1205)
+            int buttons = keyboard ? 0 : (int) Math.ceil(all.getInsets(WindowInsetsCompat.Type.tappableElement()).bottom / density);
+            String now = String.format(Locale.US, "%d %d %d %d %d",
                 (int) Math.ceil(bars.top / density), (int) Math.ceil(bars.right / density),
-                keyboard ? 0 : (int) Math.ceil(bars.bottom / density), (int) Math.ceil(bars.left / density));
+                keyboard ? 0 : (int) Math.ceil(bars.bottom / density), (int) Math.ceil(bars.left / density), buttons);
             if (!now.equals(insets)) {
                 insets = now;
                 String[] p = now.split(" ");
                 webView.evaluateJavascript(String.format(Locale.US,
                     "(function(s){var r=document.documentElement;r.classList.add('ch-edge');" +
                     "s.setProperty('--ch-inset-t','%spx');s.setProperty('--ch-inset-r','%spx');" +
-                    "s.setProperty('--ch-inset-b','%spx');s.setProperty('--ch-inset-l','%spx');})(document.documentElement.style)",
-                    p[0], p[1], p[2], p[3]), null);
+                    "s.setProperty('--ch-inset-b','%spx');s.setProperty('--ch-inset-l','%spx');" +
+                    "s.setProperty('--ch-shade-b','%spx');})(document.documentElement.style)",
+                    p[0], p[1], p[2], p[3], p[4]), null);
             }
             // The page pads itself, so the WebView must not see the insets as well: zero them
             // rather than consume them, as Capacitor does, since CONSUMED stops later updates
