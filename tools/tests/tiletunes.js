@@ -11,7 +11,7 @@ module.exports = function (T) {
     const E = loadEngine('tiletunes', 'TileTunesEngineFactory');
     const html = fs.readFileSync(file, 'utf8');
     const core = fs.readFileSync(path.join(ROOT, 'www/lib/chogan.js'), 'utf8');
-    ok(E.LANES === 4 && E.LIVES === 3 && JSON.stringify(E.SPEED_IDS) === '["slow","normal","fast"]' && E.SPEEDS.slow < 1 && E.SPEEDS.normal === 1 && E.SPEEDS.fast > 1, 'four lanes, three slips, three speeds');
+    ok(E.LANES === 4 && E.LIVES === 3 && JSON.stringify(E.SPEED_IDS) === '["slow","normal","fast","insane"]' && E.SPEEDS.slow < 1 && E.SPEEDS.normal === 1 && E.SPEEDS.fast > 1 && E.SPEEDS.insane > E.SPEEDS.fast, 'four lanes, three slips, four speeds, one above fast (#1272)');
 
     // the notes
     ok(Math.abs(E.freq(69) - 440) < 1e-9 && Math.abs(E.freq(60) - 261.6256) < 1e-3, 'A4 is 440 Hz and middle C 261.63 Hz');
@@ -67,7 +67,7 @@ module.exports = function (T) {
       const R = E.result(r.S);
       if (r.fail || !R.won || R.miss || R.stars !== 3 || R.hits !== R.total) fails.push(s.id + '/' + sp + '/' + late + ': ' + (r.fail || JSON.stringify(R)));
     }
-    ok(runs === songs.length * 6 && !fails.length, 'a test player finishes every song at every speed, on the beat and 0.4 beats late, with three stars (' + runs + ' runs)' + (fails.length ? ' (' + fails.slice(0, 4).join('; ') + ')' : ''));
+    ok(runs === songs.length * 8 && !fails.length, 'a test player finishes every song at every speed, on the beat and 0.4 beats late, with three stars (' + runs + ' runs)' + (fails.length ? ' (' + fails.slice(0, 4).join('; ') + ')' : ''));
     {
       const r = play('twinkle', 'normal', 0);
       const sec = E.seconds('twinkle', 'normal');
@@ -123,7 +123,7 @@ module.exports = function (T) {
     // the page
     ok(/C\.daily\('tiletunes', date\)\.rng/.test(html) && /speed: 'normal'/.test(html) && /C\.stats\.daily\('tiletunes', daily/.test(html), 'the daily song is picked by the core\'s daily seed and played at normal speed');
     ok(/C\.audio\.piano \? C\.audio\.piano\(E\.freq\(n\.m\)\) : null/.test(html) && !/\.(mp3|ogg|wav|m4a)\b/.test(html), 'every tile plays the core\'s piano voice, and the game carries no audio file');
-    ok(html.indexOf("unlock('tt-fast')") > 0 && /S\.speed === 'fast' && !daily/.test(html), 'the fast award needs the fast speed outside the daily song');
+    ok(html.indexOf("unlock('tt-fast')") > 0 && /\(S\.speed === 'fast' \|\| S\.speed === 'insane'\) && !daily/.test(html), 'the fast award needs fast or faster outside the daily song');
 
     // strings: every key the page uses is in every locale
     const strBlock = html.slice(html.indexOf('strings: {'), html.indexOf('\n  var params'));
