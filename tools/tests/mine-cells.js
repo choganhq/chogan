@@ -36,6 +36,15 @@ module.exports = function (T) {
     const closedOf = (t) => (mix ? mixed(rgb(accent), rgb(t[mix[1]]), shares[lum(rgb(t.bg)) < 0.2 ? 1 : 0]) : rgb(t[plain]));
     const weak = themes.filter(({ t }) => cr(closedOf(t), rgb(t[openTok])) < 1.4);
     ok(!weak.length, 'closed against opened is at least 1.4:1 in all ' + themes.length + ' blocks' + (weak.length ? '; not in ' + weak.map((w) => w.sel).join(' | ') : ''));
+    // old WebViews drop the mix: high contrast then needs its own tones (#1297)
+    const old = (game.match(/@supports not \(background: color-mix[^{]*\{([\s\S]*?)@supports \(background/) || ['', ''])[1];
+    const tones = [...old.matchAll(/--ms-fallback: (#[0-9A-Fa-f]{6}); --ms-fallflag: (#[0-9A-Fa-f]{6});/g)];
+    const contrast = themes.filter(({ sel }) => sel.indexOf('contrast') > 0);
+    ok(contrast.length >= 2 && tones.length === 3 && contrast.every(({ t }) => {
+      const [, tile, flag] = tones[lum(rgb(t.bg)) < 0.2 ? 1 : 0];
+      return cr(rgb(tile), rgb(t[openTok])) >= 1.4 && cr(rgb(flag), rgb(tile)) >= 3;
+    }) && game.includes('--ms-closed: var(--ms-fallback, var(--c-surface-3))') && game.includes('var(--ms-flag, var(--ms-fallflag, var(--c-bad)))'),
+      'without color-mix, high contrast still has closed cells at 1.4:1 and flags at 3:1, light and dark');
     // a palette block without its own red inherits the default one for its theme
     const reds = [...css.matchAll(/--c-bad:\s*(#[0-9A-Fa-f]{6})/g)].map((m) => m[1]);
     const faint = themes.filter(({ t }) => {
