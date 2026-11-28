@@ -14,12 +14,13 @@
   try {
     var bars = global.ChoganBars;
     var v = bars && typeof bars.insets === 'function' ? String(bars.insets()).split(' ') : [];
-    if (v.length === 4 && v.every(function (n) { return /^\d{1,4}$/.test(n); })) {
+    if (v.length === 5 && v.every(function (n) { return /^\d{1,4}$/.test(n); })) {
       var r = global.document.documentElement;
       r.classList.add('ch-edge');
       // fullscreen lasts from page to page, so a new page must not draw the status strip
       if (typeof bars.isImmersive === 'function' && bars.isImmersive()) r.classList.add('ch-immersive');
       ['t', 'r', 'b', 'l'].forEach(function (k, i) { r.style.setProperty('--ch-inset-' + k, v[i] + 'px'); });
+      r.style.setProperty('--ch-shade-b', v[4] + 'px'); // 0 with gesture navigation
     }
   } catch (e) { /* an older APK without insets(): the WebView padded as before */ }
   try {
