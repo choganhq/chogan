@@ -32,9 +32,15 @@ def load_sections(path):
     return mod.parse(open(path, encoding='utf-8').read())
 
 
+# The code points X counts once (twitter-text config/v3.json); everything else counts twice
+SINGLE = ((0, 4351), (8192, 8205), (8208, 8223), (8242, 8247))
+
+
 def length(text):
-    # X counts every link as 23, whatever its length
-    return len(re.sub(r'https?://\S+', 'x' * LINK, text))
+    # X counts every link as 23, whatever its length. A joined emoji is counted per code
+    # point here, more than X would: a post may come out shorter, never over the limit.
+    text = re.sub(r'https?://\S+', 'x' * LINK, text)
+    return sum(1 if any(a <= ord(c) <= b for a, b in SINGLE) else 2 for c in text)
 
 
 def plain(item):
