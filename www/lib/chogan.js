@@ -4512,7 +4512,9 @@
         go ? el('button', { class: 'ch-btn ch-btn--primary', type: 'button', onclick: function () {
           Chogan.feedback('tap');
           hideResultBtn();
-          go.fn();
+          // games lay out 120 to 150ms after the resize the bar's removal sends; a round
+          // started before that had its opening animation cut off by the repaint (#1274)
+          setTimeout(go.fn, 200);
         } }, go.label) : null
       ]);
       document.body.appendChild(afterBar);

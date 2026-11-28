@@ -26,6 +26,8 @@ module.exports = function (T) {
     const jig = fs.readFileSync(path.join(ROOT, 'www/games/jigsaw/index.html'), 'utf8');
     ok(/- kept, TRAY_W, TRAY_H\)/.test(jig) && /kept === lastKept && Math\.abs/.test(jig),
       'Jigsaw, which ignores a resize with the same window, lays out again inside the room');
+    ok(/hideResultBtn\(\);\s*(\/\/[^\n]*\n\s*)*setTimeout\(go\.fn, 200\);/.test(show),
+      'the next round starts after games have laid out for the new room');
   }
   return { testAfterBarRoom };
 };
