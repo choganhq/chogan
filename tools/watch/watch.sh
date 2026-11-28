@@ -118,7 +118,8 @@ OUT="$HERE/logs/$(date +%F_%H%M).out"
 { cat "$HERE/prompt.md"; echo; echo "Look at activity since: $since (UTC)."
   echo "Work window: issues are built between 17:00 and 07:00 local time on weekdays, and all day on Saturday and Sunday (date +%u is 6 or 7). Before starting each new issue, check the time; from 07:00 Monday to Friday, finish the issue in progress (merge, verify, report) but do not start another, and end the run with the usual summary. Exception: a weekday run that starts between 07:00 and 07:09 is the window's last run and may start one issue and finish it."; } \
   | claude -p --permission-mode auto --model claude-opus-5-5 --session-id "$sid" --name "$name" \
-      --add-dir /home/dev/projects/personal/projects-dashboard >"$OUT" 2>&1
+      --add-dir /home/dev/projects/personal/projects-dashboard \
+      --add-dir "$(readlink -f "$HERE")" >"$OUT" 2>&1
 rc=$?
 cat "$OUT" >>"$LOG"
 log "claude exited $rc"
