@@ -4487,7 +4487,14 @@
     }
     function hideResultBtn() {
       if (resultBtn) resultBtn.hidden = true;
-      if (afterBar) { afterBar.remove(); afterBar = null; }
+      if (afterBar) { afterBar.remove(); afterBar = null; afterBarRoom(); }
+    }
+    // The bar floats, so the game area ends above it while it is up: it lay over the score,
+    // next block and best of Number Drop and nothing could scroll them out (#1274)
+    function afterBarRoom() {
+      if (!main) return;
+      main.style.paddingBottom = afterBar ? (afterBar.offsetHeight + parseFloat(getComputedStyle(afterBar).bottom) + 8) + 'px' : '';
+      window.dispatchEvent(new Event('resize'));
     }
     // Closing the result with X keeps the finished board in view, but in Way Out that
     // board is empty, so the page looked blank with no way to the next level (#306).
@@ -4499,7 +4506,7 @@
       afterBar = el('div', { class: 'ch-afterbar' }, [
         el('button', { class: 'ch-btn', type: 'button', onclick: function () {
           Chogan.feedback('tap');
-          if (afterBar) { afterBar.remove(); afterBar = null; }
+          if (afterBar) { afterBar.remove(); afterBar = null; afterBarRoom(); }
           if (reopenResult) reopenResult();
         } }, [Chogan.icon('trophy', 18), el('span', { text: Chogan.t('result') })]),
         go ? el('button', { class: 'ch-btn ch-btn--primary', type: 'button', onclick: function () {
@@ -4509,6 +4516,7 @@
         } }, go.label) : null
       ]);
       document.body.appendChild(afterBar);
+      afterBarRoom();
     }
 
     function starsRow(n) {
