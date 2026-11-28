@@ -23,6 +23,9 @@ module.exports = function (T) {
     ok(/document\.body\.appendChild\(afterBar\);\s*afterBarRoom\(\);/.test(show), 'showing the bar makes the room');
     const drops = core.match(/afterBar\.remove\(\); afterBar = null;[^}\n]*/g) || [];
     ok(drops.length === 2 && drops.every((d) => /afterBarRoom\(\)/.test(d)), 'every way the bar goes away gives the room back (' + drops.length + ')');
+    const jig = fs.readFileSync(path.join(ROOT, 'www/games/jigsaw/index.html'), 'utf8');
+    ok(/- kept, TRAY_W, TRAY_H\)/.test(jig) && /kept === lastKept && Math\.abs/.test(jig),
+      'Jigsaw, which ignores a resize with the same window, lays out again inside the room');
   }
   return { testAfterBarRoom };
 };
