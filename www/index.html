@@ -2233,6 +2233,8 @@
   if (TABS.some(function (t) { return t.id === tabBack; })) tab = tabBack;
 
   function drawNav() {
+    // choosing a tab with a remote redraws the bar; the focus must stay on it (#1210)
+    var held = navIn.contains(document.activeElement);
     navIn.innerHTML = '';
     TABS.forEach(function (t) {
       var b = el('button', {
@@ -2246,6 +2248,7 @@
         render();
       });
       navIn.appendChild(b);
+      if (held && tab === t.id) b.focus();
     });
   }
 
@@ -2266,11 +2269,12 @@
   // the arrow keys move to the nearest card on screen in that direction, which
   // works the same for the grid, the list, the recent row and right-to-left.
   function kbStep(from, key) {
+    var nodes = arguments[2];   // the controls to choose among; the game cards when not given
     var dir = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[key];
     var a = from.getBoundingClientRect();
     var ax = a.left + a.width / 2, ay = a.top + a.height / 2;
     var best = null, bestScore = Infinity;
-    Array.prototype.forEach.call(app.querySelectorAll('.ch-kbnav'), function (n) {
+    Array.prototype.forEach.call(nodes || app.querySelectorAll('.ch-kbnav'), function (n) {
       if (n === from) return;
       var b = n.getBoundingClientRect();
       var dx = b.left + b.width / 2 - ax, dy = b.top + b.height / 2 - ay;
@@ -2280,6 +2284,42 @@
       if (score < bestScore) { bestScore = score; best = n; }
     });
     return best;
+  }
+
+  // A TV remote has arrows and OK but no Tab, so arrows over the cards alone left the tab bar,
+  // the sort list, search and every setting out of reach (#1210). They move over all controls.
+  var CONTROLS = '.ch-kbnav, button, select, input:not([type="file"]), textarea, a[href], [tabindex="0"]';
+  function controls(root) {
+    return Array.prototype.filter.call(root.querySelectorAll(CONTROLS), function (n) {
+      return !n.disabled && n.getClientRects().length > 0;
+    });
+  }
+  // The tab bar floats over the page (or stands beside it as a rail), so by position alone a
+  // tab would beat the next row of cards that is still off screen. The bar is reached only
+  // when the page has nothing further that way, and left for what is on screen.
+  function kbMove(from, key) {
+    var tabs = controls(navIn), page = controls(app);
+    var rail = tabs.length > 1 && tabs[1].getBoundingClientRect().top >= tabs[0].getBoundingClientRect().bottom;
+    var side = key === 'ArrowLeft' || key === 'ArrowRight';
+    var across = side === rail; // the direction that leads between the page and the bar
+    if (navIn.contains(from)) {
+      if (!across) return kbStep(from, key, tabs);
+      return kbStep(from, key, page.filter(function (n) {
+        var r = n.getBoundingClientRect();
+        return r.bottom > 0 && r.top < window.innerHeight;
+      }));
+    }
+    if (rail && side) {
+      var a = from.getBoundingClientRect();
+      var row = page.filter(function (n) { var b = n.getBoundingClientRect(); return b.top < a.bottom && b.bottom > a.top; });
+      return kbStep(from, key, row) || kbStep(from, key, tabs) || kbStep(from, key, page);
+    }
+    var next = kbStep(from, key, page);
+    if (next || !across) return next;
+    if (rail) return kbStep(from, key, tabs);
+    // not by position: scrolled to the bottom edge, the last card lies under the floating bar
+    if (key !== 'ArrowDown') return null;
+    return tabs.filter(function (t) { return t.getAttribute('aria-selected') === 'true'; })[0] || tabs[0] || null;
   }
 
   // #1102: a desktop player reached for Ctrl+F to find a game and got the browser's page find,
@@ -2311,10 +2351,13 @@
       if (TABS[n].id !== tab) { tab = TABS[n].id; C.feedback('select'); render(); }
       return;
     }
-    if (e.ctrlKey || e.metaKey || e.altKey || covered()) return;
+    if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || covered()) return;
     var cur = document.activeElement;
-    var onItem = cur && cur.classList && cur.classList.contains('ch-kbnav') && app.contains(cur);
-    if ((e.key === 'Enter' || e.key === ' ') && onItem && cur.tagName !== 'BUTTON') {
+    var inMenu = !!cur && cur !== document.body && (app.contains(cur) || navIn.contains(cur));
+    var card = inMenu && cur.classList.contains('ch-kbnav');
+    // a button the mouse focused keeps the arrows scrolling the page, as before
+    var onItem = card || (inMenu && cur.matches(':focus-visible'));
+    if ((e.key === 'Enter' || e.key === ' ') && card && cur.tagName !== 'BUTTON') {
       e.preventDefault();
       cur.click();
       return;
@@ -2323,11 +2366,13 @@
     if (!onItem) {
       // Nothing chosen yet: the first arrow press lands on the first card
       if (cur && cur !== document.body) return;
-      var first = app.querySelector('.ch-kbnav');
+      var first = app.querySelector('.ch-kbnav') || controls(app)[0];
       if (first) { e.preventDefault(); first.focus(); }
       return;
     }
-    var next = kbStep(cur, e.key);
+    // in a text field or a slider, left and right belong to the field
+    if (/Left|Right/.test(e.key) && /^(INPUT|TEXTAREA)$/.test(cur.tagName) && !/^(checkbox|radio|button)$/.test(cur.type)) return;
+    var next = kbMove(cur, e.key);
     e.preventDefault();
     if (next) { next.focus(); next.scrollIntoView({ block: 'nearest' }); }
   });
